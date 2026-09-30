@@ -451,6 +451,12 @@ export const PendingApprovals = ({
                     <span className="text-muted-foreground block text-xs">
                       <Trans>as {binding}</Trans>
                     </span>
+                    {request.chat === null ? null : (
+                      <span className="text-muted-foreground block text-xs">
+                        in one chat only, for{" "}
+                        {personName(directory, request.requestedBy)}
+                      </span>
+                    )}
                     <RecordTypeClaims request={request} directory={directory} />
                   </TableCell>
                   <TableCell>{formatList(request.actions)}</TableCell>
