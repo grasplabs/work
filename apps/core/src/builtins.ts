@@ -85,10 +85,20 @@ const installBlueprints = async (
   return complete;
 };
 
+/**
+ * How the install stores what it writes. Raise it whenever that changes,
+ * such as a column it fills, so the next request of every deployment
+ * installs again even when the release itself didn't change: the
+ * fingerprint lives in the singleton's storage, out of a migration's
+ * reach. 2: built-ins' declarations on their blueprint, not as requests.
+ */
+const installRevision = 2;
+
 /** The fingerprint of what installing `of` writes. */
 export const fingerprintOf = async (of: Release): Promise<string> =>
   await sha256Hex(
     canonicalJson({
+      revision: installRevision,
       blueprints: of.blueprints.map(
         ({ id, name, description, collections, permissions, files }) => ({
           id,
