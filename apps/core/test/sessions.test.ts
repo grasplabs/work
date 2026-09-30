@@ -1,12 +1,16 @@
+import type { SessionApi } from "@grasp-os/shared/rpc";
+import type { RpcStub } from "capnweb";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { sessionEndedCloseCode } from "../src/rpc.ts";
+import { sessionRecheckMs } from "../src/session-check.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant, clientOrigin } from "./sign-in-config.ts";
 import {
   callAuth,
   coreOrigin,
+  countingSessionReads,
   entraPerson,
   openRpc,
   outcome,
@@ -18,6 +22,8 @@ import {
 const idp = mockIdp();
 
 const hour = 60 * 60 * 1000;
+/** Calls a page makes at once, as a busy one does. */
+const callsPerBurst = 20;
 const clientHost = new URL(clientOrigin).host;
 
 describe("sessions end", () => {
@@ -74,21 +80,84 @@ describe("sessions end", () => {
     });
   });
 
-  it("on an open connection too: its next call is refused and it closes", async () => {
-    const person = entraPerson(acmeTenant);
-    const laptop = await signedIn(idp, "microsoft", person);
-    const phone = await signedIn(idp, "microsoft", person);
-    const { core, closed } = await openRpc(phone);
-    using session = core.authenticate();
-    await expect(session.whoami()).resolves.toMatchObject({
-      email: person.email,
-    });
+  it.each([
+    {
+      how: "revoked from another session",
+      end: async (_phone: string, laptop: string) =>
+        await callAuth("/revoke-other-sessions", laptop, {}),
+    },
+    {
+      how: "signed out",
+      end: async (phone: string) => await callAuth("/sign-out", phone, {}),
+    },
+  ])(
+    "on an open connection too, within a few seconds, when $how: its calls are refused, it closes, idle or not, and can't be opened again",
+    async ({ end }) => {
+      const person = entraPerson(acmeTenant);
+      const laptop = await signedIn(idp, "microsoft", person);
+      const phone = await signedIn(idp, "microsoft", person);
+      // Held from before the connections open, so their rechecks keep it.
+      vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+      try {
+        const busy = await openRpc(phone);
+        const idle = await openRpc(phone);
+        using session = busy.core.authenticate();
+        await expect(session.whoami()).resolves.toMatchObject({
+          email: person.email,
+        });
 
-    await callAuth("/revoke-other-sessions", laptop, {});
-    await expect(outcome(session.whoami())).resolves.toBe(
-      "auth.unauthenticated"
-    );
-    await expect(closed).resolves.toBe(sessionEndedCloseCode);
+        const ended = await end(phone, laptop);
+        expect(ended.status).toBe(200);
+        await vi.advanceTimersByTimeAsync(sessionRecheckMs);
+
+        // Refused, or closed first by its own recheck: either way, unanswered.
+        await expect(session.whoami()).rejects.toBeInstanceOf(Error);
+        await expect(
+          Promise.all([busy.closed, idle.closed])
+        ).resolves.toStrictEqual([
+          sessionEndedCloseCode,
+          sessionEndedCloseCode,
+        ]);
+        await expect(outcome(whoami(phone))).resolves.toBe(
+          "auth.unauthenticated"
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it("are read once every few seconds on an open connection, however many calls it carries", async () => {
+    const reads = { sessions: 0 };
+    const counted = { ...env, DB: countingSessionReads(env.DB, reads) };
+    const session = await signedIn(idp, "microsoft", entraPerson(acmeTenant));
+    const burst = async (api: RpcStub<SessionApi>) =>
+      await Promise.all(
+        Array.from({ length: callsPerBurst }, async () => await api.whoami())
+      );
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { core } = await openRpc(session, { coreEnv: counted });
+      // The upgrade reads the cookie to decide what the connection gets.
+      const opening = reads.sessions;
+      using api = core.authenticate();
+      await burst(api);
+      const first = reads.sessions - opening;
+      vi.setSystemTime(Date.now() + sessionRecheckMs - 1);
+      await burst(api);
+      const stillFirst = reads.sessions - opening;
+      vi.setSystemTime(Date.now() + 1);
+      await burst(api);
+      await burst(api);
+      expect({
+        opening,
+        first,
+        stillFirst,
+        second: reads.sessions - opening,
+      }).toStrictEqual({ opening: 1, first: 1, stillFirst: 1, second: 2 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
