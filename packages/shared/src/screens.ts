@@ -93,28 +93,48 @@ export const screenProblemSchema = z.strictObject({
 });
 export type ScreenProblem = z.output<typeof screenProblemSchema>;
 
-/**
- * One entry of an App's error log: a problem, and how often it was
- * reported. The same problem in the same screen and version is one entry.
- * Times are ISO 8601.
- */
-export interface AppErrorEntry extends ScreenProblem {
-  /** When it was last reported. */
+/** What an App's server code wrote with `console`, one line of one call. */
+export interface ServerLog {
+  /** When, ISO 8601. */
   at: string;
-  source: "screen";
-  version: number;
-  screen: string;
+  level: "debug" | "info" | "log" | "warn" | "error";
+  /** Its arguments as text, held to size. */
+  message: string;
+  /** The server method whose call wrote it, when the runtime says. */
+  method: string | null;
+}
+
+/**
+ * What reaches an App's error log: a problem one of its screens reported,
+ * or a line its server code wrote with `console` (core's server-logs.ts).
+ */
+export type ReportedEntry =
+  | (ScreenProblem & {
+      /** When it was reported, ISO 8601. */
+      at: string;
+      source: "screen";
+      version: number;
+      screen: string;
+    })
+  | (ServerLog & { source: "server"; version: number });
+
+/**
+ * One entry of an App's error log, and how often it was reported. The
+ * same problem in the same screen and version is one entry, and so is the
+ * same line from the same method and version; `at` is the last time.
+ */
+export type AppErrorEntry = ReportedEntry & {
   /** How many times it was reported. */
   count: number;
-}
+};
 
 /** An App's error log, as its builders read it. */
 export interface AppErrorLog {
-  /** The newest different problems, newest first. */
+  /** The newest different entries, newest first. */
   entries: AppErrorEntry[];
   /**
    * At least how many reports were dropped unread because the App's
-   * screens reported more than they may: counted, never kept one by one.
+   * screens and server reported more than they may: counted, never kept one by one.
    * The last minute's count is held in memory before it is written, so a
    * flood right before the App's host restarts is counted short.
    */

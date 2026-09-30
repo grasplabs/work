@@ -1,14 +1,20 @@
 import { screenLimits } from "@grasp-os/shared/screens";
-import type { AppErrorEntry, AppErrorLog } from "@grasp-os/shared/screens";
+import type {
+  AppErrorEntry,
+  AppErrorLog,
+  ReportedEntry,
+} from "@grasp-os/shared/screens";
 
-// An App's error log: what went wrong in its screens, for the builders and
-// the agent who fix it. It lives in the App's own Durable Object (in the
-// EU with the App), outside the facet its code runs in.
+// An App's error log: what went wrong in its screens, and what its server
+// code wrote with `console` (server-logs.ts), for the builders and the
+// agent who fix it. It lives in the App's own Durable Object (in the EU
+// with the App), outside the facet its code runs in.
 //
-// A screen writes its reports itself, so the log is bounded whatever it
-// sends: the same problem is one entry with a count, only the newest
-// different problems are kept, and what comes in past the rate the host
-// allows (app.ts, `admitReport`) is only counted, in one number.
+// A screen writes its reports itself, and the App's code its lines, so
+// the log is bounded whatever they send: the same problem (or line) is one
+// entry with a count, only the newest different ones are kept, and what
+// comes in past the rate the host allows (app.ts, `admitReport` and
+// `logServer`) is only counted, in one number.
 
 /**
  * Where the log keeps the number of its newest entry. The stored name
@@ -23,16 +29,33 @@ const entryPrefix = "error-log:";
 const entryKey = (sequence: number): string =>
   `${entryPrefix}${String(sequence).padStart(12, "0")}`;
 
-/** A problem as reported, before the log counts it. */
-export type ReportedProblem = Omit<AppErrorEntry, "count">;
+/** A problem or line as reported, before the log counts it. */
+export type ReportedProblem = ReportedEntry;
 
-/** Whether two reports are of the same problem, in the same place. */
-const sameProblem = (kept: AppErrorEntry, reported: ReportedProblem): boolean =>
-  kept.kind === reported.kind &&
-  kept.message === reported.message &&
-  kept.stack === reported.stack &&
-  kept.version === reported.version &&
-  kept.screen === reported.screen;
+/** Whether two reports are of the same problem (or line), in the same place. */
+const sameProblem = (
+  kept: AppErrorEntry,
+  reported: ReportedProblem
+): boolean => {
+  if (kept.source === "screen" && reported.source === "screen") {
+    return (
+      kept.kind === reported.kind &&
+      kept.message === reported.message &&
+      kept.stack === reported.stack &&
+      kept.version === reported.version &&
+      kept.screen === reported.screen
+    );
+  }
+  if (kept.source === "server" && reported.source === "server") {
+    return (
+      kept.level === reported.level &&
+      kept.message === reported.message &&
+      kept.method === reported.method &&
+      kept.version === reported.version
+    );
+  }
+  return false;
+};
 
 /** Waits for `promise` to settle, whichever way. */
 const settled = async (promise: Promise<unknown>): Promise<void> => {

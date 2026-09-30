@@ -15,14 +15,18 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { screenLimits } from "@grasp-os/shared/screens";
-import type { AppErrorLog, RunChange } from "@grasp-os/shared/screens";
+import type {
+  AppErrorLog,
+  RunChange,
+  ServerLog,
+} from "@grasp-os/shared/screens";
 import {
   statisticErrors,
   statisticLimitsOf,
 } from "@grasp-os/shared/statistics";
 import type { StatisticUse } from "@grasp-os/shared/statistics";
 import { TokenBuckets } from "@grasp-os/shared/token-bucket";
-import { DurableObject } from "cloudflare:workers";
+import { DurableObject, exports } from "cloudflare:workers";
 
 import { appBindings } from "./app-bindings.ts";
 import { ErrorLog } from "./app-error-log.ts";
@@ -335,6 +339,8 @@ const loadServer = async (
     mainModule: build.mainModule,
     modules: build.modules,
     env: bindings,
+    // What its code writes with `console` goes to its error log.
+    tails: [exports.AppTail({ props: { app, version } })],
   })).getDurableObjectClass("App");
 };
 
@@ -580,15 +586,23 @@ export class App extends DurableObject<Env> {
       this.#callerReports.take(userId, now) &&
       this.#appReports.take(appBucket, now);
     if (!admitted) {
-      this.#errorLog.suppress();
-      if (
-        !this.#suppressed.writing &&
-        now - this.#suppressed.writtenAt >= suppressedWriteMs
-      ) {
-        await this.#writeSuppressed(now);
-      }
+      await this.#dropReport(now);
     }
     return admitted;
+  }
+
+  /**
+   * Counts one report as dropped unread: written to the log at once the
+   * first time, and at most once a minute after.
+   */
+  async #dropReport(now: number): Promise<void> {
+    this.#errorLog.suppress();
+    if (
+      !this.#suppressed.writing &&
+      now - this.#suppressed.writtenAt >= suppressedWriteMs
+    ) {
+      await this.#writeSuppressed(now);
+    }
   }
 
   /**
@@ -613,6 +627,22 @@ export class App extends DurableObject<Env> {
   /** Adds an admitted report to the App's error log (app-error-log.ts). */
   async logError(reported: ReportedProblem): Promise<void> {
     await this.#errorLog.add(reported);
+  }
+
+  /**
+   * Adds what the App's server code at `version` wrote with `console` to
+   * its error log, for its tail alone (server-logs.ts): each line within
+   * what all of the App's reports may use together (`admitReport`), and
+   * only counted past it, so code that logs in a loop writes no more.
+   */
+  async logServer(version: number, logs: ServerLog[]): Promise<void> {
+    for (const line of logs) {
+      const now = Date.now();
+      // oxlint-disable-next-line no-await-in-loop -- in order, each counted against the App's reports
+      await (this.#appReports.take(appBucket, now)
+        ? this.#errorLog.add({ ...line, source: "server", version })
+        : this.#dropReport(now));
+    }
   }
 
   /**
