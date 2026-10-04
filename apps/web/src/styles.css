@@ -336,3 +336,17 @@
     --chat-turn: 360deg;
   }
 }
+
+/**
+ * The page an export prints as a PDF (export/export-file.tsx): A4 with the
+ * prototype's margins, its colours printed as they are.
+ */
+@page export {
+  size: A4;
+  margin: 16mm 16mm 18mm;
+}
+
+@utility page-export {
+  page: export;
+  print-color-adjust: exact;
+}
