@@ -533,7 +533,6 @@ msgstr "Cambia los datos de la aplicación"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
-#: src/routes/guest.tsx
 msgid "Chat"
 msgstr "Chat"
 
@@ -1607,6 +1606,10 @@ msgstr "«Solo lectura» está marcado donde Composio dice que una herramienta s
 msgid "Reading the workspace"
 msgstr "Leyendo el espacio de trabajo"
 
+#: src/routes/guest.tsx
+msgid "Reading what you wrote"
+msgstr "Leyendo lo que has escrito"
+
 #: src/chat/builds-state.ts
 msgid "reads the App's data"
 msgstr "lee los datos de la aplicación"
@@ -1824,10 +1827,6 @@ msgstr "La búsqueda lee todas las colecciones que puedes leer. Prueba con otras
 #: src/activity/pending.tsx
 msgid "See it in the log"
 msgstr "Verlo en el registro"
-
-#: src/routes/guest.tsx
-msgid "Send"
-msgstr "Enviar"
 
 #: src/chat/composer.tsx
 msgctxt "send the question"
@@ -2162,6 +2161,10 @@ msgid "This chat asks how your work is done. Everything you write is kept and re
 msgstr "Este chat pregunta cómo haces tu trabajo. Todo lo que escribas se guarda y lo leen las personas que te invitaron, que pueden copiarlo en sus propios registros y conservarlo allí. No compartas contraseñas, datos bancarios ni nada que no pondrías en un correo."
 
 #: src/routes/guest.tsx
+msgid "This chat can't be opened"
+msgstr "Este chat no se puede abrir"
+
+#: src/routes/guest.tsx
 msgid "This chat has been closed by whoever sent you the link."
 msgstr "Quien te envió el enlace ha cerrado este chat."
 
@@ -2416,6 +2419,10 @@ msgstr "Guardaría aquí registros de tipo {claimed}"
 #: src/chat/builds-state.ts
 msgid "Would run after approval"
 msgstr "Se ejecutaría tras la aprobación"
+
+#: src/routes/guest.tsx
+msgid "Write your answer"
+msgstr "Escribe tu respuesta"
 
 #: src/chat/thread.tsx
 msgid "Writing"

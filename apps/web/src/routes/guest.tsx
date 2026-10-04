@@ -1,23 +1,18 @@
 import { guestMessageMaxLength } from "@grasp-os/shared/guests";
 import type { GuestView } from "@grasp-os/shared/guests";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@grasp-os/ui/components/card";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
+import { Composer } from "../chat/composer.tsx";
+import { GraspEyes } from "../chat/grasp-eyes.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
 import { guestCall, linkSecret } from "../guest/api.ts";
 
 // Where a guest link leads (`/guest#<secret>`): someone who isn't a member,
@@ -59,26 +54,50 @@ const endedText = (view: GuestView): string | undefined => {
   }
 };
 
-/** The messages so far: theirs, and the answers. */
-const Messages = ({ view }: { view: GuestView }) => {
+/**
+ * The messages so far in the chat's look (chat/thread.tsx): theirs on the
+ * right, the answers beside Grasp's eyes, as plain text, never Markdown.
+ */
+const Messages = ({
+  view,
+  reading,
+}: {
+  view: GuestView;
+  /** Whether a message is on its way, to be answered. */
+  reading: boolean;
+}) => {
   const { t } = useLingui();
+  const last = view.messages.at(-1);
   return (
-    <ol aria-label={t`Messages`} className="flex flex-col gap-3">
-      {view.messages.map((message) => (
-        <li
-          key={`${message.at}-${message.role}`}
-          className={
-            message.role === "guest"
-              ? "bg-muted self-end rounded-lg p-3 text-sm whitespace-pre-wrap"
-              : "self-start text-sm whitespace-pre-wrap"
-          }
-        >
-          <span className="sr-only">
-            {message.role === "guest" ? t`You:` : "Grasp:"}{" "}
-          </span>
-          {message.text}
+    <ol aria-label={t`Messages`} className="flex w-full flex-col gap-8">
+      {view.messages.map((message) =>
+        message.role === "guest" ? (
+          <li
+            className="bg-secondary text-foreground ml-auto w-fit max-w-11/12 rounded-lg px-4 py-3 whitespace-pre-wrap"
+            key={`${message.at}-${message.role}`}
+          >
+            <span className="sr-only">{t`You:`} </span>
+            {message.text}
+          </li>
+        ) : (
+          <li
+            className="flex items-start gap-3"
+            key={`${message.at}-${message.role}`}
+          >
+            <GraspEyes live={message === last} state="idle" />
+            <p className="min-w-0 flex-1 whitespace-pre-wrap">
+              <span className="sr-only">Grasp: </span>
+              {message.text}
+            </p>
+          </li>
+        )
+      )}
+      {reading ? (
+        <li aria-busy="true" className="flex items-start gap-3">
+          <GraspEyes live state="thinking" />
+          <output className="shimmer-text">{t`Reading what you wrote`}</output>
         </li>
-      ))}
+      ) : null}
     </ol>
   );
 };
@@ -91,7 +110,8 @@ const Messages = ({ view }: { view: GuestView }) => {
 const Chat = ({ secret, first }: { secret: string; first: GuestView }) => {
   const [view, setView] = useState(first);
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
+  // What is on its way to core: a message, or the finish.
+  const [pending, setPending] = useState<"send" | "finish">();
   const [failure, setFailure] = useState<string | undefined>();
   const ended = endedText(view);
   const open = view.status === "open";
@@ -102,9 +122,9 @@ const Chat = ({ secret, first }: { secret: string; first: GuestView }) => {
   const call = async (
     request: { action: "send"; text: string } | { action: "finish" }
   ): Promise<boolean> => {
-    setBusy(true);
+    setPending(request.action);
     const answer = await guestCall({ ...request, token: secret });
-    setBusy(false);
+    setPending(undefined);
     if ("error" in answer) {
       setFailure(answer.error);
       return false;
@@ -115,14 +135,13 @@ const Chat = ({ secret, first }: { secret: string; first: GuestView }) => {
   };
 
   return (
-    <Card className="w-full max-w-2xl">
-      <CardHeader>
-        <CardTitle>
-          <h1>
-            <Trans>Hi {name}</Trans>
-          </h1>
-        </CardTitle>
-        <CardDescription>
+    <>
+      <GraspBuddy />
+      <div className="flex flex-col gap-2 text-center">
+        <h1 className="text-2xl font-medium tracking-tight text-balance">
+          <Trans>Hi {name}</Trans>
+        </h1>
+        <p className="text-muted-foreground text-balance">
           <Trans>
             This chat asks how your work is done. Everything you write is kept
             and read by the people who invited you, who may copy it into their
@@ -130,63 +149,48 @@ const Chat = ({ secret, first }: { secret: string; first: GuestView }) => {
             bank details or anything you wouldn&apos;t put in an email.
           </Trans>
           {open ? ` ${t`The link works until ${until}.`}` : ""}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-col gap-4">
-          <Messages view={view} />
-          {ended === undefined ? null : (
-            <output className="text-sm">{ended}</output>
-          )}
-          {open && view.turnsLeft > 0 ? (
-            <div className="flex flex-col gap-2">
-              <label className="text-sm" htmlFor="guest-message">
-                <Trans>Your message</Trans>
-              </label>
-              <Textarea
-                id="guest-message"
-                value={text}
-                maxLength={guestMessageMaxLength}
-                disabled={busy}
-                onChange={(event) => {
-                  setText(event.target.value);
-                }}
-              />
-            </div>
-          ) : null}
-          <ErrorText>{failure}</ErrorText>
-        </div>
-      </CardContent>
+        </p>
+      </div>
+      <Messages reading={pending === "send"} view={view} />
+      {ended === undefined ? null : (
+        <output className="text-muted-foreground self-start">{ended}</output>
+      )}
       {open ? (
-        <CardFooter>
-          <div className="flex gap-2">
-            {view.turnsLeft > 0 ? (
-              <Button
-                disabled={busy || text.trim() === ""}
-                onClick={() => {
-                  void (async () => {
-                    if (await call({ action: "send", text })) {
-                      setText("");
-                    }
-                  })();
-                }}
-              >
-                <Trans>Send</Trans>
-              </Button>
-            ) : null}
-            <Button
-              variant="outline"
-              disabled={busy}
-              onClick={() => {
-                void call({ action: "finish" });
+        <div className="flex w-full flex-col gap-2">
+          {view.turnsLeft > 0 ? (
+            <Composer
+              busy={pending === "send"}
+              failure={failure}
+              label={t`Your message`}
+              maxLength={guestMessageMaxLength}
+              onSend={() => {
+                void (async () => {
+                  if (await call({ action: "send", text })) {
+                    setText("");
+                  }
+                })();
               }}
-            >
-              <Trans>Finish</Trans>
-            </Button>
-          </div>
-        </CardFooter>
+              onText={setText}
+              placeholder={t`Write your answer`}
+              running={false}
+              text={text}
+            />
+          ) : (
+            <ErrorText>{failure}</ErrorText>
+          )}
+          <Button
+            className="self-end"
+            disabled={pending !== undefined}
+            onClick={() => {
+              void call({ action: "finish" });
+            }}
+            variant="outline"
+          >
+            <Trans>Finish</Trans>
+          </Button>
+        </div>
       ) : null}
-    </Card>
+    </>
   );
 };
 
@@ -234,24 +238,30 @@ const Guest = () => {
   const shown: Page =
     page.secret === secret ? page : { state: "loading", secret };
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-6">
+    <OnboardingFrame wide>
       {shown.state === "loading" ? (
-        <p className="text-muted-foreground text-sm">
-          <Trans>Opening the chat…</Trans>
-        </p>
+        <>
+          <GraspBuddy />
+          <output className="text-muted-foreground">
+            <Trans>Opening the chat…</Trans>
+          </output>
+        </>
       ) : null}
       {shown.state === "refused" ? (
         <>
-          <h1 className="text-2xl font-medium">
-            <Trans>Chat</Trans>
-          </h1>
-          <ErrorText>{shown.message}</ErrorText>
+          <GraspBuddy />
+          <div className="flex flex-col items-center gap-2 text-center">
+            <h1 className="text-2xl font-medium tracking-tight">
+              <Trans>This chat can&apos;t be opened</Trans>
+            </h1>
+            <ErrorText>{shown.message}</ErrorText>
+          </div>
         </>
       ) : null}
       {shown.state === "ready" ? (
         <Chat key={shown.secret} secret={shown.secret} first={shown.view} />
       ) : null}
-    </main>
+    </OnboardingFrame>
   );
 };
 

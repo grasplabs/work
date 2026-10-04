@@ -106,7 +106,7 @@ const SendOrStop = ({
   busy: boolean;
   canSend: boolean;
   compact: boolean;
-  onStop: () => void;
+  onStop?: () => void;
 }) => {
   const { t } = useLingui();
   return running ? (
@@ -136,11 +136,33 @@ const SendOrStop = ({
   );
 };
 
+/** The model a question names, where there are models to pick from. */
+const ModelChoice = ({
+  models,
+  model,
+  onModel,
+}: {
+  models: readonly string[];
+  model: string | undefined;
+  onModel: ((model: string) => void) | undefined;
+}) => (
+  <div className="flex min-w-0 items-center gap-1">
+    {models.length === 0 ||
+    model === undefined ||
+    onModel === undefined ? null : (
+      <ModelPicker model={model} models={models} onModel={onModel} />
+    )}
+  </div>
+);
+
+/** Where nobody picks a model. */
+const noModels: readonly string[] = [];
+
 /** The box to ask in. Controlled: the page keeps the text and the model. */
 export const Composer = ({
   text,
   onText,
-  models,
+  models = noModels,
   model,
   onModel,
   running,
@@ -152,20 +174,25 @@ export const Composer = ({
   label,
   placeholder,
   children,
+  maxLength,
 }: {
   text: string;
   onText: (text: string) => void;
-  /** The models a question may name, the default first. */
-  models: readonly string[];
-  model: string;
-  onModel: (model: string) => void;
+  /**
+   * The models a question may name, the default first, and the one it
+   * names; none where nobody picks one, such as a guest's chat.
+   */
+  models?: readonly string[];
+  model?: string;
+  onModel?: (model: string) => void;
   /** Whether Grasp is answering in this chat now. */
   running: boolean;
   /** Whether a question or a stop is on its way to core. */
   busy: boolean;
   failure?: string;
   onSend: () => void;
-  onStop: () => void;
+  /** Stops the answer being written; only where one can be. */
+  onStop?: () => void;
   /**
    * One line that grows as it is typed in, its button beside it and no
    * model to pick (the default model asks): the chat dock and the guest
@@ -177,9 +204,12 @@ export const Composer = ({
   placeholder?: string;
   /** Beside the button, in a compact box: such as the way to open the dock. */
   children?: ReactNode;
+  /** The longest message it takes; a question's by default. */
+  maxLength?: number;
 }) => {
   const { t } = useLingui();
   const empty = text.trim() === "";
+  // A question names a model where there are any to name.
   const canSend = !running && !busy && !empty && model !== "";
   return (
     <form
@@ -199,7 +229,7 @@ export const Composer = ({
               ? "field-sizing-content max-h-40 min-h-0"
               : "field-sizing-content max-h-48 min-h-16"
           }
-          maxLength={maxQuestionLength}
+          maxLength={maxLength ?? maxQuestionLength}
           name="message"
           onChange={(event) => {
             onText(event.target.value);
@@ -232,15 +262,7 @@ export const Composer = ({
             {compact ? (
               children
             ) : (
-              <div className="flex min-w-0 items-center gap-1">
-                {models.length === 0 ? null : (
-                  <ModelPicker
-                    model={model}
-                    models={models}
-                    onModel={onModel}
-                  />
-                )}
-              </div>
+              <ModelChoice model={model} models={models} onModel={onModel} />
             )}
             <SendOrStop
               busy={busy}
@@ -252,11 +274,11 @@ export const Composer = ({
           </div>
         </InputGroupAddon>
       </InputGroup>
-      {models.length === 0 && !compact ? (
+      {compact || model === undefined || models.length > 0 ? null : (
         <p className="text-muted-foreground px-1 text-xs">
           {t`No model is set up for this deployment yet.`}
         </p>
-      ) : null}
+      )}
       <ErrorText>{failure}</ErrorText>
     </form>
   );

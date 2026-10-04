@@ -533,7 +533,6 @@ msgstr "Changes the App's data"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
-#: src/routes/guest.tsx
 msgid "Chat"
 msgstr "Chat"
 
@@ -1607,6 +1606,10 @@ msgstr "Read-only is ticked where Composio says a tool only reads; Grasp doesn't
 msgid "Reading the workspace"
 msgstr "Reading the workspace"
 
+#: src/routes/guest.tsx
+msgid "Reading what you wrote"
+msgstr "Reading what you wrote"
+
 #: src/chat/builds-state.ts
 msgid "reads the App's data"
 msgstr "reads the App's data"
@@ -1824,10 +1827,6 @@ msgstr "Search reads every collection you may read. Try other words, or fewer."
 #: src/activity/pending.tsx
 msgid "See it in the log"
 msgstr "See it in the log"
-
-#: src/routes/guest.tsx
-msgid "Send"
-msgstr "Send"
 
 #: src/chat/composer.tsx
 msgctxt "send the question"
@@ -2162,6 +2161,10 @@ msgid "This chat asks how your work is done. Everything you write is kept and re
 msgstr "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
 
 #: src/routes/guest.tsx
+msgid "This chat can't be opened"
+msgstr "This chat can't be opened"
+
+#: src/routes/guest.tsx
 msgid "This chat has been closed by whoever sent you the link."
 msgstr "This chat has been closed by whoever sent you the link."
 
@@ -2416,6 +2419,10 @@ msgstr "Would keep {claimed} records here"
 #: src/chat/builds-state.ts
 msgid "Would run after approval"
 msgstr "Would run after approval"
+
+#: src/routes/guest.tsx
+msgid "Write your answer"
+msgstr "Write your answer"
 
 #: src/chat/thread.tsx
 msgid "Writing"

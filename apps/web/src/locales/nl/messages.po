@@ -533,7 +533,6 @@ msgstr "Wijzigt de gegevens van de app"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
-#: src/routes/guest.tsx
 msgid "Chat"
 msgstr "Chat"
 
@@ -1607,6 +1606,10 @@ msgstr "Alleen-lezen is aangevinkt waar Composio zegt dat een tool alleen leest;
 msgid "Reading the workspace"
 msgstr "Werkruimte wordt gelezen"
 
+#: src/routes/guest.tsx
+msgid "Reading what you wrote"
+msgstr "Leest wat je schreef"
+
 #: src/chat/builds-state.ts
 msgid "reads the App's data"
 msgstr "leest de gegevens van de app"
@@ -1824,10 +1827,6 @@ msgstr "Zoeken leest elke collectie die je mag lezen. Probeer andere woorden, of
 #: src/activity/pending.tsx
 msgid "See it in the log"
 msgstr "Bekijk het in het log"
-
-#: src/routes/guest.tsx
-msgid "Send"
-msgstr "Versturen"
 
 #: src/chat/composer.tsx
 msgctxt "send the question"
@@ -2162,6 +2161,10 @@ msgid "This chat asks how your work is done. Everything you write is kept and re
 msgstr "Deze chat vraagt hoe je werk wordt gedaan. Alles wat je schrijft, wordt bewaard en gelezen door de mensen die je hebben uitgenodigd; zij kunnen het overnemen in hun eigen administratie en het daar bewaren. Deel geen wachtwoorden, bankgegevens of iets wat je niet in een e-mail zou zetten."
 
 #: src/routes/guest.tsx
+msgid "This chat can't be opened"
+msgstr "Deze chat kan niet worden geopend"
+
+#: src/routes/guest.tsx
 msgid "This chat has been closed by whoever sent you the link."
 msgstr "Deze chat is gesloten door wie je de link stuurde."
 
@@ -2416,6 +2419,10 @@ msgstr "Zou hier records van het type {claimed} bijhouden"
 #: src/chat/builds-state.ts
 msgid "Would run after approval"
 msgstr "Zou na goedkeuring draaien"
+
+#: src/routes/guest.tsx
+msgid "Write your answer"
+msgstr "Schrijf je antwoord"
 
 #: src/chat/thread.tsx
 msgid "Writing"
