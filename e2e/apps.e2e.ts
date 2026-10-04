@@ -227,10 +227,9 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     const links = page
       .getByRole("navigation", { name: "Main" })
       .getByRole("link");
-    // The nav shows once the person's identity is in, and Notifications
-    // once core has counted them.
+    // The nav shows once the person's identity is in.
     await expect(links.first()).toBeVisible();
-    await expect(links.filter({ hasText: /^Notifications/u })).toBeVisible();
+    await expect(links.filter({ hasText: /^Dashboard/u })).toBeVisible();
     const texts = await links.allTextContents();
     // The person menu, at the sidebar's foot, ends in their role.
     await page
@@ -251,13 +250,14 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
       .getByRole("link");
     await expect(sections.last()).toHaveText("Profile");
     return {
-      // Without how many are unread.
-      nav: texts.map((text) => text.replace(/\d+ unread$/u, "")),
+      // Without how many wait.
+      nav: texts.map((text) => text.replace(/\d+ waiting$/u, "")),
       menu,
       settings: await sections.allTextContents(),
     };
   };
-  const nav = [...everyone, "Notifications"];
+  const [chat, ...rest] = everyone;
+  const nav = [chat, "Dashboard", ...rest];
   const menu = ["Settings", "Sign out"];
   expect({
     admin: await sidebarOf(admin),
@@ -267,13 +267,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     admin: {
       nav,
       menu,
-      settings: [
-        "Members and roles",
-        "Models",
-        "Audit trail",
-        "Pending approvals",
-        "Profile",
-      ],
+      settings: ["Members and roles", "Models", "Audit trail", "Profile"],
     },
     builder: { nav, menu, settings: ["Profile"] },
     user: { nav, menu, settings: ["Profile"] },

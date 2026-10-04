@@ -160,6 +160,7 @@ const cast = {
   exports: { admin: "admin" },
   chatBuilds: { builder: "builder" },
   notifications: { builder: "builder" },
+  dashboard: { user: "user", admin: "admin" },
   chatPreview: { builder: "builder" },
   languages: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;

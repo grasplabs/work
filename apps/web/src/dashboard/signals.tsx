@@ -9,7 +9,7 @@ import type {
 import { signalWindowDays } from "@grasp-os/shared/signals";
 import { Button } from "@grasp-os/ui/components/button";
 import { plural } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
 import {
   BookOpenIcon,
@@ -139,7 +139,9 @@ const ImprovementRow = ({
     return (
       <SignalRow icon={ClockIcon} kind={t`Waiting for a person`}>
         <Trans>
-          {about} has {open} decisions open; the oldest has waited {waited}.
+          {about} has{" "}
+          <Plural one="# decision open" other="# decisions open" value={open} />
+          ; the oldest has waited {waited}.
         </Trans>
       </SignalRow>
     );
@@ -158,8 +160,9 @@ const ImprovementRow = ({
         kind={t`Keeps failing`}
       >
         <Trans>
-          Step {step} of {about} failed in {failures} of {runs} runs in the last{" "}
-          {days} days.
+          Step {step} of {about} failed in {failures} of{" "}
+          <Plural one="# run" other="# runs" value={runs} /> in the last {days}{" "}
+          days.
         </Trans>
       </SignalRow>
     );
@@ -169,8 +172,9 @@ const ImprovementRow = ({
     return (
       <SignalRow icon={UndoIcon} kind={t`Often corrected`}>
         <Trans>
-          People rejected {rejected} of {answered} answers at step {step} of{" "}
-          {about} in the last {days} days.
+          People rejected {rejected} of{" "}
+          <Plural one="# answer" other="# answers" value={answered} /> at step{" "}
+          {step} of {about} in the last {days} days.
         </Trans>
       </SignalRow>
     );
@@ -181,8 +185,9 @@ const ImprovementRow = ({
     return (
       <SignalRow icon={CircleDollarSignIcon} kind={t`Model cost`}>
         <Trans>
-          {about} cost {cost} a run in model calls, over {runs} runs in the last{" "}
-          {days} days.
+          {about} cost {cost} a run in model calls, over{" "}
+          <Plural one="# run" other="# runs" value={runs} /> in the last {days}{" "}
+          days.
         </Trans>
       </SignalRow>
     );
@@ -191,8 +196,9 @@ const ImprovementRow = ({
   return (
     <SignalRow icon={SearchXIcon} kind={t`Unanswered question`}>
       <Trans>
-        A Knowledge search from {about} found nothing {searches} times, by{" "}
-        {askers} askers.
+        A Knowledge search from {about} found nothing{" "}
+        <Plural one="once" other="# times" value={searches} />, by{" "}
+        <Plural one="# asker" other="# askers" value={askers} />.
       </Trans>
     </SignalRow>
   );
@@ -247,8 +253,9 @@ const KnowledgeRow = ({ signal }: { signal: KnowledgeSignal }) => {
         kind={t`Unanswered question`}
       >
         <Trans>
-          A search in {where} found nothing {searches} times, by {askers}{" "}
-          askers.
+          A search in {where} found nothing{" "}
+          <Plural one="once" other="# times" value={searches} />, by{" "}
+          <Plural one="# asker" other="# askers" value={askers} />.
         </Trans>
       </SignalRow>
     );
@@ -269,7 +276,8 @@ const KnowledgeRow = ({ signal }: { signal: KnowledgeSignal }) => {
     return (
       <SignalRow action={dismiss} icon={BookOpenIcon} kind={t`Nobody reads it`}>
         <Trans>
-          Nobody read or changed {doc} in {where} in the last {days} days.
+          Nobody read or changed {doc} in {where} in the last{" "}
+          <Plural one="day" other="# days" value={days} />.
         </Trans>
       </SignalRow>
     );
@@ -278,7 +286,8 @@ const KnowledgeRow = ({ signal }: { signal: KnowledgeSignal }) => {
   return (
     <SignalRow action={dismiss} icon={ClockIcon} kind={t`Review overdue`}>
       <Trans>
-        {doc} in {where} is {late} days past its review date.
+        {doc} in {where} is <Plural one="# day" other="# days" value={late} />{" "}
+        past its review date.
       </Trans>
     </SignalRow>
   );

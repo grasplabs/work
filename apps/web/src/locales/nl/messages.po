@@ -20,6 +20,14 @@ msgstr "(van jou)"
 msgid "{0, plural, one {{engine}: # file changed in this chat, not proposed yet} other {{engine}: # files changed in this chat, not proposed yet}}"
 msgstr "{0, plural, one {{engine}: # bestand gewijzigd in deze chat, nog niet voorgesteld} other {{engine}: # bestanden gewijzigd in deze chat, nog niet voorgesteld}}"
 
+#: src/dashboard/signals.tsx
+msgid "{about} cost {cost} a run in model calls, over {runs, plural, one {# run} other {# runs}} in the last {days} days."
+msgstr "{about} kostte de afgelopen {days} dagen {cost} per run aan modelaanroepen, over {runs, plural, one {# run} other {# runs}}."
+
+#: src/dashboard/signals.tsx
+msgid "{about} has {open, plural, one {# decision open} other {# decisions open}}; the oldest has waited {waited}."
+msgstr "{about} heeft {open, plural, one {# open beslissing} other {# open beslissingen}}; de oudste wacht al {waited}."
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
 msgstr "{app} heeft geen tools."
@@ -27,6 +35,10 @@ msgstr "{app} heeft geen tools."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} isn't connected yet."
 msgstr "{app} is nog niet gekoppeld."
+
+#: src/dashboard/to-do.tsx
+msgid "{app} needs someone to sign in again"
+msgstr "{app} heeft iemand nodig die opnieuw aanmeldt"
 
 #: src/workflows/workflows-table.tsx
 msgid "{appName} · Version {version}"
@@ -88,6 +100,14 @@ msgstr "{count, plural, one {één keer} other {# keer}}"
 msgid "{count} or more files"
 msgstr "{count} of meer bestanden"
 
+#: src/dashboard/signals.tsx
+msgid "{days, plural, one {# day} other {# days}}"
+msgstr "{days, plural, one {# dag} other {# dagen}}"
+
+#: src/dashboard/signals.tsx
+msgid "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
+msgstr "{doc} in {where} is {late, plural, one {# dag} other {# dagen}} over de reviewdatum."
+
 #: src/activity/pending.tsx
 msgid "{engine} already keeps {type} records here: this engine's won't apply."
 msgstr "{engine} houdt hier al records van het type {type} bij: die van deze engine gelden niet."
@@ -112,6 +132,10 @@ msgstr "{folded, plural, one {# eerdere} other {# eerdere}}"
 msgid "{holder}: {actions} on {resource}"
 msgstr "{holder}: {actions} op {resource}"
 
+#: src/dashboard/signals.tsx
+msgid "{hours, plural, one {# hour} other {# hours}}"
+msgstr "{hours, plural, one {# uur} other {# uur}}"
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "{label}: {count}"
 msgstr "{label}: {count}"
@@ -120,11 +144,11 @@ msgstr "{label}: {count}"
 msgid "{limit} a month, admins alerted at {alertAt}. Calls stop once it's used up."
 msgstr "{limit} per maand, beheerders krijgen een melding bij {alertAt}. Aanroepen stoppen zodra het op is."
 
-#: src/routes/_shell.notifications.tsx
+#: src/dashboard/failed-workflows.tsx
 msgid "{link} in {appName} failed"
 msgstr "{link} in {appName} is mislukt"
 
-#: src/routes/_shell.notifications.tsx
+#: src/dashboard/failed-workflows.tsx
 msgid "{link} in {appName} failed {failures} times"
 msgstr "{link} in {appName} is {failures} keer mislukt"
 
@@ -286,6 +310,10 @@ msgstr "Een gast heeft de chat geopend"
 msgid "A guest wrote a message"
 msgstr "Een gast heeft een bericht geschreven"
 
+#: src/dashboard/signals.tsx
+msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
+msgstr "Een zoekopdracht in Kennis vanuit {about} vond {searches, plural, one {één keer} other {# keer}} niets, bij {askers, plural, one {# vragensteller} other {# vragenstellers}}."
+
 #: src/activity/audit-words.ts
 msgid "A model budget reached its alert or ran out"
 msgstr "Een modelbudget heeft de meldgrens bereikt of is op"
@@ -305,6 +333,10 @@ msgstr "Een run van een workflow vroeg om dit antwoord."
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow waits for this answer."
 msgstr "Een run van een workflow wacht op dit antwoord."
+
+#: src/dashboard/signals.tsx
+msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
+msgstr "Een zoekopdracht in {where} vond {searches, plural, one {één keer} other {# keer}} niets, bij {askers, plural, one {# vragensteller} other {# vragenstellers}}."
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -332,6 +364,11 @@ msgstr "Actief, voor het hele bedrijf"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Active, only for you"
 msgstr "Actief, alleen voor jou"
+
+#: src/dashboard/activity.tsx
+msgctxt "dashboard: what Grasp and people did"
+msgid "Activity"
+msgstr "Activiteit"
 
 #: src/activity/audit-log.tsx
 msgid "Actor ID"
@@ -695,6 +732,10 @@ msgstr "wijzigt de gegevens van de engine"
 msgid "Changes the engine's data"
 msgstr "Wijzigt de gegevens van de engine"
 
+#: src/dashboard/to-do.tsx
+msgid "Changes to confirm"
+msgstr "Te bevestigen wijzigingen"
+
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
 msgid "Chat"
@@ -846,6 +887,11 @@ msgstr "Gekoppeld."
 msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "Koppelen is niet gelukt. Probeer het opnieuw of vraag een beheerder."
 
+#: src/dashboard/to-do.tsx
+msgctxt "kind of thing that waits"
+msgid "Connection"
+msgstr "Verbinding"
+
 #: src/activity/pending.tsx
 msgid "Connection {connectionId}"
 msgstr "Koppeling {connectionId}"
@@ -853,6 +899,10 @@ msgstr "Koppeling {connectionId}"
 #: src/activity/pending.tsx
 msgid "Connection {connectionId}, {resource}"
 msgstr "Koppeling {connectionId}, {resource}"
+
+#: src/dashboard/to-do.tsx
+msgid "Connections to sign in to again"
+msgstr "Verbindingen om opnieuw bij aan te melden"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Connections whose data stays in the EU: {connections}."
@@ -878,6 +928,10 @@ msgstr "Gekopieerd"
 msgid "Copy the answer"
 msgstr "Antwoord kopiëren"
 
+#: src/dashboard/signals.tsx
+msgid "Could be better"
+msgstr "Kan beter"
+
 #: src/activity/pending.tsx
 msgid "couldn't be read"
 msgstr "kon niet worden gelezen"
@@ -901,6 +955,11 @@ msgstr "Gemaakt door het lid {owner}."
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "Created by you."
 msgstr "Door jou gemaakt."
+
+#: src/dashboard/nav-item.tsx
+#: src/routes/_shell.dashboard.tsx
+msgid "Dashboard"
+msgstr "Dashboard"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Data rules"
@@ -981,6 +1040,11 @@ msgstr "Ontkoppeld"
 #: src/activity/audit-words.ts
 msgid "Disconnected an account"
 msgstr "Een account ontkoppeld"
+
+#: src/dashboard/signals.tsx
+msgctxt "put a signal away until something new"
+msgid "Dismiss"
+msgstr "Verbergen"
 
 #: src/activity/audit-words.ts
 msgid "Dismissed a knowledge signal"
@@ -1170,6 +1234,10 @@ msgstr "Wordt uitgelezen"
 #: src/workflows/runs.tsx
 msgid "Failed"
 msgstr "Mislukt"
+
+#: src/dashboard/failed-workflows.tsx
+msgid "Failed while acting for you"
+msgstr "Mislukt terwijl er namens jou werd gehandeld"
 
 #: src/labels.ts
 msgid "File"
@@ -1441,6 +1509,10 @@ msgstr "Naar het nieuwste bericht"
 msgid "Just for you"
 msgstr "Alleen voor jou"
 
+#: src/dashboard/signals.tsx
+msgid "Keeps failing"
+msgstr "Mislukt steeds"
+
 #: src/frame/app-sidebar.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
@@ -1463,13 +1535,17 @@ msgctxt "chats from the past week"
 msgid "Last 7 days"
 msgstr "Afgelopen 7 dagen"
 
-#: src/routes/_shell.notifications.tsx
+#: src/dashboard/failed-workflows.tsx
 msgid "Last on {date}"
 msgstr "Laatst op {date}"
 
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Laatste run"
+
+#: src/dashboard/activity.tsx
+msgid "Latest activity"
+msgstr "Recente activiteit"
 
 #: src/knowledge/uploads.tsx
 msgid "Let go to add them"
@@ -1561,6 +1637,10 @@ msgstr "Model"
 msgid "Model call"
 msgstr "Modelaanroep"
 
+#: src/dashboard/signals.tsx
+msgid "Model cost"
+msgstr "Modelkosten"
+
 #: src/chat/composer.tsx
 msgid "Model: {name}. Change model"
 msgstr "Model: {name}. Model wijzigen"
@@ -1615,15 +1695,15 @@ msgstr "Iemand moet opnieuw aanmelden"
 msgid "Never"
 msgstr "Nooit"
 
-#: src/routes/_shell.notifications.tsx
-msgid "New"
-msgstr "Nieuw"
-
 #: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
 msgid "New chat"
 msgstr "Nieuwe chat"
+
+#: src/dashboard/failed-workflows.tsx
+msgid "New: failed while acting for you"
+msgstr "Nieuw: mislukt terwijl er namens jou werd gehandeld"
 
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.engines.index.tsx
@@ -1718,6 +1798,14 @@ msgstr "Niemand heeft op tijd geantwoord, dus deze beslissing is gesloten."
 msgid "Nobody matches."
 msgstr "Niemand komt overeen."
 
+#: src/dashboard/signals.tsx
+msgid "Nobody read or changed {doc} in {where} in the last {days, plural, one {day} other {# days}}."
+msgstr "Niemand heeft {doc} in {where} {days, plural, one {de afgelopen dag} other {de afgelopen # dagen}} gelezen of gewijzigd."
+
+#: src/dashboard/signals.tsx
+msgid "Nobody reads it"
+msgstr "Niemand leest het"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "none"
 msgstr "geen"
@@ -1779,6 +1867,10 @@ msgstr "Niet geverifieerd"
 msgid "Nothing connected yet."
 msgstr "Nog niets gekoppeld."
 
+#: src/dashboard/activity.tsx
+msgid "Nothing has happened yet."
+msgstr "Er is nog niets gebeurd."
+
 #: src/workflows/runs.tsx
 msgid "Nothing has run yet."
 msgstr "Er is nog niets gedraaid."
@@ -1807,14 +1899,9 @@ msgstr "Er draait nog niets: dit zou de eerste actuele versie van de engine zijn
 msgid "Nothing spent yet."
 msgstr "Nog niets uitgegeven."
 
-#: src/routes/_shell.notifications.tsx
-msgid "Nothing yet. When a workflow fails while acting for you, you'll see it here."
-msgstr "Nog niets. Als een workflow mislukt terwijl hij namens jou handelt, zie je dat hier."
-
-#: src/notifications/nav-item.tsx
-#: src/routes/_shell.notifications.tsx
-msgid "Notifications"
-msgstr "Meldingen"
+#: src/dashboard/to-do.tsx
+msgid "Nothing waits on you."
+msgstr "Er wacht niets op je."
 
 #: src/chat/builds-state.ts
 msgid "Now runs {how}"
@@ -1839,6 +1926,10 @@ msgstr "{name} aanbieden"
 #: src/connections/offer-switch.tsx
 msgid "Offered to your organization"
 msgstr "Aangeboden aan je organisatie"
+
+#: src/dashboard/signals.tsx
+msgid "Often corrected"
+msgstr "Vaak gecorrigeerd"
 
 #: src/chat/held-writes.tsx
 msgid "On {where}"
@@ -1991,14 +2082,17 @@ msgstr "PDF"
 msgid "Pending"
 msgstr "In afwachting"
 
-#: src/routes/_shell.settings.approvals.tsx
-#: src/routes/_shell.settings.tsx
-msgid "Pending approvals"
-msgstr "Wachtende goedkeuringen"
+#: src/dashboard/signals.tsx
+msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in the last {days} days."
+msgstr "Mensen wezen de afgelopen {days} dagen {rejected} van {answered, plural, one {# antwoord} other {# antwoorden}} af bij stap {step} van {about}."
 
 #: src/activity/audit-log.tsx
 msgid "Permission"
 msgstr "Toestemming"
+
+#: src/dashboard/to-do.tsx
+msgid "Permission requests"
+msgstr "Toestemmingsaanvragen"
 
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
@@ -2256,6 +2350,10 @@ msgstr "Resultaten"
 msgid "Review by"
 msgstr "Beoordelen voor"
 
+#: src/dashboard/signals.tsx
+msgid "Review overdue"
+msgstr "Review te laat"
+
 #: src/connections/connection-list.tsx
 msgid "Revoke"
 msgstr "Intrekken"
@@ -2426,7 +2524,7 @@ msgstr "Minder tonen"
 msgid "Show more"
 msgstr "Meer tonen"
 
-#: src/routes/_shell.notifications.tsx
+#: src/dashboard/failed-workflows.tsx
 msgid "Show older"
 msgstr "Oudere tonen"
 
@@ -2460,6 +2558,7 @@ msgstr "Aanmelden"
 
 #: src/connections/connection-list.tsx
 #: src/connections/integration-row.tsx
+#: src/dashboard/to-do.tsx
 msgid "Sign in again"
 msgstr "Opnieuw aanmelden"
 
@@ -2469,6 +2568,7 @@ msgstr "Aanmelden bij {app}"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/integration-row.tsx
+#: src/dashboard/to-do.tsx
 msgid "Sign in to {app} again"
 msgstr "Opnieuw aanmelden bij {app}"
 
@@ -2586,6 +2686,10 @@ msgstr "Status"
 msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Status"
+
+#: src/dashboard/signals.tsx
+msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in the last {days} days."
+msgstr "Stap {step} van {about} mislukte de afgelopen {days} dagen in {failures} van {runs, plural, one {# run} other {# runs}}."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -2720,6 +2824,10 @@ msgstr "Standaard, {each}"
 msgid "The export didn't work. Try again."
 msgstr "Het exporteren is niet gelukt. Probeer het opnieuw."
 
+#: src/dashboard/activity.tsx
+msgid "The full audit trail"
+msgstr "De volledige audittrail"
+
 #: src/routes/guest.tsx
 msgid "The link works until {until}."
 msgstr "De link werkt tot {until}."
@@ -2850,6 +2958,11 @@ msgstr "Via de eigen connector van Grasp, die de toegang in je omgeving bewaart.
 msgid "To"
 msgstr "Tot"
 
+#: src/dashboard/to-do.tsx
+msgctxt "dashboard: what waits on you"
+msgid "To do"
+msgstr "Te doen"
+
 #: src/chat/chat-list.tsx
 msgctxt "chats from today"
 msgid "Today"
@@ -2891,15 +3004,16 @@ msgstr "Opnieuw proberen…"
 msgid "Type"
 msgstr "Type"
 
+#: src/dashboard/signals.tsx
+msgid "Unanswered question"
+msgstr "Onbeantwoorde vraag"
+
 #: src/activity/pending.tsx
 msgid "Unknown"
 msgstr "Onbekend"
 
-#: src/notifications/nav-item.tsx
-msgid "unread"
-msgstr "ongelezen"
-
 #: src/activity/audit-log.tsx
+#: src/dashboard/activity.tsx
 msgid "Unreadable event"
 msgstr "Onleesbare gebeurtenis"
 
@@ -2976,10 +3090,18 @@ msgstr "Versies"
 msgid "Via Composio"
 msgstr "Via Composio"
 
+#: src/dashboard/nav-item.tsx
+msgid "waiting"
+msgstr "wachtend"
+
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 msgid "Waiting for a decision"
 msgstr "Wacht op een beslissing"
+
+#: src/dashboard/signals.tsx
+msgid "Waiting for a person"
+msgstr "Wacht op een persoon"
 
 #: src/chat/held-writes.tsx
 msgid "Waiting for you"
@@ -3001,10 +3123,6 @@ msgstr "Mocht geen lid aan een engine toevoegen"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
 msgstr "Wat er is gewijzigd"
-
-#: src/routes/_shell.settings.approvals.tsx
-msgid "What engines and agents ask to be allowed to do, waiting for an admin."
-msgstr "Wat engines en agents willen mogen doen, en waarvoor ze op een beheerder wachten."
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "What every agent has in its context, all the time."
@@ -3035,6 +3153,10 @@ msgstr "Waar kijken we vandaag naar?"
 msgid "What the engine holds"
 msgstr "Wat de engine heeft"
 
+#: src/routes/_shell.dashboard.tsx
+msgid "What waits on you, each with its next step, and what could be better."
+msgstr "Wat op je wacht, elk met de volgende stap, en wat beter kan."
+
 #: src/workflows/runs.tsx
 msgctxt "column: when a run happened"
 msgid "When"
@@ -3051,6 +3173,10 @@ msgstr "Welke engines en agents toestemmingen hebben: {why}"
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
 msgstr "Wie het gebruikt"
+
+#: src/dashboard/signals.tsx
+msgid "Worked out daily, last on {date}"
+msgstr "Dagelijks bepaald, laatst op {date}"
 
 #: src/activity/audit-words.ts
 msgid "Worked out how knowledge is used"
@@ -3094,6 +3220,11 @@ msgstr "Workflows en meer"
 #: src/workflows/workflows-table.tsx
 msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it into an engine."
 msgstr "Workflows maak je in de chat: beschrijf wat vanzelf moet lopen, en Grasp bouwt het in een engine."
+
+#: src/dashboard/failed-workflows.tsx
+#: src/dashboard/to-do.tsx
+msgid "Workflows that failed"
+msgstr "Mislukte workflows"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."
@@ -3178,6 +3309,10 @@ msgstr "Je chats verschijnen hier."
 #: src/routes/guest.tsx
 msgid "Your message"
 msgstr "Je bericht"
+
+#: src/dashboard/signals.tsx
+msgid "your organization"
+msgstr "je organisatie"
 
 #: src/connections/connect-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."

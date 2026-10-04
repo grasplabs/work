@@ -67,12 +67,10 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   }
 
   const page = await pageOf(browser, admin);
-  // From Settings: an admin's Pending approvals.
-  await page.goto("/settings/profile");
-  await page
-    .getByRole("navigation", { name: "Settings" })
-    .getByRole("link", { name: "Pending approvals" })
-    .click();
+  // An admin's permission requests wait on the dashboard; the old
+  // Settings link leads there.
+  await page.goto("/settings/approvals");
+  await expect(page).toHaveURL(/\/dashboard$/u);
   // Other tests' requests wait here too: only this App's rows count.
   const rows = page.getByRole("row").filter({ hasText: appName });
   await expect(rows).toHaveCount(2);
@@ -207,7 +205,7 @@ test("an admin sees a grant asked for again after a new version, and approves on
     const page = await pageOf(browser, admin);
     // An old link to them leads there too.
     await page.goto("/activity?tab=pending");
-    await expect(page).toHaveURL(/\/settings\/approvals$/u);
+    await expect(page).toHaveURL(/\/dashboard$/u);
     const row = page.getByRole("row").filter({ hasText: appName });
     await expect(row).toContainText(
       /Asked again after version 2 was made current \(previously granted by .+ on .+\)/u

@@ -20,6 +20,14 @@ msgstr "(tuya)"
 msgid "{0, plural, one {{engine}: # file changed in this chat, not proposed yet} other {{engine}: # files changed in this chat, not proposed yet}}"
 msgstr "{0, plural, one {{engine}: # archivo cambiado en este chat, aún sin proponer} other {{engine}: # archivos cambiados en este chat, aún sin proponer}}"
 
+#: src/dashboard/signals.tsx
+msgid "{about} cost {cost} a run in model calls, over {runs, plural, one {# run} other {# runs}} in the last {days} days."
+msgstr "{about} costó {cost} por ejecución en llamadas al modelo, en {runs, plural, one {# ejecución} other {# ejecuciones}} de los últimos {days} días."
+
+#: src/dashboard/signals.tsx
+msgid "{about} has {open, plural, one {# decision open} other {# decisions open}}; the oldest has waited {waited}."
+msgstr "{about} tiene {open, plural, one {# decisión abierta} other {# decisiones abiertas}}; la más antigua lleva {waited} esperando."
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
 msgstr "{app} no tiene herramientas."
@@ -27,6 +35,10 @@ msgstr "{app} no tiene herramientas."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} isn't connected yet."
 msgstr "{app} aún no está conectado."
+
+#: src/dashboard/to-do.tsx
+msgid "{app} needs someone to sign in again"
+msgstr "{app} necesita que alguien vuelva a iniciar sesión"
 
 #: src/workflows/workflows-table.tsx
 msgid "{appName} · Version {version}"
@@ -88,6 +100,14 @@ msgstr "{count, plural, one {una vez} other {# veces}}"
 msgid "{count} or more files"
 msgstr "{count} archivos o más"
 
+#: src/dashboard/signals.tsx
+msgid "{days, plural, one {# day} other {# days}}"
+msgstr "{days, plural, one {# día} other {# días}}"
+
+#: src/dashboard/signals.tsx
+msgid "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
+msgstr "{doc} en {where} lleva {late, plural, one {# día} other {# días}} pasada su fecha de revisión."
+
 #: src/activity/pending.tsx
 msgid "{engine} already keeps {type} records here: this engine's won't apply."
 msgstr "{engine} ya guarda aquí registros de tipo {type}: los de este motor no se aplicarán."
@@ -112,6 +132,10 @@ msgstr "{folded, plural, one {# anterior} other {# anteriores}}"
 msgid "{holder}: {actions} on {resource}"
 msgstr "{holder}: {actions} sobre {resource}"
 
+#: src/dashboard/signals.tsx
+msgid "{hours, plural, one {# hour} other {# hours}}"
+msgstr "{hours, plural, one {# hora} other {# horas}}"
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "{label}: {count}"
 msgstr "{label}: {count}"
@@ -120,11 +144,11 @@ msgstr "{label}: {count}"
 msgid "{limit} a month, admins alerted at {alertAt}. Calls stop once it's used up."
 msgstr "{limit} al mes; se avisa a los administradores al {alertAt}. Las llamadas se detienen cuando se agota."
 
-#: src/routes/_shell.notifications.tsx
+#: src/dashboard/failed-workflows.tsx
 msgid "{link} in {appName} failed"
 msgstr "{link} en {appName} ha fallado"
 
-#: src/routes/_shell.notifications.tsx
+#: src/dashboard/failed-workflows.tsx
 msgid "{link} in {appName} failed {failures} times"
 msgstr "{link} en {appName} ha fallado {failures} veces"
 
@@ -286,6 +310,10 @@ msgstr "Un invitado abrió su chat"
 msgid "A guest wrote a message"
 msgstr "Un invitado escribió un mensaje"
 
+#: src/dashboard/signals.tsx
+msgid "A Knowledge search from {about} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
+msgstr "Una búsqueda en Conocimiento desde {about} no encontró nada {searches, plural, one {una vez} other {# veces}}, de {askers, plural, one {# persona} other {# personas}}."
+
 #: src/activity/audit-words.ts
 msgid "A model budget reached its alert or ran out"
 msgstr "Un presupuesto de modelos llegó a su aviso o se agotó"
@@ -305,6 +333,10 @@ msgstr "Una ejecución de un flujo de trabajo pidió esta respuesta."
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow waits for this answer."
 msgstr "Una ejecución de un flujo de trabajo espera esta respuesta."
+
+#: src/dashboard/signals.tsx
+msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
+msgstr "Una búsqueda en {where} no encontró nada {searches, plural, one {una vez} other {# veces}}, de {askers, plural, one {# persona} other {# personas}}."
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -332,6 +364,11 @@ msgstr "Activa, para toda la empresa"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Active, only for you"
 msgstr "Activa, solo para ti"
+
+#: src/dashboard/activity.tsx
+msgctxt "dashboard: what Grasp and people did"
+msgid "Activity"
+msgstr "Actividad"
 
 #: src/activity/audit-log.tsx
 msgid "Actor ID"
@@ -695,6 +732,10 @@ msgstr "cambia los datos del motor"
 msgid "Changes the engine's data"
 msgstr "Cambia los datos del motor"
 
+#: src/dashboard/to-do.tsx
+msgid "Changes to confirm"
+msgstr "Cambios por confirmar"
+
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
 msgid "Chat"
@@ -846,6 +887,11 @@ msgstr "Conectada."
 msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "No se pudo conectar. Vuelve a intentarlo o pregunta a un administrador."
 
+#: src/dashboard/to-do.tsx
+msgctxt "kind of thing that waits"
+msgid "Connection"
+msgstr "Conexión"
+
 #: src/activity/pending.tsx
 msgid "Connection {connectionId}"
 msgstr "Conexión {connectionId}"
@@ -853,6 +899,10 @@ msgstr "Conexión {connectionId}"
 #: src/activity/pending.tsx
 msgid "Connection {connectionId}, {resource}"
 msgstr "Conexión {connectionId}, {resource}"
+
+#: src/dashboard/to-do.tsx
+msgid "Connections to sign in to again"
+msgstr "Conexiones en las que volver a iniciar sesión"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Connections whose data stays in the EU: {connections}."
@@ -878,6 +928,10 @@ msgstr "Copiado"
 msgid "Copy the answer"
 msgstr "Copiar la respuesta"
 
+#: src/dashboard/signals.tsx
+msgid "Could be better"
+msgstr "Podría ir mejor"
+
 #: src/activity/pending.tsx
 msgid "couldn't be read"
 msgstr "no se pudo leer"
@@ -901,6 +955,11 @@ msgstr "Creada por el miembro {owner}."
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "Created by you."
 msgstr "Creada por ti."
+
+#: src/dashboard/nav-item.tsx
+#: src/routes/_shell.dashboard.tsx
+msgid "Dashboard"
+msgstr "Panel"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Data rules"
@@ -981,6 +1040,11 @@ msgstr "Desconectada"
 #: src/activity/audit-words.ts
 msgid "Disconnected an account"
 msgstr "Desconectó una cuenta"
+
+#: src/dashboard/signals.tsx
+msgctxt "put a signal away until something new"
+msgid "Dismiss"
+msgstr "Descartar"
 
 #: src/activity/audit-words.ts
 msgid "Dismissed a knowledge signal"
@@ -1170,6 +1234,10 @@ msgstr "Extrayendo"
 #: src/workflows/runs.tsx
 msgid "Failed"
 msgstr "Fallida"
+
+#: src/dashboard/failed-workflows.tsx
+msgid "Failed while acting for you"
+msgstr "Falló mientras actuaba en tu nombre"
 
 #: src/labels.ts
 msgid "File"
@@ -1441,6 +1509,10 @@ msgstr "Ir al mensaje más reciente"
 msgid "Just for you"
 msgstr "Solo para ti"
 
+#: src/dashboard/signals.tsx
+msgid "Keeps failing"
+msgstr "Falla una y otra vez"
+
 #: src/frame/app-sidebar.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
@@ -1463,13 +1535,17 @@ msgctxt "chats from the past week"
 msgid "Last 7 days"
 msgstr "Últimos 7 días"
 
-#: src/routes/_shell.notifications.tsx
+#: src/dashboard/failed-workflows.tsx
 msgid "Last on {date}"
 msgstr "Última vez el {date}"
 
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Última ejecución"
+
+#: src/dashboard/activity.tsx
+msgid "Latest activity"
+msgstr "Actividad reciente"
 
 #: src/knowledge/uploads.tsx
 msgid "Let go to add them"
@@ -1561,6 +1637,10 @@ msgstr "Modelo"
 msgid "Model call"
 msgstr "Llamada al modelo"
 
+#: src/dashboard/signals.tsx
+msgid "Model cost"
+msgstr "Coste del modelo"
+
 #: src/chat/composer.tsx
 msgid "Model: {name}. Change model"
 msgstr "Modelo: {name}. Cambiar de modelo"
@@ -1615,15 +1695,15 @@ msgstr "Alguien tiene que volver a iniciar sesión"
 msgid "Never"
 msgstr "Nunca"
 
-#: src/routes/_shell.notifications.tsx
-msgid "New"
-msgstr "Nuevo"
-
 #: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
 msgid "New chat"
 msgstr "Nuevo chat"
+
+#: src/dashboard/failed-workflows.tsx
+msgid "New: failed while acting for you"
+msgstr "Nuevo: falló mientras actuaba en tu nombre"
 
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.engines.index.tsx
@@ -1718,6 +1798,14 @@ msgstr "Nadie respondió a tiempo, así que esta decisión se ha cerrado."
 msgid "Nobody matches."
 msgstr "No coincide nadie."
 
+#: src/dashboard/signals.tsx
+msgid "Nobody read or changed {doc} in {where} in the last {days, plural, one {day} other {# days}}."
+msgstr "Nadie ha leído ni cambiado {doc} en {where} {days, plural, one {en el último día} other {en los últimos # días}}."
+
+#: src/dashboard/signals.tsx
+msgid "Nobody reads it"
+msgstr "Nadie lo lee"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "none"
 msgstr "ninguna"
@@ -1779,6 +1867,10 @@ msgstr "No verificado"
 msgid "Nothing connected yet."
 msgstr "Aún no hay nada conectado."
 
+#: src/dashboard/activity.tsx
+msgid "Nothing has happened yet."
+msgstr "Aún no ha pasado nada."
+
 #: src/workflows/runs.tsx
 msgid "Nothing has run yet."
 msgstr "Todavía no se ha ejecutado nada."
@@ -1807,14 +1899,9 @@ msgstr "Aún no se ejecuta nada: esta sería la primera versión actual del moto
 msgid "Nothing spent yet."
 msgstr "Aún no se ha gastado nada."
 
-#: src/routes/_shell.notifications.tsx
-msgid "Nothing yet. When a workflow fails while acting for you, you'll see it here."
-msgstr "Aún nada. Cuando un flujo de trabajo falle mientras actúa por ti, lo verás aquí."
-
-#: src/notifications/nav-item.tsx
-#: src/routes/_shell.notifications.tsx
-msgid "Notifications"
-msgstr "Notificaciones"
+#: src/dashboard/to-do.tsx
+msgid "Nothing waits on you."
+msgstr "Nada te espera."
 
 #: src/chat/builds-state.ts
 msgid "Now runs {how}"
@@ -1839,6 +1926,10 @@ msgstr "Ofrecer {name}"
 #: src/connections/offer-switch.tsx
 msgid "Offered to your organization"
 msgstr "Ofrecido a tu organización"
+
+#: src/dashboard/signals.tsx
+msgid "Often corrected"
+msgstr "Corregido a menudo"
 
 #: src/chat/held-writes.tsx
 msgid "On {where}"
@@ -1991,14 +2082,17 @@ msgstr "PDF"
 msgid "Pending"
 msgstr "Pendiente"
 
-#: src/routes/_shell.settings.approvals.tsx
-#: src/routes/_shell.settings.tsx
-msgid "Pending approvals"
-msgstr "Aprobaciones pendientes"
+#: src/dashboard/signals.tsx
+msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in the last {days} days."
+msgstr "Se rechazaron {rejected} de {answered, plural, one {# respuesta} other {# respuestas}} en el paso {step} de {about} en los últimos {days} días."
 
 #: src/activity/audit-log.tsx
 msgid "Permission"
 msgstr "Permiso"
+
+#: src/dashboard/to-do.tsx
+msgid "Permission requests"
+msgstr "Solicitudes de permiso"
 
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
@@ -2256,6 +2350,10 @@ msgstr "Resultados"
 msgid "Review by"
 msgstr "Revisar antes del"
 
+#: src/dashboard/signals.tsx
+msgid "Review overdue"
+msgstr "Revisión vencida"
+
 #: src/connections/connection-list.tsx
 msgid "Revoke"
 msgstr "Revocar"
@@ -2426,7 +2524,7 @@ msgstr "Mostrar menos"
 msgid "Show more"
 msgstr "Mostrar más"
 
-#: src/routes/_shell.notifications.tsx
+#: src/dashboard/failed-workflows.tsx
 msgid "Show older"
 msgstr "Mostrar anteriores"
 
@@ -2460,6 +2558,7 @@ msgstr "Iniciar sesión"
 
 #: src/connections/connection-list.tsx
 #: src/connections/integration-row.tsx
+#: src/dashboard/to-do.tsx
 msgid "Sign in again"
 msgstr "Volver a iniciar sesión"
 
@@ -2469,6 +2568,7 @@ msgstr "Iniciar sesión en {app}"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/integration-row.tsx
+#: src/dashboard/to-do.tsx
 msgid "Sign in to {app} again"
 msgstr "Volver a iniciar sesión en {app}"
 
@@ -2586,6 +2686,10 @@ msgstr "Estado"
 msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Estado"
+
+#: src/dashboard/signals.tsx
+msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in the last {days} days."
+msgstr "El paso {step} de {about} falló en {failures} de {runs, plural, one {# ejecución} other {# ejecuciones}} en los últimos {days} días."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -2720,6 +2824,10 @@ msgstr "Predeterminado, {each}"
 msgid "The export didn't work. Try again."
 msgstr "La exportación no ha funcionado. Inténtalo de nuevo."
 
+#: src/dashboard/activity.tsx
+msgid "The full audit trail"
+msgstr "El registro de auditoría completo"
+
 #: src/routes/guest.tsx
 msgid "The link works until {until}."
 msgstr "El enlace funciona hasta el {until}."
@@ -2850,6 +2958,11 @@ msgstr "A través del conector propio de Grasp, que guarda el acceso en tu despl
 msgid "To"
 msgstr "Hasta"
 
+#: src/dashboard/to-do.tsx
+msgctxt "dashboard: what waits on you"
+msgid "To do"
+msgstr "Pendiente"
+
 #: src/chat/chat-list.tsx
 msgctxt "chats from today"
 msgid "Today"
@@ -2891,15 +3004,16 @@ msgstr "Reintentando…"
 msgid "Type"
 msgstr "Tipo"
 
+#: src/dashboard/signals.tsx
+msgid "Unanswered question"
+msgstr "Pregunta sin respuesta"
+
 #: src/activity/pending.tsx
 msgid "Unknown"
 msgstr "Desconocida"
 
-#: src/notifications/nav-item.tsx
-msgid "unread"
-msgstr "sin leer"
-
 #: src/activity/audit-log.tsx
+#: src/dashboard/activity.tsx
 msgid "Unreadable event"
 msgstr "Evento ilegible"
 
@@ -2976,10 +3090,18 @@ msgstr "Versiones"
 msgid "Via Composio"
 msgstr "A través de Composio"
 
+#: src/dashboard/nav-item.tsx
+msgid "waiting"
+msgstr "esperando"
+
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 msgid "Waiting for a decision"
 msgstr "A la espera de una decisión"
+
+#: src/dashboard/signals.tsx
+msgid "Waiting for a person"
+msgstr "Esperando a una persona"
 
 #: src/chat/held-writes.tsx
 msgid "Waiting for you"
@@ -3001,10 +3123,6 @@ msgstr "No se le permitió añadir un miembro a un motor"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
 msgstr "Qué cambió"
-
-#: src/routes/_shell.settings.approvals.tsx
-msgid "What engines and agents ask to be allowed to do, waiting for an admin."
-msgstr "Lo que los motores y los agentes piden poder hacer, a la espera de un administrador."
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "What every agent has in its context, all the time."
@@ -3035,6 +3153,10 @@ msgstr "¿Qué miramos hoy?"
 msgid "What the engine holds"
 msgstr "Lo que tiene el motor"
 
+#: src/routes/_shell.dashboard.tsx
+msgid "What waits on you, each with its next step, and what could be better."
+msgstr "Lo que te espera, cada cosa con su siguiente paso, y lo que podría ir mejor."
+
 #: src/workflows/runs.tsx
 msgctxt "column: when a run happened"
 msgid "When"
@@ -3051,6 +3173,10 @@ msgstr "Qué motores y agentes tienen permisos: {why}"
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
 msgstr "Quién lo usa"
+
+#: src/dashboard/signals.tsx
+msgid "Worked out daily, last on {date}"
+msgstr "Se calcula a diario; la última vez, el {date}"
 
 #: src/activity/audit-words.ts
 msgid "Worked out how knowledge is used"
@@ -3094,6 +3220,11 @@ msgstr "Flujos de trabajo y más"
 #: src/workflows/workflows-table.tsx
 msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it into an engine."
 msgstr "Los flujos de trabajo se crean en el chat: describe lo que debe funcionar solo y Grasp lo integra en un motor."
+
+#: src/dashboard/failed-workflows.tsx
+#: src/dashboard/to-do.tsx
+msgid "Workflows that failed"
+msgstr "Flujos de trabajo que fallaron"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."
@@ -3178,6 +3309,10 @@ msgstr "Tus chats aparecen aquí."
 #: src/routes/guest.tsx
 msgid "Your message"
 msgstr "Tu mensaje"
+
+#: src/dashboard/signals.tsx
+msgid "your organization"
+msgstr "tu organización"
 
 #: src/connections/connect-dialog.tsx
 msgid "Your organization uses it through the permissions you grant."
