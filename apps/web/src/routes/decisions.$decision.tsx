@@ -1,41 +1,46 @@
 import type { DecisionView } from "@grasp-os/shared/decisions";
-import { failureText } from "@grasp-os/shared/errors";
-import type { SignInOption } from "@grasp-os/shared/rpc";
+import { failureText, isExpectedError } from "@grasp-os/shared/errors";
+import type { Identity, SignInOption } from "@grasp-os/shared/rpc";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@grasp-os/ui/components/card";
+import { Card, CardContent } from "@grasp-os/ui/components/card";
+import { Label } from "@grasp-os/ui/components/label";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { CircleDotIcon } from "lucide-react";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { loadCoreStatus, readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { CoreTimeoutError } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import { AppFrame } from "../frame/app-frame.tsx";
+import { NotFound } from "../frame/page-states.tsx";
+import { SiteHeader } from "../frame/site-header.tsx";
+import type { Crumb } from "../frame/site-header.tsx";
+import { GraspMark } from "../grasp-mark.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { SignInOptions } from "../sign-in-options.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
-// Where a decision link leads (`/decisions/<id>`). Opening it answers
-// nothing (threat model R8): the person signs in, sees what is asked, and
-// answers with a button. Core checks on every call that they may answer;
-// this page only shows what core says.
+// Where a decision link leads (`/decisions/<id>`), from notifications, the
+// runs log or mail. Opening it answers nothing (threat model R8): the
+// person signs in, sees what is asked, and answers with a button. Core
+// checks on every call that they may answer; this page only shows what
+// core says. Someone signed in sees it in the app's frame; anyone else
+// on a page of its own, asked to sign in. The card is the prototype's
+// decision card (grasplabs/prototype `components/decision-card.tsx`).
 
 type DecisionPage =
   | { state: "offline" }
   | { state: "signed-out"; signInOptions: SignInOption[] }
-  | { state: "refused"; name: string; message: string }
-  | { state: "ready"; name: string; decision: DecisionView };
+  | { state: "missing"; identity: Identity }
+  | { state: "refused"; identity: Identity; message: string }
+  | { state: "ready"; identity: Identity; decision: DecisionView };
 
 const loadDecision = async (
   core: CoreConnection,
@@ -54,16 +59,15 @@ const loadDecision = async (
       core,
       async (session) => await session.decisions.get(decision)
     );
-    return { state: "ready", name: identity.name, decision: found };
+    return { state: "ready", identity, decision: found };
   } catch (error) {
     if (error instanceof CoreTimeoutError) {
       return { state: "offline" };
     }
-    return {
-      state: "refused",
-      name: identity.name,
-      message: failureText(error),
-    };
+    if (isExpectedError(error) && error.code === "decision.not_found") {
+      return { state: "missing", identity };
+    }
+    return { state: "refused", identity, message: failureText(error) };
   }
 };
 
@@ -86,14 +90,15 @@ const outcomeOf = (decision: DecisionView): string => {
     : i18n._(msg`Rejected by ${name} on ${date}.`);
 };
 
-const Answer = ({ decision }: { decision: DecisionView }) => {
+/**
+ * The decision, as the prototype's card: what is asked, where it comes
+ * from, until when, and the answers core offers, or how it ended.
+ */
+const DecisionCard = ({ decision }: { decision: DecisionView }) => {
   const [current, setCurrent] = useState(decision);
   const [comment, setComment] = useState("");
   const { busy, failure, run } = useCoreAction();
-  const { t } = useLingui();
-  const app = current.app.name;
-  const { workflow } = current;
-  const until = formatDateTime(current.expiresAt);
+  const open = current.status === "open";
   const answer = async (approved: boolean): Promise<void> => {
     const note = comment.trim();
     const answered = await run(
@@ -108,118 +113,205 @@ const Answer = ({ decision }: { decision: DecisionView }) => {
     }
   };
   return (
-    <Card className="w-full max-w-lg">
-      <CardHeader>
-        <CardTitle>
-          <h1>{current.description}</h1>
-        </CardTitle>
-        <CardDescription>
-          {current.status === "open"
-            ? t`Asked by ${app} (${workflow}), open until ${until}`
-            : t`Asked by ${app} (${workflow})`}
-        </CardDescription>
-      </CardHeader>
-      {current.status === "open" ? (
-        <>
-          <CardContent>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm" htmlFor="decision-comment">
-                <Trans>Comment (optional)</Trans>
-              </label>
-              <Textarea
-                id="decision-comment"
-                value={comment}
-                maxLength={2000}
-                disabled={busy}
-                onChange={(event) => {
-                  setComment(event.target.value);
-                }}
-              />
-              <ErrorText>{failure}</ErrorText>
+    <Card className="w-full max-w-xl">
+      <CardContent>
+        <div className="flex items-start gap-4">
+          <div className="bg-muted grid size-8 flex-none place-items-center rounded-md">
+            <CircleDotIcon aria-hidden="true" className="size-4" />
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-3">
+            <div className="flex flex-col gap-1">
+              <h1 className="font-medium">{current.description}</h1>
+              <p className="text-muted-foreground">
+                {open ? (
+                  <Trans>A run of a workflow waits for this answer.</Trans>
+                ) : (
+                  <Trans>A run of a workflow asked for this answer.</Trans>
+                )}
+              </p>
             </div>
-          </CardContent>
-          <CardFooter>
-            <div className="flex gap-2">
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  void answer(true);
-                }}
-              >
-                <Trans>Approve</Trans>
-              </Button>
-              <Button
-                variant="outline"
-                disabled={busy}
-                onClick={() => {
-                  void answer(false);
-                }}
-              >
-                <Trans>Reject</Trans>
-              </Button>
-            </div>
-          </CardFooter>
-        </>
-      ) : (
-        <CardContent>
-          <output className="text-sm">{outcomeOf(current)}</output>
-        </CardContent>
-      )}
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">
+              <dt className="text-muted-foreground">
+                <Trans context="where a decision comes from">From</Trans>
+              </dt>
+              <dd className="min-w-0 truncate">
+                {current.app.name} · {current.workflow}
+              </dd>
+              <dt className="text-muted-foreground">
+                <Trans context="the run of a workflow a decision is for">
+                  Run
+                </Trans>
+              </dt>
+              <dd className="min-w-0 truncate font-mono text-xs leading-5">
+                {current.run}
+              </dd>
+              {open ? (
+                <>
+                  <dt className="text-muted-foreground">
+                    <Trans context="until when a decision can be answered">
+                      Open until
+                    </Trans>
+                  </dt>
+                  <dd>{formatDateTime(current.expiresAt)}</dd>
+                </>
+              ) : null}
+            </dl>
+            {open ? (
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="decision-comment">
+                    <Trans>Comment (optional)</Trans>
+                  </Label>
+                  <Textarea
+                    disabled={busy}
+                    id="decision-comment"
+                    maxLength={2000}
+                    onChange={(event) => {
+                      setComment(event.target.value);
+                    }}
+                    value={comment}
+                  />
+                </div>
+                <ErrorText>{failure}</ErrorText>
+                <div className="flex gap-2">
+                  <Button
+                    disabled={busy}
+                    onClick={() => {
+                      void answer(true);
+                    }}
+                    size="sm"
+                  >
+                    <Trans>Approve</Trans>
+                  </Button>
+                  <Button
+                    disabled={busy}
+                    onClick={() => {
+                      void answer(false);
+                    }}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <Trans>Reject</Trans>
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <output>{outcomeOf(current)}</output>
+            )}
+          </div>
+        </div>
+      </CardContent>
     </Card>
+  );
+};
+
+/** A page of its own, for someone not signed in or when core is away. */
+const OnItsOwn = ({ children }: { children: ReactNode }) => (
+  <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-4 p-6 text-center text-sm">
+    <GraspMark className="text-foreground size-6" />
+    {children}
+  </main>
+);
+
+/** The decision in the app's frame, under the crumbs to its workflow. */
+const InFrame = ({
+  identity,
+  crumbs,
+  children,
+}: {
+  identity: Identity;
+  crumbs: readonly Crumb[];
+  children: ReactNode;
+}) => {
+  const { core } = Route.useRouteContext();
+  return (
+    <AppFrame core={core} identity={identity}>
+      <SiteHeader crumbs={crumbs} />
+      <div className="flex flex-col items-center gap-4 p-6 text-sm">
+        {children}
+      </div>
+    </AppFrame>
   );
 };
 
 const Decision = () => {
   const page = Route.useLoaderData();
   const { error } = Route.useSearch();
+  const { core } = Route.useRouteContext();
   const { t } = useLingui();
   if (page.state === "offline") {
     return (
-      <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-6">
-        <h1 className="text-2xl font-medium">
+      <OnItsOwn>
+        <h1 className="text-2xl font-medium tracking-tight">
           <Trans>Decision</Trans>
         </h1>
         <ErrorText>
           {t`Grasp can't be reached right now. Try again in a moment.`}
         </ErrorText>
-      </main>
+      </OnItsOwn>
     );
   }
   if (page.state === "signed-out") {
     return (
-      <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-6">
-        <h1 className="text-2xl font-medium">
+      <OnItsOwn>
+        <h1 className="text-2xl font-medium tracking-tight">
           <Trans>Sign in to answer</Trans>
         </h1>
-        <p className="text-muted-foreground text-sm">
+        <p className="text-muted-foreground">
           <Trans>Only the people this decision is from can answer it.</Trans>
         </p>
         <SignInOptions
-          options={page.signInOptions}
           error={error}
+          options={page.signInOptions}
           // Back to this page, without an earlier error.
           returnTo={window.location.pathname}
         />
-      </main>
+      </OnItsOwn>
     );
   }
-  const { name } = page;
+  const workflows: Crumb = { label: t`Workflows`, to: "/workflows" };
+  if (page.state === "missing") {
+    return (
+      <AppFrame core={core} identity={page.identity}>
+        <NotFound
+          crumbs={[workflows, { label: t`Not found` }]}
+          title={t`Decision not found`}
+        />
+      </AppFrame>
+    );
+  }
+  if (page.state === "refused") {
+    return (
+      <InFrame
+        crumbs={[workflows, { label: t`Decision` }]}
+        identity={page.identity}
+      >
+        <h1 className="text-2xl font-medium tracking-tight">
+          <Trans>Decision</Trans>
+        </h1>
+        <ErrorText>{page.message}</ErrorText>
+        <Link className="underline-offset-4 hover:underline" to="/">
+          <Trans>Go to Grasp</Trans>
+        </Link>
+      </InFrame>
+    );
+  }
+  const { decision } = page;
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-6">
-      <p className="text-muted-foreground text-sm">
-        <Trans>Signed in as {name}</Trans>
-      </p>
-      {page.state === "refused" ? (
-        <>
-          <h1 className="text-2xl font-medium">
-            <Trans>Decision</Trans>
-          </h1>
-          <ErrorText>{page.message}</ErrorText>
-        </>
-      ) : (
-        <Answer decision={page.decision} />
-      )}
-    </main>
+    <InFrame
+      crumbs={[
+        workflows,
+        {
+          label: decision.workflow,
+          to: "/workflows/$app/$workflow",
+          params: { app: decision.app.id, workflow: decision.workflow },
+        },
+        { label: t`Decision` },
+      ]}
+      identity={page.identity}
+    >
+      <DecisionCard decision={decision} />
+    </InFrame>
   );
 };
 

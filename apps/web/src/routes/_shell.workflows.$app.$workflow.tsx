@@ -34,21 +34,32 @@ import {
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import { i18n } from "@lingui/core";
-import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { WorkflowIcon } from "lucide-react";
+import {
+  BoxesIcon,
+  ClockIcon,
+  RepeatIcon,
+  SparklesIcon,
+  SplitIcon,
+  UserIcon,
+  WorkflowIcon,
+} from "lucide-react";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
-import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
+import {
+  NotLoadedState,
+  PageLoading,
+  PageNotLoaded,
+} from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { RunsTable } from "../workflows/runs.tsx";
+import { RunsLog } from "../workflows/runs.tsx";
 
 // One workflow: its steps in plain words, read from its code; its
 // parameters as a form, for the App's builders; a Test that dry-runs it
@@ -56,26 +67,47 @@ import { RunsTable } from "../workflows/runs.tsx";
 // the App's versions. Core checks every call; the page offers only what
 // core says the person may do.
 
-/** What a step does besides plain code, in words. */
-const kindLabels: Readonly<
-  Record<StepOutline["kind"], MessageDescriptor | undefined>
-> = {
-  exact: undefined,
-  ai: msg`AI`,
-  decision: msg`Decision`,
-  wait: msg`Waits`,
+/**
+ * Who does a step, as the prototype's three types say it
+ * (`components/builder/flow-step.tsx`): an agent where a model answers,
+ * a person where it waits for one. Plain code and waiting for time or an
+ * event say neither, so they show no one.
+ */
+const Doer = ({ kind }: { kind: StepOutline["kind"] }) => {
+  if (kind === "ai") {
+    return (
+      <Badge>
+        <SparklesIcon data-icon="inline-start" />
+        <Trans context="who does a step">Agent</Trans>
+      </Badge>
+    );
+  }
+  if (kind === "decision") {
+    return (
+      <Badge variant="outline">
+        <UserIcon data-icon="inline-start" />
+        <Trans context="who does a step">Person</Trans>
+      </Badge>
+    );
+  }
+  return kind === "wait" ? (
+    <Badge variant="outline">
+      <ClockIcon data-icon="inline-start" />
+      <Trans context="a step that waits for time or an event">Waits</Trans>
+    </Badge>
+  ) : null;
 };
 
-const StepItem = ({ step }: { step: StepOutline }) => {
+/** One step, as a card: its number, what it does, who does it, and its name. */
+const StepCard = ({ step, n }: { step: StepOutline; n: number }) => {
   const { t } = useLingui();
-  const kindLabel = kindLabels[step.kind];
-  const kind = kindLabel === undefined ? undefined : i18n._(kindLabel);
   const { name, key } = step;
   return (
-    <li className="flex flex-col gap-1">
+    <li className="bg-card flex flex-col gap-1.5 rounded-xl border px-4 py-3 shadow-xs">
       <span className="flex flex-wrap items-center gap-2">
-        <span className="font-medium">{step.description}</span>
-        {kind === undefined ? null : <Badge variant="secondary">{kind}</Badge>}
+        <span className="text-muted-foreground tabular-nums">{n}</span>
+        <span className="min-w-0 flex-1 font-medium">{step.description}</span>
+        <Doer kind={step.kind} />
         {step.sideEffect ? (
           <Badge variant="outline">
             <Trans>Changes something</Trans>
@@ -93,19 +125,27 @@ const StepItem = ({ step }: { step: StepOutline }) => {
 const keyOf = (node: OutlineNode): string =>
   node.type === "step" ? node.name : `${node.type}:${node.line}`;
 
-/** Steps, and the branches and loops around them, in the order they run. */
+/**
+ * Steps, and the branches and loops around them, in the order they run:
+ * each step a card, a branch or a loop a block of its own around its
+ * steps, as the prototype's overview draws them in blocks. Read only.
+ */
 const Outline = ({ nodes }: { nodes: OutlineNode[] }) => {
   const { t } = useLingui();
   return (
-    <ol className="flex list-decimal flex-col gap-3 pl-6">
-      {nodes.map((node) => {
+    <ol className="flex flex-col gap-2">
+      {nodes.map((node, index) => {
         if (node.type === "step") {
-          return <StepItem key={keyOf(node)} step={node} />;
+          return <StepCard key={keyOf(node)} n={index + 1} step={node} />;
         }
         if (node.type === "loop") {
           return (
-            <li className="flex flex-col gap-2" key={keyOf(node)}>
-              <span>
+            <li
+              className="bg-muted/50 flex flex-col gap-3 rounded-xl border border-dashed p-3"
+              key={keyOf(node)}
+            >
+              <span className="flex items-center gap-2 font-medium">
+                <RepeatIcon aria-hidden="true" className="size-4" />
                 {node.header === ""
                   ? t`Repeats, once per item:`
                   : t`Repeats, ${ph({ items: node.header })}:`}
@@ -115,9 +155,13 @@ const Outline = ({ nodes }: { nodes: OutlineNode[] }) => {
           );
         }
         return (
-          <li className="flex flex-col gap-2" key={keyOf(node)}>
+          <li
+            className="bg-muted/50 flex flex-col gap-3 rounded-xl border border-dashed p-3"
+            key={keyOf(node)}
+          >
             {/* Core leaves the condition out for those who don't build. */}
-            <span>
+            <span className="flex items-center gap-2 font-medium">
+              <SplitIcon aria-hidden="true" className="size-4" />
               {node.condition === ""
                 ? t`Only when a condition holds:`
                 : t`If ${ph({ condition: node.condition })}:`}
@@ -125,7 +169,7 @@ const Outline = ({ nodes }: { nodes: OutlineNode[] }) => {
             <Outline nodes={node.steps} />
             {node.otherwise.length === 0 ? null : (
               <>
-                <span>
+                <span className="font-medium">
                   <Trans>Otherwise:</Trans>
                 </span>
                 <Outline nodes={node.otherwise} />
@@ -143,14 +187,14 @@ const Steps = ({ steps }: { steps: WorkflowDetail["steps"] }) => {
   if (!steps.ok) {
     const { message } = steps;
     return (
-      <p className="text-muted-foreground text-sm">
+      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
         {t`The steps can't be read from this workflow's code: ${message}`}
       </p>
     );
   }
   if (steps.outline.steps.length === 0) {
     return (
-      <p className="text-muted-foreground text-sm">
+      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
         <Trans>It has no steps.</Trans>
       </p>
     );
@@ -491,108 +535,126 @@ const WorkflowView = ({
   detail,
   runs,
   versions,
+  model,
 }: {
   detail: WorkflowDetail;
   runs: Loaded<RunsPage>;
   versions: Loaded<AppVersion[]> | undefined;
+  model: string | undefined;
 }) => {
   const { identity } = Route.useRouteContext();
   const { summary, steps, params, setsParams } = detail;
   const { t } = useLingui();
   const { version } = summary;
   const owner = summary.owner.name ?? summary.owner.userId;
+  const runCount = runs.state === "ready" ? runs.data.runs.length : undefined;
   return (
-    <>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-medium">{summary.workflow}</h1>
-          <p className="text-muted-foreground text-sm">
-            <Link
-              className="underline"
-              params={{ app: summary.app }}
-              to="/apps/$app"
-            >
-              {summary.appName}
-            </Link>
-            {summary.owner.userId === identity.userId
-              ? t`, version ${version}, owned by you`
-              : t`, version ${version}, owned by ${owner}`}
-          </p>
-          {summary.scheduleStopped ? (
-            <p className="text-destructive text-sm">
-              {t`Its schedule stopped: its run failed to start ${maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the App is made current.`}
-            </p>
-          ) : null}
+    <Tabs defaultValue="steps">
+      {/* As the prototype's workflow page: the title with where it is and
+          who owns it, its one action beside it, and the tabs under them. */}
+      <div className="flex flex-col gap-3 border-b px-6 pt-5">
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+          <div className="flex min-w-0 grow basis-96 flex-col gap-2">
+            <h1 className="text-2xl font-medium tracking-tight">
+              {summary.workflow}
+            </h1>
+            <div className="text-muted-foreground flex flex-wrap items-center gap-2">
+              <Badge
+                render={<Link params={{ app: summary.app }} to="/apps/$app" />}
+                variant="outline"
+              >
+                <BoxesIcon data-icon="inline-start" />
+                {summary.appName}
+              </Badge>
+              <Badge variant="outline">
+                <Trans>Version {version}</Trans>
+              </Badge>
+              <span className="text-xs">
+                {summary.owner.userId === identity.userId
+                  ? t`Owned by you`
+                  : t`Owned by ${owner}`}
+              </span>
+            </div>
+            {summary.scheduleStopped ? (
+              <p className="text-destructive">
+                {t`Its schedule stopped: its run failed to start ${maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the App is made current.`}
+              </p>
+            ) : null}
+          </div>
+          {params === null ? null : (
+            <TestButton app={summary.app} workflow={summary.workflow} />
+          )}
         </div>
-        {params === null ? null : (
-          <TestButton app={summary.app} workflow={summary.workflow} />
-        )}
-      </div>
-      <Tabs defaultValue="steps">
-        <TabsList>
+        <TabsList variant="line">
           <TabsTrigger value="steps">
-            <Trans>Steps</Trans>
+            <Trans context="tab of a workflow">Steps</Trans>
           </TabsTrigger>
           {params === null ? null : (
             <TabsTrigger value="parameters">
-              <Trans>Parameters</Trans>
+              <Trans context="tab of a workflow">Parameters</Trans>
             </TabsTrigger>
           )}
-          <TabsTrigger value="history">
-            <Trans>History</Trans>
+          <TabsTrigger value="runs">
+            <Trans context="tab listing the runs of workflows">Runs</Trans>
+            {runCount === undefined || runCount === 0 ? null : (
+              <span className="text-muted-foreground tabular-nums">
+                {runCount}
+              </span>
+            )}
           </TabsTrigger>
+          {versions === undefined ? null : (
+            <TabsTrigger value="versions">
+              <Trans context="tab of a workflow">Versions</Trans>
+            </TabsTrigger>
+          )}
         </TabsList>
-        <TabsContent value="steps">
+      </div>
+      <TabsContent value="steps">
+        <div className="mx-auto w-full max-w-3xl p-6">
           <Steps steps={steps} />
-        </TabsContent>
-        {/* Kept while another tab shows: what was saved or typed stays. */}
-        {params === null ? null : (
-          <TabsContent keepMounted value="parameters">
+        </div>
+      </TabsContent>
+      {/* Kept while another tab shows: what was saved or typed stays. */}
+      {params === null ? null : (
+        <TabsContent keepMounted value="parameters">
+          <div className="max-w-3xl p-6">
             <Parameters
               app={summary.app}
               editable={setsParams}
               params={params}
               workflow={summary.workflow}
             />
-          </TabsContent>
-        )}
-        <TabsContent value="history">
-          <div className="flex flex-col gap-6">
-            <section aria-labelledby="runs" className="flex flex-col gap-2">
-              <h2 className="font-medium" id="runs">
-                <Trans>Runs</Trans>
-              </h2>
-              {runs.state === "ready" ? (
-                <RunsTable
-                  me={identity.userId}
-                  more={runs.data.more}
-                  runs={runs.data.runs}
-                  withWorkflow={false}
-                />
-              ) : (
-                <NotLoaded page={runs} />
-              )}
-            </section>
-            {versions === undefined ? null : (
-              <section
-                aria-labelledby="versions"
-                className="flex flex-col gap-2"
-              >
-                <h2 className="font-medium" id="versions">
-                  <Trans>Versions of the App</Trans>
-                </h2>
-                <Versions versions={versions} />
-              </section>
-            )}
           </div>
         </TabsContent>
-      </Tabs>
-    </>
+      )}
+      <TabsContent value="runs">
+        <div className="p-6">
+          {runs.state === "ready" ? (
+            <RunsLog
+              me={identity.userId}
+              model={model}
+              more={runs.data.more}
+              runs={runs.data.runs}
+              withWorkflow={false}
+            />
+          ) : (
+            <NotLoadedState page={runs} />
+          )}
+        </div>
+      </TabsContent>
+      {versions === undefined ? null : (
+        <TabsContent value="versions">
+          <div className="p-6">
+            <Versions versions={versions} />
+          </div>
+        </TabsContent>
+      )}
+    </Tabs>
   );
 };
 
 const WorkflowPage = () => {
-  const { detail, runs, versions } = Route.useLoaderData();
+  const { detail, runs, versions, model } = Route.useLoaderData();
   const { app, workflow } = Route.useParams();
   const { t } = useLingui();
   const crumbs = [
@@ -612,11 +674,12 @@ const WorkflowPage = () => {
   return (
     <>
       <SiteHeader crumbs={crumbs} />
-      <div className="flex max-w-6xl flex-col gap-6 p-6">
+      <div className="flex flex-col text-sm">
         <WorkflowView
           // Another workflow starts with its own forms and test.
           key={`${app}/${workflow}`}
           detail={detail.data}
+          model={model}
           runs={runs}
           versions={versions}
         />
@@ -631,7 +694,7 @@ export const Route = createFileRoute("/_shell/workflows/$app/$workflow")({
   // versions only for those who build it: each says on its own why it
   // failed.
   loader: async ({ context: { core }, params: { app, workflow } }) => {
-    const [detail, runs] = await Promise.all([
+    const [detail, runs, models] = await Promise.all([
       loadFromCore(
         core,
         async (session) => await session.workflows.get(app, workflow)
@@ -640,6 +703,8 @@ export const Route = createFileRoute("/_shell/workflows/$app/$workflow")({
         core,
         async (session) => await session.workflows.runs({ app, workflow })
       ),
+      // The model a fix in chat asks with; without one, none is offered.
+      loadFromCore(core, async (session) => await session.chats.models()),
     ]);
     const builds = detail.state === "ready" && detail.data.params !== null;
     const versions = builds
@@ -648,7 +713,12 @@ export const Route = createFileRoute("/_shell/workflows/$app/$workflow")({
           async (session) => await session.apps.versions.list(app)
         )
       : undefined;
-    return { detail, runs, versions };
+    return {
+      detail,
+      runs,
+      versions,
+      model: models.state === "ready" ? models.data[0] : undefined,
+    };
   },
   component: WorkflowPage,
 });

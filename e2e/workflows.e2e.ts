@@ -172,15 +172,18 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
     .click();
   const rows = page.getByRole("row").filter({ hasText: name });
   await expect(rows).toHaveCount(2, pageRead);
-  await expect(rows.first().getByRole("cell")).toHaveText([
-    "approval",
-    name,
-    "1",
-    "You",
-    /^Waiting for a decision, /u,
-    "1",
-    "0",
-  ]);
+  // Its row: the workflow, its App and version, and where it stands, with
+  // the run waiting for a decision a link to it.
+  const row = rows.first();
+  await expect(
+    row.getByRole("link", { name: "approval", exact: true })
+  ).toBeVisible();
+  await expect(row).toContainText(name);
+  await expect(row).toContainText("Version 1");
+  await expect(row).toContainText("Waiting for a decision");
+  await expect(
+    row.getByRole("link", { name: "1 waiting run of approval" })
+  ).toBeVisible();
 
   // The waiting run comes first on the Runs tab, with where to decide it.
   await page.getByRole("tab", { name: "Runs" }).click();
@@ -198,8 +201,10 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
   ).toBeVisible(pageRead);
   const steps = page.getByRole("tabpanel");
   await expect(steps.getByText("Read the invoice's total")).toBeVisible();
-  await expect(steps.getByText("AI", { exact: true })).toBeVisible();
-  await expect(steps.getByText("Decision", { exact: true })).toBeVisible();
+  // Who does each step: an agent where a model answers, a person where it
+  // waits for a decision.
+  await expect(steps.getByText("Agent", { exact: true })).toBeVisible();
+  await expect(steps.getByText("Person", { exact: true })).toBeVisible();
   await expect(
     steps.getByText("If extracted.total > params.limit:")
   ).toBeVisible();
@@ -275,7 +280,7 @@ test("someone an App is shared with reads its workflow, with nothing to change o
   // The steps without their code: no condition, only that there is one.
   await expect(page.getByText("Only when a condition holds:")).toBeVisible();
   await expect(page.getByText("params.limit")).toHaveCount(0);
-  await expect(page.getByRole("tab")).toHaveText(["Steps", "History"]);
+  await expect(page.getByRole("tab")).toHaveText(["Steps", /^Runs/u]);
   await expect(page.getByRole("button", { name: "Test" })).toHaveCount(0);
 
   // The run waits for the builder's answer, not theirs: no link to decide.

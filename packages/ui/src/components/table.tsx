@@ -62,12 +62,24 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
   );
 }
 
-function TableHead({ className, ...props }: React.ComponentProps<"th">) {
+/*
+ * `card`: a table in a card of its own, as the Grasp design lists
+ * workflows and runs: wider cells, and quiet column names.
+ */
+function TableHead({
+  className,
+  variant = "default",
+  ...props
+}: React.ComponentProps<"th"> & { variant?: "default" | "card" }) {
   return (
     <th
       data-slot="table-head"
+      data-variant={variant}
       className={cn(
-        "text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0",
+        "h-10 text-left align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0",
+        variant === "card"
+          ? "text-muted-foreground px-4 font-normal"
+          : "text-foreground px-2 font-medium",
         className
       )}
       {...props}
@@ -75,12 +87,21 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   );
 }
 
-function TableCell({ className, ...props }: React.ComponentProps<"td">) {
+/** `card` as for `TableHead`; `roomy` also gives each row more height. */
+function TableCell({
+  className,
+  variant = "default",
+  ...props
+}: React.ComponentProps<"td"> & { variant?: "default" | "card" | "roomy" }) {
   return (
     <td
       data-slot="table-cell"
+      data-variant={variant}
       className={cn(
-        "p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0",
+        "align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0",
+        variant === "default" && "p-2",
+        variant === "card" && "px-4 py-2",
+        variant === "roomy" && "px-4 py-3",
         className
       )}
       {...props}
