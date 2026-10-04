@@ -324,6 +324,12 @@ test("says an address no page has, and an App that isn't there, are not found, i
   await expect(
     page.getByRole("navigation", { name: "Breadcrumb" })
   ).toContainText("Not found");
+
+  // A workflow of an App that isn't there, the same way.
+  await page.goto("/workflows/no-such-app/no-such-workflow");
+  await expect(
+    page.getByRole("heading", { name: "Workflow not found" })
+  ).toBeVisible();
 });
 
 test("never sends what it gave up on while core was out of reach, once core is back", async ({
