@@ -9,7 +9,6 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 import {
-  CheckCheckIcon,
   HistoryIcon,
   SparklesIcon,
   UserRoundIcon,
@@ -23,7 +22,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 // who may do what in it, then one's own account, one section at a time.
 // Only the sections core has something behind are here, and only those
 // the person may open are listed: Profile for everyone; Members and roles,
-// Models, the audit trail and pending approvals for admins (Members and
+// Models and the audit trail for admins (Members and
 // roles never for Grasp staff). Core checks the role on every call
 // whatever is listed.
 
@@ -31,8 +30,7 @@ type SettingsPath =
   | "/settings/profile"
   | "/settings/members"
   | "/settings/models"
-  | "/settings/audit"
-  | "/settings/approvals";
+  | "/settings/audit";
 
 interface SettingsItem {
   label: MessageDescriptor;
@@ -61,11 +59,6 @@ const groupsFor = ({
             ]),
         { label: msg`Models`, to: "/settings/models", icon: SparklesIcon },
         { label: msg`Audit trail`, to: "/settings/audit", icon: HistoryIcon },
-        {
-          label: msg`Pending approvals`,
-          to: "/settings/approvals",
-          icon: CheckCheckIcon,
-        },
       ]
     : [];
   return [

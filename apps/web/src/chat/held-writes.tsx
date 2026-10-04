@@ -221,7 +221,7 @@ const ExactInput = ({
   );
 };
 
-const HeldWrite = ({
+export const HeldWrite = ({
   action,
   onDecided,
 }: {

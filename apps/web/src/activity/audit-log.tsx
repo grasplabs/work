@@ -154,7 +154,7 @@ export const readLog = async (
   return { page, directory };
 };
 
-const typeLabels: Record<AuditEventType, MessageDescriptor> = {
+export const typeLabels: Record<AuditEventType, MessageDescriptor> = {
   read: msg`Read`,
   action: msg`Action`,
   decision: msg`Decision`,
