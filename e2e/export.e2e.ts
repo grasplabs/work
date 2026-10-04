@@ -26,6 +26,51 @@ const choose = async (
 const textOf = async (download: Download): Promise<string> =>
   await readFile(await download.path(), "utf-8");
 
+declare global {
+  interface Window {
+    /** How often a page to print asked for the print dialog, see below. */
+    printed?: number;
+  }
+}
+
+/**
+ * Counts the print dialogs asked for instead of opening them: what a
+ * browser does with `print()` (a dialog, or nothing at all headless) isn't
+ * the page's to test. The page's frame is of this origin, so its window
+ * can be reached from here.
+ */
+const countPrints = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    const own = Object.getOwnPropertyDescriptor(
+      HTMLIFrameElement.prototype,
+      "contentWindow"
+    );
+    Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", {
+      configurable: true,
+      get(this: HTMLIFrameElement) {
+        const view: unknown = own?.get?.call(this);
+        if (typeof view === "object" && view !== null && "print" in view) {
+          Object.assign(view, {
+            print: () => {
+              window.printed = (window.printed ?? 0) + 1;
+            },
+          });
+        }
+        return view;
+      },
+    });
+  });
+};
+
+/** The print dialog closing, as the browser says it does. */
+const closePrint = async (page: Page, title: string): Promise<void> => {
+  await page.evaluate((name) => {
+    document
+      .querySelector<HTMLIFrameElement>(`iframe[title="${name}"]`)
+      ?.contentWindow?.dispatchEvent(new Event("afterprint"));
+  }, title);
+};
+
 test("a document and a chat each export as Markdown and as a page to print", async ({
   browser,
 }) => {
@@ -60,7 +105,11 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   // The page to print: the title, then the text rendered, in a frame of
   // this origin that keeps its policy, styled by the app's own stylesheets
   // and set in Geist.
+  await countPrints(page);
   await choose(page, "Export", "PDF");
+  await expect
+    .poll(async () => await page.evaluate(() => window.printed))
+    .toBe(1);
   const printed = page.frameLocator('iframe[title="Leave"]');
   const heading = printed.getByRole("heading", { name: "Leave" });
   await expect(heading).toHaveCount(1);
@@ -74,6 +123,9 @@ test("a document and a chat each export as Markdown and as a page to print", asy
         })
     )
     .toMatch(/^24px .*Geist/u);
+  // Once the dialog closes, the page to print goes.
+  await closePrint(page, "Leave");
+  await expect(page.locator('iframe[title="Leave"]')).toHaveCount(0);
 
   // A chat: its title, and each question.
   const tag = crypto.randomUUID().slice(0, 8);
@@ -93,9 +145,11 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   expect(markdown).toMatch(/^# /u);
   expect(markdown).toContain(`**You:**\n\n${question}`);
 
+  await countPrints(page);
   await choose(page, "Export this chat", "PDF");
-  // One page to print at a time: the document's has gone.
-  await expect(page.locator('iframe[title="Leave"]')).toHaveCount(0);
+  await expect
+    .poll(async () => await page.evaluate(() => window.printed))
+    .toBe(1);
   const printedChat = page.frameLocator(`iframe[title="${question}"]`);
   await expect(
     printedChat.getByRole("heading", { level: 1, name: question })
