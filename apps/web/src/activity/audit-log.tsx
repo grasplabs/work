@@ -13,7 +13,13 @@ import type {
 } from "@grasp-os/shared/audit-log";
 import { identifierMaxLength } from "@grasp-os/shared/ids";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/ui/components/dropdown-menu";
 import { Input } from "@grasp-os/ui/components/input";
 import {
   Select,
@@ -23,31 +29,25 @@ import {
   SelectValue,
 } from "@grasp-os/ui/components/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { BracesIcon, DownloadIcon, SheetIcon } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
 
 import type { Session } from "../core.ts";
-import {
-  appName,
-  formatTime,
-  personName,
-  readDirectory,
-} from "../directory.ts";
+import { appName, personName, readDirectory } from "../directory.ts";
 import type { Directory } from "../directory.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { actionWords } from "./audit-words.ts";
 
 // The audit log, for admins: its events newest first, narrowed by the
 // filters in the page's address, a page at a time, each with its details
@@ -215,7 +215,7 @@ export const LogFilters = ({ search }: { search: LogSearch }) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
         void navigate({
-          to: "/activity",
+          to: "/settings/audit",
           search: logSearchOf({ ...Object.fromEntries(form), type }),
         });
       }}
@@ -256,7 +256,7 @@ export const LogFilters = ({ search }: { search: LogSearch }) => {
       <Button type="submit">
         <Trans>Filter</Trans>
       </Button>
-      <Link className="text-sm underline" search={{}} to="/activity">
+      <Link className="text-sm underline" search={{}} to="/settings/audit">
         <Trans>Clear</Trans>
       </Link>
     </form>
@@ -283,22 +283,52 @@ const exportHref = (search: LogSearch, format: AuditExportFormat): string => {
  * the export before it sends anything, and checks the session again as it
  * reads each page.
  */
-export const LogExport = ({ search }: { search: LogSearch }) => (
-  <div className="flex gap-2">
-    <a
-      className={buttonVariants({ variant: "outline" })}
-      href={exportHref(search, "csv")}
-    >
-      <Trans>Export CSV</Trans>
-    </a>
-    <a
-      className={buttonVariants({ variant: "outline" })}
-      href={exportHref(search, "json")}
-    >
-      <Trans>Export JSON</Trans>
-    </a>
-  </div>
-);
+/**
+ * The log as core exports it, filtered as shown: CSV or JSON, the formats
+ * core writes it in. A ghost button that is its icon alone, named in its
+ * tooltip, as every export in Grasp is.
+ */
+export const LogExport = ({ search }: { search: LogSearch }) => {
+  const { t } = useLingui();
+  const name = t`Export the audit trail`;
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <Button aria-label={name} size="icon-sm" variant="ghost" />
+              }
+            />
+          }
+        >
+          <DownloadIcon />
+        </TooltipTrigger>
+        <TooltipContent>{name}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuItem
+          onClick={() => {
+            // Core sends it as a file to save: the page stays.
+            window.location.assign(exportHref(search, "csv"));
+          }}
+        >
+          <SheetIcon />
+          <Trans>Export CSV</Trans>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            window.location.assign(exportHref(search, "json"));
+          }}
+        >
+          <BracesIcon />
+          <Trans>Export JSON</Trans>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
 
 /** Who did it, by name where the page knows it, and the ID to filter by. */
 const actorOf = (
@@ -355,6 +385,125 @@ const readable = (json: string): string => {
   }
 };
 
+/** When an entry was received, short, as the page's language writes it: "3 Oct, 14:05". */
+const entryTime = (iso: string): string =>
+  new Intl.DateTimeFormat(i18n.locale, {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso));
+
+/** The month an entry falls in, in the viewer's time zone, as a key: `2026-10`. */
+const monthOf = (iso: string): string => {
+  const at = new Date(iso);
+  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}`;
+};
+
+/** A month's name and year, as the page's language writes them: "October 2026". */
+const monthName = (iso: string): string =>
+  new Intl.DateTimeFormat(i18n.locale, {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(iso));
+
+/** An entry's position, check and event as stored, for whoever needs more than its sentence. */
+const RecordDetails = ({ record, id }: { record: AuditRecord; id: string }) => {
+  const { t } = useLingui();
+  return (
+    <div className="flex flex-col gap-2 pt-2" id={id}>
+      <dl className="flex flex-col gap-1">
+        <div className="flex gap-2">
+          <dt className="text-muted-foreground">
+            <Trans>Action</Trans>
+          </dt>
+          <dd className="font-mono break-all">{record.event?.action ?? "–"}</dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="text-muted-foreground">
+            <Trans>Position</Trans>
+          </dt>
+          <dd>{record.seq}</dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="text-muted-foreground">
+            <Trans>Verified</Trans>
+          </dt>
+          <dd>
+            {record.verified
+              ? t`Yes: its hash matches, and it links to the event before it.`
+              : t`No: its hash or its link to the event before it doesn't match.`}
+          </dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="text-muted-foreground">
+            <Trans>Hash</Trans>
+          </dt>
+          <dd className="font-mono break-all">{record.hash}</dd>
+        </div>
+      </dl>
+      <pre className="bg-muted overflow-x-auto rounded-md p-3 text-xs">
+        {readable(record.eventJson)}
+      </pre>
+    </div>
+  );
+};
+
+/** What the entry did, in words; the action as recorded where there are none. */
+const EntryText = ({ action }: { action: string | undefined }) => {
+  const { t } = useLingui();
+  if (action === undefined) {
+    return <span>{t`Unreadable event`}</span>;
+  }
+  const text = actionWords(action);
+  return text === undefined ? (
+    <span className="font-mono">{action}</span>
+  ) : (
+    <span>{i18n._(text)}</span>
+  );
+};
+
+/** Who did it, and to what, each a link to the entries of the same. */
+const EntryWho = ({
+  record,
+  directory,
+}: {
+  record: AuditRecord;
+  directory: Directory;
+}) => {
+  const { event } = record;
+  const actor = event === null ? undefined : actorOf(event.actor, directory);
+  const target = event?.target;
+  return (
+    <span className="text-muted-foreground flex flex-wrap gap-x-1.5">
+      {actor?.id === undefined ? (
+        <span>{actor?.label ?? "–"}</span>
+      ) : (
+        <Link
+          className="underline"
+          search={{ actor: actor.id }}
+          to="/settings/audit"
+        >
+          {actor.label}
+        </Link>
+      )}
+      {target === undefined ? null : (
+        <>
+          <span aria-hidden="true">·</span>
+          <Link
+            className="break-all underline"
+            search={{ target: target.id }}
+            to="/settings/audit"
+          >
+            {target.type} {target.id}
+          </Link>
+        </>
+      )}
+    </span>
+  );
+};
+
+/** One entry, as the prototype lists them: when, what in words, who and to what, and its type. */
 const RecordRow = ({
   record,
   directory,
@@ -364,110 +513,66 @@ const RecordRow = ({
 }) => {
   const [open, setOpen] = useState(false);
   const { t } = useLingui();
-  const { event } = record;
   const { seq } = record;
-  const actor = event === null ? undefined : actorOf(event.actor, directory);
   const detailsId = `audit-${record.seq}`;
   return (
-    <>
-      <TableRow>
-        <TableCell>{formatTime(record.receivedAt)}</TableCell>
-        <TableCell>{event?.action ?? t`Unreadable event`}</TableCell>
-        <TableCell>
-          {record.type === null ? "–" : i18n._(typeLabels[record.type])}
-        </TableCell>
-        <TableCell>
-          {actor?.id === undefined ? (
-            (actor?.label ?? "–")
-          ) : (
-            <Link
-              className="underline"
-              search={{ actor: actor.id }}
-              to="/activity"
-            >
-              {actor.label}
-            </Link>
-          )}
-        </TableCell>
-        <TableCell>
-          {event?.target === undefined ? (
-            "–"
-          ) : (
-            <Link
-              className="underline"
-              search={{ target: event.target.id }}
-              to="/activity"
-            >
-              {event.target.type} {event.target.id}
-            </Link>
-          )}
-        </TableCell>
-        <TableCell>
-          {record.verified ? null : (
-            <Badge variant="destructive">
-              <Trans>Not verified</Trans>
-            </Badge>
-          )}
-        </TableCell>
-        <TableCell>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-controls={open ? detailsId : undefined}
-            aria-expanded={open}
-            aria-label={t`Details of event ${seq}`}
-            onClick={() => {
-              setOpen(!open);
-            }}
-          >
-            {open ? t`Hide` : t`Details`}
-          </Button>
-        </TableCell>
-      </TableRow>
-      {open ? (
-        <TableRow>
-          <TableCell colSpan={7}>
-            <dl className="flex flex-col gap-1 text-sm">
-              <div className="flex gap-2">
-                <dt className="text-muted-foreground">
-                  <Trans>Position</Trans>
-                </dt>
-                <dd>{record.seq}</dd>
-              </div>
-              <div className="flex gap-2">
-                <dt className="text-muted-foreground">
-                  <Trans>Verified</Trans>
-                </dt>
-                <dd>
-                  {record.verified
-                    ? t`Yes: its hash matches, and it links to the event before it.`
-                    : t`No: its hash or its link to the event before it doesn't match.`}
-                </dd>
-              </div>
-              <div className="flex gap-2">
-                <dt className="text-muted-foreground">
-                  <Trans>Hash</Trans>
-                </dt>
-                <dd className="font-mono break-all">{record.hash}</dd>
-              </div>
-            </dl>
-            <pre
-              className="bg-muted mt-2 overflow-x-auto rounded-md p-3 text-xs"
-              id={detailsId}
-            >
-              {readable(record.eventJson)}
-            </pre>
-          </TableCell>
-        </TableRow>
-      ) : null}
-    </>
+    <li className="flex items-start gap-4 border-t px-5 py-3">
+      <span className="text-muted-foreground w-28 flex-none pt-0.5 text-xs tabular-nums">
+        {entryTime(record.receivedAt)}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <EntryText action={record.event?.action} />
+        <EntryWho directory={directory} record={record} />
+        {open ? <RecordDetails id={detailsId} record={record} /> : null}
+      </div>
+      <div className="flex flex-none items-center gap-2">
+        {record.verified ? null : (
+          <Badge variant="destructive">
+            <Trans>Not verified</Trans>
+          </Badge>
+        )}
+        {record.type === null ? null : (
+          <Badge variant="outline">{i18n._(typeLabels[record.type])}</Badge>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-controls={open ? detailsId : undefined}
+          aria-expanded={open}
+          aria-label={t`Details of event ${seq}`}
+          onClick={() => {
+            setOpen(!open);
+          }}
+        >
+          {open ? t`Hide` : t`Details`}
+        </Button>
+      </div>
+    </li>
   );
 };
 
+/** The records by the month they fall in, newest first, as they come. */
+const byMonth = (
+  records: readonly AuditRecord[]
+): { month: string; records: AuditRecord[] }[] => {
+  const months: { month: string; records: AuditRecord[] }[] = [];
+  for (const record of records) {
+    const month = monthOf(record.receivedAt);
+    const last = months.at(-1);
+    if (last?.month === month) {
+      last.records.push(record);
+    } else {
+      months.push({ month, records: [record] });
+    }
+  }
+  return months;
+};
+
 /**
- * The events that match, newest first: the first page as the page read
- * it, then each older page asked for. Keyed by the filters and the first
- * page where it's used, so every new read starts from its own first page.
+ * The events that match, newest first and by month: the first page as the
+ * page read it, then each older page asked for. Keyed by the filters and
+ * the first page where it's used, so every new read starts from its own
+ * first page. Rows of a settings section, each with its top border.
  */
 export const LogRecords = ({
   first,
@@ -494,68 +599,49 @@ export const LogRecords = ({
     }
   };
   return (
-    <div className="flex flex-col gap-3">
+    <>
       {records.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
+        <p className="text-muted-foreground border-t px-5 py-4">
           {next === null
             ? t`No events match.`
             : t`No events match in the latest stretch of the log.`}
         </p>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>
-                <Trans>Time</Trans>
-              </TableHead>
-              <TableHead>
-                <Trans>Action</Trans>
-              </TableHead>
-              <TableHead>
-                <Trans>Type</Trans>
-              </TableHead>
-              <TableHead>
-                <Trans>Actor</Trans>
-              </TableHead>
-              <TableHead>
-                <Trans>Target</Trans>
-              </TableHead>
-              <TableHead>
-                <span className="sr-only">
-                  <Trans>Verified</Trans>
-                </span>
-              </TableHead>
-              <TableHead>
-                <span className="sr-only">
-                  <Trans>Details</Trans>
-                </span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {records.map((record) => (
+      ) : null}
+      {byMonth(records).map(({ month, records: inMonth }) => (
+        <section
+          aria-label={monthName(inMonth[0]?.receivedAt ?? "")}
+          key={month}
+        >
+          <h3 className="bg-muted/50 text-muted-foreground border-t px-5 py-2">
+            {monthName(inMonth[0]?.receivedAt ?? "")}
+          </h3>
+          <ul aria-label={t`Entries`}>
+            {inMonth.map((record) => (
               <RecordRow
                 directory={directory}
                 key={record.seq}
                 record={record}
               />
             ))}
-          </TableBody>
-        </Table>
+          </ul>
+        </section>
+      ))}
+      {next === null && failure === undefined ? null : (
+        <div className="flex flex-col items-start gap-2 border-t px-5 py-3">
+          {next === null ? null : (
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                void loadOlder(next);
+              }}
+            >
+              {busy ? t`Loading…` : t`Load older`}
+            </Button>
+          )}
+          <ErrorText>{failure}</ErrorText>
+        </div>
       )}
-      {next === null ? null : (
-        <Button
-          className="self-start"
-          variant="outline"
-          disabled={busy}
-          onClick={() => {
-            void loadOlder(next);
-          }}
-        >
-          {busy ? t`Loading…` : t`Load older`}
-        </Button>
-      )}
-      <ErrorText>{failure}</ErrorText>
-    </div>
+    </>
   );
 };

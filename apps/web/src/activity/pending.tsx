@@ -400,7 +400,7 @@ export const PendingApprovals = ({
           <Link
             className="underline"
             search={{ target: decided.permission }}
-            to="/activity"
+            to="/settings/audit"
           >
             <Trans>See it in the log</Trans>
           </Link>

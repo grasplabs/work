@@ -18,7 +18,9 @@ test("an admin reads the allowed models, the rules and the budgets, and nobody e
 }) => {
   const { admin, builder } = peopleIn("models");
   const page = await pageOf(browser, admin);
+  // An old link leads to Settings → Models.
   await page.goto("/models");
+  await expect(page).toHaveURL(/\/settings\/models$/u);
 
   await expect(page.getByText("To change them, contact Grasp.")).toBeVisible();
   const allowed = sectionOf(page, "Allowed models").getByRole("row", {
@@ -47,7 +49,7 @@ test("an admin reads the allowed models, the rules and the budgets, and nobody e
   ]);
 
   const refused = await pageOf(browser, builder);
-  await refused.goto("/models");
+  await refused.goto("/settings/models");
   await expect(refused.getByRole("alert")).toHaveText(
     "Your role doesn't allow that."
   );

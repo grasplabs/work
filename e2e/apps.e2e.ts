@@ -173,10 +173,9 @@ test("a builder finds an App in the list, opens it and uses its screen with live
   await expect(page.getByText("Created by you.")).toBeVisible();
 });
 
-test("the sidebar shows everyone the sections, and admins their own in the person menu", async ({
+test("the sidebar shows everyone the sections, and Settings each person the sections they may open", async ({
   browser,
 }) => {
-  const adminOnly = ["Activity", "Models", "Members"];
   const everyone = ["Chat", "Knowledge", "Apps", "Workflows", "Integrations"];
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
@@ -198,21 +197,43 @@ test("the sidebar shows everyone the sections, and admins their own in the perso
       .click();
     const items = page.getByRole("menuitem");
     await expect(items.filter({ hasText: "Sign out" })).toBeVisible();
-    const menu = await items.allTextContents();
+    const menuTexts = await items.allTextContents();
+    const menu = menuTexts.filter((text) =>
+      ["Settings", "Sign out"].includes(text)
+    );
+    await items.filter({ hasText: "Settings" }).click();
+    await expect(page).toHaveURL(/\/settings\/profile$/u);
+    const sections = page
+      .getByRole("navigation", { name: "Settings" })
+      .getByRole("link");
+    await expect(sections.last()).toHaveText("Profile");
     return {
       // Without how many are unread.
       nav: texts.map((text) => text.replace(/\d+ unread$/u, "")),
-      menu: menu.filter((text) => adminOnly.includes(text)),
+      menu,
+      settings: await sections.allTextContents(),
     };
   };
+  const nav = [...everyone, "Notifications"];
+  const menu = ["Settings", "Sign out"];
   expect({
     admin: await sidebarOf(admin),
     builder: await sidebarOf(builder),
     user: await sidebarOf(user),
   }).toStrictEqual({
-    admin: { nav: [...everyone, "Notifications"], menu: adminOnly },
-    builder: { nav: [...everyone, "Notifications"], menu: [] },
-    user: { nav: [...everyone, "Notifications"], menu: [] },
+    admin: {
+      nav,
+      menu,
+      settings: [
+        "Members and roles",
+        "Models",
+        "Audit trail",
+        "Pending approvals",
+        "Profile",
+      ],
+    },
+    builder: { nav, menu, settings: ["Profile"] },
+    user: { nav, menu, settings: ["Profile"] },
   });
 });
 
