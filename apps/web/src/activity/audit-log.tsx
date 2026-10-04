@@ -516,8 +516,8 @@ const RecordRow = ({
   const { seq } = record;
   const detailsId = `audit-${record.seq}`;
   return (
-    <li className="flex items-start gap-4 border-t px-5 py-3">
-      <span className="text-muted-foreground w-28 flex-none pt-0.5 text-xs tabular-nums">
+    <li className="flex flex-col gap-1.5 border-t px-5 py-3 sm:flex-row sm:items-start sm:gap-4">
+      <span className="text-muted-foreground flex-none pt-0.5 text-xs tabular-nums sm:w-28">
         {entryTime(record.receivedAt)}
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -525,7 +525,7 @@ const RecordRow = ({
         <EntryWho directory={directory} record={record} />
         {open ? <RecordDetails id={detailsId} record={record} /> : null}
       </div>
-      <div className="flex flex-none items-center gap-2">
+      <div className="flex flex-none flex-wrap items-center gap-2">
         {record.verified ? null : (
           <Badge variant="destructive">
             <Trans>Not verified</Trans>
