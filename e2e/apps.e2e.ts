@@ -156,11 +156,23 @@ test("a builder finds an engine in the list, opens it and uses its app with live
 
   await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
   await expect(page.getByText("Version 1")).toBeVisible();
+  // It opens on its apps, as the prototype's made engines do.
+  await expect(page.getByRole("tab", { name: /^Apps/u })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
   // Its workflows, in the workflows table, and their runs.
+  await page.getByRole("tab", { name: /^Workflows/u }).click();
   await expect(
     page.getByRole("row").filter({ hasText: "tally" }).getByRole("link")
   ).toHaveText("tally");
   await expect(page.getByText("No runs yet.")).toBeVisible();
+
+  // A builder sees the integrations it uses; this one uses none.
+  await page.getByRole("tab", { name: "Integrations" }).click();
+  await expect(
+    page.getByText("This engine doesn't use an integration yet.")
+  ).toBeVisible();
 
   await page.getByRole("tab", { name: "Members" }).click();
   await expect(page.getByText("Created by you.")).toBeVisible();
@@ -268,6 +280,27 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   });
 });
 
+test("an old link to an app, opened signed out, leads through sign-in to the app in the frame", async ({
+  browser,
+  page,
+}) => {
+  await page.goto(`/apps/${app}/screens/counter`);
+  await expect(
+    page.getByText("Use your organization’s account to go on.")
+  ).toBeVisible();
+  const returnTo = new URL(page.url()).searchParams.get("returnTo");
+  expect(returnTo).toBe(`/engines/${app}/apps/counter`);
+
+  const signedIn = await pageOf(browser, builder);
+  await signedIn.goto(
+    `/sign-in?returnTo=${encodeURIComponent(returnTo ?? "")}`
+  );
+  await expect(signedIn).toHaveURL(
+    new RegExp(`/engines/${app}/apps/counter$`, "u")
+  );
+  await counterScreen(signedIn);
+});
+
 test("someone with the user role finds no engine to open", async ({
   browser,
 }) => {
@@ -367,6 +400,7 @@ test("a runs read that never comes leaves the engine usable, and says so in its 
   await page.goto(`/apps/${app}`);
   await expect(page).toHaveURL(new RegExp(`/engines/${app}$`, "u"));
 
+  await page.getByRole("tab", { name: /^Workflows/u }).click();
   await expect(
     page.getByRole("row").filter({ hasText: "tally" }).getByRole("link")
   ).toHaveText("tally");

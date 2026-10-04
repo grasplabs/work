@@ -145,9 +145,9 @@ const objectOf = (
     return i18n._(msg`Collection ${collectionId}`);
   }
   if (object.type === "app") {
-    const app = appName(directory, object.appId);
+    const engine = appName(directory, object.appId);
     const covered = coveredExports(actions, exports.get(object.appId));
-    return i18n._(msg`Exports of ${app}: ${covered}`);
+    return i18n._(msg`Exports of ${engine}: ${covered}`);
   }
   if (object.type === "platform" && actions.includes("guests")) {
     // Consent in plain words: who reaches what, and at whose cost.
@@ -163,8 +163,8 @@ const objectOf = (
     );
   }
   const { workflowId } = object;
-  const app = appName(directory, object.appId);
-  return i18n._(msg`Workflow ${workflowId} of ${app}`);
+  const engine = appName(directory, object.appId);
+  return i18n._(msg`Workflow ${workflowId} of ${engine}`);
 };
 
 /**
@@ -196,7 +196,7 @@ const RecordTypeClaims = ({
         <span key={type} className="text-destructive block text-xs">
           {owner === null
             ? t`Another engine already keeps ${type} records here: this engine's won't apply.`
-            : t`${ph({ app: appName(directory, owner) })} already keeps ${type} records here: this engine's won't apply.`}
+            : t`${ph({ engine: appName(directory, owner) })} already keeps ${type} records here: this engine's won't apply.`}
         </span>
       ))}
     </>

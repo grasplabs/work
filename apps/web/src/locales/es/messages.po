@@ -17,12 +17,8 @@ msgstr "(tuya)"
 
 #. placeholder {0}: draft.changed.length
 #: src/chat/builds.tsx
-msgid "{0, plural, one {{app}: # file changed in this chat, not proposed yet} other {{app}: # files changed in this chat, not proposed yet}}"
-msgstr "{0, plural, one {{app}: # archivo cambiado en este chat, aún sin proponer} other {{app}: # archivos cambiados en este chat, aún sin proponer}}"
-
-#: src/activity/pending.tsx
-msgid "{app} already keeps {type} records here: this engine's won't apply."
-msgstr "{app} ya guarda aquí registros de tipo {type}: los de este motor no se aplicarán."
+msgid "{0, plural, one {{engine}: # file changed in this chat, not proposed yet} other {{engine}: # files changed in this chat, not proposed yet}}"
+msgstr "{0, plural, one {{engine}: # archivo cambiado en este chat, aún sin proponer} other {{engine}: # archivos cambiados en este chat, aún sin proponer}}"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
@@ -31,10 +27,6 @@ msgstr "{app} no tiene herramientas."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} isn't connected yet."
 msgstr "{app} aún no está conectado."
-
-#: src/activity/audit-log.tsx
-msgid "{app}: run of {workflowId}"
-msgstr "{app}: ejecución de {workflowId}"
 
 #: src/workflows/workflows-table.tsx
 msgid "{appName} · Version {version}"
@@ -95,6 +87,14 @@ msgstr "{count, plural, one {una vez} other {# veces}}"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "{count} or more files"
 msgstr "{count} archivos o más"
+
+#: src/activity/pending.tsx
+msgid "{engine} already keeps {type} records here: this engine's won't apply."
+msgstr "{engine} ya guarda aquí registros de tipo {type}: los de este motor no se aplicarán."
+
+#: src/activity/audit-log.tsx
+msgid "{engine}: run of {workflowId}"
+msgstr "{engine}: ejecución de {workflowId}"
 
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
@@ -237,8 +237,8 @@ msgid "{who} consented to this before connecting it:"
 msgstr "{who} dio su consentimiento antes de conectarlo:"
 
 #: src/routes/_shell.settings.models.tsx
-msgid "{workflowId} in {app}"
-msgstr "{workflowId} en {app}"
+msgid "{workflowId} in {engine}"
+msgstr "{workflowId} en {engine}"
 
 #: src/routes/_shell.engines.index.tsx
 msgid "{workflows, plural, one {# workflow} other {# workflows}}"
@@ -1021,7 +1021,7 @@ msgstr "Descartó un evento que ningún flujo de trabajo pudo recibir"
 
 #: src/routes/_shell.engines.index.tsx
 msgid "Each engine runs one part of the business: its workflows, apps and connections."
-msgstr "Cada motor gestiona una parte del negocio: sus flujos, aplicaciones y conexiones."
+msgstr "Cada motor gestiona una parte del negocio: sus flujos de trabajo, aplicaciones y conexiones."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Each person"
@@ -1052,8 +1052,8 @@ msgid "Engine"
 msgstr "Motor"
 
 #: src/connections/connection-list.tsx
-msgid "Engine {app}"
-msgstr "Motor {app}"
+msgid "Engine {engine}"
+msgstr "Motor {engine}"
 
 #: src/screens/screen-frame.tsx
 msgid "Engine app"
@@ -1157,8 +1157,8 @@ msgid "Exports"
 msgstr "Exportaciones"
 
 #: src/activity/pending.tsx
-msgid "Exports of {app}: {covered}"
-msgstr "Exportaciones de {app}: {covered}"
+msgid "Exports of {engine}: {covered}"
+msgstr "Exportaciones de {engine}: {covered}"
 
 #: src/knowledge/uploads.tsx
 msgid "Extracting"
@@ -1295,8 +1295,8 @@ msgid "Guest chats. This engine can invite people who aren't members to a short 
 msgstr "Chats de invitados. Este motor puede invitar a personas que no son miembros a un chat breve con un modelo mediante un enlace, y leer lo que escriben. Los invitados no acceden a nada más; sus chats gastan el presupuesto de modelos de quien los invita"
 
 #: src/activity/audit-log.tsx
-msgid "Guest of {app}, invited for {person}"
-msgstr "Invitado de {app}, invitado para {person}"
+msgid "Guest of {engine}, invited for {person}"
+msgstr "Invitado de {engine}, invitado para {person}"
 
 #: src/activity/audit-log.tsx
 msgid "Hash"
@@ -2204,7 +2204,7 @@ msgstr "Flujo de trabajo eliminado:"
 
 #: src/chat/builds.tsx
 msgid "Removed: it acts for whoever uses the engine, with everything the engine holds"
-msgstr "Eliminado: actuaba en nombre de quien usara el motor, con todo lo que el motor tiene"
+msgstr "Eliminado: actúa en nombre de quien use el motor, con todo lo que el motor tiene"
 
 #: src/chat/chat-list.tsx
 msgid "Rename"
@@ -2708,6 +2708,10 @@ msgstr "Las aplicaciones en las que pueden trabajar tus flujos de trabajo. Grasp
 msgid "The catalog doesn't list {app}, so its tools can't be shown."
 msgstr "El catálogo no incluye {app}, así que no se pueden mostrar sus herramientas."
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
+msgstr "No se pudo leer el catálogo de integraciones, así que esta página muestra solo lo que tus cuentas dicen de ella."
+
 #: src/chat/composer.tsx
 msgid "The default, {each}"
 msgstr "Predeterminado, {each}"
@@ -3063,8 +3067,8 @@ msgid "Workflow"
 msgstr "Flujo de trabajo"
 
 #: src/activity/pending.tsx
-msgid "Workflow {workflowId} of {app}"
-msgstr "Flujo de trabajo {workflowId} de {app}"
+msgid "Workflow {workflowId} of {engine}"
+msgstr "Flujo de trabajo {workflowId} de {engine}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Workflow not found"
@@ -3089,7 +3093,7 @@ msgstr "Flujos de trabajo y más"
 
 #: src/workflows/workflows-table.tsx
 msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it into an engine."
-msgstr "Los flujos de trabajo se crean en el chat: describe lo que debe funcionar solo y Grasp lo convierte en un motor."
+msgstr "Los flujos de trabajo se crean en el chat: describe lo que debe funcionar solo y Grasp lo integra en un motor."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."

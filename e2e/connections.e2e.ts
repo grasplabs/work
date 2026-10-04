@@ -2,6 +2,7 @@ import { composioConsentText } from "@grasp-os/shared/connect";
 import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
+import { callGate } from "./call-gate.ts";
 import { seededConnections, seededTools } from "./connections-seed.ts";
 import type { SeededConnection } from "./connections-seed.ts";
 import { test } from "./csp.ts";
@@ -73,7 +74,9 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   await expect(page.getByRole("status")).toHaveCount(0);
   // Where core's callback sends the browser once a flow finished.
   await page.goto(`/integrations/native:microsoft?connection=${mine.id}`);
-  await expect(page.getByRole("status")).toHaveText("Connected.");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Connected." })
+  ).toBeVisible();
   await expect(page.getByText("Native", { exact: true })).toBeVisible();
 
   await page.getByRole("tab", { name: /^Account/u }).click();
@@ -146,7 +149,7 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   await expect(expiredCard).toHaveCount(0);
   await expect(mineCard).toBeVisible();
   // The notice was about the flow that came back, not about the page now.
-  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(page.getByText("Connected.", { exact: true })).toHaveCount(0);
   expect(new URL(page.url()).searchParams.get("connection")).toBeNull();
 
   // Connecting another account: the test stack has no Microsoft tenant set
@@ -188,6 +191,53 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   ).toBeVisible();
 });
 
+test("a person reaches their account on an integration's page while the catalog or its tools don't come", async ({
+  browser,
+}) => {
+  const { user } = peopleIn("connections");
+  const { mine } = seededConnections();
+
+  // The tools never come: the page and its Account tab don't wait for them.
+  const slowTools = await pageOf(browser, user);
+  const toolsGate = await callGate(slowTools, '["connections","catalogTools"]');
+  toolsGate.hold();
+  await slowTools.goto("/integrations/native:microsoft?tab=account");
+  await expect(
+    cardOf(slowTools, "Microsoft 365", mine).getByRole("button", {
+      name: `Disconnect Microsoft 365 (${mine.account})`,
+    })
+  ).toBeVisible();
+  toolsGate.release();
+
+  // The catalog never comes: a connected integration still shows from its
+  // connections, with its accounts, and says why its tools don't.
+  const slowCatalog = await pageOf(browser, user);
+  const catalogGate = await callGate(slowCatalog, '["connections","catalog"]');
+  catalogGate.hold();
+  await slowCatalog.goto("/integrations/native:microsoft");
+  // Its name is the catalog's: without it, its ID.
+  await expect(
+    slowCatalog.getByRole("heading", { level: 1, name: "microsoft" })
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(
+    slowCatalog.getByText(
+      "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
+    )
+  ).toBeVisible();
+  await expect(
+    slowCatalog.getByText(
+      "Grasp can't be reached right now. Try again in a moment."
+    )
+  ).toBeVisible();
+  await slowCatalog.getByRole("tab", { name: /^Account/u }).click();
+  await expect(
+    cardOf(slowCatalog, "microsoft", mine).getByRole("button", {
+      name: `Disconnect microsoft (${mine.account})`,
+    })
+  ).toBeVisible();
+  catalogGate.release();
+});
+
 test("an admin sees which Apps can use a shared connection, revokes a permission there, and reads a Composio connection's consent", async ({
   browser,
 }) => {
@@ -195,11 +245,12 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   const { mailbox, toolkit } = seededConnections();
   const appName = `Mail triage ${crypto.randomUUID()}`;
   const { core, api } = apiOf(admin);
+  let appId: string;
   try {
-    const { id: appId } = await api.apps.create({
+    ({ id: appId } = await api.apps.create({
       name: appName,
       description: "Sorts the shared mailbox",
-    });
+    }));
     const { id } = await api.permissions.request({
       subject: { type: "app", appId },
       object: { type: "connection", connectionId: mailbox.id },
@@ -220,6 +271,18 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   }
 
   const page = await pageOf(browser, admin);
+  // The engine's Integrations tab lists the integrations of the
+  // connections it may use, in those connections' state.
+  await page.goto(`/engines/${appId}`);
+  await page.getByRole("tab", { name: "Integrations" }).click();
+  const used = page
+    .getByRole("tabpanel")
+    .getByRole("listitem")
+    .filter({ hasText: "Microsoft 365" });
+  await expect(used).toContainText("For everyone");
+  await expect(used).toContainText("Connected");
+  await expect(page.getByRole("tabpanel").getByRole("listitem")).toHaveCount(1);
+
   await accountOf(page, "native:microsoft");
   const mailboxCard = cardOf(page, "Microsoft 365", mailbox);
   await expect(mailboxCard.getByRole("definition").first()).toHaveText(

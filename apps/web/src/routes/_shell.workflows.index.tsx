@@ -1,12 +1,5 @@
-import type { App } from "@grasp-os/shared/apps";
-import { roleErrors } from "@grasp-os/shared/roles";
 import { runFilterStatuses } from "@grasp-os/shared/workflows";
-import type {
-  RunFilter,
-  RunsPage,
-  RunFilterStatus,
-  WorkflowSummary,
-} from "@grasp-os/shared/workflows";
+import type { RunFilterStatus } from "@grasp-os/shared/workflows";
 import {
   Select,
   SelectContent,
@@ -30,6 +23,7 @@ import type { Session } from "../core.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import { listRuns, listWorkflows, openableApps } from "../workflows/reads.ts";
 import { RunsLog } from "../workflows/runs.tsx";
 import { WorkflowsTable } from "../workflows/workflows-table.tsx";
 
@@ -62,39 +56,6 @@ const filterLabels: Readonly<Record<RunFilterStatus, MessageDescriptor>> = {
 const all = "all";
 
 /**
- * The workflows core lists for the person. While sharing Apps is switched
- * off, core refuses the list to the user role: they have no App to list.
- */
-const listWorkflows = async (session: Session): Promise<WorkflowSummary[]> => {
-  try {
-    return await session.workflows.overview();
-  } catch (error) {
-    if (roleErrors.codeOf(error) === "role.forbidden") {
-      return [];
-    }
-    throw error;
-  }
-};
-
-/**
- * The runs core lists for the person, as `filter` narrows them; none
- * when refused to their role, as for the list.
- */
-const listRuns = async (
-  session: Session,
-  filter: RunFilter
-): Promise<RunsPage> => {
-  try {
-    return await session.workflows.runs(filter);
-  } catch (error) {
-    if (roleErrors.codeOf(error) === "role.forbidden") {
-      return { runs: [], more: false };
-    }
-    throw error;
-  }
-};
-
-/**
  * What the Runs tab's filters offer: the Apps, and the chosen App's
  * workflows, or null when they couldn't be read.
  */
@@ -102,18 +63,6 @@ interface FilterOptions {
   apps: Option[];
   workflows: string[] | null;
 }
-
-/** The Apps core lets the person open; none where it refuses the list. */
-const openableApps = async (session: Session): Promise<App[]> => {
-  try {
-    return await session.apps.list();
-  } catch (error) {
-    if (roleErrors.codeOf(error) === "role.forbidden") {
-      return [];
-    }
-    throw error;
-  }
-};
 
 /**
  * The Apps the person can open, and the workflows of `app`'s current

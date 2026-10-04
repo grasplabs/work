@@ -751,7 +751,7 @@ export const ChatBuilds = ({
         <Trans>Being built</Trans>
       </h3>
       {builds.data.drafts.map((draft) => {
-        const app = names.get(draft.app) ?? draft.app;
+        const engine = names.get(draft.app) ?? draft.app;
         return (
           <div
             className="bg-card flex flex-col gap-3 rounded-xl border p-4 text-sm"
@@ -759,12 +759,12 @@ export const ChatBuilds = ({
           >
             <div className="flex items-start justify-between gap-2">
               <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="truncate font-medium">{app}</span>
+                <span className="truncate font-medium">{engine}</span>
                 <span className="text-muted-foreground">
                   <Plural
                     value={draft.changed.length}
-                    one={`${app}: # file changed in this chat, not proposed yet`}
-                    other={`${app}: # files changed in this chat, not proposed yet`}
+                    one={`${engine}: # file changed in this chat, not proposed yet`}
+                    other={`${engine}: # files changed in this chat, not proposed yet`}
                   />
                 </span>
               </div>
@@ -782,7 +782,7 @@ export const ChatBuilds = ({
                   </Button>
                 )}
                 <Link
-                  aria-label={t`Open ${ph({ name: app })}`}
+                  aria-label={t`Open ${ph({ name: engine })}`}
                   className={buttonVariants({
                     size: "icon-sm",
                     variant: "ghost",
@@ -799,7 +799,7 @@ export const ChatBuilds = ({
                 chatId={chatId}
                 draft={previewed}
                 key={previewed.app}
-                name={app}
+                name={engine}
               />
             ) : null}
           </div>

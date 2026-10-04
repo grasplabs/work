@@ -69,7 +69,7 @@ const holderOf = (
 ): string =>
   subject.type === "app"
     ? i18n._(
-        msg`Engine ${ph({ app: appNames.get(subject.appId) ?? subject.appId })}`
+        msg`Engine ${ph({ engine: appNames.get(subject.appId) ?? subject.appId })}`
       )
     : i18n._(msg`Agent ${ph({ agent: subject.agentId })}`);
 

@@ -23,7 +23,7 @@ import { CogIcon, LayoutGridIcon } from "lucide-react";
 import type { ReactElement } from "react";
 
 import { IntegrationRow } from "../connections/integration-row.tsx";
-import { integrationKey, integrationsOf } from "../connections/integrations.ts";
+import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { EngineIcon } from "../engines/engine-icon.tsx";
@@ -36,6 +36,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { listRuns, listWorkflows } from "../workflows/reads.ts";
 import { RunsLog } from "../workflows/runs.tsx";
 import { WorkflowsTable } from "../workflows/workflows-table.tsx";
 
@@ -67,8 +68,11 @@ const loadEngine = async (
 
 /**
  * The integrations the engine uses: those of the connections it asked to
- * use or may use now (its permissions). Admins and builders may list
- * permissions; for anyone else the tab isn't there.
+ * use or may use now (its permissions), each with only those connections,
+ * so its state is the engine's, not the viewer's. Admins and builders may
+ * list permissions; for anyone else the tab isn't there. A connection the
+ * engine holds that the viewer can't see (someone else's personal one, or
+ * one since disconnected) isn't listed: core has no read of it for them.
  */
 const loadIntegrations = async (
   session: Session,
@@ -86,14 +90,12 @@ const loadIntegrations = async (
         : []
     )
   );
-  const keys = new Set(
-    connections
-      .filter(({ id }) => used.has(id))
-      .map(({ source, provider }) => integrationKey(source, provider))
-  );
-  return integrationsOf(catalog.entries, connections).filter(({ key }) =>
-    keys.has(key)
-  );
+  return integrationsOf(catalog.entries, connections)
+    .map((integration) => ({
+      ...integration,
+      connections: integration.connections.filter(({ id }) => used.has(id)),
+    }))
+    .filter(({ connections: held }) => held.length > 0);
 };
 
 /** What a tab shows of a read: a skeleton while it comes, why it didn't, or `children` once it did. */
@@ -165,7 +167,7 @@ const Workflows = ({
 
 /** One app (core's screen) of the engine, as the prototype's app card: it opens the app in the frame. */
 const AppCard = ({ engine, screen }: { engine: string; screen: string }) => (
-  <li className="bg-card hover:border-ring/40 relative flex min-w-0 items-center gap-3 rounded-xl border p-4 transition-colors">
+  <li className="bg-card hover:border-faint relative flex min-w-0 items-center gap-3 rounded-xl border p-4 transition-colors">
     <span
       aria-hidden="true"
       className="bg-muted text-foreground inline-flex size-7.5 flex-none items-center justify-center rounded-lg"
@@ -194,7 +196,10 @@ const Apps = ({
   if (contents.version === null || contents.screens.length === 0) {
     return (
       <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed p-6">
-        <span className="bg-tile flex size-7 items-center justify-center rounded-md border">
+        <span
+          aria-hidden="true"
+          className="bg-tile flex size-7 items-center justify-center rounded-md border"
+        >
           <LayoutGridIcon className="size-4" />
         </span>
         <div className="flex max-w-prose flex-col gap-1">
@@ -355,15 +360,15 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           </p>
         </div>
       </div>
-      <Tabs defaultValue="workflows">
+      <Tabs defaultValue="apps">
         <TabsList variant="line">
-          <TabsTrigger value="workflows">
-            <Trans>Workflows</Trans>
-            <Count count={contents.workflows.length} />
-          </TabsTrigger>
           <TabsTrigger value="apps">
             <Trans>Apps</Trans>
             <Count count={contents.screens.length} />
+          </TabsTrigger>
+          <TabsTrigger value="workflows">
+            <Trans>Workflows</Trans>
+            <Count count={contents.workflows.length} />
           </TabsTrigger>
           {integrations === undefined ? null : (
             <TabsTrigger value="integrations">
@@ -437,13 +442,10 @@ export const Route = createFileRoute("/_shell/engines/$engine/")({
   component: EnginePageView,
   loader: async ({ context: { core, identity }, params }) => ({
     // Not awaited: only their tabs wait for them.
-    workflows: loadFromCore(
-      core,
-      async (session) => await session.workflows.overview()
-    ),
+    workflows: loadFromCore(core, listWorkflows),
     runs: loadFromCore(
       core,
-      async (session) => await session.workflows.runs({ app: params.engine })
+      async (session) => await listRuns(session, { app: params.engine })
     ),
     members: loadFromCore(
       core,
