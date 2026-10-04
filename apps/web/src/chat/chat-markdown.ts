@@ -1,4 +1,8 @@
-import type { ChatMessage, ChatProvenance } from "@grasp-os/shared/chat";
+import type {
+  ChatMessage,
+  ChatPartial,
+  ChatProvenance,
+} from "@grasp-os/shared/chat";
 import type { I18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 
@@ -83,17 +87,33 @@ const turnOf = (message: ChatMessage, i18n: I18n): string | undefined => {
 export const chatMarkdown = ({
   title,
   messages,
+  partial = null,
   provenance,
   names,
   i18n,
 }: {
   title: string;
   messages: readonly ChatMessage[];
+  /** The answer being written now, as far as it has come, as the thread shows it. */
+  partial?: ChatPartial | null;
   provenance: ChatProvenance;
   names: ReadonlyMap<string, SourceName>;
   i18n: I18n;
 }): string => {
-  const turns = messages.flatMap((message) => {
+  const writing =
+    partial === null || partial.text.trim() === ""
+      ? []
+      : [
+          {
+            id: Number.MAX_SAFE_INTEGER,
+            role: "assistant" as const,
+            text: partial.text,
+            code: [],
+            end: "done" as const,
+            at: "",
+          },
+        ];
+  const turns = [...messages, ...writing].flatMap((message) => {
     const turn = turnOf(message, i18n);
     return turn === undefined ? [] : [turn];
   });

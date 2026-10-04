@@ -37,10 +37,7 @@ export const bodyOf = (text: string): string =>
   splitFrontmatterBlock(text)?.body ?? text;
 
 /** `body` without a first `# heading` that only repeats `title`. */
-export const withoutTitle = (
-  body: string,
-  title: string | undefined
-): string => {
+const withoutTitle = (body: string, title: string | undefined): string => {
   const [first = "", ...rest] = body.split("\n");
   return title !== undefined && first.trim() === `# ${title}`
     ? rest.join("\n").trim()

@@ -1,7 +1,7 @@
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 
-import { bodyOf, PlainMarkdown, withoutTitle } from "../knowledge/markdown.tsx";
+import { bodyOf, PlainMarkdown } from "../knowledge/markdown.tsx";
 
 // What every export in Grasp can become, by the person's choice: a
 // Markdown file, or a PDF. A PDF is made by the browser's own print dialog
@@ -45,6 +45,21 @@ export const downloadText = (
   }, downloadKeptMs);
 };
 
+/** A backslash and what it escapes, as Markdown writes a character it would read as syntax. */
+const escaped = /\\(?<character>[!-/:-@[-`{-~])/gu;
+
+/**
+ * `body` without a first `# heading` that only repeats `title`, its escapes
+ * undone to compare (a chat's title with Markdown's characters in it is
+ * written escaped); any other first line stays as written.
+ */
+const withoutTitleLine = (body: string, title: string): string => {
+  const [first = "", ...rest] = body.split("\n");
+  return first.trim().replaceAll(escaped, "$<character>") === `# ${title}`
+    ? rest.join("\n").trim()
+    : body;
+};
+
 /** The page an export prints: its title, then its Markdown, on A4. */
 const PrintPage = ({
   title,
@@ -55,7 +70,9 @@ const PrintPage = ({
 }) => (
   <main className="page-export bg-card text-foreground flex flex-col gap-3 font-sans text-sm leading-relaxed">
     <h1 className="text-2xl font-medium tracking-tight">{title}</h1>
-    <PlainMarkdown text={withoutTitle(bodyOf(markdown).trimStart(), title)} />
+    <PlainMarkdown
+      text={withoutTitleLine(bodyOf(markdown).trimStart(), title)}
+    />
   </main>
 );
 

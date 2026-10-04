@@ -235,23 +235,26 @@ const OpenChat = ({
         className="relative flex min-w-0 flex-1 flex-col"
       >
         <h1 className="sr-only">{chat.title}</h1>
+        {/* In a row of its own above the thread, so no message scrolls under it. */}
         {view.messages.length === 0 ? null : (
-          <ExportMenu
-            className="absolute top-3 right-4 z-10"
-            file={{
-              name: fileNameOf(chat.title),
-              title: chat.title,
-              markdown: () =>
-                chatMarkdown({
-                  title: chat.title,
-                  messages: view.messages,
-                  provenance: view.provenance,
-                  names: sourceNames,
-                  i18n,
-                }),
-            }}
-            label={t`Export this chat`}
-          />
+          <div className="flex flex-none justify-end px-4 pt-2">
+            <ExportMenu
+              file={{
+                name: fileNameOf(chat.title),
+                title: chat.title,
+                markdown: () =>
+                  chatMarkdown({
+                    title: chat.title,
+                    messages: view.messages,
+                    partial: view.partial,
+                    provenance: view.provenance,
+                    names: sourceNames,
+                    i18n,
+                  }),
+              }}
+              label={t`Export this chat`}
+            />
+          </div>
         )}
         <ChatThread
           loaded={view.loaded}

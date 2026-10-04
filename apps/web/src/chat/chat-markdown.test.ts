@@ -111,6 +111,19 @@ describe(chatMarkdown, () => {
     );
   });
 
+  it("includes the answer being written, as far as it has come", () => {
+    expect(
+      chatMarkdown({
+        title: "Hello",
+        messages: [asked(1, "Hi")],
+        partial: { text: "Hello the", code: [] },
+        provenance: none,
+        names: new Map(),
+        i18n,
+      })
+    ).toBe("# Hello\n\n**You:**\n\nHi\n\n**Grasp:**\n\nHello the");
+  });
+
   it("leaves the sources out when the answers drew on none", () => {
     expect(
       chatMarkdown({
