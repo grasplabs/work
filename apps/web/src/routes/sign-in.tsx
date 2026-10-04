@@ -2,6 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
+import { setActiveChat } from "../chat/active-chat.ts";
 import { loadCoreStatus } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
@@ -86,6 +87,9 @@ export const Route = createFileRoute("/sign-in")({
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ href: deps.returnTo });
     }
+    // Signed out: whoever signs in next in this tab starts without the
+    // last person's open chat, which isn't theirs to open.
+    setActiveChat(undefined);
     return status;
   },
   component: SignIn,

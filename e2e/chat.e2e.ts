@@ -347,11 +347,16 @@ test("the chat dock on every other page carries on the open chat, which is the s
   // The page stayed where it was.
   expect(new URL(page.url()).pathname).toBe("/apps");
 
-  // Folded away, it is the bar again, and opens again on the same chat.
+  // Folded away, it is the bar again, and opens again on the same chat,
+  // the cursor in the box all along, and what was typed still there.
   await dock.getByRole("button", { name: "Fold the chat away" }).click();
   await expect(dock).toHaveCount(0);
+  await expect(box).toBeFocused();
+  await box.fill(`Half a thought ${tag}`);
   await page.getByRole("button", { name: "Open the chat" }).click();
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  await expect(box).toBeFocused();
+  await expect(box).toHaveValue(`Half a thought ${tag}`);
 
   // It is the chat in Chat, in its list, where the dock isn't.
   await dock.getByRole("link", { name: "Open in chat" }).click();

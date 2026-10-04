@@ -2239,6 +2239,7 @@ msgstr "Toegestane tools: geen vastgelegd"
 msgid "Tools to allow"
 msgstr "Toe te staan tools"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/route-error.tsx
 #: src/routes/_shell.index.tsx

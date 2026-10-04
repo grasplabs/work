@@ -176,7 +176,6 @@ const QuestionField = ({
   compact,
   label,
   placeholder,
-  autoFocus,
   maxLength,
 }: {
   text: string;
@@ -184,14 +183,12 @@ const QuestionField = ({
   compact: boolean;
   label: string | undefined;
   placeholder: string | undefined;
-  autoFocus: boolean;
   maxLength: number | undefined;
 }) => {
   const { t } = useLingui();
   return (
     <InputGroupTextarea
       aria-label={label ?? t`Your question`}
-      autoFocus={autoFocus}
       className={
         compact
           ? "field-sizing-content max-h-40 min-h-0"
@@ -239,7 +236,6 @@ export const Composer = ({
   placeholder,
   children,
   maxLength,
-  autoFocus = false,
   disabled = false,
 }: {
   text: string;
@@ -272,8 +268,6 @@ export const Composer = ({
   children?: ReactNode;
   /** The longest message it takes; a question's by default. */
   maxLength?: number;
-  /** Takes the focus when it shows, as when the chat dock opens around it. */
-  autoFocus?: boolean;
   /** Takes nothing for now, while something else is on its way to core. */
   disabled?: boolean;
 }) => {
@@ -294,7 +288,6 @@ export const Composer = ({
     >
       <InputGroup size={look.size}>
         <QuestionField
-          autoFocus={autoFocus}
           compact={compact}
           label={label}
           maxLength={maxLength}

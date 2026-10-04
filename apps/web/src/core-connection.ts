@@ -4,6 +4,7 @@ import { authErrors } from "@grasp-os/shared/errors";
 import type { CoreApi, Identity, SignInOption } from "@grasp-os/shared/rpc";
 import type { RpcStub } from "capnweb";
 
+import { setActiveChat } from "./chat/active-chat.ts";
 import {
   connectCore,
   CoreTimeoutError,
@@ -343,6 +344,8 @@ export const signOut = async (core: CoreConnection): Promise<void> => {
     headers: { "content-type": "application/json" },
     body: "{}",
   });
+  // The open chat was this person's: whoever signs in next starts without it.
+  setActiveChat(undefined);
   core.close();
   window.location.reload();
 };

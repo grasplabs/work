@@ -2239,6 +2239,7 @@ msgstr "Herramientas permitidas: ninguna registrada"
 msgid "Tools to allow"
 msgstr "Herramientas que permitir"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/route-error.tsx
 #: src/routes/_shell.index.tsx

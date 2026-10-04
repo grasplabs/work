@@ -160,15 +160,18 @@ const Chat = ({ secret, first }: { secret: string; first: GuestView }) => {
           {view.turnsLeft > 0 ? (
             <Composer
               busy={pending === "send"}
+              compact
               // Not while the chat is being finished.
               disabled={pending === "finish"}
               failure={failure}
               label={t`Your message`}
               maxLength={guestMessageMaxLength}
               onSend={() => {
+                const sent = text;
                 void (async () => {
-                  if (await call({ action: "send", text })) {
-                    setText("");
+                  if (await call({ action: "send", text: sent })) {
+                    // What they typed while it was sent stays.
+                    setText((typed) => (typed === sent ? "" : typed));
                   }
                 })();
               }}

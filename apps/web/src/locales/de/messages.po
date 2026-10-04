@@ -2239,6 +2239,7 @@ msgstr "Erlaubte Werkzeuge: keine erfasst"
 msgid "Tools to allow"
 msgstr "Zu erlaubende Werkzeuge"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/route-error.tsx
 #: src/routes/_shell.index.tsx

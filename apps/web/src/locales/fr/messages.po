@@ -2239,6 +2239,7 @@ msgstr "Outils autorisés : aucun enregistré"
 msgid "Tools to allow"
 msgstr "Outils à autoriser"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/route-error.tsx
 #: src/routes/_shell.index.tsx

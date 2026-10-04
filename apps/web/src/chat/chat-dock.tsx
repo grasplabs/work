@@ -9,9 +9,10 @@ import {
   Minimize2Icon,
   SquarePenIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -36,18 +37,31 @@ import { useAsk } from "./use-ask.ts";
 /** How the dock sits: its bar alone, a frame around it, or a drawer down the right side. */
 type DockMode = "bar" | "frame" | "drawer";
 
-/** The models a question may name, read once the dock is shown. */
-const useModels = (): Loaded<string[]> | undefined => {
+/** The models a question may name, as core lists them. */
+const readModels = async (
+  core: CoreConnection,
+  signal?: AbortSignal
+): Promise<Loaded<string[]>> =>
+  await loadFromCore(
+    core,
+    async (session) => await session.chats.models(),
+    signal
+  );
+
+/**
+ * The models a question may name, read once the dock is shown and again
+ * on `retry`, as after core was out of reach.
+ */
+const useModels = (): {
+  models: Loaded<string[]> | undefined;
+  retry: () => void;
+} => {
   const core = useCore();
   const [models, setModels] = useState<Loaded<string[]>>();
   useEffect(() => {
     const left = new AbortController();
     const read = async (): Promise<void> => {
-      const loaded = await loadFromCore(
-        core,
-        async (session) => await session.chats.models(),
-        left.signal
-      );
+      const loaded = await readModels(core, left.signal);
       if (!left.signal.aborted) {
         setModels(loaded);
       }
@@ -57,7 +71,15 @@ const useModels = (): Loaded<string[]> | undefined => {
       left.abort();
     };
   }, [core]);
-  return models;
+  return {
+    models,
+    retry: () => {
+      setModels(undefined);
+      void (async () => {
+        setModels(await readModels(core));
+      })();
+    },
+  };
 };
 
 /** Why nothing can be asked yet, if that is so: the models are what a question names. */
@@ -97,32 +119,151 @@ const HeaderButton = ({
   </Button>
 );
 
+/** The open dock's header: its title, then the ways to go on with the chat and to move the dock. */
+const DockHeader = ({
+  chatId,
+  mode,
+  onMove,
+  onNewChat,
+}: {
+  chatId: string | undefined;
+  mode: "frame" | "drawer";
+  onMove: (next: DockMode) => void;
+  onNewChat: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <header
+      className={
+        mode === "drawer"
+          ? "flex h-(--header-height) flex-none items-center gap-0.5 border-b pr-1.5 pl-4"
+          : "flex flex-none items-center gap-0.5 border-b py-1.5 pr-1.5 pl-4"
+      }
+    >
+      <h2 className="flex-1 font-medium">
+        <Trans>Ask Grasp</Trans>
+      </h2>
+      {chatId === undefined ? null : (
+        <>
+          <Link
+            aria-label={t`Open in chat`}
+            className={buttonVariants({
+              size: "icon-sm",
+              variant: "ghost",
+            })}
+            search={{ chat: chatId, panel: true }}
+            title={t`Open in chat`}
+            to="/"
+          >
+            <MessagesSquareIcon />
+          </Link>
+          <HeaderButton label={t`New chat`} onClick={onNewChat}>
+            <SquarePenIcon />
+          </HeaderButton>
+        </>
+      )}
+      {mode === "frame" ? (
+        <HeaderButton
+          label={t`Open at the side`}
+          onClick={() => {
+            onMove("drawer");
+          }}
+        >
+          <Maximize2Icon />
+        </HeaderButton>
+      ) : (
+        <HeaderButton
+          label={t`Back to the small chat`}
+          onClick={() => {
+            onMove("frame");
+          }}
+        >
+          <Minimize2Icon />
+        </HeaderButton>
+      )}
+      <HeaderButton
+        label={t`Fold the chat away`}
+        onClick={() => {
+          onMove("bar");
+        }}
+      >
+        <ChevronDownIcon />
+      </HeaderButton>
+    </header>
+  );
+};
+
+/** The open dock's conversation, or what to ask before there is one. */
+const DockThread = ({
+  chatId,
+  view,
+  failure,
+  onRetry,
+}: {
+  chatId: string | undefined;
+  view: ReturnType<typeof useFollowedChat>["view"];
+  failure: string | undefined;
+  onRetry: () => void;
+}) => {
+  if (chatId === undefined) {
+    return (
+      <p className="text-muted-foreground flex-1 p-4">
+        <Trans>Ask anything, or describe a process</Trans>
+      </p>
+    );
+  }
+  return (
+    <ChatThread
+      loaded={view.loaded || failure !== undefined}
+      messages={view.messages}
+      onRetry={onRetry}
+      partial={view.partial}
+      running={view.running}
+    >
+      {failure === undefined && view.stopped === null ? null : (
+        <div className="flex flex-col gap-2">
+          <ErrorText>{failure}</ErrorText>
+          <ErrorText>{view.stopped ?? undefined}</ErrorText>
+        </div>
+      )}
+      <HeldWrites chatId={chatId} version={view.held} />
+    </ChatThread>
+  );
+};
+
 /** The dock itself: on every page in the frame but Chat's. */
 const Dock = () => {
   const { t } = useLingui();
   const chatId = useActiveChat();
   const { view, failure } = useFollowedChat(chatId);
-  const models = useModels();
+  const { models, retry } = useModels();
   const noModels = useNoModels(models);
+  // Core out of reach or refusing may pass: the read can be asked for again.
+  const canRetry = models !== undefined && models.state !== "ready";
   const { composer, ask } = useAsk(
     chatId,
     models?.state === "ready" ? models.data : [],
     "here"
   );
   const [mode, setMode] = useState<DockMode>("bar");
-  // Once the person moved the dock, its box takes the focus where it shows
-  // next, so the cursor stays in it as the frame opens or folds away.
-  const [moved, setMoved] = useState(false);
+  // The box stays as the dock moves, but the button that moved it may go:
+  // the focus goes back to the box, so the cursor stays in it as the frame
+  // opens, grows or folds away.
+  const dock = useRef<HTMLElement>(null);
+  const focusBox = (): void => {
+    requestAnimationFrame(() => {
+      dock.current?.querySelector("textarea")?.focus();
+    });
+  };
   const moveTo = (next: DockMode): void => {
-    setMoved(true);
     setMode(next);
+    focusBox();
   };
   const open = mode !== "bar";
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   const box = (
     <Composer
       {...composer}
-      autoFocus={moved}
       compact
       label={t`Ask Grasp`}
       onSend={() => {
@@ -150,128 +291,71 @@ const Dock = () => {
       ) : null}
     </Composer>
   );
-  if (!open) {
-    return (
-      <div className="pointer-events-none fixed inset-x-7 bottom-7 z-40 flex justify-end">
-        <div className="chat-glow bg-background/80 pointer-events-auto w-80 max-w-full rounded-md text-sm backdrop-blur-md transition-all duration-300 ease-out focus-within:w-104 motion-reduce:transition-none">
-          {box}
-          {noModels === undefined ? null : (
-            <p className="text-muted-foreground px-3 pb-2 text-xs">
-              {noModels}
-            </p>
-          )}
-        </div>
-      </div>
-    );
+  const drawer = mode === "drawer";
+  // One tree in every mode, so the box, and the draft in it, stays as the
+  // dock opens, grows or folds away.
+  let place =
+    "pointer-events-none fixed inset-x-7 bottom-7 z-40 flex justify-end";
+  let look =
+    "chat-glow bg-background/80 pointer-events-auto w-80 max-w-full rounded-md text-sm backdrop-blur-md transition-all duration-300 ease-out focus-within:w-104 motion-reduce:transition-none";
+  if (drawer) {
+    place =
+      "pointer-events-none fixed inset-y-2 right-2 left-2 z-40 flex justify-end";
+    look =
+      "bg-background pointer-events-auto flex h-full w-110 max-w-full flex-col border-l text-sm";
+  } else if (open) {
+    place =
+      "pointer-events-none fixed inset-x-4 bottom-4 z-40 flex justify-end";
+    look =
+      "chat-glow bg-background/80 pointer-events-auto flex h-136 max-h-svh w-110 max-w-full flex-col overflow-hidden rounded-2xl border text-sm backdrop-blur-md";
   }
   return (
-    <div
-      className={
-        mode === "drawer"
-          ? "pointer-events-none fixed inset-y-2 right-2 left-2 z-40 flex justify-end"
-          : "pointer-events-none fixed inset-x-4 bottom-4 z-40 flex justify-end"
-      }
-    >
+    <div className={place}>
       <section
-        aria-label={t`Ask Grasp`}
-        className={
-          mode === "drawer"
-            ? "bg-background pointer-events-auto flex h-full w-110 max-w-full flex-col border-l text-sm"
-            : "chat-glow bg-background/80 pointer-events-auto flex h-136 max-h-svh w-110 max-w-full flex-col overflow-hidden rounded-2xl border text-sm backdrop-blur-md"
-        }
+        aria-label={open ? t`Ask Grasp` : undefined}
+        className={look}
+        ref={dock}
       >
-        <header
-          className={
-            mode === "drawer"
-              ? "flex h-(--header-height) flex-none items-center gap-0.5 border-b pr-1.5 pl-4"
-              : "flex flex-none items-center gap-0.5 border-b py-1.5 pr-1.5 pl-4"
-          }
-        >
-          <h2 className="flex-1 font-medium">
-            <Trans>Ask Grasp</Trans>
-          </h2>
-          {chatId === undefined ? null : (
-            <>
-              <Link
-                aria-label={t`Open in chat`}
-                className={buttonVariants({
-                  size: "icon-sm",
-                  variant: "ghost",
-                })}
-                search={{ chat: chatId, panel: true }}
-                title={t`Open in chat`}
-                to="/"
-              >
-                <MessagesSquareIcon />
-              </Link>
-              <HeaderButton
-                label={t`New chat`}
-                onClick={() => {
-                  setMoved(true);
-                  setActiveChat(undefined);
-                }}
-              >
-                <SquarePenIcon />
-              </HeaderButton>
-            </>
-          )}
-          {mode === "frame" ? (
-            <HeaderButton
-              label={t`Open at the side`}
-              onClick={() => {
-                moveTo("drawer");
-              }}
-            >
-              <Maximize2Icon />
-            </HeaderButton>
-          ) : (
-            <HeaderButton
-              label={t`Back to the small chat`}
-              onClick={() => {
-                moveTo("frame");
-              }}
-            >
-              <Minimize2Icon />
-            </HeaderButton>
-          )}
-          <HeaderButton
-            label={t`Fold the chat away`}
-            onClick={() => {
-              moveTo("bar");
+        {open ? (
+          <DockHeader
+            chatId={chatId}
+            mode={drawer ? "drawer" : "frame"}
+            onMove={moveTo}
+            onNewChat={() => {
+              setActiveChat(undefined);
+              focusBox();
             }}
-          >
-            <ChevronDownIcon />
-          </HeaderButton>
-        </header>
-        {chatId === undefined ? (
-          <p className="text-muted-foreground flex-1 p-4">
-            <Trans>Ask anything, or describe a process</Trans>
-          </p>
-        ) : (
-          <ChatThread
-            loaded={view.loaded || failure !== undefined}
-            messages={view.messages}
+          />
+        ) : null}
+        {open ? (
+          <DockThread
+            chatId={chatId}
+            failure={failure}
             onRetry={() => {
               if (lastQuestion?.role === "user") {
                 void ask(lastQuestion.text);
               }
             }}
-            partial={view.partial}
-            running={view.running}
-          >
-            {failure === undefined && view.stopped === null ? null : (
-              <div className="flex flex-col gap-2">
-                <ErrorText>{failure}</ErrorText>
-                <ErrorText>{view.stopped ?? undefined}</ErrorText>
-              </div>
-            )}
-            <HeldWrites chatId={chatId} version={view.held} />
-          </ChatThread>
-        )}
-        <div className="flex flex-none flex-col gap-1 p-3">
+            view={view}
+          />
+        ) : null}
+        <div className={open ? "flex flex-none flex-col gap-1 p-3" : undefined}>
           {box}
           {noModels === undefined ? null : (
-            <p className="text-muted-foreground px-1 text-xs">{noModels}</p>
+            <p
+              className={
+                open
+                  ? "text-muted-foreground flex items-center gap-2 px-1 text-xs"
+                  : "text-muted-foreground flex items-center gap-2 px-3 pb-2 text-xs"
+              }
+            >
+              {noModels}
+              {canRetry ? (
+                <Button onClick={retry} size="xs" variant="link">
+                  <Trans>Try again</Trans>
+                </Button>
+              ) : null}
+            </p>
           )}
         </div>
       </section>
