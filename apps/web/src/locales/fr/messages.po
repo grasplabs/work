@@ -2250,6 +2250,10 @@ msgstr "Les applications dans lesquelles vos workflows peuvent travailler. Grasp
 msgid "The catalog doesn't list {app}, so its tools can't be shown."
 msgstr "Le catalogue ne contient pas {app} : ses outils ne peuvent pas être affichés."
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
+msgstr "Le catalogue des intégrations n’a pas pu être lu : cette page ne montre donc que ce que vos comptes en disent."
+
 #: src/chat/composer.tsx
 msgid "The default, {each}"
 msgstr "Par défaut, {each}"

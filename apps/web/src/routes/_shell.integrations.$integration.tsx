@@ -12,7 +12,7 @@ import {
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Await, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { BlocksIcon, EyeIcon, PenLineIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -34,7 +34,12 @@ import { OfferSwitch } from "../connections/offer-switch.tsx";
 import { SourceBadge } from "../connections/source-badge.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
-import { NotFound, PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import {
+  LoadingLines,
+  NotFound,
+  PageLoading,
+  PageNotLoaded,
+} from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -129,25 +134,16 @@ const allowedToolsOf = (
 };
 
 /** What its tools can do, as its provider declares them, reads first. */
-const Tools = ({
+const ToolList = ({
   tools,
   app,
   allowed,
 }: {
-  tools: Loaded<CatalogTool[]> | undefined;
+  tools: Loaded<CatalogTool[]>;
   app: string;
   allowed: ReadonlySet<string> | undefined;
 }) => {
   const { i18n } = useLingui();
-  if (tools === undefined) {
-    return (
-      <p className="text-muted-foreground">
-        <Trans>
-          The catalog doesn&apos;t list {app}, so its tools can&apos;t be shown.
-        </Trans>
-      </p>
-    );
-  }
   if (tools.state !== "ready") {
     return <ErrorText>{notLoadedText(tools, i18n)}</ErrorText>;
   }
@@ -187,13 +183,51 @@ const Tools = ({
   );
 };
 
+/**
+ * Its tools once their read comes (the rest of the page doesn't wait for
+ * it), or why there are none to show: the catalog couldn't be read, or
+ * doesn't list it.
+ */
+const Tools = ({
+  tools,
+  catalog,
+  app,
+  allowed,
+}: {
+  tools: Promise<Loaded<CatalogTool[]>> | undefined;
+  catalog: Loaded<unknown>;
+  app: string;
+  allowed: ReadonlySet<string> | undefined;
+}) => {
+  const { i18n } = useLingui();
+  if (tools === undefined && catalog.state !== "ready") {
+    return <ErrorText>{notLoadedText(catalog, i18n)}</ErrorText>;
+  }
+  if (tools === undefined) {
+    return (
+      <p className="text-muted-foreground">
+        <Trans>
+          The catalog doesn&apos;t list {app}, so its tools can&apos;t be shown.
+        </Trans>
+      </p>
+    );
+  }
+  return (
+    <Await fallback={<LoadingLines />} promise={tools}>
+      {(loaded) => <ToolList allowed={allowed} app={app} tools={loaded} />}
+    </Await>
+  );
+};
+
 const Overview = ({
   integration,
   tools,
+  catalog,
   identity,
 }: {
   integration: Integration;
-  tools: Loaded<CatalogTool[]> | undefined;
+  tools: Promise<Loaded<CatalogTool[]>> | undefined;
+  catalog: Loaded<unknown>;
   identity: Identity;
 }) => {
   const { i18n } = useLingui();
@@ -240,6 +274,7 @@ const Overview = ({
         <Tools
           allowed={allowedToolsOf(integration)}
           app={integration.name}
+          catalog={catalog}
           tools={tools}
         />
       </section>
@@ -336,7 +371,7 @@ const WhyNoConnect = ({
 };
 
 const IntegrationPage = ({ integration }: { integration: Integration }) => {
-  const { held, tools } = Route.useLoaderData();
+  const { held, tools, catalog } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { tab = "overview", connection } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
@@ -386,7 +421,16 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
             </Button>
           ) : null}
         </div>
-        <WhyNoConnect identity={identity} integration={integration} />
+        {catalog.state === "ready" ? (
+          <WhyNoConnect identity={identity} integration={integration} />
+        ) : (
+          <p className="text-muted-foreground">
+            <Trans>
+              The catalog of integrations couldn&apos;t be read, so this page
+              shows only what your accounts say about it.
+            </Trans>
+          </p>
+        )}
         {connected ? (
           <output>
             <Trans>Connected.</Trans>
@@ -418,6 +462,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           <TabsContent value="overview">
             <div className="pt-4">
               <Overview
+                catalog={catalog}
                 identity={identity}
                 integration={integration}
                 tools={integration.listed ? tools : undefined}
@@ -454,7 +499,31 @@ const IntegrationRoute = () => {
   const { t } = useLingui();
   const parsed = parseIntegrationKey(key);
   const integrations = { label: t`Integrations`, to: "/integrations" as const };
-  if (catalog.state !== "ready") {
+  if (connections.state !== "ready") {
+    return (
+      <PageNotLoaded
+        crumbs={[integrations, { label: parsed?.id ?? t`Integration` }]}
+        page={connections}
+      />
+    );
+  }
+  // Without the catalog, an integration someone is connected to still
+  // shows from its connections, so they can still see, reconnect or
+  // disconnect their accounts; one they aren't connected to needs the
+  // catalog. Whether it is offered is unknown then: core, which refuses
+  // a flow for one that isn't, decides.
+  const listed =
+    parsed === undefined
+      ? undefined
+      : integrationsOf(
+          catalog.state === "ready" ? catalog.data.entries : [],
+          connections.data
+        ).find((candidate) => candidate.key === key);
+  const integration =
+    listed === undefined || catalog.state === "ready"
+      ? listed
+      : { ...listed, offered: true };
+  if (integration === undefined && catalog.state !== "ready") {
     return (
       <PageNotLoaded
         crumbs={[integrations, { label: parsed?.id ?? t`Integration` }]}
@@ -464,20 +533,6 @@ const IntegrationRoute = () => {
       />
     );
   }
-  if (connections.state !== "ready") {
-    return (
-      <PageNotLoaded
-        crumbs={[integrations, { label: parsed?.id ?? t`Integration` }]}
-        page={connections}
-      />
-    );
-  }
-  const integration =
-    parsed === undefined
-      ? undefined
-      : integrationsOf(catalog.data.entries, connections.data).find(
-          (candidate) => candidate.key === key
-        );
   if (integration === undefined) {
     return (
       <NotFound
@@ -498,16 +553,17 @@ export const Route = createFileRoute("/_shell/integrations/$integration")({
   }),
   loader: async ({ context: { core, identity }, params }) => {
     const parsed = parseIntegrationKey(params.integration);
-    const [read, tools] = await Promise.all([
-      loadIntegrations(core, identity, { held: true }),
+    // Not awaited: only Overview shows the tools, and a slow read of them
+    // shouldn't keep anyone from their account.
+    const tools =
       parsed === undefined
         ? undefined
         : loadFromCore(
             core,
             async (session) =>
               await session.connections.catalogTools(parsed.source, parsed.id)
-          ),
-    ]);
+          );
+    const read = await loadIntegrations(core, identity, { held: true });
     return { ...read, tools };
   },
   // A tab, or a notice dropped, keeps what was read; a change reads it
