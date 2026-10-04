@@ -87,9 +87,12 @@ export const Route = createFileRoute("/sign-in")({
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ href: deps.returnTo });
     }
-    // Signed out: whoever signs in next in this tab starts without the
-    // last person's open chat, which isn't theirs to open.
-    setActiveChat(undefined);
+    // Signed out, as core says it: whoever signs in next in this tab
+    // starts without the last person's open chat, which isn't theirs to
+    // open. Not while core can't be reached, when nobody knows who is in.
+    if (status.connected) {
+      setActiveChat(undefined);
+    }
     return status;
   },
   component: SignIn,
