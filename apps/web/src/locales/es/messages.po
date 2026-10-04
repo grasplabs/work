@@ -210,6 +210,16 @@ msgstr "{who} dio su consentimiento antes de conectarlo:"
 msgid "{workflowId} in {app}"
 msgstr "{workflowId} en {app}"
 
+#. One answer in an exported chat, in Markdown.
+#: src/chat/chat-markdown.ts
+msgid "**Grasp:** {text}"
+msgstr "**Grasp:** {text}"
+
+#. One question in an exported chat, in Markdown.
+#: src/chat/chat-markdown.ts
+msgid "**You:** {text}"
+msgstr "**Tú:** {text}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Un cambio se aplica a las ejecuciones que empiezan después: las que ya están en marcha conservan los valores con los que empezaron. Cada cambio queda registrado, sin su valor."
@@ -860,7 +870,7 @@ msgstr "Desplegar los chats"
 msgid "Expand the navigation"
 msgstr "Desplegar la navegación"
 
-#: src/knowledge/document.tsx
+#: src/export/export-menu.tsx
 msgid "Export"
 msgstr "Exportar"
 
@@ -871,6 +881,14 @@ msgstr "Exportar CSV"
 #: src/activity/audit-log.tsx
 msgid "Export JSON"
 msgstr "Exportar JSON"
+
+#: src/routes/_shell.index.tsx
+msgid "Export this chat"
+msgstr "Exportar este chat"
+
+#: src/knowledge/document.tsx
+msgid "Export this document"
+msgstr "Exportar este documento"
 
 #: src/chat/builds.tsx
 msgid "Exports"
@@ -1158,6 +1176,10 @@ msgstr "Hacer administrador"
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Hacer actual la versión {version}"
+
+#: src/export/export-menu.tsx
+msgid "Markdown (.md)"
+msgstr "Markdown (.md)"
 
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
@@ -1498,6 +1520,10 @@ msgstr "Ruta"
 #: src/workflows/runs.tsx
 msgid "Paused"
 msgstr "En pausa"
+
+#: src/export/export-menu.tsx
+msgid "PDF"
+msgstr "PDF"
 
 #: src/knowledge/uploads.tsx
 msgid "Pending"
@@ -1932,6 +1958,10 @@ msgstr "Alguien que ya no está"
 #: src/route-error.tsx
 msgid "Something went wrong."
 msgstr "Algo ha salido mal."
+
+#: src/chat/chat-markdown.ts
+msgid "Sources"
+msgstr "Fuentes"
 
 #: src/routes/_shell.models.tsx
 msgid "Spend this month ({month}, UTC)."

@@ -210,6 +210,16 @@ msgstr "{who} hat vor dem Verbinden hier zugestimmt:"
 msgid "{workflowId} in {app}"
 msgstr "{workflowId} in {app}"
 
+#. One answer in an exported chat, in Markdown.
+#: src/chat/chat-markdown.ts
+msgid "**Grasp:** {text}"
+msgstr "**Grasp:** {text}"
+
+#. One question in an exported chat, in Markdown.
+#: src/chat/chat-markdown.ts
+msgid "**You:** {text}"
+msgstr "**Sie:** {text}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Eine Änderung gilt für Läufe, die danach starten: laufende Läufe behalten die Werte, mit denen sie gestartet sind. Jede Änderung wird protokolliert, ohne ihren Wert."
@@ -860,7 +870,7 @@ msgstr "Chats ausklappen"
 msgid "Expand the navigation"
 msgstr "Navigation ausklappen"
 
-#: src/knowledge/document.tsx
+#: src/export/export-menu.tsx
 msgid "Export"
 msgstr "Exportieren"
 
@@ -871,6 +881,14 @@ msgstr "CSV exportieren"
 #: src/activity/audit-log.tsx
 msgid "Export JSON"
 msgstr "JSON exportieren"
+
+#: src/routes/_shell.index.tsx
+msgid "Export this chat"
+msgstr "Diesen Chat exportieren"
+
+#: src/knowledge/document.tsx
+msgid "Export this document"
+msgstr "Dieses Dokument exportieren"
 
 #: src/chat/builds.tsx
 msgid "Exports"
@@ -1158,6 +1176,10 @@ msgstr "Zum Admin machen"
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Version {version} aktuell machen"
+
+#: src/export/export-menu.tsx
+msgid "Markdown (.md)"
+msgstr "Markdown (.md)"
 
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
@@ -1498,6 +1520,10 @@ msgstr "Pfad"
 #: src/workflows/runs.tsx
 msgid "Paused"
 msgstr "Pausiert"
+
+#: src/export/export-menu.tsx
+msgid "PDF"
+msgstr "PDF"
 
 #: src/knowledge/uploads.tsx
 msgid "Pending"
@@ -1932,6 +1958,10 @@ msgstr "Jemand, der nicht mehr da ist"
 #: src/route-error.tsx
 msgid "Something went wrong."
 msgstr "Etwas ist schiefgelaufen."
+
+#: src/chat/chat-markdown.ts
+msgid "Sources"
+msgstr "Quellen"
 
 #: src/routes/_shell.models.tsx
 msgid "Spend this month ({month}, UTC)."

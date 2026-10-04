@@ -210,6 +210,16 @@ msgstr "{who} consented to this before connecting it:"
 msgid "{workflowId} in {app}"
 msgstr "{workflowId} in {app}"
 
+#. One answer in an exported chat, in Markdown.
+#: src/chat/chat-markdown.ts
+msgid "**Grasp:** {text}"
+msgstr "**Grasp:** {text}"
+
+#. One question in an exported chat, in Markdown.
+#: src/chat/chat-markdown.ts
+msgid "**You:** {text}"
+msgstr "**You:** {text}"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
@@ -860,7 +870,7 @@ msgstr "Expand the chats"
 msgid "Expand the navigation"
 msgstr "Expand the navigation"
 
-#: src/knowledge/document.tsx
+#: src/export/export-menu.tsx
 msgid "Export"
 msgstr "Export"
 
@@ -871,6 +881,14 @@ msgstr "Export CSV"
 #: src/activity/audit-log.tsx
 msgid "Export JSON"
 msgstr "Export JSON"
+
+#: src/routes/_shell.index.tsx
+msgid "Export this chat"
+msgstr "Export this chat"
+
+#: src/knowledge/document.tsx
+msgid "Export this document"
+msgstr "Export this document"
 
 #: src/chat/builds.tsx
 msgid "Exports"
@@ -1158,6 +1176,10 @@ msgstr "Make admin"
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Make version {version} current"
+
+#: src/export/export-menu.tsx
+msgid "Markdown (.md)"
+msgstr "Markdown (.md)"
 
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
@@ -1498,6 +1520,10 @@ msgstr "Path"
 #: src/workflows/runs.tsx
 msgid "Paused"
 msgstr "Paused"
+
+#: src/export/export-menu.tsx
+msgid "PDF"
+msgstr "PDF"
 
 #: src/knowledge/uploads.tsx
 msgid "Pending"
@@ -1932,6 +1958,10 @@ msgstr "Someone no longer here"
 #: src/route-error.tsx
 msgid "Something went wrong."
 msgstr "Something went wrong."
+
+#: src/chat/chat-markdown.ts
+msgid "Sources"
+msgstr "Sources"
 
 #: src/routes/_shell.models.tsx
 msgid "Spend this month ({month}, UTC)."

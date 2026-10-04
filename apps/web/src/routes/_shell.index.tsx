@@ -13,6 +13,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { ChatList, ChatSidebar } from "../chat/chat-list.tsx";
+import { chatMarkdown } from "../chat/chat-markdown.ts";
 import { Composer } from "../chat/composer.tsx";
 import { applyUpdate, emptyView, followChat } from "../chat/follow-chat.ts";
 import type { ChatView } from "../chat/follow-chat.ts";
@@ -23,6 +24,7 @@ import type { SourceName } from "../chat/sources.tsx";
 import { ChatThread } from "../chat/thread.tsx";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { ExportMenu } from "../export/export-menu.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -197,7 +199,7 @@ const OpenChat = ({
   const [view, setView] = useState<ChatView>(emptyView);
   const [failure, setFailure] = useState<string>();
   const core = useCore();
-  const { t } = useLingui();
+  const { i18n, t } = useLingui();
   const { composer, ask } = useAsk(chat.id, models);
   useEffect(
     () =>
@@ -218,8 +220,29 @@ const OpenChat = ({
   );
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
-      <section aria-label={chat.title} className="flex min-w-0 flex-1 flex-col">
+      <section
+        aria-label={chat.title}
+        className="relative flex min-w-0 flex-1 flex-col"
+      >
         <h1 className="sr-only">{chat.title}</h1>
+        {view.messages.length === 0 ? null : (
+          <ExportMenu
+            className="absolute top-3 right-4 z-10"
+            file={{
+              name: "grasp-chat",
+              title: chat.title,
+              markdown: () =>
+                chatMarkdown({
+                  title: chat.title,
+                  messages: view.messages,
+                  provenance: view.provenance,
+                  names: sourceNames,
+                  i18n,
+                }),
+            }}
+            label={t`Export this chat`}
+          />
+        )}
         <ChatThread
           loaded={view.loaded}
           messages={view.messages}
