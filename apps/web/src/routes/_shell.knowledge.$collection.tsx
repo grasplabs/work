@@ -232,23 +232,21 @@ const CollectionNotLoaded = ({
   open: Loaded<unknown> | undefined;
 }) => {
   const { t } = useLingui();
-  return (
-    <>
-      {open?.state === "missing" ? (
-        <NotFoundState icon={FileTextIcon} title={t`Document not found`} />
-      ) : null}
-      {open === undefined || open.state === "missing" ? null : (
-        <NotLoaded page={open} />
-      )}
-      {collection.state === "ready" ? null : (
-        <NotLoadedState
-          icon={BookOpenIcon}
-          notFound={t`Collection not found`}
-          page={collection}
-        />
-      )}
-    </>
-  );
+  // The collection first, as the crumbs say: a document of a collection
+  // that isn't there isn't looked for.
+  if (collection.state !== "ready") {
+    return (
+      <NotLoadedState
+        icon={BookOpenIcon}
+        notFound={t`Collection not found`}
+        page={collection}
+      />
+    );
+  }
+  if (open?.state === "missing") {
+    return <NotFoundState icon={FileTextIcon} title={t`Document not found`} />;
+  }
+  return open === undefined ? null : <NotLoaded page={open} />;
 };
 
 const CollectionView = () => {

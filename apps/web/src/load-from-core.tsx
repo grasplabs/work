@@ -1,4 +1,9 @@
-import { failureText, isExpectedError } from "@grasp-os/shared/errors";
+import {
+  failureText,
+  isExpectedError,
+  requestIdOf,
+  withReference,
+} from "@grasp-os/shared/errors";
 import type { I18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -12,7 +17,8 @@ import { ErrorText } from "./error-text.tsx";
 /** What a page read from core: its data, or why there is none. */
 export type Loaded<T> =
   | { state: "offline" }
-  | { state: "missing" }
+  /** Core doesn't have it; `requestId` is the reference to quote, if any. */
+  | { state: "missing"; requestId?: string }
   | { state: "refused"; message: string }
   | { state: "ready"; data: T };
 
@@ -58,7 +64,10 @@ export const loadFromCore = async <T,>(
       return { state: "offline" };
     }
     if (isNotFound(error)) {
-      return { state: "missing" };
+      const requestId = requestIdOf(error);
+      return requestId === undefined
+        ? { state: "missing" }
+        : { state: "missing", requestId };
     }
     return { state: "refused", message: failureText(error) };
   }
@@ -76,7 +85,9 @@ export const notLoadedText = (
     return i18n._(unreachable);
   }
   if (page.state === "missing") {
-    return i18n._(missing);
+    // In a section of a page, with its reference: what the page named was
+    // found, but not something it read along the way.
+    return withReference(i18n._(missing), page.requestId);
   }
   return page.state === "refused" ? page.message : undefined;
 };
