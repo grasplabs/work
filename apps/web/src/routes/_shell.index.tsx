@@ -182,6 +182,16 @@ const onWide = (onChange: () => void): (() => void) => {
 
 const isWide = (): boolean => matchMedia(wideQuery).matches;
 
+/** Characters a file name can't hold on some system, and runs of space. */
+const unsafeInFileName = /[\s"*/:<>?\\|]+/gu;
+
+/** The name a chat exports under: its title, made safe for a file. */
+const fileNameOf = (title: string): string =>
+  title
+    .replaceAll(unsafeInFileName, "-")
+    .replaceAll(/^-+|-+$/gu, "")
+    .slice(0, 80) || "grasp-chat";
+
 /** One chat, followed as it streams, with the side panel beside it. */
 const OpenChat = ({
   chat,
@@ -229,7 +239,7 @@ const OpenChat = ({
           <ExportMenu
             className="absolute top-3 right-4 z-10"
             file={{
-              name: "grasp-chat",
+              name: fileNameOf(chat.title),
               title: chat.title,
               markdown: () =>
                 chatMarkdown({

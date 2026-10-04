@@ -1,7 +1,7 @@
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 
-import { bodyOf, PlainMarkdown } from "../knowledge/markdown.tsx";
+import { bodyOf, PlainMarkdown, withoutTitle } from "../knowledge/markdown.tsx";
 
 // What every export in Grasp can become, by the person's choice: a
 // Markdown file, or a PDF. A PDF is made by the browser's own print dialog
@@ -45,12 +45,6 @@ export const downloadText = (
   }, downloadKeptMs);
 };
 
-/** `body` without a first `# heading` that only repeats `title`. */
-const withoutTitle = (body: string, title: string): string => {
-  const [first = "", ...rest] = body.trimStart().split("\n");
-  return first.trim() === `# ${title}` ? rest.join("\n") : body;
-};
-
 /** The page an export prints: its title, then its Markdown, on A4. */
 const PrintPage = ({
   title,
@@ -59,38 +53,71 @@ const PrintPage = ({
   title: string;
   markdown: string;
 }) => (
-  <main className="page-export bg-background text-foreground flex flex-col gap-3 font-sans text-sm leading-relaxed">
+  <main className="page-export bg-card text-foreground flex flex-col gap-3 font-sans text-sm leading-relaxed">
     <h1 className="text-2xl font-medium tracking-tight">{title}</h1>
-    <PlainMarkdown text={withoutTitle(bodyOf(markdown), title)} />
+    <PlainMarkdown text={withoutTitle(bodyOf(markdown).trimStart(), title)} />
   </main>
 );
 
-/** Waits for `link` to load, or to fail: either way the page can print. */
-const loadOf = async (link: HTMLLinkElement): Promise<void> => {
-  const loaded = Promise.withResolvers<boolean>();
-  link.addEventListener("load", () => {
-    loaded.resolve(true);
-  });
-  link.addEventListener("error", () => {
-    loaded.resolve(true);
-  });
-  await loaded.promise;
+/** How long the page waits for its stylesheets and font before it prints anyway. */
+const styledWithinMs = 5000;
+
+/** Waits for `work`, but no longer than `styledWithinMs`. */
+const withinTime = async (work: Promise<unknown>): Promise<void> => {
+  const late = Promise.withResolvers<boolean>();
+  const timer = setTimeout(() => {
+    late.resolve(false);
+  }, styledWithinMs);
+  await Promise.race([work, late.promise]);
+  clearTimeout(timer);
 };
+
+/** Resolves when `target` fires `event`, or after `styledWithinMs`. */
+const eventOrTimeout = async (
+  target: EventTarget,
+  event: string
+): Promise<void> => {
+  const fired = Promise.withResolvers<boolean>();
+  target.addEventListener(
+    event,
+    () => {
+      fired.resolve(true);
+    },
+    { once: true }
+  );
+  await withinTime(fired.promise);
+};
+
+/** The page being printed, if one is: one at a time. */
+let printing: { remove: () => void } | undefined;
 
 /**
  * Opens the print dialog for `file` as an A4 page, where the person saves
- * it as a PDF. The frame it prints from is gone once the dialog closes.
+ * it as a PDF. The frame it prints from goes once the dialog closes, or,
+ * where a browser never says so, when this page has the focus again; the
+ * focus goes back to where it was.
  */
 export const printAsPdf = async (
   file: ExportFile,
   locale: string
 ): Promise<void> => {
+  printing?.remove();
+  const returnFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : undefined;
   const frame = document.createElement("iframe");
   frame.setAttribute("aria-hidden", "true");
   frame.tabIndex = -1;
   frame.title = file.title;
   frame.className = "pointer-events-none fixed top-0 left-0 size-0 opacity-0";
+  // Some browsers replace the frame's first empty page with another as it
+  // loads: what is written into it waits for that.
+  const loaded = eventOrTimeout(frame, "load");
   document.body.append(frame);
+  if (frame.contentDocument?.readyState !== "complete") {
+    await loaded;
+  }
   const view = frame.contentWindow;
   const page = frame.contentDocument;
   if (view === null || page === null) {
@@ -109,19 +136,41 @@ export const printAsPdf = async (
     return copy;
   });
   const root = createRoot(page.body);
+  let removed = false;
+  const remove = (): void => {
+    if (removed) {
+      return;
+    }
+    removed = true;
+    window.removeEventListener("focus", remove);
+    root.unmount();
+    frame.remove();
+    if (printing?.remove === remove) {
+      printing = undefined;
+    }
+    returnFocus?.focus();
+  };
+  printing = { remove };
   flushSync(() => {
     root.render(<PrintPage markdown={file.markdown()} title={file.title} />);
   });
-  await Promise.all(links.map(loadOf));
-  // Geist first, or the PDF falls back to the system's font.
-  await page.fonts.ready;
-  const done = (): void => {
-    root.unmount();
-    frame.remove();
-  };
-  view.addEventListener("afterprint", done, { once: true });
+  await Promise.all(
+    links.map(async (link) => {
+      await eventOrTimeout(link, "load");
+    })
+  );
+  // Laid out, so the page asks for Geist; then Geist, or the PDF falls back
+  // to the system's font.
+  page.body.getBoundingClientRect();
+  await withinTime(page.fonts.load('1em "Geist Variable"'));
+  await withinTime(page.fonts.ready);
+  if (removed) {
+    return;
+  }
+  view.addEventListener("afterprint", remove, { once: true });
   view.focus();
   view.print();
+  window.addEventListener("focus", remove, { once: true });
 };
 
 /** Exports `file` as the person chose: a Markdown file, or a PDF to save. */

@@ -210,15 +210,15 @@ msgstr "{who} dio su consentimiento antes de conectarlo:"
 msgid "{workflowId} in {app}"
 msgstr "{workflowId} en {app}"
 
-#. One answer in an exported chat, in Markdown.
+#. Who answered, in an exported chat.
 #: src/chat/chat-markdown.ts
-msgid "**Grasp:** {text}"
-msgstr "**Grasp:** {text}"
+msgid "**Grasp:**"
+msgstr "**Grasp:**"
 
-#. One question in an exported chat, in Markdown.
+#. Who asked, in an exported chat.
 #: src/chat/chat-markdown.ts
-msgid "**You:** {text}"
-msgstr "**Tú:** {text}"
+msgid "**You:**"
+msgstr "**Tú:**"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
@@ -885,10 +885,6 @@ msgstr "Exportar JSON"
 #: src/routes/_shell.index.tsx
 msgid "Export this chat"
 msgstr "Exportar este chat"
-
-#: src/knowledge/document.tsx
-msgid "Export this document"
-msgstr "Exportar este documento"
 
 #: src/chat/builds.tsx
 msgid "Exports"
@@ -1725,6 +1721,7 @@ msgstr "Restaurar la versión {number}"
 msgid "Restored version {restoredFrom}"
 msgstr "Versión {restoredFrom} restaurada"
 
+#: src/chat/chat-markdown.ts
 #: src/chat/sources.tsx
 msgid "Restricted"
 msgstr "Restringido"
@@ -2020,6 +2017,7 @@ msgstr "Detener"
 msgid "Stopped"
 msgstr "Detenido"
 
+#: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Detenido."
@@ -2096,6 +2094,7 @@ msgstr "Los {top} que más gastaron; otros gastaron menos."
 msgid "The agent wasn't asked: {reason}"
 msgstr "No se preguntó al agente: {reason}"
 
+#: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The answer was cut off at the model's limit."
 msgstr "La respuesta se cortó en el límite del modelo."
@@ -2104,10 +2103,15 @@ msgstr "La respuesta se cortó en el límite del modelo."
 msgid "The default, {each}"
 msgstr "Predeterminado, {each}"
 
+#: src/export/export-menu.tsx
+msgid "The export didn't work. Try again."
+msgstr "La exportación no ha funcionado. Inténtalo de nuevo."
+
 #: src/routes/guest.tsx
 msgid "The link works until {until}."
 msgstr "El enlace funciona hasta el {until}."
 
+#: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The model call failed."
 msgstr "La llamada al modelo falló."

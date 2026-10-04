@@ -19,7 +19,7 @@ const choose = async (
   label: string,
   format: "Markdown (.md)" | "PDF"
 ): Promise<void> => {
-  await page.getByRole("button", { name: label }).click();
+  await page.getByRole("button", { name: label, exact: true }).click();
   await page.getByRole("menuitem", { name: format }).click();
 };
 
@@ -52,17 +52,28 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   await page.goto(`/knowledge/${collectionId}?doc=${documentId}`);
   await expect(page.getByText("Sixteen weeks")).toBeVisible(pageRead);
   const document = page.waitForEvent("download");
-  await choose(page, "Export this document", "Markdown (.md)");
+  await choose(page, "Export", "Markdown (.md)");
   const file = await document;
   expect(file.suggestedFilename()).toBe("leave.md");
   expect(await textOf(file)).toContain("Sixteen weeks, **paid**.");
 
   // The page to print: the title, then the text rendered, in a frame of
-  // this origin that keeps its policy.
-  await choose(page, "Export this document", "PDF");
+  // this origin that keeps its policy, styled by the app's own stylesheets
+  // and set in Geist.
+  await choose(page, "Export", "PDF");
   const printed = page.frameLocator('iframe[title="Leave"]');
-  await expect(printed.getByRole("heading", { name: "Leave" })).toHaveCount(1);
+  const heading = printed.getByRole("heading", { name: "Leave" });
+  await expect(heading).toHaveCount(1);
   await expect(printed.getByText("paid", { exact: true })).toBeAttached();
+  await expect
+    .poll(
+      async () =>
+        await heading.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return `${style.fontSize} ${style.fontFamily}`;
+        })
+    )
+    .toMatch(/^24px .*Geist/u);
 
   // A chat: its title, and each question.
   const tag = crypto.randomUUID().slice(0, 8);
@@ -76,15 +87,18 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   const chat = page.waitForEvent("download");
   await choose(page, "Export this chat", "Markdown (.md)");
   const chatFile = await chat;
-  expect(chatFile.suggestedFilename()).toBe("grasp-chat.md");
+  // Named after the chat, whose title is its first question here.
+  expect(chatFile.suggestedFilename()).toBe(`How-long-is-leave-${tag}.md`);
   const markdown = await textOf(chatFile);
   expect(markdown).toMatch(/^# /u);
-  expect(markdown).toContain(`**You:** ${question}`);
+  expect(markdown).toContain(`**You:**\n\n${question}`);
 
   await choose(page, "Export this chat", "PDF");
-  const printedChat = page.locator("iframe").last().contentFrame();
+  // One page to print at a time: the document's has gone.
+  await expect(page.locator('iframe[title="Leave"]')).toHaveCount(0);
+  const printedChat = page.frameLocator(`iframe[title="${question}"]`);
   await expect(
     printedChat.getByRole("heading", { level: 1, name: question })
   ).toHaveCount(1);
-  await expect(printedChat.getByText(`You: ${question}`)).toBeAttached();
+  await expect(printedChat.getByText(question, { exact: true })).toHaveCount(2);
 });

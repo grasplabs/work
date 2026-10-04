@@ -5,9 +5,76 @@ import { msg } from "@lingui/core/macro";
 import type { SourceName } from "./sources.tsx";
 
 // A chat as Markdown, for its export (export/export-menu.tsx): its title,
-// each question and answer in turn, and the sources its answers draw on.
-// What the agent's code returned stays out, as it does in the thread
-// unless opened: the answers say what came of it.
+// each question and answer in turn with how each answer ended, and the
+// sources its answers draw on, marked restricted where the chat is. What
+// the agent's code returned stays out, as it does in the thread unless
+// opened: the answers say what came of it.
+
+/** Characters Markdown would read as syntax in what someone typed. */
+const markdownSyntax = /[\\`*_[\]#|<>~]/gu;
+
+/** A list marker or a numbered one at the start of a line. */
+const lineMarker = /^(?<indent>\s*)(?<marker>[-+]|\d+\.)(?<space>\s)/gmu;
+
+/**
+ * A question as its asker typed it: plain text, its line breaks kept, as
+ * the thread shows it, never read as Markdown.
+ */
+export const plainText = (text: string): string =>
+  text
+    .replaceAll(markdownSyntax, String.raw`\$&`)
+    .replaceAll(lineMarker, String.raw`$<indent>\$<marker>$<space>`)
+    .replaceAll("\n", "\\\n");
+
+/** How an answer ended, as the thread says it, if it says anything. */
+const endNote = (
+  reply: Extract<ChatMessage, { role: "assistant" }>,
+  i18n: I18n
+): string | undefined => {
+  switch (reply.end) {
+    case "cancelled": {
+      return i18n._(msg`Stopped.`);
+    }
+    case "cut_off": {
+      return i18n._(msg`The answer was cut off at the model's limit.`);
+    }
+    case "failed": {
+      return reply.error ?? i18n._(msg`The model call failed.`);
+    }
+    case "done": {
+      return undefined;
+    }
+    default: {
+      return undefined;
+    }
+  }
+};
+
+/** One question or answer: who, on a line of its own, then what. */
+const turnOf = (message: ChatMessage, i18n: I18n): string | undefined => {
+  if (message.role === "result") {
+    return undefined;
+  }
+  if (message.role === "user") {
+    const label = i18n._(
+      msg({ message: "**You:**", comment: "Who asked, in an exported chat." })
+    );
+    return `${label}\n\n${plainText(message.text.trim())}`;
+  }
+  const parts = [message.text.trim(), endNote(message, i18n)].filter(
+    (part): part is string => part !== undefined && part !== ""
+  );
+  if (parts.length === 0) {
+    return undefined;
+  }
+  const label = i18n._(
+    msg({
+      message: "**Grasp:**",
+      comment: "Who answered, in an exported chat.",
+    })
+  );
+  return [label, ...parts].join("\n\n");
+};
 
 /**
  * The chat titled `title` as Markdown. `names` names its sources as the
@@ -27,37 +94,20 @@ export const chatMarkdown = ({
   i18n: I18n;
 }): string => {
   const turns = messages.flatMap((message) => {
-    const text = message.text.trim();
-    if (message.role === "result" || text === "") {
-      return [];
-    }
-    return message.role === "user"
-      ? [
-          i18n._(
-            msg({
-              message: `**You:** ${text}`,
-              comment: "One question in an exported chat, in Markdown.",
-            })
-          ),
-        ]
-      : [
-          i18n._(
-            msg({
-              message: `**Grasp:** ${text}`,
-              comment: "One answer in an exported chat, in Markdown.",
-            })
-          ),
-        ];
+    const turn = turnOf(message, i18n);
+    return turn === undefined ? [] : [turn];
   });
   const sources = provenance.sources.map(
-    (id) => `- ${names.get(id)?.name ?? id}`
+    (id) => `- ${plainText(names.get(id)?.name ?? id)}`
   );
-  const sourcesHeading = i18n._(msg`Sources`);
+  // What the answers draw on: restricted data first, as the chat marks it.
+  const footer = [
+    ...(provenance.restricted ? [`**${i18n._(msg`Restricted`)}**`] : []),
+    ...(sources.length === 0 ? [] : [sources.join("\n")]),
+  ];
   return [
-    `# ${title}`,
+    `# ${plainText(title)}`,
     ...turns,
-    ...(sources.length === 0
-      ? []
-      : [`## ${sourcesHeading}\n\n${sources.join("\n")}`]),
+    ...(footer.length === 0 ? [] : [`## ${i18n._(msg`Sources`)}`, ...footer]),
   ].join("\n\n");
 };

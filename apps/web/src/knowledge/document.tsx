@@ -417,7 +417,6 @@ export const DocumentView = ({
                       title: doc.title,
                       markdown: () => doc.version.text,
                     }}
-                    label={t`Export this document`}
                   />
                 </div>
               </div>
