@@ -17,7 +17,7 @@ import { useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
   BookOpenIcon,
-  BoxesIcon,
+  CogIcon,
   BlocksIcon,
   MessagesSquareIcon,
   WorkflowIcon,
@@ -34,7 +34,7 @@ import { PersonMenu } from "./person-menu.tsx";
 // only admins use is in the person menu at its foot.
 
 interface Section {
-  to: "/" | "/knowledge" | "/apps" | "/workflows" | "/integrations";
+  to: "/" | "/knowledge" | "/engines" | "/workflows" | "/integrations";
   label: MessageDescriptor;
   icon: LucideIcon;
 }
@@ -42,7 +42,7 @@ interface Section {
 const sections: readonly Section[] = [
   { to: "/", label: msg`Chat`, icon: MessagesSquareIcon },
   { to: "/knowledge", label: msg`Knowledge`, icon: BookOpenIcon },
-  { to: "/apps", label: msg`Apps`, icon: BoxesIcon },
+  { to: "/engines", label: msg`Engines`, icon: CogIcon },
   { to: "/workflows", label: msg`Workflows`, icon: WorkflowIcon },
   { to: "/integrations", label: msg`Integrations`, icon: BlocksIcon },
 ];

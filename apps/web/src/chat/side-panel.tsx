@@ -53,8 +53,8 @@ const OpenedApp = ({
         </Button>
         <Link
           className="text-sm underline"
-          params={{ app: app.id }}
-          to="/apps/$app"
+          params={{ engine: app.id }}
+          to="/engines/$engine"
         >
           <Trans>Workflows and more</Trans>
         </Link>

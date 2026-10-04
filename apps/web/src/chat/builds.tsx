@@ -787,8 +787,8 @@ export const ChatBuilds = ({
                     size: "icon-sm",
                     variant: "ghost",
                   })}
-                  params={{ app: draft.app }}
-                  to="/apps/$app"
+                  params={{ engine: draft.app }}
+                  to="/engines/$engine"
                 >
                   <ArrowUpRightIcon />
                 </Link>

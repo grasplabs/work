@@ -38,7 +38,7 @@ import { msg, plural, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
-  BoxesIcon,
+  CogIcon,
   PlayIcon,
   RepeatIcon,
   SparklesIcon,
@@ -603,10 +603,15 @@ const WorkflowView = ({
             </h1>
             <div className="text-muted-foreground flex flex-wrap items-center gap-2">
               <Badge
-                render={<Link params={{ app: summary.app }} to="/apps/$app" />}
+                render={
+                  <Link
+                    params={{ engine: summary.app }}
+                    to="/engines/$engine"
+                  />
+                }
                 variant="outline"
               >
-                <BoxesIcon data-icon="inline-start" />
+                <CogIcon data-icon="inline-start" />
                 {summary.appName}
               </Badge>
               <Badge variant="outline">
