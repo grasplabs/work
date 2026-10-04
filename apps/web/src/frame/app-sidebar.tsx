@@ -18,7 +18,7 @@ import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
   BookOpenIcon,
   BoxesIcon,
-  CableIcon,
+  BlocksIcon,
   MessagesSquareIcon,
   WorkflowIcon,
 } from "lucide-react";
@@ -34,7 +34,7 @@ import { PersonMenu } from "./person-menu.tsx";
 // only admins use is in the person menu at its foot.
 
 interface Section {
-  to: "/" | "/knowledge" | "/apps" | "/workflows" | "/connections";
+  to: "/" | "/knowledge" | "/apps" | "/workflows" | "/integrations";
   label: MessageDescriptor;
   icon: LucideIcon;
 }
@@ -44,7 +44,7 @@ const sections: readonly Section[] = [
   { to: "/knowledge", label: msg`Knowledge`, icon: BookOpenIcon },
   { to: "/apps", label: msg`Apps`, icon: BoxesIcon },
   { to: "/workflows", label: msg`Workflows`, icon: WorkflowIcon },
-  { to: "/connections", label: msg`Connections`, icon: CableIcon },
+  { to: "/integrations", label: msg`Integrations`, icon: BlocksIcon },
 ];
 
 /** The app's sidebar: the mark, the sections and the person signed in. */

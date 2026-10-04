@@ -7,86 +7,118 @@ import type { SeededConnection } from "./connections-seed.ts";
 import { test } from "./csp.ts";
 import { apiOf, pageOf, peopleIn } from "./people.ts";
 
-// The Connections page: a person finds the account they connected, with
-// what it reaches, and disconnects one; an admin sees which Apps hold a
+// The Integrations pages: a person finds the account they connected on
+// its integration's page, with where it stands, signs in again to one whose
+// access ran out, and disconnects one; an admin sees which Apps hold a
 // permission for a shared connection and revokes it there, and reads a
 // Composio connection's consent. The connections are what finished flows
 // leave behind (e2e/connections-seed.ts): the flows through Entra and
 // Composio are core's tests.
 
-/** A section of the page, by its heading. */
-const sectionOf = (page: Page, name: string): Locator =>
-  page.getByRole("region", { name, exact: true });
+/** An integration's page, on its Account tab. */
+const accountOf = async (page: Page, key: string): Promise<void> => {
+  await page.goto(`/integrations/${key}?tab=account`);
+};
 
-/** The card for `connection` in `section`, by its name and account. */
+/** The card for `connection`, by its name and account. */
 const cardOf = (
-  section: Locator,
+  page: Page,
   name: string,
   { account }: SeededConnection
 ): Locator =>
-  section.getByRole("listitem").filter({
-    has: section.page().getByRole("heading", {
+  page.getByRole("listitem").filter({
+    has: page.getByRole("heading", {
       level: 3,
       name: `${name} (${account})`,
     }),
   });
 
-test("a person comes back from connecting Microsoft 365, sees it with its scope, and is offered to reconnect or disconnect one that needs connecting again", async ({
+test("a person comes back from connecting Microsoft 365, sees it on its page, and is offered to sign in again or disconnect one whose access ran out", async ({
   browser,
 }) => {
   const { admin, user } = peopleIn("connections");
   const { mine, expired } = seededConnections();
   const page = await pageOf(browser, user);
-  // A link can name any ID: only a connection the page lists is news.
-  await page.goto(`/connections?connection=${crypto.randomUUID()}`);
+
+  // The list: Microsoft 365 is connected for them, and needs attention.
+  await page.goto("/integrations");
+  const search = page.getByRole("searchbox", { name: "Search integrations" });
+  await search.fill("micro");
+  await expect(page).toHaveURL(/[?&]q=micro/u);
+  const connected = page.getByRole("region", { name: "Connected" });
   await expect(
-    sectionOf(page, "My connections").getByRole("listitem").first()
+    connected.getByRole("link", { name: "Microsoft 365", exact: true })
+  ).toBeVisible();
+  await page
+    .getByRole("complementary", { name: "Filter integrations" })
+    .getByRole("link", { name: /^Needs attention/u })
+    .click();
+  await expect(page).toHaveURL(/show=attention/u);
+  await expect(
+    connected.getByRole("button", { name: "Sign in to Microsoft 365 again" })
+  ).toBeVisible();
+
+  // A link can name any ID: only a connection the page lists is news.
+  await page.goto(
+    `/integrations/native:microsoft?connection=${crypto.randomUUID()}`
+  );
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Microsoft 365" })
   ).toBeVisible();
   await expect(page.getByRole("status")).toHaveCount(0);
   // Where core's callback sends the browser once a flow finished.
-  await page.goto(`/connections?connection=${mine.id}`);
+  await page.goto(`/integrations/native:microsoft?connection=${mine.id}`);
   await expect(page.getByRole("status")).toHaveText("Connected.");
+  await expect(page.getByText("Native", { exact: true })).toBeVisible();
 
-  const own = sectionOf(page, "My connections");
-  const mineCard = cardOf(own, "Microsoft 365", mine);
-  await expect(mineCard.getByText("Native")).toBeVisible();
+  await page.getByRole("tab", { name: /^Account/u }).click();
+  const mineCard = cardOf(page, "Microsoft 365", mine);
   await expect(mineCard.getByRole("definition")).toHaveText([
-    "Active",
-    "Personal: only you can use it",
+    "Active, only for you",
     mine.account,
     "You",
     /\S/u,
   ]);
 
-  // Its access ran out: it offers Reconnect, which starts the provider's
-  // flow again. The test stack has no Microsoft tenant set up, so core
-  // refuses the start, and the card says so.
-  const expiredCard = cardOf(own, "Microsoft 365", expired);
-  await expect(expiredCard.getByText("Needs connecting again")).toBeVisible();
+  // Its access ran out: it offers to sign in again, in the connect dialog,
+  // which starts the provider's flow again. The test stack has no Microsoft
+  // tenant set up, so core refuses the start, and the dialog says so.
+  const expiredCard = cardOf(page, "Microsoft 365", expired);
+  await expect(
+    expiredCard.getByText("Needs someone to sign in again")
+  ).toBeVisible();
   await expiredCard
     .getByRole("button", {
-      name: `Reconnect Microsoft 365 (${expired.account})`,
+      name: `Sign in to Microsoft 365 (${expired.account}) again`,
     })
     .click();
-  await expect(expiredCard.getByRole("alert")).toHaveText(
+  const dialog = page.getByRole("dialog", {
+    name: "Sign in to Microsoft 365 again",
+  });
+  await dialog
+    .getByRole("button", { name: "Sign in to Microsoft 365" })
+    .click();
+  await expect(dialog.getByRole("alert")).toHaveText(
     "Connecting this provider isn't set up for this deployment."
   );
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
   // While an admin doesn't offer Microsoft 365, core refuses every start:
-  // the card offers no Reconnect, and says what has to happen first. The
+  // the card offers no sign-in, and says what has to happen first. The
   // catalog no longer lists the entry to this person, so its ID stands in
   // for its name.
   const { core, api } = apiOf(admin);
   try {
     await api.connections.setOffered("native", "microsoft", false);
     await page.reload();
-    const hiddenCard = cardOf(own, "microsoft", expired);
+    const hiddenCard = cardOf(page, "microsoft", expired);
     await expect(
       hiddenCard.getByText(
         "An admin must offer this connector again before it can be reconnected."
       )
     ).toBeVisible();
     await expect(
-      hiddenCard.getByRole("button", { name: /^Reconnect/u })
+      hiddenCard.getByRole("button", { name: /^Sign in to/u })
     ).toHaveCount(0);
   } finally {
     await api.connections.setOffered("native", "microsoft", true);
@@ -94,7 +126,7 @@ test("a person comes back from connecting Microsoft 365, sees it with its scope,
   }
   await page.reload();
   await expect(
-    expiredCard.getByRole("button", { name: /^Reconnect/u })
+    expiredCard.getByRole("button", { name: /^Sign in to/u })
   ).toBeVisible();
   // It can be disconnected instead.
   await expiredCard
@@ -110,11 +142,26 @@ test("a person comes back from connecting Microsoft 365, sees it with its scope,
   await expect(mineCard).toBeVisible();
   // The notice was about the flow that came back, not about the page now.
   await expect(page.getByRole("status")).toHaveCount(0);
-  expect(new URL(page.url()).search).toBe("");
+  expect(new URL(page.url()).searchParams.get("connection")).toBeNull();
 
-  // Connecting an account a connection already holds comes back refused,
-  // and says what to do; a code nobody knows says only the page's own words.
+  // Connecting another account: the test stack has no Microsoft tenant set
+  // up, so core refuses the start, and the dialog says so.
+  await page.getByRole("button", { name: "Connect another account" }).click();
+  const connecting = page.getByRole("dialog", {
+    name: "Connect Microsoft 365",
+  });
+  await connecting
+    .getByRole("button", { name: "Sign in to Microsoft 365" })
+    .click();
+  await expect(connecting.getByRole("alert")).toHaveText(
+    "Connecting this provider isn't set up for this deployment."
+  );
+  await page.keyboard.press("Escape");
+
+  // A flow that failed comes back through the old address, refused, and
+  // says what to do; a code nobody knows says only the page's own words.
   await page.goto("/connections?connectionError=connection.already_connected");
+  await expect(page).toHaveURL(/\/integrations\?connectionError=/u);
   await expect(page.getByRole("alert")).toHaveText(
     "That account is already connected here. Disconnect it first to connect it again."
   );
@@ -123,19 +170,11 @@ test("a person comes back from connecting Microsoft 365, sees it with its scope,
     "Connecting didn't work. Try again, or ask an admin."
   );
 
-  // The test stack has no Microsoft tenant set up: core refuses the start,
-  // and the page says so where the person clicked.
-  const catalogEntry = sectionOf(page, "Connect")
-    .getByRole("listitem")
-    .filter({ has: page.getByRole("heading", { name: "Microsoft 365" }) });
-  await page.getByLabel("Search").fill("microsoft");
-  await catalogEntry
-    .getByRole("button", { name: "Connect Microsoft 365" })
-    .click();
-  await expect(catalogEntry.getByRole("alert")).toHaveText(
-    "Connecting this provider isn't set up for this deployment."
-  );
-  await expect(page).toHaveURL(/\/connections/u);
+  // An integration there isn't is not found, in the frame.
+  await page.goto("/integrations/native:no-such-app");
+  await expect(
+    page.getByRole("heading", { name: "Integration not found" })
+  ).toBeVisible();
 });
 
 test("an admin sees which Apps can use a shared connection, revokes a permission there, and reads a Composio connection's consent", async ({
@@ -170,11 +209,10 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   }
 
   const page = await pageOf(browser, admin);
-  await page.goto("/connections");
-  const shared = sectionOf(page, "Shared connections");
-  const mailboxCard = cardOf(shared, "Microsoft 365", mailbox);
-  await expect(mailboxCard.getByRole("definition").nth(1)).toHaveText(
-    "Shared: your organization uses it through permissions"
+  await accountOf(page, "native:microsoft");
+  const mailboxCard = cardOf(page, "Microsoft 365", mailbox);
+  await expect(mailboxCard.getByRole("definition").first()).toHaveText(
+    "Active, for the whole company"
   );
   const holder = mailboxCard.getByRole("listitem").filter({ hasText: appName });
   await expect(holder).toContainText(
@@ -187,9 +225,12 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   await expect(holder).toHaveCount(0);
   await expect(mailboxCard.getByText("None.")).toBeVisible();
 
-  // Composio holds this one's tokens: who consented, to what, for which tools.
-  const toolkitCard = cardOf(shared, "hubspot", toolkit);
-  await expect(toolkitCard.getByText("Via Composio")).toBeVisible();
+  // Composio holds this one's tokens: who consented, to what, for which
+  // tools. The test stack lists no Composio toolkits, so its ID stands in
+  // for its name.
+  await accountOf(page, "composio:hubspot");
+  await expect(page.getByText("Via Composio")).toBeVisible();
+  const toolkitCard = cardOf(page, "hubspot", toolkit);
   await expect(toolkitCard.getByText(composioConsentText)).toBeVisible();
   await expect(toolkitCard).toContainText(
     `Tools allowed: ${seededTools.join(", ")}`

@@ -17,7 +17,10 @@ import type { ReactNode } from "react";
 /** A step on the way to the page; the last one is the page itself. */
 export type Crumb =
   | { label: string }
-  | { label: string; to: "/" | "/knowledge" | "/apps" | "/workflows" }
+  | {
+      label: string;
+      to: "/" | "/knowledge" | "/apps" | "/workflows" | "/integrations";
+    }
   | { label: string; to: "/apps/$app"; params: { app: string } }
   | {
       label: string;
