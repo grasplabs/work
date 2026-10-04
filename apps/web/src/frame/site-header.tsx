@@ -8,6 +8,7 @@ import {
 } from "@grasp-os/ui/components/breadcrumb";
 import { Separator } from "@grasp-os/ui/components/separator";
 import { SidebarTrigger } from "@grasp-os/ui/components/sidebar";
+import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { Fragment } from "react";
@@ -49,7 +50,8 @@ const CrumbLink = ({ crumb }: { crumb: Crumb }) => {
  * The bar above every signed-in page: the sidebar's trigger, then where the
  * page is, and on the right any page action. It stays in view while the
  * page scrolls. On one line whatever the window: on a narrow one only the
- * step before the page is kept.
+ * step before the page is kept. With no crumbs yet (the page is loading), a
+ * skeleton where they will be.
  */
 export const SiteHeader = ({
   crumbs,
@@ -72,6 +74,7 @@ export const SiteHeader = ({
         orientation="vertical"
       />
       <div className="flex min-w-0 flex-1 items-center gap-1 px-4 lg:gap-2 lg:pr-6">
+        {crumbs.length === 0 ? <Skeleton className="h-4 w-32" /> : null}
         <Breadcrumb aria-label={t`Breadcrumb`} className="min-w-0">
           <BreadcrumbList className="flex-nowrap">
             {crumbs.map((crumb, index) => (

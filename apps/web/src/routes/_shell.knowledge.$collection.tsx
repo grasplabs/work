@@ -19,6 +19,7 @@ import { FileTextIcon, FolderIcon } from "lucide-react";
 
 import type { Session } from "../core.ts";
 import { formatDate } from "../format.ts";
+import { NotLoadedState, PageLoading } from "../frame/page-states.tsx";
 import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
 import { DocumentView } from "../knowledge/document.tsx";
 import { KnowledgeFrame } from "../knowledge/frame.tsx";
@@ -222,7 +223,12 @@ const CollectionView = () => {
       <div className="min-w-0 flex-1 overflow-y-auto" hidden={documentOpen}>
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-8 md:px-12">
           {open === undefined ? null : <NotLoaded page={open} />}
-          <NotLoaded page={collection} />
+          {collection.state === "ready" ? null : (
+            <NotLoadedState
+              notFound={t`Collection not found`}
+              page={collection}
+            />
+          )}
           {collection.state === "ready" ? (
             <>
               <header className="flex flex-col gap-2.5">
@@ -272,6 +278,7 @@ const CollectionView = () => {
 };
 
 export const Route = createFileRoute("/_shell/knowledge/$collection")({
+  pendingComponent: PageLoading,
   validateSearch: (
     search: Record<string, unknown>
   ): { doc?: string; version?: number } => {

@@ -15,6 +15,7 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { FileTextIcon, LibraryIcon, SearchXIcon } from "lucide-react";
 
+import { PageLoading } from "../frame/page-states.tsx";
 import {
   CollectionDrawing,
   MemoryDrawing,
@@ -335,6 +336,7 @@ const Knowledge = () => {
 };
 
 export const Route = createFileRoute("/_shell/knowledge/")({
+  pendingComponent: PageLoading,
   validateSearch: (search: Record<string, unknown>): { q?: string } =>
     typeof search.q === "string" && search.q.trim() !== ""
       ? { q: search.q.slice(0, searchQueryMaxLength) }

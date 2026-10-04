@@ -18,6 +18,7 @@ import {
 } from "../activity/audit-log.tsx";
 import type { LogSearch } from "../activity/audit-log.tsx";
 import { PendingApprovals, readPendingRequests } from "../activity/pending.tsx";
+import { PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 
@@ -105,6 +106,7 @@ const Activity = () => {
 };
 
 export const Route = createFileRoute("/_shell/activity")({
+  pendingComponent: PageLoading,
   validateSearch: (search: Record<string, unknown>): ActivitySearch => ({
     ...logSearchOf(search),
     tab: search.tab === "pending" ? "pending" : undefined,

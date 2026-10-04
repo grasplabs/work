@@ -354,6 +354,10 @@ msgstr "Application"
 msgid "App {app}"
 msgstr "Application {app}"
 
+#: src/routes/_shell.apps.$app.tsx
+msgid "App not found"
+msgstr "Application introuvable"
+
 #: src/screens/screen-frame.tsx
 msgid "App screen"
 msgstr "Écran de l’application"
@@ -566,6 +570,10 @@ msgstr "Collection"
 #: src/activity/pending.tsx
 msgid "Collection {collectionId}"
 msgstr "Collection {collectionId}"
+
+#: src/routes/_shell.knowledge.$collection.tsx
+msgid "Collection not found"
+msgstr "Collection introuvable"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Collections"
@@ -935,7 +943,6 @@ msgstr "Source"
 #: src/core.ts
 #: src/guest/api.ts
 #: src/load-from-core.tsx
-#: src/routes/_shell.connections.tsx
 #: src/routes/_shell.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/routes/sign-in.tsx
@@ -1014,6 +1021,10 @@ msgstr "Il n’a aucune étape."
 #: src/routes/_shell.apps.$app.tsx
 msgid "It isn't shared with anyone."
 msgstr "Elle n’est partagée avec personne."
+
+#: src/frame/page-states.tsx
+msgid "It may have been renamed or removed."
+msgstr "Il a peut-être été renommé ou supprimé."
 
 #: src/chat/builds.tsx
 msgid "It no longer runs (it could change things)."
@@ -1124,21 +1135,9 @@ msgstr "Recharger le code serveur"
 msgid "Loading its tools…"
 msgstr "Chargement de ses outils…"
 
-#: src/routes/_shell.apps.$app.tsx
-msgid "Loading members…"
-msgstr "Chargement des membres…"
-
-#: src/routes/_shell.apps.$app.tsx
-msgid "Loading runs…"
-msgstr "Chargement des exécutions…"
-
-#: src/chat/builds.tsx
-msgid "Loading the server code…"
-msgstr "Chargement du code serveur…"
-
 #: src/activity/audit-log.tsx
-#: src/chat/side-panel.tsx
 #: src/chat/thread.tsx
+#: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
 msgid "Loading…"
 msgstr "Chargement…"
@@ -1330,6 +1329,14 @@ msgstr "Aucune en attente d’un admin."
 #: src/connections/connection-list.tsx
 msgid "None."
 msgstr "Aucun."
+
+#: src/frame/page-states.tsx
+msgid "Not found"
+msgstr "Introuvable"
+
+#: src/load-from-core.tsx
+msgid "Not found. It may have been renamed or removed."
+msgstr "Introuvable. Il a peut-être été renommé ou supprimé."
 
 #: src/connections/connection-list.tsx
 msgid "Not named by the provider"
@@ -2179,7 +2186,7 @@ msgstr "Ce lien ne fonctionne pas. Demandez-en un nouveau à la personne qui l�
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Ce lien a expiré. Demandez-en un nouveau à la personne qui l’a envoyé."
 
-#: src/route-error.tsx
+#: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Cette page ne s’est pas chargée"
 
@@ -2217,13 +2224,14 @@ msgid "Tools to allow"
 msgstr "Outils à autoriser"
 
 #: src/chat/thread.tsx
-#: src/route-error.tsx
+#: src/frame/page-states.tsx
 #: src/routes/_shell.index.tsx
 #: src/routes/_shell.tsx
 #: src/screens/screen-frame.tsx
 msgid "Try again"
 msgstr "Réessayer"
 
+#: src/frame/page-states.tsx
 #: src/routes/_shell.tsx
 msgid "Trying again…"
 msgstr "Nouvel essai…"
@@ -2369,6 +2377,10 @@ msgstr "Workflow"
 #: src/activity/pending.tsx
 msgid "Workflow {workflowId} of {app}"
 msgstr "Workflow {workflowId} de {app}"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
+msgid "Workflow not found"
+msgstr "Workflow introuvable"
 
 #: src/chat/builds.tsx
 msgid "Workflow tests fail:"

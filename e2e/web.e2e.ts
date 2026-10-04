@@ -289,6 +289,31 @@ test("sends someone whose session ended elsewhere to sign in, and back to the pa
   await expect(nav).toHaveCount(0);
 });
 
+test("says an address no page has, and an App that isn't there, are not found, in the frame", async ({
+  context,
+  page,
+}) => {
+  const { member } = peopleIn("notFound");
+  await signInTo(context, member);
+
+  await page.goto("/no-such-page");
+  await expect(page.getByRole("heading", { name: "Not found" })).toBeVisible();
+  await expect(
+    page.getByText("It may have been renamed or removed.")
+  ).toBeVisible();
+  // In the frame: the sidebar is there to go on from.
+  const nav = page.getByRole("navigation", { name: "Main" });
+  await expect(nav.getByRole("link", { name: "Apps" })).toBeVisible();
+
+  await page.goto("/apps/no-such-app");
+  await expect(
+    page.getByRole("heading", { name: "App not found" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Breadcrumb" })
+  ).toContainText("Not found");
+});
+
 test("never sends what it gave up on while core was out of reach, once core is back", async ({
   context,
   page,

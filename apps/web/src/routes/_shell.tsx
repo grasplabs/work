@@ -16,6 +16,7 @@ import { loadCoreStatus } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import { keepFolded, readFolded } from "../fold.ts";
 import { AppSidebar } from "../frame/app-sidebar.tsx";
+import { InFrame } from "../frame/in-frame.ts";
 import { RouteError } from "../route-error.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 
@@ -40,7 +41,9 @@ const Shell = () => {
         <AppSidebar core={core} identity={identity} />
         {/* The page scrolls inside it, so its header stays in view. */}
         <SidebarInset className="min-h-0 min-w-0 overflow-y-auto">
-          <Outlet />
+          <InFrame value>
+            <Outlet />
+          </InFrame>
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

@@ -1,13 +1,10 @@
 import { failureText, withReference } from "@grasp-os/shared/errors";
-import { Button } from "@grasp-os/ui/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useRouter, useRouterState } from "@tanstack/react-router";
+import { useLingui } from "@lingui/react/macro";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { isPageFault, reportError } from "./error-reports.ts";
-import { ErrorText } from "./error-text.tsx";
-import { SiteHeader } from "./frame/site-header.tsx";
+import { PageError } from "./frame/page-states.tsx";
 
 /**
  * What a page shows in place of itself when it failed, whatever the route:
@@ -17,7 +14,6 @@ import { SiteHeader } from "./frame/site-header.tsx";
  * it names code, not anything the person can act on.
  */
 export const RouteError = ({ error }: ErrorComponentProps) => {
-  const router = useRouter();
   const { t } = useLingui();
   const [reference, setReference] = useState<{
     error: unknown;
@@ -44,31 +40,5 @@ export const RouteError = ({ error }: ErrorComponentProps) => {
           : undefined
       )
     : failureText(error);
-  // Inside the frame (the shell loaded, a page under it failed), the page
-  // keeps its header, and with it the way to the sidebar on a phone.
-  const inFrame = useRouterState({
-    select: ({ matches }) =>
-      matches.some(
-        ({ routeId, status }) => routeId === "/_shell" && status === "success"
-      ),
-  });
-  const title = t`This page didn't load`;
-  // Not a <main>: inside the shell it shows in the frame's.
-  return (
-    <>
-      {inFrame ? <SiteHeader crumbs={[{ label: title }]} /> : null}
-      <div className="flex flex-col items-start gap-4 p-6">
-        <h1 className="text-2xl font-medium">{title}</h1>
-        <ErrorText>{reason}</ErrorText>
-        <Button
-          variant="outline"
-          onClick={() => {
-            void router.invalidate();
-          }}
-        >
-          <Trans>Try again</Trans>
-        </Button>
-      </div>
-    </>
-  );
+  return <PageError reason={reason} />;
 };

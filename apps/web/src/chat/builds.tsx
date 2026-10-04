@@ -23,6 +23,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
+import { LoadingLines } from "../frame/page-states.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { PreviewFrame } from "../screens/screen-frame.tsx";
@@ -197,11 +198,7 @@ const ServerCode = ({
   onRetry: () => void;
 }) => {
   if (code === undefined) {
-    return (
-      <output className="text-muted-foreground">
-        <Trans>Loading the server code…</Trans>
-      </output>
-    );
+    return <LoadingLines />;
   }
   if (code.state !== "ready") {
     return (
