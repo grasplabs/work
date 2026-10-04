@@ -263,6 +263,10 @@ msgid "A connection needs signing in again"
 msgstr "A connection needs signing in again"
 
 #: src/activity/audit-words.ts
+msgid "A connection refused to say what changed"
+msgstr "A connection refused to say what changed"
+
+#: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
 msgstr "A decision was put to people, or answered"
 
@@ -675,6 +679,10 @@ msgstr "Changed workflow"
 msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Changed: it acts for whoever uses the engine, with everything the engine holds"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Changes"
+msgstr "Changes"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
 msgstr "Changes something"
@@ -709,6 +717,8 @@ msgstr "Checked the audit trail's chain"
 msgid "Clear"
 msgstr "Clear"
 
+#: src/connections/connect-dialog.tsx
+#: src/connections/connection-list.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -828,6 +838,7 @@ msgid "Connected on"
 msgstr "Connected on"
 
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.integrations.index.tsx
 msgid "Connected."
 msgstr "Connected."
 
@@ -1215,6 +1226,7 @@ msgid "For"
 msgstr "For"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/integration-row.tsx
 msgid "For everyone"
 msgstr "For everyone"
 
@@ -1265,6 +1277,7 @@ msgstr "Grasp sets these for your organization, as agreed with you. To change th
 msgid "Grasp staff can read parameters, not change them."
 msgstr "Grasp staff can read parameters, not change them."
 
+#: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people."
 msgstr "Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people."
@@ -1322,6 +1335,10 @@ msgid "In the proposer's words"
 msgstr "In the proposer's words"
 
 #: src/routes/_shell.integrations.$integration.tsx
+msgid "Integration"
+msgstr "Integration"
+
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Integration not found"
 msgstr "Integration not found"
 
@@ -1343,6 +1360,14 @@ msgstr "It has no parameters."
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no steps."
 msgstr "It has no steps."
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "It isn't offered to your organization: offer it on its Overview before connecting it."
+msgstr "It isn't offered to your organization: offer it on its Overview before connecting it."
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "It isn't offered to your organization."
+msgstr "It isn't offered to your organization."
 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "It isn't shared with anyone."
@@ -1494,8 +1519,12 @@ msgid "Manage"
 msgstr "Manage"
 
 #: src/connections/integration-row.tsx
-msgid "Manage {app}"
-msgstr "Manage {app}"
+msgid "Manage {app}, connected for everyone"
+msgstr "Manage {app}, connected for everyone"
+
+#: src/connections/integration-row.tsx
+msgid "Manage {app}, connected for you"
+msgstr "Manage {app}, connected for you"
 
 #: src/export/export-menu.tsx
 msgid "Markdown (.md)"
@@ -1631,6 +1660,10 @@ msgstr "No file changes."
 msgid "No files yet."
 msgstr "No files yet."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "No integrations match your search."
+msgstr "No integrations match your search."
+
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
 msgstr "No longer runs {how}"
@@ -1706,6 +1739,10 @@ msgid "None."
 msgstr "None."
 
 #: src/routes/_shell.integrations.$integration.tsx
+msgid "Not allowed"
+msgstr "Not allowed"
+
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Not connected"
 msgstr "Not connected"
 
@@ -1738,9 +1775,17 @@ msgstr "Not released"
 msgid "Not verified"
 msgstr "Not verified"
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Nothing connected yet."
+msgstr "Nothing connected yet."
+
 #: src/workflows/runs.tsx
 msgid "Nothing has run yet."
 msgstr "Nothing has run yet."
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Nothing here yet."
+msgstr "Nothing here yet."
 
 #: src/activity/pending.tsx
 msgid "Nothing is waiting for approval."
@@ -1749,6 +1794,10 @@ msgstr "Nothing is waiting for approval."
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Nothing matched."
 msgstr "Nothing matched."
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Nothing needs attention."
+msgstr "Nothing needs attention."
 
 #: src/chat/builds.tsx
 msgid "Nothing runs yet: this would be the engine's first current version."
@@ -1834,6 +1883,10 @@ msgstr "Only the people this decision is from can answer it."
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Only when a condition holds:"
 msgstr "Only when a condition holds:"
+
+#: src/connections/integration-row.tsx
+msgid "Only you"
+msgstr "Only you"
 
 #: src/connections/connect-dialog.tsx
 msgid "Only you can use it."
@@ -2017,11 +2070,6 @@ msgstr "Ran a workflow"
 msgid "Read"
 msgstr "Read"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgctxt "what a tool may do"
-msgid "Read"
-msgstr "Read"
-
 #: src/activity/audit-words.ts
 msgid "Read a knowledge document"
 msgstr "Read a knowledge document"
@@ -2067,9 +2115,17 @@ msgstr "Read-only is ticked where Composio says a tool only reads; Grasp doesn't
 msgid "Reading the workspace"
 msgstr "Reading the workspace"
 
+#: src/activity/audit-words.ts
+msgid "Reading what changed at a connection failed"
+msgstr "Reading what changed at a connection failed"
+
 #: src/routes/guest.tsx
 msgid "Reading what you wrote"
 msgstr "Reading what you wrote"
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Reads"
+msgstr "Reads"
 
 #: src/chat/builds-state.ts
 msgid "reads the engine's data"
@@ -2512,6 +2568,14 @@ msgstr "Started a chat"
 msgid "Started by"
 msgstr "Started by"
 
+#: src/activity/audit-words.ts
+msgid "Started following a connection late: changes before then weren't read"
+msgstr "Started following a connection late: changes before then weren't read"
+
+#: src/activity/audit-words.ts
+msgid "Started following what changes at a connection"
+msgstr "Started following what changes at a connection"
+
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -2544,6 +2608,10 @@ msgstr "Stopped"
 #: src/activity/audit-words.ts
 msgid "Stopped a schedule that kept failing"
 msgstr "Stopped a schedule that kept failing"
+
+#: src/activity/audit-words.ts
+msgid "Stopped following what changes at a connection"
+msgstr "Stopped following what changes at a connection"
 
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
@@ -3039,11 +3107,6 @@ msgstr "Would keep {claimed} records here"
 #: src/chat/builds-state.ts
 msgid "Would run after approval"
 msgstr "Would run after approval"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgctxt "what a tool may do"
-msgid "Write"
-msgstr "Write"
 
 #: src/routes/guest.tsx
 msgid "Write your answer"

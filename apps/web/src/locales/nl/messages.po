@@ -263,6 +263,10 @@ msgid "A connection needs signing in again"
 msgstr "Een verbinding moet opnieuw worden aangemeld"
 
 #: src/activity/audit-words.ts
+msgid "A connection refused to say what changed"
+msgstr "Een verbinding weigerde te zeggen wat er veranderd is"
+
+#: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
 msgstr "Een beslissing is aan mensen voorgelegd of beantwoord"
 
@@ -675,6 +679,10 @@ msgstr "Workflow gewijzigd:"
 msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Gewijzigd: deze code handelt namens iedereen die de engine gebruikt, met alles wat de engine heeft"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Changes"
+msgstr "Wijzigt"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
 msgstr "Wijzigt iets"
@@ -709,6 +717,8 @@ msgstr "De keten van het auditlogboek gecontroleerd"
 msgid "Clear"
 msgstr "Wissen"
 
+#: src/connections/connect-dialog.tsx
+#: src/connections/connection-list.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -828,6 +838,7 @@ msgid "Connected on"
 msgstr "Gekoppeld op"
 
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.integrations.index.tsx
 msgid "Connected."
 msgstr "Gekoppeld."
 
@@ -1215,6 +1226,7 @@ msgid "For"
 msgstr "Voor"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/integration-row.tsx
 msgid "For everyone"
 msgstr "Voor iedereen"
 
@@ -1265,6 +1277,7 @@ msgstr "Grasp stelt deze in voor je organisatie, zoals met je afgesproken. Neem 
 msgid "Grasp staff can read parameters, not change them."
 msgstr "Grasp-medewerkers kunnen parameters lezen, niet wijzigen."
 
+#: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people."
 msgstr "Grasp-medewerkers kunnen hier geen accounts koppelen of wijzigen wat wordt aangeboden: dat is aan de eigen mensen van de organisatie."
@@ -1322,6 +1335,10 @@ msgid "In the proposer's words"
 msgstr "In de woorden van de indiener"
 
 #: src/routes/_shell.integrations.$integration.tsx
+msgid "Integration"
+msgstr "Integratie"
+
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Integration not found"
 msgstr "Integratie niet gevonden"
 
@@ -1343,6 +1360,14 @@ msgstr "Er zijn geen parameters."
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no steps."
 msgstr "Er zijn geen stappen."
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "It isn't offered to your organization: offer it on its Overview before connecting it."
+msgstr "Het wordt niet aangeboden aan je organisatie: bied het aan in het overzicht voordat je het koppelt."
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "It isn't offered to your organization."
+msgstr "Het wordt niet aangeboden aan je organisatie."
 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "It isn't shared with anyone."
@@ -1494,8 +1519,12 @@ msgid "Manage"
 msgstr "Beheren"
 
 #: src/connections/integration-row.tsx
-msgid "Manage {app}"
-msgstr "{app} beheren"
+msgid "Manage {app}, connected for everyone"
+msgstr "{app} beheren, gekoppeld voor iedereen"
+
+#: src/connections/integration-row.tsx
+msgid "Manage {app}, connected for you"
+msgstr "{app} beheren, gekoppeld voor jou"
 
 #: src/export/export-menu.tsx
 msgid "Markdown (.md)"
@@ -1631,6 +1660,10 @@ msgstr "Geen bestandswijzigingen."
 msgid "No files yet."
 msgstr "Nog geen bestanden."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "No integrations match your search."
+msgstr "Geen integraties komen overeen met je zoekopdracht."
+
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
 msgstr "Draait niet meer {how}"
@@ -1706,6 +1739,10 @@ msgid "None."
 msgstr "Geen."
 
 #: src/routes/_shell.integrations.$integration.tsx
+msgid "Not allowed"
+msgstr "Niet toegestaan"
+
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Not connected"
 msgstr "Niet gekoppeld"
 
@@ -1738,9 +1775,17 @@ msgstr "Niet uitgebracht"
 msgid "Not verified"
 msgstr "Niet geverifieerd"
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Nothing connected yet."
+msgstr "Nog niets gekoppeld."
+
 #: src/workflows/runs.tsx
 msgid "Nothing has run yet."
 msgstr "Er is nog niets gedraaid."
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Nothing here yet."
+msgstr "Hier staat nog niets."
 
 #: src/activity/pending.tsx
 msgid "Nothing is waiting for approval."
@@ -1749,6 +1794,10 @@ msgstr "Er wacht niets op goedkeuring."
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Nothing matched."
 msgstr "Niets gevonden."
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Nothing needs attention."
+msgstr "Niets vraagt aandacht."
 
 #: src/chat/builds.tsx
 msgid "Nothing runs yet: this would be the engine's first current version."
@@ -1834,6 +1883,10 @@ msgstr "Alleen de mensen voor wie deze beslissing is, kunnen erop antwoorden."
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Only when a condition holds:"
 msgstr "Alleen als aan een voorwaarde is voldaan:"
+
+#: src/connections/integration-row.tsx
+msgid "Only you"
+msgstr "Alleen jij"
 
 #: src/connections/connect-dialog.tsx
 msgid "Only you can use it."
@@ -2017,11 +2070,6 @@ msgstr "Een workflow uitgevoerd"
 msgid "Read"
 msgstr "Lezen"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgctxt "what a tool may do"
-msgid "Read"
-msgstr "Lezen"
-
 #: src/activity/audit-words.ts
 msgid "Read a knowledge document"
 msgstr "Een kennisdocument gelezen"
@@ -2067,9 +2115,17 @@ msgstr "Alleen-lezen is aangevinkt waar Composio zegt dat een tool alleen leest;
 msgid "Reading the workspace"
 msgstr "Werkruimte wordt gelezen"
 
+#: src/activity/audit-words.ts
+msgid "Reading what changed at a connection failed"
+msgstr "Lezen wat er bij een verbinding veranderd is, is mislukt"
+
 #: src/routes/guest.tsx
 msgid "Reading what you wrote"
 msgstr "Je antwoord wordt gelezen"
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Reads"
+msgstr "Leest"
 
 #: src/chat/builds-state.ts
 msgid "reads the engine's data"
@@ -2512,6 +2568,14 @@ msgstr "Een chat gestart"
 msgid "Started by"
 msgstr "Gestart door"
 
+#: src/activity/audit-words.ts
+msgid "Started following a connection late: changes before then weren't read"
+msgstr "Te laat begonnen een verbinding te volgen: eerdere wijzigingen zijn niet gelezen"
+
+#: src/activity/audit-words.ts
+msgid "Started following what changes at a connection"
+msgstr "Begonnen te volgen wat er bij een verbinding verandert"
+
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -2544,6 +2608,10 @@ msgstr "Gestopt"
 #: src/activity/audit-words.ts
 msgid "Stopped a schedule that kept failing"
 msgstr "Een planning gestopt die bleef mislukken"
+
+#: src/activity/audit-words.ts
+msgid "Stopped following what changes at a connection"
+msgstr "Gestopt met volgen wat er bij een verbinding verandert"
 
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
@@ -3039,11 +3107,6 @@ msgstr "Zou hier records van het type {claimed} bijhouden"
 #: src/chat/builds-state.ts
 msgid "Would run after approval"
 msgstr "Zou na goedkeuring draaien"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgctxt "what a tool may do"
-msgid "Write"
-msgstr "Schrijven"
 
 #: src/routes/guest.tsx
 msgid "Write your answer"
