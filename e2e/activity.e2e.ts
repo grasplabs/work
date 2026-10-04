@@ -67,8 +67,12 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   }
 
   const page = await pageOf(browser, admin);
-  await page.goto("/activity");
-  await page.getByRole("tab", { name: "Pending approvals" }).click();
+  // From Settings: an admin's Pending approvals.
+  await page.goto("/settings/profile");
+  await page
+    .getByRole("navigation", { name: "Settings" })
+    .getByRole("link", { name: "Pending approvals" })
+    .click();
   // Other tests' requests wait here too: only this App's rows count.
   const rows = page.getByRole("row").filter({ hasText: appName });
   await expect(rows).toHaveCount(2);
@@ -110,7 +114,9 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   } finally {
     reader.core[Symbol.dispose]();
   }
+  // An old link to the log leads to the audit trail, filters and all.
   await page.goto(`/activity?target=${approved}`);
+  await expect(page).toHaveURL(/\/settings\/audit\?/u);
   await expect(page.getByRole("textbox", { name: "Target ID" })).toHaveValue(
     approved
   );
@@ -147,7 +153,8 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await expect(granted).toHaveCount(1);
 
   const downloading = page.waitForEvent("download");
-  await page.getByRole("link", { name: "Export CSV" }).click();
+  await page.getByRole("button", { name: "Export the audit trail" }).click();
+  await page.getByRole("menuitem", { name: "Export CSV" }).click();
   const download = await downloading;
   expect(download.suggestedFilename()).toMatch(/^audit-log-.+\.csv$/u);
   const csv = await readFile(await download.path(), "utf-8");
@@ -160,7 +167,7 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   // Text that can't start an action is dropped, not refused by core, and
   // so is a day no calendar has, rather than searched as the next month's.
   await page.goto(
-    `/activity?target=${approved}&action=${encodeURIComponent("no such action!")}&from=2024-02-29&to=2099-02-29`
+    `/settings/audit?target=${approved}&action=${encodeURIComponent("no such action!")}&from=2024-02-29&to=2099-02-29`
   );
   await expect(page.getByRole("textbox", { name: "Action" })).toHaveValue("");
   // A leap day is a day; 2099 has none.
@@ -199,7 +206,9 @@ test("an admin sees a grant asked for again after a new version, and approves on
 
   try {
     const page = await pageOf(browser, admin);
+    // An old link to them leads there too.
     await page.goto("/activity?tab=pending");
+    await expect(page).toHaveURL(/\/settings\/approvals$/u);
     const row = page.getByRole("row").filter({ hasText: appName });
     await expect(row).toContainText(
       /Asked again after version 2 was made current \(previously granted by .+ on .+\)/u

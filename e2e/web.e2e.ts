@@ -118,23 +118,31 @@ test("names each member's actions for them, and asks before making someone an ad
   // Everyone signed in here has the same name.
   const { admin, one, two } = peopleIn("memberActions");
   await signInTo(context, admin);
+  // An old link leads to Settings → Members and roles.
   await page.goto("/members");
+  await expect(page).toHaveURL(/\/settings\/members$/u);
 
   for (const person of [one, two]) {
     const who = `Person (${person.email})`;
-    for (const name of [`End sessions for ${who}`, `Remove ${who}`]) {
-      // oxlint-disable-next-line no-await-in-loop -- one control at a time
-      await expect(page.getByRole("button", { name, exact: true })).toHaveCount(
-        1
-      );
-    }
+    // oxlint-disable-next-line no-await-in-loop -- one control at a time
+    await expect(
+      page.getByRole("button", { name: `More for ${who}`, exact: true })
+    ).toHaveCount(1);
   }
   const labels = await page
-    .getByRole("button", { name: /^(?:End sessions for|Remove) /u })
+    .getByRole("button", { name: /^More for /u })
     .evaluateAll((buttons) =>
       buttons.map((button) => button.getAttribute("aria-label"))
     );
   expect(new Set(labels).size).toBe(labels.length);
+  await page
+    .getByRole("button", { name: `More for Person (${one.email})` })
+    .click();
+  await expect(
+    page.getByRole("menuitem", { name: "Sign out everywhere" })
+  ).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Remove" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   const role = page.getByRole("combobox", {
     name: `Role of Person (${one.email})`,
@@ -153,12 +161,14 @@ test("shows the members page only to someone signed in, and never signs them out
   context,
   page,
 }) => {
-  await page.goto("/members");
+  await page.goto("/settings/members");
   await expect(
     page.getByText("Use your organization’s account to go on.")
   ).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/sign-in");
-  expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/members");
+  expect(new URL(page.url()).searchParams.get("returnTo")).toBe(
+    "/settings/members"
+  );
   await expect(page.getByRole("heading", { name: "Members" })).toHaveCount(0);
   await expect(page.getByRole("table")).toHaveCount(0);
 
@@ -179,21 +189,21 @@ test("shows the members page only to someone signed in, and never signs them out
   // A couple of failures pass: the page's connection tries again, with a
   // growing pause, and lets them in.
   failing = 2;
-  await page.goto("/members");
+  await page.goto("/settings/members");
   await expect(page.getByRole("heading", { name: "Members" })).toBeVisible({
     timeout: reconnectMs,
   });
-  expect(new URL(page.url()).pathname).toBe("/members");
+  expect(new URL(page.url()).pathname).toBe("/settings/members");
   expect(failing).toBe(0);
 
   // Failing for good says so, rather than asking them to sign in again:
   // once the page has waited its few seconds for a connection.
   failing = Number.POSITIVE_INFINITY;
-  await page.goto("/members");
+  await page.goto("/settings/members");
   await expect(
     page.getByText("Grasp can't be reached right now. Try again in a moment.")
   ).toBeVisible({ timeout: reconnectMs });
-  expect(new URL(page.url()).pathname).toBe("/members");
+  expect(new URL(page.url()).pathname).toBe("/settings/members");
   await expect(
     page.getByText("Use your organization’s account to go on.")
   ).toHaveCount(0);
@@ -208,7 +218,7 @@ test("shows the members page only to someone signed in, and never signs them out
     "Grasp can't be reached right now. Try again in a moment.",
     { timeout: reconnectMs }
   );
-  expect(new URL(page.url()).pathname).toBe("/members");
+  expect(new URL(page.url()).pathname).toBe("/settings/members");
 
   // Once core answers again, trying again lets them in.
   failing = 0;
@@ -225,7 +235,7 @@ test("an admin changes a member's role, and the controls wait for the list to sh
   const { admin, one } = peopleIn("roleChange");
   await signInTo(context, admin);
   const gate = await callGate(page, '["members","list"]');
-  await page.goto("/members");
+  await page.goto("/settings/members");
   const who = `Person (${one.email})`;
   const role = page.getByRole("combobox", { name: `Role of ${who}` });
   await expect(role).toContainText("User");
@@ -241,7 +251,7 @@ test("an admin changes a member's role, and the controls wait for the list to sh
   const whileRefreshing = {
     role: await role.isDisabled(),
     remove: await page
-      .getByRole("button", { name: `Remove ${who}`, exact: true })
+      .getByRole("button", { name: `More for ${who}`, exact: true })
       .isDisabled(),
   };
   gate.release();
@@ -258,7 +268,7 @@ test("shows the page loading while the members list is slow, then says core can'
   await signInTo(context, admin);
   const gate = await callGate(page, '["members","list"]');
   gate.hold();
-  await page.goto("/members");
+  await page.goto("/settings/members");
   // In the frame, as skeletons, while the read is slow.
   await expect(page.getByRole("status", { name: "Loading…" })).toBeVisible();
   const nav = page.getByRole("navigation", { name: "Main" });
@@ -357,7 +367,7 @@ test("never sends what it gave up on while core was out of reach, once core is b
       server.send(message);
     });
   });
-  await page.goto("/members");
+  await page.goto("/settings/members");
   const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link", { name: "Knowledge" })).toBeVisible();
 

@@ -106,7 +106,7 @@ msgstr "{folded, plural, one {# frühere} other {# frühere}}"
 msgid "{holder}: {actions} on {resource}"
 msgstr "{holder}: {actions} auf {resource}"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "{limit} a month, admins alerted at {alertAt}%. Calls stop once it's used up."
 msgstr "{limit} pro Monat, Admins werden bei {alertAt} % benachrichtigt. Aufrufe stoppen, sobald es aufgebraucht ist."
 
@@ -138,6 +138,14 @@ msgstr "{name} hat keine Ansicht zum Anzeigen."
 msgid "{name} is read-only"
 msgstr "{name} liest nur"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "{name} is removed. {count, plural, one {# personal connection was disconnected.} other {# personal connections were disconnected.}}"
+msgstr "{name} ist entfernt. {count, plural, one {# persönliche Verbindung wurde getrennt.} other {# persönliche Verbindungen wurden getrennt.}}"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "{name} is signed out everywhere."
+msgstr "{name} ist überall abgemeldet."
+
 #: src/chat/builds-state.ts
 msgid "{name} no longer changes the App's data (write → read)"
 msgstr "{name} ändert die Daten der App nicht mehr (schreiben → lesen)"
@@ -161,6 +169,10 @@ msgstr "{path}, wie es laufen würde"
 #: src/chat/builds-state.ts
 msgid "{path}, which would no longer run"
 msgstr "{path}, das nicht mehr laufen würde"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "{people, plural, one {# person has access. Members join by signing in with your organization’s account; there are no invitations to send.} other {# people have access. Members join by signing in with your organization’s account; there are no invitations to send.}}"
+msgstr "{people, plural, one {# Person hat Zugriff. Mitglieder kommen hinzu, indem sie sich mit dem Konto Ihrer Organisation anmelden; Einladungen gibt es nicht.} other {# Personen haben Zugriff. Mitglieder kommen hinzu, indem sie sich mit dem Konto Ihrer Organisation anmelden; Einladungen gibt es nicht.}}"
 
 #: src/frame/person-menu.tsx
 msgid "{role}, Grasp staff"
@@ -206,7 +218,7 @@ msgstr "{who} kann später nicht mehr erteilt werden: es muss erneut angefragt w
 msgid "{who} consented to this before connecting it:"
 msgstr "{who} hat vor dem Verbinden hier zugestimmt:"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "{workflowId} in {app}"
 msgstr "{workflowId} in {app}"
 
@@ -233,11 +245,6 @@ msgstr "Aktionen"
 #: src/connections/connection-list.tsx
 msgid "Active"
 msgstr "Aktiv"
-
-#: src/frame/person-menu.tsx
-#: src/routes/_shell.activity.tsx
-msgid "Activity"
-msgstr "Aktivität"
 
 #: src/activity/audit-log.tsx
 msgid "Actor"
@@ -271,7 +278,7 @@ msgstr "Hinzugefügt: Er handelt für jeden, der die App nutzt, mit allem, was d
 msgid "Admin"
 msgstr "Admin"
 
-#: src/routes/_shell.members.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Admins können die Rolle jeder Person ändern, ihre Sitzungen beenden und sie entfernen, andere Admins eingeschlossen."
 
@@ -296,11 +303,11 @@ msgstr "Alle"
 msgid "All Apps"
 msgstr "Alle Apps"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "All calls"
 msgstr "Alle Aufrufe"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "All calls together"
 msgstr "Alle Aufrufe zusammen"
 
@@ -308,13 +315,17 @@ msgstr "Alle Aufrufe zusammen"
 msgid "All workflow tests pass."
 msgstr "Alle Workflow-Tests bestehen."
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Allowed models"
 msgstr "Erlaubte Modelle"
 
 #: src/connections/connection-list.tsx
 msgid "An admin"
 msgstr "Ein Admin"
+
+#: src/routes/_shell.settings.profile.tsx
+msgid "An admin changes it, in Members and roles."
+msgstr "Ein Admin ändert sie, unter Mitglieder und Rollen."
 
 #: src/connections/catalog.tsx
 msgid "An admin connects this for everyone."
@@ -450,9 +461,10 @@ msgstr "Fragt nach"
 msgid "At {step}: {error}"
 msgstr "Bei {step}: {error}"
 
-#: src/routes/_shell.activity.tsx
-msgid "Audit log"
-msgstr "Prüfprotokoll"
+#: src/routes/_shell.settings.audit.tsx
+#: src/routes/_shell.settings.tsx
+msgid "Audit trail"
+msgstr "Audit-Trail"
 
 #: src/workflows/runs.tsx
 msgid "Automatically"
@@ -474,7 +486,7 @@ msgstr "Brotkrümelnavigation"
 msgid "Browse"
 msgstr "Durchsuchen"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Budgets"
 msgstr "Budgets"
 
@@ -669,7 +681,7 @@ msgstr "Verbindung {connectionId}, {resource}"
 msgid "Connections"
 msgstr "Verbindungen"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Connections whose data stays in the EU: {connections}."
 msgstr "Verbindungen, deren Daten in der EU bleiben: {connections}."
 
@@ -709,7 +721,7 @@ msgstr "Erstellt vom Mitglied {owner}."
 msgid "Created by you."
 msgstr "Von Ihnen erstellt."
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Data rules"
 msgstr "Datenregeln"
 
@@ -799,11 +811,11 @@ msgstr "{name} herunterladen"
 msgid "Drop files here"
 msgstr "Dateien hier ablegen"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Each person"
 msgstr "Jede Person"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Each workflow"
 msgstr "Jeder Workflow"
 
@@ -816,17 +828,9 @@ msgstr "Früher"
 msgid "Edit"
 msgstr "Bearbeiten"
 
-#: src/routes/_shell.members.tsx
+#: src/routes/_shell.settings.profile.tsx
 msgid "Email"
 msgstr "E-Mail"
-
-#: src/routes/_shell.members.tsx
-msgid "End sessions"
-msgstr "Sitzungen beenden"
-
-#: src/routes/_shell.members.tsx
-msgid "End sessions for {who}"
-msgstr "Sitzungen von {who} beenden"
 
 #: src/workflows/runs.tsx
 msgid "Ended"
@@ -844,21 +848,25 @@ msgstr "Geben Sie einen Betrag ein, zum Beispiel 12.50."
 msgid "Error"
 msgstr "Fehler"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "EU routing"
 msgstr "EU-Routing"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Every call stays in the EU: no."
 msgstr "Jeder Aufruf bleibt in der EU: nein."
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Every call stays in the EU: yes."
 msgstr "Jeder Aufruf bleibt in der EU: ja."
 
 #: src/knowledge/collection-markers.tsx
 msgid "Everyone"
 msgstr "Alle"
+
+#: src/routes/_shell.settings.audit.tsx
+msgid "Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen."
+msgstr "Alles, was in Grasp getan wurde, von wem und wann, in einer Kette, die niemand unbemerkt ändern kann."
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it, and always have the memory files in mind."
@@ -883,6 +891,10 @@ msgstr "CSV exportieren"
 #: src/activity/audit-log.tsx
 msgid "Export JSON"
 msgstr "JSON exportieren"
+
+#: src/activity/audit-log.tsx
+msgid "Export the audit trail"
+msgstr "Audit-Trail exportieren"
 
 #: src/chat/builds.tsx
 msgid "Exports"
@@ -957,7 +969,11 @@ msgstr "Grasp ist gerade nicht erreichbar. Versuchen Sie es gleich noch einmal."
 msgid "Grasp holds every change to an outside system until you confirm it."
 msgstr "Grasp hält jede Änderung an einem externen System zurück, bis Sie sie bestätigen."
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.profile.tsx
+msgid "Grasp in your language. Numbers, dates and amounts follow it too."
+msgstr "Grasp in Ihrer Sprache. Zahlen, Daten und Beträge folgen ihr auch."
+
+#: src/routes/_shell.settings.models.tsx
 msgid "Grasp sets these for your organization, as agreed with you. To change them, contact Grasp."
 msgstr "Grasp legt diese für Ihre Organisation fest, wie mit Ihnen vereinbart. Wenden Sie sich für Änderungen an Grasp."
 
@@ -1002,9 +1018,13 @@ msgstr "Genau Gesendetes ausblenden"
 msgid "History"
 msgstr "Verlauf"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Hosted in the EU"
 msgstr "In der EU gehostet"
+
+#: src/routes/_shell.settings.profile.tsx
+msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
+msgstr "Wie Sie in Grasp erscheinen: bei Workflows, für die Sie verantwortlich sind, und im Audit-Trail."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "If {condition}:"
@@ -1095,6 +1115,7 @@ msgid "Knowledge"
 msgstr "Wissen"
 
 #: src/language-picker.tsx
+#: src/routes/_shell.settings.profile.tsx
 msgid "Language"
 msgstr "Sprache"
 
@@ -1143,6 +1164,7 @@ msgstr "Werkzeuge werden geladen…"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
+#: src/settings/settings-parts.tsx
 msgid "Loading…"
 msgstr "Wird geladen…"
 
@@ -1150,11 +1172,11 @@ msgstr "Wird geladen…"
 msgid "Main"
 msgstr "Hauptmenü"
 
-#: src/routes/_shell.members.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "Make {name} an admin?"
 msgstr "{name} zum Admin machen?"
 
-#: src/routes/_shell.members.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "Make admin"
 msgstr "Zum Admin machen"
 
@@ -1166,11 +1188,14 @@ msgstr "Version {version} aktuell machen"
 msgid "May change something outside Grasp"
 msgstr "Kann etwas außerhalb von Grasp ändern"
 
-#: src/frame/person-menu.tsx
 #: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.members.tsx
 msgid "Members"
 msgstr "Mitglieder"
+
+#: src/routes/_shell.settings.members.tsx
+#: src/routes/_shell.settings.tsx
+msgid "Members and roles"
+msgstr "Mitglieder und Rollen"
 
 #: src/labels.ts
 #: src/routes/_shell.knowledge.index.tsx
@@ -1182,7 +1207,7 @@ msgstr "Gedächtnis"
 msgid "Messages"
 msgstr "Nachrichten"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Model"
 msgstr "Modell"
 
@@ -1194,12 +1219,12 @@ msgstr "Modellaufruf"
 msgid "Model: {name}. Change model"
 msgstr "Modell: {name}. Modell ändern"
 
-#: src/frame/person-menu.tsx
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
+#: src/routes/_shell.settings.tsx
 msgid "Models"
 msgstr "Modelle"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Models aren't set up for this deployment yet, so no model call can be made. Grasp sets them up."
 msgstr "Für diese Instanz sind noch keine Modelle eingerichtet, daher ist kein Modellaufruf möglich. Grasp richtet sie ein."
 
@@ -1211,6 +1236,10 @@ msgstr "Modelle für Ihre Organisation"
 msgid "More for {title}"
 msgstr "Mehr zu {title}"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "More for {who}"
+msgstr "Mehr für {who}"
+
 #: src/chat/held-writes.tsx
 msgid "More will be sent than is shown above. Read exactly what will be sent before you confirm."
 msgstr "Es wird mehr gesendet, als oben angezeigt wird. Lesen Sie genau, was gesendet wird, bevor Sie bestätigen."
@@ -1220,7 +1249,7 @@ msgid "My connections"
 msgstr "Meine Verbindungen"
 
 #: src/routes/_shell.apps.index.tsx
-#: src/routes/_shell.members.tsx
+#: src/routes/_shell.settings.profile.tsx
 msgid "Name"
 msgstr "Name"
 
@@ -1253,11 +1282,11 @@ msgstr "Keine App, die Sie öffnen können, hat bisher einen Workflow."
 msgid "No Apps yet"
 msgstr "Noch keine Apps"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "No budget is set: model calls aren't limited by cost."
 msgstr "Kein Budget festgelegt: Modellaufrufe sind nicht nach Kosten begrenzt."
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "No call has to stay in the EU."
 msgstr "Kein Aufruf muss in der EU bleiben."
 
@@ -1314,9 +1343,17 @@ msgstr "Nein: Sein Hash oder seine Verknüpfung zum vorherigen Ereignis stimmt n
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Niemand hat rechtzeitig geantwortet, daher ist diese Entscheidung geschlossen."
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.members.tsx
+msgid "Nobody matches."
+msgstr "Niemand passt."
+
+#: src/routes/_shell.settings.models.tsx
 msgid "none"
 msgstr "keine"
+
+#: src/routes/_shell.settings.profile.tsx
+msgid "None"
+msgstr "Keine"
 
 #: src/activity/pending.tsx
 msgid "None current"
@@ -1376,7 +1413,7 @@ msgstr "Keine Treffer."
 msgid "Nothing runs yet: this would be the App's first current version."
 msgstr "Noch läuft nichts: Dies wäre die erste aktuelle Version der App."
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Nothing spent yet."
 msgstr "Noch nichts ausgegeben."
 
@@ -1397,7 +1434,7 @@ msgstr "Läuft jetzt {how}"
 msgid "Now runs {how}, {times}"
 msgstr "Läuft jetzt {how}, {times}"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Of the limit"
 msgstr "Vom Limit"
 
@@ -1433,7 +1470,7 @@ msgstr "bei E-Mail an {address}@"
 msgid "on the event {event}, filtered"
 msgstr "beim Ereignis {event}, gefiltert"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, App or run that read one."
 msgstr "Nur die als geeignet für sensible Daten markierten Modelle dürfen Daten aus einer sensiblen Sammlung (markiert unter Wissen) oder einer sensiblen Verbindung erhalten, oder aus einem Chat, einer App oder einem Lauf, der eine davon gelesen hat."
 
@@ -1515,7 +1552,8 @@ msgstr "Pausiert"
 msgid "Pending"
 msgstr "Ausstehend"
 
-#: src/routes/_shell.activity.tsx
+#: src/routes/_shell.settings.approvals.tsx
+#: src/routes/_shell.settings.tsx
 msgid "Pending approvals"
 msgstr "Ausstehende Genehmigungen"
 
@@ -1562,6 +1600,11 @@ msgstr "Vorschau der ersten Ansicht des Entwurfs"
 #: src/screens/screen-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
 msgstr "Vorschau: ändert nichts, liest keine echten Daten"
+
+#: src/routes/_shell.settings.profile.tsx
+#: src/routes/_shell.settings.tsx
+msgid "Profile"
+msgstr "Profil"
 
 #: src/chat/builds.tsx
 msgid "Proposed by the agent in chat \"{chatTitle}\"."
@@ -1647,17 +1690,13 @@ msgstr "Abgelehnt: {who}."
 msgid "Reload"
 msgstr "Neu laden"
 
-#: src/routes/_shell.members.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "Remove"
 msgstr "Entfernen"
 
-#: src/routes/_shell.members.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "Remove {name}?"
 msgstr "{name} entfernen?"
-
-#: src/routes/_shell.members.tsx
-msgid "Remove {who}"
-msgstr "{who} entfernen"
 
 #: src/chat/builds.tsx
 msgid "Removed"
@@ -1736,15 +1775,15 @@ msgid "Revoke {holder}'s permission"
 msgstr "Berechtigung von {holder} widerrufen"
 
 #: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.members.tsx
+#: src/routes/_shell.settings.profile.tsx
 msgid "Role"
 msgstr "Rolle"
 
-#: src/routes/_shell.members.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "Role of {who}"
 msgstr "Rolle von {who}"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Rules"
 msgstr "Regeln"
 
@@ -1800,12 +1839,17 @@ msgid "Screens"
 msgstr "Ansichten"
 
 #: src/connections/catalog.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "Search"
 msgstr "Suchen"
 
 #: src/knowledge/nav.tsx
 msgid "Search Knowledge"
 msgstr "Wissen durchsuchen"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "Search members"
+msgstr "Mitglieder suchen"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Search reads every collection you may read. Try other words, or fewer."
@@ -1829,13 +1873,26 @@ msgstr "Senden"
 msgid "Sensitive"
 msgstr "Sensibel"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Sensitive connections: {connections}."
 msgstr "Sensible Verbindungen: {connections}."
 
 #: src/chat/builds.tsx
 msgid "Server code"
 msgstr "Servercode"
+
+#: src/routes/_shell.settings.profile.tsx
+msgid "Set by your organization’s sign-in."
+msgstr "Von der Anmeldung Ihrer Organisation festgelegt."
+
+#: src/routes/_shell.settings.profile.tsx
+msgid "Set in your organization’s directory."
+msgstr "Im Verzeichnis Ihrer Organisation festgelegt."
+
+#: src/frame/person-menu.tsx
+#: src/routes/_shell.settings.tsx
+msgid "Settings"
+msgstr "Einstellungen"
 
 #: src/chat/builds.tsx
 msgid "Shared code changed"
@@ -1917,6 +1974,10 @@ msgstr "Melden Sie sich mit dem Konto Ihrer Organisation an."
 msgid "Sign out"
 msgstr "Abmelden"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "Sign out everywhere"
+msgstr "Überall abmelden"
+
 #: src/sign-in-errors.ts
 msgid "Sign-in didn't work. Try again, or ask an admin."
 msgstr "Die Anmeldung hat nicht funktioniert. Versuchen Sie es erneut oder fragen Sie einen Admin."
@@ -1945,19 +2006,19 @@ msgstr "Jemand, der nicht mehr da ist"
 msgid "Something went wrong."
 msgstr "Etwas ist schiefgelaufen."
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Spend this month ({month}, UTC)."
 msgstr "Ausgaben in diesem Monat ({month}, UTC)."
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Spend: {title}"
 msgstr "Ausgaben: {title}"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Spent"
 msgstr "Ausgegeben"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Spent by"
 msgstr "Ausgegeben von"
 
@@ -2006,7 +2067,7 @@ msgstr "Gestoppt"
 msgid "Stopped."
 msgstr "Gestoppt."
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Takes sensitive data"
 msgstr "Nimmt sensible Daten an"
 
@@ -2019,6 +2080,7 @@ msgid "Target ID"
 msgstr "Ziel-ID"
 
 #: src/knowledge/collection-markers.tsx
+#: src/routes/_shell.settings.profile.tsx
 msgid "Teams"
 msgstr "Teams"
 
@@ -2070,7 +2132,7 @@ msgstr "Dieses Konto des Grasp-Teams hat hier keinen Zugang erhalten."
 msgid "That way of signing in isn't set up here."
 msgstr "Diese Anmeldemethode ist hier nicht eingerichtet."
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "The {top} who spent most; more spent less."
 msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
 
@@ -2094,7 +2156,7 @@ msgstr "Der Link funktioniert bis {until}."
 msgid "The model call failed."
 msgstr "Der Modellaufruf ist fehlgeschlagen."
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."
 msgstr "Die Regeln in der Konfiguration dieser Instanz können nicht gelesen werden, daher wird jeder Modellaufruf abgelehnt. Wenden Sie sich an Grasp."
 
@@ -2122,11 +2184,11 @@ msgstr "Es gibt noch keine Apps, die Sie öffnen können."
 msgid "There are no collections you can read yet."
 msgstr "Es gibt noch keine Sammlungen, die Sie lesen können."
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "There is no data rule: any allowed model may take sensitive data."
 msgstr "Es gibt keine Datenregel: Jedes erlaubte Modell darf sensible Daten erhalten."
 
-#: src/routes/_shell.members.tsx
+#: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "Die Person wird überall abgemeldet, ihre persönlichen Verbindungen werden getrennt, und sie kann sich nicht mehr anmelden."
 
@@ -2338,6 +2400,10 @@ msgstr "Wartet auf Sie: {title}"
 msgid "Waits"
 msgstr "Wartet"
 
+#: src/routes/_shell.settings.approvals.tsx
+msgid "What Apps and agents ask to be allowed to do, waiting for an admin."
+msgstr "Was Apps und Agents tun möchten und dafür auf einen Admin warten."
+
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
@@ -2402,9 +2468,14 @@ msgstr "Workflows"
 msgid "Workflows and more"
 msgstr "Workflows und mehr"
 
-#: src/routes/_shell.models.tsx
+#: src/routes/_shell.settings.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."
 msgstr "Workflows, deren KI-Schritte in der EU bleiben: {workflows}."
+
+#: src/routes/_shell.settings.tsx
+msgctxt "settings group"
+msgid "Workspace"
+msgstr "Arbeitsbereich"
 
 #: src/activity/pending.tsx
 msgid "Would keep {claimed} records here"
@@ -2429,10 +2500,15 @@ msgstr "Gestern"
 
 #: src/connections/connection-list.tsx
 #: src/knowledge/timeline.tsx
+#: src/routes/_shell.settings.members.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 msgid "You"
 msgstr "Sie"
+
+#: src/routes/_shell.settings.profile.tsx
+msgid "You are signed in as Grasp staff, for a limited time."
+msgstr "Sie sind als Grasp-Mitarbeiter angemeldet, für begrenzte Zeit."
 
 #: src/screens/screen-frame.tsx
 msgid "You can't open this App's screens: your role doesn't allow it, or the App has read data you can't read."
@@ -2458,6 +2534,10 @@ msgstr "Sie:"
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
 msgstr "Sie lesen Version {number}, gespeichert am {saved}. Die aktuelle Version ist {current}."
 
+#: src/routes/_shell.settings.tsx
+msgid "Your account"
+msgstr "Ihr Konto"
+
 #: src/chat/chat-list.tsx
 msgid "Your chats show up here."
 msgstr "Ihre Chats erscheinen hier."
@@ -2477,3 +2557,7 @@ msgstr "Ihre Frage"
 #: src/screens/screen-frame.tsx
 msgid "Your session has ended. Sign in again to go on."
 msgstr "Ihre Sitzung ist abgelaufen. Melden Sie sich erneut an, um fortzufahren."
+
+#: src/routes/_shell.settings.tsx
+msgid "Your workspace, who may do what in it, and your own account."
+msgstr "Ihr Arbeitsbereich, wer darin was tun darf, und Ihr eigenes Konto."

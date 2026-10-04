@@ -13,7 +13,13 @@ import type {
 } from "@grasp-os/shared/audit-log";
 import { identifierMaxLength } from "@grasp-os/shared/ids";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/ui/components/dropdown-menu";
 import { Input } from "@grasp-os/ui/components/input";
 import {
   Select,
@@ -30,11 +36,17 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { BracesIcon, DownloadIcon, SheetIcon } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
 
@@ -215,7 +227,7 @@ export const LogFilters = ({ search }: { search: LogSearch }) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
         void navigate({
-          to: "/activity",
+          to: "/settings/audit",
           search: logSearchOf({ ...Object.fromEntries(form), type }),
         });
       }}
@@ -256,7 +268,7 @@ export const LogFilters = ({ search }: { search: LogSearch }) => {
       <Button type="submit">
         <Trans>Filter</Trans>
       </Button>
-      <Link className="text-sm underline" search={{}} to="/activity">
+      <Link className="text-sm underline" search={{}} to="/settings/audit">
         <Trans>Clear</Trans>
       </Link>
     </form>
@@ -283,22 +295,52 @@ const exportHref = (search: LogSearch, format: AuditExportFormat): string => {
  * the export before it sends anything, and checks the session again as it
  * reads each page.
  */
-export const LogExport = ({ search }: { search: LogSearch }) => (
-  <div className="flex gap-2">
-    <a
-      className={buttonVariants({ variant: "outline" })}
-      href={exportHref(search, "csv")}
-    >
-      <Trans>Export CSV</Trans>
-    </a>
-    <a
-      className={buttonVariants({ variant: "outline" })}
-      href={exportHref(search, "json")}
-    >
-      <Trans>Export JSON</Trans>
-    </a>
-  </div>
-);
+/**
+ * The log as core exports it, filtered as shown: CSV or JSON, the formats
+ * core writes it in. A ghost button that is its icon alone, named in its
+ * tooltip, as every export in Grasp is.
+ */
+export const LogExport = ({ search }: { search: LogSearch }) => {
+  const { t } = useLingui();
+  const name = t`Export the audit trail`;
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <Button aria-label={name} size="icon-sm" variant="ghost" />
+              }
+            />
+          }
+        >
+          <DownloadIcon />
+        </TooltipTrigger>
+        <TooltipContent>{name}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuItem
+          onClick={() => {
+            // Core sends it as a file to save: the page stays.
+            window.location.assign(exportHref(search, "csv"));
+          }}
+        >
+          <SheetIcon />
+          <Trans>Export CSV</Trans>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            window.location.assign(exportHref(search, "json"));
+          }}
+        >
+          <BracesIcon />
+          <Trans>Export JSON</Trans>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
 
 /** Who did it, by name where the page knows it, and the ID to filter by. */
 const actorOf = (
@@ -383,7 +425,7 @@ const RecordRow = ({
             <Link
               className="underline"
               search={{ actor: actor.id }}
-              to="/activity"
+              to="/settings/audit"
             >
               {actor.label}
             </Link>
@@ -396,7 +438,7 @@ const RecordRow = ({
             <Link
               className="underline"
               search={{ target: event.target.id }}
-              to="/activity"
+              to="/settings/audit"
             >
               {event.target.type} {event.target.id}
             </Link>

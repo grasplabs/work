@@ -34,6 +34,17 @@ test("follows the browser's language, then the one the person picks", async ({
   await page.reload();
   await expect(page.getByRole("heading", { name: "Kennis" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "nl");
+
+  // And in Settings → Profile, which the person menu opens.
+  await page.getByRole("button", { name: /Gebruiker$/u }).click();
+  await page.getByRole("menuitem", { name: "Instellingen" }).click();
+  await expect(page).toHaveURL(/\/settings\/profile$/u);
+  await page.getByRole("combobox", { name: "Taal" }).click();
+  await page.getByRole("option", { name: "English" }).click();
+  await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
   await context.close();
 });
 
