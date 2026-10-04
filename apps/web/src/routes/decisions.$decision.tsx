@@ -1,5 +1,6 @@
+import { decisionErrors } from "@grasp-os/shared/decisions";
 import type { DecisionView } from "@grasp-os/shared/decisions";
-import { failureText, isExpectedError } from "@grasp-os/shared/errors";
+import { failureText } from "@grasp-os/shared/errors";
 import type { Identity, SignInOption } from "@grasp-os/shared/rpc";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
@@ -40,6 +41,7 @@ type DecisionPage =
   | { state: "signed-out"; signInOptions: SignInOption[] }
   | { state: "missing"; identity: Identity }
   | { state: "refused"; identity: Identity; message: string }
+  | { state: "not-yours"; identity: Identity }
   | { state: "ready"; identity: Identity; decision: DecisionView };
 
 const loadDecision = async (
@@ -64,8 +66,12 @@ const loadDecision = async (
     if (error instanceof CoreTimeoutError) {
       return { state: "offline" };
     }
-    if (isExpectedError(error) && error.code === "decision.not_found") {
+    const code = decisionErrors.codeOf(error);
+    if (code === "decision.not_found") {
       return { state: "missing", identity };
+    }
+    if (code === "decision.forbidden") {
+      return { state: "not-yours", identity };
     }
     return { state: "refused", identity, message: failureText(error) };
   }
@@ -80,8 +86,11 @@ const outcomeOf = (decision: DecisionView): string => {
       msg`The workflow run that asked this has ended, so this decision has closed.`
     );
   }
-  if (decision.status === "timed_out" || decided === undefined) {
+  if (decision.status === "timed_out") {
     return i18n._(msg`Nobody answered in time, so this decision has closed.`);
+  }
+  if (decided === undefined) {
+    return i18n._(msg`This decision has closed.`);
   }
   const { name } = decided.by;
   const date = formatDateTime(decided.at);
@@ -113,7 +122,7 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
     }
   };
   return (
-    <Card className="w-full max-w-xl">
+    <Card className="w-full max-w-xl" size="sm">
       <CardContent>
         <div className="flex items-start gap-4">
           <div className="bg-muted grid size-8 flex-none place-items-center rounded-md">
@@ -130,30 +139,34 @@ const DecisionCard = ({ decision }: { decision: DecisionView }) => {
                 )}
               </p>
             </div>
-            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">
-              <dt className="text-muted-foreground">
-                <Trans context="where a decision comes from">From</Trans>
-              </dt>
-              <dd className="min-w-0 truncate">
-                {current.app.name} · {current.workflow}
-              </dd>
-              <dt className="text-muted-foreground">
-                <Trans context="the run of a workflow a decision is for">
-                  Run
-                </Trans>
-              </dt>
-              <dd className="min-w-0 truncate font-mono text-xs leading-5">
-                {current.run}
-              </dd>
+            <dl className="flex flex-col gap-1">
+              <div className="flex gap-4">
+                <dt className="text-muted-foreground w-24 flex-none">
+                  <Trans context="where a decision comes from">From</Trans>
+                </dt>
+                <dd className="min-w-0 truncate">
+                  {current.app.name} · {current.workflow}
+                </dd>
+              </div>
+              <div className="flex gap-4">
+                <dt className="text-muted-foreground w-24 flex-none">
+                  <Trans context="the run of a workflow a decision is for">
+                    Run
+                  </Trans>
+                </dt>
+                <dd className="min-w-0 truncate font-mono text-xs leading-5">
+                  {current.run}
+                </dd>
+              </div>
               {open ? (
-                <>
-                  <dt className="text-muted-foreground">
+                <div className="flex gap-4">
+                  <dt className="text-muted-foreground w-24 flex-none">
                     <Trans context="until when a decision can be answered">
                       Open until
                     </Trans>
                   </dt>
                   <dd>{formatDateTime(current.expiresAt)}</dd>
-                </>
+                </div>
               ) : null}
             </dl>
             {open ? (
@@ -214,7 +227,7 @@ const OnItsOwn = ({ children }: { children: ReactNode }) => (
 );
 
 /** The decision in the app's frame, under the crumbs to its workflow. */
-const InFrame = ({
+const DecisionInFrame = ({
   identity,
   crumbs,
   children,
@@ -280,9 +293,27 @@ const Decision = () => {
       </AppFrame>
     );
   }
+  if (page.state === "not-yours") {
+    return (
+      <DecisionInFrame
+        crumbs={[workflows, { label: t`Decision` }]}
+        identity={page.identity}
+      >
+        <h1 className="text-2xl font-medium tracking-tight">
+          <Trans>Decision</Trans>
+        </h1>
+        <p className="text-muted-foreground">
+          <Trans>This decision is for someone else to answer.</Trans>
+        </p>
+        <Link className="underline-offset-4 hover:underline" to="/">
+          <Trans>Go to Grasp</Trans>
+        </Link>
+      </DecisionInFrame>
+    );
+  }
   if (page.state === "refused") {
     return (
-      <InFrame
+      <DecisionInFrame
         crumbs={[workflows, { label: t`Decision` }]}
         identity={page.identity}
       >
@@ -293,12 +324,12 @@ const Decision = () => {
         <Link className="underline-offset-4 hover:underline" to="/">
           <Trans>Go to Grasp</Trans>
         </Link>
-      </InFrame>
+      </DecisionInFrame>
     );
   }
   const { decision } = page;
   return (
-    <InFrame
+    <DecisionInFrame
       crumbs={[
         workflows,
         {
@@ -311,7 +342,7 @@ const Decision = () => {
       identity={page.identity}
     >
       <DecisionCard decision={decision} />
-    </InFrame>
+    </DecisionInFrame>
   );
 };
 

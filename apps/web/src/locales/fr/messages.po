@@ -81,8 +81,8 @@ msgid "{count} or more files"
 msgstr "{count} fichiers ou plus"
 
 #: src/routes/_shell.workflows.index.tsx
-msgid "{failed, plural, one {# failed in {days} days} other {# failed in {days} days}}"
-msgstr "{failed, plural, one {# en échec en {days} jours} other {# en échec en {days} jours}}"
+msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
+msgstr "{failed, plural, one {# en échec au cours des {days} derniers jours} other {# en échec au cours des {days} derniers jours}}"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "{failed, plural, one {# failed run} other {# failed runs}} of {name}"
@@ -2215,6 +2215,14 @@ msgstr "Cette collection n’a pas encore de fichier."
 msgid "this currency"
 msgstr "cette devise"
 
+#: src/routes/decisions.$decision.tsx
+msgid "This decision has closed."
+msgstr "Cette décision est close."
+
+#: src/routes/decisions.$decision.tsx
+msgid "This decision is for someone else to answer."
+msgstr "Cette décision revient à quelqu’un d’autre."
+
 #: src/knowledge/document.tsx
 msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
 msgstr "Ce document a changé depuis que vous l’avez ouvert. La version {newerVersion} figure ci-dessous ; votre texte est conservé. Repartez de celle-ci ou remplacez-la par votre texte."
@@ -2373,11 +2381,6 @@ msgstr "En attente de vous"
 #: src/chat/held-writes.tsx
 msgid "Waiting for you: {title}"
 msgstr "En attente de vous : {title}"
-
-#: src/routes/_shell.workflows.$app.$workflow.tsx
-msgctxt "a step that waits for time or an event"
-msgid "Waits"
-msgstr "Attend"
 
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx

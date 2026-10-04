@@ -39,7 +39,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   BoxesIcon,
-  ClockIcon,
+  PlayIcon,
   RepeatIcon,
   SparklesIcon,
   SplitIcon,
@@ -90,12 +90,7 @@ const Doer = ({ kind }: { kind: StepOutline["kind"] }) => {
       </Badge>
     );
   }
-  return kind === "wait" ? (
-    <Badge variant="outline">
-      <ClockIcon data-icon="inline-start" />
-      <Trans context="a step that waits for time or an event">Waits</Trans>
-    </Badge>
-  ) : null;
+  return null;
 };
 
 /** One step, as a card: its number, what it does, who does it, and its name. */
@@ -121,6 +116,31 @@ const StepCard = ({ step, n }: { step: StepOutline; n: number }) => {
   );
 };
 
+/**
+ * The steps' numbers in the order they are written, through branches
+ * (their steps, then what runs otherwise) and loops, as the prototype
+ * numbers a workflow's steps once from first to last.
+ */
+const stepNumbers = (
+  nodes: readonly OutlineNode[]
+): ReadonlyMap<StepOutline, number> => {
+  const numbers = new Map<StepOutline, number>();
+  const visit = (each: readonly OutlineNode[]): void => {
+    for (const node of each) {
+      if (node.type === "step") {
+        numbers.set(node, numbers.size + 1);
+      } else {
+        visit(node.steps);
+        if (node.type === "branch") {
+          visit(node.otherwise);
+        }
+      }
+    }
+  };
+  visit(nodes);
+  return numbers;
+};
+
 /** The key of an outline node among its siblings. */
 const keyOf = (node: OutlineNode): string =>
   node.type === "step" ? node.name : `${node.type}:${node.line}`;
@@ -130,13 +150,26 @@ const keyOf = (node: OutlineNode): string =>
  * each step a card, a branch or a loop a block of its own around its
  * steps, as the prototype's overview draws them in blocks. Read only.
  */
-const Outline = ({ nodes }: { nodes: OutlineNode[] }) => {
+const Outline = ({
+  nodes,
+  numbers,
+}: {
+  nodes: OutlineNode[];
+  /** Each step's number, counted once through the whole workflow. */
+  numbers: ReadonlyMap<StepOutline, number>;
+}) => {
   const { t } = useLingui();
   return (
     <ol className="flex flex-col gap-2">
-      {nodes.map((node, index) => {
+      {nodes.map((node) => {
         if (node.type === "step") {
-          return <StepCard key={keyOf(node)} n={index + 1} step={node} />;
+          return (
+            <StepCard
+              key={keyOf(node)}
+              n={numbers.get(node) ?? 0}
+              step={node}
+            />
+          );
         }
         if (node.type === "loop") {
           return (
@@ -150,7 +183,7 @@ const Outline = ({ nodes }: { nodes: OutlineNode[] }) => {
                   ? t`Repeats, once per item:`
                   : t`Repeats, ${ph({ items: node.header })}:`}
               </span>
-              <Outline nodes={node.steps} />
+              <Outline nodes={node.steps} numbers={numbers} />
             </li>
           );
         }
@@ -166,13 +199,13 @@ const Outline = ({ nodes }: { nodes: OutlineNode[] }) => {
                 ? t`Only when a condition holds:`
                 : t`If ${ph({ condition: node.condition })}:`}
             </span>
-            <Outline nodes={node.steps} />
+            <Outline nodes={node.steps} numbers={numbers} />
             {node.otherwise.length === 0 ? null : (
               <>
                 <span className="font-medium">
                   <Trans>Otherwise:</Trans>
                 </span>
-                <Outline nodes={node.otherwise} />
+                <Outline nodes={node.otherwise} numbers={numbers} />
               </>
             )}
           </li>
@@ -199,7 +232,12 @@ const Steps = ({ steps }: { steps: WorkflowDetail["steps"] }) => {
       </p>
     );
   }
-  return <Outline nodes={steps.outline.steps} />;
+  return (
+    <Outline
+      nodes={steps.outline.steps}
+      numbers={stepNumbers(steps.outline.steps)}
+    />
+  );
 };
 
 /** How many digits after the point an amount of `currency` has. */
@@ -447,6 +485,7 @@ const TestButton = ({ app, workflow }: { app: string; workflow: string }) => {
         }}
         variant="outline"
       >
+        <PlayIcon data-icon="inline-start" />
         {busy ? t`Testing…` : t`Test`}
       </Button>
       <Dialog onOpenChange={setOpen} open={open}>
@@ -547,7 +586,11 @@ const WorkflowView = ({
   const { t } = useLingui();
   const { version } = summary;
   const owner = summary.owner.name ?? summary.owner.userId;
-  const runCount = runs.state === "ready" ? runs.data.runs.length : undefined;
+  // As many as core sent, "+" where it had more.
+  const runCount =
+    runs.state === "ready" && runs.data.runs.length > 0
+      ? `${runs.data.runs.length}${runs.data.more ? "+" : ""}`
+      : undefined;
   return (
     <Tabs defaultValue="steps">
       {/* As the prototype's workflow page: the title with where it is and
@@ -596,8 +639,9 @@ const WorkflowView = ({
           )}
           <TabsTrigger value="runs">
             <Trans context="tab listing the runs of workflows">Runs</Trans>
-            {runCount === undefined || runCount === 0 ? null : (
+            {runCount === undefined ? null : (
               <span className="text-muted-foreground tabular-nums">
+                {" "}
                 {runCount}
               </span>
             )}
@@ -610,14 +654,14 @@ const WorkflowView = ({
         </TabsList>
       </div>
       <TabsContent value="steps">
-        <div className="mx-auto w-full max-w-3xl p-6">
+        <div className="mx-auto w-full max-w-5xl p-6">
           <Steps steps={steps} />
         </div>
       </TabsContent>
       {/* Kept while another tab shows: what was saved or typed stays. */}
       {params === null ? null : (
         <TabsContent keepMounted value="parameters">
-          <div className="max-w-3xl p-6">
+          <div className="mx-auto w-full max-w-5xl p-6">
             <Parameters
               app={summary.app}
               editable={setsParams}
@@ -628,7 +672,7 @@ const WorkflowView = ({
         </TabsContent>
       )}
       <TabsContent value="runs">
-        <div className="p-6">
+        <div className="mx-auto w-full max-w-5xl p-6">
           {runs.state === "ready" ? (
             <RunsLog
               me={identity.userId}
@@ -644,7 +688,7 @@ const WorkflowView = ({
       </TabsContent>
       {versions === undefined ? null : (
         <TabsContent value="versions">
-          <div className="p-6">
+          <div className="mx-auto w-full max-w-5xl p-6">
             <Versions versions={versions} />
           </div>
         </TabsContent>

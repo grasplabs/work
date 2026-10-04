@@ -238,8 +238,8 @@ const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
           workflow={workflow}
         >
           <Plural
-            one={`# failed in ${days} days`}
-            other={`# failed in ${days} days`}
+            one={`# failed in the last ${days} days`}
+            other={`# failed in the last ${days} days`}
             value={failed}
           />
         </RunCount>

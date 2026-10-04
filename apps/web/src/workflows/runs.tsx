@@ -112,7 +112,12 @@ const RunOutcome = ({
           <Trans>Details removed</Trans>
         </span>
       ) : null}
-      {run.status === "failed" && model !== undefined ? (
+      {/* Only where the person sees why it failed: core fixes nothing
+          else, nor a run whose details are gone. */}
+      {run.status === "failed" &&
+      run.failure !== undefined &&
+      !run.detailsRemoved &&
+      model !== undefined ? (
         <AskToFix inLog model={model} run={run.id} />
       ) : null}
     </div>

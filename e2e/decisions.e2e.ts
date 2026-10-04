@@ -113,10 +113,9 @@ test("the person a decision link was sent to approves it, and the run goes on", 
 
   const forwarded = await pageOf(browser, other);
   await forwarded.goto(link);
-  await expect(forwarded.getByRole("alert")).toHaveText(
-    "You aren't one of the people who answer this decision.",
-    pageRead
-  );
+  await expect(
+    forwarded.getByText("This decision is for someone else to answer.")
+  ).toBeVisible(pageRead);
 
   // Opened signed out, the link only asks them to sign in. The local stack
   // has no IdP, so signing in is the session it leaves, and the browser
