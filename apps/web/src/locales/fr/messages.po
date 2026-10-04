@@ -231,6 +231,10 @@ msgid "A connection needs signing in again"
 msgstr "Une connexion doit être reconnectée"
 
 #: src/activity/audit-words.ts
+msgid "A connection refused to say what changed"
+msgstr "Une connexion a refusé de dire ce qui a changé"
+
+#: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
 msgstr "Une décision a été soumise à des personnes, ou tranchée"
 
@@ -1850,6 +1854,10 @@ msgstr "« Lecture seule » est coché là où Composio indique qu’un outil ne
 msgid "Reading the workspace"
 msgstr "Lecture de l’espace de travail"
 
+#: src/activity/audit-words.ts
+msgid "Reading what changed at a connection failed"
+msgstr "La lecture de ce qui a changé sur une connexion a échoué"
+
 #: src/chat/builds-state.ts
 msgid "reads the App's data"
 msgstr "lit les données de l’application"
@@ -2282,6 +2290,14 @@ msgstr "A commencé une discussion"
 msgid "Started by"
 msgstr "Démarrée par"
 
+#: src/activity/audit-words.ts
+msgid "Started following a connection late: changes before then weren't read"
+msgstr "A commencé à suivre une connexion en retard : les changements antérieurs n’ont pas été lus"
+
+#: src/activity/audit-words.ts
+msgid "Started following what changes at a connection"
+msgstr "A commencé à suivre ce qui change sur une connexion"
+
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -2309,6 +2325,10 @@ msgstr "Arrêté"
 #: src/activity/audit-words.ts
 msgid "Stopped a schedule that kept failing"
 msgstr "A arrêté une planification qui échouait sans cesse"
+
+#: src/activity/audit-words.ts
+msgid "Stopped following what changes at a connection"
+msgstr "A arrêté de suivre ce qui change sur une connexion"
 
 #: src/chat/thread.tsx
 msgid "Stopped."

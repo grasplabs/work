@@ -231,6 +231,10 @@ msgid "A connection needs signing in again"
 msgstr "Een verbinding moet opnieuw worden aangemeld"
 
 #: src/activity/audit-words.ts
+msgid "A connection refused to say what changed"
+msgstr "Een verbinding weigerde te zeggen wat er veranderd is"
+
+#: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
 msgstr "Een beslissing is aan mensen voorgelegd of beantwoord"
 
@@ -1850,6 +1854,10 @@ msgstr "Alleen-lezen is aangevinkt waar Composio zegt dat een tool alleen leest;
 msgid "Reading the workspace"
 msgstr "Werkruimte wordt gelezen"
 
+#: src/activity/audit-words.ts
+msgid "Reading what changed at a connection failed"
+msgstr "Lezen wat er bij een verbinding veranderd is, is mislukt"
+
 #: src/chat/builds-state.ts
 msgid "reads the App's data"
 msgstr "leest de gegevens van de app"
@@ -2282,6 +2290,14 @@ msgstr "Een chat gestart"
 msgid "Started by"
 msgstr "Gestart door"
 
+#: src/activity/audit-words.ts
+msgid "Started following a connection late: changes before then weren't read"
+msgstr "Te laat begonnen een verbinding te volgen: eerdere wijzigingen zijn niet gelezen"
+
+#: src/activity/audit-words.ts
+msgid "Started following what changes at a connection"
+msgstr "Begonnen te volgen wat er bij een verbinding verandert"
+
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -2309,6 +2325,10 @@ msgstr "Gestopt"
 #: src/activity/audit-words.ts
 msgid "Stopped a schedule that kept failing"
 msgstr "Een planning gestopt die bleef mislukken"
+
+#: src/activity/audit-words.ts
+msgid "Stopped following what changes at a connection"
+msgstr "Gestopt met volgen wat er bij een verbinding verandert"
 
 #: src/chat/thread.tsx
 msgid "Stopped."

@@ -34,6 +34,26 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Dropped an event no workflow could take`,
   },
   {
+    action: "connection.events.started",
+    text: msg`Started following what changes at a connection`,
+  },
+  {
+    action: "connection.events.stopped",
+    text: msg`Stopped following what changes at a connection`,
+  },
+  {
+    action: "connection.events.refused",
+    text: msg`A connection refused to say what changed`,
+  },
+  {
+    action: "connection.events.failed",
+    text: msg`Reading what changed at a connection failed`,
+  },
+  {
+    action: "connection.events.primed_late",
+    text: msg`Started following a connection late: changes before then weren't read`,
+  },
+  {
     action: "connection.events",
     text: msg`Changed what a connection listens for`,
   },

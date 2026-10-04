@@ -231,6 +231,10 @@ msgid "A connection needs signing in again"
 msgstr "A connection needs signing in again"
 
 #: src/activity/audit-words.ts
+msgid "A connection refused to say what changed"
+msgstr "A connection refused to say what changed"
+
+#: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
 msgstr "A decision was put to people, or answered"
 
@@ -1850,6 +1854,10 @@ msgstr "Read-only is ticked where Composio says a tool only reads; Grasp doesn't
 msgid "Reading the workspace"
 msgstr "Reading the workspace"
 
+#: src/activity/audit-words.ts
+msgid "Reading what changed at a connection failed"
+msgstr "Reading what changed at a connection failed"
+
 #: src/chat/builds-state.ts
 msgid "reads the App's data"
 msgstr "reads the App's data"
@@ -2282,6 +2290,14 @@ msgstr "Started a chat"
 msgid "Started by"
 msgstr "Started by"
 
+#: src/activity/audit-words.ts
+msgid "Started following a connection late: changes before then weren't read"
+msgstr "Started following a connection late: changes before then weren't read"
+
+#: src/activity/audit-words.ts
+msgid "Started following what changes at a connection"
+msgstr "Started following what changes at a connection"
+
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -2309,6 +2325,10 @@ msgstr "Stopped"
 #: src/activity/audit-words.ts
 msgid "Stopped a schedule that kept failing"
 msgstr "Stopped a schedule that kept failing"
+
+#: src/activity/audit-words.ts
+msgid "Stopped following what changes at a connection"
+msgstr "Stopped following what changes at a connection"
 
 #: src/chat/thread.tsx
 msgid "Stopped."

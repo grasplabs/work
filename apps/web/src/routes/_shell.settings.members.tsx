@@ -1,3 +1,4 @@
+import { memberErrors } from "@grasp-os/shared/members";
 import type { Member } from "@grasp-os/shared/members";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
@@ -112,14 +113,21 @@ const MemberActions = ({
     // (`member.connections_pending`).
     let removed = false;
     await run(async (members) => {
-      const { connectionsDisconnected: count } = await members.remove(
-        member.userId
-      );
-      removed = true;
-      onNotice(
-        undefined,
-        t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`
-      );
+      try {
+        const { connectionsDisconnected: count } = await members.remove(
+          member.userId
+        );
+        removed = true;
+        onNotice(
+          undefined,
+          t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`
+        );
+      } catch (error) {
+        // Removed, with some connections still to disconnect: the row
+        // goes all the same, and the notice says why.
+        removed = memberErrors.codeOf(error) === "member.connections_pending";
+        throw error;
+      }
     }, onNotice);
     if (removed) {
       onRemoved();
