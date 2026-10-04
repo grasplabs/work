@@ -7,6 +7,7 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import {
   SettingsBody,
+  SettingsError,
   SettingsLoading,
   SettingsSection,
 } from "../settings/settings-parts.tsx";
@@ -31,7 +32,7 @@ const Approvals = () => {
             pending={pending.data}
           />
         ) : (
-          <NotLoadedState page={pending} />
+          <NotLoadedState heading="h3" page={pending} />
         )}
       </SettingsBody>
     </SettingsSection>
@@ -42,5 +43,6 @@ export const Route = createFileRoute("/_shell/settings/approvals")({
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, readPendingRequests),
   pendingComponent: SettingsLoading,
+  errorComponent: SettingsError,
   component: Approvals,
 });

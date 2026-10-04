@@ -131,10 +131,7 @@ const SettingsLayout = () => {
                 </span>
                 {group.items.map(({ label, to, icon: Icon }) => (
                   <Link
-                    activeProps={{
-                      className: "bg-muted text-foreground",
-                    }}
-                    className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 flex items-center gap-2 rounded-md px-2 py-1.5 outline-none focus-visible:ring-3"
+                    className="text-muted-foreground hover:bg-accent data-[status=active]:bg-muted data-[status=active]:text-foreground hover:text-foreground focus-visible:ring-ring/50 flex items-center gap-2 rounded-md px-2 py-1.5 outline-none focus-visible:ring-3"
                     key={to}
                     to={to}
                   >

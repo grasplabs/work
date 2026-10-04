@@ -107,8 +107,8 @@ msgid "{holder}: {actions} on {resource}"
 msgstr "{holder}: {actions} sobre {resource}"
 
 #: src/routes/_shell.settings.models.tsx
-msgid "{limit} a month, admins alerted at {alertAt}%. Calls stop once it's used up."
-msgstr "{limit} al mes; se avisa a los administradores al {alertAt} %. Las llamadas se detienen cuando se agota."
+msgid "{limit} a month, admins alerted at {alertAt}. Calls stop once it's used up."
+msgstr "{limit} al mes; se avisa a los administradores al {alertAt}. Las llamadas se detienen cuando se agota."
 
 #: src/routes/_shell.notifications.tsx
 msgid "{link} in {appName} failed"
@@ -140,7 +140,7 @@ msgstr "{name} es de solo lectura"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "{name} is removed. {count, plural, one {# personal connection was disconnected.} other {# personal connections were disconnected.}}"
-msgstr "{name} se ha eliminado. {count, plural, one {Se ha desconectado # conexión personal.} other {Se han desconectado # conexiones personales.}}"
+msgstr "Se ha eliminado a {name}. {count, plural, one {Se ha desconectado # conexión personal.} other {Se han desconectado # conexiones personales.}}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "{name} is signed out everywhere."
@@ -226,6 +226,38 @@ msgstr "{workflowId} en {app}"
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Un cambio se aplica a las ejecuciones que empiezan después: las que ya están en marcha conservan los valores con los que empezaron. Cada cambio queda registrado, sin su valor."
 
+#: src/activity/audit-words.ts
+msgid "A connection needs signing in again"
+msgstr "Una conexión necesita volver a iniciar sesión"
+
+#: src/activity/audit-words.ts
+msgid "A decision was put to people, or answered"
+msgstr "Se planteó una decisión a personas, o se respondió"
+
+#: src/activity/audit-words.ts
+msgid "A guest chat changed"
+msgstr "Cambió un chat de invitado"
+
+#: src/activity/audit-words.ts
+msgid "A guest finished their chat"
+msgstr "Un invitado terminó su chat"
+
+#: src/activity/audit-words.ts
+msgid "A guest opened their chat"
+msgstr "Un invitado abrió su chat"
+
+#: src/activity/audit-words.ts
+msgid "A guest wrote a message"
+msgstr "Un invitado escribió un mensaje"
+
+#: src/activity/audit-words.ts
+msgid "A model budget reached its alert or ran out"
+msgstr "Un presupuesto de modelos llegó a su aviso o se agotó"
+
+#: src/activity/audit-words.ts
+msgid "A model call was refused"
+msgstr "Se rechazó una llamada a un modelo"
+
 #: src/screens/screen-frame.tsx
 msgid "A new version of this App is available."
 msgstr "Hay una nueva versión de esta aplicación."
@@ -242,13 +274,13 @@ msgstr "Acción"
 msgid "Actions"
 msgstr "Acciones"
 
+#: src/routes/_shell.settings.members.tsx
+msgid "Actions for {who}"
+msgstr "Acciones para {who}"
+
 #: src/connections/connection-list.tsx
 msgid "Active"
 msgstr "Activa"
-
-#: src/activity/audit-log.tsx
-msgid "Actor"
-msgstr "Autor"
 
 #: src/activity/audit-log.tsx
 msgid "Actor ID"
@@ -258,9 +290,17 @@ msgstr "ID del autor"
 msgid "Added"
 msgstr "Añadido"
 
+#: src/activity/audit-words.ts
+msgid "Added a member to an App"
+msgstr "Añadió un miembro a una App"
+
 #: src/chat/builds.tsx
 msgid "Added parameter {name}"
 msgstr "Parámetro {name} añadido"
+
+#: src/activity/audit-words.ts
+msgid "Added someone to a team"
+msgstr "Añadió a alguien a un equipo"
 
 #: src/chat/builds.tsx
 msgid "Added step {name}"
@@ -325,7 +365,7 @@ msgstr "Un administrador"
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
-msgstr "La cambia un administrador, en Miembros y roles."
+msgstr "Lo cambia un administrador, en Miembros y roles."
 
 #: src/connections/catalog.tsx
 msgid "An admin connects this for everyone."
@@ -449,9 +489,17 @@ msgstr "Pedido por {app} ({workflow}), abierto hasta el {until}"
 msgid "Asked for <0>{asked}</0>"
 msgstr "Pedido el <0>{asked}</0>"
 
+#: src/activity/audit-words.ts
+msgid "Asked for a permission"
+msgstr "Pidió un permiso"
+
 #: src/activity/pending.tsx
 msgid "asked for by the agent, in their chat"
 msgstr "pedido por el agente, en su chat"
+
+#: src/activity/audit-words.ts
+msgid "Asked the agent to fix a run"
+msgstr "Pidió al agente que arreglara una ejecución"
 
 #: src/activity/pending.tsx
 msgid "Asks for"
@@ -494,6 +542,14 @@ msgstr "Presupuestos"
 msgid "Builder"
 msgstr "Creador"
 
+#: src/activity/audit-words.ts
+msgid "Called a model"
+msgstr "Llamó a un modelo"
+
+#: src/activity/audit-words.ts
+msgid "Called another App"
+msgstr "Llamó a otra App"
+
 #: src/chat/builds.tsx
 msgid "Calls {tools}: may change things"
 msgstr "Llama a {tools}: puede cambiar cosas"
@@ -510,6 +566,50 @@ msgstr "Cancelada"
 msgid "Changed"
 msgstr "Cambiado"
 
+#: src/activity/audit-words.ts
+msgid "Changed a chat"
+msgstr "Cambió un chat"
+
+#: src/activity/audit-words.ts
+msgid "Changed a collection"
+msgstr "Cambió una colección"
+
+#: src/activity/audit-words.ts
+msgid "Changed a connection"
+msgstr "Cambió una conexión"
+
+#: src/activity/audit-words.ts
+msgid "Changed a member"
+msgstr "Cambió un miembro"
+
+#: src/activity/audit-words.ts
+msgid "Changed a member's role"
+msgstr "Cambió el rol de un miembro"
+
+#: src/activity/audit-words.ts
+msgid "Changed a permission"
+msgstr "Cambió un permiso"
+
+#: src/activity/audit-words.ts
+msgid "Changed a team"
+msgstr "Cambió un equipo"
+
+#: src/activity/audit-words.ts
+msgid "Changed a workflow"
+msgstr "Cambió un flujo de trabajo"
+
+#: src/activity/audit-words.ts
+msgid "Changed a workflow's parameter"
+msgstr "Cambió un parámetro de un flujo de trabajo"
+
+#: src/activity/audit-words.ts
+msgid "Changed an App"
+msgstr "Cambió una App"
+
+#: src/activity/audit-words.ts
+msgid "Changed knowledge"
+msgstr "Cambió el conocimiento"
+
 #: src/chat/builds.tsx
 msgid "Changed parameter {name}"
 msgstr "Parámetro {name} cambiado"
@@ -517,6 +617,14 @@ msgstr "Parámetro {name} cambiado"
 #: src/chat/builds.tsx
 msgid "Changed step {name}"
 msgstr "Paso {name} cambiado"
+
+#: src/activity/audit-words.ts
+msgid "Changed what a connection listens for"
+msgstr "Cambió lo que escucha una conexión"
+
+#: src/activity/audit-words.ts
+msgid "Changed which integrations are offered"
+msgstr "Cambió qué integraciones se ofrecen"
 
 #: src/chat/builds.tsx
 msgid "Changed workflow"
@@ -548,6 +656,10 @@ msgstr "Chat"
 #: src/routes/_shell.index.tsx
 msgid "Chats"
 msgstr "Chats"
+
+#: src/activity/audit-words.ts
+msgid "Checked the audit trail's chain"
+msgstr "Comprobó la cadena del registro de auditoría"
 
 #: src/activity/audit-log.tsx
 msgid "Clear"
@@ -652,6 +764,10 @@ msgstr "Conectar {name} a través de Composio"
 msgid "Connect for everyone"
 msgstr "Conectar para todos"
 
+#: src/activity/audit-words.ts
+msgid "Connected an account"
+msgstr "Conectó una cuenta"
+
 #: src/connections/connection-list.tsx
 msgid "Connected by"
 msgstr "Conectada por"
@@ -713,6 +829,14 @@ msgstr "no se pudo leer"
 msgid "Couldn't load this App's workflows."
 msgstr "No se pudieron cargar los flujos de trabajo de esta aplicación."
 
+#: src/activity/audit-words.ts
+msgid "Created a collection"
+msgstr "Creó una colección"
+
+#: src/activity/audit-words.ts
+msgid "Created a team"
+msgstr "Creó un equipo"
+
 #: src/routes/_shell.apps.$app.tsx
 msgid "Created by the member {owner}."
 msgstr "Creada por el miembro {owner}."
@@ -728,6 +852,10 @@ msgstr "Reglas de datos"
 #: src/workflows/runs.tsx
 msgid "Decide"
 msgstr "Decidir"
+
+#: src/activity/audit-words.ts
+msgid "Decided on a held action"
+msgstr "Decidió sobre una acción retenida"
 
 #: src/activity/audit-log.tsx
 #: src/activity/pending.tsx
@@ -748,6 +876,14 @@ msgstr "Eliminar"
 #: src/chat/chat-list.tsx
 msgid "Delete “{title}”?"
 msgstr "¿Eliminar «{title}»?"
+
+#: src/activity/audit-words.ts
+msgid "Deleted a team"
+msgstr "Eliminó un equipo"
+
+#: src/activity/audit-words.ts
+msgid "Deleted entries past their retention"
+msgstr "Eliminó entradas pasado su plazo de conservación"
 
 #: src/routes/_shell.index.tsx
 msgid "Describe what you want. The agent answers from what it can read, and holds every change to an outside system until you confirm it."
@@ -786,6 +922,14 @@ msgstr "¿Desconectar {label}?"
 msgid "Disconnected"
 msgstr "Desconectada"
 
+#: src/activity/audit-words.ts
+msgid "Disconnected an account"
+msgstr "Desconectó una cuenta"
+
+#: src/activity/audit-words.ts
+msgid "Dismissed a knowledge signal"
+msgstr "Descartó una señal de conocimiento"
+
 #: src/labels.ts
 msgid "Document"
 msgstr "Documento"
@@ -810,6 +954,14 @@ msgstr "Descargar {name}"
 #: src/knowledge/uploads.tsx
 msgid "Drop files here"
 msgstr "Suelta los archivos aquí"
+
+#: src/activity/audit-words.ts
+msgid "Dropped a held action nobody can confirm"
+msgstr "Descartó una acción retenida que nadie puede confirmar"
+
+#: src/activity/audit-words.ts
+msgid "Dropped an event no workflow could take"
+msgstr "Descartó un evento que ningún flujo de trabajo pudo recibir"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Each person"
@@ -844,6 +996,10 @@ msgstr "Introduce un número."
 msgid "Enter an amount, such as 12.50."
 msgstr "Introduce un importe, por ejemplo 12.50."
 
+#: src/activity/audit-log.tsx
+msgid "Entries"
+msgstr "Entradas"
+
 #: src/chat/thread.tsx
 msgid "Error"
 msgstr "Error"
@@ -866,7 +1022,7 @@ msgstr "Todos"
 
 #: src/routes/_shell.settings.audit.tsx
 msgid "Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen."
-msgstr "Todo lo que se hace en Grasp, quién y cuándo, guardado en una cadena que nadie puede cambiar sin que se note."
+msgstr "Todo lo que se hace en Grasp, por quién y cuándo, guardado en una cadena que nadie puede cambiar sin que se note."
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it, and always have the memory files in mind."
@@ -895,6 +1051,10 @@ msgstr "Exportar JSON"
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Exportar el registro de auditoría"
+
+#: src/activity/audit-words.ts
+msgid "Exported the audit trail"
+msgstr "Exportó el registro de auditoría"
 
 #: src/chat/builds.tsx
 msgid "Exports"
@@ -956,6 +1116,14 @@ msgstr "Para"
 msgid "From"
 msgstr "De"
 
+#: src/activity/audit-words.ts
+msgid "Gave consent for a connection"
+msgstr "Dio su consentimiento para una conexión"
+
+#: src/activity/audit-words.ts
+msgid "Granted a permission"
+msgstr "Concedió un permiso"
+
 #: src/core.ts
 #: src/guest/api.ts
 #: src/load-from-core.tsx
@@ -984,6 +1152,10 @@ msgstr "El personal de Grasp puede leer los parámetros, no cambiarlos."
 #: src/connections/catalog.tsx
 msgid "Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people."
 msgstr "El personal de Grasp no puede conectar cuentas ni cambiar lo que se ofrece aquí: eso le corresponde a la propia gente de la organización."
+
+#: src/activity/audit-words.ts
+msgid "Grasp staff signed in"
+msgstr "El personal de Grasp inició sesión"
 
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
@@ -1033,6 +1205,10 @@ msgstr "Si {condition}:"
 #: src/chat/builds.tsx
 msgid "In the proposer's words"
 msgstr "En palabras de quien lo propone"
+
+#: src/activity/audit-words.ts
+msgid "Invited a guest"
+msgstr "Invitó a un invitado"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
@@ -1164,7 +1340,6 @@ msgstr "Cargando sus herramientas…"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
-#: src/settings/settings-parts.tsx
 msgid "Loading…"
 msgstr "Cargando…"
 
@@ -1236,13 +1411,13 @@ msgstr "Modelos de tu organización"
 msgid "More for {title}"
 msgstr "Más para {title}"
 
-#: src/routes/_shell.settings.members.tsx
-msgid "More for {who}"
-msgstr "Más para {who}"
-
 #: src/chat/held-writes.tsx
 msgid "More will be sent than is shown above. Read exactly what will be sent before you confirm."
 msgstr "Se enviará más de lo que se muestra arriba. Lee exactamente lo que se enviará antes de confirmar."
+
+#: src/activity/audit-words.ts
+msgid "Moved old entries out of the audit trail"
+msgstr "Sacó entradas antiguas del registro de auditoría"
 
 #: src/routes/_shell.connections.tsx
 msgid "My connections"
@@ -1331,6 +1506,10 @@ msgstr "Aún no hay ejecuciones."
 msgid "No runs."
 msgstr "No hay ejecuciones."
 
+#: src/routes/_shell.settings.profile.tsx
+msgid "No teams"
+msgstr "Ningún equipo"
+
 #: src/chat/builds.tsx
 msgid "No workflows to test."
 msgstr "No hay flujos de trabajo que probar."
@@ -1350,10 +1529,6 @@ msgstr "No coincide nadie."
 #: src/routes/_shell.settings.models.tsx
 msgid "none"
 msgstr "ninguna"
-
-#: src/routes/_shell.settings.profile.tsx
-msgid "None"
-msgstr "Ninguno"
 
 #: src/activity/pending.tsx
 msgid "None current"
@@ -1618,9 +1793,49 @@ msgstr "Propuesta por el agente, en un chat tuyo que se eliminó."
 msgid "Proposed by the agent, in another person's chat."
 msgstr "Propuesta por el agente, en el chat de otra persona."
 
+#: src/activity/audit-words.ts
+msgid "Ran a step of a workflow"
+msgstr "Ejecutó un paso de un flujo de trabajo"
+
+#: src/activity/audit-words.ts
+msgid "Ran a workflow"
+msgstr "Ejecutó un flujo de trabajo"
+
 #: src/activity/audit-log.tsx
 msgid "Read"
 msgstr "Lectura"
+
+#: src/activity/audit-words.ts
+msgid "Read a knowledge document"
+msgstr "Leyó un documento de conocimiento"
+
+#: src/activity/audit-words.ts
+msgid "Read an App's statistics"
+msgstr "Leyó las estadísticas de una App"
+
+#: src/activity/audit-words.ts
+msgid "Read an email attachment"
+msgstr "Leyó un adjunto de correo"
+
+#: src/activity/audit-words.ts
+msgid "Read how knowledge is used"
+msgstr "Leyó cómo se usa el conocimiento"
+
+#: src/activity/audit-words.ts
+msgid "Read restricted sources, and is held to them"
+msgstr "Leyó fuentes restringidas y queda sujeto a ellas"
+
+#: src/activity/audit-words.ts
+msgid "Read what a guest wrote"
+msgstr "Leyó lo que escribió un invitado"
+
+#: src/activity/audit-words.ts
+msgid "Read what changed at a connection"
+msgstr "Leyó lo que cambió en una conexión"
+
+#: src/activity/audit-words.ts
+msgid "Read what could be improved"
+msgstr "Leyó lo que podría mejorarse"
 
 #: src/connections/catalog.tsx
 #: src/knowledge/collection-markers.tsx
@@ -1702,6 +1917,10 @@ msgstr "¿Quitar a {name}?"
 msgid "Removed"
 msgstr "Eliminado"
 
+#: src/activity/audit-words.ts
+msgid "Removed a member"
+msgstr "Eliminó a un miembro"
+
 #: src/chat/builds.tsx
 msgid "Removed parameter {name}"
 msgstr "Parámetro {name} eliminado"
@@ -1773,6 +1992,10 @@ msgstr "Revocar"
 #: src/connections/connection-list.tsx
 msgid "Revoke {holder}'s permission"
 msgstr "Revocar el permiso de {holder}"
+
+#: src/activity/audit-words.ts
+msgid "Revoked a permission"
+msgstr "Revocó un permiso"
 
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.settings.profile.tsx
@@ -1855,6 +2078,14 @@ msgstr "Buscar miembros"
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "La búsqueda lee todas las colecciones que puedes leer. Prueba con otras palabras, o con menos."
 
+#: src/activity/audit-words.ts
+msgid "Searched knowledge"
+msgstr "Buscó en el conocimiento"
+
+#: src/activity/audit-words.ts
+msgid "Searched the audit trail"
+msgstr "Buscó en el registro de auditoría"
+
 #: src/activity/pending.tsx
 msgid "See it in the log"
 msgstr "Verlo en el registro"
@@ -1880,6 +2111,10 @@ msgstr "Conexiones sensibles: {connections}."
 #: src/chat/builds.tsx
 msgid "Server code"
 msgstr "Código del servidor"
+
+#: src/activity/audit-words.ts
+msgid "Set aside entries the audit trail couldn't take"
+msgstr "Apartó entradas que el registro de auditoría no pudo aceptar"
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "Set by your organization’s sign-in."
@@ -1990,6 +2225,10 @@ msgstr "El inicio de sesión caducó o se empezó en otro sitio. Vuelve a intent
 msgid "Signed in as {name}"
 msgstr "Sesión iniciada como {name}"
 
+#: src/activity/audit-words.ts
+msgid "Signed in to a connection again"
+msgstr "Volvió a iniciar sesión en una conexión"
+
 #: src/labels.ts
 msgid "Skill"
 msgstr "Skill"
@@ -2035,6 +2274,10 @@ msgstr "Empezar de nuevo desde la versión {newerVersion}"
 msgid "Started"
 msgstr "Iniciada"
 
+#: src/activity/audit-words.ts
+msgid "Started a chat"
+msgstr "Empezó un chat"
+
 #: src/workflows/runs.tsx
 msgid "Started by"
 msgstr "Iniciada por"
@@ -2063,6 +2306,10 @@ msgstr "Detener"
 msgid "Stopped"
 msgstr "Detenido"
 
+#: src/activity/audit-words.ts
+msgid "Stopped a schedule that kept failing"
+msgstr "Detuvo una programación que fallaba una y otra vez"
+
 #: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Detenido."
@@ -2070,10 +2317,6 @@ msgstr "Detenido."
 #: src/routes/_shell.settings.models.tsx
 msgid "Takes sensitive data"
 msgstr "Admite datos sensibles"
-
-#: src/activity/audit-log.tsx
-msgid "Target"
-msgstr "Objetivo"
 
 #: src/activity/audit-log.tsx
 msgid "Target ID"
@@ -2135,6 +2378,10 @@ msgstr "Esa forma de iniciar sesión no está configurada aquí."
 #: src/routes/_shell.settings.models.tsx
 msgid "The {top} who spent most; more spent less."
 msgstr "Los {top} que más gastaron; otros gastaron menos."
+
+#: src/activity/audit-words.ts
+msgid "The agent looked something up"
+msgstr "El agente consultó algo"
 
 #: src/routes/_shell.notifications.tsx
 msgid "The agent wasn't asked: {reason}"
@@ -2261,10 +2508,6 @@ msgstr "Esta página no se ha cargado"
 msgid "This screen doesn't build. Ask a builder to fix it."
 msgstr "Esta pantalla no se compila. Pide a un creador que la arregle."
 
-#: src/activity/audit-log.tsx
-msgid "Time"
-msgstr "Hora"
-
 #: src/chat/chat-list.tsx
 msgid "Title"
 msgstr "Título"
@@ -2277,6 +2520,14 @@ msgstr "Hasta"
 msgctxt "chats from today"
 msgid "Today"
 msgstr "Hoy"
+
+#: src/activity/audit-words.ts
+msgid "Took back a guest's link"
+msgstr "Retiró el enlace de un invitado"
+
+#: src/activity/audit-words.ts
+msgid "Took someone off a team"
+msgstr "Sacó a alguien de un equipo"
 
 #: src/connections/connection-list.tsx
 msgid "Tools allowed: {tools}"
@@ -2317,6 +2568,10 @@ msgstr "sin leer"
 msgid "Unreadable event"
 msgstr "Evento ilegible"
 
+#: src/activity/audit-words.ts
+msgid "Updated Grasp"
+msgstr "Actualizó Grasp"
+
 #: src/knowledge/uploads.tsx
 msgid "Upload"
 msgstr "Subir"
@@ -2325,6 +2580,10 @@ msgstr "Subir"
 msgid "Upload a PDF, Word or Excel file"
 msgstr "Sube un archivo PDF, Word o Excel"
 
+#: src/activity/audit-words.ts
+msgid "Uploaded to knowledge"
+msgstr "Subió al conocimiento"
+
 #: src/knowledge/uploads.tsx
 msgid "Uploading…"
 msgstr "Subiendo…"
@@ -2332,6 +2591,10 @@ msgstr "Subiendo…"
 #: src/routes/sign-in.tsx
 msgid "Use your organization’s account to go on."
 msgstr "Usa la cuenta de tu organización para continuar."
+
+#: src/activity/audit-words.ts
+msgid "Used a connected tool"
+msgstr "Usó una herramienta conectada"
 
 #: src/knowledge/document.tsx
 msgid "Used by"
@@ -2400,6 +2663,14 @@ msgstr "Esperando por ti: {title}"
 msgid "Waits"
 msgstr "Espera"
 
+#: src/activity/audit-words.ts
+msgid "Was called by another App"
+msgstr "Fue llamada por otra App"
+
+#: src/activity/audit-words.ts
+msgid "Was refused adding a member to an App"
+msgstr "No se le permitió añadir un miembro a una App"
+
 #: src/routes/_shell.settings.approvals.tsx
 msgid "What Apps and agents ask to be allowed to do, waiting for an admin."
 msgstr "Lo que las Apps y los agentes piden poder hacer, a la espera de un administrador."
@@ -2436,6 +2707,14 @@ msgstr "cuando alguien lo inicia"
 #: src/routes/_shell.connections.tsx
 msgid "Which Apps and agents hold permissions: {why}"
 msgstr "Qué aplicaciones y agentes tienen permisos: {why}"
+
+#: src/activity/audit-words.ts
+msgid "Worked out how knowledge is used"
+msgstr "Calculó cómo se usa el conocimiento"
+
+#: src/activity/audit-words.ts
+msgid "Worked out what could be improved"
+msgstr "Calculó lo que podría mejorarse"
 
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.workflows.index.tsx

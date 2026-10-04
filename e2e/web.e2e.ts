@@ -126,17 +126,17 @@ test("names each member's actions for them, and asks before making someone an ad
     const who = `Person (${person.email})`;
     // oxlint-disable-next-line no-await-in-loop -- one control at a time
     await expect(
-      page.getByRole("button", { name: `More for ${who}`, exact: true })
+      page.getByRole("button", { name: `Actions for ${who}`, exact: true })
     ).toHaveCount(1);
   }
   const labels = await page
-    .getByRole("button", { name: /^More for /u })
+    .getByRole("button", { name: /^Actions for /u })
     .evaluateAll((buttons) =>
       buttons.map((button) => button.getAttribute("aria-label"))
     );
   expect(new Set(labels).size).toBe(labels.length);
   await page
-    .getByRole("button", { name: `More for Person (${one.email})` })
+    .getByRole("button", { name: `Actions for Person (${one.email})` })
     .click();
   await expect(
     page.getByRole("menuitem", { name: "Sign out everywhere" })
@@ -157,6 +157,39 @@ test("names each member's actions for them, and asks before making someone an ad
   await expect(role).toContainText("User");
 });
 
+test("an admin signs someone out everywhere, then removes them, and is told what that disconnected", async ({
+  context,
+  page,
+}) => {
+  const { admin, leaving } = peopleIn("memberRemoval");
+  await signInTo(context, admin);
+  await page.goto("/settings/members");
+  const who = `Person (${leaving.email})`;
+  const actions = page.getByRole("button", { name: `Actions for ${who}` });
+  const notice = page
+    .getByRole("region", { name: "Members and roles" })
+    .getByRole("status");
+
+  await actions.click();
+  await page.getByRole("menuitem", { name: "Sign out everywhere" }).click();
+  await expect(notice).toHaveText("Person is signed out everywhere.");
+  // Still a member.
+  await expect(actions).toBeVisible();
+
+  await actions.click();
+  await page.getByRole("menuitem", { name: "Remove" }).click();
+  const confirm = page.getByRole("dialog", { name: "Remove Person?" });
+  await confirm.getByRole("button", { name: "Remove" }).click();
+  await expect(notice).toHaveText(
+    "Person is removed. 0 personal connections were disconnected."
+  );
+  await expect(actions).toHaveCount(0);
+  // Their row, and the menu that had the focus, are gone: the focus goes on.
+  await expect(
+    page.getByRole("textbox", { name: "Search members" })
+  ).toBeFocused();
+});
+
 test("shows the members page only to someone signed in, and never signs them out for core failing", async ({
   context,
   page,
@@ -170,7 +203,9 @@ test("shows the members page only to someone signed in, and never signs them out
     "/settings/members"
   );
   await expect(page.getByRole("heading", { name: "Members" })).toHaveCount(0);
-  await expect(page.getByRole("table")).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: /^Role of /u })).toHaveCount(
+    0
+  );
 
   // Core fails the next connections outright, as a busy database failing
   // the upgrade does: the browser sees only a closed socket.
@@ -251,7 +286,7 @@ test("an admin changes a member's role, and the controls wait for the list to sh
   const whileRefreshing = {
     role: await role.isDisabled(),
     remove: await page
-      .getByRole("button", { name: `More for ${who}`, exact: true })
+      .getByRole("button", { name: `Actions for ${who}`, exact: true })
       .isDisabled(),
   };
   gate.release();
@@ -284,7 +319,9 @@ test("shows the page loading while the members list is slow, then says core can'
   );
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(nav).toBeVisible();
-  await expect(page.getByRole("table")).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: /^Role of /u })).toHaveCount(
+    0
+  );
 });
 
 test("sends someone whose session ended elsewhere to sign in, and back to the page they asked for", async ({

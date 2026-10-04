@@ -40,7 +40,7 @@ import {
   SearchIcon,
   UserMinusIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
@@ -50,6 +50,7 @@ import { initials } from "../frame/person-menu.tsx";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import {
+  SettingsError,
   SettingsLoading,
   SettingsSection,
 } from "../settings/settings-parts.tsx";
@@ -74,9 +75,12 @@ type Report = (failure?: string, done?: string) => void;
 const MemberActions = ({
   member,
   onNotice,
+  onRemoved,
 }: {
   member: Member;
   onNotice: Report;
+  /** Once they are removed: their row, and what had the focus in it, is gone. */
+  onRemoved: () => void;
 }) => {
   const router = useRouter();
   const { busy, failure, run: runAction } = useCoreAction();
@@ -102,6 +106,25 @@ const MemberActions = ({
       );
     }, report);
   };
+  const remove = async (): Promise<void> => {
+    // Shown on the page: a removal that went through takes this row with
+    // it, even when it failed to disconnect everything
+    // (`member.connections_pending`).
+    let removed = false;
+    await run(async (members) => {
+      const { connectionsDisconnected: count } = await members.remove(
+        member.userId
+      );
+      removed = true;
+      onNotice(
+        undefined,
+        t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`
+      );
+    }, onNotice);
+    if (removed) {
+      onRemoved();
+    }
+  };
   const setRole = (role: Role): void => {
     void run(async (members) => {
       await members.setRole(member.userId, role);
@@ -122,7 +145,7 @@ const MemberActions = ({
             }
           }}
         >
-          <SelectTrigger aria-label={t`Role of ${who}`} className="w-28">
+          <SelectTrigger aria-label={t`Role of ${who}`} className="w-36">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -160,7 +183,7 @@ const MemberActions = ({
         </Dialog>
         <DropdownMenu>
           <DropdownMenuTrigger
-            aria-label={t`More for ${who}`}
+            aria-label={t`Actions for ${who}`}
             disabled={busy}
             render={<Button size="icon-sm" variant="ghost" />}
           >
@@ -208,17 +231,7 @@ const MemberActions = ({
                 variant="destructive"
                 disabled={busy}
                 onClick={() => {
-                  // Shown on the page: a removal that went through takes
-                  // this row with it, even when it failed to disconnect
-                  // everything (`member.connections_pending`).
-                  void run(async (members) => {
-                    const { connectionsDisconnected: count } =
-                      await members.remove(member.userId);
-                    onNotice(
-                      undefined,
-                      t`${name} is removed. ${plural(count, { one: "# personal connection was disconnected.", other: "# personal connections were disconnected." })}`
-                    );
-                  }, onNotice);
+                  void remove();
                 }}
               >
                 <Trans>Remove</Trans>
@@ -251,6 +264,7 @@ const MembersList = ({ members, me }: { members: Member[]; me: string }) => {
   const { t } = useLingui();
   const [notice, setNotice] = useState<{ failure?: string; done?: string }>({});
   const [search, setSearch] = useState("");
+  const searchField = useRef<HTMLInputElement>(null);
   const people = members.length;
   const shown = members.filter((member) => matches(member, search));
   return (
@@ -263,6 +277,7 @@ const MembersList = ({ members, me }: { members: Member[]; me: string }) => {
               setSearch(event.target.value);
             }}
             placeholder={t`Search`}
+            ref={searchField}
             value={search}
           />
           <InputGroupAddon>
@@ -318,6 +333,9 @@ const MembersList = ({ members, me }: { members: Member[]; me: string }) => {
           ) : (
             <MemberActions
               member={member}
+              onRemoved={() => {
+                searchField.current?.focus();
+              }}
               onNotice={(failure, done) => {
                 setNotice({
                   ...(failure === undefined ? {} : { failure }),
@@ -339,7 +357,7 @@ const Members = () => {
   if (page.state !== "ready") {
     return (
       <SettingsSection title={t`Members and roles`}>
-        <NotLoadedState page={page} />
+        <NotLoadedState heading="h3" page={page} />
       </SettingsSection>
     );
   }
@@ -348,6 +366,7 @@ const Members = () => {
 
 export const Route = createFileRoute("/_shell/settings/members")({
   pendingComponent: SettingsLoading,
+  errorComponent: SettingsError,
   component: Members,
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => await session.members.list()),

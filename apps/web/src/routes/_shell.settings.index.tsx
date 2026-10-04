@@ -4,6 +4,6 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 export const Route = createFileRoute("/_shell/settings/")({
   beforeLoad: () => {
     // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
-    throw redirect({ to: "/settings/profile" });
+    throw redirect({ replace: true, to: "/settings/profile" });
   },
 });

@@ -1,8 +1,10 @@
-import { useLingui } from "@lingui/react/macro";
+import { Skeleton } from "@grasp-os/ui/components/skeleton";
+import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
-import { LoadingLines } from "../frame/page-states.tsx";
+import { ErrorState, LoadingLines } from "../frame/page-states.tsx";
+import { useRouteErrorReason } from "../route-error.tsx";
 
 // Settings' building blocks, as in the prototype (`components/settings.tsx`):
 // a section on a card of its own, and its rows.
@@ -75,14 +77,25 @@ export const SettingsBody = ({ children }: { children: ReactNode }) => (
   <div className="flex flex-col gap-4 border-t px-5 py-4">{children}</div>
 );
 
-/** A section while its read is slow: its card, with lines where its rows will be. */
-export const SettingsLoading = () => {
-  const { t } = useLingui();
-  return (
-    <SettingsSection title={t`Loading…`}>
-      <SettingsBody>
-        <LoadingLines lines={4} />
-      </SettingsBody>
-    </SettingsSection>
-  );
-};
+/** A section while its read is slow: its card, with skeletons where its title and rows will be. */
+export const SettingsLoading = () => (
+  <div className="bg-card overflow-hidden rounded-xl border text-sm">
+    <div className="flex flex-col gap-2 px-5 py-4">
+      <Skeleton className="h-4 w-40" />
+      <Skeleton className="h-4 w-72 max-w-full" />
+    </div>
+    <SettingsBody>
+      <LoadingLines lines={4} />
+    </SettingsBody>
+  </div>
+);
+
+/**
+ * A section that failed as it rendered: the error on its card, in the
+ * Settings layout, rather than a page of its own with a second header.
+ */
+export const SettingsError = ({ error }: ErrorComponentProps) => (
+  <div className="bg-card overflow-hidden rounded-xl border text-sm">
+    <ErrorState heading="h2" reason={useRouteErrorReason(error)} />
+  </div>
+);

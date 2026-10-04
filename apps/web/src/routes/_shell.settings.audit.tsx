@@ -14,7 +14,7 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import {
   SettingsBody,
-  SettingsLoading,
+  SettingsError,
   SettingsSection,
 } from "../settings/settings-parts.tsx";
 
@@ -45,17 +45,19 @@ const AuditTrail = () => {
       <SettingsBody>
         {/* Filters and records start again from new filters. */}
         <LogFilters key={JSON.stringify(filters)} search={filters} />
-        {log.state === "ready" ? (
-          <LogRecords
-            directory={log.data.directory}
-            first={log.data.page}
-            key={logKey(filters, log.data.page)}
-            search={filters}
-          />
-        ) : (
-          <NotLoadedState page={log} />
-        )}
       </SettingsBody>
+      {log.state === "ready" ? (
+        <LogRecords
+          directory={log.data.directory}
+          first={log.data.page}
+          key={logKey(filters, log.data.page)}
+          search={filters}
+        />
+      ) : (
+        <div className="border-t">
+          <NotLoadedState heading="h3" page={log} />
+        </div>
+      )}
     </SettingsSection>
   );
 };
@@ -66,6 +68,6 @@ export const Route = createFileRoute("/_shell/settings/audit")({
   loaderDeps: ({ search }) => search,
   loader: async ({ context: { core }, deps }) =>
     await loadFromCore(core, async (session) => await readLog(session, deps)),
-  pendingComponent: SettingsLoading,
+  errorComponent: SettingsError,
   component: AuditTrail,
 });

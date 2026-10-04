@@ -120,21 +120,22 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await expect(page.getByRole("textbox", { name: "Target ID" })).toHaveValue(
     approved
   );
-  const granted = page
-    .getByRole("row")
-    .filter({ has: page.getByRole("cell", { name: "permission.granted" }) });
+  // Each entry in words, under who did it and to what.
+  const entries = page
+    .getByRole("list", { name: "Entries" })
+    .getByRole("listitem");
+  const granted = entries.filter({ hasText: "Granted a permission" });
   await expect(granted).toHaveCount(1);
   await expect(granted).toContainText("Permission");
   await expect(granted).toContainText(`permission ${approved}`);
   await expect(
-    page.getByRole("row").filter({
-      has: page.getByRole("cell", { name: "permission.requested" }),
-    })
+    entries.filter({ hasText: "Asked for a permission" })
   ).toHaveCount(1);
   await granted.getByRole("button", { name: /^Details of event /u }).click();
   await expect(
     page.getByText(`"requestedBy": "${builder.userId}"`)
   ).toBeVisible();
+  await expect(granted).toContainText("permission.granted");
 
   // Narrowed to grants, the request drops out; the action is taken as
   // core takes it, whatever its case and a trailing dot.
@@ -146,9 +147,7 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await page.getByRole("button", { name: "Filter" }).click();
   await expect(page).toHaveURL(/action=permission\.granted/u);
   await expect(
-    page.getByRole("row").filter({
-      has: page.getByRole("cell", { name: "permission.requested" }),
-    })
+    entries.filter({ hasText: "Asked for a permission" })
   ).toHaveCount(0);
   await expect(granted).toHaveCount(1);
 

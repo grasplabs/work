@@ -8,7 +8,11 @@ import { formatList } from "../format.ts";
 import { initials } from "../frame/person-menu.tsx";
 import { roleLabel } from "../labels.ts";
 import { LanguageSelect } from "../language-picker.tsx";
-import { SettingsRow, SettingsSection } from "../settings/settings-parts.tsx";
+import {
+  SettingsError,
+  SettingsRow,
+  SettingsSection,
+} from "../settings/settings-parts.tsx";
 
 // Settings → Profile, as in the prototype (`routes/settings/profile.tsx`):
 // how the person appears in Grasp. Their name and email come from their
@@ -62,7 +66,7 @@ const Profile = () => {
         label={t`Teams`}
       >
         <span className="text-muted-foreground">
-          {teams.length === 0 ? <Trans>None</Trans> : formatList(teams)}
+          {teams.length === 0 ? <Trans>No teams</Trans> : formatList(teams)}
         </span>
       </SettingsRow>
       <SettingsRow
@@ -77,5 +81,6 @@ const Profile = () => {
 };
 
 export const Route = createFileRoute("/_shell/settings/profile")({
+  errorComponent: SettingsError,
   component: Profile,
 });

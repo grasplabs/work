@@ -27,6 +27,7 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import {
   SettingsBody,
+  SettingsError,
   SettingsLoading,
   SettingsSection,
 } from "../settings/settings-parts.tsx";
@@ -37,12 +38,21 @@ import {
 // that Grasp sets as agreed with the client, so the page only shows them,
 // as core reads them; core checks the role.
 
-const dollars = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 4,
-});
+/** An amount in US dollars, the gateway's currency, as the page's language writes it. */
+const dollars = (amount: number): string =>
+  new Intl.NumberFormat(i18n.locale, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(amount);
+
+/** A share given in percent (80 for 80 %), as the page's language writes it. */
+const percent = (value: number): string =>
+  new Intl.NumberFormat(i18n.locale, {
+    style: "percent",
+    maximumFractionDigits: 0,
+  }).format(value / 100);
 
 /** A list of IDs for a sentence, or `none`. */
 const listed = (ids: readonly string[]): string =>
@@ -188,15 +198,15 @@ const spenderName = (of: ModelSpender): string => {
 const BudgetTable = ({ budget }: { budget: ModelBudget }) => {
   const { t } = useLingui();
   const title = i18n._(scopeTitles[budget.scope]);
-  const limit = dollars.format(budget.limit);
-  const { alertAt } = budget;
+  const limit = dollars(budget.limit);
+  const alertAt = percent(budget.alertAt);
   const top = budget.spent.length;
   return (
     <div className="flex flex-col gap-2">
       <h3 className="font-medium">{title}</h3>
       <p className="text-muted-foreground text-sm">
         <Trans>
-          {limit} a month, admins alerted at {alertAt}%. Calls stop once
+          {limit} a month, admins alerted at {alertAt}. Calls stop once
           it&apos;s used up.
         </Trans>
       </p>
@@ -228,9 +238,12 @@ const BudgetTable = ({ budget }: { budget: ModelBudget }) => {
             {budget.spent.map(({ of, amount }) => (
               <TableRow key={JSON.stringify(of)}>
                 <TableCell>{spenderName(of)}</TableCell>
-                <TableCell>{dollars.format(amount)}</TableCell>
+                <TableCell>{dollars(amount)}</TableCell>
                 <TableCell>
-                  {Math.round((amount / budget.limit) * 100)}%
+                  {/* A limit of nothing is used up by any spend at all. */}
+                  {budget.limit > 0
+                    ? percent((amount / budget.limit) * 100)
+                    : percent(100)}
                 </TableCell>
               </TableRow>
             ))}
@@ -273,23 +286,20 @@ const Settings = ({ settings }: { settings: ModelSettings }) => {
   const { t } = useLingui();
   if (settings.models.length === 0) {
     return (
-      <p className="text-muted-foreground text-sm">
-        <Trans>
-          Models aren&apos;t set up for this deployment yet, so no model call
-          can be made. Grasp sets them up.
-        </Trans>
-      </p>
+      <Section title={t`Allowed models`}>
+        <p className="text-muted-foreground text-sm">
+          <Trans>
+            Models aren&apos;t set up for this deployment yet, so no model call
+            can be made. Grasp sets them up.
+          </Trans>
+        </p>
+      </Section>
     );
   }
   const { rules } = settings;
   const on = rules.state === "on" ? rules : undefined;
   return (
     <>
-      {rules.state === "invalid" ? (
-        <ErrorText>
-          {t`The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp.`}
-        </ErrorText>
-      ) : null}
       <Section
         description={
           <Trans>
@@ -299,6 +309,11 @@ const Settings = ({ settings }: { settings: ModelSettings }) => {
         }
         title={t`Allowed models`}
       >
+        {rules.state === "invalid" ? (
+          <ErrorText>
+            {t`The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp.`}
+          </ErrorText>
+        ) : null}
         <AllowedModels models={settings.models} rules={on} />
       </Section>
       {on === undefined ? null : (
@@ -324,7 +339,7 @@ const Models = () => {
   if (page.state !== "ready") {
     return (
       <SettingsSection title={t`Models`}>
-        <NotLoadedState page={page} />
+        <NotLoadedState heading="h3" page={page} />
       </SettingsSection>
     );
   }
@@ -333,6 +348,7 @@ const Models = () => {
 
 export const Route = createFileRoute("/_shell/settings/models")({
   pendingComponent: SettingsLoading,
+  errorComponent: SettingsError,
   component: Models,
   loader: async ({ context: { core } }) =>
     await loadFromCore(
