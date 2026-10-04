@@ -1,5 +1,4 @@
 import type { App, AppContents } from "@grasp-os/shared/apps";
-import { roleErrors } from "@grasp-os/shared/roles";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Empty,
@@ -19,6 +18,7 @@ import { EngineIcon } from "../engines/engine-icon.tsx";
 import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import { openableApps } from "../workflows/reads.ts";
 
 // Engines, as in the prototype (`routes/engines/index.tsx`): the engines
 // (core's Apps) the person can open, as core lists them, each a card with
@@ -30,21 +30,6 @@ interface ListedApp {
   /** Undefined when core didn't answer for this App. */
   contents?: AppContents;
 }
-
-/**
- * The Apps core lets the person open: their own, those shared with them,
- * and every App for admins. A list refused to their role is none.
- */
-const openableApps = async (session: Session): Promise<App[]> => {
-  try {
-    return await session.apps.list();
-  } catch (error) {
-    if (roleErrors.codeOf(error) === "role.forbidden") {
-      return [];
-    }
-    throw error;
-  }
-};
 
 /**
  * How long one App's contents may take: half the page's own limit, so an

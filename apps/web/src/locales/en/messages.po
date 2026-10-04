@@ -17,12 +17,8 @@ msgstr "(yours)"
 
 #. placeholder {0}: draft.changed.length
 #: src/chat/builds.tsx
-msgid "{0, plural, one {{app}: # file changed in this chat, not proposed yet} other {{app}: # files changed in this chat, not proposed yet}}"
-msgstr "{0, plural, one {{app}: # file changed in this chat, not proposed yet} other {{app}: # files changed in this chat, not proposed yet}}"
-
-#: src/activity/pending.tsx
-msgid "{app} already keeps {type} records here: this engine's won't apply."
-msgstr "{app} already keeps {type} records here: this engine's won't apply."
+msgid "{0, plural, one {{engine}: # file changed in this chat, not proposed yet} other {{engine}: # files changed in this chat, not proposed yet}}"
+msgstr "{0, plural, one {{engine}: # file changed in this chat, not proposed yet} other {{engine}: # files changed in this chat, not proposed yet}}"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
@@ -31,10 +27,6 @@ msgstr "{app} has no tools."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} isn't connected yet."
 msgstr "{app} isn't connected yet."
-
-#: src/activity/audit-log.tsx
-msgid "{app}: run of {workflowId}"
-msgstr "{app}: run of {workflowId}"
 
 #: src/workflows/workflows-table.tsx
 msgid "{appName} · Version {version}"
@@ -95,6 +87,14 @@ msgstr "{count, plural, one {once} other {# times}}"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "{count} or more files"
 msgstr "{count} or more files"
+
+#: src/activity/pending.tsx
+msgid "{engine} already keeps {type} records here: this engine's won't apply."
+msgstr "{engine} already keeps {type} records here: this engine's won't apply."
+
+#: src/activity/audit-log.tsx
+msgid "{engine}: run of {workflowId}"
+msgstr "{engine}: run of {workflowId}"
 
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
@@ -237,8 +237,8 @@ msgid "{who} consented to this before connecting it:"
 msgstr "{who} consented to this before connecting it:"
 
 #: src/routes/_shell.settings.models.tsx
-msgid "{workflowId} in {app}"
-msgstr "{workflowId} in {app}"
+msgid "{workflowId} in {engine}"
+msgstr "{workflowId} in {engine}"
 
 #: src/routes/_shell.engines.index.tsx
 msgid "{workflows, plural, one {# workflow} other {# workflows}}"
@@ -1052,8 +1052,8 @@ msgid "Engine"
 msgstr "Engine"
 
 #: src/connections/connection-list.tsx
-msgid "Engine {app}"
-msgstr "Engine {app}"
+msgid "Engine {engine}"
+msgstr "Engine {engine}"
 
 #: src/screens/screen-frame.tsx
 msgid "Engine app"
@@ -1157,8 +1157,8 @@ msgid "Exports"
 msgstr "Exports"
 
 #: src/activity/pending.tsx
-msgid "Exports of {app}: {covered}"
-msgstr "Exports of {app}: {covered}"
+msgid "Exports of {engine}: {covered}"
+msgstr "Exports of {engine}: {covered}"
 
 #: src/knowledge/uploads.tsx
 msgid "Extracting"
@@ -1295,8 +1295,8 @@ msgid "Guest chats. This engine can invite people who aren't members to a short 
 msgstr "Guest chats. This engine can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
 
 #: src/activity/audit-log.tsx
-msgid "Guest of {app}, invited for {person}"
-msgstr "Guest of {app}, invited for {person}"
+msgid "Guest of {engine}, invited for {person}"
+msgstr "Guest of {engine}, invited for {person}"
 
 #: src/activity/audit-log.tsx
 msgid "Hash"
@@ -3063,8 +3063,8 @@ msgid "Workflow"
 msgstr "Workflow"
 
 #: src/activity/pending.tsx
-msgid "Workflow {workflowId} of {app}"
-msgstr "Workflow {workflowId} of {app}"
+msgid "Workflow {workflowId} of {engine}"
+msgstr "Workflow {workflowId} of {engine}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Workflow not found"

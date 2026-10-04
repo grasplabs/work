@@ -357,18 +357,18 @@ const actorOf = (
     };
   }
   if (actor.type === "workflow") {
-    const app = appName(directory, actor.appId);
+    const engine = appName(directory, actor.appId);
     const { workflowId } = actor;
     return {
-      label: i18n._(msg`${app}: run of ${workflowId}`),
+      label: i18n._(msg`${engine}: run of ${workflowId}`),
       id: actor.runId,
     };
   }
   if (actor.type === "guest") {
-    const app = appName(directory, actor.appId);
+    const engine = appName(directory, actor.appId);
     const person = personName(directory, actor.invitedBy);
     return {
-      label: i18n._(msg`Guest of ${app}, invited for ${person}`),
+      label: i18n._(msg`Guest of ${engine}, invited for ${person}`),
       id: actor.chatId,
     };
   }

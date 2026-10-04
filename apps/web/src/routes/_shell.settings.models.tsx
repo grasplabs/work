@@ -189,8 +189,8 @@ const spenderName = (of: ModelSpender): string => {
   }
   if (of.type === "workflow") {
     const { workflowId } = of;
-    const app = of.appName ?? of.appId;
-    return i18n._(msg`${workflowId} in ${app}`);
+    const engine = of.appName ?? of.appId;
+    return i18n._(msg`${workflowId} in ${engine}`);
   }
   return of.name ?? of.userId;
 };

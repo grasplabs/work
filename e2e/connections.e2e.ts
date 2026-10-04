@@ -195,11 +195,12 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   const { mailbox, toolkit } = seededConnections();
   const appName = `Mail triage ${crypto.randomUUID()}`;
   const { core, api } = apiOf(admin);
+  let appId: string;
   try {
-    const { id: appId } = await api.apps.create({
+    ({ id: appId } = await api.apps.create({
       name: appName,
       description: "Sorts the shared mailbox",
-    });
+    }));
     const { id } = await api.permissions.request({
       subject: { type: "app", appId },
       object: { type: "connection", connectionId: mailbox.id },
@@ -220,6 +221,18 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   }
 
   const page = await pageOf(browser, admin);
+  // The engine's Integrations tab lists the integrations of the
+  // connections it may use, in those connections' state.
+  await page.goto(`/engines/${appId}`);
+  await page.getByRole("tab", { name: "Integrations" }).click();
+  const used = page
+    .getByRole("tabpanel")
+    .getByRole("listitem")
+    .filter({ hasText: "Microsoft 365" });
+  await expect(used).toContainText("For everyone");
+  await expect(used).toContainText("Connected");
+  await expect(page.getByRole("tabpanel").getByRole("listitem")).toHaveCount(1);
+
   await accountOf(page, "native:microsoft");
   const mailboxCard = cardOf(page, "Microsoft 365", mailbox);
   await expect(mailboxCard.getByRole("definition").first()).toHaveText(

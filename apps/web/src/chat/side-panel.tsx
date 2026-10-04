@@ -12,7 +12,7 @@ import { Link } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   BoxIcon,
-  BoxesIcon,
+  CogIcon,
   ChevronRightIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -139,7 +139,7 @@ export const SidePanel = ({
           className="flex items-center gap-2 text-sm font-medium"
           id="panel-apps"
         >
-          <BoxesIcon
+          <CogIcon
             aria-hidden="true"
             className="text-muted-foreground size-4"
           />
@@ -150,7 +150,7 @@ export const SidePanel = ({
           <Empty>
             <EmptyHeader>
               <EmptyMedia variant="icon">
-                <BoxesIcon />
+                <CogIcon />
               </EmptyMedia>
               <EmptyTitle>
                 <Trans>No engines yet</Trans>
