@@ -12,6 +12,7 @@ import {
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { ChatDock } from "../chat/chat-dock.tsx";
 import { loadCoreStatus } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import { keepFolded, readFolded } from "../fold.ts";
@@ -42,6 +43,8 @@ const Shell = () => {
         <SidebarInset className="min-h-0 min-w-0 overflow-y-auto">
           <Outlet />
         </SidebarInset>
+        {/* Grasp's chat, bottom right on every page but Chat's own. */}
+        <ChatDock />
       </SidebarProvider>
     </TooltipProvider>
   );

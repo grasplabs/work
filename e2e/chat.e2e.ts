@@ -133,10 +133,26 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   // Renamed from the chat's menu in the list.
   await chats.getByRole("button", { name: `More for ${question}` }).click();
   await page.getByRole("menuitem", { name: "Rename" }).click();
-  await page.getByLabel("Title").fill(title);
-  await page.getByRole("button", { name: "Save" }).click();
+  // In place: the name is in a field, Enter keeps it.
+  const name = chats.getByLabel("Chat name");
+  await expect(name).toBeFocused();
+  await name.fill(`Draft ${tag}`);
+  await name.press("Enter");
+  await expect(chats.getByRole("link", { name: `Draft ${tag}` })).toBeVisible();
+
+  // A double click renames it too, rather than opening it; Escape keeps
+  // the name it had.
+  await chats.getByRole("link", { name: `Draft ${tag}` }).dblclick();
+  await chats.getByLabel("Chat name").fill("Never kept");
+  await chats.getByLabel("Chat name").press("Escape");
+  await expect(chats.getByRole("link", { name: `Draft ${tag}` })).toBeFocused();
+  await chats.getByRole("link", { name: `Draft ${tag}` }).dblclick();
+  await chats.getByLabel("Chat name").fill(title);
+  await chats.getByLabel("Chat name").press("Enter");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(title);
   await expect(chats.getByRole("link", { name: title })).toBeVisible();
+  // One line per chat: its title alone.
+  await expect(chats.getByRole("link", { name: title })).toHaveText(title);
 
   const chatId = new URL(page.url()).searchParams.get("chat") ?? "";
   const account = `mail-${tag}@acme.test`;
@@ -306,4 +322,52 @@ test("the side panel opens in a sheet over the chat on a narrow screen, and besi
     fits: (beside?.x ?? 0) + (beside?.width ?? 0) <= 1440,
     besideTheChat: (chat?.x ?? 0) + (chat?.width ?? 0) <= (beside?.x ?? 0),
   }).toStrictEqual({ fits: true, besideTheChat: true });
+});
+
+test("the chat dock on every other page carries on the open chat, which is the same chat in Chat", async ({
+  browser,
+}) => {
+  const { user } = peopleIn("chatDock");
+  const page = await pageOf(browser, user);
+  const tag = crypto.randomUUID().slice(0, 8);
+  const question = `From the dock ${tag}?`;
+
+  // Asked from another page, it opens around the box and streams there.
+  await page.goto("/apps");
+  const box = page.getByRole("textbox", { name: "Ask Grasp" });
+  await box.fill(question);
+  await box.press("Enter");
+  const dock = page.getByRole("region", { name: "Ask Grasp" });
+  const messages = dock.getByRole("list", { name: "Messages" });
+  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  await expect(messages.getByRole("alert")).toHaveText(
+    "The model call failed.",
+    { timeout: 30_000 }
+  );
+  // The page stayed where it was.
+  expect(new URL(page.url()).pathname).toBe("/apps");
+
+  // Folded away, it is the bar again, and opens again on the same chat.
+  await dock.getByRole("button", { name: "Fold the chat away" }).click();
+  await expect(dock).toHaveCount(0);
+  await page.getByRole("button", { name: "Open the chat" }).click();
+  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+
+  // It is the chat in Chat, in its list, where the dock isn't.
+  await dock.getByRole("link", { name: "Open in chat" }).click();
+  await expect(page).toHaveURL(/[?&]chat=/u);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(question);
+  await expect(
+    page
+      .getByRole("navigation", { name: "Recent chats" })
+      .getByRole("link", { name: question })
+  ).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toHaveCount(0);
+
+  // A new chat from the dock starts afresh.
+  await page.goto("/knowledge");
+  await page.getByRole("button", { name: "Open the chat" }).click();
+  await dock.getByRole("button", { name: "New chat" }).click();
+  await expect(dock.getByRole("list", { name: "Messages" })).toHaveCount(0);
+  await expect(dock).toContainText("Ask anything, or describe a process");
 });

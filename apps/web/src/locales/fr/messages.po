@@ -394,9 +394,14 @@ msgstr "en tant que {binding}"
 msgid "Ask again"
 msgstr "Reposer la question"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Posez une question ou décrivez un processus"
+
+#: src/chat/chat-dock.tsx
+msgid "Ask Grasp"
+msgstr "Demander à Grasp"
 
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the App shows here to preview before it is proposed."
@@ -457,6 +462,10 @@ msgstr "Automatiquement"
 #: src/knowledge/document.tsx
 msgid "Back to the current version"
 msgstr "Revenir à la version actuelle"
+
+#: src/chat/chat-dock.tsx
+msgid "Back to the small chat"
+msgstr "Revenir au petit chat"
 
 #: src/chat/builds.tsx
 msgid "Being built"
@@ -527,6 +536,10 @@ msgstr "Modifie les données de l’application"
 #: src/routes/guest.tsx
 msgid "Chat"
 msgstr "Chat"
+
+#: src/chat/chat-list.tsx
+msgid "Chat name"
+msgstr "Nom du chat"
 
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
@@ -916,6 +929,10 @@ msgstr "Filtres"
 msgid "Finish"
 msgstr "Terminer"
 
+#: src/chat/chat-dock.tsx
+msgid "Fold the chat away"
+msgstr "Replier le chat"
+
 #: src/chat/chat-list.tsx
 msgid "Fold the chats"
 msgstr "Replier les discussions"
@@ -1237,6 +1254,7 @@ msgstr "Jamais"
 msgid "New"
 msgstr "Nouveau"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
 msgid "New chat"
@@ -1447,10 +1465,19 @@ msgstr "Seulement si une condition est remplie :"
 msgid "Open {name}"
 msgstr "Ouvrir {name}"
 
+#: src/chat/chat-dock.tsx
+msgid "Open at the side"
+msgstr "Ouvrir sur le côté"
+
 #: src/routes/_shell.apps.$app.tsx
 msgid "Open full page"
 msgstr "Ouvrir en pleine page"
 
+#: src/chat/chat-dock.tsx
+msgid "Open in chat"
+msgstr "Ouvrir dans le chat"
+
+#: src/chat/chat-dock.tsx
 #: src/routes/_shell.notifications.tsx
 msgid "Open the chat"
 msgstr "Ouvrir le chat"
@@ -1671,10 +1698,6 @@ msgstr "Supprimé : il agissait pour quiconque utilise l’application, avec tou
 msgid "Rename"
 msgstr "Renommer"
 
-#: src/chat/chat-list.tsx
-msgid "Rename this chat"
-msgstr "Renommer ce chat"
-
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Repeats, {items}:"
 msgstr "Se répète, {items} :"
@@ -1764,7 +1787,6 @@ msgstr "S’exécute actuellement"
 msgid "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 msgstr "Exécute les cas de test propres au workflow avec les valeurs définies actuellement. Rien n’est modifié : ce qu’il modifierait est listé à la place."
 
-#: src/chat/chat-list.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Save"
@@ -2191,10 +2213,6 @@ msgstr "Cet écran ne se construit pas. Demandez à un concepteur de le corriger
 msgid "Time"
 msgstr "Horaire"
 
-#: src/chat/chat-list.tsx
-msgid "Title"
-msgstr "Titre"
-
 #: src/activity/audit-log.tsx
 msgid "To"
 msgstr "Au"
@@ -2406,11 +2424,6 @@ msgstr "Rédaction"
 #: src/activity/audit-log.tsx
 msgid "Yes: its hash matches, and it links to the event before it."
 msgstr "Oui : son hachage correspond et il est lié à l’événement précédent."
-
-#: src/chat/chat-list.tsx
-msgctxt "when a chat was started"
-msgid "Yesterday"
-msgstr "Hier"
 
 #: src/connections/connection-list.tsx
 #: src/knowledge/timeline.tsx

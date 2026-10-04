@@ -21,6 +21,7 @@ import {
   SparklesIcon,
   SquareIcon,
 } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 
@@ -93,6 +94,48 @@ const ModelPicker = ({
   );
 };
 
+/** Sends the question, or stops the answer while Grasp is writing it. */
+const SendOrStop = ({
+  running,
+  busy,
+  canSend,
+  compact,
+  onStop,
+}: {
+  running: boolean;
+  busy: boolean;
+  canSend: boolean;
+  compact: boolean;
+  onStop: () => void;
+}) => {
+  const { t } = useLingui();
+  return running ? (
+    <InputGroupButton
+      aria-label={t({ message: "Stop", context: "stop the answer" })}
+      disabled={busy}
+      onClick={onStop}
+      size={compact ? "icon-xs" : "icon-sm"}
+      type="button"
+      variant="default"
+    >
+      <SquareIcon />
+    </InputGroupButton>
+  ) : (
+    <InputGroupButton
+      aria-label={t({
+        message: "Send",
+        context: "send the question",
+      })}
+      disabled={!canSend}
+      size={compact ? "icon-xs" : "icon-sm"}
+      type="submit"
+      variant={canSend ? "default" : "secondary"}
+    >
+      {busy ? <Spinner /> : <ArrowUpIcon />}
+    </InputGroupButton>
+  );
+};
+
 /** The box to ask in. Controlled: the page keeps the text and the model. */
 export const Composer = ({
   text,
@@ -105,6 +148,10 @@ export const Composer = ({
   failure,
   onSend,
   onStop,
+  compact = false,
+  label,
+  placeholder,
+  children,
 }: {
   text: string;
   onText: (text: string) => void;
@@ -119,6 +166,17 @@ export const Composer = ({
   failure?: string;
   onSend: () => void;
   onStop: () => void;
+  /**
+   * One line that grows as it is typed in, its button beside it and no
+   * model to pick (the default model asks): the chat dock and the guest
+   * page.
+   */
+  compact?: boolean;
+  /** What the box is called; "Your question" without it. */
+  label?: string;
+  placeholder?: string;
+  /** Beside the button, in a compact box: such as the way to open the dock. */
+  children?: ReactNode;
 }) => {
   const { t } = useLingui();
   const empty = text.trim() === "";
@@ -133,10 +191,14 @@ export const Composer = ({
         }
       }}
     >
-      <InputGroup size="prompt">
+      <InputGroup size={compact ? "default" : "prompt"}>
         <InputGroupTextarea
-          aria-label={t`Your question`}
-          className="field-sizing-content max-h-48 min-h-16"
+          aria-label={label ?? t`Your question`}
+          className={
+            compact
+              ? "field-sizing-content max-h-40 min-h-0"
+              : "field-sizing-content max-h-48 min-h-16"
+          }
           maxLength={maxQuestionLength}
           name="message"
           onChange={(event) => {
@@ -152,45 +214,45 @@ export const Composer = ({
               event.currentTarget.form?.requestSubmit();
             }
           }}
-          placeholder={t`Ask anything, or describe a process`}
+          placeholder={placeholder ?? t`Ask anything, or describe a process`}
+          rows={compact ? 1 : undefined}
           value={text}
         />
-        <InputGroupAddon align="block-end">
-          <div className="flex w-full items-center justify-between gap-1">
-            <div className="flex min-w-0 items-center gap-1">
-              {models.length === 0 ? null : (
-                <ModelPicker model={model} models={models} onModel={onModel} />
-              )}
-            </div>
-            {running ? (
-              <InputGroupButton
-                aria-label={t({ message: "Stop", context: "stop the answer" })}
-                disabled={busy}
-                onClick={onStop}
-                size="icon-sm"
-                type="button"
-                variant="default"
-              >
-                <SquareIcon />
-              </InputGroupButton>
+        <InputGroupAddon
+          align={compact ? "inline-end" : "block-end"}
+          className={compact ? "self-end" : undefined}
+        >
+          <div
+            className={
+              compact
+                ? "flex items-center gap-1"
+                : "flex w-full items-center justify-between gap-1"
+            }
+          >
+            {compact ? (
+              children
             ) : (
-              <InputGroupButton
-                aria-label={t({
-                  message: "Send",
-                  context: "send the question",
-                })}
-                disabled={!canSend}
-                size="icon-sm"
-                type="submit"
-                variant={canSend ? "default" : "secondary"}
-              >
-                {busy ? <Spinner /> : <ArrowUpIcon />}
-              </InputGroupButton>
+              <div className="flex min-w-0 items-center gap-1">
+                {models.length === 0 ? null : (
+                  <ModelPicker
+                    model={model}
+                    models={models}
+                    onModel={onModel}
+                  />
+                )}
+              </div>
             )}
+            <SendOrStop
+              busy={busy}
+              canSend={canSend}
+              compact={compact}
+              onStop={onStop}
+              running={running}
+            />
           </div>
         </InputGroupAddon>
       </InputGroup>
-      {models.length === 0 ? (
+      {models.length === 0 && !compact ? (
         <p className="text-muted-foreground px-1 text-xs">
           {t`No model is set up for this deployment yet.`}
         </p>
