@@ -217,7 +217,11 @@ const missingOf = (
   if (collection.state === "missing") {
     return "collection";
   }
-  return open?.state === "missing" ? "document" : undefined;
+  // A document is only missing from a collection that loaded, as the page
+  // says below the crumbs.
+  return collection.state === "ready" && open?.state === "missing"
+    ? "document"
+    : undefined;
 };
 
 /**
