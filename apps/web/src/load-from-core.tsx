@@ -1,6 +1,5 @@
 import {
   failureText,
-  isExpectedError,
   requestIdOf,
   withReference,
 } from "@grasp-os/shared/errors";
@@ -37,8 +36,13 @@ const notFoundCodes = new Set([
   "screen.not_found",
 ]);
 
+// Read off the error itself: a family's codes are only known to
+// `isExpectedError` once its module has loaded, and the page loads few.
 const isNotFound = (error: unknown): boolean =>
-  isExpectedError(error) && notFoundCodes.has(error.code);
+  error instanceof Error &&
+  "code" in error &&
+  typeof error.code === "string" &&
+  notFoundCodes.has(error.code);
 
 /**
  * Reads a page's data with `read`, on the signed-in person's session over
