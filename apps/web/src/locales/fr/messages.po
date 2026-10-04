@@ -948,6 +948,7 @@ msgstr "Pour"
 msgid "From"
 msgstr "Source"
 
+#: src/chat/chat-dock.tsx
 #: src/core.ts
 #: src/guest/api.ts
 #: src/load-from-core.tsx
@@ -1300,6 +1301,7 @@ msgstr "Ne s’exécute plus {how}"
 msgid "No memory files are written yet."
 msgstr "Aucun fichier de mémoire n’a encore été écrit."
 
+#: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "Aucun modèle n’est encore configuré pour ce déploiement."
@@ -1608,7 +1610,7 @@ msgstr "Lecture de l’espace de travail"
 
 #: src/routes/guest.tsx
 msgid "Reading what you wrote"
-msgstr "Lit ce que vous avez écrit"
+msgstr "Lecture de ce que vous avez écrit"
 
 #: src/chat/builds-state.ts
 msgid "reads the App's data"

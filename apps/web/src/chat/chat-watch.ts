@@ -34,6 +34,16 @@ const changed = (watch: Watch, state: FollowedChat): void => {
   }
 };
 
+/**
+ * One subscribe function per chat (and connection), so React keeps its
+ * subscription from render to render rather than letting go and taking it
+ * again; let go of with the watch.
+ */
+const subscribers = new WeakMap<
+  CoreConnection,
+  Map<string, (listener: () => void) => () => void>
+>();
+
 /** Shows `chatId` to `listener`, starting its watch if nobody else shows it. */
 const subscribe = (
   core: CoreConnection,
@@ -66,11 +76,32 @@ const subscribe = (
   followed.listeners.add(listener);
   return () => {
     followed.listeners.delete(listener);
-    if (followed.listeners.size === 0) {
-      followed.stop?.();
-      watches.delete(chatId);
-    }
+    // Stopped a moment later, so whoever shows the chat next (the chat
+    // page after the dock, React subscribing again) keeps the same watch.
+    setTimeout(() => {
+      if (followed.listeners.size === 0 && watches.get(chatId) === followed) {
+        followed.stop?.();
+        watches.delete(chatId);
+        subscribers.get(core)?.delete(chatId);
+      }
+    }, 0);
   };
+};
+
+const subscriberFor = (
+  core: CoreConnection,
+  chatId: string
+): ((listener: () => void) => () => void) => {
+  const ofCore =
+    subscribers.get(core) ??
+    new Map<string, (listener: () => void) => () => void>();
+  subscribers.set(core, ofCore);
+  let subscriber = ofCore.get(chatId);
+  if (subscriber === undefined) {
+    subscriber = (listener) => subscribe(core, chatId, listener);
+    ofCore.set(chatId, subscriber);
+  }
+  return subscriber;
 };
 
 /** Follows nothing: there is no chat yet. */
@@ -82,9 +113,7 @@ const followNothing = (): (() => void) => () => {
 export const useFollowedChat = (chatId: string | undefined): FollowedChat => {
   const core = useCore();
   return useSyncExternalStore(
-    chatId === undefined
-      ? followNothing
-      : (listener) => subscribe(core, chatId, listener),
+    chatId === undefined ? followNothing : subscriberFor(core, chatId),
     () =>
       chatId === undefined
         ? notStarted

@@ -360,7 +360,7 @@ test("the chat dock on every other page carries on the open chat, which is the s
   await expect(
     page
       .getByRole("navigation", { name: "Recent chats" })
-      .getByRole("link", { name: question })
+      .getByRole("link", { name: question, exact: true })
   ).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toHaveCount(0);
 
@@ -370,4 +370,23 @@ test("the chat dock on every other page carries on the open chat, which is the s
   await dock.getByRole("button", { name: "New chat" }).click();
   await expect(dock.getByRole("list", { name: "Messages" })).toHaveCount(0);
   await expect(dock).toContainText("Ask anything, or describe a process");
+  const second = `Another from the dock ${tag}?`;
+  await box.fill(second);
+  await box.press("Enter");
+  await expect(messages.getByRole("listitem").first()).toHaveText(second);
+
+  // Chat, from the sidebar, opens on the dock's chat, and both chats are
+  // in its list.
+  await page
+    .getByRole("navigation", { name: "Main" })
+    .getByRole("link", { name: "Chat" })
+    .click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(second);
+  const list = page.getByRole("navigation", { name: "Recent chats" });
+  await expect(
+    list.getByRole("link", { name: second, exact: true })
+  ).toBeVisible();
+  await expect(
+    list.getByRole("link", { name: question, exact: true })
+  ).toBeVisible();
 });

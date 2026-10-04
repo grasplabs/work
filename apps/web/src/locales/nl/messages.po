@@ -948,6 +948,7 @@ msgstr "Voor"
 msgid "From"
 msgstr "Uit"
 
+#: src/chat/chat-dock.tsx
 #: src/core.ts
 #: src/guest/api.ts
 #: src/load-from-core.tsx
@@ -1300,6 +1301,7 @@ msgstr "Draait niet meer {how}"
 msgid "No memory files are written yet."
 msgstr "Er zijn nog geen geheugenbestanden geschreven."
 
+#: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "Er is nog geen model ingesteld voor deze omgeving."
@@ -1608,7 +1610,7 @@ msgstr "Werkruimte wordt gelezen"
 
 #: src/routes/guest.tsx
 msgid "Reading what you wrote"
-msgstr "Leest wat je schreef"
+msgstr "Je antwoord wordt gelezen"
 
 #: src/chat/builds-state.ts
 msgid "reads the App's data"

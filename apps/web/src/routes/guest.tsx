@@ -160,6 +160,8 @@ const Chat = ({ secret, first }: { secret: string; first: GuestView }) => {
           {view.turnsLeft > 0 ? (
             <Composer
               busy={pending === "send"}
+              // Not while the chat is being finished.
+              disabled={pending === "finish"}
               failure={failure}
               label={t`Your message`}
               maxLength={guestMessageMaxLength}

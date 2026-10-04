@@ -948,6 +948,7 @@ msgstr "Para"
 msgid "From"
 msgstr "De"
 
+#: src/chat/chat-dock.tsx
 #: src/core.ts
 #: src/guest/api.ts
 #: src/load-from-core.tsx
@@ -1300,6 +1301,7 @@ msgstr "Ya no se ejecuta {how}"
 msgid "No memory files are written yet."
 msgstr "Aún no hay archivos de memoria escritos."
 
+#: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "Aún no hay ningún modelo configurado en este despliegue."

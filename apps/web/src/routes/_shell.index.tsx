@@ -2,12 +2,12 @@ import type { ChatSummary } from "@grasp-os/shared/chat";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { PanelLeftIcon, PanelRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
-import { setActiveChat } from "../chat/active-chat.ts";
+import { activeChat, setActiveChat } from "../chat/active-chat.ts";
 import { ChatList, ChatSidebar } from "../chat/chat-list.tsx";
 import { useFollowedChat } from "../chat/chat-watch.ts";
 import { Composer } from "../chat/composer.tsx";
@@ -210,11 +210,13 @@ const Chat = () => {
   const { chat: open } = Route.useSearch();
   const { t } = useLingui();
   const [listOpen, setListOpen] = useState(false);
-  const [panel, setPanel] = useState(false);
-  // The open chat, or none for a new one: the chat dock carries it on on
-  // every other page.
+  // Open from the start where the dock's "Open in chat" asked for it.
+  const [panel, setPanel] = useState(Route.useSearch().panel === true);
+  // The open chat: the chat dock carries it on on every other page.
   useEffect(() => {
-    setActiveChat(open);
+    if (open !== undefined) {
+      setActiveChat(open);
+    }
   }, [open]);
   if (page.state !== "ready") {
     return (
@@ -267,6 +269,9 @@ const Chat = () => {
                 </Button>
                 <Link
                   className={buttonVariants({ size: "sm", variant: "outline" })}
+                  onClick={() => {
+                    setActiveChat(undefined);
+                  }}
                   search={{}}
                   to="/"
                 >
@@ -321,8 +326,21 @@ const Chat = () => {
 };
 
 export const Route = createFileRoute("/_shell/")({
-  validateSearch: (search: Record<string, unknown>): { chat?: string } =>
-    typeof search.chat === "string" ? { chat: search.chat } : {},
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { chat?: string; panel?: true } => ({
+    ...(typeof search.chat === "string" ? { chat: search.chat } : {}),
+    ...(search.panel === true ? { panel: true } : {}),
+  }),
+  // Chat opens on the open chat, the one the dock carries on, whatever led
+  // here (the sidebar, the logo); only "New chat" lets go of it first.
+  beforeLoad: ({ search }) => {
+    const active = activeChat();
+    if (search.chat === undefined && active !== undefined) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({ to: "/", search: { chat: active }, replace: true });
+    }
+  },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session): Promise<ChatPage> => {
       const [chats, models, sourceNames] = await Promise.all([

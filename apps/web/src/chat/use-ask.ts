@@ -59,7 +59,11 @@ export const useAsk = (
         await navigate({ to: "/", search: { chat: sent } });
       }
     }
-    await router.invalidate();
+    // Chat's list shows a new chat; from the dock, Chat reads it when it
+    // opens, and the page the person is on has nothing to read again.
+    if (opens === "page") {
+      await router.invalidate();
+    }
   };
   const stop = async (): Promise<void> => {
     if (chatId !== undefined) {

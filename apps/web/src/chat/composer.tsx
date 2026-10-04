@@ -155,6 +155,70 @@ const ModelChoice = ({
   </div>
 );
 
+/** How the box looks: a prompt box under the thread, or one line (compact). */
+const looks = {
+  prompt: {
+    size: "prompt",
+    align: "block-end",
+    row: "flex w-full items-center justify-between gap-1",
+  },
+  compact: {
+    size: "default",
+    align: "inline-end",
+    row: "flex items-center gap-1",
+  },
+} as const;
+
+/** What the question is typed in: Enter sends it, Shift+Enter starts a new line. */
+const QuestionField = ({
+  text,
+  onText,
+  compact,
+  label,
+  placeholder,
+  autoFocus,
+  maxLength,
+}: {
+  text: string;
+  onText: (text: string) => void;
+  compact: boolean;
+  label: string | undefined;
+  placeholder: string | undefined;
+  autoFocus: boolean;
+  maxLength: number | undefined;
+}) => {
+  const { t } = useLingui();
+  return (
+    <InputGroupTextarea
+      aria-label={label ?? t`Your question`}
+      autoFocus={autoFocus}
+      className={
+        compact
+          ? "field-sizing-content max-h-40 min-h-0"
+          : "field-sizing-content max-h-48 min-h-16"
+      }
+      maxLength={maxLength ?? maxQuestionLength}
+      name="message"
+      onChange={(event) => {
+        onText(event.target.value);
+      }}
+      onKeyDown={(event) => {
+        if (
+          event.key === "Enter" &&
+          !event.shiftKey &&
+          !event.nativeEvent.isComposing
+        ) {
+          event.preventDefault();
+          event.currentTarget.form?.requestSubmit();
+        }
+      }}
+      placeholder={placeholder ?? t`Ask anything, or describe a process`}
+      rows={compact ? 1 : undefined}
+      value={text}
+    />
+  );
+};
+
 /** Where nobody picks a model. */
 const noModels: readonly string[] = [];
 
@@ -175,6 +239,8 @@ export const Composer = ({
   placeholder,
   children,
   maxLength,
+  autoFocus = false,
+  disabled = false,
 }: {
   text: string;
   onText: (text: string) => void;
@@ -202,15 +268,20 @@ export const Composer = ({
   /** What the box is called; "Your question" without it. */
   label?: string;
   placeholder?: string;
-  /** Beside the button, in a compact box: such as the way to open the dock. */
+  /** Beside the button, in a compact box only: such as the way to open the dock. */
   children?: ReactNode;
   /** The longest message it takes; a question's by default. */
   maxLength?: number;
+  /** Takes the focus when it shows, as when the chat dock opens around it. */
+  autoFocus?: boolean;
+  /** Takes nothing for now, while something else is on its way to core. */
+  disabled?: boolean;
 }) => {
   const { t } = useLingui();
   const empty = text.trim() === "";
   // A question names a model where there are any to name.
-  const canSend = !running && !busy && !empty && model !== "";
+  const canSend = !running && !busy && !disabled && !empty && model !== "";
+  const look = looks[compact ? "compact" : "prompt"];
   return (
     <form
       className="flex flex-col gap-1.5"
@@ -221,44 +292,21 @@ export const Composer = ({
         }
       }}
     >
-      <InputGroup size={compact ? "default" : "prompt"}>
-        <InputGroupTextarea
-          aria-label={label ?? t`Your question`}
-          className={
-            compact
-              ? "field-sizing-content max-h-40 min-h-0"
-              : "field-sizing-content max-h-48 min-h-16"
-          }
-          maxLength={maxLength ?? maxQuestionLength}
-          name="message"
-          onChange={(event) => {
-            onText(event.target.value);
-          }}
-          onKeyDown={(event) => {
-            if (
-              event.key === "Enter" &&
-              !event.shiftKey &&
-              !event.nativeEvent.isComposing
-            ) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
-          }}
-          placeholder={placeholder ?? t`Ask anything, or describe a process`}
-          rows={compact ? 1 : undefined}
-          value={text}
+      <InputGroup size={look.size}>
+        <QuestionField
+          autoFocus={autoFocus}
+          compact={compact}
+          label={label}
+          maxLength={maxLength}
+          onText={onText}
+          placeholder={placeholder}
+          text={text}
         />
         <InputGroupAddon
-          align={compact ? "inline-end" : "block-end"}
+          align={look.align}
           className={compact ? "self-end" : undefined}
         >
-          <div
-            className={
-              compact
-                ? "flex items-center gap-1"
-                : "flex w-full items-center justify-between gap-1"
-            }
-          >
+          <div className={look.row}>
             {compact ? (
               children
             ) : (

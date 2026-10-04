@@ -316,6 +316,10 @@
       color-mix(in oklch, var(--status-attention) 18%, transparent) 360deg
     );
     /* Only the ring between the padding and the edge shows. */
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
     mask:
       linear-gradient(#000 0 0) content-box exclude,
       linear-gradient(#000 0 0);

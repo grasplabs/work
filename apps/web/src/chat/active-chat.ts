@@ -47,6 +47,9 @@ const subscribe = (listener: () => void): (() => void) => {
   };
 };
 
+/** The open chat in this tab, if there is one, read once. */
+export const activeChat = (): string | undefined => active;
+
 /** The open chat in this tab, if there is one. */
 export const useActiveChat = (): string | undefined =>
   useSyncExternalStore(subscribe, () => active);

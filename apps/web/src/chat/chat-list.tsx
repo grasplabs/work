@@ -39,6 +39,7 @@ import {
   usePageSidebarFold,
 } from "../frame/page-sidebar.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { activeChat, setActiveChat } from "./active-chat.ts";
 
 // The person's chats beside the open one, in the page sidebar
 // (grasplabs/prototype `components/chat/chat-list.tsx`): a new chat with
@@ -99,10 +100,12 @@ const groupChats = (
 const RenameField = ({
   value,
   label,
+  maxLength,
   onDone,
 }: {
   value: string;
   label: string;
+  maxLength: number;
   onDone: (name: string | null, byKey: boolean) => void;
 }) => {
   const [text, setText] = useState(value);
@@ -119,6 +122,7 @@ const RenameField = ({
   return (
     <Input
       aria-label={label}
+      maxLength={maxLength}
       // It opens to be typed in.
       autoFocus
       onBlur={() => {
@@ -143,6 +147,9 @@ const RenameField = ({
     />
   );
 };
+
+/** The longest name a chat takes, as core checks it. */
+const chatTitleMaxLength = 200;
 
 /** How long a first click waits for a second one before it counts as one. */
 const doubleClickMs = 250;
@@ -211,6 +218,10 @@ const DeleteDialog = ({
     });
     if (removed === true) {
       onOpenChange(false);
+      // A deleted chat is nobody's open chat any more.
+      if (activeChat() === chat.id) {
+        setActiveChat(undefined);
+      }
       if (active) {
         await navigate({ to: "/", search: {} });
       }
@@ -305,6 +316,7 @@ const ChatItem = ({
         <div className="flex items-center px-2 py-0.5">
           <RenameField
             label={t`Chat name`}
+            maxLength={chatTitleMaxLength}
             onDone={(name, byKey) => {
               refocus.current = byKey;
               setRenaming(false);
@@ -421,7 +433,10 @@ export const ChatList = ({
       <PageSidebarTop fold={fold}>
         <Link
           className={buttonVariants({ variant: "outline" })}
-          onClick={onPick}
+          onClick={() => {
+            setActiveChat(undefined);
+            onPick?.();
+          }}
           search={{}}
           to="/"
         >
@@ -484,7 +499,18 @@ export const ChatSidebar = ({
             setFolded(false);
           }}
         />
-        <RailButton label={t`New chat`} render={<Link search={{}} to="/" />}>
+        <RailButton
+          label={t`New chat`}
+          render={
+            <Link
+              onClick={() => {
+                setActiveChat(undefined);
+              }}
+              search={{}}
+              to="/"
+            />
+          }
+        >
           <PlusIcon />
         </RailButton>
         <RailDivider />
