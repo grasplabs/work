@@ -57,6 +57,11 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   await expect(
     connected.getByRole("button", { name: "Sign in to Microsoft 365 again" })
   ).toBeVisible();
+  // A search that matches nothing says so.
+  await search.fill("no such app at all");
+  await expect(
+    page.getByText("No integrations match your search.")
+  ).toBeVisible();
 
   // A link can name any ID: only a connection the page lists is news.
   await page.goto(
@@ -169,6 +174,12 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   await expect(page.getByRole("alert")).toHaveText(
     "Connecting didn't work. Try again, or ask an admin."
   );
+  // A flow that finished, sent back through the old address, still says so.
+  await page.goto(`/connections?connection=${mine.id}`);
+  await expect(page).toHaveURL(/\/integrations\?connection=/u);
+  await expect(
+    page.getByRole("status").filter({ hasText: "Connected." })
+  ).toBeVisible();
 
   // An integration there isn't is not found, in the frame.
   await page.goto("/integrations/native:no-such-app");
