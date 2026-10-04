@@ -65,8 +65,8 @@ interface IntegrationsSearch {
 }
 
 /**
- * Most apps shown at once: Composio lists thousands of toolkits, so the
- * rest wait for a narrower search.
+ * Most apps shown at once, besides those connected: Composio lists
+ * thousands of toolkits, so the rest wait for a narrower search.
  */
 const shownMax = 50;
 
@@ -429,7 +429,17 @@ const Integrations = () => {
     (integration) =>
       keeps(filter, integration) && (q === undefined || matches(integration, q))
   );
-  const shown = matching.slice(0, shownMax);
+  // Every connected one, then as many of the others as fit: a cap in
+  // catalog order could push someone's own account off the list.
+  const connectedOnes = matching.filter(
+    (integration) => stateOf(integration) !== "not_connected"
+  );
+  const shown = [
+    ...connectedOnes,
+    ...matching
+      .filter((integration) => stateOf(integration) === "not_connected")
+      .slice(0, Math.max(0, shownMax - connectedOnes.length)),
+  ];
   const count = shown.length;
   const total = matching.length;
   const loaded = catalog.state === "ready" && connections.state === "ready";
