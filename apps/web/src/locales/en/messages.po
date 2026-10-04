@@ -28,6 +28,10 @@ msgstr "{app} already keeps {type} records here: this App's won't apply."
 msgid "{app}: run of {workflowId}"
 msgstr "{app}: run of {workflowId}"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "{appName} · Version {version}"
+msgstr "{appName} · Version {version}"
+
 #: src/chat/builds.tsx
 msgid "{binding}: {actions} on {object}"
 msgstr "{binding}: {actions} on {object}"

@@ -253,7 +253,7 @@ const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
  * when it last ran and where it stands. The whole row opens it.
  */
 const WorkflowRow = ({ workflow }: { workflow: WorkflowSummary }) => {
-  const { version } = workflow;
+  const { version, appName } = workflow;
   return (
     <TableRow className="relative">
       <TableCell variant="roomy">
@@ -272,8 +272,11 @@ const WorkflowRow = ({ workflow }: { workflow: WorkflowSummary }) => {
               </Badge>
             ) : null}
           </span>
+          {/* Narrow, the App's cell is hidden: its name and version here. */}
           <span className="text-muted-foreground truncate @lg:hidden">
-            {workflow.appName}
+            <Trans>
+              {appName} · Version {version}
+            </Trans>
           </span>
         </div>
       </TableCell>

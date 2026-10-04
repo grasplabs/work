@@ -28,6 +28,10 @@ msgstr "{app} conserve déjà ici des enregistrements de type {type} : ceux de c
 msgid "{app}: run of {workflowId}"
 msgstr "{app} : exécution de {workflowId}"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "{appName} · Version {version}"
+msgstr "{appName} · Version {version}"
+
 #: src/chat/builds.tsx
 msgid "{binding}: {actions} on {object}"
 msgstr "{binding} : {actions} sur {object}"

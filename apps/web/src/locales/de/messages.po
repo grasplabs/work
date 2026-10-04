@@ -28,6 +28,10 @@ msgstr "{app} führt hier bereits Datensätze vom Typ {type}: die dieser App gel
 msgid "{app}: run of {workflowId}"
 msgstr "{app}: Lauf von {workflowId}"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "{appName} · Version {version}"
+msgstr "{appName} · Version {version}"
+
 #: src/chat/builds.tsx
 msgid "{binding}: {actions} on {object}"
 msgstr "{binding}: {actions} auf {object}"
