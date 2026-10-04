@@ -9,8 +9,8 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
 import { ChatList, ChatSidebar } from "../chat/chat-list.tsx";
-import { useFollowedChat } from "../chat/chat-watch.ts";
 import { chatMarkdown } from "../chat/chat-markdown.ts";
+import { useFollowedChat } from "../chat/chat-watch.ts";
 import { Composer } from "../chat/composer.tsx";
 import { HeldWrites } from "../chat/held-writes.tsx";
 import { SidePanel } from "../chat/side-panel.tsx";
@@ -20,12 +20,10 @@ import { ChatThread } from "../chat/thread.tsx";
 import { useAsk } from "../chat/use-ask.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
+import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
-import { useCoreAction } from "../use-core-action.ts";
-import { useCore } from "../use-core.ts";
 
 // Chat with the organization's agent, in the prototype's layout
 // (grasplabs/prototype `routes/index.tsx`): the person's chats in the page
