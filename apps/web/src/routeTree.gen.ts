@@ -23,6 +23,8 @@ import { Route as ShellNotificationsRouteImport } from './routes/_shell.notifica
 import { Route as DecisionsDecisionRouteImport } from './routes/decisions.$decision'
 import { Route as ShellAppsIndexRouteImport } from './routes/_shell.apps.index'
 import { Route as ShellAppsAppRouteImport } from './routes/_shell.apps.$app'
+import { Route as ShellIntegrationsIndexRouteImport } from './routes/_shell.integrations.index'
+import { Route as ShellIntegrationsIntegrationRouteImport } from './routes/_shell.integrations.$integration'
 import { Route as ShellKnowledgeIndexRouteImport } from './routes/_shell.knowledge.index'
 import { Route as ShellKnowledgeCollectionRouteImport } from './routes/_shell.knowledge.$collection'
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell.workflows.index'
@@ -98,6 +100,17 @@ const ShellAppsAppRoute = ShellAppsAppRouteImport.update({
   path: '/apps/$app',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellIntegrationsIndexRoute = ShellIntegrationsIndexRouteImport.update({
+  id: '/integrations/',
+  path: '/integrations/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellIntegrationsIntegrationRoute =
+  ShellIntegrationsIntegrationRouteImport.update({
+    id: '/integrations/$integration',
+    path: '/integrations/$integration',
+    getParentRoute: () => ShellRoute,
+  } as any)
 const ShellKnowledgeIndexRoute = ShellKnowledgeIndexRouteImport.update({
   id: '/knowledge/',
   path: '/knowledge/',
@@ -139,8 +152,10 @@ export interface FileRoutesByFullPath {
   '/notifications': typeof ShellNotificationsRoute
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/apps/$app': typeof ShellAppsAppRoute
+  '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
   '/apps/': typeof ShellAppsIndexRoute
+  '/integrations/': typeof ShellIntegrationsIndexRoute
   '/knowledge/': typeof ShellKnowledgeIndexRoute
   '/workflows/': typeof ShellWorkflowsIndexRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
@@ -159,8 +174,10 @@ export interface FileRoutesByTo {
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/': typeof ShellIndexRoute
   '/apps/$app': typeof ShellAppsAppRoute
+  '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
   '/apps': typeof ShellAppsIndexRoute
+  '/integrations': typeof ShellIntegrationsIndexRoute
   '/knowledge': typeof ShellKnowledgeIndexRoute
   '/workflows': typeof ShellWorkflowsIndexRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
@@ -181,8 +198,10 @@ export interface FileRoutesById {
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/apps/$app': typeof ShellAppsAppRoute
+  '/_shell/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/_shell/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
   '/_shell/apps/': typeof ShellAppsIndexRoute
+  '/_shell/integrations/': typeof ShellIntegrationsIndexRoute
   '/_shell/knowledge/': typeof ShellKnowledgeIndexRoute
   '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
   '/_shell/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
@@ -203,8 +222,10 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/decisions/$decision'
     | '/apps/$app'
+    | '/integrations/$integration'
     | '/knowledge/$collection'
     | '/apps/'
+    | '/integrations/'
     | '/knowledge/'
     | '/workflows/'
     | '/workflows/$app/$workflow'
@@ -223,8 +244,10 @@ export interface FileRouteTypes {
     | '/decisions/$decision'
     | '/'
     | '/apps/$app'
+    | '/integrations/$integration'
     | '/knowledge/$collection'
     | '/apps'
+    | '/integrations'
     | '/knowledge'
     | '/workflows'
     | '/workflows/$app/$workflow'
@@ -244,8 +267,10 @@ export interface FileRouteTypes {
     | '/decisions/$decision'
     | '/_shell/'
     | '/_shell/apps/$app'
+    | '/_shell/integrations/$integration'
     | '/_shell/knowledge/$collection'
     | '/_shell/apps/'
+    | '/_shell/integrations/'
     | '/_shell/knowledge/'
     | '/_shell/workflows/'
     | '/_shell/workflows/$app/$workflow'
@@ -361,6 +386,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellAppsAppRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/integrations/': {
+      id: '/_shell/integrations/'
+      path: '/integrations'
+      fullPath: '/integrations/'
+      preLoaderRoute: typeof ShellIntegrationsIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/integrations/$integration': {
+      id: '/_shell/integrations/$integration'
+      path: '/integrations/$integration'
+      fullPath: '/integrations/$integration'
+      preLoaderRoute: typeof ShellIntegrationsIntegrationRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/knowledge/': {
       id: '/_shell/knowledge/'
       path: '/knowledge'
@@ -408,8 +447,10 @@ interface ShellRouteChildren {
   ShellNotificationsRoute: typeof ShellNotificationsRoute
   ShellIndexRoute: typeof ShellIndexRoute
   ShellAppsAppRoute: typeof ShellAppsAppRoute
+  ShellIntegrationsIntegrationRoute: typeof ShellIntegrationsIntegrationRoute
   ShellKnowledgeCollectionRoute: typeof ShellKnowledgeCollectionRoute
   ShellAppsIndexRoute: typeof ShellAppsIndexRoute
+  ShellIntegrationsIndexRoute: typeof ShellIntegrationsIndexRoute
   ShellKnowledgeIndexRoute: typeof ShellKnowledgeIndexRoute
   ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
   ShellWorkflowsAppWorkflowRoute: typeof ShellWorkflowsAppWorkflowRoute
@@ -424,8 +465,10 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellNotificationsRoute: ShellNotificationsRoute,
   ShellIndexRoute: ShellIndexRoute,
   ShellAppsAppRoute: ShellAppsAppRoute,
+  ShellIntegrationsIntegrationRoute: ShellIntegrationsIntegrationRoute,
   ShellKnowledgeCollectionRoute: ShellKnowledgeCollectionRoute,
   ShellAppsIndexRoute: ShellAppsIndexRoute,
+  ShellIntegrationsIndexRoute: ShellIntegrationsIndexRoute,
   ShellKnowledgeIndexRoute: ShellKnowledgeIndexRoute,
   ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
   ShellWorkflowsAppWorkflowRoute: ShellWorkflowsAppWorkflowRoute,

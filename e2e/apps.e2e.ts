@@ -177,7 +177,7 @@ test("the sidebar shows everyone the sections, and admins their own in the perso
   browser,
 }) => {
   const adminOnly = ["Activity", "Models", "Members"];
-  const everyone = ["Chat", "Knowledge", "Apps", "Workflows", "Connections"];
+  const everyone = ["Chat", "Knowledge", "Apps", "Workflows", "Integrations"];
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
     const page = await pageOf(browser, person);
