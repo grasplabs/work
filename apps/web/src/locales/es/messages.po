@@ -550,6 +550,10 @@ msgstr "Flujo de trabajo cambiado:"
 msgid "Changed: it acts for whoever uses the App, with everything the App holds"
 msgstr "Cambiado: actúa en nombre de quien use la aplicación, con todo lo que la aplicación tiene"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Changes"
+msgstr "Cambia"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
 msgstr "Cambia algo"
@@ -577,6 +581,8 @@ msgstr "Chats"
 msgid "Clear"
 msgstr "Borrar"
 
+#: src/connections/connect-dialog.tsx
+#: src/connections/connection-list.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -692,6 +698,7 @@ msgid "Connected on"
 msgstr "Conectada el"
 
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.integrations.index.tsx
 msgid "Connected."
 msgstr "Conectada."
 
@@ -1000,6 +1007,7 @@ msgid "For"
 msgstr "Para"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/integration-row.tsx
 msgid "For everyone"
 msgstr "Para todos"
 
@@ -1028,6 +1036,7 @@ msgstr "Grasp los configura para tu organización, según lo acordado contigo. P
 msgid "Grasp staff can read parameters, not change them."
 msgstr "El personal de Grasp puede leer los parámetros, no cambiarlos."
 
+#: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people."
 msgstr "El personal de Grasp no puede conectar cuentas ni cambiar lo que se ofrece aquí: eso le corresponde a la propia gente de la organización."
@@ -1078,6 +1087,10 @@ msgid "In the proposer's words"
 msgstr "En palabras de quien lo propone"
 
 #: src/routes/_shell.integrations.$integration.tsx
+msgid "Integration"
+msgstr "Integración"
+
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Integration not found"
 msgstr "Integración no encontrada"
 
@@ -1094,6 +1107,14 @@ msgstr "No tiene parámetros."
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no steps."
 msgstr "No tiene pasos."
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "It isn't offered to your organization: offer it on its Overview before connecting it."
+msgstr "No se ofrece a tu organización: ofrécelo en su Resumen antes de conectarlo."
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "It isn't offered to your organization."
+msgstr "No se ofrece a tu organización."
 
 #: src/routes/_shell.apps.$app.tsx
 msgid "It isn't shared with anyone."
@@ -1240,8 +1261,12 @@ msgid "Manage"
 msgstr "Gestionar"
 
 #: src/connections/integration-row.tsx
-msgid "Manage {app}"
-msgstr "Gestionar {app}"
+msgid "Manage {app}, connected for everyone"
+msgstr "Gestionar {app}, conectado para todos"
+
+#: src/connections/integration-row.tsx
+msgid "Manage {app}, connected for you"
+msgstr "Gestionar {app}, conectado para ti"
 
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
@@ -1364,6 +1389,10 @@ msgstr "Sin cambios en archivos."
 msgid "No files yet."
 msgstr "Todavía no hay archivos."
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "No integrations match your search."
+msgstr "Ninguna integración coincide con tu búsqueda."
+
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
 msgstr "Ya no se ejecuta {how}"
@@ -1421,6 +1450,10 @@ msgid "None."
 msgstr "Ninguno."
 
 #: src/routes/_shell.integrations.$integration.tsx
+msgid "Not allowed"
+msgstr "No permitida"
+
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Not connected"
 msgstr "Sin conectar"
 
@@ -1452,6 +1485,14 @@ msgstr "Sin publicar"
 msgid "Not verified"
 msgstr "No verificado"
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Nothing connected yet."
+msgstr "Aún no hay nada conectado."
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Nothing here yet."
+msgstr "Aquí aún no hay nada."
+
 #: src/activity/pending.tsx
 msgid "Nothing is waiting for approval."
 msgstr "No hay nada pendiente de aprobación."
@@ -1459,6 +1500,10 @@ msgstr "No hay nada pendiente de aprobación."
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Nothing matched."
 msgstr "No hubo coincidencias."
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Nothing needs attention."
+msgstr "Nada requiere atención."
 
 #: src/chat/builds.tsx
 msgid "Nothing runs yet: this would be the App's first current version."
@@ -1544,6 +1589,10 @@ msgstr "Solo pueden responderla las personas a quienes va dirigida esta decisió
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Only when a condition holds:"
 msgstr "Solo cuando se cumple una condición:"
+
+#: src/connections/integration-row.tsx
+msgid "Only you"
+msgstr "Solo tú"
 
 #: src/connections/connect-dialog.tsx
 msgid "Only you can use it."
@@ -1675,11 +1724,6 @@ msgstr "Propuesta por el agente, en el chat de otra persona."
 msgid "Read"
 msgstr "Lectura"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgctxt "what a tool may do"
-msgid "Read"
-msgstr "Leer"
-
 #: src/connections/connect-dialog.tsx
 #: src/knowledge/collection-markers.tsx
 msgid "Read-only"
@@ -1692,6 +1736,10 @@ msgstr "«Solo lectura» está marcado donde Composio dice que una herramienta s
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
 msgstr "Leyendo el espacio de trabajo"
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Reads"
+msgstr "Lee"
 
 #: src/chat/builds-state.ts
 msgid "reads the App's data"
@@ -2554,11 +2602,6 @@ msgstr "Guardaría aquí registros de tipo {claimed}"
 #: src/chat/builds-state.ts
 msgid "Would run after approval"
 msgstr "Se ejecutaría tras la aprobación"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgctxt "what a tool may do"
-msgid "Write"
-msgstr "Escribir"
 
 #: src/chat/thread.tsx
 msgid "Writing"

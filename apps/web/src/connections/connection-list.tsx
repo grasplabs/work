@@ -271,11 +271,17 @@ const SignInAgain = ({
 const Disconnect = ({
   connection,
   label,
+  last,
 }: {
   connection: ListedConnection;
   label: string;
+  /**
+   * The integration's last connection, where the catalog doesn't list it:
+   * its page goes with it, so the list shows next.
+   */
+  last: boolean;
 }) => {
-  const { busy, failure, change } = useChange();
+  const { busy, failure, change } = useChange({ leave: last });
   const [confirming, setConfirming] = useState(false);
   const { t } = useLingui();
   return (
@@ -293,7 +299,7 @@ const Disconnect = ({
         >
           <Trans>Disconnect</Trans>
         </DialogTrigger>
-        <DialogContent>
+        <DialogContent closeLabel={t`Close`}>
           <DialogHeader>
             <DialogTitle>
               <Trans>Disconnect {label}?</Trans>
@@ -306,7 +312,7 @@ const Disconnect = ({
               </Trans>
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter showCloseButton>
+          <DialogFooter closeLabel={t`Close`} showCloseButton>
             <Button
               variant="destructive"
               disabled={busy}
@@ -372,7 +378,11 @@ const ConnectionItem = ({
             />
           ) : null}
           {mayDisconnect ? (
-            <Disconnect connection={connection} label={label} />
+            <Disconnect
+              connection={connection}
+              label={label}
+              last={!integration.listed && integration.connections.length === 1}
+            />
           ) : null}
         </div>
       </div>

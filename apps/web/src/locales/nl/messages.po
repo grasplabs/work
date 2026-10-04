@@ -550,6 +550,10 @@ msgstr "Workflow gewijzigd:"
 msgid "Changed: it acts for whoever uses the App, with everything the App holds"
 msgstr "Gewijzigd: deze code handelt namens iedereen die de app gebruikt, met alles wat de app heeft"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Changes"
+msgstr "Wijzigt"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
 msgstr "Wijzigt iets"
@@ -577,6 +581,8 @@ msgstr "Chats"
 msgid "Clear"
 msgstr "Wissen"
 
+#: src/connections/connect-dialog.tsx
+#: src/connections/connection-list.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -692,6 +698,7 @@ msgid "Connected on"
 msgstr "Gekoppeld op"
 
 #: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.integrations.index.tsx
 msgid "Connected."
 msgstr "Gekoppeld."
 
@@ -1000,6 +1007,7 @@ msgid "For"
 msgstr "Voor"
 
 #: src/connections/connect-dialog.tsx
+#: src/connections/integration-row.tsx
 msgid "For everyone"
 msgstr "Voor iedereen"
 
@@ -1028,6 +1036,7 @@ msgstr "Grasp stelt deze in voor je organisatie, zoals met je afgesproken. Neem 
 msgid "Grasp staff can read parameters, not change them."
 msgstr "Grasp-medewerkers kunnen parameters lezen, niet wijzigen."
 
+#: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people."
 msgstr "Grasp-medewerkers kunnen hier geen accounts koppelen of wijzigen wat wordt aangeboden: dat is aan de eigen mensen van de organisatie."
@@ -1078,6 +1087,10 @@ msgid "In the proposer's words"
 msgstr "In de woorden van de indiener"
 
 #: src/routes/_shell.integrations.$integration.tsx
+msgid "Integration"
+msgstr "Integratie"
+
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Integration not found"
 msgstr "Integratie niet gevonden"
 
@@ -1094,6 +1107,14 @@ msgstr "Er zijn geen parameters."
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no steps."
 msgstr "Er zijn geen stappen."
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "It isn't offered to your organization: offer it on its Overview before connecting it."
+msgstr "Het wordt niet aangeboden aan je organisatie: bied het aan in het overzicht voordat je het koppelt."
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "It isn't offered to your organization."
+msgstr "Het wordt niet aangeboden aan je organisatie."
 
 #: src/routes/_shell.apps.$app.tsx
 msgid "It isn't shared with anyone."
@@ -1240,8 +1261,12 @@ msgid "Manage"
 msgstr "Beheren"
 
 #: src/connections/integration-row.tsx
-msgid "Manage {app}"
-msgstr "{app} beheren"
+msgid "Manage {app}, connected for everyone"
+msgstr "{app} beheren, gekoppeld voor iedereen"
+
+#: src/connections/integration-row.tsx
+msgid "Manage {app}, connected for you"
+msgstr "{app} beheren, gekoppeld voor jou"
 
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
@@ -1316,7 +1341,7 @@ msgstr "Opnieuw aanmelden nodig"
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Needs someone to sign in again"
-msgstr "Iemand moet opnieuw aanmelden"
+msgstr "Iemand moet zich opnieuw aanmelden"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "Never"
@@ -1363,6 +1388,10 @@ msgstr "Geen bestandswijzigingen."
 #: src/routes/_shell.knowledge.index.tsx
 msgid "No files yet."
 msgstr "Nog geen bestanden."
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "No integrations match your search."
+msgstr "Geen integraties komen overeen met je zoekopdracht."
 
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
@@ -1421,6 +1450,10 @@ msgid "None."
 msgstr "Geen."
 
 #: src/routes/_shell.integrations.$integration.tsx
+msgid "Not allowed"
+msgstr "Niet toegestaan"
+
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Not connected"
 msgstr "Niet gekoppeld"
 
@@ -1452,6 +1485,14 @@ msgstr "Niet uitgebracht"
 msgid "Not verified"
 msgstr "Niet geverifieerd"
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "Nothing connected yet."
+msgstr "Nog niets gekoppeld."
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Nothing here yet."
+msgstr "Hier staat nog niets."
+
 #: src/activity/pending.tsx
 msgid "Nothing is waiting for approval."
 msgstr "Er wacht niets op goedkeuring."
@@ -1459,6 +1500,10 @@ msgstr "Er wacht niets op goedkeuring."
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Nothing matched."
 msgstr "Niets gevonden."
+
+#: src/routes/_shell.integrations.index.tsx
+msgid "Nothing needs attention."
+msgstr "Niets vraagt aandacht."
 
 #: src/chat/builds.tsx
 msgid "Nothing runs yet: this would be the App's first current version."
@@ -1544,6 +1589,10 @@ msgstr "Alleen de mensen voor wie deze beslissing is, kunnen erop antwoorden."
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Only when a condition holds:"
 msgstr "Alleen als aan een voorwaarde is voldaan:"
+
+#: src/connections/integration-row.tsx
+msgid "Only you"
+msgstr "Alleen jij"
 
 #: src/connections/connect-dialog.tsx
 msgid "Only you can use it."
@@ -1675,11 +1724,6 @@ msgstr "Voorgesteld door de agent, in de chat van iemand anders."
 msgid "Read"
 msgstr "Lezen"
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgctxt "what a tool may do"
-msgid "Read"
-msgstr "Lezen"
-
 #: src/connections/connect-dialog.tsx
 #: src/knowledge/collection-markers.tsx
 msgid "Read-only"
@@ -1692,6 +1736,10 @@ msgstr "Alleen-lezen is aangevinkt waar Composio zegt dat een tool alleen leest;
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
 msgstr "Werkruimte wordt gelezen"
+
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Reads"
+msgstr "Leest"
 
 #: src/chat/builds-state.ts
 msgid "reads the App's data"
@@ -2554,11 +2602,6 @@ msgstr "Zou hier records van het type {claimed} bijhouden"
 #: src/chat/builds-state.ts
 msgid "Would run after approval"
 msgstr "Zou na goedkeuring draaien"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgctxt "what a tool may do"
-msgid "Write"
-msgstr "Schrijven"
 
 #: src/chat/thread.tsx
 msgid "Writing"

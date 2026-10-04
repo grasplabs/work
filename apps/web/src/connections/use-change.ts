@@ -10,7 +10,12 @@ import { useCoreAction } from "../use-core-action.ts";
  * back with: their notice was about that flow, not about what the page
  * shows now. Other search (the list's filters) stays.
  */
-export const useChange = () => {
+export const useChange = ({
+  leave = false,
+}: {
+  /** The change takes the page away: go back to the list after it. */
+  leave?: boolean;
+} = {}) => {
   const router = useRouter();
   const { pathname, searchStr } = useLocation();
   const action = useCoreAction();
@@ -26,7 +31,9 @@ export const useChange = () => {
           params.delete("connectionError");
           const left = params.toString();
           await router.navigate({
-            href: left === "" ? pathname : `${pathname}?${left}`,
+            href: leave
+              ? "/integrations"
+              : `${pathname}${left === "" ? "" : `?${left}`}`,
             replace: true,
           });
           // `sync` waits for the loader; without it, the router reloads

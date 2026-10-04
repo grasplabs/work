@@ -77,38 +77,66 @@ const HeldNotLoaded = ({
   );
 };
 
-/** One tool: its name, what it does, and whether it only reads. */
-const ToolRow = ({ tool }: { tool: CatalogTool }) => (
+/** One tool: its name and what it does; marked where a connection doesn't allow it. */
+const ToolRow = ({
+  tool,
+  allowed,
+}: {
+  tool: CatalogTool;
+  allowed: boolean;
+}) => (
   <li className="flex min-h-11 items-center gap-3 border-b px-4 py-3 last:border-b-0">
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span className="truncate font-mono text-xs">{tool.name}</span>
+      <span
+        className={
+          allowed
+            ? "truncate font-mono text-xs"
+            : "text-muted-foreground truncate font-mono text-xs"
+        }
+      >
+        {tool.name}
+      </span>
       {tool.description === null ? null : (
         <span className="text-muted-foreground line-clamp-2 text-xs">
           {tool.description}
         </span>
       )}
     </div>
-    {tool.readOnly ? (
+    {allowed ? null : (
       <Badge variant="outline">
-        <EyeIcon data-icon="inline-start" />
-        <Trans context="what a tool may do">Read</Trans>
-      </Badge>
-    ) : (
-      <Badge variant="secondary">
-        <PenLineIcon data-icon="inline-start" />
-        <Trans context="what a tool may do">Write</Trans>
+        <Trans>Not allowed</Trans>
       </Badge>
     )}
   </li>
 );
 
+const toolGroups = [
+  { id: "read", readOnly: true, title: msg`Reads`, icon: EyeIcon },
+  { id: "change", readOnly: false, title: msg`Changes`, icon: PenLineIcon },
+] as const;
+
+/**
+ * The tools a Composio connection allows, as the admin who connected it
+ * chose them; none to go by for a native one, whose every tool is there.
+ */
+const allowedToolsOf = (
+  integration: Integration
+): ReadonlySet<string> | undefined => {
+  const chosen = integration.connections.flatMap(({ tools }) => tools ?? []);
+  return integration.source === "composio" && integration.connections.length > 0
+    ? new Set(chosen)
+    : undefined;
+};
+
 /** What its tools can do, as its provider declares them, reads first. */
 const Tools = ({
   tools,
   app,
+  allowed,
 }: {
   tools: Loaded<CatalogTool[]> | undefined;
   app: string;
+  allowed: ReadonlySet<string> | undefined;
 }) => {
   const { i18n } = useLingui();
   if (tools === undefined) {
@@ -130,15 +158,32 @@ const Tools = ({
       </p>
     );
   }
-  const ordered = tools.data.toSorted(
-    (one, other) => Number(other.readOnly) - Number(one.readOnly)
-  );
   return (
-    <ul className="bg-card flex flex-col overflow-hidden rounded-xl border">
-      {ordered.map((tool) => (
-        <ToolRow key={tool.name} tool={tool} />
-      ))}
-    </ul>
+    <div className="flex flex-col gap-4">
+      {toolGroups.map((group) => {
+        const inGroup = tools.data.filter(
+          ({ readOnly }) => readOnly === group.readOnly
+        );
+        const { icon: Icon } = group;
+        return inGroup.length === 0 ? null : (
+          <div className="flex flex-col gap-2" key={group.id}>
+            <h3 className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
+              <Icon aria-hidden="true" className="size-3.5" />
+              {i18n._(group.title)}
+            </h3>
+            <ul className="bg-card flex flex-col overflow-hidden rounded-xl border">
+              {inGroup.map((tool) => (
+                <ToolRow
+                  allowed={allowed?.has(tool.name) ?? true}
+                  key={tool.name}
+                  tool={tool}
+                />
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
   );
 };
 
@@ -192,7 +237,11 @@ const Overview = ({
             </Trans>
           </p>
         </div>
-        <Tools app={integration.name} tools={tools} />
+        <Tools
+          allowed={allowedToolsOf(integration)}
+          app={integration.name}
+          tools={tools}
+        />
       </section>
       {isAdmin(identity.role) && integration.listed ? (
         <OfferSwitch integration={integration} staff={identity.staff} />
@@ -237,11 +286,54 @@ const Account = ({
   );
 };
 
-/** What the app is for, and since when it is connected, under its name. */
+/** What the app is for, under its name: its kinds, as the catalog names them. */
 const aboutOf = (integration: Integration): string | undefined =>
   integration.categories.length === 0
     ? undefined
     : formatList(integration.categories);
+
+/** Why this person can't connect it, where they can't: staff, an entry not offered, or a toolkit only admins connect. */
+const WhyNoConnect = ({
+  integration,
+  identity,
+}: {
+  integration: Integration;
+  identity: Identity;
+}) => {
+  if (canConnect(integration, identity)) {
+    return null;
+  }
+  if (identity.staff) {
+    return (
+      <p className="text-muted-foreground">
+        <Trans>
+          Grasp staff can&apos;t connect accounts or change what is offered
+          here: that is for the organization&apos;s own people.
+        </Trans>
+      </p>
+    );
+  }
+  if (!integration.offered) {
+    return (
+      <p className="text-muted-foreground">
+        {isAdmin(identity.role) ? (
+          <Trans>
+            It isn&apos;t offered to your organization: offer it on its Overview
+            before connecting it.
+          </Trans>
+        ) : (
+          <Trans>It isn&apos;t offered to your organization.</Trans>
+        )}
+      </p>
+    );
+  }
+  return integration.source === "composio" &&
+    integration.connections.length === 0 ? (
+    <p className="text-muted-foreground">
+      <Trans>An admin connects this for everyone.</Trans>
+    </p>
+  ) : null;
+};
 
 const IntegrationPage = ({ integration }: { integration: Integration }) => {
   const { held, tools } = Route.useLoaderData();
@@ -294,14 +386,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
             </Button>
           ) : null}
         </div>
-        {!connectable &&
-        count === 0 &&
-        integration.source === "composio" &&
-        !identity.staff ? (
-          <p className="text-muted-foreground">
-            <Trans>An admin connects this for everyone.</Trans>
-          </p>
-        ) : null}
+        <WhyNoConnect identity={identity} integration={integration} />
         {connected ? (
           <output>
             <Trans>Connected.</Trans>
@@ -372,7 +457,7 @@ const IntegrationRoute = () => {
   if (catalog.state !== "ready") {
     return (
       <PageNotLoaded
-        crumbs={[integrations, { label: key }]}
+        crumbs={[integrations, { label: parsed?.id ?? t`Integration` }]}
         icon={BlocksIcon}
         notFound={t`Integration not found`}
         page={catalog}
@@ -382,7 +467,7 @@ const IntegrationRoute = () => {
   if (connections.state !== "ready") {
     return (
       <PageNotLoaded
-        crumbs={[integrations, { label: key }]}
+        crumbs={[integrations, { label: parsed?.id ?? t`Integration` }]}
         page={connections}
       />
     );
@@ -425,6 +510,9 @@ export const Route = createFileRoute("/_shell/integrations/$integration")({
     ]);
     return { ...read, tools };
   },
+  // A tab, or a notice dropped, keeps what was read; a change reads it
+  // again (use-change.ts invalidates it).
+  shouldReload: false,
   pendingComponent: PageLoading,
   component: IntegrationRoute,
 });

@@ -19,12 +19,23 @@ import { stateOf } from "./integrations.ts";
 // again, or Connected, which says Manage under the pointer or focus.
 
 /** Connected: Manage under the pointer or keyboard focus, both labels in one place so it keeps its width. */
-const ManageLink = ({ integration }: { integration: Integration }) => {
+const ManageLink = ({
+  integration,
+  shared,
+}: {
+  integration: Integration;
+  /** Connected for everyone, rather than for this person alone. */
+  shared: boolean;
+}) => {
   const { t } = useLingui();
   const app = integration.name;
   return (
     <Button
-      aria-label={t`Manage ${app}`}
+      aria-label={
+        shared
+          ? t`Manage ${app}, connected for everyone`
+          : t`Manage ${app}, connected for you`
+      }
       nativeButton={false}
       render={
         <Link
@@ -102,7 +113,7 @@ const IntegrationButton = ({
     );
   }
   if (state !== "not_connected") {
-    return <ManageLink integration={integration} />;
+    return <ManageLink integration={integration} shared={state === "shared"} />;
   }
   if (!canConnect(integration, identity)) {
     return null;
@@ -127,6 +138,23 @@ const IntegrationButton = ({
       />
     </>
   );
+};
+
+/** For whom it is connected, once it is: everyone, or this person alone. */
+const ScopeBadge = ({ integration }: { integration: Integration }) => {
+  const state = stateOf(integration);
+  if (state === "shared") {
+    return (
+      <Badge variant="secondary">
+        <Trans>For everyone</Trans>
+      </Badge>
+    );
+  }
+  return state === "personal" ? (
+    <Badge variant="secondary">
+      <Trans>Only you</Trans>
+    </Badge>
+  ) : null;
 };
 
 /** What the app is for: its kinds, and how many tools it has. */
@@ -171,6 +199,7 @@ export const IntegrationRow = ({
         >
           {integration.name}
         </Link>
+        <ScopeBadge integration={integration} />
         {integration.listed && !integration.offered ? (
           <Badge variant="outline">
             <Trans>Not offered</Trans>

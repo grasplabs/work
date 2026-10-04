@@ -4,6 +4,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
+import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
@@ -59,6 +60,8 @@ interface IntegrationsSearch {
   show?: "connected" | "attention";
   category?: string;
   connectionError?: string;
+  /** A connection a flow just made, when core sent it back here. */
+  connection?: string;
 }
 
 /**
@@ -131,6 +134,29 @@ const FilterItem = ({
   );
 };
 
+/** A filter in the folded rail: its icon, its name and count in the tooltip. */
+const RailChoice = ({
+  choice,
+  selected,
+  q,
+}: {
+  choice: Choice;
+  selected: boolean;
+  q: string | undefined;
+}) => {
+  const { t } = useLingui();
+  const { icon: Icon, label, count } = choice;
+  return (
+    <RailButton
+      active={selected}
+      label={t`${label}: ${count}`}
+      render={<Link search={searchFor(choice.filter, q)} to="/integrations" />}
+    >
+      <Icon />
+    </RailButton>
+  );
+};
+
 /** The filters: open, under a heading, with the catalog's categories; folded, a rail of the first three. */
 const Filters = ({
   choices,
@@ -155,21 +181,23 @@ const Filters = ({
           }}
         />
         <RailDivider />
-        {fixed.map((choice) => {
-          const { icon: Icon, label, count } = choice;
-          return (
-            <RailButton
-              active={sameFilter(choice.filter, filter)}
-              key={choice.id}
-              label={t`${label}: ${count}`}
-              render={
-                <Link search={searchFor(choice.filter, q)} to="/integrations" />
-              }
-            >
-              <Icon />
-            </RailButton>
-          );
-        })}
+        {fixed.map((choice) => (
+          <RailChoice
+            choice={choice}
+            key={choice.id}
+            q={q}
+            selected={sameFilter(choice.filter, filter)}
+          />
+        ))}
+        {categories.length === 0 ? null : <RailDivider />}
+        {categories.map((choice) => (
+          <RailChoice
+            choice={choice}
+            key={choice.id}
+            q={q}
+            selected={sameFilter(choice.filter, filter)}
+          />
+        ))}
       </PageSidebar>
     );
   }
@@ -225,6 +253,15 @@ const Search = ({ q }: { q: string | undefined }) => {
   const { t } = useLingui();
   const navigate = useNavigate({ from: "/integrations/" });
   const [text, setText] = useState(q ?? "");
+  // The search the address had when the box last followed it: a new one
+  // from elsewhere (the sidebar's link, back) replaces what the box shows.
+  const [followed, setFollowed] = useState(q);
+  if (q !== followed) {
+    setFollowed(q);
+    if ((q ?? "") !== text.trim()) {
+      setText(q ?? "");
+    }
+  }
   return (
     <InputGroup className="w-40 @md:w-56">
       <InputGroupInput
@@ -344,34 +381,49 @@ const useChoices = (integrations: Integration[]): Choice[] => {
   ];
 };
 
+const emptyTexts = {
+  search: msg`No integrations match your search.`,
+  connected: msg`Nothing connected yet.`,
+  attention: msg`Nothing needs attention.`,
+  other: msg`Nothing here yet.`,
+} as const;
+
 /** Why nothing shows: a search or filter that matches nothing, or nothing connected yet. */
-const emptyText = (
+const emptyTextOf = (
   filter: IntegrationFilter,
-  q: string | undefined,
-  t: ReturnType<typeof useLingui>["t"]
-): string => {
+  q: string | undefined
+): MessageDescriptor => {
   if (q !== undefined) {
-    return t`No integrations match your search.`;
+    return emptyTexts.search;
   }
-  if (filter.show === "connected") {
-    return t`Nothing connected yet.`;
+  if (filter.show === "connected" || filter.show === "attention") {
+    return emptyTexts[filter.show];
   }
-  return filter.show === "attention"
-    ? t`Nothing needs attention.`
-    : t`Nothing here yet.`;
+  return emptyTexts.other;
 };
 
 const Integrations = () => {
   const { catalog, connections } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const search = Route.useSearch();
-  const { q, connectionError } = search;
-  const { t } = useLingui();
-  const filter = filterOf(search);
+  const { q, connectionError, connection } = search;
+  const { t, i18n } = useLingui();
   const integrations = integrationsOf(
     catalog.state === "ready" ? catalog.data.entries : [],
     connections.state === "ready" ? connections.data : []
   );
+  // A category the catalog doesn't have (an old link) shows everything.
+  const asked = filterOf(search);
+  const filter: IntegrationFilter =
+    asked.show === "category" &&
+    !integrations.some(({ categories }) => categories.includes(asked.category))
+      ? { show: "all" }
+      : asked;
+  // Only a connection the page lists: anyone can put an ID in a link.
+  const connected =
+    connection !== undefined &&
+    connections.state === "ready" &&
+    connections.data.some(({ id }) => id === connection);
   const choices = useChoices(integrations);
   const matching = integrations.filter(
     (integration) =>
@@ -400,6 +452,11 @@ const Integrations = () => {
                 </Trans>
               </p>
             </div>
+            {connected ? (
+              <output>
+                <Trans>Connected.</Trans>
+              </output>
+            ) : null}
             {connectionError === undefined ? null : (
               <ErrorText>{connectionErrorMessage(connectionError)}</ErrorText>
             )}
@@ -451,7 +508,7 @@ const Integrations = () => {
             ) : null}
             {loaded && count === 0 ? (
               <p className="text-muted-foreground py-16 text-center">
-                {emptyText(filter, q, t)}
+                {i18n._(emptyTextOf(filter, q))}
               </p>
             ) : null}
             <Sections identity={identity} shown={shown} />
@@ -462,8 +519,11 @@ const Integrations = () => {
   );
 };
 
-const textOf = (value: unknown): string | undefined =>
-  typeof value === "string" && value.trim() !== "" ? value : undefined;
+/** Text from the address; the router reads `?q=365` as a number. */
+const textOf = (value: unknown): string | undefined => {
+  const text = typeof value === "number" ? String(value) : value;
+  return typeof text === "string" && text.trim() !== "" ? text : undefined;
+};
 
 export const Route = createFileRoute("/_shell/integrations/")({
   validateSearch: (search: Record<string, unknown>): IntegrationsSearch => ({
@@ -474,9 +534,12 @@ export const Route = createFileRoute("/_shell/integrations/")({
         : undefined,
     category: textOf(search.category),
     connectionError: textOf(search.connectionError),
+    connection: textOf(search.connection),
   }),
   // Read once: the filters and the search only narrow what was read, so a
-  // new one keeps the page as it is rather than reading it again.
+  // new one keeps the page as it is rather than reading it again. A change
+  // reads it again (use-change.ts invalidates it).
+  shouldReload: false,
   loader: async ({ context: { core, identity } }) =>
     await loadIntegrations(core, identity, { held: false }),
   pendingComponent: PageLoading,

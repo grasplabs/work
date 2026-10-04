@@ -141,6 +141,32 @@ const SignInSteps = ({ app }: { app: string }) => (
   </>
 );
 
+/** One of the scope choice's options: its radio, its name and what it means. */
+const ScopeOption = ({
+  value,
+  scope,
+  onScope,
+  children,
+}: {
+  value: ConnectionScope;
+  scope: ConnectionScope;
+  onScope: (scope: ConnectionScope) => void;
+  children: ReactNode;
+}) => (
+  <label className="has-checked:bg-muted flex cursor-pointer items-start gap-3 border-b px-3 py-2.5 last:border-b-0">
+    <input
+      checked={scope === value}
+      className="accent-primary mt-1"
+      name="scope"
+      onChange={() => {
+        onScope(value);
+      }}
+      type="radio"
+    />
+    <span className="flex flex-col gap-0.5">{children}</span>
+  </label>
+);
+
 /** An admin's choice: connect for themselves, or for everyone. */
 const ScopeChoice = ({
   scope,
@@ -148,46 +174,32 @@ const ScopeChoice = ({
 }: {
   scope: ConnectionScope;
   onScope: (scope: ConnectionScope) => void;
-}) => {
-  const { t } = useLingui();
-  const choices: { scope: ConnectionScope; label: string; about: string }[] = [
-    {
-      scope: "personal",
-      label: t`Just for you`,
-      about: t`Only you can use it.`,
-    },
-    {
-      scope: "shared",
-      label: t`For everyone`,
-      about: t`Your organization uses it through the permissions you grant.`,
-    },
-  ];
-  return (
-    <div className="flex flex-col overflow-hidden rounded-lg border">
-      {choices.map((choice) => (
-        <label
-          aria-label={choice.label}
-          className="has-checked:bg-muted flex cursor-pointer items-start gap-3 border-b px-3 py-2.5 last:border-b-0"
-          key={choice.scope}
-        >
-          <input
-            checked={scope === choice.scope}
-            className="accent-primary mt-1"
-            name="scope"
-            onChange={() => {
-              onScope(choice.scope);
-            }}
-            type="radio"
-          />
-          <span className="flex flex-col gap-0.5">
-            <span>{choice.label}</span>
-            <span className="text-muted-foreground">{choice.about}</span>
-          </span>
-        </label>
-      ))}
-    </div>
-  );
-};
+}) => (
+  <fieldset className="flex flex-col overflow-hidden rounded-lg border">
+    {/* The step's title says it on screen. */}
+    <legend className="sr-only">
+      <Trans>Who uses it</Trans>
+    </legend>
+    <ScopeOption onScope={onScope} scope={scope} value="personal">
+      <span>
+        <Trans>Just for you</Trans>
+      </span>
+      <span className="text-muted-foreground">
+        <Trans>Only you can use it.</Trans>
+      </span>
+    </ScopeOption>
+    <ScopeOption onScope={onScope} scope={scope} value="shared">
+      <span>
+        <Trans>For everyone</Trans>
+      </span>
+      <span className="text-muted-foreground">
+        <Trans>
+          Your organization uses it through the permissions you grant.
+        </Trans>
+      </span>
+    </ScopeOption>
+  </fieldset>
+);
 
 /**
  * One tool of a toolkit: whether to allow it and, once allowed, whether it
@@ -426,7 +438,10 @@ export const ConnectDialog = ({
   const app = integration.name;
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-svh overflow-y-auto sm:max-w-md">
+      <DialogContent
+        className="max-h-svh overflow-y-auto sm:max-w-md"
+        closeLabel={t`Close`}
+      >
         <header className="flex flex-col gap-3">
           <AppLogo name={app} size="sm" />
           <div className="flex flex-col gap-1">
