@@ -16,9 +16,23 @@ export type Loaded<T> =
   | { state: "refused"; message: string }
   | { state: "ready"; data: T };
 
-/** Core has no such thing: every family names that `<family>.not_found`. */
+/**
+ * What a page can name that core may not have (any more): an App, a
+ * workflow, a collection or document, a decision, a screen. Not
+ * `request.not_found`, an endpoint this core doesn't know (an older one),
+ * nor what a page reads along the way, such as a member: those stay
+ * refusals, with their reference.
+ */
+const notFoundCodes = new Set([
+  "app.not_found",
+  "workflow.not_found",
+  "knowledge.not_found",
+  "decision.not_found",
+  "screen.not_found",
+]);
+
 const isNotFound = (error: unknown): boolean =>
-  isExpectedError(error) && error.code.endsWith(".not_found");
+  isExpectedError(error) && notFoundCodes.has(error.code);
 
 /**
  * Reads a page's data with `read`, on the signed-in person's session over

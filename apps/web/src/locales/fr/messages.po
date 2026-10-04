@@ -779,6 +779,10 @@ msgid "Document"
 msgstr "Document"
 
 #: src/routes/_shell.knowledge.$collection.tsx
+msgid "Document not found"
+msgstr "Document introuvable"
+
+#: src/routes/_shell.knowledge.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Les documents rédigés ici et les fichiers importés apparaissent ici pour que Grasp et ses agents les lisent."
 
@@ -1024,7 +1028,7 @@ msgstr "Elle n’est partagée avec personne."
 
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
-msgstr "Il a peut-être été renommé ou supprimé."
+msgstr "Cet élément a peut-être été renommé ou supprimé."
 
 #: src/chat/builds.tsx
 msgid "It no longer runs (it could change things)."
@@ -1331,12 +1335,13 @@ msgid "None."
 msgstr "Aucun."
 
 #: src/frame/page-states.tsx
+#: src/routes/_shell.knowledge.$collection.tsx
 msgid "Not found"
 msgstr "Introuvable"
 
 #: src/load-from-core.tsx
 msgid "Not found. It may have been renamed or removed."
-msgstr "Introuvable. Il a peut-être été renommé ou supprimé."
+msgstr "Introuvable. Cet élément a peut-être été renommé ou supprimé."
 
 #: src/connections/connection-list.tsx
 msgid "Not named by the provider"
@@ -2226,13 +2231,11 @@ msgstr "Outils à autoriser"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/routes/_shell.index.tsx
-#: src/routes/_shell.tsx
 #: src/screens/screen-frame.tsx
 msgid "Try again"
 msgstr "Réessayer"
 
 #: src/frame/page-states.tsx
-#: src/routes/_shell.tsx
 msgid "Trying again…"
 msgstr "Nouvel essai…"
 

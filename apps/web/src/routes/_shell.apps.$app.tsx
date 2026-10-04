@@ -24,6 +24,7 @@ import {
   Link,
   useRouter,
 } from "@tanstack/react-router";
+import { BoxesIcon } from "lucide-react";
 import { useState } from "react";
 
 import type { Session } from "../core.ts";
@@ -321,6 +322,7 @@ const AppPageView = () => {
     return (
       <PageNotLoaded
         crumbs={[{ label: t`Apps`, to: "/apps" }, { label: t`App` }]}
+        icon={BoxesIcon}
         notFound={t`App not found`}
         page={page}
       />

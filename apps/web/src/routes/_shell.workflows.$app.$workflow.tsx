@@ -38,6 +38,7 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { WorkflowIcon } from "lucide-react";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
@@ -602,6 +603,7 @@ const WorkflowPage = () => {
     return (
       <PageNotLoaded
         crumbs={crumbs}
+        icon={WorkflowIcon}
         notFound={t`Workflow not found`}
         page={detail}
       />

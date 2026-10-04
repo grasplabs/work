@@ -779,6 +779,10 @@ msgid "Document"
 msgstr "Dokument"
 
 #: src/routes/_shell.knowledge.$collection.tsx
+msgid "Document not found"
+msgstr "Dokument nicht gefunden"
+
+#: src/routes/_shell.knowledge.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Hier geschriebene Dokumente und hochgeladene Dateien erscheinen hier, damit Grasp und seine Agenten sie lesen können."
 
@@ -1331,6 +1335,7 @@ msgid "None."
 msgstr "Keine."
 
 #: src/frame/page-states.tsx
+#: src/routes/_shell.knowledge.$collection.tsx
 msgid "Not found"
 msgstr "Nicht gefunden"
 
@@ -2226,13 +2231,11 @@ msgstr "Zu erlaubende Werkzeuge"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/routes/_shell.index.tsx
-#: src/routes/_shell.tsx
 #: src/screens/screen-frame.tsx
 msgid "Try again"
 msgstr "Erneut versuchen"
 
 #: src/frame/page-states.tsx
-#: src/routes/_shell.tsx
 msgid "Trying again…"
 msgstr "Neuer Versuch…"
 

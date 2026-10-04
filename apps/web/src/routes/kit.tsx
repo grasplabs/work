@@ -135,6 +135,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@grasp-os/ui/components/tooltip";
+import { cn } from "@grasp-os/ui/lib/utils";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import {
   BookOpenIcon,
@@ -209,9 +210,11 @@ const badgeVariants = [
   "secondary",
   "destructive",
   "outline",
+  "ghost",
+  "link",
 ] as const;
 
-/** The Grasp theme: its colours, type and radii, and each variant. */
+/** The Grasp theme: its colours and type, and each variant. */
 const Theme = () => (
   <Card>
     <CardHeader>
@@ -227,7 +230,7 @@ const Theme = () => (
             <li className="flex flex-col gap-1.5" key={name}>
               <span
                 aria-hidden="true"
-                className={`h-10 rounded-md border ${className}`}
+                className={cn("h-10 rounded-md border", className)}
               />
               <span className="text-muted-foreground text-xs">{name}</span>
             </li>

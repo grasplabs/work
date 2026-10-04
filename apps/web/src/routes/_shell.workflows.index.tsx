@@ -37,7 +37,6 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 
 import type { Session } from "../core.ts";
 import { formatDateTime } from "../format.ts";
-import { PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import { RunsTable, runStatusLabel } from "../workflows/runs.tsx";
@@ -484,7 +483,6 @@ const Workflows = () => {
 };
 
 export const Route = createFileRoute("/_shell/workflows/")({
-  pendingComponent: PageLoading,
   validateSearch: (search: Record<string, unknown>): WorkflowsSearch => ({
     ...(search.tab === "runs" ? { tab: "runs" } : {}),
     ...(typeof search.app === "string" ? { app: search.app } : {}),

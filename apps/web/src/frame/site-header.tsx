@@ -74,29 +74,32 @@ export const SiteHeader = ({
         orientation="vertical"
       />
       <div className="flex min-w-0 flex-1 items-center gap-1 px-4 lg:gap-2 lg:pr-6">
-        {crumbs.length === 0 ? <Skeleton className="h-4 w-32" /> : null}
-        <Breadcrumb aria-label={t`Breadcrumb`} className="min-w-0">
-          <BreadcrumbList className="flex-nowrap">
-            {crumbs.map((crumb, index) => (
-              <Fragment key={`${index}:${crumb.label}`}>
-                {index > 0 ? (
-                  <BreadcrumbSeparator
-                    className={index < last ? "max-md:hidden" : undefined}
-                  />
-                ) : null}
-                <BreadcrumbItem
-                  className={
-                    index === last
-                      ? "min-w-8"
-                      : `flex-none ${index < last - 1 ? "max-md:hidden" : ""}`
-                  }
-                >
-                  <CrumbLink crumb={crumb} />
-                </BreadcrumbItem>
-              </Fragment>
-            ))}
-          </BreadcrumbList>
-        </Breadcrumb>
+        {crumbs.length === 0 ? (
+          <Skeleton className="h-4 w-32" />
+        ) : (
+          <Breadcrumb aria-label={t`Breadcrumb`} className="min-w-0">
+            <BreadcrumbList className="flex-nowrap">
+              {crumbs.map((crumb, index) => (
+                <Fragment key={`${index}:${crumb.label}`}>
+                  {index > 0 ? (
+                    <BreadcrumbSeparator
+                      className={index < last ? "max-md:hidden" : undefined}
+                    />
+                  ) : null}
+                  <BreadcrumbItem
+                    className={
+                      index === last
+                        ? "min-w-8"
+                        : `flex-none ${index < last - 1 ? "max-md:hidden" : ""}`
+                    }
+                  >
+                    <CrumbLink crumb={crumb} />
+                  </BreadcrumbItem>
+                </Fragment>
+              ))}
+            </BreadcrumbList>
+          </Breadcrumb>
+        )}
         {actions === undefined ? null : (
           <div className="ml-auto flex flex-none items-center gap-2">
             {actions}

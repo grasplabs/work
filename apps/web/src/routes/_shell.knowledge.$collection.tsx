@@ -15,11 +15,12 @@ import {
 } from "@grasp-os/ui/components/empty";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { FileTextIcon, FolderIcon } from "lucide-react";
+import { BookOpenIcon, FileTextIcon, FolderIcon } from "lucide-react";
 
 import type { Session } from "../core.ts";
 import { formatDate } from "../format.ts";
-import { NotLoadedState, PageLoading } from "../frame/page-states.tsx";
+import { NotFoundState, NotLoadedState } from "../frame/page-states.tsx";
+import type { Crumb } from "../frame/site-header.tsx";
 import { CollectionMarkers } from "../knowledge/collection-markers.tsx";
 import { DocumentView } from "../knowledge/document.tsx";
 import { KnowledgeFrame } from "../knowledge/frame.tsx";
@@ -28,6 +29,7 @@ import { folderTree } from "../knowledge/tree.ts";
 import type { Folder } from "../knowledge/tree.ts";
 import { Uploads } from "../knowledge/uploads.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 
 // One collection: its files, the one open (`?doc=<id>`) with its details,
 // text and history, and uploading more. Core decides what the person may
@@ -167,6 +169,88 @@ const FileList = ({ documents }: { documents: DocumentSummary[] }) => {
   );
 };
 
+/**
+ * The crumbs after Knowledge: the collection, then the folders and title of
+ * the document open in it; `notFound` in place of what core didn't have
+ * (the collection, or the document).
+ */
+const collectionCrumbs = ({
+  collectionId,
+  name,
+  document,
+  notFound,
+}: {
+  collectionId: string;
+  name: string;
+  document: DocumentRead | undefined;
+  notFound: { what: "collection" | "document"; label: string } | undefined;
+}): Crumb[] => {
+  const collection = {
+    label: name,
+    to: "/knowledge/$collection" as const,
+    params: { collection: collectionId },
+  };
+  if (notFound !== undefined) {
+    return notFound.what === "collection"
+      ? [{ label: notFound.label }]
+      : [collection, { label: notFound.label }];
+  }
+  if (document === undefined) {
+    return [{ label: name }];
+  }
+  return [
+    collection,
+    // The folders the document is in, as its path names them.
+    ...document.path
+      .split("/")
+      .slice(0, -1)
+      .map((folder) => ({ label: folder })),
+    { label: document.title },
+  ];
+};
+
+/** What core didn't have of what the address names, if anything. */
+const missingOf = (
+  collection: Loaded<unknown>,
+  open: Loaded<unknown> | undefined
+): "collection" | "document" | undefined => {
+  if (collection.state === "missing") {
+    return "collection";
+  }
+  return open?.state === "missing" ? "document" : undefined;
+};
+
+/**
+ * Why the collection, or the document asked for, isn't shown: not found in
+ * the prototype's words (the crumbs end in it too), or why it didn't load.
+ */
+const CollectionNotLoaded = ({
+  collection,
+  open,
+}: {
+  collection: Loaded<unknown>;
+  open: Loaded<unknown> | undefined;
+}) => {
+  const { t } = useLingui();
+  return (
+    <>
+      {open?.state === "missing" ? (
+        <NotFoundState icon={FileTextIcon} title={t`Document not found`} />
+      ) : null}
+      {open === undefined || open.state === "missing" ? null : (
+        <NotLoaded page={open} />
+      )}
+      {collection.state === "ready" ? null : (
+        <NotLoadedState
+          icon={BookOpenIcon}
+          notFound={t`Collection not found`}
+          page={collection}
+        />
+      )}
+    </>
+  );
+};
+
 const CollectionView = () => {
   const { collection, open, nav } = Route.useLoaderData();
   const { t } = useLingui();
@@ -186,6 +270,7 @@ const CollectionView = () => {
     collection.state === "ready"
       ? collection.data.collection.name
       : t`Collection`;
+  const missing = missingOf(collection, open);
   const { collection: collectionId } = Route.useParams();
   const document = open?.state === "ready" ? open.data.doc : undefined;
   const documentOpen = document !== undefined;
@@ -200,21 +285,12 @@ const CollectionView = () => {
       }}
       crumbs={[
         { label: t`Knowledge`, to: "/knowledge" },
-        ...(document === undefined
-          ? [{ label: name }]
-          : [
-              {
-                label: name,
-                to: "/knowledge/$collection" as const,
-                params: { collection: collectionId },
-              },
-              // The folders the document is in, as its path names them.
-              ...document.path
-                .split("/")
-                .slice(0, -1)
-                .map((folder) => ({ label: folder })),
-              { label: document.title },
-            ]),
+        ...collectionCrumbs({
+          collectionId,
+          name,
+          document,
+          notFound: missing && { what: missing, label: t`Not found` },
+        }),
       ]}
       data={nav}
     >
@@ -222,13 +298,7 @@ const CollectionView = () => {
           is open, so uploads on their way keep going and keep their rows. */}
       <div className="min-w-0 flex-1 overflow-y-auto" hidden={documentOpen}>
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-8 md:px-12">
-          {open === undefined ? null : <NotLoaded page={open} />}
-          {collection.state === "ready" ? null : (
-            <NotLoadedState
-              notFound={t`Collection not found`}
-              page={collection}
-            />
-          )}
+          <CollectionNotLoaded collection={collection} open={open} />
           {collection.state === "ready" ? (
             <>
               <header className="flex flex-col gap-2.5">
@@ -278,7 +348,6 @@ const CollectionView = () => {
 };
 
 export const Route = createFileRoute("/_shell/knowledge/$collection")({
-  pendingComponent: PageLoading,
   validateSearch: (
     search: Record<string, unknown>
   ): { doc?: string; version?: number } => {
