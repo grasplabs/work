@@ -2,6 +2,7 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 
+import { ChatDock } from "../chat/chat-dock.tsx";
 import { loadCoreStatus } from "../core-connection.ts";
 import { AppFrame } from "../frame/app-frame.tsx";
 import { PageError } from "../frame/page-states.tsx";
@@ -15,7 +16,7 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
 const Shell = () => {
   const { core, identity } = Route.useRouteContext();
   return (
-    <AppFrame core={core} identity={identity}>
+    <AppFrame aside={<ChatDock />} core={core} identity={identity}>
       <Outlet />
     </AppFrame>
   );
