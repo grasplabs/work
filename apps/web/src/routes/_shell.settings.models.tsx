@@ -167,7 +167,7 @@ const DataRules = ({
         <Trans>
           Only the models marked as taking sensitive data may be sent data from
           a sensitive collection (marked in Knowledge) or a sensitive
-          connection, or from a chat, App or run that read one.
+          connection, or from a chat, engine or run that read one.
         </Trans>
       </li>
       <li>

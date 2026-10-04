@@ -21,8 +21,8 @@ msgid "{0, plural, one {{app}: # file changed in this chat, not proposed yet} ot
 msgstr "{0, plural, one {{app}: # bestand gewijzigd in deze chat, nog niet voorgesteld} other {{app}: # bestanden gewijzigd in deze chat, nog niet voorgesteld}}"
 
 #: src/activity/pending.tsx
-msgid "{app} already keeps {type} records here: this App's won't apply."
-msgstr "{app} houdt hier al records van het type {type} bij: die van deze app gelden niet."
+msgid "{app} already keeps {type} records here: this engine's won't apply."
+msgstr "{app} houdt hier al records van het type {type} bij: die van deze engine gelden niet."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
@@ -36,9 +36,13 @@ msgstr "{app} is nog niet gekoppeld."
 msgid "{app}: run of {workflowId}"
 msgstr "{app}: run van {workflowId}"
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/workflows/workflows-table.tsx
 msgid "{appName} · Version {version}"
 msgstr "{appName} · Versie {version}"
+
+#: src/routes/_shell.engines.index.tsx
+msgid "{apps, plural, one {# app} other {# apps}}"
+msgstr "{apps, plural, one {# app} other {# apps}}"
 
 #: src/chat/builds.tsx
 msgid "{binding}: {actions} on {object}"
@@ -92,11 +96,11 @@ msgstr "{count, plural, one {één keer} other {# keer}}"
 msgid "{count} or more files"
 msgstr "{count} of meer bestanden"
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
 msgstr "{failed, plural, one {# mislukt in de afgelopen {days} dagen} other {# mislukt in de afgelopen {days} dagen}}"
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed run} other {# failed runs}} of {name}"
 msgstr "{failed, plural, one {# mislukte run} other {# mislukte runs}} van {name}"
 
@@ -137,8 +141,8 @@ msgid "{name} changed: it {does}"
 msgstr "{name} gewijzigd: {does}"
 
 #: src/chat/side-panel.tsx
-msgid "{name} has no screen to show."
-msgstr "{name} heeft geen scherm om te tonen."
+msgid "{name} has no app to show."
+msgstr "{name} heeft geen app om te tonen."
 
 #: src/connections/connect-dialog.tsx
 msgid "{name} is read-only"
@@ -153,12 +157,12 @@ msgid "{name} is signed out everywhere."
 msgstr "{name} is overal afgemeld."
 
 #: src/chat/builds-state.ts
-msgid "{name} no longer changes the App's data (write → read)"
-msgstr "{name} wijzigt de gegevens van de app niet meer (schrijven → lezen)"
+msgid "{name} no longer changes the engine's data (write → read)"
+msgstr "{name} wijzigt de gegevens van de engine niet meer (schrijven → lezen)"
 
 #: src/chat/builds-state.ts
-msgid "{name} now changes the App's data (read → write)"
-msgstr "{name} wijzigt nu de gegevens van de app (lezen → schrijven)"
+msgid "{name} now changes the engine's data (read → write)"
+msgstr "{name} wijzigt nu de gegevens van de engine (lezen → schrijven)"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{name}, per {key}"
@@ -193,14 +197,14 @@ msgid "{run}: failed"
 msgstr "{run}: mislukt"
 
 #: src/screens/screen-frame.tsx
-msgid "{screen} screen"
-msgstr "Scherm {screen}"
+msgid "{screen} app"
+msgstr "App {screen}"
 
 #: src/activity/pending.tsx
 msgid "{subject}: {actions} on {object}"
 msgstr "{subject}: {actions} op {object}"
 
-#: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
 msgid "{team} (team)"
 msgstr "{team} (team)"
 
@@ -216,11 +220,11 @@ msgstr "{toolCount, plural, one {# tool} other {# tools}}"
 msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{total, plural, one {# integratie getoond} other {# integraties getoond}}"
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/workflows/workflows-table.tsx
 msgid "{waiting, plural, one {# waiting run} other {# waiting runs}} of {name}"
 msgstr "{waiting, plural, one {# wachtende run} other {# wachtende runs}} van {name}"
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/workflows/workflows-table.tsx
 msgid "{waiting, plural, one {# waiting} other {# waiting}}"
 msgstr "{waiting, plural, one {# wacht} other {# wachten}}"
 
@@ -235,6 +239,10 @@ msgstr "{who} gaf hier toestemming voor voordat het werd gekoppeld:"
 #: src/routes/_shell.settings.models.tsx
 msgid "{workflowId} in {app}"
 msgstr "{workflowId} in {app}"
+
+#: src/routes/_shell.engines.index.tsx
+msgid "{workflows, plural, one {# workflow} other {# workflows}}"
+msgstr "{workflows, plural, one {# workflow} other {# workflows}}"
 
 #. Who answered, in an exported chat.
 #: src/chat/chat-markdown.ts
@@ -283,8 +291,8 @@ msgid "A model call was refused"
 msgstr "Een modelaanroep is geweigerd"
 
 #: src/screens/screen-frame.tsx
-msgid "A new version of this App is available."
-msgstr "Er is een nieuwe versie van deze app."
+msgid "A new version of this engine is available."
+msgstr "Er is een nieuwe versie van deze engine."
 
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow asked for this answer."
@@ -330,8 +338,8 @@ msgid "Added"
 msgstr "Toegevoegd"
 
 #: src/activity/audit-words.ts
-msgid "Added a member to an App"
-msgstr "Een lid aan een App toegevoegd"
+msgid "Added a member to an engine"
+msgstr "Een lid aan een engine toegevoegd"
 
 #: src/chat/builds.tsx
 msgid "Added parameter {name}"
@@ -350,8 +358,8 @@ msgid "Added workflow"
 msgstr "Workflow toegevoegd:"
 
 #: src/chat/builds.tsx
-msgid "Added: it acts for whoever uses the App, with everything the App holds"
-msgstr "Toegevoegd: deze code handelt namens iedereen die de app gebruikt, met alles wat de app heeft"
+msgid "Added: it acts for whoever uses the engine, with everything the engine holds"
+msgstr "Toegevoegd: deze code handelt namens iedereen die de engine gebruikt, met alles wat de engine heeft"
 
 #: src/labels.ts
 msgid "Admin"
@@ -384,10 +392,6 @@ msgctxt "filter: every integration"
 msgid "All"
 msgstr "Alle"
 
-#: src/chat/side-panel.tsx
-msgid "All Apps"
-msgstr "Alle apps"
-
 #: src/routes/_shell.settings.models.tsx
 msgid "All calls"
 msgstr "Alle aanroepen"
@@ -395,6 +399,10 @@ msgstr "Alle aanroepen"
 #: src/routes/_shell.settings.models.tsx
 msgid "All calls together"
 msgstr "Alle aanroepen samen"
+
+#: src/chat/side-panel.tsx
+msgid "All engines"
+msgstr "Alle engines"
 
 #: src/chat/builds.tsx
 msgid "All workflow tests pass."
@@ -428,34 +436,21 @@ msgstr "Een bedrag in {currency} heeft hoogstens {digits, plural, one {# decimaa
 msgid "An amount in {currency} has no decimals."
 msgstr "Een bedrag in {currency} heeft geen decimalen."
 
-#: src/activity/pending.tsx
-msgid "Another App already keeps {type} records here: this App's won't apply."
-msgstr "Een andere app houdt hier al records van het type {type} bij: die van deze app gelden niet."
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "An app is what this engine's team works in, standing on its workflows and integrations. Ask Grasp in chat to build one."
+msgstr "In een app werkt het team van deze engine, gebouwd op de workflows en integraties ervan. Vraag Grasp in de chat er een te bouwen."
 
 #: src/activity/pending.tsx
-msgid "Another version of this App was made current since this list was read. The list now shows it: review that version, then approve again."
-msgstr "Sinds deze lijst is gelezen, is een andere versie van deze app actueel gemaakt. De lijst toont die nu: beoordeel die versie en keur daarna opnieuw goed."
+msgid "Another engine already keeps {type} records here: this engine's won't apply."
+msgstr "Een andere engine houdt hier al records van het type {type} bij: die van deze engine gelden niet."
+
+#: src/activity/pending.tsx
+msgid "Another version of this engine was made current since this list was read. The list now shows it: review that version, then approve again."
+msgstr "Sinds deze lijst is gelezen, is een andere versie van deze engine actueel gemaakt. De lijst toont die nu: beoordeel die versie en keur daarna opnieuw goed."
 
 #: src/activity/audit-log.tsx
 msgid "Any type"
 msgstr "Elk type"
-
-#: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.workflows.index.tsx
-msgid "App"
-msgstr "App"
-
-#: src/connections/connection-list.tsx
-msgid "App {app}"
-msgstr "App {app}"
-
-#: src/routes/_shell.apps.$app.tsx
-msgid "App not found"
-msgstr "App niet gevonden"
-
-#: src/screens/screen-frame.tsx
-msgid "App screen"
-msgstr "App-scherm"
 
 #: src/activity/pending.tsx
 #: src/routes/decisions.$decision.tsx
@@ -474,16 +469,9 @@ msgstr "Goedgekeurd door {name} op {date}."
 msgid "Approved: {who}."
 msgstr "Goedgekeurd: {who}."
 
-#: src/chat/side-panel.tsx
-#: src/frame/app-sidebar.tsx
-#: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.apps.index.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
 msgid "Apps"
 msgstr "Apps"
-
-#: src/connections/connection-list.tsx
-msgid "Apps and agents with a permission"
-msgstr "Apps en agents met een toestemming"
 
 #: src/activity/pending.tsx
 msgid "as {binding}"
@@ -503,8 +491,8 @@ msgid "Ask Grasp"
 msgstr "Vraag het Grasp"
 
 #: src/chat/side-panel.tsx
-msgid "Ask Grasp to build one. While it works, the App shows here to preview before it is proposed."
-msgstr "Vraag Grasp er een te bouwen. Terwijl het werkt, staat de App hier om te bekijken voordat die wordt voorgesteld."
+msgid "Ask Grasp to build one. While it works, the engine shows here to preview before it is proposed."
+msgstr "Vraag Grasp er een te bouwen. Terwijl het werkt, staat de engine hier om te bekijken voordat die wordt voorgesteld."
 
 #: src/workflows/fix-in-chat.tsx
 msgid "Ask the agent to fix"
@@ -596,8 +584,8 @@ msgid "Called a model"
 msgstr "Een model aangeroepen"
 
 #: src/activity/audit-words.ts
-msgid "Called another App"
-msgstr "Een andere App aangeroepen"
+msgid "Called another engine"
+msgstr "Een andere engine aangeroepen"
 
 #: src/chat/builds.tsx
 msgid "Calls {tools}: may change things"
@@ -656,8 +644,8 @@ msgid "Changed a workflow's parameter"
 msgstr "Een parameter van een workflow gewijzigd"
 
 #: src/activity/audit-words.ts
-msgid "Changed an App"
-msgstr "Een App gewijzigd"
+msgid "Changed an engine"
+msgstr "Een engine gewijzigd"
 
 #: src/activity/audit-words.ts
 msgid "Changed knowledge"
@@ -684,20 +672,20 @@ msgid "Changed workflow"
 msgstr "Workflow gewijzigd:"
 
 #: src/chat/builds.tsx
-msgid "Changed: it acts for whoever uses the App, with everything the App holds"
-msgstr "Gewijzigd: deze code handelt namens iedereen die de app gebruikt, met alles wat de app heeft"
+msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
+msgstr "Gewijzigd: deze code handelt namens iedereen die de engine gebruikt, met alles wat de engine heeft"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
 msgstr "Wijzigt iets"
 
 #: src/chat/builds-state.ts
-msgid "changes the App's data"
-msgstr "wijzigt de gegevens van de app"
+msgid "changes the engine's data"
+msgstr "wijzigt de gegevens van de engine"
 
 #: src/chat/builds.tsx
-msgid "Changes the App's data"
-msgstr "Wijzigt de gegevens van de app"
+msgid "Changes the engine's data"
+msgstr "Wijzigt de gegevens van de engine"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
@@ -871,10 +859,6 @@ msgstr "Toestemming geven en koppelen"
 msgid "Consent and sign in"
 msgstr "Toestemming geven en aanmelden"
 
-#: src/routes/_shell.apps.index.tsx
-msgid "Contents unavailable"
-msgstr "Inhoud niet beschikbaar"
-
 #: src/chat/thread.tsx
 msgid "Copied"
 msgstr "Gekopieerd"
@@ -888,8 +872,8 @@ msgid "couldn't be read"
 msgstr "kon niet worden gelezen"
 
 #: src/routes/_shell.workflows.index.tsx
-msgid "Couldn't load this App's workflows."
-msgstr "De workflows van deze app konden niet worden geladen."
+msgid "Couldn't load this engine's workflows."
+msgstr "De workflows van deze engine konden niet worden geladen."
 
 #: src/activity/audit-words.ts
 msgid "Created a collection"
@@ -899,11 +883,11 @@ msgstr "Een collectie aangemaakt"
 msgid "Created a team"
 msgstr "Een team aangemaakt"
 
-#: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
 msgid "Created by the member {owner}."
 msgstr "Gemaakt door het lid {owner}."
 
-#: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
 msgid "Created by you."
 msgstr "Door jou gemaakt."
 
@@ -953,10 +937,6 @@ msgstr "Vermeldingen na hun bewaartermijn verwijderd"
 #: src/routes/_shell.index.tsx
 msgid "Describe what you want. The agent answers from what it can read, and holds every change to an outside system until you confirm it."
 msgstr "Beschrijf wat je wilt. De agent antwoordt op basis van wat hij kan lezen en houdt elke wijziging aan een extern systeem vast tot jij die bevestigt."
-
-#: src/routes/_shell.apps.index.tsx
-msgid "Description"
-msgstr "Beschrijving"
 
 #: src/activity/audit-log.tsx
 #: src/knowledge/document.tsx
@@ -1028,6 +1008,10 @@ msgstr "Een tegengehouden actie laten vallen die niemand meer kan bevestigen"
 msgid "Dropped an event no workflow could take"
 msgstr "Een gebeurtenis laten vallen die geen workflow kon aannemen"
 
+#: src/routes/_shell.engines.index.tsx
+msgid "Each engine runs one part of the business: its workflows, apps and connections."
+msgstr "Elke engine draait één deel van het bedrijf: de workflows, apps en koppelingen die erbij horen."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Each person"
 msgstr "Elke persoon"
@@ -1048,6 +1032,38 @@ msgstr "Bewerken"
 #: src/routes/_shell.settings.profile.tsx
 msgid "Email"
 msgstr "E-mail"
+
+#: src/routes/_shell.engines.$engine.apps.$screen.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.workflows.index.tsx
+#: src/workflows/workflows-table.tsx
+msgid "Engine"
+msgstr "Engine"
+
+#: src/connections/connection-list.tsx
+msgid "Engine {app}"
+msgstr "Engine {app}"
+
+#: src/screens/screen-frame.tsx
+msgid "Engine app"
+msgstr "Engine-app"
+
+#: src/routes/_shell.engines.$engine.apps.$screen.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "Engine not found"
+msgstr "Engine niet gevonden"
+
+#: src/chat/side-panel.tsx
+#: src/frame/app-sidebar.tsx
+#: src/routes/_shell.engines.$engine.apps.$screen.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.engines.index.tsx
+msgid "Engines"
+msgstr "Engines"
+
+#: src/connections/connection-list.tsx
+msgid "Engines and agents with a permission"
+msgstr "Engines en agents met een toestemming"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Enter a number."
@@ -1262,8 +1278,8 @@ msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Gastaccounts kunnen niet inloggen. Gebruik een eigen account van je organisatie."
 
 #: src/activity/pending.tsx
-msgid "Guest chats. This App can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
-msgstr "Gastchats. Deze app kan mensen die geen lid zijn via een link uitnodigen voor een korte chat met een model, en teruglezen wat ze schrijven. Gasten bereiken verder niets; hun chats gaan ten koste van het modelbudget van wie hen uitnodigt"
+msgid "Guest chats. This engine can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
+msgstr "Gastchats. Deze engine kan mensen die geen lid zijn via een link uitnodigen voor een korte chat met een model, en teruglezen wat ze schrijven. Gasten bereiken verder niets; hun chats gaan ten koste van het modelbudget van wie hen uitnodigt"
 
 #: src/activity/audit-log.tsx
 msgid "Guest of {app}, invited for {person}"
@@ -1310,6 +1326,7 @@ msgid "Integration not found"
 msgstr "Integratie niet gevonden"
 
 #: src/frame/app-sidebar.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Integrations"
@@ -1327,7 +1344,7 @@ msgstr "Er zijn geen parameters."
 msgid "It has no steps."
 msgstr "Er zijn geen stappen."
 
-#: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
 msgid "It isn't shared with anyone."
 msgstr "Ze wordt met niemand gedeeld."
 
@@ -1364,8 +1381,12 @@ msgid "Its access ran out. Grasp staff can't reconnect it: an admin of the organ
 msgstr "De toegang is verlopen. Grasp-medewerkers kunnen hem niet opnieuw koppelen: een beheerder van de organisatie wel."
 
 #: src/connections/connection-list.tsx
-msgid "Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it."
-msgstr "De toegang is verlopen. Meld je opnieuw aan met hetzelfde account: Apps en agents houden hun toestemmingen ervoor."
+msgid "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
+msgstr "De toegang is verlopen. Meld je opnieuw aan met hetzelfde account: engines en agents houden hun toestemmingen ervoor."
+
+#: src/routes/_shell.engines.index.tsx
+msgid "Its contents couldn't be read."
+msgstr "De inhoud kon niet worden gelezen."
 
 #: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
@@ -1376,16 +1397,16 @@ msgid "Its parameters can't be read from its code."
 msgstr "De parameters kunnen niet uit de code worden gelezen."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
-msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the App is made current."
-msgstr "Het schema is gestopt: de run kon {maxFailedStarts} keer achter elkaar niet starten. Het start weer zodra het schema onder Parameters wordt ingesteld, of zodra een nieuwe versie van de app actueel wordt."
+msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the engine is made current."
+msgstr "Het schema is gestopt: de run kon {maxFailedStarts} keer achter elkaar niet starten. Het start weer zodra het schema onder Parameters wordt ingesteld, of zodra een nieuwe versie van de engine actueel wordt."
 
 #: src/chat/builds.tsx
 msgid "Its steps can't be read from its code, so it may do anything its code does."
 msgstr "De stappen kunnen niet uit de code worden gelezen, dus hij kan alles doen wat de code doet."
 
 #: src/connections/connection-list.tsx
-msgid "Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
-msgstr "De tokens worden verwijderd, elke app en agent verliest hem en acties die erop wachten, vervallen. Koppel hem opnieuw om hem weer te gebruiken."
+msgid "Its tokens are deleted, every engine and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
+msgstr "De tokens worden verwijderd, elke engine en agent verliest hem en acties die erop wachten, vervallen. Koppel hem opnieuw om hem weer te gebruiken."
 
 #: src/chat/thread.tsx
 msgid "Jump to the newest message"
@@ -1421,7 +1442,7 @@ msgstr "Afgelopen 7 dagen"
 msgid "Last on {date}"
 msgstr "Laatst op {date}"
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Laatste run"
 
@@ -1484,7 +1505,7 @@ msgstr "Markdown (.md)"
 msgid "May change something outside Grasp"
 msgstr "Kan iets buiten Grasp wijzigen"
 
-#: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
 msgid "Members"
 msgstr "Leden"
 
@@ -1540,7 +1561,6 @@ msgstr "Er wordt meer verstuurd dan hierboven staat. Lees precies wat er wordt v
 msgid "Moved old entries out of the audit trail"
 msgstr "Oude vermeldingen uit het auditlogboek verplaatst"
 
-#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Name"
 msgstr "Naam"
@@ -1562,7 +1582,7 @@ msgstr "Opnieuw aanmelden nodig"
 msgid "Needs someone to sign in again"
 msgstr "Iemand moet opnieuw aanmelden"
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/workflows/workflows-table.tsx
 msgid "Never"
 msgstr "Nooit"
 
@@ -1576,9 +1596,10 @@ msgstr "Nieuw"
 msgid "New chat"
 msgstr "Nieuwe chat"
 
-#: src/chat/side-panel.tsx
-msgid "No Apps yet"
-msgstr "Nog geen Apps"
+#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.engines.index.tsx
+msgid "No apps yet"
+msgstr "Nog geen apps"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "No budget is set: model calls aren't limited by cost."
@@ -1587,6 +1608,11 @@ msgstr "Er is geen budget ingesteld: modelaanroepen worden niet beperkt op koste
 #: src/routes/_shell.settings.models.tsx
 msgid "No call has to stay in the EU."
 msgstr "Geen aanroep hoeft in de EU te blijven."
+
+#: src/chat/side-panel.tsx
+#: src/routes/_shell.engines.index.tsx
+msgid "No engines yet"
+msgstr "Nog geen engines"
 
 #: src/activity/audit-log.tsx
 msgid "No events match in the latest stretch of the log."
@@ -1626,7 +1652,7 @@ msgstr "Geen toestemmingen."
 msgid "No runs match these filters."
 msgstr "Geen runs passen bij deze filters."
 
-#: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
 msgid "No runs yet."
 msgstr "Nog geen runs."
 
@@ -1634,11 +1660,16 @@ msgstr "Nog geen runs."
 msgid "No teams"
 msgstr "Geen teams"
 
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "No workflow in this engine yet."
+msgstr "Nog geen workflow in deze engine."
+
 #: src/chat/builds.tsx
 msgid "No workflows to test."
 msgstr "Geen workflows om te testen."
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/routes/_shell.engines.index.tsx
+#: src/workflows/workflows-table.tsx
 msgid "No workflows yet"
 msgstr "Nog geen workflows"
 
@@ -1698,8 +1729,8 @@ msgstr "Niet benoemd door de provider"
 msgid "Not offered"
 msgstr "Niet aangeboden"
 
-#: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.apps.index.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.engines.index.tsx
 msgid "Not released"
 msgstr "Niet uitgebracht"
 
@@ -1720,8 +1751,8 @@ msgid "Nothing matched."
 msgstr "Niets gevonden."
 
 #: src/chat/builds.tsx
-msgid "Nothing runs yet: this would be the App's first current version."
-msgstr "Er draait nog niets: dit zou de eerste actuele versie van de app zijn."
+msgid "Nothing runs yet: this would be the engine's first current version."
+msgstr "Er draait nog niets: dit zou de eerste actuele versie van de engine zijn."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Nothing spent yet."
@@ -1785,8 +1816,8 @@ msgid "on the event {event}, filtered"
 msgstr "bij de gebeurtenis {event}, gefilterd"
 
 #: src/routes/_shell.settings.models.tsx
-msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, App or run that read one."
-msgstr "Alleen de modellen die gemarkeerd zijn voor gevoelige gegevens mogen gegevens krijgen uit een gevoelige collectie (gemarkeerd in Kennis) of een gevoelige koppeling, of uit een chat, app of run die er een heeft gelezen."
+msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, engine or run that read one."
+msgstr "Alleen de modellen die gemarkeerd zijn voor gevoelige gegevens mogen gegevens krijgen uit een gevoelige collectie (gemarkeerd in Kennis) of een gevoelige koppeling, of uit een chat, engine of run die er een heeft gelezen."
 
 #: src/activity/pending.tsx
 msgid "Only the organization's own admins decide permissions."
@@ -1808,7 +1839,7 @@ msgstr "Alleen als aan een voorwaarde is voldaan:"
 msgid "Only you can use it."
 msgstr "Alleen jij kunt het gebruiken."
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/workflows/workflows-table.tsx
 msgctxt "column: a link that opens the workflow"
 msgid "Open"
 msgstr "Openen"
@@ -1823,11 +1854,12 @@ msgstr "{name} openen"
 msgid "Open at the side"
 msgstr "Aan de zijkant openen"
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/routes/_shell.engines.index.tsx
+#: src/workflows/workflows-table.tsx
 msgid "Open Chat"
 msgstr "Chat openen"
 
-#: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.engines.$engine.apps.$screen.tsx
 msgid "Open full page"
 msgstr "Volledige pagina openen"
 
@@ -1854,16 +1886,16 @@ msgid "or choose them from your computer"
 msgstr "of kies ze op je computer"
 
 #: src/chat/builds-state.ts
-msgid "Other Apps may no longer call {name}"
-msgstr "Andere apps mogen {name} niet meer aanroepen"
+msgid "Other engines may no longer call {name}"
+msgstr "Andere engines mogen {name} niet meer aanroepen"
 
 #: src/chat/builds-state.ts
-msgid "Other Apps may now call {name}"
-msgstr "Andere apps mogen nu {name} aanroepen"
+msgid "Other engines may now call {name}"
+msgstr "Andere engines mogen nu {name} aanroepen"
 
 #: src/chat/builds-state.ts
-msgid "Other Apps may now call {name}, which {does}"
-msgstr "Andere apps mogen nu {name} aanroepen, dat {does}"
+msgid "Other engines may now call {name}, which {does}"
+msgstr "Andere engines mogen nu {name} aanroepen, dat {does}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
@@ -1925,8 +1957,8 @@ msgid "Person"
 msgstr "Persoon"
 
 #: src/activity/pending.tsx
-msgid "Platform statistics. This App can read run and signal counts for every App, and may show them to anyone who uses it"
-msgstr "Platformstatistieken. Deze app kan aantallen runs en signalen van elke app lezen en die tonen aan iedereen die haar gebruikt"
+msgid "Platform statistics. This engine can read run and signal counts for every engine, and may show them to anyone who uses it"
+msgstr "Platformstatistieken. Deze engine kan aantallen runs en signalen van elke engine lezen en die tonen aan iedereen die haar gebruikt"
 
 #: src/activity/audit-log.tsx
 msgid "Platform update"
@@ -1945,12 +1977,12 @@ msgid "Preview of {name}"
 msgstr "Voorbeeld van {name}"
 
 #: src/screens/screen-frame.tsx
-msgid "Preview of {screen} screen"
-msgstr "Voorbeeld van scherm {screen}"
+msgid "Preview of the {screen} app"
+msgstr "Voorbeeld van de app {screen}"
 
 #: src/screens/screen-frame.tsx
-msgid "Preview of the draft's first screen"
-msgstr "Voorbeeld van het eerste scherm van het concept"
+msgid "Preview of the draft's first app"
+msgstr "Voorbeeld van de eerste app van het concept"
 
 #: src/screens/screen-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -1995,12 +2027,12 @@ msgid "Read a knowledge document"
 msgstr "Een kennisdocument gelezen"
 
 #: src/activity/audit-words.ts
-msgid "Read an App's statistics"
-msgstr "De statistieken van een App gelezen"
-
-#: src/activity/audit-words.ts
 msgid "Read an email attachment"
 msgstr "Een e-mailbijlage gelezen"
+
+#: src/activity/audit-words.ts
+msgid "Read an engine's statistics"
+msgstr "De statistieken van een engine gelezen"
 
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"
@@ -2028,8 +2060,8 @@ msgid "Read-only"
 msgstr "Alleen-lezen"
 
 #: src/connections/connect-dialog.tsx
-msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "Alleen-lezen is aangevinkt waar Composio zegt dat een tool alleen leest; Grasp controleert dat niet. Een alleen-lezen-tool draait zonder te vragen. Een aanroep van elke andere tool vanuit een chat, of door iemand die een app gebruikt, wacht tot die persoon bevestigt; een workflowrun voert hem uit als een van zijn stappen. Markeer een tool alleen als alleen-lezen als hij niets wijzigt: verkeerd gemarkeerd wijzigt hij dingen zonder te vragen."
+msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using an engine, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Alleen-lezen is aangevinkt waar Composio zegt dat een tool alleen leest; Grasp controleert dat niet. Een alleen-lezen-tool draait zonder te vragen. Een aanroep van elke andere tool vanuit een chat, of door iemand die een engine gebruikt, wacht tot die persoon bevestigt; een workflowrun voert hem uit als een van zijn stappen. Markeer een tool alleen als alleen-lezen als hij niets wijzigt: verkeerd gemarkeerd wijzigt hij dingen zonder te vragen."
 
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
@@ -2040,8 +2072,8 @@ msgid "Reading what you wrote"
 msgstr "Je antwoord wordt gelezen"
 
 #: src/chat/builds-state.ts
-msgid "reads the App's data"
-msgstr "leest de gegevens van de app"
+msgid "reads the engine's data"
+msgstr "leest de gegevens van de engine"
 
 #: src/knowledge/uploads.tsx
 msgid "Ready"
@@ -2115,8 +2147,8 @@ msgid "Removed workflow"
 msgstr "Workflow verwijderd:"
 
 #: src/chat/builds.tsx
-msgid "Removed: it acts for whoever uses the App, with everything the App holds"
-msgstr "Verwijderd: deze code handelde namens iedereen die de app gebruikt, met alles wat de app heeft"
+msgid "Removed: it acts for whoever uses the engine, with everything the engine holds"
+msgstr "Verwijderd: deze code handelde namens iedereen die de engine gebruikt, met alles wat de engine heeft"
 
 #: src/chat/chat-list.tsx
 msgid "Rename"
@@ -2180,7 +2212,7 @@ msgstr "Toestemming van {holder} intrekken"
 msgid "Revoked a permission"
 msgstr "Een toestemming ingetrokken"
 
-#: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Role"
 msgstr "Rol"
@@ -2204,7 +2236,7 @@ msgstr "Run"
 msgid "Running"
 msgstr "Draait"
 
-#: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
 msgid "Runs"
 msgstr "Runs"
 
@@ -2239,14 +2271,9 @@ msgstr "Opslaan"
 msgid "Saved."
 msgstr "Opgeslagen."
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/workflows/workflows-table.tsx
 msgid "Schedule stopped"
 msgstr "Schema gestopt"
-
-#: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.apps.index.tsx
-msgid "Screens"
-msgstr "Schermen"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Search"
@@ -2323,7 +2350,7 @@ msgstr "Instellingen"
 msgid "Shared code changed"
 msgstr "Gedeelde code gewijzigd"
 
-#: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
 msgid "Shared with"
 msgstr "Gedeeld met"
 
@@ -2477,10 +2504,6 @@ msgstr "Toegang voor Grasp-medewerkers tot deze organisatie is niet open."
 msgid "Start again from version {newerVersion}"
 msgstr "Opnieuw beginnen vanaf versie {newerVersion}"
 
-#: src/routes/_shell.apps.$app.tsx
-msgid "Started"
-msgstr "Gestart"
-
 #: src/activity/audit-words.ts
 msgid "Started a chat"
 msgstr "Een chat gestart"
@@ -2490,13 +2513,12 @@ msgid "Started by"
 msgstr "Gestart door"
 
 #: src/connections/connection-list.tsx
-#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "Status"
 msgstr "Status"
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/workflows/workflows-table.tsx
 msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Status"
@@ -2606,6 +2628,10 @@ msgstr "De agent is niet gevraagd: {reason}"
 msgid "The answer was cut off at the model's limit."
 msgstr "Het antwoord is afgekapt op de limiet van het model."
 
+#: src/screens/screen-frame.tsx
+msgid "The app couldn't be loaded."
+msgstr "De app kon niet worden geladen."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "De apps waarin je workflows kunnen werken. Grasp doet alleen wat je per app toestaat."
@@ -2635,10 +2661,6 @@ msgstr "De modelaanroep is mislukt."
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."
 msgstr "De regels in de configuratie van deze omgeving kunnen niet worden gelezen, dus elke modelaanroep wordt geweigerd. Neem contact op met Grasp."
 
-#: src/screens/screen-frame.tsx
-msgid "The screen couldn't be loaded."
-msgstr "Het scherm kon niet worden geladen."
-
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "The steps can't be read from this workflow's code: {message}"
 msgstr "De stappen kunnen niet uit de code van deze workflow worden gelezen: {message}"
@@ -2651,13 +2673,13 @@ msgstr "de hele koppeling"
 msgid "The workflow run that asked this has ended, so this decision has closed."
 msgstr "De workflowrun die dit vroeg, is afgelopen, dus deze beslissing is gesloten."
 
-#: src/routes/_shell.apps.index.tsx
-msgid "There are no Apps you can open yet."
-msgstr "Er zijn nog geen apps die je kunt openen."
-
 #: src/routes/_shell.knowledge.index.tsx
 msgid "There are no collections you can read yet."
 msgstr "Er zijn nog geen collecties die je kunt lezen."
+
+#: src/routes/_shell.engines.index.tsx
+msgid "There are no engines you can open yet. Engines are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
+msgstr "Er zijn nog geen engines die je kunt openen. Engines maak je in de chat: beschrijf een deel van je werk, en Grasp bouwt de workflows en apps ervoor."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "There is no data rule: any allowed model may take sensitive data."
@@ -2668,21 +2690,8 @@ msgid "They are signed out everywhere, their personal connections are disconnect
 msgstr "Ze worden overal uitgelogd, hun persoonlijke koppelingen worden ontkoppeld en ze kunnen niet meer inloggen."
 
 #: src/screens/screen-frame.tsx
-msgid "This App has no such screen."
-msgstr "Deze app heeft zo’n scherm niet."
-
-#: src/routes/_shell.apps.$app.tsx
-#: src/screens/screen-frame.tsx
-msgid "This App has no version to run yet."
-msgstr "Deze app heeft nog geen versie om te draaien."
-
-#: src/routes/_shell.apps.$app.tsx
-msgid "This App's current version has no screens."
-msgstr "De actuele versie van deze app heeft geen schermen."
-
-#: src/routes/_shell.apps.$app.tsx
-msgid "This App's current version has no workflows."
-msgstr "De actuele versie van deze app heeft geen workflows."
+msgid "This app doesn't build. Ask a builder to fix it."
+msgstr "Deze app bouwt niet. Vraag een bouwer om hem te herstellen."
 
 #: src/routes/guest.tsx
 msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
@@ -2728,6 +2737,19 @@ msgstr "Dit document is gewijzigd sinds je het opende. Versie {newerVersion} sta
 msgid "This document is empty."
 msgstr "Dit document is leeg."
 
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "This engine doesn't use an integration yet."
+msgstr "Deze engine gebruikt nog geen integratie."
+
+#: src/screens/screen-frame.tsx
+msgid "This engine has no such app."
+msgstr "Deze engine heeft zo’n app niet."
+
+#: src/routes/_shell.engines.$engine.index.tsx
+#: src/screens/screen-frame.tsx
+msgid "This engine has no version to run yet."
+msgstr "Deze engine heeft nog geen versie om te draaien."
+
 #: src/connections/connection-list.tsx
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
 msgstr "Dit is de toestemming zoals Grasp die nu formuleert. Het auditlog bewaart een hash van de exacte tekst die werd getoond."
@@ -2743,10 +2765,6 @@ msgstr "Deze link is verlopen. Vraag wie hem stuurde om een nieuwe."
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Deze pagina is niet geladen"
-
-#: src/screens/screen-frame.tsx
-msgid "This screen doesn't build. Ask a builder to fix it."
-msgstr "Dit scherm bouwt niet. Vraag een bouwer om het te herstellen."
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
@@ -2854,8 +2872,6 @@ msgid "Verified"
 msgstr "Geverifieerd"
 
 #: src/knowledge/document.tsx
-#: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Version"
 msgstr "Versie"
@@ -2868,9 +2884,10 @@ msgstr "Versie {number}"
 msgid "Version {number}, current"
 msgstr "Versie {number}, huidig"
 
-#: src/routes/_shell.apps.$app.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.engines.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
-#: src/routes/_shell.workflows.index.tsx
+#: src/workflows/workflows-table.tsx
 msgid "Version {version}"
 msgstr "Versie {version}"
 
@@ -2901,21 +2918,21 @@ msgid "Waiting for you: {title}"
 msgstr "Wacht op jou: {title}"
 
 #: src/activity/audit-words.ts
-msgid "Was called by another App"
-msgstr "Is door een andere App aangeroepen"
+msgid "Was called by another engine"
+msgstr "Is door een andere engine aangeroepen"
 
 #: src/activity/audit-words.ts
-msgid "Was refused adding a member to an App"
-msgstr "Mocht geen lid aan een App toevoegen"
-
-#: src/routes/_shell.settings.approvals.tsx
-msgid "What Apps and agents ask to be allowed to do, waiting for an admin."
-msgstr "Wat Apps en agents willen mogen doen, en waarvoor ze op een beheerder wachten."
+msgid "Was refused adding a member to an engine"
+msgstr "Mocht geen lid aan een engine toevoegen"
 
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
 msgstr "Wat er is gewijzigd"
+
+#: src/routes/_shell.settings.approvals.tsx
+msgid "What engines and agents ask to be allowed to do, waiting for an admin."
+msgstr "Wat engines en agents willen mogen doen, en waarvoor ze op een beheerder wachten."
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "What every agent has in its context, all the time."
@@ -2927,24 +2944,24 @@ msgid "What Grasp may do"
 msgstr "Wat Grasp mag doen"
 
 #: src/routes/_shell.integrations.$integration.tsx
-msgid "What its tools do, as its provider declares them. Apps and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
-msgstr "Wat de tools doen, zoals de aanbieder ze opgeeft. Apps en agents gebruiken alleen wat ze mogen, en een tool die iets verandert wacht tot de persoon het bevestigt."
+msgid "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
+msgstr "Wat de tools doen, zoals de aanbieder ze opgeeft. Engines en agents gebruiken alleen wat ze mogen, en een tool die iets verandert wacht tot de persoon het bevestigt."
 
 #: src/chat/builds.tsx
 msgid "What makes it run on its own can't be read from its code."
 msgstr "Wat hem vanzelf laat draaien, kan niet uit de code worden gelezen."
 
 #: src/chat/builds.tsx
-msgid "What other Apps may call"
-msgstr "Wat andere apps mogen aanroepen"
+msgid "What other engines may call"
+msgstr "Wat andere engines mogen aanroepen"
 
 #: src/routes/_shell.index.tsx
 msgid "What should we look at today?"
 msgstr "Waar kijken we vandaag naar?"
 
 #: src/chat/builds.tsx
-msgid "What the App holds"
-msgstr "Wat de app heeft"
+msgid "What the engine holds"
+msgstr "Wat de engine heeft"
 
 #: src/workflows/runs.tsx
 msgctxt "column: when a run happened"
@@ -2956,8 +2973,8 @@ msgid "when someone starts it"
 msgstr "als iemand hem start"
 
 #: src/routes/_shell.integrations.$integration.tsx
-msgid "Which Apps and agents hold permissions: {why}"
-msgstr "Welke apps en agents toestemmingen hebben: {why}"
+msgid "Which engines and agents hold permissions: {why}"
+msgstr "Welke engines en agents toestemmingen hebben: {why}"
 
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
@@ -2971,9 +2988,9 @@ msgstr "Bepaald hoe kennis wordt gebruikt"
 msgid "Worked out what could be improved"
 msgstr "Bepaald wat er beter kan"
 
-#: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
+#: src/workflows/workflows-table.tsx
 msgid "Workflow"
 msgstr "Workflow"
 
@@ -2991,8 +3008,7 @@ msgstr "Workflowtests mislukken:"
 
 #: src/chat/builds.tsx
 #: src/frame/app-sidebar.tsx
-#: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.apps.index.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/decisions.$decision.tsx
@@ -3003,9 +3019,9 @@ msgstr "Workflows"
 msgid "Workflows and more"
 msgstr "Workflows en meer"
 
-#: src/routes/_shell.workflows.index.tsx
-msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it into an App."
-msgstr "Workflows maak je in de chat: beschrijf wat vanzelf moet lopen, en Grasp bouwt het in een App."
+#: src/workflows/workflows-table.tsx
+msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it into an engine."
+msgstr "Workflows maak je in de chat: beschrijf wat vanzelf moet lopen, en Grasp bouwt het in een engine."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."
@@ -3057,8 +3073,8 @@ msgid "You are signed in as Grasp staff, for a limited time."
 msgstr "Je bent aangemeld als medewerker van Grasp, voor beperkte tijd."
 
 #: src/screens/screen-frame.tsx
-msgid "You can't open this App's screens: your role doesn't allow it, or the App has read data you can't read."
-msgstr "Je kunt de schermen van deze app niet openen: je rol staat het niet toe, of de app heeft gegevens gelezen die jij niet mag lezen."
+msgid "You can't open this engine's apps: your role doesn't allow it, or the engine has read data you can't read."
+msgstr "Je kunt de apps van deze engine niet openen: je rol staat het niet toe, of de engine heeft gegevens gelezen die jij niet mag lezen."
 
 #: src/connections/connect-dialog.tsx
 msgid "You come back to {app}’s page here."

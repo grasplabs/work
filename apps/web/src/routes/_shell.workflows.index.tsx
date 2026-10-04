@@ -204,7 +204,7 @@ const RunFilters = ({ options }: { options: FilterOptions }) => {
   return (
     <div className="flex flex-wrap gap-2">
       <Filter
-        label={t`App`}
+        label={t`Engine`}
         onChange={(app) => {
           // A workflow of another App finds nothing in this one.
           filterBy({ app, workflow: undefined });
@@ -238,7 +238,7 @@ const RunFilters = ({ options }: { options: FilterOptions }) => {
       />
       {options.workflows === null ? (
         <p className="text-destructive self-center text-sm">
-          <Trans>Couldn&apos;t load this App&apos;s workflows.</Trans>
+          <Trans>Couldn&apos;t load this engine&apos;s workflows.</Trans>
         </p>
       ) : null}
     </div>

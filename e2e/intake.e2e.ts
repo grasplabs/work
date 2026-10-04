@@ -55,8 +55,8 @@ const intakeFor = async (admin: Person): Promise<string> => {
 
 /** The intake's screen in `page`, once it shows. */
 const openIntake = async (page: Page, app: string) => {
-  await page.goto(`/apps/${app}/screens/intake`);
-  const screen = page.frameLocator('iframe[title="intake screen"]');
+  await page.goto(`/engines/${app}/apps/intake/full`);
+  const screen = page.frameLocator('iframe[title="intake app"]');
   // The first open builds the screen, which takes a while on a loaded machine.
   await expect(screen.getByRole("heading", { name: "Intake" })).toBeVisible({
     timeout: 20_000,

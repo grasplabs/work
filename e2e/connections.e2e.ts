@@ -216,11 +216,11 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   );
   const holder = mailboxCard.getByRole("listitem").filter({ hasText: appName });
   await expect(holder).toContainText(
-    `App ${appName}: mail.read on the whole connection`
+    `Engine ${appName}: mail.read on the whole connection`
   );
   await expect(holder).toHaveCount(1);
   await holder
-    .getByRole("button", { name: `Revoke App ${appName}'s permission` })
+    .getByRole("button", { name: `Revoke Engine ${appName}'s permission` })
     .click();
   await expect(holder).toHaveCount(0);
   await expect(mailboxCard.getByText("None.")).toBeVisible();

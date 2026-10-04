@@ -110,9 +110,9 @@ const changeWords = {
 
 /** How the server code changed, as a whole sentence for its warning. */
 const serverChangeWarnings = {
-  added: msg`Added: it acts for whoever uses the App, with everything the App holds`,
-  modified: msg`Changed: it acts for whoever uses the App, with everything the App holds`,
-  removed: msg`Removed: it acts for whoever uses the App, with everything the App holds`,
+  added: msg`Added: it acts for whoever uses the engine, with everything the engine holds`,
+  modified: msg`Changed: it acts for whoever uses the engine, with everything the engine holds`,
+  removed: msg`Removed: it acts for whoever uses the engine, with everything the engine holds`,
 } as const;
 
 /** How a workflow changed, before its ID. */
@@ -263,7 +263,7 @@ const ReviewDetails = ({
       </blockquote>
       <p className="text-muted-foreground">
         {current === null
-          ? t`Nothing runs yet: this would be the App's first current version.`
+          ? t`Nothing runs yet: this would be the engine's first current version.`
           : t`Compared with version ${current}, which runs now.`}
       </p>
       <section aria-label={t`Files`} className="flex flex-col gap-1">
@@ -391,7 +391,7 @@ const ReviewDetails = ({
       {review.exports.length === 0 ? null : (
         <section aria-label={t`Exports`} className="flex flex-col gap-1">
           <h4 className="font-medium">
-            <Trans>What other Apps may call</Trans>
+            <Trans>What other engines may call</Trans>
           </h4>
           <ul className="flex flex-col gap-1">
             {review.exports.map((change) => {
@@ -401,7 +401,7 @@ const ReviewDetails = ({
                   {text}
                   {widens ? (
                     <Badge variant="destructive">
-                      <Trans>Changes the App&apos;s data</Trans>
+                      <Trans>Changes the engine&apos;s data</Trans>
                     </Badge>
                   ) : null}
                 </li>
@@ -411,11 +411,11 @@ const ReviewDetails = ({
         </section>
       )}
       <section
-        aria-label={t`What the App holds`}
+        aria-label={t`What the engine holds`}
         className="flex flex-col gap-1"
       >
         <h4 className="font-medium">
-          <Trans>What the App holds</Trans>
+          <Trans>What the engine holds</Trans>
         </h4>
         {review.grants.length === 0 ? (
           <p className="text-muted-foreground">

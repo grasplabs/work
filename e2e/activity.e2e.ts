@@ -220,7 +220,7 @@ test("an admin sees a grant asked for again after a new version, and approves on
     await release(builds.api, appId, { "README.md": "Three" }, "Third");
     await row.getByRole("button", { name: /^Approve /u }).click();
     await expect(row.getByRole("alert")).toHaveText(
-      "Another version of this App was made current since this list was read. The list now shows it: review that version, then approve again."
+      "Another version of this engine was made current since this list was read. The list now shows it: review that version, then approve again."
     );
     await expect(row.getByRole("cell", { name: "3", exact: true })).toHaveCount(
       1

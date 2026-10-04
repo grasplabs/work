@@ -333,7 +333,7 @@ test("the chat dock on every other page carries on the open chat, which is the s
   const question = `From the dock ${tag}?`;
 
   // Asked from another page, it opens around the box and streams there.
-  await page.goto("/apps");
+  await page.goto("/engines");
   const box = page.getByRole("textbox", { name: "Ask Grasp" });
   await box.fill(question);
   await box.press("Enter");
@@ -345,7 +345,7 @@ test("the chat dock on every other page carries on the open chat, which is the s
     { timeout: 30_000 }
   );
   // The page stayed where it was.
-  expect(new URL(page.url()).pathname).toBe("/apps");
+  expect(new URL(page.url()).pathname).toBe("/engines");
 
   // Folded away, it is the bar again, and opens again on the same chat,
   // the cursor in the box all along, and what was typed still there.

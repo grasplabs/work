@@ -206,8 +206,8 @@ const Apps = ({
               <Trans>This engine has no version to run yet.</Trans>
             ) : (
               <Trans>
-                An app is a screen this engine&apos;s team works in, standing on
-                its workflows and integrations. Ask Grasp in chat to build one.
+                An app is what this engine&apos;s team works in, standing on its
+                workflows and integrations. Ask Grasp in chat to build one.
               </Trans>
             )}
           </p>

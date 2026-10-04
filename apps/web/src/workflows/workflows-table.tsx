@@ -226,7 +226,7 @@ export const WorkflowsTable = ({
             <EmptyDescription>
               <Trans>
                 Workflows are made in chat: describe what should run on its own,
-                and Grasp builds it into an App.
+                and Grasp builds it into an engine.
               </Trans>
             </EmptyDescription>
           </EmptyHeader>

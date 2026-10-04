@@ -332,19 +332,19 @@ test("sends someone whose session ended elsewhere to sign in, and back to the pa
   await signInTo(context, member);
   await page.goto("/knowledge");
   const nav = page.getByRole("navigation", { name: "Main" });
-  await expect(nav.getByRole("link", { name: "Apps" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Engines" })).toBeVisible();
 
   // Signed out in another tab, or revoked: the page's connection, opened
   // while they were signed in, is refused at the next page they open.
   await endSession(member);
-  await nav.getByRole("link", { name: "Apps" }).click();
+  await nav.getByRole("link", { name: "Engines" }).click();
   await expect(
     page.getByText("Use your organization’s account to go on.")
   ).toBeVisible({
     timeout: reconnectMs,
   });
   expect(new URL(page.url()).pathname).toBe("/sign-in");
-  expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/apps");
+  expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/engines");
   await expect(nav).toHaveCount(0);
 });
 
@@ -362,11 +362,12 @@ test("says an address no page has, and an App that isn't there, are not found, i
   ).toBeVisible();
   // In the frame: the sidebar is there to go on from.
   const nav = page.getByRole("navigation", { name: "Main" });
-  await expect(nav.getByRole("link", { name: "Apps" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Engines" })).toBeVisible();
 
+  // An old link to an App is an engine's now.
   await page.goto("/apps/no-such-app");
   await expect(
-    page.getByRole("heading", { name: "App not found" })
+    page.getByRole("heading", { name: "Engine not found" })
   ).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "Breadcrumb" })

@@ -22,7 +22,7 @@ const Approvals = () => {
   const { identity } = Route.useRouteContext();
   return (
     <SettingsSection
-      description={t`What Apps and agents ask to be allowed to do, waiting for an admin.`}
+      description={t`What engines and agents ask to be allowed to do, waiting for an admin.`}
       title={t`Pending approvals`}
     >
       <SettingsBody>

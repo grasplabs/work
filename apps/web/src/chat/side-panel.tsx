@@ -49,7 +49,7 @@ const OpenedApp = ({
       <div className="flex items-center gap-2">
         <Button onClick={onClose} size="sm" variant="ghost">
           <ArrowLeftIcon data-icon="inline-start" />
-          <Trans>All Apps</Trans>
+          <Trans>All engines</Trans>
         </Button>
         <Link
           className="text-sm underline"
@@ -61,7 +61,7 @@ const OpenedApp = ({
       </div>
       {screen === undefined || contents.version === null ? (
         <p className="text-muted-foreground text-sm">
-          <Trans>{name} has no screen to show.</Trans>
+          <Trans>{name} has no app to show.</Trans>
         </p>
       ) : (
         <ScreenFrame app={app.id} embedded screen={screen} />
@@ -143,7 +143,7 @@ export const SidePanel = ({
             aria-hidden="true"
             className="text-muted-foreground size-4"
           />
-          <Trans>Apps</Trans>
+          <Trans>Engines</Trans>
         </h2>
         {opened === undefined ? null : <NotLoaded page={opened} />}
         {apps.data.length === 0 ? (
@@ -153,12 +153,12 @@ export const SidePanel = ({
                 <BoxesIcon />
               </EmptyMedia>
               <EmptyTitle>
-                <Trans>No Apps yet</Trans>
+                <Trans>No engines yet</Trans>
               </EmptyTitle>
               <EmptyDescription>
                 <Trans>
-                  Ask Grasp to build one. While it works, the App shows here to
-                  preview before it is proposed.
+                  Ask Grasp to build one. While it works, the engine shows here
+                  to preview before it is proposed.
                 </Trans>
               </EmptyDescription>
             </EmptyHeader>
