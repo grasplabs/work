@@ -12,7 +12,7 @@ import { Link } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   BoxIcon,
-  BoxesIcon,
+  CogIcon,
   ChevronRightIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -49,19 +49,19 @@ const OpenedApp = ({
       <div className="flex items-center gap-2">
         <Button onClick={onClose} size="sm" variant="ghost">
           <ArrowLeftIcon data-icon="inline-start" />
-          <Trans>All Apps</Trans>
+          <Trans>All engines</Trans>
         </Button>
         <Link
           className="text-sm underline"
-          params={{ app: app.id }}
-          to="/apps/$app"
+          params={{ engine: app.id }}
+          to="/engines/$engine"
         >
           <Trans>Workflows and more</Trans>
         </Link>
       </div>
       {screen === undefined || contents.version === null ? (
         <p className="text-muted-foreground text-sm">
-          <Trans>{name} has no screen to show.</Trans>
+          <Trans>{name} has no app to show.</Trans>
         </p>
       ) : (
         <ScreenFrame app={app.id} embedded screen={screen} />
@@ -139,26 +139,26 @@ export const SidePanel = ({
           className="flex items-center gap-2 text-sm font-medium"
           id="panel-apps"
         >
-          <BoxesIcon
+          <CogIcon
             aria-hidden="true"
             className="text-muted-foreground size-4"
           />
-          <Trans>Apps</Trans>
+          <Trans>Engines</Trans>
         </h2>
         {opened === undefined ? null : <NotLoaded page={opened} />}
         {apps.data.length === 0 ? (
           <Empty>
             <EmptyHeader>
               <EmptyMedia variant="icon">
-                <BoxesIcon />
+                <CogIcon />
               </EmptyMedia>
               <EmptyTitle>
-                <Trans>No Apps yet</Trans>
+                <Trans>No engines yet</Trans>
               </EmptyTitle>
               <EmptyDescription>
                 <Trans>
-                  Ask Grasp to build one. While it works, the App shows here to
-                  preview before it is proposed.
+                  Ask Grasp to build one. While it works, the engine shows here
+                  to preview before it is proposed.
                 </Trans>
               </EmptyDescription>
             </EmptyHeader>

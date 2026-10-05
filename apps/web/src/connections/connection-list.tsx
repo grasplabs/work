@@ -2,7 +2,7 @@ import {
   composioConsentText,
   oauthProviderSchema,
 } from "@grasp-os/shared/connect";
-import type { ListedConnection, OAuthProvider } from "@grasp-os/shared/connect";
+import type { ListedConnection } from "@grasp-os/shared/connect";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -21,13 +21,13 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatList } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
-import { useCoreAction } from "../use-core-action.ts";
-import { goTo, returnTo } from "./catalog.tsx";
-import { SourceBadge } from "./source-badge.tsx";
+import { canReconnect, ConnectDialog } from "./connect-dialog.tsx";
+import type { Integration } from "./integrations.ts";
 import { useChange } from "./use-change.ts";
 
 // The person's connections and the shared ones, as core lists them: what
@@ -43,15 +43,20 @@ export interface HeldPermissions {
   appNames: ReadonlyMap<string, string>;
 }
 
-const statusText: Record<ListedConnection["status"], MessageDescriptor> = {
-  active: msg`Active`,
-  needs_reauth: msg`Needs connecting again`,
-  disconnected: msg`Disconnected`,
-};
-
-const scopeText: Record<ListedConnection["scope"], MessageDescriptor> = {
-  personal: msg`Personal: only you can use it`,
-  shared: msg`Shared: your organization uses it through permissions`,
+/** Where a connection stands, in words, by its status and whose it is. */
+const statusTextOf = ({
+  status,
+  scope,
+}: ListedConnection): MessageDescriptor => {
+  if (status === "needs_reauth") {
+    return msg`Needs someone to sign in again`;
+  }
+  if (status === "disconnected") {
+    return msg`Disconnected`;
+  }
+  return scope === "shared"
+    ? msg`Active, for the whole company`
+    : msg`Active, only for you`;
 };
 
 /** An ISO 8601 time as a date for people. */
@@ -64,7 +69,7 @@ const holderOf = (
 ): string =>
   subject.type === "app"
     ? i18n._(
-        msg`App ${ph({ app: appNames.get(subject.appId) ?? subject.appId })}`
+        msg`Engine ${ph({ engine: appNames.get(subject.appId) ?? subject.appId })}`
       )
     : i18n._(msg`Agent ${ph({ agent: subject.agentId })}`);
 
@@ -133,7 +138,7 @@ const Holders = ({
   return (
     <div className="flex flex-col gap-1 text-sm">
       <h4 className="font-medium">
-        <Trans>Apps and agents with a permission</Trans>
+        <Trans>Engines and agents with a permission</Trans>
       </h4>
       {holding.length === 0 ? (
         <p className="text-muted-foreground">
@@ -190,65 +195,6 @@ const ConsentRecord = ({ connection }: { connection: ListedConnection }) => {
   );
 };
 
-const Detail = ({ term, children }: { term: string; children: string }) => (
-  <div className="flex gap-2">
-    <dt className="text-muted-foreground">{term}</dt>
-    <dd>{children}</dd>
-  </div>
-);
-
-/**
- * Starts the provider's flow again for a connection whose access ran out.
- * Finished with the account it holds, it is the same connection again,
- * with every permission on it; connect decides that from the account the
- * provider names, never from this page.
- */
-const Reconnect = ({
-  connection,
-  provider,
-  label,
-}: {
-  connection: ListedConnection;
-  provider: OAuthProvider;
-  label: string;
-}) => {
-  const { busy, failure, run } = useCoreAction();
-  const { t } = useLingui();
-  const start = async (): Promise<void> => {
-    goTo(
-      await run(
-        async (session) =>
-          await session.connections.start({
-            provider,
-            scope: connection.scope,
-            returnTo,
-          })
-      )
-    );
-  };
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="text-muted-foreground text-sm">
-        <Trans>
-          Its access ran out. Reconnect it with the same account: Apps and
-          agents keep their permissions for it.
-        </Trans>
-      </p>
-      <Button
-        className="self-start"
-        disabled={busy}
-        aria-label={t`Reconnect ${label}`}
-        onClick={() => {
-          void start();
-        }}
-      >
-        <Trans>Reconnect</Trans>
-      </Button>
-      <ErrorText>{failure}</ErrorText>
-    </div>
-  );
-};
-
 /**
  * What a connection whose access ran out says to someone who can't
  * reconnect it: why not, and who can, if anyone. `known` is whether its
@@ -278,73 +224,202 @@ const ranOutText = (
       );
 };
 
+const Detail = ({ term, children }: { term: string; children: ReactNode }) => (
+  <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-8">
+    <dt className="text-muted-foreground flex-none sm:w-32">{term}</dt>
+    <dd className="flex min-w-0 items-center gap-2">{children}</dd>
+  </div>
+);
+
+/** Signing in again to a connection whose access ran out, in the connect dialog. */
+const SignInAgain = ({
+  connection,
+  integration,
+  identity,
+  label,
+}: {
+  connection: ListedConnection;
+  integration: Integration;
+  identity: Identity;
+  label: string;
+}) => {
+  const [open, setOpen] = useState(false);
+  const { t } = useLingui();
+  return (
+    <>
+      <Button
+        aria-label={t`Sign in to ${label} again`}
+        onClick={() => {
+          setOpen(true);
+        }}
+        size="sm"
+      >
+        <Trans>Sign in again</Trans>
+      </Button>
+      <ConnectDialog
+        again={connection}
+        identity={identity}
+        integration={integration}
+        onOpenChange={setOpen}
+        open={open}
+      />
+    </>
+  );
+};
+
+/** Disconnecting, once confirmed: its tokens go, and everything that used it loses it. */
+const Disconnect = ({
+  connection,
+  label,
+  last,
+}: {
+  connection: ListedConnection;
+  label: string;
+  /**
+   * The integration's last connection, where the catalog doesn't list it:
+   * its page goes with it, so the list shows next.
+   */
+  last: boolean;
+}) => {
+  const { busy, failure, change } = useChange({ leave: last });
+  const [confirming, setConfirming] = useState(false);
+  const { t } = useLingui();
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Dialog open={confirming} onOpenChange={setConfirming}>
+        <DialogTrigger
+          render={
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              aria-label={t`Disconnect ${label}`}
+            />
+          }
+        >
+          <Trans>Disconnect</Trans>
+        </DialogTrigger>
+        <DialogContent closeLabel={t`Close`}>
+          <DialogHeader>
+            <DialogTitle>
+              <Trans>Disconnect {label}?</Trans>
+            </DialogTitle>
+            <DialogDescription>
+              <Trans>
+                Its tokens are deleted, every engine and agent loses it, and
+                actions waiting on it are dropped. Connect it again to use it
+                again.
+              </Trans>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter closeLabel={t`Close`} showCloseButton>
+            <Button
+              variant="destructive"
+              disabled={busy}
+              onClick={() => {
+                setConfirming(false);
+                void change(
+                  async (session) =>
+                    await session.connections.disconnect(connection.id)
+                );
+              }}
+            >
+              <Trans>Disconnect</Trans>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ErrorText>{failure}</ErrorText>
+    </div>
+  );
+};
+
+/**
+ * One connection to the integration, as the prototype's Account section
+ * shows it: its account, where it stands, who connected it and when, and
+ * what can be done with it.
+ */
 const ConnectionItem = ({
   connection,
-  name,
-  offered,
+  integration,
   held,
   identity,
 }: {
   connection: ListedConnection;
-  name: string;
-  /** Whether people are offered its catalog entry. */
-  offered: boolean;
+  integration: Integration;
   held: HeldPermissions | undefined;
   identity: Identity;
 }) => {
-  const { busy, failure, change } = useChange();
-  const [confirming, setConfirming] = useState(false);
   const { t } = useLingui();
   const admin = isAdmin(identity.role);
   // Only the owner sees a personal connection here, and admins disconnect
   // shared ones: connect checks both.
   const mayDisconnect = connection.scope === "personal" || admin;
-  const provider = oauthProviderSchema.safeParse(connection.provider);
-  // Whoever may disconnect it may reconnect it, but never Grasp staff, and
-  // only while its connector is offered.
-  const reconnectable =
-    connection.source === "native" &&
-    provider.success &&
-    offered &&
-    mayDisconnect &&
-    !identity.staff;
+  const reconnectable = canReconnect(connection, integration.offered, identity);
   const { accountName } = connection;
+  const { name } = integration;
   const label = accountName === null ? name : `${name} (${accountName})`;
   const connectedBy =
     connection.connectedBy === identity.userId
       ? t`You`
       : (connection.connectedByName ?? t`Someone no longer here`);
+  const ranOut = connection.status === "needs_reauth";
   return (
-    <li className="flex flex-col gap-3 rounded-lg border p-4">
-      <div className="flex flex-wrap items-center gap-2">
+    <li className="bg-card flex flex-col gap-4 rounded-xl border p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="font-medium">{label}</h3>
-        <SourceBadge source={connection.source} />
+        <div className="flex items-start gap-2">
+          {ranOut && reconnectable ? (
+            <SignInAgain
+              connection={connection}
+              identity={identity}
+              integration={integration}
+              label={label}
+            />
+          ) : null}
+          {mayDisconnect ? (
+            <Disconnect
+              connection={connection}
+              label={label}
+              last={!integration.listed && integration.connections.length === 1}
+            />
+          ) : null}
+        </div>
       </div>
-      <dl className="flex flex-col gap-1 text-sm">
+      <dl className="flex flex-col gap-3">
         <Detail term={t`Status`}>
-          {i18n._(statusText[connection.status])}
+          <span
+            aria-hidden="true"
+            className={
+              ranOut
+                ? "bg-status-attention size-1.75 rounded-full"
+                : "bg-status-agreed size-1.75 rounded-full"
+            }
+          />
+          {i18n._(statusTextOf(connection))}
         </Detail>
-        <Detail term={t`Scope`}>{i18n._(scopeText[connection.scope])}</Detail>
         <Detail term={t`Account`}>
           {accountName ?? t`Not named by the provider`}
         </Detail>
         <Detail term={t`Connected by`}>{connectedBy}</Detail>
         <Detail term={t`Connected on`}>{dateOf(connection.createdAt)}</Detail>
       </dl>
-      {connection.status === "needs_reauth" && reconnectable ? (
-        <Reconnect
-          connection={connection}
-          provider={provider.data}
-          label={label}
-        />
-      ) : null}
-      {connection.status === "needs_reauth" && !reconnectable ? (
-        <p className="text-muted-foreground text-sm">
+      {ranOut && !reconnectable ? (
+        <p className="text-muted-foreground">
           {ranOutText(
-            connection.source === "native" && provider.success,
-            offered,
+            connection.source === "native" &&
+              oauthProviderSchema.safeParse(connection.provider).success,
+            integration.offered,
             identity.staff
           )}
+        </p>
+      ) : null}
+      {ranOut && reconnectable ? (
+        <p className="text-muted-foreground">
+          <Trans>
+            Its access ran out. Sign in again with the same account: engines and
+            agents keep their permissions for it.
+          </Trans>
         </p>
       ) : null}
       {connection.source === "composio" ? (
@@ -357,95 +432,30 @@ const ConnectionItem = ({
           mayRevoke={admin && !identity.staff}
         />
       )}
-      {mayDisconnect ? (
-        <Dialog open={confirming} onOpenChange={setConfirming}>
-          <DialogTrigger
-            render={
-              <Button
-                className="self-start"
-                variant="destructive"
-                disabled={busy}
-                aria-label={t`Disconnect ${label}`}
-              />
-            }
-          >
-            <Trans>Disconnect</Trans>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                <Trans>Disconnect {label}?</Trans>
-              </DialogTitle>
-              <DialogDescription>
-                <Trans>
-                  Its tokens are deleted, every App and agent loses it, and
-                  actions waiting on it are dropped. Connect it again to use it
-                  again.
-                </Trans>
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter showCloseButton>
-              <Button
-                variant="destructive"
-                disabled={busy}
-                onClick={() => {
-                  setConfirming(false);
-                  void change(
-                    async (session) =>
-                      await session.connections.disconnect(connection.id)
-                  );
-                }}
-              >
-                <Trans>Disconnect</Trans>
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      ) : null}
-      <ErrorText>{failure}</ErrorText>
     </li>
   );
 };
 
+/** The integration's connections this person can see, each on its card. */
 export const ConnectionList = ({
-  connections,
-  names,
-  offered,
+  integration,
   held,
   identity,
-  empty,
 }: {
-  connections: ListedConnection[];
-  /** Catalog names, keyed `source:id`; the provider's ID stands in. */
-  names: ReadonlyMap<string, string>;
-  /**
-   * The catalog entries people are offered, keyed like `names`; undefined
-   * while the catalog isn't read, when every entry counts as offered.
-   */
-  offered: ReadonlySet<string> | undefined;
+  integration: Integration;
   /** Undefined for someone who can't list permissions. */
   held: Loaded<HeldPermissions> | undefined;
   identity: Identity;
-  empty: string;
-}) =>
-  connections.length === 0 ? (
-    <p className="text-muted-foreground text-sm">{empty}</p>
-  ) : (
-    <ul className="flex flex-col gap-3">
-      {connections.map((connection) => (
-        <ConnectionItem
-          key={connection.id}
-          connection={connection}
-          name={
-            names.get(`${connection.source}:${connection.provider}`) ??
-            connection.provider
-          }
-          offered={
-            offered?.has(`${connection.source}:${connection.provider}`) ?? true
-          }
-          held={held?.state === "ready" ? held.data : undefined}
-          identity={identity}
-        />
-      ))}
-    </ul>
-  );
+}) => (
+  <ul className="flex flex-col gap-3">
+    {integration.connections.map((connection) => (
+      <ConnectionItem
+        connection={connection}
+        held={held?.state === "ready" ? held.data : undefined}
+        identity={identity}
+        integration={integration}
+        key={connection.id}
+      />
+    ))}
+  </ul>
+);

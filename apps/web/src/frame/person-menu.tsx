@@ -1,4 +1,3 @@
-import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import {
@@ -18,25 +17,20 @@ import {
 } from "@grasp-os/ui/components/sidebar";
 import { useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
-import {
-  ActivityIcon,
-  CpuIcon,
-  EllipsisVerticalIcon,
-  LogOutIcon,
-  UsersIcon,
-} from "lucide-react";
+import { EllipsisVerticalIcon, LogOutIcon, SettingsIcon } from "lucide-react";
 
 import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { roleLabel } from "../labels.ts";
 import { LanguageMenu } from "../language-picker.tsx";
 
-// The person signed in, at the foot of the sidebar: a menu with what only
-// admins use, the language and signing out. The menu only leaves out what
-// a role can't use; core checks the role on every call whatever it shows.
+// The person signed in, at the foot of the sidebar, as in the prototype
+// (`components/nav-user.tsx`): a menu with Settings, where their profile
+// and, for admins, the workspace's settings are, the language and signing
+// out.
 
 /** Up to two letters of `name`, for the avatar. */
-const initials = (name: string): string =>
+export const initials = (name: string): string =>
   name
     .split(/\s+/u)
     .filter((part) => part !== "")
@@ -72,7 +66,6 @@ export const PersonMenu = ({
 }) => {
   const { t } = useLingui();
   const { isMobile } = useSidebar();
-  const admin = isAdmin(identity.role);
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -91,29 +84,11 @@ export const PersonMenu = ({
               <DropdownMenuLabel>{identity.email}</DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            {admin ? (
-              <>
-                <DropdownMenuGroup>
-                  <DropdownMenuItem render={<Link to="/activity" />}>
-                    <ActivityIcon />
-                    {t`Activity`}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem render={<Link to="/models" />}>
-                    <CpuIcon />
-                    {t`Models`}
-                  </DropdownMenuItem>
-                  {/* For the organization's own admins, never Grasp staff. */}
-                  {identity.staff ? null : (
-                    <DropdownMenuItem render={<Link to="/members" />}>
-                      <UsersIcon />
-                      {t`Members`}
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-              </>
-            ) : null}
             <DropdownMenuGroup>
+              <DropdownMenuItem render={<Link to="/settings/profile" />}>
+                <SettingsIcon />
+                {t`Settings`}
+              </DropdownMenuItem>
               <LanguageMenu />
               <DropdownMenuItem
                 onClick={() => {

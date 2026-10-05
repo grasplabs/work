@@ -136,6 +136,7 @@ const cast = {
   decisionAnswered: { builder: "builder", decider: "user", other: "admin" },
   decisionUnreachable: { decider: "user" },
   memberActions: { admin: "admin", one: "user", two: "user" },
+  memberRemoval: { admin: "admin", leaving: "user" },
   roleChange: { admin: "admin", one: "user" },
   membersUnreachable: { admin: "admin" },
   membersRecover: { admin: "admin" },
@@ -159,6 +160,7 @@ const cast = {
   exports: { admin: "admin" },
   chatBuilds: { builder: "builder" },
   notifications: { builder: "builder" },
+  dashboard: { user: "user", admin: "admin" },
   chatPreview: { builder: "builder" },
   languages: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;

@@ -17,17 +17,31 @@ import { Route as ShellIndexRouteImport } from './routes/_shell.index'
 import { Route as ShellSplatRouteImport } from './routes/_shell.$'
 import { Route as ShellActivityRouteImport } from './routes/_shell.activity'
 import { Route as ShellConnectionsRouteImport } from './routes/_shell.connections'
+import { Route as ShellDashboardRouteImport } from './routes/_shell.dashboard'
 import { Route as ShellMembersRouteImport } from './routes/_shell.members'
 import { Route as ShellModelsRouteImport } from './routes/_shell.models'
 import { Route as ShellNotificationsRouteImport } from './routes/_shell.notifications'
+import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as DecisionsDecisionRouteImport } from './routes/decisions.$decision'
 import { Route as ShellAppsIndexRouteImport } from './routes/_shell.apps.index'
 import { Route as ShellAppsAppRouteImport } from './routes/_shell.apps.$app'
+import { Route as ShellEnginesIndexRouteImport } from './routes/_shell.engines.index'
+import { Route as ShellIntegrationsIndexRouteImport } from './routes/_shell.integrations.index'
+import { Route as ShellIntegrationsIntegrationRouteImport } from './routes/_shell.integrations.$integration'
 import { Route as ShellKnowledgeIndexRouteImport } from './routes/_shell.knowledge.index'
 import { Route as ShellKnowledgeCollectionRouteImport } from './routes/_shell.knowledge.$collection'
+import { Route as ShellSettingsIndexRouteImport } from './routes/_shell.settings.index'
+import { Route as ShellSettingsApprovalsRouteImport } from './routes/_shell.settings.approvals'
+import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
+import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settings.members'
+import { Route as ShellSettingsModelsRouteImport } from './routes/_shell.settings.models'
+import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settings.profile'
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell.workflows.index'
+import { Route as ShellEnginesEngineIndexRouteImport } from './routes/_shell.engines.$engine.index'
 import { Route as ShellWorkflowsAppWorkflowRouteImport } from './routes/_shell.workflows.$app.$workflow'
 import { Route as AppsAppScreensScreenRouteImport } from './routes/apps.$app.screens.$screen'
+import { Route as ShellEnginesEngineAppsScreenRouteImport } from './routes/_shell.engines.$engine.apps.$screen'
+import { Route as EnginesEngineAppsScreenFullRouteImport } from './routes/engines.$engine.apps.$screen.full'
 
 const ShellRoute = ShellRouteImport.update({
   id: '/_shell',
@@ -68,6 +82,11 @@ const ShellConnectionsRoute = ShellConnectionsRouteImport.update({
   path: '/connections',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellDashboardRoute = ShellDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellMembersRoute = ShellMembersRouteImport.update({
   id: '/members',
   path: '/members',
@@ -81,6 +100,11 @@ const ShellModelsRoute = ShellModelsRouteImport.update({
 const ShellNotificationsRoute = ShellNotificationsRouteImport.update({
   id: '/notifications',
   path: '/notifications',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellSettingsRoute = ShellSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => ShellRoute,
 } as any)
 const DecisionsDecisionRoute = DecisionsDecisionRouteImport.update({
@@ -98,6 +122,22 @@ const ShellAppsAppRoute = ShellAppsAppRouteImport.update({
   path: '/apps/$app',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellEnginesIndexRoute = ShellEnginesIndexRouteImport.update({
+  id: '/engines/',
+  path: '/engines/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellIntegrationsIndexRoute = ShellIntegrationsIndexRouteImport.update({
+  id: '/integrations/',
+  path: '/integrations/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellIntegrationsIntegrationRoute =
+  ShellIntegrationsIntegrationRouteImport.update({
+    id: '/integrations/$integration',
+    path: '/integrations/$integration',
+    getParentRoute: () => ShellRoute,
+  } as any)
 const ShellKnowledgeIndexRoute = ShellKnowledgeIndexRouteImport.update({
   id: '/knowledge/',
   path: '/knowledge/',
@@ -109,9 +149,44 @@ const ShellKnowledgeCollectionRoute =
     path: '/knowledge/$collection',
     getParentRoute: () => ShellRoute,
   } as any)
+const ShellSettingsIndexRoute = ShellSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ShellSettingsRoute,
+} as any)
+const ShellSettingsApprovalsRoute = ShellSettingsApprovalsRouteImport.update({
+  id: '/approvals',
+  path: '/approvals',
+  getParentRoute: () => ShellSettingsRoute,
+} as any)
+const ShellSettingsAuditRoute = ShellSettingsAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => ShellSettingsRoute,
+} as any)
+const ShellSettingsMembersRoute = ShellSettingsMembersRouteImport.update({
+  id: '/members',
+  path: '/members',
+  getParentRoute: () => ShellSettingsRoute,
+} as any)
+const ShellSettingsModelsRoute = ShellSettingsModelsRouteImport.update({
+  id: '/models',
+  path: '/models',
+  getParentRoute: () => ShellSettingsRoute,
+} as any)
+const ShellSettingsProfileRoute = ShellSettingsProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => ShellSettingsRoute,
+} as any)
 const ShellWorkflowsIndexRoute = ShellWorkflowsIndexRouteImport.update({
   id: '/workflows/',
   path: '/workflows/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellEnginesEngineIndexRoute = ShellEnginesEngineIndexRouteImport.update({
+  id: '/engines/$engine/',
+  path: '/engines/$engine/',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellWorkflowsAppWorkflowRoute =
@@ -125,6 +200,18 @@ const AppsAppScreensScreenRoute = AppsAppScreensScreenRouteImport.update({
   path: '/apps/$app/screens/$screen',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ShellEnginesEngineAppsScreenRoute =
+  ShellEnginesEngineAppsScreenRouteImport.update({
+    id: '/engines/$engine/apps/$screen',
+    path: '/engines/$engine/apps/$screen',
+    getParentRoute: () => ShellRoute,
+  } as any)
+const EnginesEngineAppsScreenFullRoute =
+  EnginesEngineAppsScreenFullRouteImport.update({
+    id: '/engines/$engine/apps/$screen/full',
+    path: '/engines/$engine/apps/$screen/full',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
@@ -134,17 +221,31 @@ export interface FileRoutesByFullPath {
   '/$': typeof ShellSplatRoute
   '/activity': typeof ShellActivityRoute
   '/connections': typeof ShellConnectionsRoute
+  '/dashboard': typeof ShellDashboardRoute
   '/members': typeof ShellMembersRoute
   '/models': typeof ShellModelsRoute
   '/notifications': typeof ShellNotificationsRoute
+  '/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/apps/$app': typeof ShellAppsAppRoute
+  '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
+  '/settings/approvals': typeof ShellSettingsApprovalsRoute
+  '/settings/audit': typeof ShellSettingsAuditRoute
+  '/settings/members': typeof ShellSettingsMembersRoute
+  '/settings/models': typeof ShellSettingsModelsRoute
+  '/settings/profile': typeof ShellSettingsProfileRoute
   '/apps/': typeof ShellAppsIndexRoute
+  '/engines/': typeof ShellEnginesIndexRoute
+  '/integrations/': typeof ShellIntegrationsIndexRoute
   '/knowledge/': typeof ShellKnowledgeIndexRoute
+  '/settings/': typeof ShellSettingsIndexRoute
   '/workflows/': typeof ShellWorkflowsIndexRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/apps/$app/screens/$screen': typeof AppsAppScreensScreenRoute
+  '/engines/$engine/': typeof ShellEnginesEngineIndexRoute
+  '/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
+  '/engines/$engine/apps/$screen/full': typeof EnginesEngineAppsScreenFullRoute
 }
 export interface FileRoutesByTo {
   '/guest': typeof GuestRoute
@@ -153,18 +254,31 @@ export interface FileRoutesByTo {
   '/$': typeof ShellSplatRoute
   '/activity': typeof ShellActivityRoute
   '/connections': typeof ShellConnectionsRoute
+  '/dashboard': typeof ShellDashboardRoute
   '/members': typeof ShellMembersRoute
   '/models': typeof ShellModelsRoute
   '/notifications': typeof ShellNotificationsRoute
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/': typeof ShellIndexRoute
   '/apps/$app': typeof ShellAppsAppRoute
+  '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
+  '/settings/approvals': typeof ShellSettingsApprovalsRoute
+  '/settings/audit': typeof ShellSettingsAuditRoute
+  '/settings/members': typeof ShellSettingsMembersRoute
+  '/settings/models': typeof ShellSettingsModelsRoute
+  '/settings/profile': typeof ShellSettingsProfileRoute
   '/apps': typeof ShellAppsIndexRoute
+  '/engines': typeof ShellEnginesIndexRoute
+  '/integrations': typeof ShellIntegrationsIndexRoute
   '/knowledge': typeof ShellKnowledgeIndexRoute
+  '/settings': typeof ShellSettingsIndexRoute
   '/workflows': typeof ShellWorkflowsIndexRoute
   '/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/apps/$app/screens/$screen': typeof AppsAppScreensScreenRoute
+  '/engines/$engine': typeof ShellEnginesEngineIndexRoute
+  '/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
+  '/engines/$engine/apps/$screen/full': typeof EnginesEngineAppsScreenFullRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -175,18 +289,32 @@ export interface FileRoutesById {
   '/_shell/$': typeof ShellSplatRoute
   '/_shell/activity': typeof ShellActivityRoute
   '/_shell/connections': typeof ShellConnectionsRoute
+  '/_shell/dashboard': typeof ShellDashboardRoute
   '/_shell/members': typeof ShellMembersRoute
   '/_shell/models': typeof ShellModelsRoute
   '/_shell/notifications': typeof ShellNotificationsRoute
+  '/_shell/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/apps/$app': typeof ShellAppsAppRoute
+  '/_shell/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/_shell/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
+  '/_shell/settings/approvals': typeof ShellSettingsApprovalsRoute
+  '/_shell/settings/audit': typeof ShellSettingsAuditRoute
+  '/_shell/settings/members': typeof ShellSettingsMembersRoute
+  '/_shell/settings/models': typeof ShellSettingsModelsRoute
+  '/_shell/settings/profile': typeof ShellSettingsProfileRoute
   '/_shell/apps/': typeof ShellAppsIndexRoute
+  '/_shell/engines/': typeof ShellEnginesIndexRoute
+  '/_shell/integrations/': typeof ShellIntegrationsIndexRoute
   '/_shell/knowledge/': typeof ShellKnowledgeIndexRoute
+  '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
   '/_shell/workflows/$app/$workflow': typeof ShellWorkflowsAppWorkflowRoute
   '/apps/$app/screens/$screen': typeof AppsAppScreensScreenRoute
+  '/_shell/engines/$engine/': typeof ShellEnginesEngineIndexRoute
+  '/_shell/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
+  '/engines/$engine/apps/$screen/full': typeof EnginesEngineAppsScreenFullRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -198,17 +326,31 @@ export interface FileRouteTypes {
     | '/$'
     | '/activity'
     | '/connections'
+    | '/dashboard'
     | '/members'
     | '/models'
     | '/notifications'
+    | '/settings'
     | '/decisions/$decision'
     | '/apps/$app'
+    | '/integrations/$integration'
     | '/knowledge/$collection'
+    | '/settings/approvals'
+    | '/settings/audit'
+    | '/settings/members'
+    | '/settings/models'
+    | '/settings/profile'
     | '/apps/'
+    | '/engines/'
+    | '/integrations/'
     | '/knowledge/'
+    | '/settings/'
     | '/workflows/'
     | '/workflows/$app/$workflow'
     | '/apps/$app/screens/$screen'
+    | '/engines/$engine/'
+    | '/engines/$engine/apps/$screen'
+    | '/engines/$engine/apps/$screen/full'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/guest'
@@ -217,18 +359,31 @@ export interface FileRouteTypes {
     | '/$'
     | '/activity'
     | '/connections'
+    | '/dashboard'
     | '/members'
     | '/models'
     | '/notifications'
     | '/decisions/$decision'
     | '/'
     | '/apps/$app'
+    | '/integrations/$integration'
     | '/knowledge/$collection'
+    | '/settings/approvals'
+    | '/settings/audit'
+    | '/settings/members'
+    | '/settings/models'
+    | '/settings/profile'
     | '/apps'
+    | '/engines'
+    | '/integrations'
     | '/knowledge'
+    | '/settings'
     | '/workflows'
     | '/workflows/$app/$workflow'
     | '/apps/$app/screens/$screen'
+    | '/engines/$engine'
+    | '/engines/$engine/apps/$screen'
+    | '/engines/$engine/apps/$screen/full'
   id:
     | '__root__'
     | '/_shell'
@@ -238,18 +393,32 @@ export interface FileRouteTypes {
     | '/_shell/$'
     | '/_shell/activity'
     | '/_shell/connections'
+    | '/_shell/dashboard'
     | '/_shell/members'
     | '/_shell/models'
     | '/_shell/notifications'
+    | '/_shell/settings'
     | '/decisions/$decision'
     | '/_shell/'
     | '/_shell/apps/$app'
+    | '/_shell/integrations/$integration'
     | '/_shell/knowledge/$collection'
+    | '/_shell/settings/approvals'
+    | '/_shell/settings/audit'
+    | '/_shell/settings/members'
+    | '/_shell/settings/models'
+    | '/_shell/settings/profile'
     | '/_shell/apps/'
+    | '/_shell/engines/'
+    | '/_shell/integrations/'
     | '/_shell/knowledge/'
+    | '/_shell/settings/'
     | '/_shell/workflows/'
     | '/_shell/workflows/$app/$workflow'
     | '/apps/$app/screens/$screen'
+    | '/_shell/engines/$engine/'
+    | '/_shell/engines/$engine/apps/$screen'
+    | '/engines/$engine/apps/$screen/full'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -259,6 +428,7 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRoute
   DecisionsDecisionRoute: typeof DecisionsDecisionRoute
   AppsAppScreensScreenRoute: typeof AppsAppScreensScreenRoute
+  EnginesEngineAppsScreenFullRoute: typeof EnginesEngineAppsScreenFullRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -319,6 +489,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellConnectionsRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/dashboard': {
+      id: '/_shell/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof ShellDashboardRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/members': {
       id: '/_shell/members'
       path: '/members'
@@ -338,6 +515,13 @@ declare module '@tanstack/react-router' {
       path: '/notifications'
       fullPath: '/notifications'
       preLoaderRoute: typeof ShellNotificationsRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/settings': {
+      id: '/_shell/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof ShellSettingsRouteImport
       parentRoute: typeof ShellRoute
     }
     '/decisions/$decision': {
@@ -361,6 +545,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellAppsAppRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/engines/': {
+      id: '/_shell/engines/'
+      path: '/engines'
+      fullPath: '/engines/'
+      preLoaderRoute: typeof ShellEnginesIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/integrations/': {
+      id: '/_shell/integrations/'
+      path: '/integrations'
+      fullPath: '/integrations/'
+      preLoaderRoute: typeof ShellIntegrationsIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/integrations/$integration': {
+      id: '/_shell/integrations/$integration'
+      path: '/integrations/$integration'
+      fullPath: '/integrations/$integration'
+      preLoaderRoute: typeof ShellIntegrationsIntegrationRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/knowledge/': {
       id: '/_shell/knowledge/'
       path: '/knowledge'
@@ -375,11 +580,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellKnowledgeCollectionRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/settings/': {
+      id: '/_shell/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof ShellSettingsIndexRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
+    '/_shell/settings/approvals': {
+      id: '/_shell/settings/approvals'
+      path: '/approvals'
+      fullPath: '/settings/approvals'
+      preLoaderRoute: typeof ShellSettingsApprovalsRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
+    '/_shell/settings/audit': {
+      id: '/_shell/settings/audit'
+      path: '/audit'
+      fullPath: '/settings/audit'
+      preLoaderRoute: typeof ShellSettingsAuditRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
+    '/_shell/settings/members': {
+      id: '/_shell/settings/members'
+      path: '/members'
+      fullPath: '/settings/members'
+      preLoaderRoute: typeof ShellSettingsMembersRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
+    '/_shell/settings/models': {
+      id: '/_shell/settings/models'
+      path: '/models'
+      fullPath: '/settings/models'
+      preLoaderRoute: typeof ShellSettingsModelsRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
+    '/_shell/settings/profile': {
+      id: '/_shell/settings/profile'
+      path: '/profile'
+      fullPath: '/settings/profile'
+      preLoaderRoute: typeof ShellSettingsProfileRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
     '/_shell/workflows/': {
       id: '/_shell/workflows/'
       path: '/workflows'
       fullPath: '/workflows/'
       preLoaderRoute: typeof ShellWorkflowsIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/engines/$engine/': {
+      id: '/_shell/engines/$engine/'
+      path: '/engines/$engine'
+      fullPath: '/engines/$engine/'
+      preLoaderRoute: typeof ShellEnginesEngineIndexRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/workflows/$app/$workflow': {
@@ -396,39 +650,89 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppsAppScreensScreenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_shell/engines/$engine/apps/$screen': {
+      id: '/_shell/engines/$engine/apps/$screen'
+      path: '/engines/$engine/apps/$screen'
+      fullPath: '/engines/$engine/apps/$screen'
+      preLoaderRoute: typeof ShellEnginesEngineAppsScreenRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/engines/$engine/apps/$screen/full': {
+      id: '/engines/$engine/apps/$screen/full'
+      path: '/engines/$engine/apps/$screen/full'
+      fullPath: '/engines/$engine/apps/$screen/full'
+      preLoaderRoute: typeof EnginesEngineAppsScreenFullRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
+
+interface ShellSettingsRouteChildren {
+  ShellSettingsApprovalsRoute: typeof ShellSettingsApprovalsRoute
+  ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
+  ShellSettingsMembersRoute: typeof ShellSettingsMembersRoute
+  ShellSettingsModelsRoute: typeof ShellSettingsModelsRoute
+  ShellSettingsProfileRoute: typeof ShellSettingsProfileRoute
+  ShellSettingsIndexRoute: typeof ShellSettingsIndexRoute
+}
+
+const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
+  ShellSettingsApprovalsRoute: ShellSettingsApprovalsRoute,
+  ShellSettingsAuditRoute: ShellSettingsAuditRoute,
+  ShellSettingsMembersRoute: ShellSettingsMembersRoute,
+  ShellSettingsModelsRoute: ShellSettingsModelsRoute,
+  ShellSettingsProfileRoute: ShellSettingsProfileRoute,
+  ShellSettingsIndexRoute: ShellSettingsIndexRoute,
+}
+
+const ShellSettingsRouteWithChildren = ShellSettingsRoute._addFileChildren(
+  ShellSettingsRouteChildren,
+)
 
 interface ShellRouteChildren {
   ShellSplatRoute: typeof ShellSplatRoute
   ShellActivityRoute: typeof ShellActivityRoute
   ShellConnectionsRoute: typeof ShellConnectionsRoute
+  ShellDashboardRoute: typeof ShellDashboardRoute
   ShellMembersRoute: typeof ShellMembersRoute
   ShellModelsRoute: typeof ShellModelsRoute
   ShellNotificationsRoute: typeof ShellNotificationsRoute
+  ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellIndexRoute: typeof ShellIndexRoute
   ShellAppsAppRoute: typeof ShellAppsAppRoute
+  ShellIntegrationsIntegrationRoute: typeof ShellIntegrationsIntegrationRoute
   ShellKnowledgeCollectionRoute: typeof ShellKnowledgeCollectionRoute
   ShellAppsIndexRoute: typeof ShellAppsIndexRoute
+  ShellEnginesIndexRoute: typeof ShellEnginesIndexRoute
+  ShellIntegrationsIndexRoute: typeof ShellIntegrationsIndexRoute
   ShellKnowledgeIndexRoute: typeof ShellKnowledgeIndexRoute
   ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
   ShellWorkflowsAppWorkflowRoute: typeof ShellWorkflowsAppWorkflowRoute
+  ShellEnginesEngineIndexRoute: typeof ShellEnginesEngineIndexRoute
+  ShellEnginesEngineAppsScreenRoute: typeof ShellEnginesEngineAppsScreenRoute
 }
 
 const ShellRouteChildren: ShellRouteChildren = {
   ShellSplatRoute: ShellSplatRoute,
   ShellActivityRoute: ShellActivityRoute,
   ShellConnectionsRoute: ShellConnectionsRoute,
+  ShellDashboardRoute: ShellDashboardRoute,
   ShellMembersRoute: ShellMembersRoute,
   ShellModelsRoute: ShellModelsRoute,
   ShellNotificationsRoute: ShellNotificationsRoute,
+  ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellIndexRoute: ShellIndexRoute,
   ShellAppsAppRoute: ShellAppsAppRoute,
+  ShellIntegrationsIntegrationRoute: ShellIntegrationsIntegrationRoute,
   ShellKnowledgeCollectionRoute: ShellKnowledgeCollectionRoute,
   ShellAppsIndexRoute: ShellAppsIndexRoute,
+  ShellEnginesIndexRoute: ShellEnginesIndexRoute,
+  ShellIntegrationsIndexRoute: ShellIntegrationsIndexRoute,
   ShellKnowledgeIndexRoute: ShellKnowledgeIndexRoute,
   ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
   ShellWorkflowsAppWorkflowRoute: ShellWorkflowsAppWorkflowRoute,
+  ShellEnginesEngineIndexRoute: ShellEnginesEngineIndexRoute,
+  ShellEnginesEngineAppsScreenRoute: ShellEnginesEngineAppsScreenRoute,
 }
 
 const ShellRouteWithChildren = ShellRoute._addFileChildren(ShellRouteChildren)
@@ -440,6 +744,7 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRoute,
   DecisionsDecisionRoute: DecisionsDecisionRoute,
   AppsAppScreensScreenRoute: AppsAppScreensScreenRoute,
+  EnginesEngineAppsScreenFullRoute: EnginesEngineAppsScreenFullRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

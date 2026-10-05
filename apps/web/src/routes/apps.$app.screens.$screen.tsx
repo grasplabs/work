@@ -1,21 +1,15 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { ScreenFrame } from "../screens/screen-frame.tsx";
-
-// One of an App's screens, full page. The App's page links here; core
-// refuses the screen while the `screens` feature is off, and the page says
-// so. Keyed by App and screen, so moving to another starts afresh: the
-// chrome never shows the name of the App the page just left.
-
-const Screen = () => {
-  const { app, screen } = Route.useParams();
-  return (
-    <main className="flex h-svh flex-col">
-      <ScreenFrame app={app} key={`${app}/${screen}`} screen={screen} />
-    </main>
-  );
-};
-
+// An App's screen is now an engine's app, shown in the Grasp frame: an old
+// link, from a chat message or mail, still leads to it. Someone signed out
+// signs in on the way.
 export const Route = createFileRoute("/apps/$app/screens/$screen")({
-  component: Screen,
+  beforeLoad: ({ params }) => {
+    // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+    throw redirect({
+      to: "/engines/$engine/apps/$screen",
+      params: { engine: params.app, screen: params.screen },
+      replace: true,
+    });
+  },
 });

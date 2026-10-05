@@ -99,8 +99,8 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
   }
 
   const page = await pageOf(browser, admin);
-  await page.goto(`/apps/${app}/screens/board`);
-  const screen = page.frameLocator('iframe[title="board screen"]');
+  await page.goto(`/engines/${app}/apps/board/full`);
+  const screen = page.frameLocator('iframe[title="board app"]');
   // The first open builds the screen, which takes a while on a loaded machine.
   await expect(screen.getByRole("heading", { name: "Board page" })).toBeVisible(
     { timeout: 20_000 }
@@ -139,7 +139,7 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
     screen.getByRole("button", { name: "Take a snapshot" })
   ).toBeHidden();
   await expect(screen.getByLabel("Edit the narrative")).toBeHidden();
-  await expect(page.getByText("App screen")).toBeHidden();
+  await expect(page.getByText("Engine app")).toBeHidden();
   const frame = page
     .frames()
     .find((each) => each.url().includes("/screen-frame"));

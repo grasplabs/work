@@ -291,7 +291,7 @@ test("someone an App is shared with reads its workflow, with nothing to change o
   // The App's workflows couldn't be read: the filter says so, and its runs
   // are listed all the same.
   await expect(
-    page.getByText("Couldn't load this App's workflows.")
+    page.getByText("Couldn't load this engine's workflows.")
   ).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Workflow" })).toBeDisabled();
 });

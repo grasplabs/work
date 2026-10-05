@@ -98,7 +98,7 @@ test("the side panel shows an App being built, and a builder makes its version c
       /Added screens\/desk\.tsx/u
     );
     await expect(built).toContainText(
-      "Nothing runs yet: this would be the App's first current version."
+      "Nothing runs yet: this would be the engine's first current version."
     );
     // Who proposed it, and the proposer's own words, labelled as such.
     await expect(built).toContainText("Committed by a person.");
@@ -118,14 +118,14 @@ test("the side panel shows an App being built, and a builder makes its version c
     // What other Apps may now call, flagged when it changes the App's data.
     const exported = built.getByRole("region", { name: "Exports" });
     await expect(exported).toContainText(
-      "Other Apps may now call book, which changes the App's data"
+      "Other engines may now call book, which changes the engine's data"
     );
-    await expect(exported).toContainText("Changes the App's data");
+    await expect(exported).toContainText("Changes the engine's data");
     // All of its server code is flagged. Until it loads, nothing is made
     // current; once its read failed, it can be read again.
     const serverCode = built.getByRole("region", { name: "Server code" });
     await expect(serverCode).toContainText(
-      "Added: it acts for whoever uses the App"
+      "Added: it acts for whoever uses the engine"
     );
     const makeCurrent = built.getByRole("button", {
       name: `Make version ${version} current`,
