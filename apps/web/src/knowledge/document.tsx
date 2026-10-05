@@ -14,11 +14,12 @@ import { Input } from "@grasp-os/ui/components/input";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
-import { ChevronRightIcon, DownloadIcon, PencilIcon } from "lucide-react";
+import { ChevronRightIcon, PencilIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { ExportMenu } from "../export/export-menu.tsx";
 import { documentTypeLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { DocumentMarkdown } from "./markdown.tsx";
@@ -167,24 +168,10 @@ const Editor = ({
   );
 };
 
-/** How long an exported file stays readable for the browser's download. */
-const exportKeptMs = 40_000;
-
-/** Downloads the document's text, frontmatter and all, as Markdown. */
-const exportMarkdown = (doc: DocumentRead): void => {
+/** The name a document exports under: its file's, without `.md`. */
+const fileNameOf = (doc: DocumentRead): string => {
   const name = doc.path.split("/").at(-1) ?? doc.title;
-  const url = URL.createObjectURL(
-    new Blob([doc.version.text], { type: "text/markdown;charset=utf-8" })
-  );
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = name.endsWith(".md") ? name : `${name}.md`;
-  link.click();
-  // Some browsers read the file only after the click returns: it is let go
-  // once they surely have it, as FileSaver.js does.
-  setTimeout(() => {
-    URL.revokeObjectURL(url);
-  }, exportKeptMs);
+  return name.endsWith(".md") ? name.slice(0, -3) : name;
 };
 
 /** A document another one links to, or that links to it, as a chip. */
@@ -424,16 +411,13 @@ export const DocumentView = ({
                       <Trans>Edit</Trans>
                     </Button>
                   ) : null}
-                  <Button
-                    onClick={() => {
-                      exportMarkdown(doc);
+                  <ExportMenu
+                    file={{
+                      name: fileNameOf(doc),
+                      title: doc.title,
+                      markdown: () => doc.version.text,
                     }}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <DownloadIcon data-icon="inline-start" />
-                    <Trans>Export</Trans>
-                  </Button>
+                  />
                 </div>
               </div>
               <h1 className="text-2xl font-medium tracking-tight wrap-break-word">

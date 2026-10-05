@@ -222,6 +222,16 @@ msgstr "{who} a donné son consentement avant de le connecter :"
 msgid "{workflowId} in {app}"
 msgstr "{workflowId} dans {app}"
 
+#. Who answered, in an exported chat.
+#: src/chat/chat-markdown.ts
+msgid "**Grasp:**"
+msgstr "**Grasp :**"
+
+#. Who asked, in an exported chat.
+#: src/chat/chat-markdown.ts
+msgid "**You:**"
+msgstr "**Vous :**"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Une modification s’applique aux exécutions qui démarrent ensuite : celles déjà en cours gardent les valeurs de leur démarrage. Chaque modification est enregistrée, sans sa valeur."
@@ -1040,7 +1050,7 @@ msgstr "Déplier les discussions"
 msgid "Expand the navigation"
 msgstr "Déplier la navigation"
 
-#: src/knowledge/document.tsx
+#: src/export/export-menu.tsx
 msgid "Export"
 msgstr "Exporter"
 
@@ -1055,6 +1065,10 @@ msgstr "Exporter en JSON"
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Exporter le journal d’audit"
+
+#: src/routes/_shell.index.tsx
+msgid "Export this chat"
+msgstr "Exporter ce chat"
 
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
@@ -1362,6 +1376,10 @@ msgstr "Faire admin"
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Rendre la version {version} actuelle"
+
+#: src/export/export-menu.tsx
+msgid "Markdown (.md)"
+msgstr "Markdown (.md)"
 
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
@@ -1727,6 +1745,10 @@ msgstr "Chemin"
 msgid "Paused"
 msgstr "En pause"
 
+#: src/export/export-menu.tsx
+msgid "PDF"
+msgstr "PDF"
+
 #: src/knowledge/uploads.tsx
 msgid "Pending"
 msgstr "En attente"
@@ -1977,6 +1999,7 @@ msgstr "Restaurer la version {number}"
 msgid "Restored version {restoredFrom}"
 msgstr "Version {restoredFrom} restaurée"
 
+#: src/chat/chat-markdown.ts
 #: src/chat/sources.tsx
 msgid "Restricted"
 msgstr "Restreint"
@@ -2253,6 +2276,10 @@ msgstr "Quelqu’un qui n’est plus là"
 msgid "Something went wrong."
 msgstr "Une erreur s’est produite."
 
+#: src/chat/chat-markdown.ts
+msgid "Sources"
+msgstr "Sources"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Spend this month ({month}, UTC)."
 msgstr "Dépenses ce mois-ci ({month}, UTC)."
@@ -2330,6 +2357,7 @@ msgstr "A arrêté une planification qui échouait sans cesse"
 msgid "Stopped following what changes at a connection"
 msgstr "A arrêté de suivre ce qui change sur une connexion"
 
+#: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Arrêté."
@@ -2407,6 +2435,7 @@ msgstr "L’agent a consulté quelque chose"
 msgid "The agent wasn't asked: {reason}"
 msgstr "L’agent n’a pas été sollicité : {reason}"
 
+#: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The answer was cut off at the model's limit."
 msgstr "La réponse a été coupée à la limite du modèle."
@@ -2415,10 +2444,15 @@ msgstr "La réponse a été coupée à la limite du modèle."
 msgid "The default, {each}"
 msgstr "Par défaut, {each}"
 
+#: src/export/export-menu.tsx
+msgid "The export didn't work. Try again."
+msgstr "L’export n’a pas fonctionné. Réessayez."
+
 #: src/routes/guest.tsx
 msgid "The link works until {until}."
 msgstr "Le lien fonctionne jusqu’au {until}."
 
+#: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The model call failed."
 msgstr "L’appel au modèle a échoué."
