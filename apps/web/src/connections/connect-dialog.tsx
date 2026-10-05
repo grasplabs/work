@@ -76,7 +76,7 @@ export const canConnect = (
 export const canReconnect = (
   connection: ListedConnection,
   offered: boolean,
-  identity: Identity
+  identity: Pick<Identity, "role" | "staff">
 ): boolean =>
   connection.source === "native" &&
   oauthProviderSchema.safeParse(connection.provider).success &&

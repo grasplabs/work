@@ -161,8 +161,8 @@ const ImprovementRow = ({
       >
         <Trans>
           Step {step} of {about} failed in {failures} of{" "}
-          <Plural one="# run" other="# runs" value={runs} /> in the last {days}{" "}
-          days.
+          <Plural one="# run" other="# runs" value={runs} /> in{" "}
+          <Plural one="the last day" other="the last # days" value={days} />.
         </Trans>
       </SignalRow>
     );
@@ -174,7 +174,8 @@ const ImprovementRow = ({
         <Trans>
           People rejected {rejected} of{" "}
           <Plural one="# answer" other="# answers" value={answered} /> at step{" "}
-          {step} of {about} in the last {days} days.
+          {step} of {about} in{" "}
+          <Plural one="the last day" other="the last # days" value={days} />.
         </Trans>
       </SignalRow>
     );
@@ -186,8 +187,8 @@ const ImprovementRow = ({
       <SignalRow icon={CircleDollarSignIcon} kind={t`Model cost`}>
         <Trans>
           {about} cost {cost} a run in model calls, over{" "}
-          <Plural one="# run" other="# runs" value={runs} /> in the last {days}{" "}
-          days.
+          <Plural one="# run" other="# runs" value={runs} /> in{" "}
+          <Plural one="the last day" other="the last # days" value={days} />.
         </Trans>
       </SignalRow>
     );
@@ -205,12 +206,13 @@ const ImprovementRow = ({
 };
 
 /** Dismissing a Knowledge signal until something new comes, as its owner can. */
-const Dismiss = ({ id }: { id: string }) => {
+const Dismiss = ({ id, label }: { id: string; label: string }) => {
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   return (
     <div className="flex flex-col items-end gap-1">
       <Button
+        aria-label={label}
         disabled={busy}
         onClick={() => {
           void (async () => {
@@ -243,7 +245,10 @@ const KnowledgeRow = ({ signal }: { signal: KnowledgeSignal }) => {
       {collection.name}
     </Link>
   );
-  const dismiss = <Dismiss id={signal.id} />;
+  const { name } = collection;
+  const dismiss = (
+    <Dismiss id={signal.id} label={t`Dismiss this signal about ${name}`} />
+  );
   if (signal.kind === "unanswered_question") {
     const { searches, askers } = signal.evidence;
     return (

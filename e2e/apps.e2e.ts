@@ -251,7 +251,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     await expect(sections.last()).toHaveText("Profile");
     return {
       // Without how many wait.
-      nav: texts.map((text) => text.replace(/\d+ waiting$/u, "")),
+      nav: texts.map((text) => text.replace(/\d+ things? waiting$/u, "")),
       menu,
       settings: await sections.allTextContents(),
     };

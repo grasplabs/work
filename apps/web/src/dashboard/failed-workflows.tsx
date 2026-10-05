@@ -4,7 +4,7 @@ import type {
   NotificationPage,
 } from "@grasp-os/shared/notifications";
 import { Button } from "@grasp-os/ui/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { TriangleAlertIcon } from "lucide-react";
 import { useState } from "react";
@@ -106,7 +106,8 @@ const FailedWorkflow = ({
         <span className="truncate">
           {failures > 1 ? (
             <Trans>
-              {link} in {appName} failed {failures} times
+              {link} in {appName} failed{" "}
+              <Plural one="once" other="# times" value={failures} />
             </Trans>
           ) : (
             <Trans>

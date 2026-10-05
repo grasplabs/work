@@ -125,7 +125,11 @@ export const readDashboard = async (
     isAdmin(identity.role)
       ? loadFromCore(core, async (session) => {
           const { records } = await session.audit.search({});
-          return records;
+          // Core records every search of the trail, this one too: those
+          // would soon be all the card shows.
+          return records.filter(
+            ({ event }) => event?.action !== "audit.searched"
+          );
         })
       : undefined,
   ]);

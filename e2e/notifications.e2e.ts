@@ -61,7 +61,7 @@ test("the person a run acted for is told it failed, and asks the agent to fix it
   const page = await pageOf(browser, builder);
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
-  await nav.getByRole("link", { name: "Dashboard 1 waiting" }).click();
+  await nav.getByRole("link", { name: "Dashboard 1 thing waiting" }).click();
   const item = page
     .getByRole("list", { name: "Workflows that failed" })
     .getByRole("listitem")

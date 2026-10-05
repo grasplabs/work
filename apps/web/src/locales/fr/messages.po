@@ -21,8 +21,8 @@ msgid "{0, plural, one {{engine}: # file changed in this chat, not proposed yet}
 msgstr "{0, plural, one {{engine} : # fichier modifié dans ce chat, pas encore proposé} other {{engine} : # fichiers modifiés dans ce chat, pas encore proposés}}"
 
 #: src/dashboard/signals.tsx
-msgid "{about} cost {cost} a run in model calls, over {runs, plural, one {# run} other {# runs}} in the last {days} days."
-msgstr "{about} a coûté {cost} par exécution en appels au modèle, sur {runs, plural, one {# exécution} other {# exécutions}} ces {days} derniers jours."
+msgid "{about} cost {cost} a run in model calls, over {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
+msgstr "{about} a coûté {cost} par exécution en appels au modèle, sur {runs, plural, one {# exécution} other {# exécutions}} {days, plural, one {ces dernières 24 heures} other {ces # derniers jours}}."
 
 #: src/dashboard/signals.tsx
 msgid "{about} has {open, plural, one {# decision open} other {# decisions open}}; the oldest has waited {waited}."
@@ -149,8 +149,8 @@ msgid "{link} in {appName} failed"
 msgstr "{link} dans {appName} a échoué"
 
 #: src/dashboard/failed-workflows.tsx
-msgid "{link} in {appName} failed {failures} times"
-msgstr "{link} dans {appName} a échoué {failures} fois"
+msgid "{link} in {appName} failed {failures, plural, one {once} other {# times}}"
+msgstr "{link} dans {appName} a échoué {failures, plural, one {une fois} other {# fois}}"
 
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
@@ -243,6 +243,10 @@ msgstr "{toolCount, plural, one {# outil} other {# outils}}"
 #: src/routes/_shell.integrations.index.tsx
 msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{total, plural, one {# intégration affichée} other {# intégrations affichées}}"
+
+#: src/dashboard/nav-item.tsx
+msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
+msgstr "{waiting, plural, one {# élément en attente} other {# éléments en attente}}"
 
 #: src/workflows/workflows-table.tsx
 msgid "{waiting, plural, one {# waiting run} other {# waiting runs}} of {name}"
@@ -902,7 +906,7 @@ msgstr "Connexion {connectionId}, {resource}"
 
 #: src/dashboard/to-do.tsx
 msgid "Connections to sign in to again"
-msgstr "Connexions où se reconnecter"
+msgstr "Connexions à reconnecter"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Connections whose data stays in the EU: {connections}."
@@ -930,7 +934,7 @@ msgstr "Copier la réponse"
 
 #: src/dashboard/signals.tsx
 msgid "Could be better"
-msgstr "Pourrait être mieux"
+msgstr "À améliorer"
 
 #: src/activity/pending.tsx
 msgid "couldn't be read"
@@ -1045,6 +1049,10 @@ msgstr "A déconnecté un compte"
 msgctxt "put a signal away until something new"
 msgid "Dismiss"
 msgstr "Ignorer"
+
+#: src/dashboard/signals.tsx
+msgid "Dismiss this signal about {name}"
+msgstr "Ignorer ce signal sur {name}"
 
 #: src/activity/audit-words.ts
 msgid "Dismissed a knowledge signal"
@@ -2083,8 +2091,8 @@ msgid "Pending"
 msgstr "En attente"
 
 #: src/dashboard/signals.tsx
-msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in the last {days} days."
-msgstr "À l’étape {step} de {about}, {rejected} sur {answered, plural, one {# réponse} other {# réponses}} ont été refusées ces {days} derniers jours."
+msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
+msgstr "À l’étape {step} de {about} : {rejected} refus sur {answered, plural, one {# réponse} other {# réponses}} {days, plural, one {ces dernières 24 heures} other {ces # derniers jours}}."
 
 #: src/activity/audit-log.tsx
 msgid "Permission"
@@ -2688,8 +2696,8 @@ msgid "Status"
 msgstr "Statut"
 
 #: src/dashboard/signals.tsx
-msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in the last {days} days."
-msgstr "L’étape {step} de {about} a échoué {failures} fois sur {runs, plural, one {# exécution} other {# exécutions}} ces {days} derniers jours."
+msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
+msgstr "L’étape {step} de {about} a échoué {failures} fois sur {runs, plural, one {# exécution} other {# exécutions}} {days, plural, one {ces dernières 24 heures} other {ces # derniers jours}}."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -3090,10 +3098,6 @@ msgstr "Versions"
 msgid "Via Composio"
 msgstr "Via Composio"
 
-#: src/dashboard/nav-item.tsx
-msgid "waiting"
-msgstr "en attente"
-
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 msgid "Waiting for a decision"
@@ -3155,7 +3159,7 @@ msgstr "Ce que détient le moteur"
 
 #: src/routes/_shell.dashboard.tsx
 msgid "What waits on you, each with its next step, and what could be better."
-msgstr "Ce qui vous attend, chaque fois avec l’étape suivante, et ce qui pourrait être mieux."
+msgstr "Ce qui vous attend, chacun avec son étape suivante, et ce qui pourrait être mieux."
 
 #: src/workflows/runs.tsx
 msgctxt "column: when a run happened"

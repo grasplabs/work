@@ -21,8 +21,8 @@ msgid "{0, plural, one {{engine}: # file changed in this chat, not proposed yet}
 msgstr "{0, plural, one {{engine}: # bestand gewijzigd in deze chat, nog niet voorgesteld} other {{engine}: # bestanden gewijzigd in deze chat, nog niet voorgesteld}}"
 
 #: src/dashboard/signals.tsx
-msgid "{about} cost {cost} a run in model calls, over {runs, plural, one {# run} other {# runs}} in the last {days} days."
-msgstr "{about} kostte de afgelopen {days} dagen {cost} per run aan modelaanroepen, over {runs, plural, one {# run} other {# runs}}."
+msgid "{about} cost {cost} a run in model calls, over {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
+msgstr "{about} kostte {days, plural, one {de afgelopen dag} other {de afgelopen # dagen}} {cost} per run aan modelaanroepen, over {runs, plural, one {# run} other {# runs}}."
 
 #: src/dashboard/signals.tsx
 msgid "{about} has {open, plural, one {# decision open} other {# decisions open}}; the oldest has waited {waited}."
@@ -38,7 +38,7 @@ msgstr "{app} is nog niet gekoppeld."
 
 #: src/dashboard/to-do.tsx
 msgid "{app} needs someone to sign in again"
-msgstr "{app} heeft iemand nodig die opnieuw aanmeldt"
+msgstr "{app} heeft iemand nodig die zich opnieuw aanmeldt"
 
 #: src/workflows/workflows-table.tsx
 msgid "{appName} · Version {version}"
@@ -149,8 +149,8 @@ msgid "{link} in {appName} failed"
 msgstr "{link} in {appName} is mislukt"
 
 #: src/dashboard/failed-workflows.tsx
-msgid "{link} in {appName} failed {failures} times"
-msgstr "{link} in {appName} is {failures} keer mislukt"
+msgid "{link} in {appName} failed {failures, plural, one {once} other {# times}}"
+msgstr "{link} in {appName} is {failures, plural, one {één keer} other {# keer}} mislukt"
 
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
@@ -243,6 +243,10 @@ msgstr "{toolCount, plural, one {# tool} other {# tools}}"
 #: src/routes/_shell.integrations.index.tsx
 msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{total, plural, one {# integratie getoond} other {# integraties getoond}}"
+
+#: src/dashboard/nav-item.tsx
+msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
+msgstr "{waiting, plural, one {# ding wacht} other {# dingen wachten}}"
 
 #: src/workflows/workflows-table.tsx
 msgid "{waiting, plural, one {# waiting run} other {# waiting runs}} of {name}"
@@ -1045,6 +1049,10 @@ msgstr "Een account ontkoppeld"
 msgctxt "put a signal away until something new"
 msgid "Dismiss"
 msgstr "Verbergen"
+
+#: src/dashboard/signals.tsx
+msgid "Dismiss this signal about {name}"
+msgstr "Dit signaal over {name} verbergen"
 
 #: src/activity/audit-words.ts
 msgid "Dismissed a knowledge signal"
@@ -2083,8 +2091,8 @@ msgid "Pending"
 msgstr "In afwachting"
 
 #: src/dashboard/signals.tsx
-msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in the last {days} days."
-msgstr "Mensen wezen de afgelopen {days} dagen {rejected} van {answered, plural, one {# antwoord} other {# antwoorden}} af bij stap {step} van {about}."
+msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
+msgstr "Mensen wezen {days, plural, one {de afgelopen dag} other {de afgelopen # dagen}} {rejected} van {answered, plural, one {# antwoord} other {# antwoorden}} af bij stap {step} van {about}."
 
 #: src/activity/audit-log.tsx
 msgid "Permission"
@@ -2688,8 +2696,8 @@ msgid "Status"
 msgstr "Status"
 
 #: src/dashboard/signals.tsx
-msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in the last {days} days."
-msgstr "Stap {step} van {about} mislukte de afgelopen {days} dagen in {failures} van {runs, plural, one {# run} other {# runs}}."
+msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
+msgstr "Stap {step} van {about} mislukte {days, plural, one {de afgelopen dag} other {de afgelopen # dagen}} in {failures} van {runs, plural, one {# run} other {# runs}}."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -3089,10 +3097,6 @@ msgstr "Versies"
 #: src/connections/source-badge.tsx
 msgid "Via Composio"
 msgstr "Via Composio"
-
-#: src/dashboard/nav-item.tsx
-msgid "waiting"
-msgstr "wachtend"
 
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx

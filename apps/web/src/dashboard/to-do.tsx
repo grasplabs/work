@@ -40,10 +40,13 @@ export interface Waiting {
   requests: Loaded<PendingRequests> | undefined;
 }
 
+/** Who counts what waits: what they may act on follows from their role. */
+export type Viewer = Pick<Identity, "role" | "staff">;
+
 /** The integrations whose access ran out, among those this person can sign in to again. */
 export const toReconnect = (
   integrations: readonly Integration[],
-  identity: Identity
+  identity: Viewer
 ): Integration[] =>
   integrations.filter(({ connections, offered }) =>
     connections.some(
@@ -53,17 +56,28 @@ export const toReconnect = (
     )
   );
 
-/** How many things wait on the person, of what was read: the nav's count too. */
+/** Whether permission requests wait on this person: admins decide them, staff only look. */
+export const decidesRequests = ({ role, staff }: Viewer): boolean =>
+  isAdmin(role) && !staff;
+
+/**
+ * How many things the page lists as waiting on the person, of what was
+ * read: every failed workflow listed, read or not, so the number matches
+ * the rows. (The nav counts only unread ones: counting there never marks
+ * anything read, and one already seen here is no longer news.)
+ */
 export const waitingCount = (
   { held, failed, integrations, requests }: Waiting,
-  identity: Identity
+  identity: Viewer
 ): number =>
   (held.state === "ready" ? held.data.length : 0) +
-  (failed.state === "ready" ? failed.data.page.unread : 0) +
+  (failed.state === "ready" ? failed.data.page.notifications.length : 0) +
   (integrations.state === "ready"
     ? toReconnect(integrations.data, identity).length
     : 0) +
-  (requests?.state === "ready" ? requests.data.requests.length : 0);
+  (requests?.state === "ready" && decidesRequests(identity)
+    ? requests.data.requests.length
+    : 0);
 
 /** A connection to sign in to again: its next step opens its account on its page. */
 const ReconnectRow = ({ integration }: { integration: Integration }) => {
@@ -145,7 +159,7 @@ const RequestsGroup = ({
     <DashboardGroup title={t`Permission requests`}>
       <div className="border-t px-4 py-3">
         <PendingApprovals
-          decides={isAdmin(identity.role) && !identity.staff}
+          decides={decidesRequests(identity)}
           pending={requests.data}
         />
       </div>
@@ -194,11 +208,11 @@ const ReconnectGroup = ({
   );
 };
 
-/** Whether anything at all is listed: failed workflows stay listed once read. */
+/** Whether anything at all is listed: requests show to staff admins too, who don't decide them. */
 const listsAnything = (waiting: Waiting, identity: Identity): boolean =>
   waitingCount(waiting, identity) > 0 ||
-  (waiting.failed.state === "ready" &&
-    waiting.failed.data.page.notifications.length > 0);
+  (waiting.requests?.state === "ready" &&
+    waiting.requests.data.requests.length > 0);
 
 /** What waits on the person, grouped by kind, each with its next step. */
 export const ToDo = ({
