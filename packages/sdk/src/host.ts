@@ -50,6 +50,58 @@ interface Budget {
   nodes: number;
 }
 
+/**
+ * How deep the data of a descriptor nests at most: each of its levels is a
+ * descriptor inside a map of fields, and a default value nests below those.
+ */
+const dataDepth = valueLimits.depth * 4;
+
+interface CopyBudget extends Budget {
+  tooLarge: boolean;
+}
+
+/**
+ * A copy of what was passed in, holding plain data only. A descriptor is
+ * JSON, so a property that is computed when read (a getter) is refused
+ * without being read, as is anything that isn't a plain object or an array.
+ * It is bounded, so data that contains itself is refused instead of followed.
+ */
+const dataOf = (value: unknown, depth: number, budget: CopyBudget): unknown => {
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+  budget.nodes += 1;
+  if (depth > dataDepth || budget.nodes > valueLimits.steps) {
+    budget.tooLarge = true;
+    throw new Error("The descriptor is too large.");
+  }
+  const isArray = Array.isArray(value);
+  if (!(isArray || isPlainObject(value))) {
+    throw new Error("The descriptor isn't JSON.");
+  }
+  const copy: unknown[] | Record<string, unknown> = isArray ? [] : {};
+  const properties = Object.getOwnPropertyDescriptors(value);
+  for (const [key, property] of Object.entries(properties)) {
+    if (!("value" in property)) {
+      throw new Error("The descriptor has a getter.");
+    }
+    if (isArray && key === "length") {
+      // Kept, so an array with holes stays one and is refused as before.
+      copy.length = property.value;
+    } else if (property.enumerable === true) {
+      // Defined, not assigned: a prototype key stays a key and is refused by
+      // its name later.
+      Object.defineProperty(copy, key, {
+        configurable: true,
+        enumerable: true,
+        value: dataOf(property.value, depth + 1, budget),
+        writable: true,
+      });
+    }
+  }
+  return copy;
+};
+
 /** The keys of a descriptor's kind, once every key it has is one of them. */
 const knownKind = (input: Record<string, unknown>): string => {
   const { kind } = input;
@@ -137,17 +189,23 @@ const read = (
 export const schemaFromDescriptor = (
   descriptor: unknown
 ): ValueSchema<unknown, unknown> => {
+  const budget: CopyBudget = { nodes: 0, tooLarge: false };
+  let data: unknown;
   try {
-    return schemaOf(read(descriptor, 1, { nodes: 0 }));
-  } catch (error) {
-    if (error instanceof ValueDefinitionError) {
-      throw error;
+    data = dataOf(descriptor, 1, budget);
+  } catch {
+    // Replaced on purpose. Copying is the only step that touches the object
+    // passed in, so it is the only one that can run its sender's code (a
+    // proxy's traps). Whatever that code threw, even an error of our own
+    // class, is the sender's text and is not passed on.
+    if (budget.tooLarge) {
+      throw new ValueDefinitionError(
+        "definition.too_large",
+        "The descriptor nests too deep or declares too much."
+      );
     }
-    // Replaced on purpose. Every refusal of ours is a ValueDefinitionError,
-    // rethrown above; reading and sealing throw nothing else and call no App
-    // code. So anything else came from the descriptor running code as it
-    // was read (a proxy, a getter). It is refused like any bad descriptor,
-    // and what it threw (the sender's text) is not passed on.
     return refuse("The descriptor can't be read as JSON.");
   }
+  // From here only the copy is read: plain data, which runs no code.
+  return schemaOf(read(data, 1, { nodes: 0 }));
 };

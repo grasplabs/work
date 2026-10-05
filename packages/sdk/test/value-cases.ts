@@ -1934,6 +1934,43 @@ add(
   ["definition.invalid_descriptor", false]
 );
 add(
+  "a descriptor with a getter is refused without the getter being run",
+  () => {
+    let ran = false;
+    const descriptor = {
+      ...base,
+      get kind(): string {
+        ran = true;
+        return "boolean";
+      },
+    };
+    return [declare(() => schemaFromDescriptor(descriptor)), ran];
+  },
+  ["definition.invalid_descriptor", false]
+);
+add(
+  "a descriptor can't choose the error its reader gets",
+  () => {
+    const descriptor = new Proxy(
+      { ...base, kind: "boolean" },
+      {
+        ownKeys: () => {
+          throw new ValueDefinitionError("definition.too_large", "secret");
+        },
+      }
+    );
+    try {
+      schemaFromDescriptor(descriptor);
+      return "declared";
+    } catch (error) {
+      return error instanceof ValueDefinitionError
+        ? [error.code, error.message.includes("secret")]
+        : "threw";
+    }
+  },
+  ["definition.invalid_descriptor", false]
+);
+add(
   "a definition error carries its code as its own property",
   () => {
     try {
