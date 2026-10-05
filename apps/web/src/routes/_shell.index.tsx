@@ -9,6 +9,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
 import { ChatList, ChatSidebar } from "../chat/chat-list.tsx";
+import { chatMarkdown } from "../chat/chat-markdown.ts";
 import { useFollowedChat } from "../chat/chat-watch.ts";
 import { Composer } from "../chat/composer.tsx";
 import { HeldWrites } from "../chat/held-writes.tsx";
@@ -19,8 +20,10 @@ import { ChatThread } from "../chat/thread.tsx";
 import { useAsk } from "../chat/use-ask.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { ExportMenu } from "../export/export-menu.tsx";
+import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 
 // Chat with the organization's agent, in the prototype's layout
 // (grasplabs/prototype `routes/index.tsx`): the person's chats in the page
@@ -107,6 +110,16 @@ const onWide = (onChange: () => void): (() => void) => {
 
 const isWide = (): boolean => matchMedia(wideQuery).matches;
 
+/** Characters a file name can't hold on some system, and runs of space. */
+const unsafeInFileName = /[\s"*/:<>?\\|]+/gu;
+
+/** The name a chat exports under: its title, made safe for a file. */
+const fileNameOf = (title: string): string =>
+  title
+    .replaceAll(unsafeInFileName, "-")
+    .replaceAll(/^-+|-+$/gu, "")
+    .slice(0, 80) || "grasp-chat";
+
 /** One chat, followed as it streams, with the side panel beside it. */
 const OpenChat = ({
   chat,
@@ -122,7 +135,7 @@ const OpenChat = ({
   onPanel: (open: boolean) => void;
 }) => {
   const { view, failure } = useFollowedChat(chat.id);
-  const { t } = useLingui();
+  const { i18n, t } = useLingui();
   const { composer, ask } = useAsk(chat.id, models);
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   const wide = useSyncExternalStore(onWide, isWide);
@@ -131,8 +144,32 @@ const OpenChat = ({
   );
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
-      <section aria-label={chat.title} className="flex min-w-0 flex-1 flex-col">
+      <section
+        aria-label={chat.title}
+        className="relative flex min-w-0 flex-1 flex-col"
+      >
         <h1 className="sr-only">{chat.title}</h1>
+        {/* In a row of its own above the thread, so no message scrolls under it. */}
+        {view.messages.length === 0 ? null : (
+          <div className="flex flex-none justify-end px-4 pt-2">
+            <ExportMenu
+              file={{
+                name: fileNameOf(chat.title),
+                title: chat.title,
+                markdown: () =>
+                  chatMarkdown({
+                    title: chat.title,
+                    messages: view.messages,
+                    partial: view.partial,
+                    provenance: view.provenance,
+                    names: sourceNames,
+                    i18n,
+                  }),
+              }}
+              label={t`Export this chat`}
+            />
+          </div>
+        )}
         <ChatThread
           loaded={view.loaded}
           messages={view.messages}
@@ -219,14 +256,7 @@ const Chat = () => {
     }
   }, [open]);
   if (page.state !== "ready") {
-    return (
-      <>
-        <SiteHeader crumbs={[{ label: t`Chat` }]} />
-        <div className="p-6">
-          <NotLoaded page={page} />
-        </div>
-      </>
-    );
+    return <PageNotLoaded crumbs={[{ label: t`Chat` }]} page={page} />;
   }
   const { chats, models, sourceNames } = page.data;
   // One past the list's newest opens too, as core finds it (or says why not).
@@ -326,6 +356,7 @@ const Chat = () => {
 };
 
 export const Route = createFileRoute("/_shell/")({
+  pendingComponent: PageLoading,
   validateSearch: (
     search: Record<string, unknown>
   ): { chat?: string; panel?: true } => ({

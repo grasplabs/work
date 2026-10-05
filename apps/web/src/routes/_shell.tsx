@@ -1,22 +1,16 @@
-import { Button } from "@grasp-os/ui/components/button";
 import { SidebarInset, SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { TooltipProvider } from "@grasp-os/ui/components/tooltip";
 import { useLingui } from "@lingui/react/macro";
-import {
-  createFileRoute,
-  Outlet,
-  redirect,
-  useRouter,
-  useRouterState,
-} from "@tanstack/react-router";
+import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { ChatDock } from "../chat/chat-dock.tsx";
 import { loadCoreStatus } from "../core-connection.ts";
-import { ErrorText } from "../error-text.tsx";
 import { keepFolded, readFolded } from "../fold.ts";
 import { AppSidebar } from "../frame/app-sidebar.tsx";
+import { InFrame } from "../frame/in-frame.ts";
+import { PageError } from "../frame/page-states.tsx";
 import { RouteError } from "../route-error.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 
@@ -41,7 +35,9 @@ const Shell = () => {
         <AppSidebar core={core} identity={identity} />
         {/* The page scrolls inside it, so its header stays in view. */}
         <SidebarInset className="min-h-0 min-w-0 overflow-y-auto">
-          <Outlet />
+          <InFrame value>
+            <Outlet />
+          </InFrame>
         </SidebarInset>
         {/* Grasp's chat, bottom right on every page but Chat's own. */}
         <ChatDock />
@@ -61,34 +57,18 @@ class CoreUnreachableError extends Error {
 
 /**
  * Says core can't be reached, with a way to ask again (not a fault, so
- * not reported); any other error as every page shows it.
+ * not reported), as every page shows a failure; any other error as every
+ * page shows it.
  */
 const ShellError = ({ error, reset, info }: ErrorComponentProps) => {
-  const router = useRouter();
-  const trying = useRouterState({ select: (state) => state.isLoading });
   const { t } = useLingui();
   if (!(error instanceof CoreUnreachableError)) {
     return <RouteError error={error} reset={reset} info={info} />;
   }
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-6">
-      <h1 className="text-2xl font-medium">Grasp</h1>
-      {/* Gone while trying, so the alert is announced again if it fails. */}
-      {trying ? null : (
-        <ErrorText>
-          {t`Grasp can't be reached right now. Try again in a moment.`}
-        </ErrorText>
-      )}
-      <Button
-        variant="outline"
-        disabled={trying}
-        onClick={() => {
-          void router.invalidate();
-        }}
-      >
-        {trying ? t`Trying again…` : t`Try again`}
-      </Button>
-    </main>
+    <PageError
+      reason={t`Grasp can't be reached right now. Try again in a moment.`}
+    />
   );
 };
 

@@ -24,10 +24,16 @@ import {
   Link,
   useRouter,
 } from "@tanstack/react-router";
+import { BoxesIcon } from "lucide-react";
 import { useState } from "react";
 
 import type { Session } from "../core.ts";
 import { formatDateTime } from "../format.ts";
+import {
+  LoadingLines,
+  PageNotLoaded,
+  PageLoading,
+} from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
@@ -186,14 +192,7 @@ const Workflows = ({
         <h2 className="font-medium">
           <Trans>Runs</Trans>
         </h2>
-        <Await
-          fallback={
-            <p className="text-muted-foreground text-sm">
-              <Trans>Loading runs…</Trans>
-            </p>
-          }
-          promise={runs}
-        >
+        <Await fallback={<LoadingLines />} promise={runs}>
           {(loaded) =>
             loaded.state === "ready" ? (
               <RunsTable runs={loaded.data} />
@@ -254,14 +253,7 @@ const Members = ({ app, members }: { app: App; members: MemberList }) => {
           ? t`Created by you.`
           : t`Created by the member ${owner}.`}
       </p>
-      <Await
-        fallback={
-          <p className="text-muted-foreground">
-            <Trans>Loading members…</Trans>
-          </p>
-        }
-        promise={members}
-      >
+      <Await fallback={<LoadingLines />} promise={members}>
         {(loaded) =>
           loaded.state === "ready" ? (
             <MembersTable members={loaded.data} />
@@ -326,36 +318,38 @@ const AppView = ({
 const AppPageView = () => {
   const { page, runs, members } = Route.useLoaderData();
   const { t } = useLingui();
+  if (page.state !== "ready") {
+    return (
+      <PageNotLoaded
+        crumbs={[{ label: t`Apps`, to: "/apps" }, { label: t`App` }]}
+        icon={BoxesIcon}
+        notFound={t`App not found`}
+        page={page}
+      />
+    );
+  }
   return (
     <>
       <SiteHeader
         crumbs={[
           { label: t`Apps`, to: "/apps" },
-          { label: page.state === "ready" ? page.data.app.name : t`App` },
+          { label: page.data.app.name },
         ]}
       />
       <div className="flex flex-1 flex-col gap-4 p-6">
-        {page.state === "ready" ? (
-          <AppView
-            key={page.data.app.id}
-            members={members}
-            page={page.data}
-            runs={runs}
-          />
-        ) : (
-          <>
-            <h1 className="text-2xl font-medium">
-              <Trans>App</Trans>
-            </h1>
-            <NotLoaded page={page} />
-          </>
-        )}
+        <AppView
+          key={page.data.app.id}
+          members={members}
+          page={page.data}
+          runs={runs}
+        />
       </div>
     </>
   );
 };
 
 export const Route = createFileRoute("/_shell/apps/$app")({
+  pendingComponent: PageLoading,
   component: AppPageView,
   loader: async ({ context: { core }, params }) => ({
     // Not awaited: only their tabs wait for them.

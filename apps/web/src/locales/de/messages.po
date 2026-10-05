@@ -210,6 +210,16 @@ msgstr "{who} hat vor dem Verbinden hier zugestimmt:"
 msgid "{workflowId} in {app}"
 msgstr "{workflowId} in {app}"
 
+#. Who answered, in an exported chat.
+#: src/chat/chat-markdown.ts
+msgid "**Grasp:**"
+msgstr "**Grasp:**"
+
+#. Who asked, in an exported chat.
+#: src/chat/chat-markdown.ts
+msgid "**You:**"
+msgstr "**Sie:**"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Eine Änderung gilt für Läufe, die danach starten: laufende Läufe behalten die Werte, mit denen sie gestartet sind. Jede Änderung wird protokolliert, ohne ihren Wert."
@@ -353,6 +363,10 @@ msgstr "App"
 #: src/connections/connection-list.tsx
 msgid "App {app}"
 msgstr "App {app}"
+
+#: src/routes/_shell.apps.$app.tsx
+msgid "App not found"
+msgstr "App nicht gefunden"
 
 #: src/screens/screen-frame.tsx
 msgid "App screen"
@@ -579,6 +593,10 @@ msgstr "Sammlung"
 msgid "Collection {collectionId}"
 msgstr "Sammlung {collectionId}"
 
+#: src/routes/_shell.knowledge.$collection.tsx
+msgid "Collection not found"
+msgstr "Sammlung nicht gefunden"
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Collections"
 msgstr "Sammlungen"
@@ -783,6 +801,10 @@ msgid "Document"
 msgstr "Dokument"
 
 #: src/routes/_shell.knowledge.$collection.tsx
+msgid "Document not found"
+msgstr "Dokument nicht gefunden"
+
+#: src/routes/_shell.knowledge.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Hier geschriebene Dokumente und hochgeladene Dateien erscheinen hier, damit Grasp und seine Agenten sie lesen können."
 
@@ -872,7 +894,7 @@ msgstr "Chats ausklappen"
 msgid "Expand the navigation"
 msgstr "Navigation ausklappen"
 
-#: src/knowledge/document.tsx
+#: src/export/export-menu.tsx
 msgid "Export"
 msgstr "Exportieren"
 
@@ -883,6 +905,10 @@ msgstr "CSV exportieren"
 #: src/activity/audit-log.tsx
 msgid "Export JSON"
 msgstr "JSON exportieren"
+
+#: src/routes/_shell.index.tsx
+msgid "Export this chat"
+msgstr "Diesen Chat exportieren"
 
 #: src/chat/builds.tsx
 msgid "Exports"
@@ -952,7 +978,6 @@ msgstr "Aus"
 #: src/core.ts
 #: src/guest/api.ts
 #: src/load-from-core.tsx
-#: src/routes/_shell.connections.tsx
 #: src/routes/_shell.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/routes/sign-in.tsx
@@ -1031,6 +1056,10 @@ msgstr "Er hat keine Schritte."
 #: src/routes/_shell.apps.$app.tsx
 msgid "It isn't shared with anyone."
 msgstr "Sie ist mit niemandem geteilt."
+
+#: src/frame/page-states.tsx
+msgid "It may have been renamed or removed."
+msgstr "Es wurde vielleicht umbenannt oder entfernt."
 
 #: src/chat/builds.tsx
 msgid "It no longer runs (it could change things)."
@@ -1141,21 +1170,9 @@ msgstr "Servercode erneut laden"
 msgid "Loading its tools…"
 msgstr "Werkzeuge werden geladen…"
 
-#: src/routes/_shell.apps.$app.tsx
-msgid "Loading members…"
-msgstr "Mitglieder werden geladen…"
-
-#: src/routes/_shell.apps.$app.tsx
-msgid "Loading runs…"
-msgstr "Läufe werden geladen…"
-
-#: src/chat/builds.tsx
-msgid "Loading the server code…"
-msgstr "Servercode wird geladen…"
-
 #: src/activity/audit-log.tsx
-#: src/chat/side-panel.tsx
 #: src/chat/thread.tsx
+#: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
 msgid "Loading…"
 msgstr "Wird geladen…"
@@ -1175,6 +1192,10 @@ msgstr "Zum Admin machen"
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Version {version} aktuell machen"
+
+#: src/export/export-menu.tsx
+msgid "Markdown (.md)"
+msgstr "Markdown (.md)"
 
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
@@ -1349,6 +1370,15 @@ msgstr "Keine wartet auf einen Admin."
 #: src/connections/connection-list.tsx
 msgid "None."
 msgstr "Keine."
+
+#: src/frame/page-states.tsx
+#: src/routes/_shell.knowledge.$collection.tsx
+msgid "Not found"
+msgstr "Nicht gefunden"
+
+#: src/load-from-core.tsx
+msgid "Not found. It may have been renamed or removed."
+msgstr "Nicht gefunden. Es wurde vielleicht umbenannt oder entfernt."
 
 #: src/connections/connection-list.tsx
 msgid "Not named by the provider"
@@ -1526,6 +1556,10 @@ msgstr "Pfad"
 #: src/workflows/runs.tsx
 msgid "Paused"
 msgstr "Pausiert"
+
+#: src/export/export-menu.tsx
+msgid "PDF"
+msgstr "PDF"
 
 #: src/knowledge/uploads.tsx
 msgid "Pending"
@@ -1727,6 +1761,7 @@ msgstr "Version {number} wiederherstellen"
 msgid "Restored version {restoredFrom}"
 msgstr "Version {restoredFrom} wiederhergestellt"
 
+#: src/chat/chat-markdown.ts
 #: src/chat/sources.tsx
 msgid "Restricted"
 msgstr "Eingeschränkt"
@@ -1956,6 +1991,10 @@ msgstr "Jemand, der nicht mehr da ist"
 msgid "Something went wrong."
 msgstr "Etwas ist schiefgelaufen."
 
+#: src/chat/chat-markdown.ts
+msgid "Sources"
+msgstr "Quellen"
+
 #: src/routes/_shell.models.tsx
 msgid "Spend this month ({month}, UTC)."
 msgstr "Ausgaben in diesem Monat ({month}, UTC)."
@@ -2013,6 +2052,7 @@ msgstr "Stoppen"
 msgid "Stopped"
 msgstr "Gestoppt"
 
+#: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Gestoppt."
@@ -2089,6 +2129,7 @@ msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
 msgid "The agent wasn't asked: {reason}"
 msgstr "Der Agent wurde nicht gefragt: {reason}"
 
+#: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The answer was cut off at the model's limit."
 msgstr "Die Antwort wurde am Limit des Modells abgeschnitten."
@@ -2097,10 +2138,15 @@ msgstr "Die Antwort wurde am Limit des Modells abgeschnitten."
 msgid "The default, {each}"
 msgstr "Standard, {each}"
 
+#: src/export/export-menu.tsx
+msgid "The export didn't work. Try again."
+msgstr "Der Export hat nicht funktioniert. Versuchen Sie es erneut."
+
 #: src/routes/guest.tsx
 msgid "The link works until {until}."
 msgstr "Der Link funktioniert bis {until}."
 
+#: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The model call failed."
 msgstr "Der Modellaufruf ist fehlgeschlagen."
@@ -2206,7 +2252,7 @@ msgstr "Dieser Link funktioniert nicht. Bitten Sie die Person, die ihn geschickt
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Dieser Link ist abgelaufen. Bitten Sie die Person, die ihn geschickt hat, um einen neuen."
 
-#: src/route-error.tsx
+#: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Diese Seite wurde nicht geladen"
 
@@ -2241,14 +2287,13 @@ msgstr "Zu erlaubende Werkzeuge"
 
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
-#: src/route-error.tsx
+#: src/frame/page-states.tsx
 #: src/routes/_shell.index.tsx
-#: src/routes/_shell.tsx
 #: src/screens/screen-frame.tsx
 msgid "Try again"
 msgstr "Erneut versuchen"
 
-#: src/routes/_shell.tsx
+#: src/frame/page-states.tsx
 msgid "Trying again…"
 msgstr "Neuer Versuch…"
 
@@ -2393,6 +2438,10 @@ msgstr "Workflow"
 #: src/activity/pending.tsx
 msgid "Workflow {workflowId} of {app}"
 msgstr "Workflow {workflowId} von {app}"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
+msgid "Workflow not found"
+msgstr "Workflow nicht gefunden"
 
 #: src/chat/builds.tsx
 msgid "Workflow tests fail:"

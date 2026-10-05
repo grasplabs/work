@@ -210,6 +210,16 @@ msgstr "{who} consented to this before connecting it:"
 msgid "{workflowId} in {app}"
 msgstr "{workflowId} in {app}"
 
+#. Who answered, in an exported chat.
+#: src/chat/chat-markdown.ts
+msgid "**Grasp:**"
+msgstr "**Grasp:**"
+
+#. Who asked, in an exported chat.
+#: src/chat/chat-markdown.ts
+msgid "**You:**"
+msgstr "**You:**"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
@@ -353,6 +363,10 @@ msgstr "App"
 #: src/connections/connection-list.tsx
 msgid "App {app}"
 msgstr "App {app}"
+
+#: src/routes/_shell.apps.$app.tsx
+msgid "App not found"
+msgstr "App not found"
 
 #: src/screens/screen-frame.tsx
 msgid "App screen"
@@ -579,6 +593,10 @@ msgstr "Collection"
 msgid "Collection {collectionId}"
 msgstr "Collection {collectionId}"
 
+#: src/routes/_shell.knowledge.$collection.tsx
+msgid "Collection not found"
+msgstr "Collection not found"
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Collections"
 msgstr "Collections"
@@ -783,6 +801,10 @@ msgid "Document"
 msgstr "Document"
 
 #: src/routes/_shell.knowledge.$collection.tsx
+msgid "Document not found"
+msgstr "Document not found"
+
+#: src/routes/_shell.knowledge.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 
@@ -872,7 +894,7 @@ msgstr "Expand the chats"
 msgid "Expand the navigation"
 msgstr "Expand the navigation"
 
-#: src/knowledge/document.tsx
+#: src/export/export-menu.tsx
 msgid "Export"
 msgstr "Export"
 
@@ -883,6 +905,10 @@ msgstr "Export CSV"
 #: src/activity/audit-log.tsx
 msgid "Export JSON"
 msgstr "Export JSON"
+
+#: src/routes/_shell.index.tsx
+msgid "Export this chat"
+msgstr "Export this chat"
 
 #: src/chat/builds.tsx
 msgid "Exports"
@@ -952,7 +978,6 @@ msgstr "From"
 #: src/core.ts
 #: src/guest/api.ts
 #: src/load-from-core.tsx
-#: src/routes/_shell.connections.tsx
 #: src/routes/_shell.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/routes/sign-in.tsx
@@ -1031,6 +1056,10 @@ msgstr "It has no steps."
 #: src/routes/_shell.apps.$app.tsx
 msgid "It isn't shared with anyone."
 msgstr "It isn't shared with anyone."
+
+#: src/frame/page-states.tsx
+msgid "It may have been renamed or removed."
+msgstr "It may have been renamed or removed."
 
 #: src/chat/builds.tsx
 msgid "It no longer runs (it could change things)."
@@ -1141,21 +1170,9 @@ msgstr "Load the server code again"
 msgid "Loading its tools…"
 msgstr "Loading its tools…"
 
-#: src/routes/_shell.apps.$app.tsx
-msgid "Loading members…"
-msgstr "Loading members…"
-
-#: src/routes/_shell.apps.$app.tsx
-msgid "Loading runs…"
-msgstr "Loading runs…"
-
-#: src/chat/builds.tsx
-msgid "Loading the server code…"
-msgstr "Loading the server code…"
-
 #: src/activity/audit-log.tsx
-#: src/chat/side-panel.tsx
 #: src/chat/thread.tsx
+#: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
 msgid "Loading…"
 msgstr "Loading…"
@@ -1175,6 +1192,10 @@ msgstr "Make admin"
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Make version {version} current"
+
+#: src/export/export-menu.tsx
+msgid "Markdown (.md)"
+msgstr "Markdown (.md)"
 
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
@@ -1349,6 +1370,15 @@ msgstr "None waiting for an admin."
 #: src/connections/connection-list.tsx
 msgid "None."
 msgstr "None."
+
+#: src/frame/page-states.tsx
+#: src/routes/_shell.knowledge.$collection.tsx
+msgid "Not found"
+msgstr "Not found"
+
+#: src/load-from-core.tsx
+msgid "Not found. It may have been renamed or removed."
+msgstr "Not found. It may have been renamed or removed."
 
 #: src/connections/connection-list.tsx
 msgid "Not named by the provider"
@@ -1526,6 +1556,10 @@ msgstr "Path"
 #: src/workflows/runs.tsx
 msgid "Paused"
 msgstr "Paused"
+
+#: src/export/export-menu.tsx
+msgid "PDF"
+msgstr "PDF"
 
 #: src/knowledge/uploads.tsx
 msgid "Pending"
@@ -1727,6 +1761,7 @@ msgstr "Restore version {number}"
 msgid "Restored version {restoredFrom}"
 msgstr "Restored version {restoredFrom}"
 
+#: src/chat/chat-markdown.ts
 #: src/chat/sources.tsx
 msgid "Restricted"
 msgstr "Restricted"
@@ -1956,6 +1991,10 @@ msgstr "Someone no longer here"
 msgid "Something went wrong."
 msgstr "Something went wrong."
 
+#: src/chat/chat-markdown.ts
+msgid "Sources"
+msgstr "Sources"
+
 #: src/routes/_shell.models.tsx
 msgid "Spend this month ({month}, UTC)."
 msgstr "Spend this month ({month}, UTC)."
@@ -2013,6 +2052,7 @@ msgstr "Stop"
 msgid "Stopped"
 msgstr "Stopped"
 
+#: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Stopped."
@@ -2089,6 +2129,7 @@ msgstr "The {top} who spent most; more spent less."
 msgid "The agent wasn't asked: {reason}"
 msgstr "The agent wasn't asked: {reason}"
 
+#: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The answer was cut off at the model's limit."
 msgstr "The answer was cut off at the model's limit."
@@ -2097,10 +2138,15 @@ msgstr "The answer was cut off at the model's limit."
 msgid "The default, {each}"
 msgstr "The default, {each}"
 
+#: src/export/export-menu.tsx
+msgid "The export didn't work. Try again."
+msgstr "The export didn't work. Try again."
+
 #: src/routes/guest.tsx
 msgid "The link works until {until}."
 msgstr "The link works until {until}."
 
+#: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The model call failed."
 msgstr "The model call failed."
@@ -2206,7 +2252,7 @@ msgstr "This link doesn't work. Ask whoever sent it for a new one."
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "This link has expired. Ask whoever sent it for a new one."
 
-#: src/route-error.tsx
+#: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "This page didn't load"
 
@@ -2241,14 +2287,13 @@ msgstr "Tools to allow"
 
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
-#: src/route-error.tsx
+#: src/frame/page-states.tsx
 #: src/routes/_shell.index.tsx
-#: src/routes/_shell.tsx
 #: src/screens/screen-frame.tsx
 msgid "Try again"
 msgstr "Try again"
 
-#: src/routes/_shell.tsx
+#: src/frame/page-states.tsx
 msgid "Trying again…"
 msgstr "Trying again…"
 
@@ -2393,6 +2438,10 @@ msgstr "Workflow"
 #: src/activity/pending.tsx
 msgid "Workflow {workflowId} of {app}"
 msgstr "Workflow {workflowId} of {app}"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
+msgid "Workflow not found"
+msgstr "Workflow not found"
 
 #: src/chat/builds.tsx
 msgid "Workflow tests fail:"

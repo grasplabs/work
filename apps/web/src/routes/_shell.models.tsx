@@ -23,8 +23,9 @@ import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
+import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 
 // Models, for admins: the models the deployment allows, the client's rules
 // for model calls (EU routing, which models take sensitive data, budgets),
@@ -311,6 +312,9 @@ const Settings = ({ settings }: { settings: ModelSettings }) => {
 const Models = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
+  if (page.state !== "ready") {
+    return <PageNotLoaded crumbs={[{ label: t`Models` }]} page={page} />;
+  }
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Models` }]} />
@@ -326,14 +330,14 @@ const Models = () => {
             </Trans>
           </p>
         </div>
-        <NotLoaded page={page} />
-        {page.state === "ready" ? <Settings settings={page.data} /> : null}
+        <Settings settings={page.data} />
       </div>
     </>
   );
 };
 
 export const Route = createFileRoute("/_shell/models")({
+  pendingComponent: PageLoading,
   component: Models,
   loader: async ({ context: { core } }) =>
     await loadFromCore(
