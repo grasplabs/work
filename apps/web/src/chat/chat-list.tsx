@@ -26,7 +26,8 @@ import {
   PlusIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import {
@@ -38,6 +39,7 @@ import {
   usePageSidebarFold,
 } from "../frame/page-sidebar.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { activeChat, setActiveChat } from "./active-chat.ts";
 
 // The person's chats beside the open one, in the page sidebar
 // (grasplabs/prototype `components/chat/chat-list.tsx`): a new chat with
@@ -89,94 +91,107 @@ const groupChats = (
   });
 };
 
-/** When a chat was started, as short as the list has room for. */
-const useWhen = (): ((iso: string) => string) => {
-  const { t, i18n } = useLingui();
-  const now = new Date();
-  return (iso) => {
-    const days = daysAgo(iso, now);
-    if (days <= 0) {
-      return new Date(iso).toLocaleTimeString(i18n.locale, {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    }
-    if (days === 1) {
-      return t({ message: "Yesterday", context: "when a chat was started" });
-    }
-    return new Date(iso).toLocaleDateString(i18n.locale, {
-      day: "numeric",
-      month: "short",
-    });
-  };
-};
-
-/** Renames a chat, in a dialog. */
-const RenameDialog = ({
-  chat,
-  open,
-  onOpenChange,
+/**
+ * A chat's name being changed in place: Enter or leaving the field keeps
+ * it, Escape keeps the old one. `onDone` gets the new name, or `null` when
+ * nothing should change, and whether a key ended it, so the focus can go
+ * back to the row (leaving the field put it somewhere else already).
+ */
+const RenameField = ({
+  value,
+  label,
+  maxLength,
+  onDone,
 }: {
-  chat: ChatSummary;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  value: string;
+  label: string;
+  maxLength: number;
+  onDone: (name: string | null, byKey: boolean) => void;
 }) => {
-  const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
-  const [title, setTitle] = useState(chat.title);
-  const valid = chatTitleSchema.safeParse(title).success;
-  const save = async (): Promise<void> => {
-    const saved = await run(async (session) => {
-      await session.chats.rename(chat.id, title);
-      return true;
-    });
-    if (saved === true) {
-      onOpenChange(false);
-      await router.invalidate();
+  const [text, setText] = useState(value);
+  // Enter and Escape end it before the field loses focus; leaving it must
+  // not end it a second time.
+  const done = useRef(false);
+  const finish = (name: string | null, byKey: boolean): void => {
+    if (done.current) {
+      return;
     }
+    done.current = true;
+    onDone(name, byKey);
   };
   return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>Rename this chat</Trans>
-          </DialogTitle>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-2"
-          id={`rename-${chat.id}`}
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (valid && !busy) {
-              void save();
-            }
-          }}
-        >
-          <label className="text-sm" htmlFor={`chat-title-${chat.id}`}>
-            <Trans>Title</Trans>
-          </label>
-          <Input
-            id={`chat-title-${chat.id}`}
-            onChange={(event) => {
-              setTitle(event.target.value);
-            }}
-            value={title}
-          />
-          <ErrorText>{failure}</ErrorText>
-        </form>
-        <DialogFooter showCloseButton>
-          <Button
-            disabled={busy || !valid}
-            form={`rename-${chat.id}`}
-            type="submit"
-          >
-            <Trans>Save</Trans>
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <Input
+      aria-label={label}
+      maxLength={maxLength}
+      // It opens to be typed in.
+      autoFocus
+      onBlur={() => {
+        finish(text, false);
+      }}
+      onChange={(event) => {
+        setText(event.target.value);
+      }}
+      onFocus={(event) => {
+        event.currentTarget.select();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          finish(text, true);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          finish(null, true);
+        }
+      }}
+      value={text}
+    />
   );
+};
+
+/** The longest name a chat takes, as core checks it. */
+const chatTitleMaxLength = 200;
+
+/** How long a first click waits for a second one before it counts as one. */
+const doubleClickMs = 250;
+
+/**
+ * A click and a double click that do different things on a link: the
+ * click waits a moment, so a double click only renames. A click from the
+ * keyboard, or one that opens a new tab, acts at once, as a link does.
+ */
+const useClickOrDoubleClick = (
+  onClick: () => void,
+  onDoubleClick: () => void
+) => {
+  const pending = useRef(0);
+  useEffect(
+    () => () => {
+      window.clearTimeout(pending.current);
+    },
+    []
+  );
+  return {
+    onClick: (event: MouseEvent) => {
+      window.clearTimeout(pending.current);
+      const ownTab =
+        event.button === 0 &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.shiftKey &&
+        !event.altKey;
+      if (event.detail === 0 || !ownTab) {
+        return;
+      }
+      event.preventDefault();
+      if (event.detail === 1) {
+        pending.current = window.setTimeout(onClick, doubleClickMs);
+      }
+    },
+    onDoubleClick: () => {
+      window.clearTimeout(pending.current);
+      onDoubleClick();
+    },
+  };
 };
 
 /** Deletes a chat, once the person confirms. */
@@ -203,6 +218,10 @@ const DeleteDialog = ({
     });
     if (removed === true) {
       onOpenChange(false);
+      // A deleted chat is nobody's open chat any more.
+      if (activeChat() === chat.id) {
+        setActiveChat(undefined);
+      }
       if (active) {
         await navigate({ to: "/", search: {} });
       }
@@ -240,78 +259,145 @@ const DeleteDialog = ({
   );
 };
 
-/** One chat in the list: its title, when it was started, and its menu. */
+/**
+ * One chat in the list: its title alone, one line as high as every other
+ * row in a sidebar, so the list holds more of them; the group it is under
+ * says when it was started. A double click renames it in place, as does
+ * Rename in its menu; Delete asks first.
+ */
 const ChatItem = ({
   chat,
   active,
-  when,
   onPick,
 }: {
   chat: ChatSummary;
   active: boolean;
-  when: string;
   onPick?: () => void;
 }) => {
   const { t } = useLingui();
+  const router = useRouter();
+  const navigate = useNavigate();
+  const { failure, run } = useCoreAction();
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Choosing Rename leaves the focus in the field that opens, rather than
+  // giving it back to the menu's button.
+  const renamingFromMenu = useRef(false);
+  // Enter or Escape gives the focus back to the row once the field goes.
+  const link = useRef<HTMLAnchorElement>(null);
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (renaming || !refocus.current) {
+      return;
+    }
+    refocus.current = false;
+    link.current?.focus();
+  }, [renaming]);
+  const open = (): void => {
+    onPick?.();
+    void navigate({ to: "/", search: { chat: chat.id } });
+  };
+  const clicks = useClickOrDoubleClick(open, () => {
+    setRenaming(true);
+  });
+  const rename = async (name: string): Promise<void> => {
+    const renamed = await run(async (session) => {
+      await session.chats.rename(chat.id, name);
+      return true;
+    });
+    if (renamed === true) {
+      await router.invalidate();
+    }
+  };
   const { title } = chat;
   return (
-    <li className="group/chat relative">
-      <Link
-        aria-current={active ? "page" : undefined}
-        className={
-          active
-            ? "bg-accent focus-visible:ring-ring flex w-full items-start gap-2.5 rounded-lg px-2 py-2 pr-9 text-left outline-none focus-visible:ring-2"
-            : "hover:bg-muted focus-visible:ring-ring flex w-full items-start gap-2.5 rounded-lg px-2 py-2 pr-9 text-left outline-none focus-visible:ring-2"
-        }
-        onClick={onPick}
-        search={{ chat: chat.id }}
-        to="/"
-      >
-        <MessageSquareIcon
-          aria-hidden="true"
-          className="text-muted-foreground mt-0.5 size-4 flex-none"
-        />
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate">{title}</span>
-          <span className="text-muted-foreground text-xs tabular-nums">
-            {when}
-          </span>
-        </span>
-      </Link>
-      <span className="absolute top-1.5 right-1.5 opacity-0 group-hover/chat:opacity-100 focus-within:opacity-100 has-aria-expanded:opacity-100">
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            aria-label={t`More for ${title}`}
-            render={<Button size="icon-xs" variant="ghost" />}
-          >
-            <EllipsisIcon />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              onClick={() => {
-                setRenaming(true);
-              }}
-            >
-              <PencilIcon />
-              <Trans>Rename</Trans>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
-                setDeleting(true);
-              }}
-              variant="destructive"
-            >
-              <Trash2Icon />
-              <Trans>Delete</Trans>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </span>
+    <li className="group/row relative">
       {renaming ? (
-        <RenameDialog chat={chat} onOpenChange={setRenaming} open={renaming} />
-      ) : null}
+        <div className="flex items-center px-2 py-0.5">
+          <RenameField
+            label={t`Chat name`}
+            maxLength={chatTitleMaxLength}
+            onDone={(name, byKey) => {
+              refocus.current = byKey;
+              setRenaming(false);
+              const trimmed = name?.trim();
+              if (
+                trimmed !== undefined &&
+                trimmed !== title &&
+                chatTitleSchema.safeParse(trimmed).success
+              ) {
+                void rename(trimmed);
+              }
+            }}
+            value={title}
+          />
+        </div>
+      ) : (
+        <Link
+          aria-current={active ? "page" : undefined}
+          className={
+            active
+              ? "bg-accent focus-visible:ring-ring flex w-full items-center rounded-md py-1.5 pr-9 pl-2 text-left outline-none focus-visible:ring-2"
+              : "hover:bg-muted focus-visible:ring-ring flex w-full items-center rounded-md py-1.5 pr-9 pl-2 text-left outline-none focus-visible:ring-2"
+          }
+          onClick={(event) => {
+            clicks.onClick(event);
+            if (event.detail === 0) {
+              onPick?.();
+            }
+          }}
+          onDoubleClick={() => {
+            clicks.onDoubleClick();
+          }}
+          ref={link}
+          search={{ chat: chat.id }}
+          to="/"
+        >
+          <span className="min-w-0 flex-1 truncate">{title}</span>
+        </Link>
+      )}
+      {renaming ? null : (
+        <span className="absolute top-1 right-1.5 opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100 has-data-popup-open:opacity-100 pointer-coarse:opacity-100">
+          <DropdownMenu
+            onOpenChange={(menuOpen) => {
+              if (menuOpen) {
+                renamingFromMenu.current = false;
+              }
+            }}
+          >
+            <DropdownMenuTrigger
+              aria-label={t`More for ${title}`}
+              render={<Button size="icon-xs" variant="ghost" />}
+            >
+              <EllipsisIcon />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              finalFocus={() => !renamingFromMenu.current}
+            >
+              <DropdownMenuItem
+                onClick={() => {
+                  renamingFromMenu.current = true;
+                  setRenaming(true);
+                }}
+              >
+                <PencilIcon />
+                <Trans>Rename</Trans>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  setDeleting(true);
+                }}
+                variant="destructive"
+              >
+                <Trash2Icon />
+                <Trans>Delete</Trans>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </span>
+      )}
+      <ErrorText>{failure}</ErrorText>
       {deleting ? (
         <DeleteDialog
           active={active}
@@ -341,14 +427,16 @@ export const ChatList = ({
   onPick?: () => void;
 }) => {
   const { t, i18n } = useLingui();
-  const when = useWhen();
   const groups = groupChats(chats, new Date());
   return (
     <div className="flex h-full min-h-0 flex-col text-sm">
       <PageSidebarTop fold={fold}>
         <Link
           className={buttonVariants({ variant: "outline" })}
-          onClick={onPick}
+          onClick={() => {
+            setActiveChat(undefined);
+            onPick?.();
+          }}
           search={{}}
           to="/"
         >
@@ -381,7 +469,6 @@ export const ChatList = ({
                     chat={chat}
                     key={chat.id}
                     onPick={onPick}
-                    when={when(chat.createdAt)}
                   />
                 ))}
               </ul>
@@ -412,7 +499,18 @@ export const ChatSidebar = ({
             setFolded(false);
           }}
         />
-        <RailButton label={t`New chat`} render={<Link search={{}} to="/" />}>
+        <RailButton
+          label={t`New chat`}
+          render={
+            <Link
+              onClick={() => {
+                setActiveChat(undefined);
+              }}
+              search={{}}
+              to="/"
+            />
+          }
+        >
           <PlusIcon />
         </RailButton>
         <RailDivider />

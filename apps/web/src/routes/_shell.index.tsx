@@ -2,34 +2,28 @@ import type { ChatSummary } from "@grasp-os/shared/chat";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
 import { Trans, useLingui } from "@lingui/react/macro";
-import {
-  createFileRoute,
-  Link,
-  useNavigate,
-  useRouter,
-} from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { PanelLeftIcon, PanelRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
+import { activeChat, setActiveChat } from "../chat/active-chat.ts";
 import { ChatList, ChatSidebar } from "../chat/chat-list.tsx";
 import { chatMarkdown } from "../chat/chat-markdown.ts";
+import { useFollowedChat } from "../chat/chat-watch.ts";
 import { Composer } from "../chat/composer.tsx";
-import { applyUpdate, emptyView, followChat } from "../chat/follow-chat.ts";
-import type { ChatView } from "../chat/follow-chat.ts";
 import { HeldWrites } from "../chat/held-writes.tsx";
 import { SidePanel } from "../chat/side-panel.tsx";
 import { ChatSources } from "../chat/sources.tsx";
 import type { SourceName } from "../chat/sources.tsx";
 import { ChatThread } from "../chat/thread.tsx";
+import { useAsk } from "../chat/use-ask.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
 import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
-import { useCoreAction } from "../use-core-action.ts";
-import { useCore } from "../use-core.ts";
 
 // Chat with the organization's agent, in the prototype's layout
 // (grasplabs/prototype `routes/index.tsx`): the person's chats in the page
@@ -72,73 +66,6 @@ const readSourceNames = async (
     }
   }
   return names;
-};
-
-/** A new chat's title: the start of its first question. */
-const titleOf = (question: string): string => {
-  const line = question.trim().split("\n")[0] ?? "";
-  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
-};
-
-/**
- * What the box to ask in needs: the text and model, and asking in
- * `chatId`, or in a new chat named after the question.
- */
-const useAsk = (chatId: string | undefined, models: readonly string[]) => {
-  const router = useRouter();
-  const navigate = useNavigate();
-  const { busy, failure, run } = useCoreAction();
-  const [text, setText] = useState("");
-  const [model, setModel] = useState(models[0] ?? "");
-  const ask = async (question: string): Promise<void> => {
-    let created: string | undefined;
-    const sent = await run(async (session) => {
-      let id = chatId;
-      if (id === undefined) {
-        ({ id } = await session.chats.create(titleOf(question)));
-        created = id;
-      }
-      await session.chats.send(id, { text: question, model });
-      return id;
-    });
-    if (sent === undefined) {
-      // A new chat the question didn't go into is in the list, to ask again.
-      if (created !== undefined) {
-        await router.invalidate();
-      }
-      return;
-    }
-    // Clears the box only of what was sent from it: asking again sends an
-    // earlier question, and a draft the person started stays.
-    setText((now) => (now === question ? "" : now));
-    if (chatId === undefined) {
-      await navigate({ to: "/", search: { chat: sent } });
-    }
-    await router.invalidate();
-  };
-  const stop = async (): Promise<void> => {
-    if (chatId !== undefined) {
-      await run(async (session) => await session.chats.cancel(chatId));
-    }
-  };
-  return {
-    composer: {
-      text,
-      onText: setText,
-      models,
-      model,
-      onModel: setModel,
-      busy,
-      failure,
-      onSend: () => {
-        void ask(text);
-      },
-      onStop: () => {
-        void stop();
-      },
-    },
-    ask,
-  };
 };
 
 /** A new chat: Grasp's buddy, the question, and the box to ask in. */
@@ -207,23 +134,9 @@ const OpenChat = ({
   panel: boolean;
   onPanel: (open: boolean) => void;
 }) => {
-  const [view, setView] = useState<ChatView>(emptyView);
-  const [failure, setFailure] = useState<string>();
-  const core = useCore();
+  const { view, failure } = useFollowedChat(chat.id);
   const { i18n, t } = useLingui();
   const { composer, ask } = useAsk(chat.id, models);
-  useEffect(
-    () =>
-      followChat(
-        core,
-        chat.id,
-        (update) => {
-          setView((before) => applyUpdate(before, update));
-        },
-        setFailure
-      ),
-    [core, chat.id]
-  );
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   const wide = useSyncExternalStore(onWide, isWide);
   const sidePanel = (
@@ -334,7 +247,14 @@ const Chat = () => {
   const { chat: open } = Route.useSearch();
   const { t } = useLingui();
   const [listOpen, setListOpen] = useState(false);
-  const [panel, setPanel] = useState(false);
+  // Open from the start where the dock's "Open in chat" asked for it.
+  const [panel, setPanel] = useState(Route.useSearch().panel === true);
+  // The open chat: the chat dock carries it on on every other page.
+  useEffect(() => {
+    if (open !== undefined) {
+      setActiveChat(open);
+    }
+  }, [open]);
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Chat` }]} page={page} />;
   }
@@ -379,6 +299,9 @@ const Chat = () => {
                 </Button>
                 <Link
                   className={buttonVariants({ size: "sm", variant: "outline" })}
+                  onClick={() => {
+                    setActiveChat(undefined);
+                  }}
                   search={{}}
                   to="/"
                 >
@@ -434,8 +357,21 @@ const Chat = () => {
 
 export const Route = createFileRoute("/_shell/")({
   pendingComponent: PageLoading,
-  validateSearch: (search: Record<string, unknown>): { chat?: string } =>
-    typeof search.chat === "string" ? { chat: search.chat } : {},
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { chat?: string; panel?: true } => ({
+    ...(typeof search.chat === "string" ? { chat: search.chat } : {}),
+    ...(search.panel === true ? { panel: true } : {}),
+  }),
+  // Chat opens on the open chat, the one the dock carries on, whatever led
+  // here (the sidebar, the logo); only "New chat" lets go of it first.
+  beforeLoad: ({ search }) => {
+    const active = activeChat();
+    if (search.chat === undefined && active !== undefined) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({ to: "/", search: { chat: active }, replace: true });
+    }
+  },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session): Promise<ChatPage> => {
       const [chats, models, sourceNames] = await Promise.all([

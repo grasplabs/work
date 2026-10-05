@@ -2,10 +2,10 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
+import { setActiveChat } from "../chat/active-chat.ts";
 import { loadCoreStatus } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
-import { GraspMark } from "../grasp-mark.tsx";
-import { LanguageButton } from "../language-picker.tsx";
+import { OnboardingFrame } from "../frame/onboarding-frame.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { SignInOptions } from "../sign-in-options.tsx";
 
@@ -38,48 +38,38 @@ const returnPathOf = (value: unknown): string =>
     : "/";
 
 /**
- * The page in the onboarding's frame (grasplabs/prototype
- * `components/onboarding/onboarding-frame.tsx`): one centred column with
- * Grasp's buddy, the mark bottom left and the language bottom right.
+ * The page in the onboarding's frame (frame/onboarding-frame.tsx), with
+ * Grasp's buddy.
  */
 const SignIn = () => {
   const { connected, signInOptions } = Route.useLoaderData();
   const { error, returnTo } = Route.useSearch();
   const { t } = useLingui();
   return (
-    <div className="bg-background flex min-h-svh flex-col text-sm">
-      <div aria-hidden="true" className="h-18 flex-none" />
-      <main className="flex flex-1 flex-col items-center px-4 py-2">
-        <div className="my-auto flex w-full max-w-sm flex-col items-center gap-8 text-center">
-          <GraspBuddy />
-          <div className="flex flex-col gap-2">
-            <h1 className="text-2xl font-medium tracking-tight text-balance">
-              <Trans>Sign in to Grasp</Trans>
-            </h1>
-            {connected ? (
-              <p className="text-muted-foreground text-balance">
-                <Trans>Use your organization’s account to go on.</Trans>
-              </p>
-            ) : null}
-          </div>
-          {connected ? (
-            <SignInOptions
-              error={error}
-              options={signInOptions}
-              returnTo={returnTo}
-            />
-          ) : (
-            <ErrorText>
-              {t`Grasp can't be reached right now. Try again in a moment.`}
-            </ErrorText>
-          )}
-        </div>
-      </main>
-      <footer className="bg-background sticky bottom-0 flex h-18 flex-none items-center justify-between px-4 sm:px-10">
-        <GraspMark className="text-foreground size-5" />
-        <LanguageButton />
-      </footer>
-    </div>
+    <OnboardingFrame>
+      <GraspBuddy />
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-medium tracking-tight text-balance">
+          <Trans>Sign in to Grasp</Trans>
+        </h1>
+        {connected ? (
+          <p className="text-muted-foreground text-balance">
+            <Trans>Use your organization’s account to go on.</Trans>
+          </p>
+        ) : null}
+      </div>
+      {connected ? (
+        <SignInOptions
+          error={error}
+          options={signInOptions}
+          returnTo={returnTo}
+        />
+      ) : (
+        <ErrorText>
+          {t`Grasp can't be reached right now. Try again in a moment.`}
+        </ErrorText>
+      )}
+    </OnboardingFrame>
   );
 };
 
@@ -96,6 +86,12 @@ export const Route = createFileRoute("/sign-in")({
     if (status.identity !== undefined) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ href: deps.returnTo });
+    }
+    // Signed out, as core says it: whoever signs in next in this tab
+    // starts without the last person's open chat, which isn't theirs to
+    // open. Not while core can't be reached, when nobody knows who is in.
+    if (status.connected) {
+      setActiveChat(undefined);
     }
     return status;
   },
