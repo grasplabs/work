@@ -408,9 +408,14 @@ msgstr "als {binding}"
 msgid "Ask again"
 msgstr "Erneut fragen"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Etwas fragen oder einen Prozess beschreiben"
+
+#: src/chat/chat-dock.tsx
+msgid "Ask Grasp"
+msgstr "Grasp fragen"
 
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the App shows here to preview before it is proposed."
@@ -471,6 +476,10 @@ msgstr "Automatisch"
 #: src/knowledge/document.tsx
 msgid "Back to the current version"
 msgstr "Zurück zur aktuellen Version"
+
+#: src/chat/chat-dock.tsx
+msgid "Back to the small chat"
+msgstr "Zurück zum kleinen Chat"
 
 #: src/chat/builds.tsx
 msgid "Being built"
@@ -538,9 +547,12 @@ msgstr "Ändert die Daten der App"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
-#: src/routes/guest.tsx
 msgid "Chat"
 msgstr "Chat"
+
+#: src/chat/chat-list.tsx
+msgid "Chat name"
+msgstr "Name des Chats"
 
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
@@ -942,6 +954,10 @@ msgstr "Filter"
 msgid "Finish"
 msgstr "Beenden"
 
+#: src/chat/chat-dock.tsx
+msgid "Fold the chat away"
+msgstr "Chat einklappen"
+
 #: src/chat/chat-list.tsx
 msgid "Fold the chats"
 msgstr "Chats einklappen"
@@ -958,6 +974,7 @@ msgstr "Für"
 msgid "From"
 msgstr "Aus"
 
+#: src/chat/chat-dock.tsx
 #: src/core.ts
 #: src/guest/api.ts
 #: src/load-from-core.tsx
@@ -1258,6 +1275,7 @@ msgstr "Nie"
 msgid "New"
 msgstr "Neu"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
 msgid "New chat"
@@ -1304,6 +1322,7 @@ msgstr "Läuft nicht mehr {how}"
 msgid "No memory files are written yet."
 msgstr "Es wurden noch keine Gedächtnisdateien geschrieben."
 
+#: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "Für diese Instanz ist noch kein Modell eingerichtet."
@@ -1477,10 +1496,19 @@ msgstr "Nur wenn eine Bedingung erfüllt ist:"
 msgid "Open {name}"
 msgstr "{name} öffnen"
 
+#: src/chat/chat-dock.tsx
+msgid "Open at the side"
+msgstr "An der Seite öffnen"
+
 #: src/routes/_shell.apps.$app.tsx
 msgid "Open full page"
 msgstr "Als ganze Seite öffnen"
 
+#: src/chat/chat-dock.tsx
+msgid "Open in chat"
+msgstr "Im Chat öffnen"
+
+#: src/chat/chat-dock.tsx
 #: src/routes/_shell.notifications.tsx
 msgid "Open the chat"
 msgstr "Chat öffnen"
@@ -1614,6 +1642,10 @@ msgstr "„Nur lesen“ ist angehakt, wo Composio angibt, dass ein Werkzeug nur 
 msgid "Reading the workspace"
 msgstr "Workspace wird gelesen"
 
+#: src/routes/guest.tsx
+msgid "Reading what you wrote"
+msgstr "Ihre Antwort wird gelesen"
+
 #: src/chat/builds-state.ts
 msgid "reads the App's data"
 msgstr "liest die Daten der App"
@@ -1705,10 +1737,6 @@ msgstr "Entfernt: Er handelte für jeden, der die App nutzt, mit allem, was die 
 msgid "Rename"
 msgstr "Umbenennen"
 
-#: src/chat/chat-list.tsx
-msgid "Rename this chat"
-msgstr "Diesen Chat umbenennen"
-
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Repeats, {items}:"
 msgstr "Wiederholt sich, {items}:"
@@ -1799,7 +1827,6 @@ msgstr "Läuft jetzt"
 msgid "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 msgstr "Führt die eigenen Testfälle des Workflows mit den aktuell gesetzten Werten aus. Es wird nichts geändert: Was er ändern würde, wird stattdessen aufgelistet."
 
-#: src/chat/chat-list.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Save"
@@ -1837,10 +1864,6 @@ msgstr "Die Suche durchsucht jede Sammlung, die Sie lesen dürfen. Versuchen Sie
 #: src/activity/pending.tsx
 msgid "See it in the log"
 msgstr "Im Protokoll ansehen"
-
-#: src/routes/guest.tsx
-msgid "Send"
-msgstr "Senden"
 
 #: src/chat/composer.tsx
 msgctxt "send the question"
@@ -2186,6 +2209,10 @@ msgid "This chat asks how your work is done. Everything you write is kept and re
 msgstr "In diesem Chat geht es darum, wie Ihre Arbeit erledigt wird. Alles, was Sie schreiben, wird gespeichert und von den Personen gelesen, die Sie eingeladen haben; sie können es in ihre eigenen Unterlagen übernehmen und dort aufbewahren. Bitte teilen Sie keine Passwörter, Bankdaten oder etwas, das Sie nicht in eine E-Mail schreiben würden."
 
 #: src/routes/guest.tsx
+msgid "This chat can't be opened"
+msgstr "Dieser Chat lässt sich nicht öffnen"
+
+#: src/routes/guest.tsx
 msgid "This chat has been closed by whoever sent you the link."
 msgstr "Dieser Chat wurde von der Person geschlossen, die Ihnen den Link geschickt hat."
 
@@ -2237,10 +2264,6 @@ msgstr "Diese Ansicht lässt sich nicht erstellen. Bitten Sie einen Builder, sie
 msgid "Time"
 msgstr "Uhrzeit"
 
-#: src/chat/chat-list.tsx
-msgid "Title"
-msgstr "Titel"
-
 #: src/activity/audit-log.tsx
 msgid "To"
 msgstr "Bis"
@@ -2262,6 +2285,7 @@ msgstr "Erlaubte Werkzeuge: keine erfasst"
 msgid "Tools to allow"
 msgstr "Zu erlaubende Werkzeuge"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/routes/_shell.index.tsx
@@ -2448,6 +2472,10 @@ msgstr "Würde hier Datensätze vom Typ {claimed} führen"
 msgid "Would run after approval"
 msgstr "Würde nach der Genehmigung laufen"
 
+#: src/routes/guest.tsx
+msgid "Write your answer"
+msgstr "Schreiben Sie Ihre Antwort"
+
 #: src/chat/thread.tsx
 msgid "Writing"
 msgstr "Schreibt"
@@ -2455,11 +2483,6 @@ msgstr "Schreibt"
 #: src/activity/audit-log.tsx
 msgid "Yes: its hash matches, and it links to the event before it."
 msgstr "Ja: Sein Hash stimmt, und es ist mit dem vorherigen Ereignis verknüpft."
-
-#: src/chat/chat-list.tsx
-msgctxt "when a chat was started"
-msgid "Yesterday"
-msgstr "Gestern"
 
 #: src/connections/connection-list.tsx
 #: src/knowledge/timeline.tsx
