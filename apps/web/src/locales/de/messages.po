@@ -7,14 +7,6 @@ msgstr ""
 "X-Generator: @lingui/cli\n"
 "Language: de\n"
 
-#: src/routes/_shell.workflows.$app.$workflow.tsx
-msgid ", version {version}, owned by {owner}"
-msgstr ", Version {version}, Eigentümer: {owner}"
-
-#: src/routes/_shell.workflows.$app.$workflow.tsx
-msgid ", version {version}, owned by you"
-msgstr ", Version {version}, Eigentümer: Sie"
-
 #: src/routes/_shell.knowledge.index.tsx
 msgid "(company)"
 msgstr "(Unternehmen)"
@@ -28,16 +20,6 @@ msgstr "(Ihre)"
 msgid "{0, plural, one {{app}: # file changed in this chat, not proposed yet} other {{app}: # files changed in this chat, not proposed yet}}"
 msgstr "{0, plural, one {{app}: # Datei in diesem Chat geändert, noch nicht vorgeschlagen} other {{app}: # Dateien in diesem Chat geändert, noch nicht vorgeschlagen}}"
 
-#. placeholder {0}: workflow.failed
-#: src/routes/_shell.workflows.index.tsx
-msgid "{0, plural, one {# failed run} other {# failed runs}} of {name}"
-msgstr "{0, plural, one {# fehlgeschlagener Lauf} other {# fehlgeschlagene Läufe}} von {name}"
-
-#. placeholder {0}: workflow.waiting
-#: src/routes/_shell.workflows.index.tsx
-msgid "{0, plural, one {# waiting run} other {# waiting runs}} of {name}"
-msgstr "{0, plural, one {# wartender Lauf} other {# wartende Läufe}} von {name}"
-
 #: src/activity/pending.tsx
 msgid "{app} already keeps {type} records here: this App's won't apply."
 msgstr "{app} führt hier bereits Datensätze vom Typ {type}: die dieser App gelten nicht."
@@ -45,6 +27,10 @@ msgstr "{app} führt hier bereits Datensätze vom Typ {type}: die dieser App gel
 #: src/activity/audit-log.tsx
 msgid "{app}: run of {workflowId}"
 msgstr "{app}: Lauf von {workflowId}"
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "{appName} · Version {version}"
+msgstr "{appName} · Version {version}"
 
 #: src/chat/builds.tsx
 msgid "{binding}: {actions} on {object}"
@@ -97,6 +83,14 @@ msgstr "{count, plural, one {einmal} other {#-mal}}"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "{count} or more files"
 msgstr "{count} oder mehr Dateien"
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
+msgstr "{failed, plural, one {# fehlgeschlagen in den letzten {days} Tagen} other {# fehlgeschlagen in den letzten {days} Tagen}}"
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "{failed, plural, one {# failed run} other {# failed runs}} of {name}"
+msgstr "{failed, plural, one {# fehlgeschlagener Lauf} other {# fehlgeschlagene Läufe}} von {name}"
 
 #: src/knowledge/timeline.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
@@ -178,10 +172,6 @@ msgstr "{run}: fehlgeschlagen"
 msgid "{screen} screen"
 msgstr "Ansicht {screen}"
 
-#: src/routes/_shell.workflows.index.tsx
-msgid "{status}, {date}"
-msgstr "{status}, {date}"
-
 #: src/activity/pending.tsx
 msgid "{subject}: {actions} on {object}"
 msgstr "{subject}: {actions} auf {object}"
@@ -197,6 +187,14 @@ msgstr "{title} auf {connection}"
 #: src/connections/catalog.tsx
 msgid "{toolCount, plural, one {# tool} other {# tools}}"
 msgstr "{toolCount, plural, one {# Werkzeug} other {# Werkzeuge}}"
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "{waiting, plural, one {# waiting run} other {# waiting runs}} of {name}"
+msgstr "{waiting, plural, one {# wartender Lauf} other {# wartende Läufe}} von {name}"
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "{waiting, plural, one {# waiting} other {# waiting}}"
+msgstr "{waiting, plural, one {# wartet} other {# warten}}"
 
 #: src/activity/pending.tsx
 msgid "{who} can't be granted later: it has to ask again."
@@ -227,6 +225,14 @@ msgstr "Eine Änderung gilt für Läufe, die danach starten: laufende Läufe beh
 #: src/screens/screen-frame.tsx
 msgid "A new version of this App is available."
 msgstr "Eine neue Version dieser App ist verfügbar."
+
+#: src/routes/decisions.$decision.tsx
+msgid "A run of a workflow asked for this answer."
+msgstr "Ein Lauf eines Workflows hat um diese Antwort gebeten."
+
+#: src/routes/decisions.$decision.tsx
+msgid "A run of a workflow waits for this answer."
+msgstr "Ein Lauf eines Workflows wartet auf diese Antwort."
 
 #: src/connections/connection-list.tsx
 msgid "Account"
@@ -285,6 +291,11 @@ msgstr "Admin"
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Admins können die Rolle jeder Person ändern, ihre Sitzungen beenden und sie entfernen, andere Admins eingeschlossen."
 
+#: src/routes/_shell.workflows.$app.$workflow.tsx
+msgctxt "who does a step"
+msgid "Agent"
+msgstr "Agent"
+
 #: src/activity/pending.tsx
 #: src/connections/connection-list.tsx
 msgid "Agent {agent}"
@@ -293,10 +304,6 @@ msgstr "Agent {agent}"
 #: src/activity/audit-log.tsx
 msgid "Agent {agentId} for {person}"
 msgstr "Agent {agentId} für {person}"
-
-#: src/routes/_shell.workflows.$app.$workflow.tsx
-msgid "AI"
-msgstr "KI"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
@@ -356,7 +363,6 @@ msgstr "Jeder Typ"
 
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.workflows.index.tsx
-#: src/workflows/runs.tsx
 msgid "App"
 msgstr "App"
 
@@ -421,7 +427,7 @@ msgstr "Grasp fragen"
 msgid "Ask Grasp to build one. While it works, the App shows here to preview before it is proposed."
 msgstr "Bitten Sie Grasp, eine zu erstellen. Während es daran arbeitet, erscheint die App hier zur Vorschau, bevor sie vorgeschlagen wird."
 
-#: src/routes/_shell.notifications.tsx
+#: src/workflows/fix-in-chat.tsx
 msgid "Ask the agent to fix"
 msgstr "Agenten um Behebung bitten"
 
@@ -440,14 +446,6 @@ msgstr "Erneut angefragt, nachdem Version {version} aktuell wurde (zuvor erteilt
 #: src/activity/pending.tsx
 msgid "Asked by"
 msgstr "Angefragt von"
-
-#: src/routes/decisions.$decision.tsx
-msgid "Asked by {app} ({workflow})"
-msgstr "Angefragt von {app} ({workflow})"
-
-#: src/routes/decisions.$decision.tsx
-msgid "Asked by {app} ({workflow}), open until {until}"
-msgstr "Angefragt von {app} ({workflow}), offen bis {until}"
 
 #: src/chat/held-writes.tsx
 msgid "Asked for <0>{asked}</0>"
@@ -742,10 +740,13 @@ msgstr "Entscheiden"
 #: src/activity/audit-log.tsx
 #: src/activity/pending.tsx
 #: src/labels.ts
-#: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Decision"
 msgstr "Entscheidung"
+
+#: src/routes/decisions.$decision.tsx
+msgid "Decision not found"
+msgstr "Entscheidung nicht gefunden"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Default: {fallback}"
@@ -850,10 +851,6 @@ msgstr "Sitzungen beenden"
 msgid "End sessions for {who}"
 msgstr "Sitzungen von {who} beenden"
 
-#: src/workflows/runs.tsx
-msgid "Ended"
-msgstr "Beendet"
-
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Enter a number."
 msgstr "Geben Sie eine Zahl ein."
@@ -929,10 +926,6 @@ msgstr "Wird ausgelesen"
 msgid "Failed"
 msgstr "Fehlgeschlagen"
 
-#: src/routes/_shell.workflows.index.tsx
-msgid "Failed ({failedRunDays} days)"
-msgstr "Fehlgeschlagen ({failedRunDays} Tage)"
-
 #: src/labels.ts
 msgid "File"
 msgstr "Datei"
@@ -954,6 +947,10 @@ msgstr "Filter"
 msgid "Finish"
 msgstr "Beenden"
 
+#: src/workflows/fix-in-chat.tsx
+msgid "Fix in chat"
+msgstr "Im Chat beheben"
+
 #: src/chat/chat-dock.tsx
 msgid "Fold the chat away"
 msgstr "Chat einklappen"
@@ -973,6 +970,15 @@ msgstr "Für"
 #: src/activity/audit-log.tsx
 msgid "From"
 msgstr "Aus"
+
+#: src/routes/decisions.$decision.tsx
+msgctxt "where a decision comes from"
+msgid "From"
+msgstr "Von"
+
+#: src/routes/decisions.$decision.tsx
+msgid "Go to Grasp"
+msgstr "Zu Grasp"
 
 #: src/chat/chat-dock.tsx
 #: src/core.ts
@@ -1029,7 +1035,6 @@ msgid "Hide exactly what will be sent"
 msgstr "Genau Gesendetes ausblenden"
 
 #: src/knowledge/timeline.tsx
-#: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "History"
 msgstr "Verlauf"
 
@@ -1281,10 +1286,6 @@ msgstr "Neu"
 msgid "New chat"
 msgstr "Neuer Chat"
 
-#: src/routes/_shell.workflows.index.tsx
-msgid "No App you can open has a workflow yet."
-msgstr "Keine App, die Sie öffnen können, hat bisher einen Workflow."
-
 #: src/chat/side-panel.tsx
 msgid "No Apps yet"
 msgstr "Noch keine Apps"
@@ -1331,17 +1332,21 @@ msgstr "Für diese Instanz ist noch kein Modell eingerichtet."
 msgid "No permissions."
 msgstr "Keine Berechtigungen."
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "No runs match these filters."
+msgstr "Keine Läufe passen zu diesen Filtern."
+
 #: src/routes/_shell.apps.$app.tsx
 msgid "No runs yet."
 msgstr "Noch keine Läufe."
 
-#: src/workflows/runs.tsx
-msgid "No runs."
-msgstr "Keine Läufe."
-
 #: src/chat/builds.tsx
 msgid "No workflows to test."
 msgstr "Keine Workflows zu testen."
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "No workflows yet"
+msgstr "Noch keine Workflows"
 
 #: src/activity/audit-log.tsx
 msgid "No: its hash or its link to the event before it doesn't match."
@@ -1373,6 +1378,7 @@ msgstr "Keine."
 
 #: src/frame/page-states.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
+#: src/routes/decisions.$decision.tsx
 msgid "Not found"
 msgstr "Nicht gefunden"
 
@@ -1396,6 +1402,10 @@ msgstr "Nicht veröffentlicht"
 #: src/activity/audit-log.tsx
 msgid "Not verified"
 msgstr "Nicht verifiziert"
+
+#: src/workflows/runs.tsx
+msgid "Nothing has run yet."
+msgstr "Bisher ist nichts gelaufen."
 
 #: src/activity/pending.tsx
 msgid "Nothing is waiting for approval."
@@ -1490,6 +1500,11 @@ msgstr "Nur die Personen, an die sich diese Entscheidung richtet, können sie be
 msgid "Only when a condition holds:"
 msgstr "Nur wenn eine Bedingung erfüllt ist:"
 
+#: src/routes/_shell.workflows.index.tsx
+msgctxt "column: a link that opens the workflow"
+msgid "Open"
+msgstr "Öffnen"
+
 #: src/chat/builds.tsx
 #: src/knowledge/nav.tsx
 #: src/knowledge/uploads.tsx
@@ -1500,6 +1515,10 @@ msgstr "{name} öffnen"
 msgid "Open at the side"
 msgstr "An der Seite öffnen"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "Open Chat"
+msgstr "Chat öffnen"
+
 #: src/routes/_shell.apps.$app.tsx
 msgid "Open full page"
 msgstr "Als ganze Seite öffnen"
@@ -1509,9 +1528,14 @@ msgid "Open in chat"
 msgstr "Im Chat öffnen"
 
 #: src/chat/chat-dock.tsx
-#: src/routes/_shell.notifications.tsx
+#: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Chat öffnen"
+
+#: src/routes/decisions.$decision.tsx
+msgctxt "until when a decision can be answered"
+msgid "Open until"
+msgstr "Offen bis"
 
 #: src/routes/guest.tsx
 msgid "Opening the chat…"
@@ -1537,11 +1561,16 @@ msgstr "Andere Apps dürfen jetzt {name} aufrufen, das {does}"
 msgid "Otherwise:"
 msgstr "Sonst:"
 
-#: src/routes/_shell.workflows.index.tsx
-msgid "Owner"
-msgstr "Verantwortlich"
+#: src/routes/_shell.workflows.$app.$workflow.tsx
+msgid "Owned by {owner}"
+msgstr "Verantwortlich: {owner}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+msgid "Owned by you"
+msgstr "Sie sind verantwortlich"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
+msgctxt "tab of a workflow"
 msgid "Parameters"
 msgstr "Parameter"
 
@@ -1576,6 +1605,11 @@ msgstr "Berechtigung"
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
 msgstr "Angefragte Berechtigungen"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
+msgctxt "who does a step"
+msgid "Person"
+msgstr "Person"
 
 #: src/connections/connection-list.tsx
 msgid "Personal: only you can use it"
@@ -1770,6 +1804,11 @@ msgstr "Eingeschränkt"
 msgid "Result"
 msgstr "Ergebnis"
 
+#: src/workflows/runs.tsx
+msgctxt "column: what happened in a run"
+msgid "Result"
+msgstr "Ergebnis"
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Results"
 msgstr "Ergebnisse"
@@ -1799,6 +1838,11 @@ msgstr "Rolle von {who}"
 msgid "Rules"
 msgstr "Regeln"
 
+#: src/routes/decisions.$decision.tsx
+msgctxt "the run of a workflow a decision is for"
+msgid "Run"
+msgstr "Lauf"
+
 #: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
@@ -1806,8 +1850,12 @@ msgid "Running"
 msgstr "Läuft"
 
 #: src/routes/_shell.apps.$app.tsx
+msgid "Runs"
+msgstr "Läufe"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
+msgctxt "tab listing the runs of workflows"
 msgid "Runs"
 msgstr "Läufe"
 
@@ -1971,10 +2019,6 @@ msgstr "Die Anmeldung hat nicht funktioniert. Versuchen Sie es erneut oder frage
 msgid "Sign-in timed out or was started elsewhere. Try again."
 msgstr "Die Anmeldung ist abgelaufen oder wurde anderswo gestartet. Versuchen Sie es erneut."
 
-#: src/routes/decisions.$decision.tsx
-msgid "Signed in as {name}"
-msgstr "Angemeldet als {name}"
-
 #: src/labels.ts
 msgid "Skill"
 msgstr "Skill"
@@ -2020,7 +2064,6 @@ msgid "Start again from version {newerVersion}"
 msgstr "Neu beginnen ab Version {newerVersion}"
 
 #: src/routes/_shell.apps.$app.tsx
-#: src/workflows/runs.tsx
 msgid "Started"
 msgstr "Gestartet"
 
@@ -2031,11 +2074,16 @@ msgstr "Gestartet von"
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.workflows.index.tsx
-#: src/workflows/runs.tsx
+msgid "Status"
+msgstr "Status"
+
+#: src/routes/_shell.workflows.index.tsx
+msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Status"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+msgctxt "tab of a workflow"
 msgid "Steps"
 msgstr "Schritte"
 
@@ -2125,7 +2173,7 @@ msgstr "Diese Anmeldemethode ist hier nicht eingerichtet."
 msgid "The {top} who spent most; more spent less."
 msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
 
-#: src/routes/_shell.notifications.tsx
+#: src/workflows/fix-in-chat.tsx
 msgid "The agent wasn't asked: {reason}"
 msgstr "Der Agent wurde nicht gefragt: {reason}"
 
@@ -2231,6 +2279,14 @@ msgstr "Diese Sammlung hat noch keine Dateien."
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "this currency"
 msgstr "dieser Währung"
+
+#: src/routes/decisions.$decision.tsx
+msgid "This decision has closed."
+msgstr "Diese Entscheidung ist geschlossen."
+
+#: src/routes/decisions.$decision.tsx
+msgid "This decision is for someone else to answer."
+msgstr "Diese Entscheidung trifft jemand anderes."
 
 #: src/knowledge/document.tsx
 msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
@@ -2345,8 +2401,6 @@ msgstr "Verifiziert"
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
-#: src/routes/_shell.workflows.index.tsx
-#: src/workflows/runs.tsx
 msgid "Version"
 msgstr "Version"
 
@@ -2360,6 +2414,7 @@ msgstr "Version {number}, aktuell"
 
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
+#: src/routes/_shell.workflows.index.tsx
 msgid "Version {version}"
 msgstr "Version {version}"
 
@@ -2368,16 +2423,13 @@ msgid "Version to review"
 msgstr "Zu prüfende Version"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
-msgid "Versions of the App"
-msgstr "Versionen der App"
+msgctxt "tab of a workflow"
+msgid "Versions"
+msgstr "Versionen"
 
 #: src/connections/source-badge.tsx
 msgid "Via Composio"
 msgstr "Über Composio"
-
-#: src/routes/_shell.workflows.index.tsx
-msgid "Waiting"
-msgstr "Wartend"
 
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
@@ -2391,10 +2443,6 @@ msgstr "Wartet auf Sie"
 #: src/chat/held-writes.tsx
 msgid "Waiting for you: {title}"
 msgstr "Wartet auf Sie: {title}"
-
-#: src/routes/_shell.workflows.$app.$workflow.tsx
-msgid "Waits"
-msgstr "Wartet"
 
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
@@ -2420,6 +2468,11 @@ msgstr "Was sollen wir uns heute ansehen?"
 #: src/chat/builds.tsx
 msgid "What the App holds"
 msgstr "Was die App hat"
+
+#: src/workflows/runs.tsx
+msgctxt "column: when a run happened"
+msgid "When"
+msgstr "Wann"
 
 #: src/chat/builds-state.ts
 msgid "when someone starts it"
@@ -2453,12 +2506,17 @@ msgstr "Workflow-Tests schlagen fehl:"
 #: src/routes/_shell.apps.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
+#: src/routes/decisions.$decision.tsx
 msgid "Workflows"
 msgstr "Workflows"
 
 #: src/chat/side-panel.tsx
 msgid "Workflows and more"
 msgstr "Workflows und mehr"
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it into an App."
+msgstr "Workflows entstehen im Chat: Beschreiben Sie, was von selbst laufen soll, und Grasp baut es in eine App."
 
 #: src/routes/_shell.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."
@@ -2486,7 +2544,6 @@ msgstr "Ja: Sein Hash stimmt, und es ist mit dem vorherigen Ereignis verknüpft.
 
 #: src/connections/connection-list.tsx
 #: src/knowledge/timeline.tsx
-#: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 msgid "You"
 msgstr "Sie"

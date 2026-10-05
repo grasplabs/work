@@ -23,6 +23,11 @@ export type Crumb =
       label: string;
       to: "/knowledge/$collection";
       params: { collection: string };
+    }
+  | {
+      label: string;
+      to: "/workflows/$app/$workflow";
+      params: { app: string; workflow: string };
     };
 
 /** Where a crumb leads, as a link. */
@@ -30,7 +35,10 @@ const crumbLink = (crumb: Extract<Crumb, { to: string }>) => {
   if (!("params" in crumb)) {
     return <Link to={crumb.to} />;
   }
-  return "app" in crumb.params ? (
+  if (crumb.to === "/workflows/$app/$workflow") {
+    return <Link params={crumb.params} to="/workflows/$app/$workflow" />;
+  }
+  return crumb.to === "/apps/$app" ? (
     <Link params={crumb.params} to="/apps/$app" />
   ) : (
     <Link params={crumb.params} search={{}} to="/knowledge/$collection" />

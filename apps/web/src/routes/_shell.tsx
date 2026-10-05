@@ -1,15 +1,10 @@
-import { SidebarInset, SidebarProvider } from "@grasp-os/ui/components/sidebar";
-import { TooltipProvider } from "@grasp-os/ui/components/tooltip";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
-import { useState } from "react";
 
 import { ChatDock } from "../chat/chat-dock.tsx";
 import { loadCoreStatus } from "../core-connection.ts";
-import { keepFolded, readFolded } from "../fold.ts";
-import { AppSidebar } from "../frame/app-sidebar.tsx";
-import { InFrame } from "../frame/in-frame.ts";
+import { AppFrame } from "../frame/app-frame.tsx";
 import { PageError } from "../frame/page-states.tsx";
 import { RouteError } from "../route-error.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
@@ -20,29 +15,10 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
 
 const Shell = () => {
   const { core, identity } = Route.useRouteContext();
-  // Folded as the person left it in this browser.
-  const [open, setOpen] = useState(() => readFolded("sidebar") !== true);
   return (
-    <TooltipProvider>
-      <SidebarProvider
-        className="h-svh"
-        open={open}
-        onOpenChange={(next) => {
-          setOpen(next);
-          void keepFolded("sidebar", !next);
-        }}
-      >
-        <AppSidebar core={core} identity={identity} />
-        {/* The page scrolls inside it, so its header stays in view. */}
-        <SidebarInset className="min-h-0 min-w-0 overflow-y-auto">
-          <InFrame value>
-            <Outlet />
-          </InFrame>
-        </SidebarInset>
-        {/* Grasp's chat, bottom right on every page but Chat's own. */}
-        <ChatDock />
-      </SidebarProvider>
-    </TooltipProvider>
+    <AppFrame aside={<ChatDock />} core={core} identity={identity}>
+      <Outlet />
+    </AppFrame>
   );
 };
 
