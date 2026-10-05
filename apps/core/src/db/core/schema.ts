@@ -302,10 +302,30 @@ export const permissions = sqliteTable(
   "permissions",
   {
     id: text().primaryKey(),
-    subjectType: text("subject_type", { enum: ["app", "agent"] }).notNull(),
+    /**
+     * An App or an agent, for what its code may use. A `person` (a user
+     * ID) or a `team` only ever holds `dependencies` (below): what a
+     * person may decide, never what code may reach.
+     */
+    subjectType: text("subject_type", {
+      enum: ["app", "agent", "person", "team"],
+    }).notNull(),
     subjectId: text("subject_id").notNull(),
+    /**
+     * `dependencies`, with the one action `approve`, is
+     * `dependencies.approve` (src/dependencies/approvers.ts): held by
+     * people and teams only, with `object_id` and `binding` filling their
+     * columns.
+     */
     objectType: text("object_type", {
-      enum: ["connection", "collection", "workflow", "app", "platform"],
+      enum: [
+        "connection",
+        "collection",
+        "workflow",
+        "app",
+        "platform",
+        "dependencies",
+      ],
     }).notNull(),
     objectId: text("object_id").notNull(),
     resource: text(),
@@ -663,6 +683,81 @@ export const workflowDecisions = sqliteTable(
     index("workflow_decisions_decided_idx").on(table.decidedAt, table.id),
   ]
 );
+
+/**
+ * npm packages proposed for an App (src/dependencies/requests.ts), one row
+ * per request, never deleted. What was asked never changes: the App, the
+ * source revision the graph was resolved from, where the packages would
+ * run (`targets`, a sorted JSON array), the graph's hash and the whole
+ * review (`snapshot`: the graph, findings and refusals, as JSON). `status`
+ * moves from `pending` once, in one conditional update, to a person's
+ * decision (`approved`, `denied`) or to `superseded` when another proposal
+ * for the App takes its place; the decision keeps who made it, when, why
+ * and under which policy generation. An approval is this row: another
+ * decision on the same graph is another request.
+ */
+export const dependencyRequests = sqliteTable(
+  "dependency_requests",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    sourceRevision: text("source_revision").notNull(),
+    graphHash: text("graph_hash").notNull(),
+    targets: text().notNull(),
+    purpose: text().notNull(),
+    snapshot: text().notNull(),
+    /** How many packages it asks for directly, and brings in all. */
+    direct: integer().notNull(),
+    packages: integer().notNull(),
+    findings: integer().notNull(),
+    refused: integer().notNull(),
+    /** The request approved for the App when this one was asked, if any. */
+    previous: text(),
+    status: text({
+      enum: ["pending", "approved", "denied", "superseded"],
+    }).notNull(),
+    requestedBy: text("requested_by").notNull(),
+    /** The chat's agent that proposed it (JSON); null for a person's own. */
+    requestedVia: text("requested_via", {
+      mode: "json",
+    }).$type<AgentProposer>(),
+    requestedAt: timestamp("requested_at").notNull(),
+    /** The policy generation it was asked under. */
+    policyGeneration: integer("policy_generation").notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at"),
+    /** The policy generation the decision was made under. */
+    decidedGeneration: integer("decided_generation"),
+    reason: text(),
+  },
+  (table) => [
+    // One request waits per App: a second pending row is refused.
+    uniqueIndex("dependency_requests_pending_idx")
+      .on(table.appId)
+      .where(sql`status = 'pending'`),
+    // An App's requests by status, newest first, and the admission check.
+    index("dependency_requests_app_idx").on(
+      table.appId,
+      table.status,
+      table.requestedAt
+    ),
+  ]
+);
+
+/**
+ * The dependency policy generation, in its one row (`id` is `policy`;
+ * none yet counts as 0). It goes up, in the batch that makes the change,
+ * each time who holds `dependencies.approve` changes. A decision lands
+ * only under the generation its person reviewed, and a build is admitted
+ * only under the one it read: what was checked before a change isn't
+ * acted on after it.
+ */
+export const dependencyPolicy = sqliteTable("dependency_policy", {
+  id: text().primaryKey(),
+  generation: integer().notNull(),
+});
 
 /**
  * The values people set for workflows' parameters, one per App, workflow

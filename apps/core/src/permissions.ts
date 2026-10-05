@@ -171,6 +171,10 @@ const objectOf = (row: Row): PermissionObject => {
     case "platform": {
       return permissionObjectSchema.parse({ type: row.objectType });
     }
+    // What a person or team holds: `ofCode` keeps those rows out.
+    case "dependencies": {
+      throw new Error("Not an App's or agent's permission");
+    }
     default: {
       throw new Error(`Unknown permission object ${String(row.objectType)}`);
     }
@@ -265,7 +269,7 @@ const changeEntry = (
  * and revoke. Grasp staff are admins, but never decide a client's
  * permissions.
  */
-const requireMemberAdmin = (by: Identity): void => {
+export const requireMemberAdmin = (by: Identity): void => {
   requireAdmin(by);
   if (by.staff) {
     throw roleErrors.create("role.forbidden");
@@ -277,13 +281,17 @@ const requireMemberAdmin = (by: Identity): void => {
  * the very update that grants or revokes, so an admin demoted or removed
  * after their session was checked changes nothing.
  */
-const stillAdmin = (by: Identity): SQL => activeMember(by.userId, ["admin"]);
+export const stillAdmin = (by: Identity): SQL =>
+  activeMember(by.userId, ["admin"]);
 
 /**
  * After a grant or revoke changed nothing: refuses with `role.forbidden`
  * if that was because `by` is no longer an active admin.
  */
-const requireStillAdmin = async (env: Env, by: Identity): Promise<void> => {
+export const requireStillAdmin = async (
+  env: Env,
+  by: Identity
+): Promise<void> => {
   const row = await drizzle(env.DB).get<{ admin: number }>(
     sql`SELECT ${stillAdmin(by)} AS admin`
   );
@@ -323,11 +331,19 @@ const restartApp = async (
   }
 };
 
+/**
+ * The rows this module is about, as a condition: an App's or an agent's.
+ * What a person or team holds (`dependencies.approve`,
+ * dependencies/approvers.ts) is granted, revoked and listed there, and is
+ * no permission here: it has no subject or object these functions know.
+ */
+const ofCode = inArray(permissions.subjectType, ["app", "agent"]);
+
 const findRow = async (env: Env, id: string): Promise<Row | undefined> =>
   await drizzle(env.DB)
     .select()
     .from(permissions)
-    .where(eq(permissions.id, id))
+    .where(and(eq(permissions.id, id), ofCode))
     .get();
 
 /**
@@ -1287,7 +1303,7 @@ export const listPermissions = async (
   const rows = await db
     .select()
     .from(permissions)
-    .where(and(ofOne, ofOpenApp, inStatus))
+    .where(and(ofCode, ofOne, ofOpenApp, inStatus))
     .orderBy(asc(permissions.requestedAt), asc(permissions.id));
   return await Promise.all(
     rows.map(async (row) => await withTypeClaims(env, by, row))

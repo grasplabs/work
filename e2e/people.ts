@@ -161,6 +161,7 @@ const cast = {
   chatBuilds: { builder: "builder" },
   notifications: { builder: "builder" },
   dashboard: { user: "user", admin: "admin" },
+  dependencyApproval: { admin: "admin", builder: "builder", approver: "user" },
   chatPreview: { builder: "builder" },
   languages: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;

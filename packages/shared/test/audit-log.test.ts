@@ -88,6 +88,18 @@ describe("audit event types", () => {
     ]);
   });
 
+  it("files a person deciding on proposed packages as a decision, and proposing or being refused them as an action", () => {
+    expect(
+      [
+        "dependency.requested",
+        "dependency.admission_refused",
+        "dependency.superseded",
+        "dependency.approved",
+        "dependency.denied",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["action", "action", "action", "decision", "decision"]);
+  });
+
   it("files a person deciding on a held action as a decision, and dropping one as an action", () => {
     expect(
       [

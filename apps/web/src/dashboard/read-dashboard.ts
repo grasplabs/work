@@ -37,15 +37,23 @@ export const readWaiting = async (
   core: CoreConnection,
   identity: Identity
 ): Promise<Waiting> => {
-  const [held, failed, integrations, requests] = await Promise.all([
-    loadFromCore(core, async (session) => await session.pendingActions.list()),
-    loadFromCore(core, readNotifications),
-    loadFromCore(core, readIntegrations),
-    decidesRequests(identity)
-      ? loadFromCore(core, readPendingRequests)
-      : undefined,
-  ]);
-  return { held, failed, integrations, requests };
+  const [held, failed, integrations, requests, dependencies] =
+    await Promise.all([
+      loadFromCore(
+        core,
+        async (session) => await session.pendingActions.list()
+      ),
+      loadFromCore(core, readNotifications),
+      loadFromCore(core, readIntegrations),
+      decidesRequests(identity)
+        ? loadFromCore(core, readPendingRequests)
+        : undefined,
+      loadFromCore(
+        core,
+        async (session) => await session.dependencies.waiting()
+      ),
+    ]);
+  return { held, failed, integrations, requests, dependencies };
 };
 
 /**
