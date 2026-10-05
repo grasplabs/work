@@ -48,6 +48,10 @@ msgstr "{appName} · Version {version}"
 msgid "{apps, plural, one {# app} other {# apps}}"
 msgstr "{apps, plural, one {# App} other {# Apps}}"
 
+#: src/routes/_shell.workflows.index.tsx
+msgid "{appName} · Version {version}"
+msgstr "{appName} · Version {version}"
+
 #: src/chat/builds.tsx
 msgid "{binding}: {actions} on {object}"
 msgstr "{binding}: {actions} auf {object}"
@@ -282,6 +286,16 @@ msgstr "**Grasp:**"
 msgid "**You:**"
 msgstr "**Sie:**"
 
+#. Who answered, in an exported chat.
+#: src/chat/chat-markdown.ts
+msgid "**Grasp:**"
+msgstr "**Grasp:**"
+
+#. Who asked, in an exported chat.
+#: src/chat/chat-markdown.ts
+msgid "**You:**"
+msgstr "**Sie:**"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Eine Änderung gilt für Läufe, die danach starten: laufende Läufe behalten die Werte, mit denen sie gestartet sind. Jede Änderung wird protokolliert, ohne ihren Wert."
@@ -341,6 +355,14 @@ msgstr "Ein Lauf eines Workflows wartet auf diese Antwort."
 #: src/dashboard/signals.tsx
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Eine Suche in {where} hat {searches, plural, one {einmal} other {#-mal}} nichts gefunden, bei {askers, plural, one {# fragenden Person} other {# fragenden Personen}}."
+
+#: src/routes/decisions.$decision.tsx
+msgid "A run of a workflow asked for this answer."
+msgstr "Ein Lauf eines Workflows hat um diese Antwort gebeten."
+
+#: src/routes/decisions.$decision.tsx
+msgid "A run of a workflow waits for this answer."
+msgstr "Ein Lauf eines Workflows wartet auf diese Antwort."
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -3170,6 +3192,11 @@ msgctxt "column: when a run happened"
 msgid "When"
 msgstr "Wann"
 
+#: src/workflows/runs.tsx
+msgctxt "column: when a run happened"
+msgid "When"
+msgstr "Wann"
+
 #: src/chat/builds-state.ts
 msgid "when someone starts it"
 msgstr "wenn ihn jemand startet"
@@ -3203,6 +3230,10 @@ msgstr "Workflow"
 #: src/activity/pending.tsx
 msgid "Workflow {workflowId} of {engine}"
 msgstr "Workflow {workflowId} von {engine}"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
+msgid "Workflow not found"
+msgstr "Workflow nicht gefunden"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Workflow not found"
