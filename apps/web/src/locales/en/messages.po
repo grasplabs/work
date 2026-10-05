@@ -436,9 +436,14 @@ msgstr "as {binding}"
 msgid "Ask again"
 msgstr "Ask again"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Ask anything, or describe a process"
+
+#: src/chat/chat-dock.tsx
+msgid "Ask Grasp"
+msgstr "Ask Grasp"
 
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the App shows here to preview before it is proposed."
@@ -503,6 +508,10 @@ msgstr "Available"
 #: src/knowledge/document.tsx
 msgid "Back to the current version"
 msgstr "Back to the current version"
+
+#: src/chat/chat-dock.tsx
+msgid "Back to the small chat"
+msgstr "Back to the small chat"
 
 #: src/chat/builds.tsx
 msgid "Being built"
@@ -578,9 +587,12 @@ msgstr "Changes the App's data"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
-#: src/routes/guest.tsx
 msgid "Chat"
 msgstr "Chat"
+
+#: src/chat/chat-list.tsx
+msgid "Chat name"
+msgstr "Chat name"
 
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
@@ -1004,6 +1016,10 @@ msgstr "Filters"
 msgid "Finish"
 msgstr "Finish"
 
+#: src/chat/chat-dock.tsx
+msgid "Fold the chat away"
+msgstr "Fold the chat away"
+
 #: src/chat/chat-list.tsx
 msgid "Fold the chats"
 msgstr "Fold the chats"
@@ -1029,6 +1045,7 @@ msgstr "For everyone"
 msgid "From"
 msgstr "From"
 
+#: src/chat/chat-dock.tsx
 #: src/core.ts
 #: src/guest/api.ts
 #: src/load-from-core.tsx
@@ -1369,6 +1386,7 @@ msgstr "Never"
 msgid "New"
 msgstr "New"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
 msgid "New chat"
@@ -1419,6 +1437,7 @@ msgstr "No longer runs {how}"
 msgid "No memory files are written yet."
 msgstr "No memory files are written yet."
 
+#: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "No model is set up for this deployment yet."
@@ -1622,10 +1641,19 @@ msgstr "Only you can use it."
 msgid "Open {name}"
 msgstr "Open {name}"
 
+#: src/chat/chat-dock.tsx
+msgid "Open at the side"
+msgstr "Open at the side"
+
 #: src/routes/_shell.apps.$app.tsx
 msgid "Open full page"
 msgstr "Open full page"
 
+#: src/chat/chat-dock.tsx
+msgid "Open in chat"
+msgstr "Open in chat"
+
+#: src/chat/chat-dock.tsx
 #: src/routes/_shell.notifications.tsx
 msgid "Open the chat"
 msgstr "Open the chat"
@@ -1759,6 +1787,10 @@ msgstr "Read-only is ticked where Composio says a tool only reads; Grasp doesn't
 msgid "Reading the workspace"
 msgstr "Reading the workspace"
 
+#: src/routes/guest.tsx
+msgid "Reading what you wrote"
+msgstr "Reading what you wrote"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Reads"
 msgstr "Reads"
@@ -1845,10 +1877,6 @@ msgstr "Removed: it acts for whoever uses the App, with everything the App holds
 #: src/chat/chat-list.tsx
 msgid "Rename"
 msgstr "Rename"
-
-#: src/chat/chat-list.tsx
-msgid "Rename this chat"
-msgstr "Rename this chat"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Repeats, {items}:"
@@ -1940,7 +1968,6 @@ msgstr "Runs now"
 msgid "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 msgstr "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 
-#: src/chat/chat-list.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Save"
@@ -1978,10 +2005,6 @@ msgstr "Search reads every collection you may read. Try other words, or fewer."
 #: src/activity/pending.tsx
 msgid "See it in the log"
 msgstr "See it in the log"
-
-#: src/routes/guest.tsx
-msgid "Send"
-msgstr "Send"
 
 #: src/chat/composer.tsx
 msgctxt "send the question"
@@ -2358,6 +2381,10 @@ msgid "This chat asks how your work is done. Everything you write is kept and re
 msgstr "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
 
 #: src/routes/guest.tsx
+msgid "This chat can't be opened"
+msgstr "This chat can't be opened"
+
+#: src/routes/guest.tsx
 msgid "This chat has been closed by whoever sent you the link."
 msgstr "This chat has been closed by whoever sent you the link."
 
@@ -2417,10 +2444,6 @@ msgstr "Through Grasp's own connector, which keeps the access in your deployment
 msgid "Time"
 msgstr "Time"
 
-#: src/chat/chat-list.tsx
-msgid "Title"
-msgstr "Title"
-
 #: src/activity/audit-log.tsx
 msgid "To"
 msgstr "To"
@@ -2442,6 +2465,7 @@ msgstr "Tools allowed: none recorded"
 msgid "Tools to allow"
 msgstr "Tools to allow"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/routes/_shell.index.tsx
@@ -2641,6 +2665,10 @@ msgstr "Would keep {claimed} records here"
 msgid "Would run after approval"
 msgstr "Would run after approval"
 
+#: src/routes/guest.tsx
+msgid "Write your answer"
+msgstr "Write your answer"
+
 #: src/chat/thread.tsx
 msgid "Writing"
 msgstr "Writing"
@@ -2648,11 +2676,6 @@ msgstr "Writing"
 #: src/activity/audit-log.tsx
 msgid "Yes: its hash matches, and it links to the event before it."
 msgstr "Yes: its hash matches, and it links to the event before it."
-
-#: src/chat/chat-list.tsx
-msgctxt "when a chat was started"
-msgid "Yesterday"
-msgstr "Yesterday"
 
 #: src/connections/connection-list.tsx
 #: src/knowledge/timeline.tsx

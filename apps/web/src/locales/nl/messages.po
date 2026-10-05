@@ -436,9 +436,14 @@ msgstr "als {binding}"
 msgid "Ask again"
 msgstr "Opnieuw vragen"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Vraag wat je wilt, of beschrijf een proces"
+
+#: src/chat/chat-dock.tsx
+msgid "Ask Grasp"
+msgstr "Vraag het Grasp"
 
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the App shows here to preview before it is proposed."
@@ -503,6 +508,10 @@ msgstr "Beschikbaar"
 #: src/knowledge/document.tsx
 msgid "Back to the current version"
 msgstr "Terug naar de huidige versie"
+
+#: src/chat/chat-dock.tsx
+msgid "Back to the small chat"
+msgstr "Terug naar de kleine chat"
 
 #: src/chat/builds.tsx
 msgid "Being built"
@@ -578,9 +587,12 @@ msgstr "Wijzigt de gegevens van de app"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
-#: src/routes/guest.tsx
 msgid "Chat"
 msgstr "Chat"
+
+#: src/chat/chat-list.tsx
+msgid "Chat name"
+msgstr "Naam van de chat"
 
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
@@ -1004,6 +1016,10 @@ msgstr "Filters"
 msgid "Finish"
 msgstr "Afronden"
 
+#: src/chat/chat-dock.tsx
+msgid "Fold the chat away"
+msgstr "Chat inklappen"
+
 #: src/chat/chat-list.tsx
 msgid "Fold the chats"
 msgstr "Chats inklappen"
@@ -1029,6 +1045,7 @@ msgstr "Voor iedereen"
 msgid "From"
 msgstr "Uit"
 
+#: src/chat/chat-dock.tsx
 #: src/core.ts
 #: src/guest/api.ts
 #: src/load-from-core.tsx
@@ -1369,6 +1386,7 @@ msgstr "Nooit"
 msgid "New"
 msgstr "Nieuw"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/chat-list.tsx
 #: src/routes/_shell.index.tsx
 msgid "New chat"
@@ -1419,6 +1437,7 @@ msgstr "Draait niet meer {how}"
 msgid "No memory files are written yet."
 msgstr "Er zijn nog geen geheugenbestanden geschreven."
 
+#: src/chat/chat-dock.tsx
 #: src/chat/composer.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "Er is nog geen model ingesteld voor deze omgeving."
@@ -1622,10 +1641,19 @@ msgstr "Alleen jij kunt het gebruiken."
 msgid "Open {name}"
 msgstr "{name} openen"
 
+#: src/chat/chat-dock.tsx
+msgid "Open at the side"
+msgstr "Aan de zijkant openen"
+
 #: src/routes/_shell.apps.$app.tsx
 msgid "Open full page"
 msgstr "Volledige pagina openen"
 
+#: src/chat/chat-dock.tsx
+msgid "Open in chat"
+msgstr "Openen in Chat"
+
+#: src/chat/chat-dock.tsx
 #: src/routes/_shell.notifications.tsx
 msgid "Open the chat"
 msgstr "Chat openen"
@@ -1759,6 +1787,10 @@ msgstr "Alleen-lezen is aangevinkt waar Composio zegt dat een tool alleen leest;
 msgid "Reading the workspace"
 msgstr "Werkruimte wordt gelezen"
 
+#: src/routes/guest.tsx
+msgid "Reading what you wrote"
+msgstr "Je antwoord wordt gelezen"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Reads"
 msgstr "Leest"
@@ -1845,10 +1877,6 @@ msgstr "Verwijderd: deze code handelde namens iedereen die de app gebruikt, met 
 #: src/chat/chat-list.tsx
 msgid "Rename"
 msgstr "Hernoemen"
-
-#: src/chat/chat-list.tsx
-msgid "Rename this chat"
-msgstr "Deze chat hernoemen"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Repeats, {items}:"
@@ -1940,7 +1968,6 @@ msgstr "Draait nu"
 msgid "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 msgstr "Voert de eigen testcases van de workflow uit met de waarden die nu zijn ingesteld. Er wordt niets gewijzigd: wat hij zou wijzigen, wordt in plaats daarvan opgesomd."
 
-#: src/chat/chat-list.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Save"
@@ -1978,10 +2005,6 @@ msgstr "Zoeken leest elke collectie die je mag lezen. Probeer andere woorden, of
 #: src/activity/pending.tsx
 msgid "See it in the log"
 msgstr "Bekijk het in het log"
-
-#: src/routes/guest.tsx
-msgid "Send"
-msgstr "Versturen"
 
 #: src/chat/composer.tsx
 msgctxt "send the question"
@@ -2358,6 +2381,10 @@ msgid "This chat asks how your work is done. Everything you write is kept and re
 msgstr "Deze chat vraagt hoe je werk wordt gedaan. Alles wat je schrijft, wordt bewaard en gelezen door de mensen die je hebben uitgenodigd; zij kunnen het overnemen in hun eigen administratie en het daar bewaren. Deel geen wachtwoorden, bankgegevens of iets wat je niet in een e-mail zou zetten."
 
 #: src/routes/guest.tsx
+msgid "This chat can't be opened"
+msgstr "Deze chat kan niet worden geopend"
+
+#: src/routes/guest.tsx
 msgid "This chat has been closed by whoever sent you the link."
 msgstr "Deze chat is gesloten door wie je de link stuurde."
 
@@ -2417,10 +2444,6 @@ msgstr "Via de eigen connector van Grasp, die de toegang in je omgeving bewaart.
 msgid "Time"
 msgstr "Tijd"
 
-#: src/chat/chat-list.tsx
-msgid "Title"
-msgstr "Titel"
-
 #: src/activity/audit-log.tsx
 msgid "To"
 msgstr "Tot"
@@ -2442,6 +2465,7 @@ msgstr "Toegestane tools: geen vastgelegd"
 msgid "Tools to allow"
 msgstr "Toe te staan tools"
 
+#: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/routes/_shell.index.tsx
@@ -2641,6 +2665,10 @@ msgstr "Zou hier records van het type {claimed} bijhouden"
 msgid "Would run after approval"
 msgstr "Zou na goedkeuring draaien"
 
+#: src/routes/guest.tsx
+msgid "Write your answer"
+msgstr "Schrijf je antwoord"
+
 #: src/chat/thread.tsx
 msgid "Writing"
 msgstr "Schrijft"
@@ -2648,11 +2676,6 @@ msgstr "Schrijft"
 #: src/activity/audit-log.tsx
 msgid "Yes: its hash matches, and it links to the event before it."
 msgstr "Ja: de hash klopt en hij verwijst naar de gebeurtenis ervoor."
-
-#: src/chat/chat-list.tsx
-msgctxt "when a chat was started"
-msgid "Yesterday"
-msgstr "Gisteren"
 
 #: src/connections/connection-list.tsx
 #: src/knowledge/timeline.tsx
