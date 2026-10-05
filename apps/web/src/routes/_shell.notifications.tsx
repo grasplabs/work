@@ -13,8 +13,9 @@ import type { Session } from "../core.ts";
 import { listedOrNone } from "../directory.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // What core told the person: the workflows that failed while acting for
@@ -169,6 +170,9 @@ const FailedWorkflow = ({
 const Notifications = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
+  if (page.state !== "ready") {
+    return <PageNotLoaded crumbs={[{ label: t`Notifications` }]} page={page} />;
+  }
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Notifications` }]} />
@@ -176,11 +180,7 @@ const Notifications = () => {
         <h1 className="text-2xl font-medium">
           <Trans>Notifications</Trans>
         </h1>
-        {page.state === "ready" ? (
-          <NotificationList page={page.data} />
-        ) : (
-          <NotLoaded page={page} />
-        )}
+        <NotificationList page={page.data} />
       </div>
     </>
   );
@@ -244,6 +244,7 @@ const NotificationList = ({ page }: { page: NotificationsPage }) => {
 };
 
 export const Route = createFileRoute("/_shell/notifications")({
+  pendingComponent: PageLoading,
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, readNotifications),
   component: Notifications,

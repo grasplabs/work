@@ -9,8 +9,9 @@ import type { HeldPermissions } from "../connections/connection-list.tsx";
 import type { Session } from "../core.ts";
 import { listedOrNone } from "../directory.ts";
 import { ErrorText } from "../error-text.tsx";
+import { PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore, NotLoaded, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 
 // Connections: the person's own, the organization's shared ones, and the
@@ -44,14 +45,11 @@ const HeldNotLoaded = ({
 }: {
   held: Loaded<HeldPermissions> | undefined;
 }) => {
-  const { t } = useLingui();
-  if (held === undefined || held.state === "ready") {
+  const { i18n, t } = useLingui();
+  const why = held === undefined ? undefined : notLoadedText(held, i18n);
+  if (why === undefined) {
     return null;
   }
-  const why =
-    held.state === "offline"
-      ? t`Grasp can't be reached right now. Try again in a moment.`
-      : held.message;
   return (
     <ErrorText>{t`Which Apps and agents hold permissions: ${why}`}</ErrorText>
   );
@@ -148,6 +146,7 @@ const Connections = () => {
 };
 
 export const Route = createFileRoute("/_shell/connections")({
+  pendingComponent: PageLoading,
   validateSearch: (
     search: Record<string, unknown>
   ): { connection?: string; connectionError?: string } => ({

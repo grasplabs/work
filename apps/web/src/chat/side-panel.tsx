@@ -7,8 +7,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
-import { Spinner } from "@grasp-os/ui/components/spinner";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Trans } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
@@ -18,6 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { LoadingLines } from "../frame/page-states.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { ScreenFrame } from "../screens/screen-frame.tsx";
@@ -83,7 +83,6 @@ export const SidePanel = ({
   running: boolean;
   drafts: number;
 }) => {
-  const { t } = useLingui();
   const [apps, setApps] = useState<Loaded<App[]>>();
   const core = useCore();
   const [opened, setOpened] = useState<Loaded<Opened>>();
@@ -127,7 +126,7 @@ export const SidePanel = ({
     );
   }
   if (apps === undefined) {
-    return <Spinner aria-label={t`Loading…`} className="self-center" />;
+    return <LoadingLines />;
   }
   if (apps.state !== "ready") {
     return <NotLoaded page={apps} />;
