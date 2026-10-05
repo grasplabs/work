@@ -156,6 +156,7 @@ const cast = {
   activity: { admin: "admin", builder: "builder" },
   activityAgain: { admin: "admin", builder: "builder" },
   chat: { user: "user" },
+  chatDock: { user: "user" },
   exports: { admin: "admin" },
   chatBuilds: { builder: "builder" },
   notifications: { builder: "builder" },

@@ -5,6 +5,7 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { ChatDock } from "../chat/chat-dock.tsx";
 import { loadCoreStatus } from "../core-connection.ts";
 import { keepFolded, readFolded } from "../fold.ts";
 import { AppSidebar } from "../frame/app-sidebar.tsx";
@@ -38,6 +39,8 @@ const Shell = () => {
             <Outlet />
           </InFrame>
         </SidebarInset>
+        {/* Grasp's chat, bottom right on every page but Chat's own. */}
+        <ChatDock />
       </SidebarProvider>
     </TooltipProvider>
   );
