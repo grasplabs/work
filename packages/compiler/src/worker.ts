@@ -6,9 +6,11 @@
  * Each App file becomes one ES module: Babel runs the React Compiler,
  * strips types and turns JSX into calls, then points imports at flat module
  * names (see kit.ts). There is no bundler: the kit's modules are built once
- * per release and shared by every App. Once every file compiles, the App is
- * type-checked and linted against the kit's design system; then Tailwind
- * compiles the CSS for the classes in the App's and the kit's sources.
+ * per release and shared by every App, and a build says which of them, and
+ * which of the App's own, each screen loads. Once every file compiles, the
+ * App is type-checked and linted against the kit's design system; then
+ * Tailwind compiles the CSS for the classes in the App's sources and in the
+ * kit modules it loads.
  *
  * It also builds an App's server code and workflows, which run in core
  * (see `buildServer` and `buildWorkflows`): the same Babel, stripping
@@ -32,7 +34,7 @@ import {
   serverCode,
   workflowCode,
 } from "./imports.ts";
-import type { CodeKind, ImportSite } from "./imports.ts";
+import type { CodeKind, ImportSite, ModuleImports } from "./imports.ts";
 import {
   buildFiles,
   declarationFile,
@@ -53,16 +55,27 @@ import { lint } from "./lint.ts";
 import { typeCheck } from "./type-check.ts";
 
 /**
+ * What a page loads to run one screen, by flat name: of the App's modules,
+ * the screen's and what it imports, directly or through others; of the
+ * kit's, what those import, and the screen runtime.
+ */
+export interface ScreenClosure {
+  modules: string[];
+  kitModules: string[];
+}
+
+/**
  * An App's modules by flat name, the kit's modules a page needs to run them
  * (what they import, directly or through each other, and the screen
- * runtime) and the CSS they use; or why it failed. Errors fail
- * a build; warnings don't.
+ * runtime), what each screen loads of both, by its module's name, and the
+ * CSS they use; or why it failed. Errors fail a build; warnings don't.
  */
 export type ScreenBuild =
   | {
       ok: true;
       modules: Record<string, string>;
       kitModules: string[];
+      screens: Record<string, ScreenClosure>;
       css: string;
       diagnostics: Diagnostic[];
     }
@@ -148,16 +161,12 @@ const nameClashes = (paths: string[]): Diagnostic[] => {
 const messageIn = (path: string, error: unknown): string =>
   messageOf(error).replace(`/${path}: `, "").replace(`${path}: `, "");
 
-/**
- * Compiles one App file, or says why it can't be. Adds the kit modules it
- * imports to `kitImports`.
- */
+/** Compiles one App file, with what it imports, or says why it can't be. */
 const compileFile = (
   path: string,
   source: string,
-  files: ReadonlySet<string>,
-  kitImports: Set<string>
-): { code: string } | { errors: Diagnostic[] } => {
+  files: ReadonlySet<string>
+): { code: string; imported: ModuleImports } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
   let compiled: string;
   try {
@@ -191,11 +200,13 @@ const compileFile = (
   if (errors.length > 0) {
     return { errors };
   }
+  const imported: ModuleImports = { app: new Set(), kit: new Set() };
   try {
     return {
       code: transformModule(compiled, path, [
-        rewriteImports(path, files, kit, kitImports),
+        rewriteImports(path, files, kit, imported),
       ]),
+      imported,
     };
   } catch (error) {
     return {
@@ -204,21 +215,58 @@ const compileFile = (
   }
 };
 
-/** The kit's modules these import, and every kit module those import. */
-const kitModulesFor = (imported: Iterable<string>): string[] => {
+/** These modules and every module they import, through `importsOf`. */
+const closureOf = (
+  roots: Iterable<string>,
+  importsOf: (name: string) => Iterable<string>
+): string[] => {
   const needed = new Set<string>();
-  const queue = [...imported];
+  const queue = [...roots];
   for (const name of queue) {
     if (!needed.has(name)) {
       needed.add(name);
-      queue.push(...(ownEntry(kit.moduleImports, name) ?? []));
+      queue.push(...importsOf(name));
     }
   }
   return [...needed].toSorted();
 };
 
-/** The CSS for the kit's theme and every class the App and the kit use. */
-const buildCss = async (sources: string[]): Promise<string> => {
+/**
+ * The kit's modules these import, and every kit module those import. The
+ * runtime renders the screens: a page needs it for any of them.
+ */
+const kitModulesFor = (imported: Iterable<string>): string[] =>
+  closureOf(
+    [...imported, kitModuleName(screenRuntime)],
+    (name) => ownEntry(kit.moduleImports, name) ?? []
+  );
+
+/**
+ * What a page loads for the screen in the module `entry`, given what each
+ * of the App's modules imports: not the App's other screens, nor what only
+ * they use of the kit.
+ */
+const screenClosure = (
+  entry: string,
+  imports: ReadonlyMap<string, ModuleImports>
+): ScreenClosure => {
+  const modules = closureOf([entry], (name) => imports.get(name)?.app ?? []);
+  return {
+    modules,
+    kitModules: kitModulesFor(
+      modules.flatMap((name) => [...(imports.get(name)?.kit ?? [])])
+    ),
+  };
+};
+
+/**
+ * The CSS for the kit's theme and every class used by the App and by the
+ * kit modules it loads (`kitModules`).
+ */
+const buildCss = async (
+  sources: string[],
+  kitModules: string[]
+): Promise<string> => {
   const tailwind = await compile(kit.stylesheets[kitStylesheet] ?? "", {
     // The kit's stylesheet only imports stylesheets that ship with the kit.
     // oxlint-disable-next-line require-await -- Tailwind expects a promise
@@ -231,7 +279,7 @@ const buildCss = async (sources: string[]): Promise<string> => {
     },
   });
   return tailwind.build([
-    ...kit.candidates,
+    ...kitModules.flatMap((name) => ownEntry(kit.moduleCandidates, name) ?? []),
     ...sources.flatMap((source) => extractCandidates(source)),
   ]);
 };
@@ -282,12 +330,13 @@ export const buildScreens = async (
   }
   const known = new Set(paths);
   const modules: Record<string, string> = {};
-  const kitImports = new Set<string>();
+  const imports = new Map<string, ModuleImports>();
   const errors: Diagnostic[] = [];
   for (const [path, source] of sources) {
-    const result = compileFile(path, source, known, kitImports);
+    const result = compileFile(path, source, known);
     if ("code" in result) {
       modules[appModuleName(path)] = result.code;
+      imports.set(appModuleName(path), result.imported);
     } else {
       errors.push(...result.errors);
     }
@@ -300,12 +349,23 @@ export const buildScreens = async (
   if (diagnostics.some((diagnostic) => isError(diagnostic))) {
     return { ok: false, diagnostics };
   }
-  const css = await buildCss(sources.map(([, source]) => source));
+  const kitModules = kitModulesFor(
+    [...imports.values()].flatMap(({ kit: imported }) => [...imported])
+  );
+  const css = await buildCss(
+    sources.map(([, source]) => source),
+    kitModules
+  );
   return {
     ok: true,
     modules,
-    // The runtime renders the screens: a page needs it for any of them.
-    kitModules: kitModulesFor([...kitImports, kitModuleName(screenRuntime)]),
+    kitModules,
+    screens: Object.fromEntries(
+      paths
+        .filter((path) => screenFile.test(path))
+        .map((path) => appModuleName(path))
+        .map((entry) => [entry, screenClosure(entry, imports)])
+    ),
     css,
     diagnostics,
   };

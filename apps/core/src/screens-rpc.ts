@@ -79,9 +79,18 @@ const maxRunSubscriptions = 20;
 /** What a frame runs of a screen: its code, the kit's it needs, its CSS. */
 type ScreenCode = Omit<ScreenBundle, "app" | "name" | "version">;
 
+/** These of `modules`, by name. */
+const pick = (
+  modules: Record<string, string>,
+  names: string[]
+): Record<string, string> =>
+  Object.fromEntries(names.map((name) => [name, modules[name] ?? ""]));
+
 /**
  * Screen `screen` of an App's `files` (at `version`; null for a chat's
- * draft), built, with the kit modules it needs.
+ * draft), built, with what it loads and nothing else: its own module and
+ * the App's and the kit's modules it imports, not the App's other screens
+ * or the rest of the kit.
  */
 export const screenCode = async (
   env: Env,
@@ -101,15 +110,18 @@ export const screenCode = async (
       buildFailed(version, build)
     );
   }
-  const { modules } = await kitModules(env.ASSETS);
+  const entry = appModuleName(path);
+  const closure = build.screens[entry];
+  if (closure === undefined) {
+    throw screenErrors.create("screen.not_found");
+  }
+  const { modules: kit } = await kitModules(env.ASSETS);
   return {
     screen: name,
-    entry: appModuleName(path),
+    entry,
     runtime: kitModuleName(screenRuntime),
-    modules: build.modules,
-    kit: Object.fromEntries(
-      build.kitModules.map((module) => [module, modules[module] ?? ""])
-    ),
+    modules: pick(build.modules, closure.modules),
+    kit: pick(kit, closure.kitModules),
     css: build.css,
   };
 };

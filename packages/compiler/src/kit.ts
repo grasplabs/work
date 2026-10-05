@@ -18,8 +18,12 @@ export interface Kit {
   icons: Record<string, string>;
   /** The kit's stylesheet, followed by the stylesheets it imports, by import id. */
   stylesheets: Record<string, string>;
-  /** Tailwind class candidates in the kit's own sources. */
-  candidates: string[];
+  /**
+   * Tailwind class candidates in the kit's own sources, by the flat name of
+   * the module that holds each source: a build's CSS has the classes of the
+   * kit modules its App loads, not of the whole catalog.
+   */
+  moduleCandidates: Record<string, string[]>;
   /** What each of the kit's modules imports, by flat name. */
   moduleImports: Record<string, string[]>;
   /**

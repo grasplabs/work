@@ -10,6 +10,7 @@ import type { UserWorkspaceConfig } from "vite-plus";
 import { testComposioKey } from "../connect/test/provider-config.ts";
 import { testBlueprintsModule } from "./build-blueprints.ts";
 import { connectBundle } from "./test/build-connect.ts";
+import { testVersionModule } from "./test/compiler-version.ts";
 import {
   connectClient,
   connectProvidersScript,
@@ -97,9 +98,13 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
       sequence: { ...test?.sequence, setupFiles: "list" },
     },
     // The built-ins the global setup embeds, the tests' own included, in a
-    // module of their own: core's build ships dist/blueprints.js.
+    // module of their own: core's build ships dist/blueprints.js. The
+    // version of the compiler it builds into the tests' assets likewise.
     resolve: {
-      alias: [{ find: /^#blueprints$/u, replacement: testBlueprintsModule }],
+      alias: [
+        { find: /^#blueprints$/u, replacement: testBlueprintsModule },
+        { find: /^#version$/u, replacement: testVersionModule },
+      ],
     },
     plugins: [
       // Read when the pool starts, after the global setup wrote the bundle.
