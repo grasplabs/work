@@ -7,12 +7,16 @@ import type { ImprovementSignals } from "@grasp-os/shared/signals";
 import { readPendingRequests } from "../activity/pending.tsx";
 import { integrationsOf } from "../connections/integrations.ts";
 import type { CoreConnection } from "../core-connection.ts";
+import { CoreTimeoutError } from "../core.ts";
 import type { Session } from "../core.ts";
 import { listedOrNone } from "../directory.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { openableApps } from "../workflows/reads.ts";
+import { activityShown } from "./activity.tsx";
 import { readNotifications } from "./failed-workflows.tsx";
 import type { Signals } from "./signals.tsx";
+import { decidesRequests } from "./to-do.tsx";
 import type { Waiting } from "./to-do.tsx";
 
 // What the dashboard reads, each part on its own so one that fails or
@@ -37,17 +41,34 @@ export const readWaiting = async (
     loadFromCore(core, async (session) => await session.pendingActions.list()),
     loadFromCore(core, readNotifications),
     loadFromCore(core, readIntegrations),
-    isAdmin(identity.role)
+    decidesRequests(identity)
       ? loadFromCore(core, readPendingRequests)
       : undefined,
   ]);
   return { held, failed, integrations, requests };
 };
 
-/** A read of signals core may refuse this person: none, rather than a failure, then. */
+/** Whether core itself refused a read: its errors carry a code; a timeout or a lost connection don't. */
+const refusedByCore = (error: unknown): boolean =>
+  !(error instanceof CoreTimeoutError) &&
+  error instanceof Error &&
+  "code" in error &&
+  typeof error.code === "string";
+
+/**
+ * A read of signals core may refuse this person: none, rather than a
+ * failure, then. Anything else (a read that doesn't come in time, a lost
+ * connection) fails the card, which says so, rather than hiding it.
+ */
 const orNone = async <T>(read: Promise<T>): Promise<T | undefined> => {
-  const [value] = await listedOrNone((async () => [await read])());
-  return value;
+  try {
+    return await read;
+  } catch (error) {
+    if (refusedByCore(error)) {
+      return undefined;
+    }
+    throw error;
+  }
 };
 
 /**
@@ -90,7 +111,7 @@ const readSignals = async (
   identity: Identity
 ): Promise<Signals> => {
   const [apps, models, knowledge] = await Promise.all([
-    listedOrNone(session.apps.list()),
+    openableApps(session),
     listedOrNone(session.chats.models()),
     orNone<KnowledgeSignals>(session.knowledgeSignals.list()),
   ]);
@@ -107,31 +128,56 @@ const readSignals = async (
   };
 };
 
-/** Everything the dashboard shows. */
+/** How many pages of the trail the card reads at most, past the trail's own searches. */
+const activityPages = 5;
+
+/**
+ * The latest events of the audit trail, without its own searches: core
+ * records every search, the dashboard's too, and those alone can fill a
+ * page. It reads older pages until it has enough to show, or the trail
+ * ends; only a first page records a search.
+ */
+const readActivity = async (session: Session): Promise<AuditRecord[]> => {
+  const shown: AuditRecord[] = [];
+  let before: number | undefined;
+  for (let page = 0; page < activityPages; page += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each page starts where the last ended
+    const { records, next } = await session.audit.search({}, before);
+    shown.push(
+      ...records.filter(({ event }) => event?.action !== "audit.searched")
+    );
+    if (shown.length >= activityShown || next === null) {
+      break;
+    }
+    before = next;
+  }
+  return shown;
+};
+
+/**
+ * Everything the dashboard shows. What waits on the person comes first;
+ * the signals and activity come as they are read, so a slow one never
+ * holds back the rest.
+ */
 export interface Dashboard {
   waiting: Waiting;
-  signals: Loaded<Signals>;
+  signals: Promise<Loaded<Signals>>;
   /** Admins only. */
-  activity: Loaded<AuditRecord[]> | undefined;
+  activity: Promise<Loaded<AuditRecord[]>> | undefined;
 }
 
 export const readDashboard = async (
   core: CoreConnection,
   identity: Identity
 ): Promise<Dashboard> => {
-  const [waiting, signals, activity] = await Promise.all([
-    readWaiting(core, identity),
-    loadFromCore(core, async (session) => await readSignals(session, identity)),
-    isAdmin(identity.role)
-      ? loadFromCore(core, async (session) => {
-          const { records } = await session.audit.search({});
-          // Core records every search of the trail, this one too: those
-          // would soon be all the card shows.
-          return records.filter(
-            ({ event }) => event?.action !== "audit.searched"
-          );
-        })
-      : undefined,
-  ]);
+  // Not awaited: their cards wait for them.
+  const signals = loadFromCore(
+    core,
+    async (session) => await readSignals(session, identity)
+  );
+  const activity = isAdmin(identity.role)
+    ? loadFromCore(core, readActivity)
+    : undefined;
+  const waiting = await readWaiting(core, identity);
   return { waiting, signals, activity };
 };

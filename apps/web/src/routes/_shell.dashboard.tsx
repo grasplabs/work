@@ -1,11 +1,11 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute } from "@tanstack/react-router";
+import { Await, createFileRoute } from "@tanstack/react-router";
 
 import { Activity } from "../dashboard/activity.tsx";
 import { readDashboard } from "../dashboard/read-dashboard.ts";
 import { CouldBeBetter } from "../dashboard/signals.tsx";
 import { ToDo } from "../dashboard/to-do.tsx";
-import { PageLoading } from "../frame/page-states.tsx";
+import { LoadingLines, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
 
@@ -37,16 +37,26 @@ const DashboardPage = () => {
           </p>
         </div>
         <ToDo identity={identity} waiting={waiting} />
-        {signals.state === "ready" ? (
-          <CouldBeBetter signals={signals.data} />
-        ) : (
-          <NotLoaded page={signals} />
-        )}
-        {activity?.state === "ready" ? (
-          <Activity records={activity.data} />
-        ) : null}
-        {activity === undefined || activity.state === "ready" ? null : (
-          <NotLoaded page={activity} />
+        {/* Each comes as it is read: a slow one holds back nothing else. */}
+        <Await fallback={<LoadingLines />} promise={signals}>
+          {(loaded) =>
+            loaded.state === "ready" ? (
+              <CouldBeBetter signals={loaded.data} />
+            ) : (
+              <NotLoaded page={loaded} />
+            )
+          }
+        </Await>
+        {activity === undefined ? null : (
+          <Await fallback={<LoadingLines />} promise={activity}>
+            {(loaded) =>
+              loaded.state === "ready" ? (
+                <Activity records={loaded.data} />
+              ) : (
+                <NotLoaded page={loaded} />
+              )
+            }
+          </Await>
         )}
       </div>
     </>

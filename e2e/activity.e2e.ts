@@ -84,9 +84,9 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await expect(reading).toContainText("Collection playbook");
   await expect(reading).toContainText("None current");
   await reading.getByRole("button", { name: /^Approve /u }).click();
-  await expect(page.getByRole("status")).toContainText(
-    `Approved: ${appName}: read on Collection playbook.`
-  );
+  await expect(
+    page.getByRole("region", { name: "To do" }).getByRole("status")
+  ).toContainText(`Approved: ${appName}: read on Collection playbook.`);
   await expect(rows).toHaveCount(1);
 
   await rows.getByRole("button", { name: /^Reject /u }).click();
@@ -94,7 +94,9 @@ test("an admin approves a permission request, finds it in the audit log, and exp
     .getByRole("dialog")
     .getByRole("button", { name: "Reject", exact: true })
     .click();
-  await expect(page.getByRole("status")).toContainText(`Rejected: ${appName}`);
+  await expect(
+    page.getByRole("region", { name: "To do" }).getByRole("status")
+  ).toContainText(`Rejected: ${appName}`);
   await expect(rows).toHaveCount(0);
 
   // The approval is in the log, found by what it granted, once the log has
@@ -224,12 +226,14 @@ test("an admin sees a grant asked for again after a new version, and approves on
       1
     );
     await expect(row).toContainText("Asked again after version 3");
-    await expect(page.getByRole("status")).toHaveCount(0);
+    await expect(
+      page.getByRole("region", { name: "To do" }).getByRole("status")
+    ).toHaveCount(0);
 
     await row.getByRole("button", { name: /^Approve /u }).click();
-    await expect(page.getByRole("status")).toContainText(
-      `Approved: ${appName}: write on Collection playbook.`
-    );
+    await expect(
+      page.getByRole("region", { name: "To do" }).getByRole("status")
+    ).toContainText(`Approved: ${appName}: write on Collection playbook.`);
     await expect(row).toHaveCount(0);
   } finally {
     builds.core[Symbol.dispose]();

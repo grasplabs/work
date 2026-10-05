@@ -7,7 +7,6 @@ import { Button } from "@grasp-os/ui/components/button";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { TriangleAlertIcon } from "lucide-react";
-import { useState } from "react";
 
 import type { Session } from "../core.ts";
 import { listedOrNone } from "../directory.ts";
@@ -122,10 +121,25 @@ const FailedWorkflow = ({
   );
 };
 
+/** Older failures shown on asking, after the latest page; the dashboard keeps them, to count them too. */
+export interface OlderFailures {
+  rows: Notification[];
+  /** Whether core has older ones still; undefined until one was asked for. */
+  more: boolean | undefined;
+}
+
 /** The pages shown so far, and the way to the next older one. */
-export const FailedWorkflows = ({ page }: { page: NotificationsPage }) => {
-  const [shown, setShown] = useState(page.page.notifications);
-  const [more, setMore] = useState(page.page.more);
+export const FailedWorkflows = ({
+  page,
+  older,
+  onOlder,
+}: {
+  page: NotificationsPage;
+  older: OlderFailures;
+  onOlder: (older: OlderFailures) => void;
+}) => {
+  const shown = [...page.page.notifications, ...older.rows];
+  const more = older.more ?? page.page.more;
   const { busy, failure, run } = useCoreAction();
   const { t } = useLingui();
   const showOlder = async (): Promise<void> => {
@@ -137,8 +151,10 @@ export const FailedWorkflows = ({ page }: { page: NotificationsPage }) => {
       async (session) => await readPage(session, { at: last.at, id: last.id })
     );
     if (next !== undefined) {
-      setShown([...shown, ...next.notifications]);
-      setMore(next.more);
+      onOlder({
+        rows: [...older.rows, ...next.notifications],
+        more: next.more,
+      });
     }
   };
   if (shown.length === 0) {
