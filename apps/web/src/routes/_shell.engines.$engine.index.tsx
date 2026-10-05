@@ -50,6 +50,21 @@ import { WorkflowsTable } from "../workflows/workflows-table.tsx";
 /** A read only one tab waits for: the page shows before it comes. */
 type Deferred<T> = Promise<Loaded<T>>;
 
+/**
+ * A read started the first time its tab asks for it, then shared: hidden
+ * tabs aren't rendered, so a tab never opened never reads.
+ */
+type OnFirstUse<T> = () => { read: Deferred<T> };
+
+const onFirstUse = <T,>(start: () => Deferred<T>): OnFirstUse<T> => {
+  // The same promise each time, which `Await` follows across renders.
+  let started: Deferred<T> | undefined;
+  return () => {
+    started ??= start();
+    return { read: started };
+  };
+};
+
 interface EnginePage {
   app: App;
   contents: AppContents;
@@ -125,14 +140,14 @@ const Workflows = ({
   identity,
 }: {
   engine: string;
-  workflows: Deferred<WorkflowSummary[]>;
-  runs: Deferred<RunsPage>;
+  workflows: OnFirstUse<WorkflowSummary[]>;
+  runs: OnFirstUse<RunsPage>;
   identity: Identity;
 }) => {
   const { t } = useLingui();
   return (
     <div className="flex flex-col gap-6">
-      <Later promise={workflows}>
+      <Later promise={workflows().read}>
         {(rows) => (
           <WorkflowsTable
             empty={
@@ -149,7 +164,7 @@ const Workflows = ({
         <h2 className="font-medium" id="engine-runs">
           <Trans>Runs</Trans>
         </h2>
-        <Later promise={runs}>
+        <Later promise={runs().read}>
           {(page) => (
             <RunsLog
               empty={t`No runs yet.`}
@@ -441,11 +456,16 @@ export const Route = createFileRoute("/_shell/engines/$engine/")({
   pendingComponent: PageLoading,
   component: EnginePageView,
   loader: async ({ context: { core, identity }, params }) => ({
-    // Not awaited: only their tabs wait for them.
-    workflows: loadFromCore(core, listWorkflows),
-    runs: loadFromCore(
-      core,
-      async (session) => await listRuns(session, { app: params.engine })
+    // Not awaited: only their tabs wait for them. Core lists every
+    // engine's workflows at once (there is no read of one engine's), so
+    // that read, and the runs, wait until Workflows is opened.
+    workflows: onFirstUse(async () => await loadFromCore(core, listWorkflows)),
+    runs: onFirstUse(
+      async () =>
+        await loadFromCore(
+          core,
+          async (session) => await listRuns(session, { app: params.engine })
+        )
     ),
     members: loadFromCore(
       core,

@@ -1,5 +1,5 @@
 import { useNavigate, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
@@ -32,7 +32,15 @@ export const useAsk = (
   // models are known.
   const [chosenModel, setChosenModel] = useState<string>();
   const model = chosenModel ?? models[0] ?? "";
+  // One question at a time: a second click on Send or Try again while one
+  // is on its way would ask it twice. A ref, as `busy` is only seen on the
+  // next render.
+  const sending = useRef(false);
   const ask = async (question: string): Promise<void> => {
+    if (sending.current) {
+      return;
+    }
+    sending.current = true;
     let created: string | undefined;
     const sent = await run(async (session) => {
       let id = chatId;
@@ -43,9 +51,15 @@ export const useAsk = (
       await session.chats.send(id, { text: question, model });
       return id;
     });
+    sending.current = false;
     if (sent === undefined) {
-      // A new chat the question didn't go into is in the list, to ask again.
+      // A new chat the question didn't go into opens, so asking again asks
+      // in it rather than making another; the box keeps the question.
       if (created !== undefined) {
+        setActiveChat(created);
+        if (opens === "page") {
+          await navigate({ to: "/", search: { chat: created } });
+        }
         await router.invalidate();
       }
       return;
