@@ -1,12 +1,12 @@
 import { execFileSync } from "node:child_process";
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,11 +33,20 @@ const scratch = (): string => {
 };
 
 /** Builds into `assets`, as a process with `NODE_ENV` set to `mode`. */
-const build = (assets: string, versionModule: string, mode: string): void => {
-  execFileSync(process.execPath, [buildScript, assets, versionModule], {
-    env: { ...process.env, NODE_ENV: mode },
-    stdio: "pipe",
-  });
+const build = (
+  assets: string,
+  versionModule: string,
+  mode: string,
+  flags: string[] = []
+): void => {
+  execFileSync(
+    process.execPath,
+    [buildScript, assets, versionModule, ...flags],
+    {
+      env: { ...process.env, NODE_ENV: mode },
+      stdio: "pipe",
+    }
+  );
 };
 
 const versionIn = (versionModule: string): string =>
@@ -46,6 +55,18 @@ const versionIn = (versionModule: string): string =>
 
 const releasesIn = (assets: string): string[] =>
   readdirSync(path.join(assets, compilerAssets.directory(""))).toSorted();
+
+/** Releases left in `assets` by earlier builds, each a minute newer than the last. */
+const earlierReleases = (assets: string, names: string[]): void => {
+  const releases = path.join(assets, compilerAssets.directory(""));
+  const longAgo = Date.now() - 3_600_000;
+  for (const [index, name] of names.entries()) {
+    const release = path.join(releases, name);
+    mkdirSync(release, { recursive: true });
+    const at = new Date(longAgo + index * 60_000);
+    utimesSync(release, at, at);
+  }
+};
 
 // Each build starts Node, TypeScript and three bundles.
 describe("the compiler's build", { timeout: 120_000 }, () => {
@@ -110,14 +131,22 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
           return [file, [ino, mtimeMs]];
         })
       );
-    const before = identityOf();
+    /** The file itself and when it was last written. */
+    const moduleIdentity = (): number[] => {
+      const { ino, mtimeMs } = statSync(versionModule);
+      return [ino, mtimeMs];
+    };
+    const before = { release: identityOf(), module: moduleIdentity() };
 
     // A server reads these files while the watcher builds: under another
-    // NODE_ENV too, they are never taken away or written again.
+    // NODE_ENV too, they are never taken away or written again. Nor is
+    // the version module, which the server would reload on.
     build(assets, versionModule, "development");
 
     expect(versionIn(versionModule)).toBe(version);
-    expect(identityOf()).toStrictEqual(before);
+    expect({ release: identityOf(), module: moduleIdentity() }).toStrictEqual(
+      before
+    );
     expect(readdirSync(assets)).toStrictEqual(["_compiler"]);
   });
 
@@ -127,35 +156,55 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
     build(path.join(dir, "assets"), versionModule, "production");
     const version = versionIn(versionModule);
     // Next to the kit's components, as a test of one would be.
+    // The build reads the kit where it is, so the files go there, for as
+    // long as the build takes: removed whatever happens here, though a run
+    // that is killed outright leaves them, untracked, to delete by hand.
     const added = ["probe.test.tsx", "probe.d.ts"].map((file) =>
       path.join(import.meta.dirname, "../ui/src/components", file)
     );
-    made.push(...added);
-    for (const file of added) {
-      writeFileSync(file, "export const probe = 1;\n");
+    try {
+      for (const file of added) {
+        writeFileSync(file, "export const probe = 1;\n");
+      }
+      build(path.join(dir, "assets"), versionModule, "production");
+    } finally {
+      for (const file of added) {
+        rmSync(file, { force: true });
+      }
     }
-
-    build(path.join(dir, "assets"), versionModule, "production");
 
     expect(versionIn(versionModule)).toBe(version);
   });
 
-  it("keeps the release a running server was built for until the next build, and drops older ones", () => {
+  it("leaves only its own release, as a release ships", () => {
     const dir = scratch();
     const assets = path.join(dir, "assets");
     const versionModule = path.join(dir, "version.js");
-    const releases = path.join(assets, compilerAssets.directory(""));
-    // A server runs on `running`; `older` is left from before it.
-    for (const release of ["0000000000000001", "0000000000000002"]) {
-      mkdirSync(path.join(releases, release), { recursive: true });
-    }
-    const [older = "", running = ""] = releasesIn(assets);
-    writeFileSync(versionModule, `export const version = "${running}";\n`);
+    earlierReleases(assets, ["0000000000000001", "0000000000000002"]);
 
     build(assets, versionModule, "production");
 
-    const version = versionIn(versionModule);
-    expect(releasesIn(assets)).toStrictEqual([running, version].toSorted());
-    expect(existsSync(path.join(releases, older))).toBeFalsy();
+    expect(releasesIn(assets)).toStrictEqual([versionIn(versionModule)]);
+  });
+
+  it("keeps, for the dev watcher, the release a server started on through two more builds", () => {
+    const dir = scratch();
+    const assets = path.join(dir, "assets");
+    const versionModule = path.join(dir, "version.js");
+    // A server started on `running` and hasn't reloaded; one build has
+    // finished since (`second`), and `older` is from before the server.
+    const [older, running, second] = [
+      "0000000000000001",
+      "0000000000000002",
+      "0000000000000003",
+    ];
+    earlierReleases(assets, [older, running, second]);
+
+    // The next build finishes before the server reloads, too.
+    build(assets, versionModule, "production", ["--keep=3"]);
+
+    expect(releasesIn(assets)).toStrictEqual(
+      [running, second, versionIn(versionModule)].toSorted()
+    );
   });
 });
