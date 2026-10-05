@@ -9,6 +9,13 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
 import { useLingui } from "@lingui/react/macro";
 import { LanguagesIcon } from "lucide-react";
 
@@ -97,5 +104,37 @@ export const LanguageButton = () => {
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+};
+
+/** The language as a field of its own, as Settings → Profile offers it. */
+export const LanguageSelect = ({ id }: { id: string }) => {
+  const { i18n } = useLingui();
+  const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
+  return (
+    <Select
+      items={languages}
+      onValueChange={(value: unknown) => {
+        if (isLocale(value)) {
+          void chooseLocale(value);
+        }
+      }}
+      value={locale}
+    >
+      <SelectTrigger className="w-full" id={id}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {languages.map((language) => (
+          <SelectItem
+            key={language.value}
+            lang={language.value}
+            value={language.value}
+          >
+            {language.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 };

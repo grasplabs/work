@@ -4,7 +4,7 @@ import { test } from "./csp.ts";
 import { apiOf, pageOf, peopleIn, release } from "./people.ts";
 
 // A failed run, end to end: the person it acted for finds it counted in
-// the nav, reads it on the Notifications page, and asks the agent to fix
+// the nav, reads it on the dashboard, and asks the agent to fix
 // it, which opens a new chat with the question asked. The local stack
 // reaches no model, so the answer is the gateway's failure; what the agent
 // is handed, and who may ask, are core's tests
@@ -61,16 +61,19 @@ test("the person a run acted for is told it failed, and asks the agent to fix it
   const page = await pageOf(browser, builder);
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
-  await nav.getByRole("link", { name: "Notifications 1 unread" }).click();
+  await nav.getByRole("link", { name: "Dashboard 1 thing waiting" }).click();
   const item = page
-    .getByRole("list", { name: "Notifications" })
+    .getByRole("list", { name: "Workflows that failed" })
     .getByRole("listitem")
     .filter({ hasText: name });
   await expect(item).toContainText(`careless in ${name} failed`, pageRead);
   // Read now: the nav counts none.
-  await expect(nav.getByRole("link", { name: "Notifications" })).toHaveText(
-    "Notifications"
+  await expect(nav.getByRole("link", { name: "Dashboard" })).toHaveText(
+    "Dashboard"
   );
+  // An old link to the notifications leads to the dashboard.
+  await page.goto("/notifications");
+  await expect(page).toHaveURL(/\/dashboard$/u);
 
   await item.getByRole("button", { name: "Ask the agent to fix" }).click();
   await expect(page).toHaveURL(/[?&]chat=/u, pageRead);

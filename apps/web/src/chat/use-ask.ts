@@ -1,5 +1,5 @@
 import { useNavigate, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
@@ -32,10 +32,23 @@ export const useAsk = (
   // models are known.
   const [chosenModel, setChosenModel] = useState<string>();
   const model = chosenModel ?? models[0] ?? "";
+  // One question at a time: a second click on Send or Try again while one
+  // is on its way would ask it twice. A ref, as `busy` is only seen on the
+  // next render.
+  const sending = useRef(false);
+  // A new chat made for a question that then failed to send: asking the
+  // same question again asks in it, rather than making another.
+  const unsent = useRef<{ id: string; question: string } | null>(null);
   const ask = async (question: string): Promise<void> => {
+    if (sending.current) {
+      return;
+    }
+    sending.current = true;
     let created: string | undefined;
     const sent = await run(async (session) => {
-      let id = chatId;
+      let id =
+        chatId ??
+        (unsent.current?.question === question ? unsent.current.id : undefined);
       if (id === undefined) {
         ({ id } = await session.chats.create(titleOf(question)));
         created = id;
@@ -43,13 +56,17 @@ export const useAsk = (
       await session.chats.send(id, { text: question, model });
       return id;
     });
+    sending.current = false;
     if (sent === undefined) {
-      // A new chat the question didn't go into is in the list, to ask again.
+      // The box keeps the question and says why it wasn't sent; a new chat
+      // made for it waits to be asked in again, and shows in Chat's list.
       if (created !== undefined) {
+        unsent.current = { id: created, question };
         await router.invalidate();
       }
       return;
     }
+    unsent.current = null;
     // Clears the box only of what was sent from it: asking again sends an
     // earlier question, and a draft the person started stays.
     setText((now) => (now === question ? "" : now));

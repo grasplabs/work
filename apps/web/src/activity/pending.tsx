@@ -145,26 +145,26 @@ const objectOf = (
     return i18n._(msg`Collection ${collectionId}`);
   }
   if (object.type === "app") {
-    const app = appName(directory, object.appId);
+    const engine = appName(directory, object.appId);
     const covered = coveredExports(actions, exports.get(object.appId));
-    return i18n._(msg`Exports of ${app}: ${covered}`);
+    return i18n._(msg`Exports of ${engine}: ${covered}`);
   }
   if (object.type === "platform" && actions.includes("guests")) {
     // Consent in plain words: who reaches what, and at whose cost.
     return i18n._(
-      msg`Guest chats. This App can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them`
+      msg`Guest chats. This engine can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them`
     );
   }
   if (object.type === "platform") {
     // Consent in plain words: what the App reads is published company-wide
     // on purpose (counts only, never a run), and it may show it to anyone.
     return i18n._(
-      msg`Platform statistics. This App can read run and signal counts for every App, and may show them to anyone who uses it`
+      msg`Platform statistics. This engine can read run and signal counts for every engine, and may show them to anyone who uses it`
     );
   }
   const { workflowId } = object;
-  const app = appName(directory, object.appId);
-  return i18n._(msg`Workflow ${workflowId} of ${app}`);
+  const engine = appName(directory, object.appId);
+  return i18n._(msg`Workflow ${workflowId} of ${engine}`);
 };
 
 /**
@@ -195,8 +195,8 @@ const RecordTypeClaims = ({
       {recordTypes.taken.map(({ type, owner }) => (
         <span key={type} className="text-destructive block text-xs">
           {owner === null
-            ? t`Another App already keeps ${type} records here: this App's won't apply.`
-            : t`${ph({ app: appName(directory, owner) })} already keeps ${type} records here: this App's won't apply.`}
+            ? t`Another engine already keeps ${type} records here: this engine's won't apply.`
+            : t`${ph({ engine: appName(directory, owner) })} already keeps ${type} records here: this engine's won't apply.`}
         </span>
       ))}
     </>
@@ -255,7 +255,7 @@ const askedAgain = (
       );
 };
 
-const versionChanged = msg`Another version of this App was made current since this list was read. The list now shows it: review that version, then approve again.`;
+const versionChanged = msg`Another version of this engine was made current since this list was read. The list now shows it: review that version, then approve again.`;
 
 /**
  * Grants `request` for `version`, the one the admin reviewed. Core refuses
@@ -400,7 +400,7 @@ export const PendingApprovals = ({
           <Link
             className="underline"
             search={{ target: decided.permission }}
-            to="/activity"
+            to="/settings/audit"
           >
             <Trans>See it in the log</Trans>
           </Link>

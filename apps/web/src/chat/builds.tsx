@@ -110,9 +110,9 @@ const changeWords = {
 
 /** How the server code changed, as a whole sentence for its warning. */
 const serverChangeWarnings = {
-  added: msg`Added: it acts for whoever uses the App, with everything the App holds`,
-  modified: msg`Changed: it acts for whoever uses the App, with everything the App holds`,
-  removed: msg`Removed: it acts for whoever uses the App, with everything the App holds`,
+  added: msg`Added: it acts for whoever uses the engine, with everything the engine holds`,
+  modified: msg`Changed: it acts for whoever uses the engine, with everything the engine holds`,
+  removed: msg`Removed: it acts for whoever uses the engine, with everything the engine holds`,
 } as const;
 
 /** How a workflow changed, before its ID. */
@@ -263,7 +263,7 @@ const ReviewDetails = ({
       </blockquote>
       <p className="text-muted-foreground">
         {current === null
-          ? t`Nothing runs yet: this would be the App's first current version.`
+          ? t`Nothing runs yet: this would be the engine's first current version.`
           : t`Compared with version ${current}, which runs now.`}
       </p>
       <section aria-label={t`Files`} className="flex flex-col gap-1">
@@ -391,7 +391,7 @@ const ReviewDetails = ({
       {review.exports.length === 0 ? null : (
         <section aria-label={t`Exports`} className="flex flex-col gap-1">
           <h4 className="font-medium">
-            <Trans>What other Apps may call</Trans>
+            <Trans>What other engines may call</Trans>
           </h4>
           <ul className="flex flex-col gap-1">
             {review.exports.map((change) => {
@@ -401,7 +401,7 @@ const ReviewDetails = ({
                   {text}
                   {widens ? (
                     <Badge variant="destructive">
-                      <Trans>Changes the App&apos;s data</Trans>
+                      <Trans>Changes the engine&apos;s data</Trans>
                     </Badge>
                   ) : null}
                 </li>
@@ -411,11 +411,11 @@ const ReviewDetails = ({
         </section>
       )}
       <section
-        aria-label={t`What the App holds`}
+        aria-label={t`What the engine holds`}
         className="flex flex-col gap-1"
       >
         <h4 className="font-medium">
-          <Trans>What the App holds</Trans>
+          <Trans>What the engine holds</Trans>
         </h4>
         {review.grants.length === 0 ? (
           <p className="text-muted-foreground">
@@ -751,7 +751,7 @@ export const ChatBuilds = ({
         <Trans>Being built</Trans>
       </h3>
       {builds.data.drafts.map((draft) => {
-        const app = names.get(draft.app) ?? draft.app;
+        const engine = names.get(draft.app) ?? draft.app;
         return (
           <div
             className="bg-card flex flex-col gap-3 rounded-xl border p-4 text-sm"
@@ -759,12 +759,12 @@ export const ChatBuilds = ({
           >
             <div className="flex items-start justify-between gap-2">
               <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="truncate font-medium">{app}</span>
+                <span className="truncate font-medium">{engine}</span>
                 <span className="text-muted-foreground">
                   <Plural
                     value={draft.changed.length}
-                    one={`${app}: # file changed in this chat, not proposed yet`}
-                    other={`${app}: # files changed in this chat, not proposed yet`}
+                    one={`${engine}: # file changed in this chat, not proposed yet`}
+                    other={`${engine}: # files changed in this chat, not proposed yet`}
                   />
                 </span>
               </div>
@@ -782,13 +782,13 @@ export const ChatBuilds = ({
                   </Button>
                 )}
                 <Link
-                  aria-label={t`Open ${ph({ name: app })}`}
+                  aria-label={t`Open ${ph({ name: engine })}`}
                   className={buttonVariants({
                     size: "icon-sm",
                     variant: "ghost",
                   })}
-                  params={{ app: draft.app }}
-                  to="/apps/$app"
+                  params={{ engine: draft.app }}
+                  to="/engines/$engine"
                 >
                   <ArrowUpRightIcon />
                 </Link>
@@ -799,7 +799,7 @@ export const ChatBuilds = ({
                 chatId={chatId}
                 draft={previewed}
                 key={previewed.app}
-                name={app}
+                name={engine}
               />
             ) : null}
           </div>

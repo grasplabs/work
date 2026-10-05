@@ -47,14 +47,24 @@ const Place = ({
     <main className="flex min-h-svh flex-col">{children}</main>
   );
 
+/**
+ * The level of a state's title: `h1` where it stands for the page, lower
+ * where it sits under the page's own heading (a settings section's `h3`,
+ * under the page's and the section's).
+ */
+type StateHeading = "h1" | "h2" | "h3";
+
 /** Not found, in a page that keeps its own frame, such as Knowledge with its sidebar. */
 export const NotFoundState = ({
   title,
   icon: Icon = SearchXIcon,
+  heading: Heading = "h1",
 }: {
   title?: string;
   /** What wasn't found, as the sidebar draws it: a workflow's icon, say. */
   icon?: LucideIcon;
+  /** Its title's level: the page's own heading unless it sits in a section that has one. */
+  heading?: StateHeading;
 }) => {
   const { t } = useLingui();
   return (
@@ -64,7 +74,7 @@ export const NotFoundState = ({
           <Icon />
         </EmptyMedia>
         <EmptyTitle>
-          <h1>{title ?? t`Not found`}</h1>
+          <Heading>{title ?? t`Not found`}</Heading>
         </EmptyTitle>
         <EmptyDescription>
           <Trans>It may have been renamed or removed.</Trans>
@@ -117,10 +127,13 @@ const TryAgain = ({ trying }: { trying: boolean }) => {
 export const ErrorState = ({
   reason,
   title,
+  heading: Heading = "h1",
 }: {
   reason: string | undefined;
   /** What failed; "This page didn't load" without it. */
   title?: string;
+  /** Its title's level: the page's own heading unless it sits in a section that has one. */
+  heading?: StateHeading;
 }) => {
   const { t } = useLingui();
   const trying = useRouterState({ select: (state) => state.isLoading });
@@ -131,7 +144,7 @@ export const ErrorState = ({
           <TriangleAlertIcon />
         </EmptyMedia>
         <EmptyTitle>
-          <h1>{title ?? t`This page didn't load`}</h1>
+          <Heading>{title ?? t`This page didn't load`}</Heading>
         </EmptyTitle>
         <EmptyDescription>
           {/* Gone while trying, so the alert is announced again if it fails again. */}
@@ -202,16 +215,18 @@ export const NotLoadedState = ({
   page,
   notFound,
   icon,
+  heading,
 }: {
   page: Exclude<Loaded<unknown>, { state: "ready" }>;
   notFound?: string;
   icon?: LucideIcon;
+  heading?: StateHeading;
 }) => {
   const { i18n } = useLingui();
   return page.state === "missing" ? (
-    <NotFoundState icon={icon} title={notFound} />
+    <NotFoundState heading={heading} icon={icon} title={notFound} />
   ) : (
-    <ErrorState reason={notLoadedText(page, i18n)} />
+    <ErrorState heading={heading} reason={notLoadedText(page, i18n)} />
   );
 };
 

@@ -9,11 +9,11 @@ import { runPreview, runScreen } from "./screen-host.ts";
 import type { FailureReason, ScreenState } from "./screen-host.ts";
 
 const failureMessages: Readonly<Record<FailureReason, MessageDescriptor>> = {
-  forbidden: msg`You can't open this App's screens: your role doesn't allow it, or the App has read data you can't read.`,
-  "not-found": msg`This App has no such screen.`,
-  "not-running": msg`This App has no version to run yet.`,
-  broken: msg`This screen doesn't build. Ask a builder to fix it.`,
-  unknown: msg`The screen couldn't be loaded.`,
+  forbidden: msg`You can't open this engine's apps: your role doesn't allow it, or the engine has read data you can't read.`,
+  "not-found": msg`This engine has no such app.`,
+  "not-running": msg`This engine has no version to run yet.`,
+  broken: msg`This app doesn't build. Ask a builder to fix it.`,
+  unknown: msg`The app couldn't be loaded.`,
 };
 
 interface StatusProps {
@@ -29,7 +29,7 @@ const ScreenStatus = ({ state, onReload }: StatusProps) => {
   }
   let message = i18n._(failureMessages.unknown);
   if (state.status === "updated") {
-    message = t`A new version of this App is available.`;
+    message = t`A new version of this engine is available.`;
   } else if (state.status === "signed-out") {
     message = t`Your session has ended. Sign in again to go on.`;
   } else if (state.status === "failed") {
@@ -194,9 +194,9 @@ export const ScreenFrame = ({
   return (
     <FramedScreen
       embedded={embedded}
-      label={t`App screen`}
+      label={t`Engine app`}
       source={{ app, screen }}
-      title={t`${screen} screen`}
+      title={t`${screen} app`}
       {...(onReload === undefined ? {} : { onReload })}
     />
   );
@@ -225,8 +225,8 @@ export const PreviewFrame = ({
       source={{ chatId, app, ...(screen === undefined ? {} : { screen }) }}
       title={
         screen === undefined
-          ? t`Preview of the draft's first screen`
-          : t`Preview of ${screen} screen`
+          ? t`Preview of the draft's first app`
+          : t`Preview of the ${screen} app`
       }
     />
   );
