@@ -1,13 +1,12 @@
 import type { AuditRecord } from "@grasp-os/shared/audit-log";
 import type { KnowledgeSignals } from "@grasp-os/shared/knowledge-signals";
-import { canBuild, isAdmin } from "@grasp-os/shared/roles";
+import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ImprovementSignals } from "@grasp-os/shared/signals";
 
 import { readPendingRequests } from "../activity/pending.tsx";
 import { integrationsOf } from "../connections/integrations.ts";
 import type { CoreConnection } from "../core-connection.ts";
-import { CoreTimeoutError } from "../core.ts";
 import type { Session } from "../core.ts";
 import { listedOrNone } from "../directory.ts";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -48,23 +47,25 @@ export const readWaiting = async (
   return { held, failed, integrations, requests };
 };
 
-/** Whether core itself refused a read: its errors carry a code; a timeout or a lost connection don't. */
-const refusedByCore = (error: unknown): boolean =>
-  !(error instanceof CoreTimeoutError) &&
-  error instanceof Error &&
-  "code" in error &&
-  typeof error.code === "string";
+/**
+ * Whether core refused the read to this person's role (admins read every
+ * improvement signal, an engine's builders its own): their having none to
+ * see, not a failure. Any other error is one.
+ */
+const refusedToRole = (error: unknown): boolean =>
+  roleErrors.codeOf(error) === "role.forbidden";
 
 /**
  * A read of signals core may refuse this person: none, rather than a
- * failure, then. Anything else (a read that doesn't come in time, a lost
- * connection) fails the card, which says so, rather than hiding it.
+ * failure, then. Anything else (another error, a read that doesn't come
+ * in time, a lost connection) fails the card, which says so, rather than
+ * hiding it.
  */
 const orNone = async <T>(read: Promise<T>): Promise<T | undefined> => {
   try {
     return await read;
   } catch (error) {
-    if (refusedByCore(error)) {
+    if (refusedToRole(error)) {
       return undefined;
     }
     throw error;
