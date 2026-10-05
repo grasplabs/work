@@ -81,7 +81,7 @@ export const screenHooks = "@grasp-os/sdk/screen";
 
 /**
  * What renders a screen in its frame. App code doesn't import it, but every
- * build needs it (`ScreenBuild.kitModules`).
+ * screen needs it (`ScreenClosure.kitModules`).
  */
 export const screenRuntime = "@grasp-os/sdk/screen-runtime";
 

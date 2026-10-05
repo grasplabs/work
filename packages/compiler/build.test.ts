@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -61,11 +62,12 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
     const devVersion = path.join(dir, "dev-version.js");
     const testVersion = path.join(dir, "test-version.js");
 
-    build(dev, devVersion, "development");
-    // A test run builds too, with its own NODE_ENV, into its own assets.
+    // As CI builds a release, then as a test run builds, with its own
+    // NODE_ENV, into its own assets.
+    build(dev, devVersion, "production");
     build(tests, testVersion, "test");
 
-    // The dev server's version still names what its assets have.
+    // The first version still names what its assets have.
     const version = versionIn(devVersion);
     expect(version).not.toBe("");
     expect(releasesIn(dev)).toStrictEqual([version]);
@@ -92,6 +94,50 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
     ).toBe(
       readFileSync(path.join(release, compilerAssets.kitModules), "utf-8")
     );
+  });
+
+  it("leaves a release that is there as it is when the same sources build again", () => {
+    const dir = scratch();
+    const assets = path.join(dir, "assets");
+    const versionModule = path.join(dir, "version.js");
+    build(assets, versionModule, "production");
+    const version = versionIn(versionModule);
+    const release = path.join(assets, compilerAssets.directory(version));
+    const identityOf = (): Record<string, number[]> =>
+      Object.fromEntries(
+        readdirSync(release).map((file) => {
+          const { ino, mtimeMs } = statSync(path.join(release, file));
+          return [file, [ino, mtimeMs]];
+        })
+      );
+    const before = identityOf();
+
+    // A server reads these files while the watcher builds: under another
+    // NODE_ENV too, they are never taken away or written again.
+    build(assets, versionModule, "development");
+
+    expect(versionIn(versionModule)).toBe(version);
+    expect(identityOf()).toStrictEqual(before);
+    expect(readdirSync(assets)).toStrictEqual(["_compiler"]);
+  });
+
+  it("builds the same release with a test or a declaration among the kit's sources", () => {
+    const dir = scratch();
+    const versionModule = path.join(dir, "version.js");
+    build(path.join(dir, "assets"), versionModule, "production");
+    const version = versionIn(versionModule);
+    // Next to the kit's components, as a test of one would be.
+    const added = ["probe.test.tsx", "probe.d.ts"].map((file) =>
+      path.join(import.meta.dirname, "../ui/src/components", file)
+    );
+    made.push(...added);
+    for (const file of added) {
+      writeFileSync(file, "export const probe = 1;\n");
+    }
+
+    build(path.join(dir, "assets"), versionModule, "production");
+
+    expect(versionIn(versionModule)).toBe(version);
   });
 
   it("keeps the release a running server was built for until the next build, and drops older ones", () => {

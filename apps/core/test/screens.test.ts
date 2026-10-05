@@ -92,6 +92,15 @@ ${imports.map((name, index) => `    "${name}": Object.fromEntries(Object.entries
   return await response.json();
 };
 
+/** The kit's modules a build's screens load, all of them. */
+const kitModulesOf = (built: {
+  screens: Record<string, { kitModules: string[] }>;
+}): string[] => [
+  ...new Set(
+    Object.values(built.screens).flatMap(({ kitModules: names }) => names)
+  ),
+];
+
 /** A screen that says `text`. */
 const screen = (text: string): Record<string, string> => ({
   "screens/desk.tsx": `export default function Desk() {
@@ -124,7 +133,7 @@ describe("screen builds", { timeout: 60_000 }, () => {
     await expect(
       evaluate(
         {
-          ...(await kitModulesNamed(built.kitModules)),
+          ...(await kitModulesNamed(kitModulesOf(built))),
           ...built.modules,
         },
         ["app~screens~desk.js", "app~screens~inbox.js"]
@@ -143,10 +152,10 @@ describe("screen builds", { timeout: 60_000 }, () => {
   it("names only the kit modules the App needs", async () => {
     const built = await buildScreens(env, sampleApp);
 
-    expect(built.ok && built.kitModules).toContain(
+    expect(built.ok && kitModulesOf(built)).toContain(
       "lucide-react~icons~inbox.js"
     );
-    expect(built.ok && built.kitModules).not.toContain(
+    expect(built.ok && kitModulesOf(built)).not.toContain(
       "lucide-react~icons~house.js"
     );
   });

@@ -65,16 +65,14 @@ export interface ScreenClosure {
 }
 
 /**
- * An App's modules by flat name, the kit's modules a page needs to run them
- * (what they import, directly or through each other, and the screen
- * runtime), what each screen loads of both, by its module's name, and the
- * CSS they use; or why it failed. Errors fail a build; warnings don't.
+ * An App's modules by flat name, what each screen loads of them and of the
+ * kit's, by its module's name, and the CSS they use; or why it failed.
+ * Errors fail a build; warnings don't.
  */
 export type ScreenBuild =
   | {
       ok: true;
       modules: Record<string, string>;
-      kitModules: string[];
       screens: Record<string, ScreenClosure>;
       css: string;
       diagnostics: Diagnostic[];
@@ -359,7 +357,6 @@ export const buildScreens = async (
   return {
     ok: true,
     modules,
-    kitModules,
     screens: Object.fromEntries(
       paths
         .filter((path) => screenFile.test(path))

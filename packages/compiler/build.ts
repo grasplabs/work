@@ -9,8 +9,10 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -74,10 +76,18 @@ const manifestOf = (dir: string) =>
 
 const exportsOf = (dir: string) => manifestOf(dir).exports ?? {};
 
-/** Every source file under a directory. */
+/**
+ * A test or a declaration among the kit's sources: no part of a release.
+ * It is never a module of the kit, so never sent to a screen, and the
+ * compiler doesn't read it either: adding or changing one builds the same
+ * release.
+ */
+const notShipped = /\.(?:test|d)\.tsx?$/u;
+
+/** Every source file under a directory that a release is built from. */
 const sourcesIn = (dir: string): string[] =>
   readdirSync(dir, { recursive: true, encoding: "utf-8" })
-    .filter((file) => /\.tsx?$/u.test(file))
+    .filter((file) => /\.tsx?$/u.test(file) && !notShipped.test(file))
     .map((file) => path.join(dir, file));
 
 /** A kit module's entry: its specifier and the file or virtual module it is. */
@@ -85,9 +95,6 @@ interface Entry {
   specifier: string;
   id: string;
 }
-
-/** A test or a declaration: never a module of the kit, so never sent to a screen. */
-const notShipped = /\.(?:test|d)\.tsx?$/u;
 
 /** `@grasp-os/ui`: one module per file its exports (`./components/*`, …) cover. */
 const uiEntries = (): Entry[] =>
@@ -552,7 +559,7 @@ const collectLintProject = (
     encoding: "utf-8",
   })) {
     const source = path.join(ui, "src", file);
-    if (statSync(source).isFile()) {
+    if (statSync(source).isFile() && !notShipped.test(file)) {
       files[`ui/src/${file}`] = readText(source);
     }
   }
@@ -703,6 +710,38 @@ const versionIn = (file: string): string | undefined =>
     : undefined;
 
 /**
+ * Puts a release's `files` in `assets`, whole or not at all: written next
+ * to where they go and moved there in one step, so a server reading its
+ * assets never finds some of a release's files without the others. A
+ * release that is there already is left as it is: the same version is the
+ * same files, and a server may be reading them.
+ */
+const writeRelease = (
+  assets: string,
+  version: string,
+  files: Record<string, string>
+): void => {
+  const release = path.join(assets, compilerAssets.directory(version));
+  if (
+    Object.keys(files).every((file) => existsSync(path.join(release, file)))
+  ) {
+    return;
+  }
+  mkdirSync(path.dirname(release), { recursive: true });
+  const written = mkdtempSync(path.join(assets, ".compiler-"));
+  try {
+    for (const [file, content] of Object.entries(files)) {
+      writeFileSync(path.join(written, file), content);
+    }
+    // Only what an interrupted build of an older compiler left half-written.
+    rmSync(release, { recursive: true, force: true });
+    renameSync(written, release);
+  } finally {
+    rmSync(written, { recursive: true, force: true });
+  }
+};
+
+/**
  * Builds the kit, then the compiler: its files into `assets`, and the
  * version that names them into `versionModule`.
  *
@@ -763,26 +802,21 @@ const buildScreenCompiler = async (
     .update(sdkModules.version)
     .digest("hex")
     .slice(0, 16);
-  const release = path.join(assets, compilerAssets.directory(version));
-  rmSync(release, { recursive: true, force: true });
-  mkdirSync(release, { recursive: true });
-  writeFileSync(path.join(release, compilerAssets.source), compiler);
-  writeFileSync(path.join(release, compilerAssets.kit), kitJson);
-  writeFileSync(
-    path.join(release, compilerAssets.kitModules),
-    JSON.stringify(kitModules)
-  );
-  writeFileSync(
-    path.join(release, compilerAssets.sdkModules),
-    JSON.stringify(sdkModules)
-  );
+  writeRelease(assets, version, {
+    [compilerAssets.source]: compiler,
+    [compilerAssets.kit]: kitJson,
+    [compilerAssets.kitModules]: JSON.stringify(kitModules),
+    [compilerAssets.sdkModules]: JSON.stringify(sdkModules),
+  });
   // Core imports only the version; the rest it reads from its static
   // assets when it starts a build, so it never loads them otherwise. The
-  // version goes last, once its files are all there: a dev server that
-  // reloads on it never finds half a release.
+  // version goes last, once its release is in place, and in one step: a
+  // dev server that reloads on it finds the whole release.
   const previous = versionIn(versionModule);
   mkdirSync(path.dirname(versionModule), { recursive: true });
-  writeFileSync(versionModule, `export const version = "${version}";\n`);
+  const written = `${versionModule}.${process.pid}.tmp`;
+  writeFileSync(written, `export const version = "${version}";\n`);
+  renameSync(written, versionModule);
   // Other releases go, except the one the version named until now: a dev
   // server still running on it reads its files until it has reloaded.
   const releases = path.join(assets, compilerAssets.directory(""));

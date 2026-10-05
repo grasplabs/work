@@ -14,21 +14,34 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync, watch } from "node:fs";
+import type { FSWatcher } from "node:fs";
 import path from "node:path";
 
 const root = import.meta.dirname;
 const packages = path.join(root, "..");
 
+/**
+ * A directory to watch: all of it, or only the files `only` names in it.
+ * Always a directory, never one file: an editor that saves by writing a
+ * new file over the old one would end a watch of the file itself.
+ */
+interface Watched {
+  dir: string;
+  only?: string[];
+}
+
 /** What the kit and the compiler are built from, besides their dependencies. */
-const watched = [
-  path.join(packages, "ui/src"),
-  path.join(packages, "ui/components.json"),
-  path.join(packages, "ui/package.json"),
-  path.join(packages, "sdk/src"),
-  path.join(packages, "shared/src"),
-  path.join(root, "src"),
-  path.join(root, "build.ts"),
+const watched: Watched[] = [
+  { dir: path.join(packages, "ui/src") },
+  { dir: path.join(packages, "ui"), only: ["components.json", "package.json"] },
+  { dir: path.join(packages, "sdk/src") },
+  { dir: path.join(packages, "shared/src") },
+  { dir: path.join(root, "src") },
+  { dir: root, only: ["build.ts"] },
 ];
+
+/** How long after a watch fails it is started again. */
+const rewatchMs = 1000;
 
 /** How long after the last change a build starts: an editor saves in bursts. */
 const settleMs = 200;
@@ -77,6 +90,33 @@ const changed = (): void => {
   settle = setTimeout(rebuild, settleMs);
 };
 
-for (const target of watched.filter((file) => existsSync(file))) {
-  watch(target, { recursive: true }, changed);
+/**
+ * Watches one directory. A watch that fails (the directory moved, the
+ * system out of watches) is said and started again: the rest of
+ * `vp run dev` goes on either way.
+ */
+const watchOne = ({ dir, only }: Watched): void => {
+  if (!existsSync(dir)) {
+    return;
+  }
+  const watcher: FSWatcher = watch(
+    dir,
+    { recursive: only === undefined },
+    (_event, file) => {
+      if (only === undefined || (file !== null && only.includes(file))) {
+        changed();
+      }
+    }
+  );
+  watcher.on("error", (error) => {
+    console.error(`Watching ${dir} failed: ${error.message}`);
+    watcher.close();
+    setTimeout(() => {
+      watchOne({ dir, only });
+    }, rewatchMs);
+  });
+};
+
+for (const target of watched) {
+  watchOne(target);
 }
