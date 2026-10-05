@@ -18,10 +18,13 @@ import { InFrame } from "./in-frame.ts";
 export const AppFrame = ({
   core,
   identity,
+  aside,
   children,
 }: {
   core: CoreConnection;
   identity: Identity;
+  /** Beside the page, over it: the shell's chat dock. */
+  aside?: ReactNode;
   children: ReactNode;
 }) => {
   // Folded as the person left it in this browser.
@@ -40,6 +43,7 @@ export const AppFrame = ({
         <SidebarInset className="min-h-0 min-w-0 overflow-y-auto">
           <InFrame value>{children}</InFrame>
         </SidebarInset>
+        {aside}
       </SidebarProvider>
     </TooltipProvider>
   );
