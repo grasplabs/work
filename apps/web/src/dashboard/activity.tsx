@@ -43,8 +43,15 @@ const Row = ({ record }: { record: AuditRecord }) => {
   );
 };
 
+/** What the card read of the trail: the latest events, and whether it stopped before the trail's end. */
+export interface LatestActivity {
+  records: AuditRecord[];
+  older: boolean;
+}
+
 /** The latest events, newest first, and the way on to the audit trail. */
-export const Activity = ({ records }: { records: AuditRecord[] }) => {
+export const Activity = ({ activity }: { activity: LatestActivity }) => {
+  const { records, older } = activity;
   const { t } = useLingui();
   const shown = records.slice(0, activityShown);
   return (
@@ -58,7 +65,14 @@ export const Activity = ({ records }: { records: AuditRecord[] }) => {
       />
       {shown.length === 0 ? (
         <p className="text-muted-foreground border-t px-4 py-6 text-center">
-          <Trans>Nothing has happened yet.</Trans>
+          {older ? (
+            <Trans>
+              Lately the trail only records its own searches: older events are
+              in the full audit trail.
+            </Trans>
+          ) : (
+            <Trans>Nothing has happened yet.</Trans>
+          )}
         </p>
       ) : (
         <ul aria-label={t`Latest activity`}>

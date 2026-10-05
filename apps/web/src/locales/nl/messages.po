@@ -1552,6 +1552,10 @@ msgid "Last run"
 msgstr "Laatste run"
 
 #: src/dashboard/activity.tsx
+msgid "Lately the trail only records its own searches: older events are in the full audit trail."
+msgstr "De audittrail legt de laatste tijd alleen zijn eigen zoekopdrachten vast: oudere gebeurtenissen vind je in de volledige audittrail."
+
+#: src/dashboard/activity.tsx
 msgid "Latest activity"
 msgstr "Recente activiteit"
 

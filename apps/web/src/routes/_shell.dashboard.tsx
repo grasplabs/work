@@ -51,7 +51,7 @@ const DashboardPage = () => {
           <Await fallback={<LoadingLines />} promise={activity}>
             {(loaded) =>
               loaded.state === "ready" ? (
-                <Activity records={loaded.data} />
+                <Activity activity={loaded.data} />
               ) : (
                 <NotLoaded page={loaded} />
               )

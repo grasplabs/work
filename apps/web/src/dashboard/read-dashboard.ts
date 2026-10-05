@@ -13,6 +13,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { openableApps } from "../workflows/reads.ts";
 import { activityShown } from "./activity.tsx";
+import type { LatestActivity } from "./activity.tsx";
 import { readNotifications } from "./failed-workflows.tsx";
 import type { Signals } from "./signals.tsx";
 import { decidesRequests } from "./to-do.tsx";
@@ -136,23 +137,24 @@ const activityPages = 5;
  * The latest events of the audit trail, without its own searches: core
  * records every search, the dashboard's too, and those alone can fill a
  * page. It reads older pages until it has enough to show, or the trail
- * ends; only a first page records a search.
+ * ends, or it has read as many as it reads; only a first page records a
+ * search. `older` says the trail goes on past what was read.
  */
-const readActivity = async (session: Session): Promise<AuditRecord[]> => {
-  const shown: AuditRecord[] = [];
+const readActivity = async (session: Session): Promise<LatestActivity> => {
+  const records: AuditRecord[] = [];
   let before: number | undefined;
   for (let page = 0; page < activityPages; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- each page starts where the last ended
-    const { records, next } = await session.audit.search({}, before);
-    shown.push(
-      ...records.filter(({ event }) => event?.action !== "audit.searched")
+    const read = await session.audit.search({}, before);
+    records.push(
+      ...read.records.filter(({ event }) => event?.action !== "audit.searched")
     );
-    if (shown.length >= activityShown || next === null) {
-      break;
+    if (records.length >= activityShown || read.next === null) {
+      return { records, older: false };
     }
-    before = next;
+    before = read.next;
   }
-  return shown;
+  return { records, older: true };
 };
 
 /**
@@ -164,7 +166,7 @@ export interface Dashboard {
   waiting: Waiting;
   signals: Promise<Loaded<Signals>>;
   /** Admins only. */
-  activity: Promise<Loaded<AuditRecord[]>> | undefined;
+  activity: Promise<Loaded<LatestActivity>> | undefined;
 }
 
 export const readDashboard = async (

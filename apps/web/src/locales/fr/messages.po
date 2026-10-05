@@ -1552,6 +1552,10 @@ msgid "Last run"
 msgstr "Dernière exécution"
 
 #: src/dashboard/activity.tsx
+msgid "Lately the trail only records its own searches: older events are in the full audit trail."
+msgstr "Ces derniers temps, le journal n’enregistre que ses propres recherches : les événements plus anciens sont dans le journal d’audit complet."
+
+#: src/dashboard/activity.tsx
 msgid "Latest activity"
 msgstr "Activité récente"
 
