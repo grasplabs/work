@@ -104,6 +104,8 @@ test("reports an error the page never caught once core has it, cut to the size c
     void Promise.reject(new Error("another"));
   });
   await expect.poll(() => attempts).toBe(3);
+  // An attempt is counted as it leaves, and taken once core has answered.
+  await expect.poll(() => taken.length).toBe(2);
   expect(taken).toStrictEqual([
     { message: "é", status: 204, bytes: expect.any(Number) },
     { message: "a", status: 204, bytes: expect.any(Number) },

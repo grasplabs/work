@@ -31,10 +31,14 @@ const disconnected =
 /**
  * Stops the page's clock where it is: from here on, time passes only when
  * a test moves it, so "not yet" and "after ten seconds" don't depend on
- * how fast the machine is.
+ * how fast the machine is. Only once the page has got as far as the test
+ * needs: starting up, it waits on timers of its own.
  */
 const stopClock = async (page: Page): Promise<void> => {
-  await page.clock.pauseAt(await page.evaluate(() => Date.now()));
+  // A clock stops at a time ahead of it, never behind: two seconds on,
+  // which reading it and stopping it never take, and well short of ten.
+  const ahead = 2000;
+  await page.clock.pauseAt(await page.evaluate((ms) => Date.now() + ms, ahead));
 };
 
 /** A UDP port standing in for a TURN server: it only counts packets. */
@@ -243,11 +247,12 @@ test("a frame that never says it is ready is given up on after ten seconds", asy
     });
   });
   await page.goto(screenPath(probing, "notes"));
-  await stopClock(page);
   await expect(page.frameLocator("iframe").locator("html")).toHaveAttribute(
     "data-forged",
     "4"
   );
+  // The frame has only just loaded, so its ten seconds have only begun.
+  await stopClock(page);
   await expect(page.getByText(timedOut)).toHaveCount(0);
 
   await page.clock.runFor(10_000);
@@ -272,13 +277,15 @@ test("a screen that never renders is given up on after ten seconds, whatever it 
   const page = await pageOf(browser, builder);
   await page.clock.install();
   await page.goto(screenPath(attacking, "stuck"));
-  await stopClock(page);
   // Its module ran, and told the page it had mounted, six ways.
   await expect(page.frameLocator("iframe").locator("body")).toHaveAttribute(
     "data-forged",
     "6",
     { timeout: 30_000 }
   );
+  // The screen was only just handed over, so its ten seconds have only
+  // begun.
+  await stopClock(page);
   await expect(page.getByText(timedOut)).toHaveCount(0);
 
   await page.clock.runFor(10_000);
