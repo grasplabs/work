@@ -36,6 +36,54 @@ const stored = (schema: AnySchema): unknown => {
 
 const base = { descriptorVersion: 1, nullable: false, presence: "required" };
 
+/**
+ * Cron expressions `v.schedule()` accepts. Each must also be one the parser
+ * schedules run on accepts (values.test.ts checks that), so a schedule that
+ * validates is one that can be run.
+ */
+export const acceptedCrons = [
+  "0 8 * * 1",
+  "*/15 9-17 1,15 1-12/3 0-7",
+  "0-30/10 4 * * *",
+  "*/59 */23 */31 */12 */7",
+  "* * * * 7",
+  "0 0 29 2 *",
+  "0 0 31 2,3 *",
+  "0 0 31 */2 *",
+  // A day of the week makes it come, whatever the day of the month says.
+  "0 0 31 2 1",
+];
+
+/** Expressions that parser refuses too: a step with nothing to step over, a
+ * step past the field, and a date that never comes. */
+export const cronsNoParserAccepts = [
+  "5/2 * * * *",
+  "*/99 * * * *",
+  "0 0 1-31/99 * *",
+  "0 0 31 2 *",
+];
+
+const refusedCrons = [
+  ...cronsNoParserAccepts,
+  "0 0 30 2 *",
+  "0 0 31 4,6,9,11 *",
+  "0 0 31 2-2 *",
+  "*/60 * * * *",
+  "* * * * 1/2",
+  "0 8 * *",
+  "0 8 * * 1 2026",
+  "60 8 * * 1",
+  "0 24 * * 1",
+  "0 8 0 * 1",
+  "0 8 * 13 1",
+  "0 8 * * 8",
+  "0 8 * * MON",
+  "5-1 8 * * 1",
+  "*/0 8 * * 1",
+  "0  8 * * 1",
+  "@daily",
+];
+
 /** JSON as it arrives: a `__proto__` key in it is a key like any other. */
 const fromJson = (text: string): unknown => JSON.parse(text);
 
@@ -664,6 +712,38 @@ add(
   ]
 );
 add(
+  "a bound that isn't a number is refused, whatever was set before",
+  () => [
+    // @ts-expect-error -- a bound needs a limit
+    declare(() => v.string().max()),
+    // @ts-expect-error -- a bound needs a limit
+    declare(() => v.number().min()),
+    // @ts-expect-error -- a bound needs a limit
+    declare(() => v.array(v.string()).min()),
+    // @ts-expect-error -- null is not a number
+    declare(() => v.string().max(null)),
+    // @ts-expect-error -- null is not a number
+    declare(() => v.string().max(5).max(null)),
+    // @ts-expect-error -- a bound is a number
+    declare(() => v.string().max("3")),
+    // @ts-expect-error -- a bound is a number
+    declare(() => v.string().max(5).max("3")),
+    // @ts-expect-error -- a bound is a number
+    declare(() => v.number().min(1).min("3")),
+    // @ts-expect-error -- a bound is a number
+    declare(() => v.array(v.string()).min(1).min([2])),
+  ],
+  Array.from({ length: 9 }, () => "definition.invalid_bound")
+);
+add(
+  "a literal normalizes to the value that was declared",
+  () => {
+    const result = v.literal(0)["~standard"].validate(-0);
+    return result.issues === undefined && Object.is(result.value, 0);
+  },
+  true
+);
+add(
   "a kind without a constraint has no modifier for it",
   () =>
     [
@@ -1179,10 +1259,11 @@ add(
     check(v.record(v.number()), { ["k".repeat(256)]: 1 }),
   ],
   [
-    { issues: [["value.unsafe_key"]] },
-    { issues: [["value.unsafe_key"]] },
-    { issues: [["value.unsafe_key"]] },
-    { issues: [["value.unsafe_key"]] },
+    { issues: [["value.unsafe_key", "__proto__"]] },
+    { issues: [["value.unsafe_key", "constructor"]] },
+    { issues: [["value.unsafe_key", "prototype"]] },
+    // At the record: a path never repeats a key of any length.
+    { issues: [["value.key_too_long"]] },
     { value: { ["k".repeat(256)]: 1 } },
   ]
 );
@@ -1435,21 +1516,10 @@ add(
   () =>
     [
       { cron: "0 8 * * 1", timeZone: "Europe/Amsterdam" },
-      { cron: "*/15 9-17 1,15 1-12/3 0-7", timeZone: "UTC" },
       { cron: "0 8 * * 1", timeZone: "Asia/Kolkata" },
       { cron: "0 8 * * 1", timeZone: "Asia/Calcutta" },
-      { cron: "0 8 * *", timeZone: "UTC" },
-      { cron: "0 8 * * 1 2026", timeZone: "UTC" },
-      { cron: "60 8 * * 1", timeZone: "UTC" },
-      { cron: "0 24 * * 1", timeZone: "UTC" },
-      { cron: "0 8 0 * 1", timeZone: "UTC" },
-      { cron: "0 8 * 13 1", timeZone: "UTC" },
-      { cron: "0 8 * * 8", timeZone: "UTC" },
-      { cron: "0 8 * * MON", timeZone: "UTC" },
-      { cron: "5-1 8 * * 1", timeZone: "UTC" },
-      { cron: "*/0 8 * * 1", timeZone: "UTC" },
-      { cron: "0  8 * * 1", timeZone: "UTC" },
-      { cron: "@daily", timeZone: "UTC" },
+      ...acceptedCrons.map((cron) => ({ cron, timeZone: "UTC" })),
+      ...refusedCrons.map((cron) => ({ cron, timeZone: "UTC" })),
       { cron: "0 8 * * 1", timeZone: "Europe/Delft" },
       { cron: "0 8 * * 1", timeZone: "europe/amsterdam" },
       { cron: "0 8 * * 1", timeZone: "+02:00" },
@@ -1458,12 +1528,10 @@ add(
     ].map((value) => check(v.schedule(), value)),
   [
     { value: { cron: "0 8 * * 1", timeZone: "Europe/Amsterdam" } },
-    { value: { cron: "*/15 9-17 1,15 1-12/3 0-7", timeZone: "UTC" } },
     { value: { cron: "0 8 * * 1", timeZone: "Asia/Kolkata" } },
     { value: { cron: "0 8 * * 1", timeZone: "Asia/Calcutta" } },
-    ...Array.from({ length: 12 }, () => ({
-      issues: [["value.invalid_cron", "cron"]],
-    })),
+    ...acceptedCrons.map((cron) => ({ value: { cron, timeZone: "UTC" } })),
+    ...refusedCrons.map(() => ({ issues: [["value.invalid_cron", "cron"]] })),
     { issues: [["value.invalid_time_zone", "timeZone"]] },
     { issues: [["value.invalid_time_zone", "timeZone"]] },
     { issues: [["value.invalid_time_zone", "timeZone"]] },
@@ -1553,6 +1621,27 @@ add(
     return [check(v.array(v.string()).max(10), value), read];
   },
   [{ issues: [["value.too_long"]] }, 0]
+);
+add(
+  "an array that reports another length later can't get past its maximum",
+  () => {
+    let asked = 0;
+    const value = new Proxy(
+      Array.from({ length: 100 }, () => "a"),
+      {
+        get: (target, key, receiver) => {
+          if (key === "length") {
+            asked += 1;
+            return asked === 1 ? 2 : 100;
+          }
+          const entry: unknown = Reflect.get(target, key, receiver);
+          return entry;
+        },
+      }
+    );
+    return check(v.array(v.string()).max(10), value);
+  },
+  { value: ["a", "a"] }
 );
 add(
   "a value that refers to itself is refused, not followed",

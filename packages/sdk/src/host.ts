@@ -11,6 +11,10 @@ import { schemaOf, seal } from "./value-schema.ts";
 // and turns them back into schemas here, without running the code that
 // declared them.
 
+// Which currencies and time zones this SDK accepts: a host compares it with
+// its own before it activates an App.
+export { valueCatalogVersion } from "./value-catalog.ts";
+
 /** The keys every descriptor has. */
 const baseKeys = new Set(["descriptorVersion", "kind", "presence", "nullable"]);
 
@@ -139,8 +143,11 @@ export const schemaFromDescriptor = (
     if (error instanceof ValueDefinitionError) {
       throw error;
     }
-    // Only a descriptor that runs code when read (a proxy, a getter) gets
-    // here; what it threw is not passed on.
+    // Replaced on purpose. Every refusal of ours is a ValueDefinitionError,
+    // rethrown above; reading and sealing throw nothing else and call no App
+    // code. So anything else came from the descriptor running code as it
+    // was read (a proxy, a getter). It is refused like any bad descriptor,
+    // and what it threw (the sender's text) is not passed on.
     return refuse("The descriptor can't be read as JSON.");
   }
 };

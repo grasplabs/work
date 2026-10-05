@@ -185,16 +185,17 @@ const enumBody = (draft: DescriptorDraft): Body => {
       "An enum is a list of at least one string."
     );
   }
-  const names: string[] = [];
+  const seen = new Set<string>();
   for (const value of values) {
-    if (!isName(value) || names.includes(value)) {
+    if (!isName(value) || seen.has(value)) {
       return refuse(
         "definition.invalid_value",
         "An enum's values are short strings, each once."
       );
     }
-    names.push(value);
+    seen.add(value);
   }
+  const names = [...seen];
   return {
     children: [],
     extraWeight: names.length,
@@ -437,18 +438,29 @@ const changed = (
  */
 const boundMethods = (
   descriptor: ValueDescriptor & { readonly min?: number; readonly max?: number }
-): object => ({
-  max: (limit: number) =>
-    changed(descriptor, {
-      max:
-        descriptor.max === undefined ? limit : Math.min(descriptor.max, limit),
-    }),
-  min: (limit: number) =>
-    changed(descriptor, {
-      min:
-        descriptor.min === undefined ? limit : Math.max(descriptor.min, limit),
-    }),
-});
+): object => {
+  // Refused before it is weighed against the bound already set: `Math.min`
+  // would turn `null` into 0 and `"3"` into 3, and leaving a limit out
+  // would set no bound at all, each depending on what was set before.
+  const limitOf = (limit: unknown): number =>
+    typeof limit === "number"
+      ? limit
+      : refuse("definition.invalid_bound", "A bound is a number.");
+  return {
+    max: (limit: unknown) => {
+      const max = limitOf(limit);
+      return changed(descriptor, {
+        max: descriptor.max === undefined ? max : Math.min(descriptor.max, max),
+      });
+    },
+    min: (limit: unknown) => {
+      const min = limitOf(limit);
+      return changed(descriptor, {
+        min: descriptor.min === undefined ? min : Math.max(descriptor.min, min),
+      });
+    },
+  };
+};
 
 const objectOf = (fields: Record<string, unknown>): AnySchema =>
   // oxlint-disable-next-line no-use-before-define -- a schema's modifiers make schemas

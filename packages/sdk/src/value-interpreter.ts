@@ -95,7 +95,7 @@ const isReference = (value: unknown): value is string =>
   referencePattern.test(value);
 
 const cronPartPattern =
-  /^(?:\*|(?<from>\d{1,2})(?:-(?<to>\d{1,2}))?)(?:\/(?<step>\d{1,2}))?$/u;
+  /^(?:(?<all>\*)|(?<from>\d{1,2})(?:-(?<to>\d{1,2}))?)(?:\/(?<step>\d{1,2}))?$/u;
 
 /** The lowest and highest number of each cron field, in order. */
 const cronFieldRanges = [
@@ -106,39 +106,99 @@ const cronFieldRanges = [
   [0, 7],
 ] as const;
 
-const isCronPart = (part: string, lowest: number, highest: number): boolean => {
+/** The most days each month can have, January first. */
+const longestMonths = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/**
+ * The numbers one part of a cron field names (`5`, `1-5`, `*`, `1-5/2`,
+ * `*\/15`), or nothing when it isn't one. A step follows `*` or a range
+ * only, and is no larger than the field's highest number.
+ */
+const cronPartNumbers = (
+  part: string,
+  lowest: number,
+  highest: number
+): number[] | undefined => {
   const groups = cronPartPattern.exec(part)?.groups;
   if (groups === undefined) {
-    return false;
+    return undefined;
   }
-  const { from, to, step } = groups;
-  if (step !== undefined && Number(step) < 1) {
-    return false;
+  const { all, from, to, step } = groups;
+  let first = lowest;
+  let last = highest;
+  if (all === undefined) {
+    first = Number(from);
+    last = to === undefined ? first : Number(to);
   }
-  if (from === undefined) {
-    return true;
+  const stride = step === undefined ? 1 : Number(step);
+  const stepsAnything = all !== undefined || to !== undefined;
+  const valid =
+    first >= lowest &&
+    last <= highest &&
+    first <= last &&
+    stride >= 1 &&
+    stride <= highest &&
+    (step === undefined || stepsAnything);
+  if (!valid) {
+    return undefined;
   }
-  const first = Number(from);
-  const last = to === undefined ? first : Number(to);
-  return first >= lowest && last <= highest && first <= last;
+  const numbers: number[] = [];
+  for (let number = first; number <= last; number += stride) {
+    numbers.push(number);
+  }
+  return numbers;
+};
+
+/** The numbers a whole cron field names, or nothing when it isn't one. */
+const cronFieldNumbers = (
+  field: string | undefined,
+  lowest: number,
+  highest: number
+): number[] | undefined => {
+  const numbers: number[] = [];
+  for (const part of (field ?? "").split(",")) {
+    const named = cronPartNumbers(part, lowest, highest);
+    if (named === undefined) {
+      return undefined;
+    }
+    numbers.push(...named);
+  }
+  return numbers;
 };
 
 /**
  * Five cron fields (minute, hour, day of month, month, day of week) in
  * numbers, single spaces between them: `*`, `5`, `1-5`, `*\/15`, `1-5/2` and
- * lists of those. Names (`MON`) and other dialects aren't one fixed form.
+ * lists of those, naming a time that comes (not 31 February). Names (`MON`)
+ * and other dialects aren't one fixed form. Everything accepted here is
+ * accepted by the parser schedules run on (`isCronExpression` in
+ * `@grasp-os/shared/workflows`); values.test.ts holds the two together.
  */
 const isCron = (value: unknown): value is string => {
   if (typeof value !== "string" || value.length > valueLimits.nameLength) {
     return false;
   }
   const fields = value.split(" ");
+  if (fields.length !== cronFieldRanges.length) {
+    return false;
+  }
+  const numbers = cronFieldRanges.map(([lowest, highest], index) =>
+    cronFieldNumbers(fields[index], lowest, highest)
+  );
+  const { 2: days, 3: months } = numbers;
+  if (
+    numbers.includes(undefined) ||
+    days === undefined ||
+    months === undefined
+  ) {
+    return false;
+  }
+  // A day of the week makes a date come whatever the day of the month says;
+  // without one, some named month must be long enough for a named day.
   return (
-    fields.length === cronFieldRanges.length &&
-    cronFieldRanges.every(([lowest, highest], index) =>
-      (fields[index] ?? "")
-        .split(",")
-        .every((part) => isCronPart(part, lowest, highest))
+    fields[4] !== "*" ||
+    months.some((month) =>
+      days.some((day) => day <= (longestMonths[month - 1] ?? 0))
     )
   );
 };
@@ -150,7 +210,7 @@ const isCron = (value: unknown): value is string => {
  */
 const checkStrictObject = (
   value: unknown,
-  keys: readonly string[],
+  keys: ReadonlySet<string>,
   state: CheckState,
   checkKey: (key: string, entry: unknown) => Checked
 ): Checked => {
@@ -162,7 +222,7 @@ const checkStrictObject = (
     if (state.stopped) {
       break;
     }
-    if (!keys.includes(key)) {
+    if (!keys.has(key)) {
       // The path names the key only when it is short: an issue never
       // carries an unbounded piece of what was submitted.
       const named = key.length <= valueLimits.nameLength;
@@ -248,9 +308,23 @@ const checkCron = (value: unknown, state: CheckState): Checked => {
   return isCron(value) ? value : refuse(state, "value.invalid_cron");
 };
 
-const moneyKeys = ["minorUnits", "currency"] as const;
-const scheduleKeys = ["cron", "timeZone"] as const;
-const fileKeys = ["id"] as const;
+const moneyKeys: ReadonlySet<string> = new Set(["minorUnits", "currency"]);
+const scheduleKeys: ReadonlySet<string> = new Set(["cron", "timeZone"]);
+const fileKeys: ReadonlySet<string> = new Set(["id"]);
+
+/** The names of an object descriptor's fields, listed once per descriptor. */
+const fieldNames = new WeakMap<object, ReadonlySet<string>>();
+
+const namesOf = (
+  fields: Readonly<Record<string, ValueDescriptor>>
+): ReadonlySet<string> => {
+  let names = fieldNames.get(fields);
+  if (names === undefined) {
+    names = new Set(Object.keys(fields));
+    fieldNames.set(fields, names);
+  }
+  return names;
+};
 
 /** The kinds with one fixed wire form each. */
 const semanticChecks: Record<
@@ -337,16 +411,18 @@ const checkArray = (
   if (!Array.isArray(value)) {
     return refuse(state, "value.invalid_type");
   }
-  // The length is checked before any element is read or copied.
-  if (descriptor.min !== undefined && value.length < descriptor.min) {
+  // The length is read once, and checked before any element is read or
+  // copied: an array that reports another length later can't get past it.
+  const { length } = value;
+  if (descriptor.min !== undefined && length < descriptor.min) {
     return refuse(state, "value.too_short");
   }
-  if (descriptor.max !== undefined && value.length > descriptor.max) {
+  if (descriptor.max !== undefined && length > descriptor.max) {
     return refuse(state, "value.too_long");
   }
   const result: unknown[] = [];
   let valid = true;
-  for (let index = 0; index < value.length && !state.stopped; index += 1) {
+  for (let index = 0; index < length && !state.stopped; index += 1) {
     state.path.push(index);
     // A hole reads as undefined, which a required item refuses.
     // oxlint-disable-next-line no-use-before-define -- the checks of nested values call each other
@@ -375,8 +451,15 @@ const checkRecord = (
     if (state.stopped) {
       break;
     }
-    if (unsafeKeys.has(key) || key.length > valueLimits.nameLength) {
+    if (key.length > valueLimits.nameLength) {
+      // Reported at the record: the path never carries an unbounded piece
+      // of what was submitted.
+      refuse(state, "value.key_too_long");
+      valid = false;
+    } else if (unsafeKeys.has(key)) {
+      state.path.push(key);
       refuse(state, "value.unsafe_key");
+      state.path.pop();
       valid = false;
     } else {
       state.path.push(key);
@@ -459,9 +542,11 @@ const checkKind = (
       return pass(value === null, value, state);
     }
     case "literal": {
+      // The declared value, not the submitted one: `-0` equals a literal 0
+      // and normalizes to it.
       return pass(
         value === descriptor.value,
-        value,
+        descriptor.value,
         state,
         "value.invalid_literal"
       );
@@ -484,13 +569,9 @@ const checkKind = (
     }
     case "object": {
       const { fields } = descriptor;
-      return checkStrictObject(
-        value,
-        Object.keys(fields),
-        state,
-        (key, entry) =>
-          // oxlint-disable-next-line no-use-before-define -- the checks of nested values call each other
-          check(fields[key], entry, state)
+      return checkStrictObject(value, namesOf(fields), state, (key, entry) =>
+        // oxlint-disable-next-line no-use-before-define -- the checks of nested values call each other
+        check(fields[key], entry, state)
       );
     }
     case "array": {
@@ -565,7 +646,11 @@ export const validateValue = (
   try {
     checked = check(descriptor, value, state);
   } catch {
-    // Only a value that runs code when read (a proxy, a getter) throws.
+    // Swallowed on purpose. The interpreter itself throws nothing: its
+    // recursion is bounded by the descriptor and it calls no App code. So
+    // what was thrown came from the value running code as it was read (a
+    // proxy, a getter). That is the submitter's text, not a fault of ours,
+    // so it is answered as an issue and never passed on or logged.
     return { issues: [issue("value.unreadable")] };
   }
   if (state.exhausted) {

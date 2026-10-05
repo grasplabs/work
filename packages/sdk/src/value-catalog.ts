@@ -9,7 +9,13 @@ export const valueCatalogVersion = "iso4217-cldr48.tz2026c";
 
 const words = (list: string): ReadonlySet<string> => new Set(list.split(" "));
 
-/** The active ISO 4217 currency codes (CLDR 48). */
+/**
+ * The currency codes ICU 78.2 (CLDR 48) lists: exactly what
+ * `Intl.supportedValuesOf("currency")` returned on Node 24.15, sorted. That
+ * is not the same as the active ISO 4217 list: it still has codes that were
+ * retired (`HRK`, `CUC`, `SLL`, `ZWL`) and lacks some that are current
+ * (`VED`).
+ */
 export const currencyCodes = words(
   "AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND " +
     "BOB BRL BSD BTN BWP BYN BZD CAD CDF CHF CLP CNY COP CRC CUC CUP CVE CZK " +
@@ -25,6 +31,8 @@ export const currencyCodes = words(
 /**
  * The IANA time zones (tzdata 2026c): every `Area/Location` zone and link,
  * so both `Asia/Kolkata` and its older name `Asia/Calcutta`, plus `UTC`.
+ * Listed from the files of a tzdata 2026c install (`/usr/share/zoneinfo`,
+ * without its `posix/` and `right/` copies), sorted.
  */
 export const timeZones = words(
   "UTC Africa/Abidjan Africa/Accra Africa/Addis_Ababa Africa/Algiers " +

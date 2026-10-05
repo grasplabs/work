@@ -168,6 +168,7 @@ export const valueIssueMessages = {
   "value.invalid_time_zone": "The value isn't an IANA time zone.",
   "value.unknown_key": "The object has a key that isn't declared.",
   "value.unsafe_key": "The object has a key that isn't allowed.",
+  "value.key_too_long": "The object has a key that is too long.",
   "value.no_union_match": "The value matches none of the allowed forms.",
   "value.too_complex": "The value is too large to check.",
   "value.unreadable": "The value can't be read as JSON.",
