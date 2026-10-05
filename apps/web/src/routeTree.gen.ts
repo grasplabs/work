@@ -14,6 +14,7 @@ import { Route as GuestRouteImport } from './routes/guest'
 import { Route as KitRouteImport } from './routes/kit'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as ShellIndexRouteImport } from './routes/_shell.index'
+import { Route as ShellSplatRouteImport } from './routes/_shell.$'
 import { Route as ShellActivityRouteImport } from './routes/_shell.activity'
 import { Route as ShellConnectionsRouteImport } from './routes/_shell.connections'
 import { Route as ShellMembersRouteImport } from './routes/_shell.members'
@@ -50,6 +51,11 @@ const SignInRoute = SignInRouteImport.update({
 const ShellIndexRoute = ShellIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellSplatRoute = ShellSplatRouteImport.update({
+  id: '/$',
+  path: '/$',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellActivityRoute = ShellActivityRouteImport.update({
@@ -125,6 +131,7 @@ export interface FileRoutesByFullPath {
   '/guest': typeof GuestRoute
   '/kit': typeof KitRoute
   '/sign-in': typeof SignInRoute
+  '/$': typeof ShellSplatRoute
   '/activity': typeof ShellActivityRoute
   '/connections': typeof ShellConnectionsRoute
   '/members': typeof ShellMembersRoute
@@ -143,6 +150,7 @@ export interface FileRoutesByTo {
   '/guest': typeof GuestRoute
   '/kit': typeof KitRoute
   '/sign-in': typeof SignInRoute
+  '/$': typeof ShellSplatRoute
   '/activity': typeof ShellActivityRoute
   '/connections': typeof ShellConnectionsRoute
   '/members': typeof ShellMembersRoute
@@ -164,6 +172,7 @@ export interface FileRoutesById {
   '/guest': typeof GuestRoute
   '/kit': typeof KitRoute
   '/sign-in': typeof SignInRoute
+  '/_shell/$': typeof ShellSplatRoute
   '/_shell/activity': typeof ShellActivityRoute
   '/_shell/connections': typeof ShellConnectionsRoute
   '/_shell/members': typeof ShellMembersRoute
@@ -186,6 +195,7 @@ export interface FileRouteTypes {
     | '/guest'
     | '/kit'
     | '/sign-in'
+    | '/$'
     | '/activity'
     | '/connections'
     | '/members'
@@ -204,6 +214,7 @@ export interface FileRouteTypes {
     | '/guest'
     | '/kit'
     | '/sign-in'
+    | '/$'
     | '/activity'
     | '/connections'
     | '/members'
@@ -224,6 +235,7 @@ export interface FileRouteTypes {
     | '/guest'
     | '/kit'
     | '/sign-in'
+    | '/_shell/$'
     | '/_shell/activity'
     | '/_shell/connections'
     | '/_shell/members'
@@ -284,6 +296,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof ShellIndexRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/$': {
+      id: '/_shell/$'
+      path: '/$'
+      fullPath: '/$'
+      preLoaderRoute: typeof ShellSplatRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/activity': {
@@ -381,6 +400,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface ShellRouteChildren {
+  ShellSplatRoute: typeof ShellSplatRoute
   ShellActivityRoute: typeof ShellActivityRoute
   ShellConnectionsRoute: typeof ShellConnectionsRoute
   ShellMembersRoute: typeof ShellMembersRoute
@@ -396,6 +416,7 @@ interface ShellRouteChildren {
 }
 
 const ShellRouteChildren: ShellRouteChildren = {
+  ShellSplatRoute: ShellSplatRoute,
   ShellActivityRoute: ShellActivityRoute,
   ShellConnectionsRoute: ShellConnectionsRoute,
   ShellMembersRoute: ShellMembersRoute,

@@ -9,6 +9,7 @@ import { createRoot } from "react-dom/client";
 
 import { CoreConnection } from "./core-connection.ts";
 import { reportError, reportUncaughtErrors } from "./error-reports.ts";
+import { NotFound } from "./frame/page-states.tsx";
 import { startI18n } from "./i18n.ts";
 import { RouteError } from "./route-error.tsx";
 import { routeTree } from "./routeTree.gen.ts";
@@ -22,11 +23,14 @@ const core = new CoreConnection(() => {
 
 // Every route shows a failure the same way, and reports a fault of the
 // page's own to core (route-error.tsx), the root route included: the
-// boundary around the whole app.
+// boundary around the whole app. What isn't there shows the same
+// not-found, and each page under the shell its skeleton while it loads
+// (frame/page-states.tsx).
 const router = createRouter({
   routeTree,
   context: { core },
   defaultErrorComponent: RouteError,
+  defaultNotFoundComponent: () => <NotFound />,
 });
 
 // What the page throws and never catches, reported with the route's

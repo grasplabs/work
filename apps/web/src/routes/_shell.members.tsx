@@ -33,9 +33,10 @@ import { useState } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { roleLabel } from "../labels.ts";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Offboarding, for admins: the organization's members, each with their
@@ -244,6 +245,9 @@ const Members = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
+  if (page.state !== "ready") {
+    return <PageNotLoaded crumbs={[{ label: t`Members` }]} page={page} />;
+  }
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Members` }]} />
@@ -251,16 +255,14 @@ const Members = () => {
         <h1 className="text-2xl font-medium">
           <Trans>Members</Trans>
         </h1>
-        <NotLoaded page={page} />
-        {page.state === "ready" ? (
-          <MembersTable members={page.data} me={identity.userId} />
-        ) : null}
+        <MembersTable members={page.data} me={identity.userId} />
       </div>
     </>
   );
 };
 
 export const Route = createFileRoute("/_shell/members")({
+  pendingComponent: PageLoading,
   component: Members,
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session) => await session.members.list()),

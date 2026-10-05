@@ -75,6 +75,7 @@ import {
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Kbd } from "@grasp-os/ui/components/kbd";
+import { Label } from "@grasp-os/ui/components/label";
 import {
   Popover,
   PopoverContent,
@@ -134,6 +135,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@grasp-os/ui/components/tooltip";
+import { cn } from "@grasp-os/ui/lib/utils";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import {
   BookOpenIcon,
@@ -153,6 +155,11 @@ import {
   RailExpand,
   usePageSidebarFold,
 } from "../frame/page-sidebar.tsx";
+import {
+  ErrorState,
+  LoadingLines,
+  NotFoundState,
+} from "../frame/page-states.tsx";
 import { GraspMark } from "../grasp-mark.tsx";
 
 const models = [
@@ -168,6 +175,115 @@ const runs = [
 const showToast = () => {
   toast.add({ title: "Saved", description: "Your changes are saved." });
 };
+
+// The theme's colours, each a token the components use (the classes are
+// written out whole so Tailwind finds them).
+const swatches = [
+  { name: "background", className: "bg-background" },
+  { name: "foreground", className: "bg-foreground" },
+  { name: "card", className: "bg-card" },
+  { name: "primary", className: "bg-primary" },
+  { name: "secondary", className: "bg-secondary" },
+  { name: "muted", className: "bg-muted" },
+  { name: "muted-foreground", className: "bg-muted-foreground" },
+  { name: "faint", className: "bg-faint" },
+  { name: "accent", className: "bg-accent" },
+  { name: "destructive", className: "bg-destructive" },
+  { name: "border", className: "bg-border" },
+  { name: "sidebar", className: "bg-sidebar" },
+  { name: "tile", className: "bg-tile" },
+  { name: "status-agreed", className: "bg-status-agreed" },
+  { name: "status-attention", className: "bg-status-attention" },
+];
+
+const buttonVariants = [
+  "default",
+  "outline",
+  "secondary",
+  "ghost",
+  "destructive",
+  "link",
+] as const;
+
+const badgeVariants = [
+  "default",
+  "secondary",
+  "destructive",
+  "outline",
+  "ghost",
+  "link",
+] as const;
+
+/** The Grasp theme: its colours and type, and each variant. */
+const Theme = () => (
+  <Card>
+    <CardHeader>
+      <CardTitle>Theme</CardTitle>
+      <CardDescription>
+        Grasp&apos;s colours, type and the variants of buttons and badges.
+      </CardDescription>
+    </CardHeader>
+    <CardContent>
+      <div className="flex flex-col gap-6">
+        <ul className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+          {swatches.map(({ name, className }) => (
+            <li className="flex flex-col gap-1.5" key={name}>
+              <span
+                aria-hidden="true"
+                className={cn("h-10 rounded-md border", className)}
+              />
+              <span className="text-muted-foreground text-xs">{name}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="flex flex-col gap-1">
+          <p className="text-2xl font-medium tracking-tight">
+            A page&apos;s title
+          </p>
+          <p className="text-sm">The body text, in Geist.</p>
+          <p className="text-muted-foreground text-sm">A quiet line.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {buttonVariants.map((variant) => (
+            <Button key={variant} variant={variant}>
+              {variant}
+            </Button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {badgeVariants.map((variant) => (
+            <Badge key={variant} variant={variant}>
+              {variant}
+            </Badge>
+          ))}
+        </div>
+      </div>
+    </CardContent>
+  </Card>
+);
+
+/** How every page finds nothing, fails and loads (frame/page-states.tsx). */
+const States = () => (
+  <Card>
+    <CardHeader>
+      <CardTitle>Page states</CardTitle>
+      <CardDescription>Not found, an error and loading.</CardDescription>
+    </CardHeader>
+    <CardContent>
+      <div className="flex flex-col gap-4">
+        <div className="rounded-lg border">
+          <NotFoundState title="Workflow not found" />
+        </div>
+        <div className="rounded-lg border">
+          <ErrorState reason="Grasp can't be reached right now. Try again in a moment. Reference: 0f8c2a4e-5d1b-4c3e-9a7f-2b6d8e1c4a90" />
+        </div>
+        <div className="rounded-lg border p-4">
+          <LoadingLines />
+        </div>
+      </div>
+    </CardContent>
+  </Card>
+);
 
 /** Navigation and page furniture: the sidebar, crumbs, people, keys. */
 const Frame = () => (
@@ -429,9 +545,13 @@ const Kit = () => (
           <h1 className="text-2xl font-medium">UI kit</h1>
         </div>
 
+        <Theme />
+
         <Frame />
 
         <PageColumn />
+
+        <States />
 
         <Card>
           <CardHeader>
@@ -440,10 +560,10 @@ const Kit = () => (
           </CardHeader>
           <CardContent>
             <div className="flex flex-col gap-4">
-              <label className="flex flex-col gap-2 text-sm" htmlFor="kit-name">
-                Name
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="kit-name">Name</Label>
                 <Input id="kit-name" placeholder="Ada Lovelace" />
-              </label>
+              </div>
               <label
                 className="flex flex-col gap-2 text-sm"
                 htmlFor="kit-notes"

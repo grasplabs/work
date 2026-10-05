@@ -250,7 +250,7 @@ test("an admin changes a member's role, and the controls wait for the list to sh
   await expect(role).toContainText("Builder");
 });
 
-test("says core can't be reached when the members list never comes", async ({
+test("shows the page loading while the members list is slow, then says core can't be reached when it never comes", async ({
   context,
   page,
 }) => {
@@ -259,9 +259,21 @@ test("says core can't be reached when the members list never comes", async ({
   const gate = await callGate(page, '["members","list"]');
   gate.hold();
   await page.goto("/members");
+  // In the frame, as skeletons, while the read is slow.
+  await expect(page.getByRole("status", { name: "Loading…" })).toBeVisible();
+  const nav = page.getByRole("navigation", { name: "Main" });
+  await expect(nav).toBeVisible();
+
+  // Then the page says it didn't load and why, with a way to ask again,
+  // still in the frame.
   await expect(
-    page.getByText("Grasp can't be reached right now. Try again in a moment.")
+    page.getByRole("heading", { name: "This page didn't load" })
   ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("alert")).toHaveText(
+    "Grasp can't be reached right now. Try again in a moment."
+  );
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+  await expect(nav).toBeVisible();
   await expect(page.getByRole("table")).toHaveCount(0);
 });
 
@@ -287,6 +299,37 @@ test("sends someone whose session ended elsewhere to sign in, and back to the pa
   expect(new URL(page.url()).pathname).toBe("/sign-in");
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/apps");
   await expect(nav).toHaveCount(0);
+});
+
+test("says an address no page has, and an App that isn't there, are not found, in the frame", async ({
+  context,
+  page,
+}) => {
+  const { member } = peopleIn("notFound");
+  await signInTo(context, member);
+
+  await page.goto("/no-such-page");
+  await expect(page.getByRole("heading", { name: "Not found" })).toBeVisible();
+  await expect(
+    page.getByText("It may have been renamed or removed.")
+  ).toBeVisible();
+  // In the frame: the sidebar is there to go on from.
+  const nav = page.getByRole("navigation", { name: "Main" });
+  await expect(nav.getByRole("link", { name: "Apps" })).toBeVisible();
+
+  await page.goto("/apps/no-such-app");
+  await expect(
+    page.getByRole("heading", { name: "App not found" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Breadcrumb" })
+  ).toContainText("Not found");
+
+  // A workflow of an App that isn't there, the same way.
+  await page.goto("/workflows/no-such-app/no-such-workflow");
+  await expect(
+    page.getByRole("heading", { name: "Workflow not found" })
+  ).toBeVisible();
 });
 
 test("never sends what it gave up on while core was out of reach, once core is back", async ({

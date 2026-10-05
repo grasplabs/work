@@ -354,6 +354,10 @@ msgstr "App"
 msgid "App {app}"
 msgstr "App {app}"
 
+#: src/routes/_shell.apps.$app.tsx
+msgid "App not found"
+msgstr "App nicht gefunden"
+
 #: src/screens/screen-frame.tsx
 msgid "App screen"
 msgstr "App-Ansicht"
@@ -567,6 +571,10 @@ msgstr "Sammlung"
 msgid "Collection {collectionId}"
 msgstr "Sammlung {collectionId}"
 
+#: src/routes/_shell.knowledge.$collection.tsx
+msgid "Collection not found"
+msgstr "Sammlung nicht gefunden"
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Collections"
 msgstr "Sammlungen"
@@ -771,6 +779,10 @@ msgid "Document"
 msgstr "Dokument"
 
 #: src/routes/_shell.knowledge.$collection.tsx
+msgid "Document not found"
+msgstr "Dokument nicht gefunden"
+
+#: src/routes/_shell.knowledge.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Hier geschriebene Dokumente und hochgeladene Dateien erscheinen hier, damit Grasp und seine Agenten sie lesen können."
 
@@ -935,7 +947,6 @@ msgstr "Aus"
 #: src/core.ts
 #: src/guest/api.ts
 #: src/load-from-core.tsx
-#: src/routes/_shell.connections.tsx
 #: src/routes/_shell.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/routes/sign-in.tsx
@@ -1014,6 +1025,10 @@ msgstr "Er hat keine Schritte."
 #: src/routes/_shell.apps.$app.tsx
 msgid "It isn't shared with anyone."
 msgstr "Sie ist mit niemandem geteilt."
+
+#: src/frame/page-states.tsx
+msgid "It may have been renamed or removed."
+msgstr "Es wurde vielleicht umbenannt oder entfernt."
 
 #: src/chat/builds.tsx
 msgid "It no longer runs (it could change things)."
@@ -1124,21 +1139,9 @@ msgstr "Servercode erneut laden"
 msgid "Loading its tools…"
 msgstr "Werkzeuge werden geladen…"
 
-#: src/routes/_shell.apps.$app.tsx
-msgid "Loading members…"
-msgstr "Mitglieder werden geladen…"
-
-#: src/routes/_shell.apps.$app.tsx
-msgid "Loading runs…"
-msgstr "Läufe werden geladen…"
-
-#: src/chat/builds.tsx
-msgid "Loading the server code…"
-msgstr "Servercode wird geladen…"
-
 #: src/activity/audit-log.tsx
-#: src/chat/side-panel.tsx
 #: src/chat/thread.tsx
+#: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
 msgid "Loading…"
 msgstr "Wird geladen…"
@@ -1330,6 +1333,15 @@ msgstr "Keine wartet auf einen Admin."
 #: src/connections/connection-list.tsx
 msgid "None."
 msgstr "Keine."
+
+#: src/frame/page-states.tsx
+#: src/routes/_shell.knowledge.$collection.tsx
+msgid "Not found"
+msgstr "Nicht gefunden"
+
+#: src/load-from-core.tsx
+msgid "Not found. It may have been renamed or removed."
+msgstr "Nicht gefunden. Es wurde vielleicht umbenannt oder entfernt."
 
 #: src/connections/connection-list.tsx
 msgid "Not named by the provider"
@@ -2179,7 +2191,7 @@ msgstr "Dieser Link funktioniert nicht. Bitten Sie die Person, die ihn geschickt
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Dieser Link ist abgelaufen. Bitten Sie die Person, die ihn geschickt hat, um einen neuen."
 
-#: src/route-error.tsx
+#: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Diese Seite wurde nicht geladen"
 
@@ -2217,14 +2229,13 @@ msgid "Tools to allow"
 msgstr "Zu erlaubende Werkzeuge"
 
 #: src/chat/thread.tsx
-#: src/route-error.tsx
+#: src/frame/page-states.tsx
 #: src/routes/_shell.index.tsx
-#: src/routes/_shell.tsx
 #: src/screens/screen-frame.tsx
 msgid "Try again"
 msgstr "Erneut versuchen"
 
-#: src/routes/_shell.tsx
+#: src/frame/page-states.tsx
 msgid "Trying again…"
 msgstr "Neuer Versuch…"
 
@@ -2369,6 +2380,10 @@ msgstr "Workflow"
 #: src/activity/pending.tsx
 msgid "Workflow {workflowId} of {app}"
 msgstr "Workflow {workflowId} von {app}"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
+msgid "Workflow not found"
+msgstr "Workflow nicht gefunden"
 
 #: src/chat/builds.tsx
 msgid "Workflow tests fail:"

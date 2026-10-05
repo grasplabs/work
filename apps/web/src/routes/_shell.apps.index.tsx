@@ -16,8 +16,9 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { timeoutMs, withTimeout } from "../core.ts";
 import type { Session } from "../core.ts";
 import { formatList } from "../format.ts";
+import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 
 // The Apps the person can open, as core lists them, with what each one's
 // current version offers.
@@ -140,6 +141,9 @@ const AppsTable = ({ apps }: { apps: ListedApp[] }) => {
 const Apps = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
+  if (page.state !== "ready") {
+    return <PageNotLoaded crumbs={[{ label: t`Apps` }]} page={page} />;
+  }
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Apps` }]} />
@@ -147,14 +151,14 @@ const Apps = () => {
         <h1 className="text-2xl font-medium">
           <Trans>Apps</Trans>
         </h1>
-        <NotLoaded page={page} />
-        {page.state === "ready" ? <AppsTable apps={page.data} /> : null}
+        <AppsTable apps={page.data} />
       </div>
     </>
   );
 };
 
 export const Route = createFileRoute("/_shell/apps/")({
+  pendingComponent: PageLoading,
   component: Apps,
   loader: async ({ context: { core } }) => await loadFromCore(core, listApps),
 });

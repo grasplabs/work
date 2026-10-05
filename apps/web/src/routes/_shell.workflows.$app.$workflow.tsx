@@ -38,10 +38,12 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { WorkflowIcon } from "lucide-react";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
+import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -593,35 +595,38 @@ const WorkflowPage = () => {
   const { detail, runs, versions } = Route.useLoaderData();
   const { app, workflow } = Route.useParams();
   const { t } = useLingui();
+  const crumbs = [
+    { label: t`Workflows`, to: "/workflows" },
+    { label: workflow },
+  ] as const;
+  if (detail.state !== "ready") {
+    return (
+      <PageNotLoaded
+        crumbs={crumbs}
+        icon={WorkflowIcon}
+        notFound={t`Workflow not found`}
+        page={detail}
+      />
+    );
+  }
   return (
     <>
-      <SiteHeader
-        crumbs={[
-          { label: t`Workflows`, to: "/workflows" },
-          { label: workflow },
-        ]}
-      />
+      <SiteHeader crumbs={crumbs} />
       <div className="flex max-w-6xl flex-col gap-6 p-6">
-        {detail.state === "ready" ? (
-          <WorkflowView
-            // Another workflow starts with its own forms and test.
-            key={`${app}/${workflow}`}
-            detail={detail.data}
-            runs={runs}
-            versions={versions}
-          />
-        ) : (
-          <>
-            <h1 className="text-2xl font-medium">{workflow}</h1>
-            <NotLoaded page={detail} />
-          </>
-        )}
+        <WorkflowView
+          // Another workflow starts with its own forms and test.
+          key={`${app}/${workflow}`}
+          detail={detail.data}
+          runs={runs}
+          versions={versions}
+        />
       </div>
     </>
   );
 };
 
 export const Route = createFileRoute("/_shell/workflows/$app/$workflow")({
+  pendingComponent: PageLoading,
   // The workflow and its runs are read on their own, and the App's
   // versions only for those who build it: each says on its own why it
   // failed.

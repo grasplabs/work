@@ -1,4 +1,10 @@
-import { failureText } from "@grasp-os/shared/errors";
+import {
+  failureText,
+  requestIdOf,
+  withReference,
+} from "@grasp-os/shared/errors";
+import type { I18n } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 
 import { readWithin } from "./core-connection.ts";
@@ -10,16 +16,42 @@ import { ErrorText } from "./error-text.tsx";
 /** What a page read from core: its data, or why there is none. */
 export type Loaded<T> =
   | { state: "offline" }
+  /** Core doesn't have it; `requestId` is the reference to quote, if any. */
+  | { state: "missing"; requestId?: string }
   | { state: "refused"; message: string }
   | { state: "ready"; data: T };
+
+/**
+ * What a page can name that core may not have (any more): an App, a
+ * workflow, a collection or document, a decision, a screen. Not
+ * `request.not_found`, an endpoint this core doesn't know (an older one),
+ * nor what a page reads along the way, such as a member: those stay
+ * refusals, with their reference.
+ */
+const notFoundCodes = new Set([
+  "app.not_found",
+  "workflow.not_found",
+  "knowledge.not_found",
+  "decision.not_found",
+  "screen.not_found",
+]);
+
+// Read off the error itself: a family's codes are only known to
+// `isExpectedError` once its module has loaded, and the page loads few.
+const isNotFound = (error: unknown): boolean =>
+  error instanceof Error &&
+  "code" in error &&
+  typeof error.code === "string" &&
+  notFoundCodes.has(error.code);
 
 /**
  * Reads a page's data with `read`, on the signed-in person's session over
  * the tab's connection, within a few seconds (`readWithin`): a read that
  * hangs, or waits that long for a connection, counts as core being out of
- * reach, and a refusal carries core's reason. Given `left`, the page's
- * signal that it was left, a read still waiting for a connection then is
- * never sent.
+ * reach, a read of something core doesn't have (renamed or removed) as
+ * missing, and any other refusal carries core's reason. Given `left`, the
+ * page's signal that it was left, a read still waiting for a connection
+ * then is never sent.
  */
 export const loadFromCore = async <T,>(
   core: CoreConnection,
@@ -35,21 +67,37 @@ export const loadFromCore = async <T,>(
     if (error instanceof CoreTimeoutError) {
       return { state: "offline" };
     }
+    if (isNotFound(error)) {
+      const requestId = requestIdOf(error);
+      return requestId === undefined
+        ? { state: "missing" }
+        : { state: "missing", requestId };
+    }
     return { state: "refused", message: failureText(error) };
   }
 };
 
+const unreachable = msg`Grasp can't be reached right now. Try again in a moment.`;
+const missing = msg`Not found. It may have been renamed or removed.`;
+
+/** Why a read from core has no data, in words; nothing once it has. */
+export const notLoadedText = (
+  page: Loaded<unknown>,
+  i18n: I18n
+): string | undefined => {
+  if (page.state === "offline") {
+    return i18n._(unreachable);
+  }
+  if (page.state === "missing") {
+    // In a section of a page, with its reference: what the page named was
+    // found, but not something it read along the way.
+    return withReference(i18n._(missing), page.requestId);
+  }
+  return page.state === "refused" ? page.message : undefined;
+};
+
 /** Why a page has no data to show; nothing once it has. */
 export const NotLoaded = ({ page }: { page: Loaded<unknown> }) => {
-  const { t } = useLingui();
-  if (page.state === "offline") {
-    return (
-      <ErrorText>
-        {t`Grasp can't be reached right now. Try again in a moment.`}
-      </ErrorText>
-    );
-  }
-  return page.state === "refused" ? (
-    <ErrorText>{page.message}</ErrorText>
-  ) : null;
+  const { i18n } = useLingui();
+  return <ErrorText>{notLoadedText(page, i18n)}</ErrorText>;
 };
