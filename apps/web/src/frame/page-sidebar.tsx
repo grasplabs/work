@@ -7,7 +7,7 @@ import {
   TooltipTrigger,
 } from "@grasp-os/ui/components/tooltip";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import { keepFolded, readFolded } from "../fold.ts";
@@ -50,7 +50,20 @@ export const usePageSidebarFold = (
   return [choice ?? !roomy, setFolded];
 };
 
-/** The sidebar itself, named `label`: open, or folded to its rail. */
+/** How long a sidebar takes to open or fold: `duration-200` in its classes. */
+const foldMs = 200;
+
+const motionReduced = (): boolean =>
+  matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/**
+ * The sidebar itself, named `label`: open, or folded to its rail. It stays
+ * one element either way, so its width eases between the two on the app
+ * sidebar's curve; what it holds keeps its own width, so it is uncovered or
+ * cut off rather than squeezed. Folding, it keeps what it held open until
+ * its width has shrunk, so it closes the way it opens rather than turning
+ * into the rail at once and shrinking an empty column.
+ */
 export const PageSidebar = ({
   folded,
   label,
@@ -59,18 +72,61 @@ export const PageSidebar = ({
   folded: boolean;
   label: string;
   children: ReactNode;
-}) => (
-  <aside
-    aria-label={label}
-    className={
-      folded
-        ? "hidden w-12 flex-none flex-col items-center gap-1 overflow-y-auto border-r py-3 md:flex"
-        : "hidden w-72 flex-none flex-col border-r md:flex"
+}) => {
+  const [was, setWas] = useState({
+    folded,
+    open: folded ? null : children,
+  });
+  // While it folds, what it held open; none once the width has shrunk, or
+  // where motion is reduced.
+  const [leaving, setLeaving] = useState<ReactNode>(null);
+  if (folded !== was.folded || (!folded && children !== was.open)) {
+    setWas({ folded, open: folded ? was.open : children });
+    if (folded !== was.folded) {
+      setLeaving(folded && !motionReduced() ? was.open : null);
     }
-  >
-    {children}
-  </aside>
-);
+  }
+  // The rail takes over once the width has shrunk. A timer rather than
+  // `transitionend`, which never comes where no transition runs, as on a
+  // phone, where the sidebar is hidden.
+  useEffect(() => {
+    const timer =
+      leaving === null
+        ? undefined
+        : setTimeout(() => {
+            setLeaving(null);
+          }, foldMs);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [leaving]);
+  return (
+    <aside
+      aria-label={label}
+      className={
+        folded
+          ? "ease-sidebar hidden w-12 flex-none overflow-hidden border-r transition-all duration-200 motion-reduce:transition-none md:flex"
+          : "ease-sidebar hidden w-72 flex-none overflow-hidden border-r transition-all duration-200 motion-reduce:transition-none md:flex"
+      }
+    >
+      {leaving === null ? (
+        <div
+          className={
+            folded
+              ? "flex w-12 flex-none flex-col items-center gap-1 overflow-y-auto py-3"
+              : "flex w-72 flex-none flex-col"
+          }
+        >
+          {children}
+        </div>
+      ) : (
+        <div className="flex w-72 flex-none flex-col" inert>
+          {leaving}
+        </div>
+      )}
+    </aside>
+  );
+};
 
 /** A rail entry that is a link: `render` with the rail button's look. */
 const RailLink = ({

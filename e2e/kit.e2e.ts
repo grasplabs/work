@@ -59,6 +59,20 @@ const expectKitRendered = async (page: Page): Promise<void> => {
 
   await page.getByRole("button", { name: "Show details" }).click();
   await expect(page.getByText("The details.")).toBeVisible();
+
+  // Every page's states: not found, an error with its reference and a way
+  // to try again, and skeletons while it loads.
+  await expect(
+    page.getByRole("heading", { name: "Workflow not found" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "This page didn't load" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Reference: " })
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+  await expect(page.getByRole("status", { name: "Loading…" })).toBeVisible();
 };
 
 test("renders the UI kit in light mode", async ({ page }) => {

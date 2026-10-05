@@ -25,8 +25,9 @@ import { ChatThread } from "../chat/thread.tsx";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
+import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 
@@ -335,14 +336,7 @@ const Chat = () => {
   const [listOpen, setListOpen] = useState(false);
   const [panel, setPanel] = useState(false);
   if (page.state !== "ready") {
-    return (
-      <>
-        <SiteHeader crumbs={[{ label: t`Chat` }]} />
-        <div className="p-6">
-          <NotLoaded page={page} />
-        </div>
-      </>
-    );
+    return <PageNotLoaded crumbs={[{ label: t`Chat` }]} page={page} />;
   }
   const { chats, models, sourceNames } = page.data;
   // One past the list's newest opens too, as core finds it (or says why not).
@@ -439,6 +433,7 @@ const Chat = () => {
 };
 
 export const Route = createFileRoute("/_shell/")({
+  pendingComponent: PageLoading,
   validateSearch: (search: Record<string, unknown>): { chat?: string } =>
     typeof search.chat === "string" ? { chat: search.chat } : {},
   loader: async ({ context: { core } }) =>
