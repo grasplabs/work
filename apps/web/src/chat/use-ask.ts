@@ -36,6 +36,9 @@ export const useAsk = (
   // is on its way would ask it twice. A ref, as `busy` is only seen on the
   // next render.
   const sending = useRef(false);
+  // A new chat made for a question that then failed to send: asking the
+  // same question again asks in it, rather than making another.
+  const unsent = useRef<{ id: string; question: string } | null>(null);
   const ask = async (question: string): Promise<void> => {
     if (sending.current) {
       return;
@@ -43,7 +46,9 @@ export const useAsk = (
     sending.current = true;
     let created: string | undefined;
     const sent = await run(async (session) => {
-      let id = chatId;
+      let id =
+        chatId ??
+        (unsent.current?.question === question ? unsent.current.id : undefined);
       if (id === undefined) {
         ({ id } = await session.chats.create(titleOf(question)));
         created = id;
@@ -53,17 +58,15 @@ export const useAsk = (
     });
     sending.current = false;
     if (sent === undefined) {
-      // A new chat the question didn't go into opens, so asking again asks
-      // in it rather than making another; the box keeps the question.
+      // The box keeps the question and says why it wasn't sent; a new chat
+      // made for it waits to be asked in again, and shows in Chat's list.
       if (created !== undefined) {
-        setActiveChat(created);
-        if (opens === "page") {
-          await navigate({ to: "/", search: { chat: created } });
-        }
+        unsent.current = { id: created, question };
         await router.invalidate();
       }
       return;
     }
+    unsent.current = null;
     // Clears the box only of what was sent from it: asking again sends an
     // earlier question, and a draft the person started stays.
     setText((now) => (now === question ? "" : now));
