@@ -1934,6 +1934,38 @@ add(
   ["definition.invalid_descriptor", false]
 );
 add(
+  "a schema with a large default is read back from its descriptor",
+  () => {
+    const rows = Array.from({ length: 25_000 }, () => ({}));
+    const schema = v.array(v.object({})).default(rows);
+    const reloaded = schemaFromDescriptor(stored(schema));
+    // Nothing is passed, so the default is what comes back.
+    const nothing: unknown = [][0];
+    const result = reloaded["~standard"].validate(nothing);
+    return "value" in result && Array.isArray(result.value)
+      ? result.value.length
+      : "refused";
+  },
+  25_000
+);
+add(
+  "a default that contains itself is refused, not followed",
+  () => {
+    const rows: unknown[] = [];
+    rows.push(rows);
+    return declare(() =>
+      schemaFromDescriptor({
+        ...base,
+        kind: "array",
+        item: { ...base, kind: "boolean" },
+        presence: "default",
+        defaultValue: rows,
+      })
+    );
+  },
+  "definition.too_large"
+);
+add(
   "a descriptor with a getter is refused without the getter being run",
   () => {
     let ran = false;
