@@ -14,16 +14,19 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
-import type { AppErrorEntry, RunChange } from "@grasp-os/shared/screens";
+import { screenLimits } from "@grasp-os/shared/screens";
+import type { AppErrorLog, RunChange } from "@grasp-os/shared/screens";
 import {
   statisticErrors,
   statisticLimitsOf,
 } from "@grasp-os/shared/statistics";
 import type { StatisticUse } from "@grasp-os/shared/statistics";
+import { TokenBuckets } from "@grasp-os/shared/token-bucket";
 import { DurableObject } from "cloudflare:workers";
 
 import { appBindings } from "./app-bindings.ts";
-import { addToErrorLog, readErrorLog } from "./app-error-log.ts";
+import { ErrorLog } from "./app-error-log.ts";
+import type { ReportedProblem } from "./app-error-log.ts";
 import { findApp, versionFiles } from "./apps.ts";
 import { appHost } from "./durable-objects.ts";
 import { sandbox } from "./sandbox.ts";
@@ -75,6 +78,9 @@ const reservedMethods: ReadonlySet<string> = new Set(reservedAppMethods);
 
 /** Where the host counts starts on new code or permissions (`#load`, `restart`). */
 const generationKey = "generation";
+
+/** How often, at most, the count of dropped reports is written to the log. */
+const suppressedWriteMs = 60_000;
 
 /** Where the host keeps the version its code last started on. */
 const versionKey = "version";
@@ -377,6 +383,25 @@ export class App extends DurableObject<Env> {
   /** The minute a read refused past its bounds was last audited. */
   #limitedAuditMinute = -1;
 
+  // What the App's screens may ask and report, counted here because every
+  // connection of every person to this App ends at this one object: a
+  // count the page or one connection kept is skipped by opening another.
+  // Kept in memory: a restart of this object starts the buckets full,
+  // which an idle App's are anyway.
+
+  /** Each person's requests of the App's screens. */
+  readonly #requests = new TokenBuckets(screenLimits.requests);
+
+  /** The reports kept of each person's screens, and of all of them. */
+  readonly #callerReports = new TokenBuckets(screenLimits.callerReports);
+  readonly #appReports = new TokenBuckets(screenLimits.appReports);
+
+  /** The App's error log, in this object's own storage. */
+  readonly #errorLog = new ErrorLog(this.ctx.storage);
+
+  /** Reports dropped unread and not yet in the log's count, and when it was last written. */
+  #suppressed = { reports: 0, writtenAt: 0 };
+
   get #app(): AppId {
     return appIdSchema.parse(this.ctx.id.name);
   }
@@ -508,14 +533,56 @@ export class App extends DurableObject<Env> {
     await this.ctx.storage.put(restrictedKey, true);
   }
 
-  /** Adds an entry to the App's error log (app-error-log.ts). */
-  async logError(entry: AppErrorEntry): Promise<void> {
-    await addToErrorLog(this.ctx.storage, entry);
+  /**
+   * Whether `userId`'s screen may ask the App one more thing now
+   * (`screenLimits.requests`). Asked before the request is read, so one
+   * that is refused or malformed counts too.
+   */
+  admitRequest(userId: string): boolean {
+    return this.#requests.take(userId);
   }
 
-  /** The App's error log, newest first. */
-  async errors(): Promise<AppErrorEntry[]> {
-    return await readErrorLog(this.ctx.storage);
+  /**
+   * Whether one more report of `userId`'s screen is kept now: within what
+   * one person's screens may report, and all of the App's together. One
+   * that isn't is only counted. The count reaches the log at once the
+   * first time and at most once a minute after, so a flood of reports
+   * writes one number, not a record each.
+   */
+  async admitReport(userId: string): Promise<boolean> {
+    const now = Date.now();
+    const admitted =
+      this.#callerReports.take(userId, now) &&
+      this.#appReports.take("app", now);
+    if (!admitted) {
+      this.#suppressed.reports += 1;
+      if (now - this.#suppressed.writtenAt >= suppressedWriteMs) {
+        await this.#writeSuppressed(now);
+      }
+    }
+    return admitted;
+  }
+
+  async #writeSuppressed(now: number): Promise<void> {
+    const { reports } = this.#suppressed;
+    if (reports === 0) {
+      return;
+    }
+    this.#suppressed = { reports: 0, writtenAt: now };
+    // One line for the operator too, as often as the number is written.
+    log.warn("screen.reports_suppressed", { appId: this.#app, reports });
+    await this.#errorLog.suppress(reports);
+  }
+
+  /** Adds an admitted report to the App's error log (app-error-log.ts). */
+  async logError(reported: ReportedProblem): Promise<void> {
+    await this.#errorLog.add(reported);
+  }
+
+  /** The App's error log, with every report dropped so far counted. */
+  async errors(): Promise<AppErrorLog> {
+    await this.#writeSuppressed(Date.now());
+    return await this.#errorLog.read();
   }
 
   /**
