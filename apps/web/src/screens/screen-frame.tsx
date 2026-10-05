@@ -15,6 +15,7 @@ const failureMessages: Readonly<Record<FailureReason, MessageDescriptor>> = {
   broken: msg`This app doesn't build. Ask a builder to fix it.`,
   "timed-out": msg`This app didn't start in time.`,
   left: msg`This app left its frame and was stopped.`,
+  disconnected: msg`This app lost its connection to the page and was stopped.`,
   unknown: msg`The app couldn't be loaded.`,
 };
 

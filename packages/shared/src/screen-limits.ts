@@ -74,24 +74,116 @@ export const screenFrameMessage = "grasp:screen";
  */
 export const screenFrameMounted = "grasp:screen-mounted";
 
-/**
- * How many bytes `value` takes as UTF-8 JSON, measured on the text itself.
- * Bytes count as the base64 they travel as, a big integer as its digits;
- * a value with no JSON form (one that holds itself) is past any limit.
- */
-export const jsonBytes = (value: unknown): number => {
-  try {
-    const text = JSON.stringify(value, (_key, held: unknown) => {
-      if (typeof held === "bigint") {
-        return held.toString();
-      }
-      if (held instanceof Uint8Array) {
-        return "=".repeat(Math.ceil(held.byteLength / 3) * 4);
-      }
-      return held;
-    });
-    return new TextEncoder().encode(text).byteLength;
-  } catch {
-    return Number.POSITIVE_INFINITY;
-  }
+/** Past any limit: what a value that can't be measured counts as. */
+const unmeasured = Number.POSITIVE_INFINITY;
+
+/** Measures a value held inside the one being measured. */
+type Measure = (held: unknown) => number;
+
+/** The bytes of `text` as a JSON string, in UTF-8. */
+const textBytes = (text: string): number =>
+  new TextEncoder().encode(JSON.stringify(text)).byteLength;
+
+/** The bytes of `members`, each already measured, with the commas between. */
+const listBytes = (members: number[]): number =>
+  members.reduce((sum, member) => sum + member, 2) +
+  Math.max(0, members.length - 1);
+
+/** The bytes of an object's members: each key, a colon, and its value. */
+const membersBytes = (members: [string, unknown][], measure: Measure): number =>
+  listBytes(
+    members
+      // As JSON, a member with no value isn't written.
+      .filter(([, held]) => held !== undefined)
+      .map(([key, held]) => textBytes(key) + 1 + measure(held))
+  );
+
+/** Whether `value` is an object written with braces, and nothing more. */
+const isPlainObject = (value: object): boolean => {
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 };
+
+/**
+ * The bytes of an array, an error or a plain object, by what it holds;
+ * of anything else, past any limit.
+ */
+const holderBytes = (value: object, measure: Measure): number => {
+  if (Array.isArray(value)) {
+    return listBytes(value.map((held: unknown) => measure(held)));
+  }
+  if (value instanceof Error) {
+    // An error travels with its name, message and stack, which JSON
+    // itself would leave out, and with whatever else was put on it.
+    return membersBytes(
+      [
+        ["name", value.name],
+        ["message", value.message],
+        ["stack", value.stack],
+        ...Object.entries(value),
+      ],
+      measure
+    );
+  }
+  return isPlainObject(value)
+    ? membersBytes(Object.entries(value), measure)
+    : unmeasured;
+};
+
+/** The bytes of an object; `holders` are the ones it is inside of. */
+const objectBytes = (
+  value: object,
+  holders: Set<object>,
+  measure: Measure
+): number => {
+  if (value instanceof Date) {
+    return textBytes(new Date(0).toISOString());
+  }
+  if (value instanceof Uint8Array) {
+    // As the base64 it travels as.
+    return Math.ceil(value.byteLength / 3) * 4 + 2;
+  }
+  // A value that holds itself has no end.
+  if (holders.has(value)) {
+    return unmeasured;
+  }
+  holders.add(value);
+  const bytes = holderBytes(value, measure);
+  holders.delete(value);
+  return bytes;
+};
+
+const measured = (value: unknown, holders: Set<object>): number => {
+  if (typeof value === "string") {
+    return textBytes(value);
+  }
+  if (typeof value === "bigint") {
+    // As its digits, in a string.
+    return value.toString().length + 2;
+  }
+  if (typeof value === "boolean") {
+    return String(value).length;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value).length : "null".length;
+  }
+  if (value === null || value === undefined) {
+    return "null".length;
+  }
+  // A function or a symbol has no measure.
+  return typeof value === "object"
+    ? objectBytes(value, holders, (held) => measured(held, holders))
+    : unmeasured;
+};
+
+/**
+ * How many bytes `value` takes as UTF-8 JSON: the limit a call's
+ * arguments and answer are held to, so it must never come out smaller
+ * than what travels. It reads the value itself, calling nothing on it.
+ * Bytes count as their base64, a big integer as its digits, an error as
+ * its name, message and stack. Anything it has no measure for is past any
+ * limit: a map, a set, a buffer, an instance of a class, a function, or a
+ * value that holds itself.
+ */
+export const jsonBytes = (value: unknown): number =>
+  measured(value, new Set<object>());

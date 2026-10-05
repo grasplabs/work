@@ -118,6 +118,10 @@ export class App extends DurableObject {
     return back === undefined ? "nothing" : typeof back;
   }
 
+  failure(_caller: Caller, length: number): { failed: Error } {
+    return { failed: new Error("A".repeat(length)) };
+  }
+
   lookLikeThePlatform(): Error {
     return Object.assign(new Error("Sign in to continue."), { code: "auth.unauthenticated" });
   }
@@ -203,6 +207,16 @@ const atStoppedClock = async <T>(
   } finally {
     vi.useRealTimers();
   }
+};
+
+/** Follows the App's runs of a workflow, and lets go of them again. */
+const followAndRelease = async (person: Person, app: string): Promise<void> => {
+  const subscription = await person.api.screens.watchRuns(
+    app,
+    "invoices",
+    noop
+  );
+  await subscription.release();
 };
 
 /** How many of `outcomes` ended as `code`. */
@@ -1109,6 +1123,84 @@ describe("screens", { timeout: 60_000 }, () => {
       third: "screen.answer_too_large",
       read: "screen.answer_too_large",
     });
+  });
+
+  it("counts an error by the message it carries, sent or answered", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const call = async (method: string, argument: unknown): Promise<string> =>
+      await outcome(builder.api.screens.call(app, method, [argument]));
+
+    // As JSON an error is "{}"; over the connection it is its message.
+    expect({
+      smallSent: await call("whoami", new Error("small")),
+      bigSent: await call("whoami", new Error("A".repeat(200_000))),
+      bigSentInside: await call("whoami", {
+        deep: [new Error("A".repeat(200_000))],
+      }),
+      smallAnswered: await call("failure", 10),
+      bigAnswered: await call("failure", 300_000),
+    }).toStrictEqual({
+      smallSent: "ok",
+      bigSent: "screen.input_too_large",
+      bigSentInside: "screen.input_too_large",
+      smallAnswered: "ok",
+      bigAnswered: "screen.answer_too_large",
+    });
+  });
+
+  it("holds what an App pushes a screen to the size of an answer, and drops the callback it refused", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const watching = collector();
+    await builder.api.screens.call(app, "watchNotes", [watching.callback]);
+    const sizes = (): number[] =>
+      watching.received.map((notes) => JSON.stringify(notes).length);
+
+    // Each note is pushed with all before it: 120,000 bytes, 240,000,
+    // then 360,000, which is more than a screen takes.
+    for (const letter of ["a", "b", "c"]) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await outcome(
+        builder.api.screens.call(app, "addNote", [letter.repeat(120_000)])
+      );
+    }
+    // Asked slowly enough to stay within what a person may ask.
+    await vi.waitFor(
+      async () => {
+        expect({
+          watching: await builder.api.screens.call(app, "watching", []),
+          pushes: watching.received.length,
+        }).toStrictEqual({ watching: 0, pushes: 3 });
+      },
+      { timeout: 10_000, interval: 500 }
+    );
+
+    expect(sizes().map((size) => size > 256 * 1024)).toStrictEqual([
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("counts following an App's runs as a request, however often a screen lets go again", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+
+    const followed = await atStoppedClock(async () => {
+      const results: string[] = [];
+      for (let attempt = 0; attempt < 25; attempt += 1) {
+        // Let go at once, so never near the twenty a screen may hold.
+        // oxlint-disable-next-line no-await-in-loop -- follow, let go, follow again
+        results.push(await outcome(followAndRelease(builder, app)));
+      }
+      return results;
+    });
+
+    expect({
+      followed: ended(followed, "ok"),
+      refused: ended(followed, "screen.rate_limited"),
+    }).toStrictEqual({ followed: 20, refused: 5 });
   });
 
   it("ends a connection that sends a value nested deeper than a screen's may be", async () => {

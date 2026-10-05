@@ -82,6 +82,12 @@ const generationKey = "generation";
 /** How often, at most, the count of dropped reports is written to the log. */
 const suppressedWriteMs = 60_000;
 
+/** How often, at most, refused requests of an App's screens are logged. */
+const refusalLogMs = 60_000;
+
+/** The one bucket all of an App's reports share. */
+const appBucket = "app";
+
 /** Where the host keeps the version its code last started on. */
 const versionKey = "version";
 
@@ -400,7 +406,10 @@ export class App extends DurableObject<Env> {
   readonly #errorLog = new ErrorLog(this.ctx.storage);
 
   /** Reports dropped unread and not yet in the log's count, and when it was last written. */
-  #suppressed = { reports: 0, writtenAt: 0 };
+  readonly #suppressed = { reports: 0, writtenAt: 0, writing: false };
+
+  /** Requests refused since the last line logged of them, and when that was. */
+  #refused = { requests: 0, loggedAt: 0 };
 
   get #app(): AppId {
     return appIdSchema.parse(this.ctx.id.name);
@@ -539,7 +548,20 @@ export class App extends DurableObject<Env> {
    * that is refused or malformed counts too.
    */
   admitRequest(userId: string): boolean {
-    return this.#requests.take(userId);
+    const now = Date.now();
+    const admitted = this.#requests.take(userId, now);
+    if (!admitted) {
+      this.#refused.requests += 1;
+      // One line a minute for whoever audits it, not one a request.
+      if (now - this.#refused.loggedAt >= refusalLogMs) {
+        log.warn("screen.requests_limited", {
+          appId: this.#app,
+          refused: this.#refused.requests,
+        });
+        this.#refused = { requests: 0, loggedAt: now };
+      }
+    }
+    return admitted;
   }
 
   /**
@@ -551,27 +573,49 @@ export class App extends DurableObject<Env> {
    */
   async admitReport(userId: string): Promise<boolean> {
     const now = Date.now();
+    // Asked of the App's bucket first, taken from it last: a report the
+    // App has no room for must not use up the person's own.
     const admitted =
+      this.#appReports.has(appBucket, now) &&
       this.#callerReports.take(userId, now) &&
-      this.#appReports.take("app", now);
+      this.#appReports.take(appBucket, now);
     if (!admitted) {
       this.#suppressed.reports += 1;
-      if (now - this.#suppressed.writtenAt >= suppressedWriteMs) {
+      if (
+        !this.#suppressed.writing &&
+        now - this.#suppressed.writtenAt >= suppressedWriteMs
+      ) {
         await this.#writeSuppressed(now);
       }
     }
     return admitted;
   }
 
+  /**
+   * Adds the reports dropped since the last write to the log's count. The
+   * time of the write moves on only once the log has them, and a write
+   * that fails puts them back: it loses nothing.
+   */
   async #writeSuppressed(now: number): Promise<void> {
     const { reports } = this.#suppressed;
     if (reports === 0) {
       return;
     }
-    this.#suppressed = { reports: 0, writtenAt: now };
-    // One line for the operator too, as often as the number is written.
-    log.warn("screen.reports_suppressed", { appId: this.#app, reports });
-    await this.#errorLog.suppress(reports);
+    // Taken out before the write, so two writes at once never count the
+    // same reports, and put back if it fails.
+    this.#suppressed.reports = 0;
+    this.#suppressed.writing = true;
+    try {
+      await this.#errorLog.suppress(reports);
+      this.#suppressed.writtenAt = now;
+      // One line for the operator too, as often as the number is written.
+      log.warn("screen.reports_suppressed", { appId: this.#app, reports });
+    } catch (error) {
+      this.#suppressed.reports += reports;
+      throw error;
+    } finally {
+      this.#suppressed.writing = false;
+    }
   }
 
   /** Adds an admitted report to the App's error log (app-error-log.ts). */

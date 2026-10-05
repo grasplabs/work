@@ -1,3 +1,4 @@
+import { jsonBytes } from "@grasp-os/shared/screens";
 import { RpcStub } from "capnweb";
 
 import { isPlainData } from "./app.ts";
@@ -18,10 +19,15 @@ export type PageCallback = RpcStub<(value: unknown) => unknown>;
 export const isStub = (value: unknown): value is PageCallback =>
   value instanceof RpcStub;
 
-/** How a push is refused: data that isn't plain, or a person who may no longer have it. */
+/**
+ * How a push is refused: data that isn't plain, a person who may no
+ * longer have it, or, where pushes are held to a size (`maxBytes`), one
+ * that is over it.
+ */
 export interface Refusals {
   invalid: () => Error;
   closed: () => Error;
+  tooLarge?: { maxBytes: number; refuse: () => Error };
 }
 
 /**
@@ -55,6 +61,12 @@ export const callbackFor = (
     async (value: unknown): Promise<void> => {
       if (!isPlainData(value)) {
         throw refusals.invalid();
+      }
+      if (
+        refusals.tooLarge !== undefined &&
+        jsonBytes(value) > refusals.tooLarge.maxBytes
+      ) {
+        throw refusals.tooLarge.refuse();
       }
       if (!live || !(await stillOpen())) {
         release();

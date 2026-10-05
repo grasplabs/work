@@ -80,6 +80,74 @@ describe("the size of a value in bytes", () => {
     }).toStrictEqual({ bytes: 402, big: 22 });
   });
 
+  it("counts an error as the name, message and stack it travels with", () => {
+    const error = Object.assign(new Error("A".repeat(5_000_000)), {
+      code: "app.failed",
+    });
+    const bare = new Error("short");
+    bare.stack = undefined;
+    expect({
+      big: jsonBytes([error]) > 5_000_000,
+      inAnAnswer: jsonBytes({ e: error }) > 5_000_000,
+      bare: jsonBytes(bare),
+    }).toStrictEqual({
+      big: true,
+      inAnAnswer: true,
+      bare: '{"name":"Error","message":"short"}'.length,
+    });
+  });
+
+  it("puts what it has no measure for past any limit, wherever it is held", () => {
+    class Invoice {
+      total = 1;
+    }
+    const unmeasured = {
+      map: new Map([["a", "x".repeat(1000)]]),
+      set: new Set(["x".repeat(1000)]),
+      buffer: new ArrayBuffer(1000),
+      words: new Uint16Array(1000),
+      instance: new Invoice(),
+      callback: () => "x",
+      symbol: Symbol("x"),
+    };
+    expect(
+      Object.entries(unmeasured)
+        .filter(
+          ([, value]) =>
+            Number.isFinite(jsonBytes(value)) ||
+            Number.isFinite(jsonBytes({ deep: [value] }))
+        )
+        .map(([name]) => name)
+    ).toStrictEqual([]);
+  });
+
+  it("measures what is plain: a date, nothing, and the same value held twice", () => {
+    const shared = { note: "a" };
+    expect({
+      date: jsonBytes(new Date(0)),
+      nothing: [jsonBytes(null), jsonBytes([undefined])],
+      omitted: jsonBytes({ kept: 1, dropped: undefined }),
+      twice: jsonBytes([shared, shared]),
+      noPrototype: jsonBytes(Object.assign(Object.create(null), { a: 1 })),
+    }).toStrictEqual({
+      date: '"1970-01-01T00:00:00.000Z"'.length,
+      nothing: [4, 6],
+      omitted: '{"kept":1}'.length,
+      twice: '[{"note":"a"},{"note":"a"}]'.length,
+      noPrototype: '{"a":1}'.length,
+    });
+  });
+
+  it("checks the buckets it forgets at most once a minute, and refills none that isn't full", () => {
+    const buckets = new TokenBuckets({ burst: 1, perMinute: 1 });
+    expect(buckets.has("ada", 0)).toBeTruthy();
+    buckets.take("ada", 0);
+    expect([buckets.has("ada", 0), buckets.has("ada", 60_000)]).toStrictEqual([
+      false,
+      true,
+    ]);
+  });
+
   it("puts a value that holds itself past any limit", () => {
     const loop: Record<string, unknown> = {};
     loop.self = loop;

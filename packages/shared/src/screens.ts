@@ -113,8 +113,10 @@ export interface AppErrorLog {
   /** The newest different problems, newest first. */
   entries: AppErrorEntry[];
   /**
-   * How many reports were dropped unread because the App's screens
-   * reported more than they may: counted, never kept one by one.
+   * At least how many reports were dropped unread because the App's
+   * screens reported more than they may: counted, never kept one by one.
+   * The last minute's count is held in memory before it is written, so a
+   * flood right before the App's host restarts is counted short.
    */
   suppressed: number;
 }

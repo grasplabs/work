@@ -25,6 +25,17 @@ import { screenAppFiles, serveAttacker } from "./screen-app.ts";
 
 const timedOut = "This app didn't start in time.";
 const left = "This app left its frame and was stopped.";
+const disconnected =
+  "This app lost its connection to the page and was stopped.";
+
+/**
+ * Stops the page's clock where it is: from here on, time passes only when
+ * a test moves it, so "not yet" and "after ten seconds" don't depend on
+ * how fast the machine is.
+ */
+const stopClock = async (page: Page): Promise<void> => {
+  await page.clock.pauseAt(await page.evaluate(() => Date.now()));
+};
 
 /** A UDP port standing in for a TURN server: it only counts packets. */
 const serveTurn = async (): Promise<{
@@ -200,6 +211,17 @@ test("a screen that loads another document in its frame is stopped", async ({
   await expect(frameOf(page)).not.toHaveAttribute("src");
 });
 
+test("a screen that sends more than its port takes is stopped, and the page says so", async ({
+  browser,
+}) => {
+  const page = await pageOf(browser, builder);
+  await page.goto(screenPath(attacking, "oversized"));
+
+  await expect(page.getByText(disconnected)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+  await expect(frameOf(page)).not.toHaveAttribute("src");
+});
+
 test("a frame that never says it is ready is given up on after ten seconds", async ({
   browser,
 }) => {
@@ -221,17 +243,19 @@ test("a frame that never says it is ready is given up on after ten seconds", asy
     });
   });
   await page.goto(screenPath(probing, "notes"));
+  await stopClock(page);
   await expect(page.frameLocator("iframe").locator("html")).toHaveAttribute(
     "data-forged",
     "4"
   );
   await expect(page.getByText(timedOut)).toHaveCount(0);
 
-  await page.clock.fastForward(10_000);
+  await page.clock.runFor(10_000);
   await expect(page.getByText(timedOut)).toBeVisible();
   await expect(frameOf(page)).not.toHaveAttribute("src");
 
   // Trying again is a new frame, which starts as any other.
+  await page.clock.resume();
   await page.unroute("**/screen-frame?*");
   await page.getByRole("button", { name: "Try again" }).click();
   await expect(
@@ -248,6 +272,7 @@ test("a screen that never renders is given up on after ten seconds, whatever it 
   const page = await pageOf(browser, builder);
   await page.clock.install();
   await page.goto(screenPath(attacking, "stuck"));
+  await stopClock(page);
   // Its module ran, and told the page it had mounted, six ways.
   await expect(page.frameLocator("iframe").locator("body")).toHaveAttribute(
     "data-forged",
@@ -256,7 +281,7 @@ test("a screen that never renders is given up on after ten seconds, whatever it 
   );
   await expect(page.getByText(timedOut)).toHaveCount(0);
 
-  await page.clock.fastForward(10_000);
+  await page.clock.runFor(10_000);
   await expect(page.getByText(timedOut)).toBeVisible();
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(frameOf(page)).not.toHaveAttribute("src");
@@ -286,9 +311,10 @@ test("WebRTC is left as the browser has it: nothing hidden, nothing claimed", as
   // What the browser then sent the stand-in TURN server is its own
   // doing, which no policy of the frame governs. Written down, either
   // way; a browser that sends nothing here is not thereby safe.
+  // A few seconds is how long a browser that sends at all takes here.
   let reached = true;
   try {
-    await expect.poll(turn.packets, { timeout: 15_000 }).toBeGreaterThan(0);
+    await expect.poll(turn.packets, { timeout: 3000 }).toBeGreaterThan(0);
   } catch {
     reached = false;
   }
@@ -297,7 +323,7 @@ test("WebRTC is left as the browser has it: nothing hidden, nothing claimed", as
     description: `${outcome}; ${
       reached
         ? `${turn.packets()} packets reached the stand-in server`
-        : "no packet reached the stand-in server in 15 s"
+        : "no packet reached the stand-in server in 3 s"
     }`,
   });
 });

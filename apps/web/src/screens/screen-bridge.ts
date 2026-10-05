@@ -132,10 +132,12 @@ class Bridge extends RpcTarget implements ScreenBridge {
 
   /**
    * The frame's callback goes on to core, which may only call it; the
-   * subscription core answers goes back to the frame, to release. Core
-   * holds a screen to a number of them at once.
+   * subscription core answers goes back to the frame, to release.
+   * Following counts as a request; what core then pushes doesn't, and
+   * core holds a screen to a number of subscriptions at once.
    */
   async watchRuns(workflow: unknown, onChange: unknown): Promise<unknown> {
+    this.#request();
     return await this.#target.watchRuns(text(workflow), onChange);
   }
 
@@ -189,10 +191,16 @@ class Bridge extends RpcTarget implements ScreenBridge {
  * channel. Returns what closes it: the session ends, the port closes, and
  * what the bridge kept for the frame (its theme observer, the stubs the
  * frame held) is let go. Closing it twice does nothing.
+ *
+ * `onBroken` is called if the session ends any other way: the frame sent
+ * a message over the limits, or something that isn't a message, or closed
+ * its end. Every call of the screen's fails from then on, so the page has
+ * to say so; the bridge is closed already.
  */
 export const openBridge = (
   port: MessagePort,
-  target: FrameTarget
+  target: FrameTarget,
+  onBroken: () => void
 ): (() => void) => {
   const cleanups: (() => void)[] = [];
   const session = new RpcSession(
@@ -202,7 +210,7 @@ export const openBridge = (
   );
   const frame = session.getRemoteMain();
   let open = true;
-  return () => {
+  const close = (): void => {
     if (!open) {
       return;
     }
@@ -213,4 +221,12 @@ export const openBridge = (
     frame[Symbol.dispose]();
     port.close();
   };
+  frame.onRpcBroken(() => {
+    // Not when the page closed it itself.
+    if (open) {
+      close();
+      onBroken();
+    }
+  });
+  return close;
 };

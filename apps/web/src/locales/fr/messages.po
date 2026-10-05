@@ -2893,6 +2893,10 @@ msgstr "Cette application ne se construit pas. Demandez à un concepteur de la c
 msgid "This app left its frame and was stopped."
 msgstr "Cette application a quitté son cadre et a été arrêtée."
 
+#: src/screens/screen-frame.tsx
+msgid "This app lost its connection to the page and was stopped."
+msgstr "Cette application a perdu sa connexion avec la page et a été arrêtée."
+
 #: src/routes/guest.tsx
 msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
 msgstr "Ce chat vous demande comment votre travail est fait. Tout ce que vous écrivez est conservé et lu par les personnes qui vous ont invité, qui peuvent le copier dans leurs propres dossiers et l’y garder. Ne partagez pas de mots de passe, de coordonnées bancaires ni rien que vous ne mettriez pas dans un e-mail."

@@ -199,10 +199,18 @@ const openScreen = async (
 /** A function the App gets for a callback the screen passed. */
 type Callback = (value: AppAnswer) => Promise<void>;
 
-/** How the App's pushes through a screen's callback are refused. */
+/**
+ * How the App's pushes through a screen's callback are refused. A push is
+ * held to the size of an answer: what `live` sends a screen is the same
+ * data a call would answer.
+ */
 const refusals = {
   invalid: () => appErrors.create("app.answer_invalid"),
   closed: () => appErrors.create("app.not_found"),
+  tooLarge: {
+    maxBytes: screenLimits.answerBytes,
+    refuse: () => screenErrors.create("screen.answer_too_large"),
+  },
 };
 
 /**
@@ -288,7 +296,11 @@ const watchRuns = async (
   stillOpenFor: (app: AppId) => StillOpen,
   subscriptions: Set<Disposable>
 ): Promise<RunSubscription> => {
-  const { id } = await getApp(env, by, app);
+  // Following is a request like any other: a screen that follows and
+  // lets go over and over is held to what a person may ask. What core
+  // then pushes is not counted, and how many it follows at once has its
+  // own bound below.
+  const id = await admitted(env, by, app);
   const name = screenWorkflow(workflow);
   if (!isStub(onChange)) {
     throw screenErrors.create("screen.invalid");

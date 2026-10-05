@@ -62,6 +62,8 @@ export type FailureReason =
   | "timed-out"
   /** The frame went to another address, and was stopped. */
   | "left"
+  /** The frame's channel to the page ended: over a limit, or closed. */
+  | "disconnected"
   | "unknown";
 
 /** How often the page asks whether the App has a new current version. */
@@ -323,7 +325,11 @@ const runFrame = <Bundle extends FrameCode>(
       generation,
     };
     const { port1, port2 } = new MessageChannel();
-    cleanups.push(openBridge(port1, source.target(link, bundle)));
+    cleanups.push(
+      openBridge(port1, source.target(link, bundle), () => {
+        fail({ status: "failed", reason: "disconnected" });
+      })
+    );
     const mounted = stage(
       "mounted",
       (message) => isMounted(message, frameWindow, expected),

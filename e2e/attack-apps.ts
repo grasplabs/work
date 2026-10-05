@@ -50,6 +50,21 @@ export default function Wandering() {
 `;
 
 /**
+ * Renders, then sends its server more in one message than the page takes
+ * over the frame's port.
+ */
+const oversizedScreen = `import { callServer } from "@grasp-os/sdk/screen";
+import { useEffect } from "react";
+
+export default function Oversized() {
+  useEffect(() => {
+    void callServer("secret", "x".repeat(300_000)).catch(() => undefined);
+  }, []);
+  return <main><h1>Oversized</h1></main>;
+}
+`;
+
+/**
  * Never renders: it throws instead. Before that, as its module loads, it
  * tells the page it has mounted, every way a screen can make that up: it
  * can read its frame's load from its own address, but was never told the
@@ -126,6 +141,7 @@ export const attackAppFiles = ({
   "app/server.ts": serverCode,
   "screens/leaving.tsx": leavingScreen(attacker),
   "screens/wandering.tsx": wanderingScreen,
+  "screens/oversized.tsx": oversizedScreen,
   "screens/stuck.tsx": stuckScreen,
   "screens/turn.tsx": turnScreen(turn),
 });

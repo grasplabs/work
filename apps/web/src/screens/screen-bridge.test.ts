@@ -63,11 +63,14 @@ const coreStandIn = () => {
 const framed = () => {
   const core = coreStandIn();
   const { port1, port2 } = new MessageChannel();
-  const close = openBridge(port1, core.target);
+  const broken = { times: 0 };
+  const close = openBridge(port1, core.target, () => {
+    broken.times += 1;
+  });
   const page: RpcStub<ScreenBridge> = new RpcSession<ScreenBridge>(
     portTransport(port2)
   ).getRemoteMain();
-  return { ...core, close, page, port: port2 };
+  return { ...core, broken, close, page, port: port2 };
 };
 
 /** How a call of the frame's ended: its answer, or why not. */
@@ -98,6 +101,12 @@ const nested = (depth: number): unknown => {
 
 const noop = (): void => {
   // Nothing to update.
+};
+
+/** Follows a workflow's runs once more, as a screen may over and over. */
+const follow = async (page: RpcStub<ScreenBridge>): Promise<string> => {
+  await page.watchRuns("invoices", noop);
+  return "followed";
 };
 
 describe("the page's bridge to a screen", () => {
@@ -193,9 +202,20 @@ describe("the page's bridge to a screen", () => {
     const after = await outcome(frame.page.call("notes", []));
     frame.close();
 
-    expect({ fits, tooLong, after, reached: frame.calls.length }).toStrictEqual(
-      { fits: "answered", tooLong: "refused", after: "refused", reached: 1 }
-    );
+    expect({
+      fits,
+      tooLong,
+      after,
+      reached: frame.calls.length,
+      // The page is told, once, so it can say the screen stopped.
+      broken: frame.broken.times,
+    }).toStrictEqual({
+      fits: "answered",
+      tooLong: "refused",
+      after: "refused",
+      reached: 1,
+      broken: 1,
+    });
   });
 
   it("ends the session over a value nested deeper than 32", async () => {
@@ -204,10 +224,16 @@ describe("the page's bridge to a screen", () => {
     const deep = await outcome(frame.page.call("notes", [nested(40)]));
     frame.close();
 
-    expect({ shallow, deep, reached: frame.calls.length }).toStrictEqual({
+    expect({
+      shallow,
+      deep,
+      reached: frame.calls.length,
+      broken: frame.broken.times,
+    }).toStrictEqual({
       shallow: "answered",
       deep: "refused",
       reached: 1,
+      broken: 1,
     });
   });
 
@@ -218,10 +244,28 @@ describe("the page's bridge to a screen", () => {
     const after = await outcome(frame.page.call("notes", []));
     frame.close();
 
-    expect({ after, reached: frame.calls }).toStrictEqual({
-      after: "refused",
-      reached: [],
-    });
+    expect({
+      after,
+      reached: frame.calls,
+      broken: frame.broken.times,
+    }).toStrictEqual({ after: "refused", reached: [], broken: 1 });
+  });
+
+  it("counts following a workflow's runs as a request, however often a screen does", async () => {
+    const frame = framed();
+    const followed: unknown[] = [];
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      followed.push(await outcome(follow(frame.page)));
+    }
+    frame.close();
+
+    expect({
+      followed: followed.filter((result) => result === "followed").length,
+      refused: followed.filter((result) => result === "screen.rate_limited")
+        .length,
+      reachedCore: frame.subscriptions.length,
+    }).toStrictEqual({ followed: 20, refused: 5, reachedCore: 20 });
   });
 
   it("lets go of what the frame followed, and answers nothing more, once closed", async () => {
@@ -239,10 +283,17 @@ describe("the page's bridge to a screen", () => {
         [true, true]
       );
     });
-    expect({ before, after, reached: frame.calls }).toStrictEqual({
+    expect({
+      before,
+      after,
+      reached: frame.calls,
+      // Closed by the page itself: nothing broke.
+      broken: frame.broken.times,
+    }).toStrictEqual({
       before: [false, false],
       after: "refused",
       reached: [],
+      broken: 0,
     });
   });
 });

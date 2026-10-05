@@ -46,13 +46,17 @@ export const takeToken = (
   return { taken, bucket: { tokens: taken ? tokens - 1 : tokens, at: now } };
 };
 
-/** Past this many keys, the buckets that are full again are forgotten. */
+/**
+ * Past this many keys, the buckets that are full again are forgotten: at
+ * most once a minute, as that reads every bucket.
+ */
 const pruneAbove = 1000;
 
 /** One bucket per key, kept in memory: a restart starts them full. */
 export class TokenBuckets {
   readonly #rate: BucketRate;
   readonly #buckets = new Map<string, TokenBucket>();
+  #prunedAt = Number.NEGATIVE_INFINITY;
 
   constructor(rate: BucketRate) {
     this.#rate = rate;
@@ -66,10 +70,16 @@ export class TokenBuckets {
       now
     );
     this.#buckets.set(key, bucket);
-    if (this.#buckets.size > pruneAbove) {
+    if (this.#buckets.size > pruneAbove && now - this.#prunedAt >= minuteMs) {
+      this.#prunedAt = now;
       this.#prune(now);
     }
     return taken;
+  }
+
+  /** Whether `key`'s bucket has a token, without taking it. */
+  has(key: string, now: number = Date.now()): boolean {
+    return filled(this.#buckets.get(key), this.#rate, now) >= 1;
   }
 
   /** A full bucket is the same as none: only the others are kept. */

@@ -10,7 +10,7 @@ import type { AppErrorEntry, AppErrorLog } from "@grasp-os/shared/screens";
 // different problems are kept, and what comes in past the rate the host
 // allows (app.ts, `admitReport`) is only counted, in one number.
 
-const sequenceKey = "error-log-count";
+const sequenceKey = "error-log-sequence";
 const suppressedKey = "error-log-suppressed";
 const entryPrefix = "error-log:";
 
@@ -53,6 +53,9 @@ export class ErrorLog {
    * Runs `write` after every write before it. Each reads the log before
    * it writes, and many reports arrive at once: two that read the same
    * log would each add the same problem as new, or count over each other.
+   * The object's own ordering of requests doesn't cover it: without this,
+   * two hundred reports sent at once come out as dozens of entries (the
+   * test of that in screen-bridge.test.ts fails).
    */
   async #inTurn(write: () => Promise<void>): Promise<void> {
     const before = this.#written;
