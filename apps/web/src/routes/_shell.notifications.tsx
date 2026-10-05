@@ -4,9 +4,9 @@ import type {
   NotificationPage,
 } from "@grasp-os/shared/notifications";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import type { Session } from "../core.ts";
@@ -17,6 +17,7 @@ import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { AskToFix } from "../workflows/fix-in-chat.tsx";
 
 // What core told the person: the workflows that failed while acting for
 // them, each with a way to the workflow, and to a new chat that asks the
@@ -63,60 +64,6 @@ const readNotifications = async (
     listedOrNone(session.chats.models()),
   ]);
   return { page, model: models[0] };
-};
-
-/**
- * Starts a chat that asks the agent to fix `run`, and opens it. A chat
- * made whose question was refused is offered to open, with why, instead
- * of the button: asking again would make another.
- */
-const AskToFix = ({ run, model }: { run: string; model: string }) => {
-  const navigate = useNavigate();
-  const { busy, failure, run: act } = useCoreAction();
-  const [refused, setRefused] = useState<{ chat: string; reason: string }>();
-  const { t } = useLingui();
-  const ask = async (): Promise<void> => {
-    const started = await act(
-      async (session) => await session.chats.fixRun(run, model)
-    );
-    if (started === undefined) {
-      return;
-    }
-    if (started.sent) {
-      await navigate({ to: "/", search: { chat: started.chat.id } });
-      return;
-    }
-    setRefused({ chat: started.chat.id, reason: started.reason });
-  };
-  if (refused !== undefined) {
-    const { reason } = refused;
-    return (
-      <div className="flex flex-col gap-1">
-        <Link
-          className={buttonVariants({ size: "sm", variant: "outline" })}
-          search={{ chat: refused.chat }}
-          to="/"
-        >
-          <Trans>Open the chat</Trans>
-        </Link>
-        <ErrorText>{t`The agent wasn't asked: ${reason}`}</ErrorText>
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-1">
-      <Button
-        disabled={busy}
-        onClick={() => {
-          void ask();
-        }}
-        size="sm"
-      >
-        <Trans>Ask the agent to fix</Trans>
-      </Button>
-      <ErrorText>{failure}</ErrorText>
-    </div>
-  );
 };
 
 /** One notification: which workflow failed, how often, and when last. */
