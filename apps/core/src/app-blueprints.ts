@@ -433,8 +433,9 @@ const installEntry = (
  * deleted is only logged, and deleted by the next install, which deletes
  * every tree but the one its row names. Installs run one at a time (the
  * `Builtins` singleton, builtins.ts), so none deletes a tree another is
- * about to name; a person creating an App from the built-in just as its
- * tree is replaced may be refused, and creates it again from the new one.
+ * about to name. A person creating an App from the built-in just as its
+ * tree is replaced may see that create fail; trying again creates it from
+ * the new one.
  */
 const deleteReplacedTrees = async (
   env: Env,
