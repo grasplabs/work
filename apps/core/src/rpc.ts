@@ -12,6 +12,7 @@ import { newWebSocketRpcSession, RpcTarget } from "capnweb";
 import { oidcProviders, signInConfig } from "./auth/config.ts";
 import { identify } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
+import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import { SessionRpc } from "./session-rpc.ts";
 
 /** What the frontend reaches over `/rpc`, signed in or not. */
@@ -54,8 +55,6 @@ export const toClientError = (
 ): Error | undefined =>
   isExpectedError(error) ? undefined : toOpaqueError(error, { requestId });
 
-/** How often an idle connection checks that its session still holds. */
-const sessionRecheckMs = 60_000;
 /** The close code a connection gets when its session ends. */
 export const sessionEndedCloseCode = 4401;
 
@@ -92,11 +91,14 @@ interface ConnectionSession {
 }
 
 /**
- * The signed-in API of one connection. Its check reads the session again and
- * closes the connection once it no longer holds (revoked, expired, removed
- * from the organization, staff window closed). It runs on every call, and
- * once a minute while the connection is idle, so an unused connection
- * doesn't stay open on a revoked session either.
+ * The signed-in API of one connection. Its check is the one place that
+ * reads who is behind the connection: at most every `sessionRecheckMs`,
+ * shared by every call and every push meanwhile, and on a timer as often,
+ * so an idle connection doesn't stay open on an ended session either.
+ * Once the session no longer holds (revoked, expired, removed from the
+ * organization, staff window closed), it refuses and closes the
+ * connection. What each call may do (its role, its App) is still checked
+ * by the call, against the identity this hands it.
  */
 const sessionApi = (
   { env, headers, connectedAs }: ConnectionSession,
@@ -107,27 +109,50 @@ const sessionApi = (
       server.close(sessionEndedCloseCode, "Session ended");
     }
   };
-  const check = async (): Promise<Identity> => {
-    const identity = await identify(env, headers);
-    if (identity?.userId !== connectedAs.userId) {
-      // After the refusal is on its way to the client.
-      setTimeout(close, 0);
-      throw authErrors.create("auth.unauthenticated");
+  let ended = false;
+  let recheck: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Has the timer read again as the latest reading runs out, whether or
+   * not a call asks first: so an ended session closes the connection
+   * within one window, used or idle, and a busy connection still reads
+   * once a window.
+   */
+  const recheckWhenDue = (run: () => Promise<void>): void => {
+    clearTimeout(recheck);
+    if (!ended) {
+      recheck = setTimeout(() => {
+        void run();
+      }, sessionRecheckMs);
     }
-    return identity;
   };
   const checkQuietly = async (): Promise<void> => {
     try {
+      // oxlint-disable-next-line no-use-before-define -- the check and its timer start each other; this runs only once both exist
       await check();
     } catch {
-      // The check has closed the connection.
+      // An ended session has closed the connection; a reading that failed
+      // is made again at the next tick or call.
     }
   };
-  const recheck = setInterval(() => {
-    void checkQuietly();
-  }, sessionRecheckMs);
+  const check = recheckedEvery(
+    sessionRecheckMs,
+    async (): Promise<Identity> => {
+      recheckWhenDue(checkQuietly);
+      const identity = await identify(env, headers);
+      if (identity?.userId !== connectedAs.userId) {
+        // After the refusal is on its way to the client.
+        setTimeout(close, 0);
+        throw authErrors.create("auth.unauthenticated");
+      }
+      return identity;
+    }
+  );
+  // The upgrade has just read the session: the next reading is due a
+  // window on.
+  recheckWhenDue(checkQuietly);
   server.addEventListener("close", () => {
-    clearInterval(recheck);
+    ended = true;
+    clearTimeout(recheck);
   });
   return new SessionRpc(env, check);
 };
@@ -137,8 +162,8 @@ const sessionApi = (
  * invocation for as long as the socket is open; hibernation applies once RPC
  * is routed to a Durable Object.
  *
- * The session cookie is checked when the connection opens, and again on
- * every call that needs the person (`sessionApi`).
+ * The session cookie is checked when the connection opens, and again every
+ * few seconds for as long as it is open (`sessionApi`).
  */
 export const rpcResponse = async (
   request: Request,

@@ -83,14 +83,12 @@ import {
 // A callback the App keeps (a screen's subscription), or its host keeps
 // for the App's run changes (`watchRuns`), outlives the call that passed
 // it, so each push through it checks again that the person
-// still has a role in the App (`stillOpen`), at most every
-// `recheckMs` per App and connection. Once they don't (unshared, a team
-// left, a role changed, a source they can't read), the callback is
-// released and forwards nothing more: losing access stops a screen within
-// a few seconds, whatever the App does.
-
-/** How long one answer to whether the person may still use an App holds. */
-const recheckMs = 5000;
+// still has a role in the App (`stillHasRole`), once per reading of the
+// connection's session (at most every `sessionRecheckMs`) per App and
+// connection. Once they don't (signed out, unshared, a team left, a role
+// changed, a source they can't read), the callback is released and
+// forwards nothing more: losing access stops a screen within a few
+// seconds, whatever the App does.
 
 /**
  * Most run subscriptions (`watchRuns`) one connection keeps at once. A
@@ -363,24 +361,24 @@ const watchRuns = async (
 
 /**
  * Whether the person behind the connection still has `role` in `app`
- * (any role: `user`), read now: the connection's own session check
- * (`check`), which reads their session, role and teams as every call does,
- * Grasp staff's window included, then the App's rules (`appFor`). Anything that goes wrong on the way is a
- * no: a callback must not outlive access because a check failed. A
- * session that ended also closes the connection, as on any call. For the
- * callbacks of an App's screens, and of a draft's preview (chats-rpc.ts).
+ * (any role: `user`), before each push: the connection's own session check
+ * (`check`), the reading of their session, role and teams that every call
+ * shares, Grasp staff's window included, then the App's rules (`appFor`),
+ * read again with each new reading of the session and kept until the next.
+ * So a push never rests on an older reading than a call would, and a
+ * stream of pushes costs one look at the App's rules every few seconds.
+ * Anything that goes wrong on the way is a no: a callback must not
+ * outlive access because a check failed. A session that ended also closes
+ * the connection, as on any call. For the callbacks of an App's screens,
+ * and of a draft's preview (chats-rpc.ts).
  */
-export const stillHasRole = async (
+export const stillHasRole = (
   env: Env,
   check: SessionCheck,
   app: AppId,
   role: "user" | "builder" = "user"
-): Promise<boolean> => {
-  try {
-    const person = await check();
-    await appFor(env, person, app, role);
-    return true;
-  } catch (error) {
+): StillOpen => {
+  const refused = (error: unknown): false => {
     if (!isExpectedError(error)) {
       log.error("screen.access_check_failed", {
         appId: app,
@@ -388,7 +386,28 @@ export const stillHasRole = async (
       });
     }
     return false;
-  }
+  };
+  const hasRole = async (person: Identity): Promise<boolean> => {
+    try {
+      await appFor(env, person, app, role);
+      return true;
+    } catch (error) {
+      return refused(error);
+    }
+  };
+  let latest: { person: Identity; open: Promise<boolean> } | undefined;
+  return async () => {
+    let person: Identity;
+    try {
+      person = await check();
+    } catch (error) {
+      return refused(error);
+    }
+    if (latest?.person !== person) {
+      latest = { person, open: hasRole(person) };
+    }
+    return await latest.open;
+  };
 };
 
 /** Where in a screen a problem happened, as the page reports it. */
@@ -447,11 +466,8 @@ export class ScreensRpc extends RpcTarget implements ScreensApi {
   /** This connection's run subscriptions that haven't been released. */
   readonly #runSubscriptions = new Set<Disposable>();
 
-  /** The latest answer to whether the person may use each App, and until when it holds. */
-  readonly #access = new Map<
-    AppId,
-    { open: Promise<boolean>; until: number }
-  >();
+  /** Whether the person may still use each App, shared by its callbacks. */
+  readonly #access = new Map<AppId, StillOpen>();
 
   /**
    * Which build this connection's frame runs for each App: the one a
@@ -484,20 +500,15 @@ export class ScreensRpc extends RpcTarget implements ScreensApi {
 
   /**
    * Whether the person may still use `app`, for this connection's callbacks:
-   * read again at most every `recheckMs`, and shared by every push
-   * meanwhile.
+   * one answer per reading of the session, shared by every push meanwhile.
    */
   #stillOpen(app: AppId): StillOpen {
-    return async () => {
-      const now = Date.now();
-      const cached = this.#access.get(app);
-      if (cached !== undefined && cached.until > now) {
-        return await cached.open;
-      }
-      const open = stillHasRole(this.#env, this.#check, app);
-      this.#access.set(app, { open, until: now + recheckMs });
-      return await open;
-    };
+    let open = this.#access.get(app);
+    if (open === undefined) {
+      open = stillHasRole(this.#env, this.#check, app);
+      this.#access.set(app, open);
+    }
+    return open;
   }
 
   async open(app: string, screen: string): Promise<ScreenBundle> {
