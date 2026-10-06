@@ -103,14 +103,17 @@ test("reports an error the page never caught once core has it, cut to the size c
   await page.evaluate(() => {
     void Promise.reject(new Error("another"));
   });
-  await expect.poll(() => attempts).toBe(3);
-  // An attempt is counted as it leaves, and taken once core has answered.
+  // Until core has answered both: a report counts as an attempt when it
+  // leaves the page, and core answers the two in either order.
   await expect.poll(() => taken.length).toBe(2);
-  expect(taken).toStrictEqual([
+  expect(attempts).toBe(3);
+  const wide = taken.find(({ message }) => message === "é");
+  const other = taken.find(({ message }) => message === "a");
+  expect([wide, other]).toStrictEqual([
     { message: "é", status: 204, bytes: expect.any(Number) },
     { message: "a", status: 204, bytes: expect.any(Number) },
   ]);
-  expect(taken[0]?.bytes).toBeLessThanOrEqual(errorReportMaxBytes);
+  expect(wide?.bytes).toBeLessThanOrEqual(errorReportMaxBytes);
 });
 
 test("names each member's actions for them, and asks before making someone an admin", async ({

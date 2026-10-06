@@ -91,8 +91,29 @@ const maxRunSubscriptions = 20;
 type ScreenCode = Omit<ScreenBundle, "app" | "name" | "version">;
 
 /**
+ * These of `modules`, by name. A build names only modules it has or the
+ * kit has, so one that is missing means the build and the kit are not of
+ * one release: that fails here, not as an import the frame can't resolve.
+ */
+const pick = (
+  modules: Record<string, string>,
+  names: string[]
+): Record<string, string> =>
+  Object.fromEntries(
+    names.map((name) => {
+      const code = modules[name];
+      if (code === undefined) {
+        throw new Error(`The screen's build names ${name}, which is missing.`);
+      }
+      return [name, code];
+    })
+  );
+
+/**
  * Screen `screen` of an App's `files` (at `version`; null for a chat's
- * draft), built, with the kit modules it needs.
+ * draft), built, with what it loads and nothing else: its own module and
+ * the App's and the kit's modules it imports, not the App's other screens
+ * or the rest of the kit.
  */
 export const screenCode = async (
   env: Env,
@@ -112,14 +133,18 @@ export const screenCode = async (
       buildFailed(version, build)
     );
   }
-  const { modules } = await kitModules(env.ASSETS);
+  const entry = appModuleName(path);
+  const closure = build.screens[entry];
+  if (closure === undefined) {
+    // The file is there and the build passed: the build is at fault.
+    throw new Error(`The build has no closure for the screen in ${path}.`);
+  }
+  const { modules: kit } = await kitModules(env.ASSETS);
   const code = {
-    entry: appModuleName(path),
+    entry,
     runtime: kitModuleName(screenRuntime),
-    modules: build.modules,
-    kit: Object.fromEntries(
-      build.kitModules.map((module) => [module, modules[module] ?? ""])
-    ),
+    modules: pick(build.modules, closure.modules),
+    kit: pick(kit, closure.kitModules),
     css: build.css,
   };
   // Which code a frame was handed, in core's words: the page expects the
