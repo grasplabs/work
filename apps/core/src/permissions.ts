@@ -342,7 +342,7 @@ export const requireMemberAdmin = (by: Identity): void => {
  * the very update that grants or revokes, so an admin demoted or removed
  * after their session was checked changes nothing.
  */
-export const stillAdmin = (by: Identity): SQL =>
+export const stillAdminSql = (by: Identity): SQL =>
   activeMember(by.userId, ["admin"]);
 
 /**
@@ -354,7 +354,7 @@ export const requireStillAdmin = async (
   by: Identity
 ): Promise<void> => {
   const row = await drizzle(env.DB).get<{ admin: number }>(
-    sql`SELECT ${stillAdmin(by)} AS admin`
+    sql`SELECT ${stillAdminSql(by)} AS admin`
   );
   if (row.admin === 0) {
     throw roleErrors.create("role.forbidden");
@@ -790,7 +790,7 @@ export const grantPermission = async (
         and(
           eq(permissions.id, found.id),
           eq(permissions.status, "requested"),
-          stillAdmin(by),
+          stillAdminSql(by),
           stillReviewed,
           noBindingClash
         )
@@ -878,7 +878,7 @@ const auditDetailSql = sql`json_patch(
  * of the organization, not Grasp staff, still an admin then.
  */
 const canGrantSql = (by: Identity): SQL =>
-  isAdmin(by.role) && !by.staff ? stillAdmin(by) : sql`0`;
+  isAdmin(by.role) && !by.staff ? stillAdminSql(by) : sql`0`;
 
 /**
  * That a permission lets an App change things for the person using it,
@@ -1140,7 +1140,7 @@ export const revokePermission = async (
         and(
           eq(permissions.id, found.id),
           inArray(permissions.status, ["requested", "active"]),
-          stillAdmin(by)
+          stillAdminSql(by)
         )
       )
       .returning(),

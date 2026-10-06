@@ -64,6 +64,57 @@ const call = async (
   ...args: unknown[]
 ): Promise<unknown> => await callApp(env, app, as(userId), method, args);
 
+/**
+ * Fewest characters a token of a model's answer takes: fewer than English
+ * or Dutch text, JSON's punctuation and indenting included, take.
+ */
+const charactersPerToken = 3;
+
+const jsonSchemaSchema = z
+  .object({
+    type: z.string().optional(),
+    enum: z.array(z.string()).optional(),
+    maxLength: z.number().optional(),
+    maxItems: z.number().optional(),
+    items: z.unknown().optional(),
+    properties: z.record(z.string(), z.unknown()).optional(),
+  })
+  .loose();
+
+/**
+ * The longest JSON value `schema`, a JSON Schema, accepts: each string at
+ * its longest, each array at its most items. Throws for a string or an
+ * array it doesn't bound, which no answer's cap could hold.
+ */
+const largestAnswer = (schema: unknown): unknown => {
+  const {
+    type,
+    enum: values,
+    maxLength,
+    maxItems,
+    items,
+    properties,
+  } = jsonSchemaSchema.parse(schema);
+  if (values !== undefined) {
+    return values.toSorted((one, other) => other.length - one.length)[0];
+  }
+  if (type === "string" && maxLength !== undefined) {
+    return "x".repeat(maxLength);
+  }
+  if (type === "array" && maxItems !== undefined) {
+    return Array.from({ length: maxItems }, () => largestAnswer(items));
+  }
+  if (type === "object") {
+    return Object.fromEntries(
+      Object.entries(properties ?? {}).map(([key, value]) => [
+        key,
+        largestAnswer(value),
+      ])
+    );
+  }
+  throw new Error(`No bound on ${JSON.stringify(schema)}`);
+};
+
 const createdSchema = z.object({ id: z.string(), version: z.number() });
 
 const savedSchema = z.object({ source: z.string(), statements: z.number() });
@@ -1033,6 +1084,55 @@ describe("reading notes", { timeout: 60_000 }, () => {
       ],
       tags: [false, false],
     });
+  });
+
+  it("asks the default model for no more than it may answer", async () => {
+    const { admin, app } = await setUp();
+    const gateway = fakeGateway({
+      text: JSON.stringify(found),
+      inputTokens: 200,
+      outputTokens: 80,
+    });
+    const ai: AiBinding = env.AI;
+    const answering = vi
+      .spyOn(ai, "fetch")
+      .mockImplementation(gateway.binding.fetch);
+    try {
+      const run = await admin.api.screens.startRun(app, "extract", {
+        source: {
+          title: `Close ${unique()}`,
+          medium: "interview",
+          date: "2026-09-22",
+          from: "Anna",
+        },
+        notes,
+      });
+      await runEnded(run.id);
+    } finally {
+      answering.mockRestore();
+    }
+    // What the model was told to answer, and how long it may: as sent.
+    const { messages, max_completion_tokens: answerCap } = z
+      .object({
+        messages: z.array(z.object({ role: z.string(), content: z.unknown() })),
+        max_completion_tokens: z.number(),
+      })
+      .parse(gateway.requests[0]?.body);
+    const system = messages.find(({ role }) => role === "system")?.content;
+    const schemaLine =
+      typeof system === "string"
+        ? system.split("\n").find((line) => line.startsWith("{"))
+        : undefined;
+    const largest = JSON.stringify(
+      largestAnswer(JSON.parse(schemaLine ?? "null")),
+      null,
+      2
+    );
+
+    expect({
+      answerCap,
+      fits: Math.ceil(largest.length / charactersPerToken) <= answerCap,
+    }).toStrictEqual({ answerCap: 6000, fits: true });
   });
 
   it("shows its steps as its code runs them, where its runs are reviewed", async () => {

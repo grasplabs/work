@@ -45,7 +45,7 @@ import {
 import {
   requireMemberAdmin,
   requireStillAdmin,
-  stillAdmin,
+  stillAdminSql,
 } from "./permissions.ts";
 import { recordBuilds } from "./screen-builds.ts";
 import {
@@ -251,7 +251,7 @@ export const screenSource = async (
 
 /** The condition every decision's write carries: still an admin, and nothing changed since the review. */
 const reviewedUnder = (by: Identity, app: AppId, generation: number): SQL =>
-  sql`${stillAdmin(by)} AND ${generationSql(app)} = ${generation}`;
+  sql`${stillAdminSql(by)} AND ${generationSql(app)} = ${generation}`;
 
 /**
  * Approves the builds an admin reviewed, all in one batch: each lands
@@ -381,7 +381,7 @@ export const revokeScreen = async (
           eq(screenArtifacts.appId, found.id),
           eq(screenArtifacts.artifact, artifact),
           eq(screenArtifacts.status, "approved"),
-          stillAdmin(by)
+          stillAdminSql(by)
         )
       )
       .returning(),

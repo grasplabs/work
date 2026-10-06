@@ -1610,6 +1610,49 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 
+  it("keeps two hundred lines a minute of what the App's server code logs, and its screens' reports whatever it logs", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const at = { version: 1, screen: "notes" };
+
+    const result = await atStoppedClock(async () => {
+      // Eleven calls of twenty lines each: twenty past what is kept.
+      for (let call = 0; call < 11; call += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one call at a time
+        await builder.api.screens.call(app, "chatty", ["invoice 7"]);
+      }
+      const logged = await vi.waitFor(
+        async () => {
+          const log = await builder.api.screens.errors(app);
+          const kept = log.entries.reduce((sum, { count }) => sum + count, 0);
+          expect(kept + log.suppressed).toBe(220);
+          return { kept, suppressed: log.suppressed };
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+      const report = await outcome(
+        builder.api.screens.report(app, at, {
+          kind: "error",
+          message: "Rendered too often",
+        })
+      );
+      const { entries } = await builder.api.screens.errors(app);
+      return {
+        logged,
+        report,
+        screen: entries
+          .filter(({ source }) => source === "screen")
+          .map(({ message }) => message),
+      };
+    });
+
+    expect(result).toStrictEqual({
+      logged: { kept: 200, suppressed: 20 },
+      report: "ok",
+      screen: ["Rendered too often"],
+    });
+  });
+
   it("answers a burst of one person's requests of an App, refuses the rest, and another person's none", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);

@@ -101,8 +101,15 @@ const refusalAuditMs = 10 * 60_000;
 /** How many refusals `auditRefusal` remembers at most. */
 const refusalsKept = 1000;
 
-/** The one bucket all of an App's reports share. */
+/** The one bucket all of an App's reports share, and its server lines. */
 const appBucket = "app";
+
+/**
+ * The lines kept a minute of what an App's server code writes with
+ * `console`, as many as of its screens' reports (`screenLimits.appReports`)
+ * but counted apart from them (`logServer`).
+ */
+const serverLinesLimit = { burst: 200, perMinute: 200 } as const;
 
 /** Where the host keeps the version its code last started on. */
 const versionKey = "version";
@@ -420,6 +427,13 @@ export class App extends DurableObject<Env> {
   readonly #callerReports = new TokenBuckets(screenLimits.callerReports);
   readonly #appReports = new TokenBuckets(screenLimits.appReports);
 
+  /**
+   * The lines kept of what the App's server code writes with `console`:
+   * a budget apart from its screens' reports, so server code that logs
+   * a lot never crowds out a problem a screen reports.
+   */
+  readonly #serverLines = new TokenBuckets(serverLinesLimit);
+
   /** The App's error log, in this object's own storage. */
   readonly #errorLog = new ErrorLog(this.ctx.storage);
 
@@ -696,14 +710,15 @@ export class App extends DurableObject<Env> {
   /**
    * Adds what the App's server code at `version` wrote with `console` to
    * its error log, for its tail alone (server-logs.ts): each line within
-   * what all of the App's reports may use together (`admitReport`), and
-   * only counted past it, so code that logs in a loop writes no more.
+   * what the App's server lines may use together (`serverLinesLimit`),
+   * apart from its screens' reports, and only counted past it, so code
+   * that logs in a loop writes no more, and suppresses no screen's report.
    */
   async logServer(version: number, logs: ServerLog[]): Promise<void> {
     for (const line of logs) {
       const now = Date.now();
-      // oxlint-disable-next-line no-await-in-loop -- in order, each counted against the App's reports
-      await (this.#appReports.take(appBucket, now)
+      // oxlint-disable-next-line no-await-in-loop -- in order, each counted against the App's server lines
+      await (this.#serverLines.take(appBucket, now)
         ? this.#errorLog.add({ ...line, source: "server", version })
         : this.#dropReport(now));
     }
