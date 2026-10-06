@@ -65,10 +65,18 @@ const call = async (
 ): Promise<unknown> => await callApp(env, app, as(userId), method, args);
 
 /**
- * Fewest characters a token of a model's answer takes: fewer than English
- * or Dutch text, JSON's punctuation and indenting included, take.
+ * Characters per token for a conservative estimate of an answer's
+ * tokens: there's no Llama tokenizer here to count them with. English
+ * and Dutch text, JSON's punctuation and indenting included, take more
+ * characters a token than this, so the estimate comes out high.
  */
-const charactersPerToken = 3;
+const estimatedCharactersPerToken = 3;
+
+/**
+ * A quote and a backslash: characters JSON writes escaped, two for each,
+ * so text of them is the longest JSON text of its length.
+ */
+const escapedPair = '"\\';
 
 const jsonSchemaSchema = z
   .object({
@@ -83,8 +91,9 @@ const jsonSchemaSchema = z
 
 /**
  * The longest JSON value `schema`, a JSON Schema, accepts: each string at
- * its longest, each array at its most items. Throws for a string or an
- * array it doesn't bound, which no answer's cap could hold.
+ * its longest, of characters JSON escapes, each array at its most items.
+ * Throws for a string or an array it doesn't bound, which no answer's cap
+ * could hold.
  */
 const largestAnswer = (schema: unknown): unknown => {
   const {
@@ -99,7 +108,9 @@ const largestAnswer = (schema: unknown): unknown => {
     return values.toSorted((one, other) => other.length - one.length)[0];
   }
   if (type === "string" && maxLength !== undefined) {
-    return "x".repeat(maxLength);
+    return escapedPair
+      .repeat(Math.ceil(maxLength / escapedPair.length))
+      .slice(0, maxLength);
   }
   if (type === "array" && maxItems !== undefined) {
     return Array.from({ length: maxItems }, () => largestAnswer(items));
@@ -1086,7 +1097,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
     });
   });
 
-  it("asks the default model for no more than it may answer", async () => {
+  it("asks the default model for no more than it may answer, by a conservative estimate", async () => {
     const { admin, app } = await setUp();
     const gateway = fakeGateway({
       text: JSON.stringify(found),
@@ -1123,16 +1134,21 @@ describe("reading notes", { timeout: 60_000 }, () => {
       typeof system === "string"
         ? system.split("\n").find((line) => line.startsWith("{"))
         : undefined;
+    // The largest answer the schema accepts, escaped and indented as JSON:
+    // an estimate of its tokens, on the high side, not a count.
     const largest = JSON.stringify(
       largestAnswer(JSON.parse(schemaLine ?? "null")),
       null,
       2
     );
+    const estimatedTokens = Math.ceil(
+      largest.length / estimatedCharactersPerToken
+    );
 
     expect({
       answerCap,
-      fits: Math.ceil(largest.length / charactersPerToken) <= answerCap,
-    }).toStrictEqual({ answerCap: 6000, fits: true });
+      estimateFits: estimatedTokens <= answerCap,
+    }).toStrictEqual({ answerCap: 6000, estimateFits: true });
   });
 
   it("shows its steps as its code runs them, where its runs are reviewed", async () => {
