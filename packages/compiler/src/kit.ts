@@ -73,6 +73,13 @@ export const compilerAssets = {
   sdkModules: "sdk-modules.json",
 } as const;
 
+/**
+ * The lock a build of the compiler into the assets directory `assets`
+ * holds (build-lock.ts): next to the assets, never in them.
+ */
+export const compilerLock = (assets: string): string =>
+  `${assets}.compiler-lock`;
+
 /** The name the compiler's isolate has `Kit` under, as a JSON module. */
 export const kitModule = "kit.json";
 

@@ -1,5 +1,7 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -14,7 +16,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { compilerAssets } from "./src/kit.ts";
+import { compilerAssets, compilerLock } from "./src/kit.ts";
 
 // The build as core, its tests and the dev watcher run it: a process that
 // writes a release into an assets directory and its version into a module.
@@ -46,6 +48,57 @@ const versionIn = (versionModule: string): string =>
 
 const releasesIn = (assets: string): string[] =>
   readdirSync(path.join(assets, compilerAssets.directory(""))).toSorted();
+
+/**
+ * A build into `assets` that runs on its own: resolves to its exit code,
+ * and `waiting` resolves once it says another build holds the lock.
+ */
+const startBuild = (
+  assets: string,
+  versionModule: string
+): { done: Promise<number | null>; waiting: Promise<true> } => {
+  const child = spawn(process.execPath, [buildScript, assets, versionModule], {
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  const { promise: waiting, resolve: saidWaiting } =
+    Promise.withResolvers<true>();
+  let said = "";
+  child.stderr.on("data", (chunk: Buffer) => {
+    said += chunk.toString();
+    if (said.includes("Waiting for another build")) {
+      saidWaiting(true);
+    }
+  });
+  const done = once(child, "exit").then(([code]: unknown[]) =>
+    typeof code === "number" ? code : null
+  );
+  return { done, waiting };
+};
+
+/** Holds the lock of `assets` as the process `pid` would; returns the lock. */
+const heldLock = (assets: string, pid: number): string => {
+  const lock = compilerLock(assets);
+  mkdirSync(lock, { recursive: true });
+  writeFileSync(path.join(lock, String(pid)), "");
+  return lock;
+};
+
+/** The files of the one release `assets` has, or what is wrong with it. */
+const wholeRelease = (assets: string, versionModule: string): string[] => {
+  const [release = "", ...others] = releasesIn(assets);
+  return release === versionIn(versionModule) && others.length === 0
+    ? readdirSync(
+        path.join(assets, compilerAssets.directory(release))
+      ).toSorted()
+    : [`not one release named by the version: ${release}, ${others.join(",")}`];
+};
+
+const releaseFiles = [
+  compilerAssets.source,
+  compilerAssets.kit,
+  compilerAssets.kitModules,
+  compilerAssets.sdkModules,
+].toSorted();
 
 /**
  * Releases in `assets` put there by other builds, the first `fromNowMs`
@@ -195,19 +248,59 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
     );
   });
 
-  it("never removes its own release or one put there after it, whatever else is newer", () => {
+  it("waits for a build that holds the assets' lock, then builds", async () => {
     const dir = scratch();
     const assets = path.join(dir, "assets");
     const versionModule = path.join(dir, "version.js");
-    // Three other builds end after this one, as their releases' times say.
-    const later = ["0000000000000007", "0000000000000008", "0000000000000009"];
-    earlierReleases(assets, ["0000000000000001"], -3_600_000);
-    earlierReleases(assets, later, 3_600_000);
+    // Another build, as far as the lock says: this process, which runs.
+    const lock = heldLock(assets, process.pid);
+
+    const building = startBuild(assets, versionModule);
+    await building.waiting;
+    // It has written nothing while it waits.
+    expect([existsSync(assets), existsSync(versionModule)]).toStrictEqual([
+      false,
+      false,
+    ]);
+    rmSync(lock, { recursive: true });
+
+    await expect(building.done).resolves.toBe(0);
+    expect(wholeRelease(assets, versionModule)).toStrictEqual(releaseFiles);
+    expect(readdirSync(dir).toSorted()).toStrictEqual(["assets", "version.js"]);
+  });
+
+  it("takes over the lock of a build that no longer runs", () => {
+    const dir = scratch();
+    const assets = path.join(dir, "assets");
+    const versionModule = path.join(dir, "version.js");
+    // A process that has ended: its ID is no running build's.
+    const { pid: ended } = spawnSync(process.execPath, ["-e", ""]);
+    heldLock(assets, ended);
 
     build(assets, versionModule, "production");
 
-    expect(releasesIn(assets)).toStrictEqual(
-      [...later, versionIn(versionModule)].toSorted()
-    );
+    expect(wholeRelease(assets, versionModule)).toStrictEqual(releaseFiles);
+    expect(readdirSync(dir).toSorted()).toStrictEqual(["assets", "version.js"]);
+  });
+
+  it("builds one at a time when two builds start together", async () => {
+    const dir = scratch();
+    const assets = path.join(dir, "assets");
+    const versionModule = path.join(dir, "version.js");
+
+    const builds = [
+      startBuild(assets, versionModule),
+      startBuild(assets, versionModule),
+    ];
+
+    await expect(
+      Promise.all(builds.map(async ({ done }) => await done))
+    ).resolves.toStrictEqual([0, 0]);
+    expect(wholeRelease(assets, versionModule)).toStrictEqual(releaseFiles);
+    // No lock and nothing half-written left, next to the assets or in them.
+    expect([readdirSync(dir).toSorted(), readdirSync(assets)]).toStrictEqual([
+      ["assets", "version.js"],
+      ["_compiler"],
+    ]);
   });
 });
