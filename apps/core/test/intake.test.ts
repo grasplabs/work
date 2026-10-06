@@ -10,7 +10,12 @@ import { callApp } from "../src/app.ts";
 import type { AppCallerInput } from "../src/app.ts";
 import { builtins, fingerprintOf, release } from "../src/builtins.ts";
 import { fakeGateway } from "./ai-gateway.ts";
-import { grantReviewed, revokeOtherCopies, serverBuilt } from "./apps.ts";
+import {
+  grantReviewed,
+  ordinaryData,
+  revokeOtherCopies,
+  serverBuilt,
+} from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished as runEnded } from "./runs.ts";
 import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
@@ -116,6 +121,7 @@ const copyOf = async (
     await grantReviewed(admin.api, id);
   }
   await builder.api.apps.versions.setCurrent(created.app.id, 1);
+  await ordinaryData(created.app.id);
   await serverBuilt(created.app.id, 1);
   return {
     app: appIdSchema.parse(created.app.id),

@@ -96,6 +96,10 @@ msgstr "{connection}, {resource}"
 msgid "{connection}, {resource} ({tool})"
 msgstr "{connection}, {resource} ({tool})"
 
+#: src/dashboard/to-do.tsx
+msgid "{count, plural, one {{name} has # app whose code nobody approved} other {{name} has # apps whose code nobody approved}}"
+msgstr "{count, plural, one {{name} hat # App, deren Code niemand genehmigt hat} other {{name} hat # Apps, deren Code niemand genehmigt hat}}"
+
 #: src/chat/held-writes.tsx
 msgid "{count, plural, one {# change waits for you to confirm or reject it.} other {# changes wait for you to confirm or reject them.}}"
 msgstr "{count, plural, one {# Änderung wartet darauf, dass Sie sie bestätigen oder ablehnen.} other {# Änderungen warten darauf, dass Sie sie bestätigen oder ablehnen.}}"
@@ -513,6 +517,10 @@ msgstr "Ein Admin verbindet dies für alle."
 msgid "An admin hasn't set up company memory yet."
 msgstr "Ein Admin hat das Unternehmensgedächtnis noch nicht eingerichtet."
 
+#: src/engines/screen-approval.tsx
+msgid "An admin said this engine's data may go to apps nobody approved, so its apps run without approval, unless their approval was taken back."
+msgstr "Ein Admin hat festgelegt, dass die Daten dieser Engine an Apps gehen dürfen, die niemand freigegeben hat. Ihre Apps laufen daher ohne Freigabe, außer ihre Freigabe wurde zurückgenommen."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "An amount in {currency} has at most {digits, plural, one {# decimal} other {# decimals}}."
 msgstr "Ein Betrag in {currency} hat höchstens {digits, plural, one {# Nachkommastelle} other {# Nachkommastellen}}."
@@ -521,9 +529,17 @@ msgstr "Ein Betrag in {currency} hat höchstens {digits, plural, one {# Nachkomm
 msgid "An amount in {currency} has no decimals."
 msgstr "Ein Betrag in {currency} hat keine Nachkommastellen."
 
+#: src/engines/screen-approval.tsx
+msgid "An app is code that runs in people's browsers. It gets this engine's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
+msgstr "Eine App ist Code, der im Browser der Nutzer läuft. Sie erhält die Daten dieser Engine erst, wenn ein Admin genau diesen Code genehmigt hat, und eine Änderung am Code braucht eine neue Genehmigung. Lesen Sie zuerst den Code: Genehmigter Code kann das, was er erhält, weiterhin anderswohin senden. Mit der Genehmigung sagen Sie also, dass Sie ihm vertrauen."
+
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "An app is what this engine's team works in, standing on its workflows and integrations. Ask Grasp in chat to build one."
 msgstr "In einer App arbeitet das Team dieser Engine, gestützt auf ihre Workflows und Integrationen. Bitten Sie Grasp im Chat, eine zu bauen."
+
+#: src/activity/audit-words.ts
+msgid "An app nobody approved was refused the engine's data"
+msgstr "Einer App, die niemand genehmigt hat, wurden die Daten der Engine verweigert"
 
 #: src/activity/pending.tsx
 msgid "Another engine already keeps {type} records here: this engine's won't apply."
@@ -537,6 +553,23 @@ msgstr "Seit diese Liste geladen wurde, ist eine andere Version dieser Engine ak
 msgid "Any type"
 msgstr "Jeder Typ"
 
+#: src/engines/screen-approval.tsx
+msgid "App"
+msgstr "App"
+
+#: src/dashboard/to-do.tsx
+msgctxt "kind of thing that waits"
+msgid "App approval"
+msgstr "App-Genehmigung"
+
+#: src/engines/screen-approval.tsx
+msgid "Approval"
+msgstr "Genehmigung"
+
+#: src/engines/screen-approval.tsx
+msgid "Approval taken back"
+msgstr "Genehmigung zurückgenommen"
+
 #: src/activity/pending.tsx
 #: src/dashboard/dependency-requests.tsx
 #: src/routes/decisions.$decision.tsx
@@ -547,9 +580,21 @@ msgstr "Genehmigen"
 msgid "Approve {who}"
 msgstr "{who} genehmigen"
 
+#: src/engines/screen-approval.tsx
+msgid "Approve the apps of version {version}"
+msgstr "Die Apps von Version {version} genehmigen"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Approve the packages for {engine}"
 msgstr "Die Pakete für {engine} genehmigen"
+
+#: src/engines/screen-approval.tsx
+msgid "Approved"
+msgstr "Genehmigt"
+
+#: src/activity/audit-words.ts
+msgid "Approved an app's code"
+msgstr "Den Code einer App genehmigt"
 
 #: src/routes/decisions.$decision.tsx
 msgid "Approved by {name} on {date}."
@@ -566,6 +611,10 @@ msgstr "Genehmigt: {who}."
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "Apps"
 msgstr "Apps"
+
+#: src/dashboard/to-do.tsx
+msgid "Apps to approve"
+msgstr "Zu genehmigende Apps"
 
 #: src/activity/pending.tsx
 msgid "as {binding}"
@@ -766,6 +815,10 @@ msgstr "Schritt {name} geändert"
 #: src/activity/audit-words.ts
 msgid "Changed what a connection listens for"
 msgstr "Geändert, worauf eine Verbindung achtet"
+
+#: src/activity/audit-words.ts
+msgid "Changed whether an engine's data needs approved apps"
+msgstr "Geändert, ob die Daten einer Engine genehmigte Apps erfordern"
 
 #: src/activity/audit-words.ts
 msgid "Changed which integrations are offered"
@@ -1155,6 +1208,10 @@ msgstr "Dokument nicht gefunden"
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Hier geschriebene Dokumente und hochgeladene Dateien erscheinen hier, damit Grasp und seine Agenten sie lesen können."
 
+#: src/engines/screen-approval.tsx
+msgid "Doesn't build now"
+msgstr "Lässt sich gerade nicht bauen"
+
 #: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "Done"
@@ -1192,6 +1249,10 @@ msgstr "Jeder Workflow"
 msgctxt "older chats"
 msgid "Earlier"
 msgstr "Früher"
+
+#: src/engines/screen-approval.tsx
+msgid "Earlier versions"
+msgstr "Frühere Versionen"
 
 #: src/knowledge/document.tsx
 msgid "Edit"
@@ -1939,6 +2000,10 @@ msgstr "Nein: Sein Hash oder seine Verknüpfung zum vorherigen Ereignis stimmt n
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Niemand hat rechtzeitig geantwortet, daher ist diese Entscheidung geschlossen."
 
+#: src/screens/screen-frame.tsx
+msgid "Nobody has approved this app's code for the engine's data yet. An admin can approve it on the engine's page."
+msgstr "Noch hat niemand den Code dieser App für die Daten der Engine genehmigt. Ein Admin kann das auf der Seite der Engine tun."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Nobody matches."
 msgstr "Niemand passt."
@@ -1978,6 +2043,10 @@ msgstr "Keine."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not allowed"
 msgstr "Nicht erlaubt"
+
+#: src/engines/screen-approval.tsx
+msgid "Not approved"
+msgstr "Nicht genehmigt"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not connected"
@@ -2362,6 +2431,10 @@ msgstr "Gelesen, wie Wissen genutzt wird"
 msgid "Read restricted sources, and is held to them"
 msgstr "Eingeschränkte Quellen gelesen und ist jetzt an sie gebunden"
 
+#: src/engines/screen-approval.tsx
+msgid "Read the code of version {version}"
+msgstr "Code von Version {version} lesen"
+
 #: src/activity/audit-words.ts
 msgid "Read what a guest wrote"
 msgstr "Gelesen, was ein Gast geschrieben hat"
@@ -2532,6 +2605,10 @@ msgstr "Ergebnis"
 msgid "Results"
 msgstr "Ergebnisse"
 
+#: src/dashboard/to-do.tsx
+msgid "Review"
+msgstr "Prüfen"
+
 #: src/knowledge/document.tsx
 msgid "Review by"
 msgstr "Prüfen bis"
@@ -2539,6 +2616,10 @@ msgstr "Prüfen bis"
 #: src/dashboard/signals.tsx
 msgid "Review overdue"
 msgstr "Prüfung überfällig"
+
+#: src/dashboard/to-do.tsx
+msgid "Review the apps of {name}"
+msgstr "Die Apps von {name} prüfen"
 
 #: src/connections/connection-list.tsx
 msgid "Revoke"
@@ -2889,6 +2970,7 @@ msgid "Started following what changes at a connection"
 msgstr "Begonnen zu verfolgen, was sich bei einer Verbindung ändert"
 
 #: src/connections/connection-list.tsx
+#: src/engines/screen-approval.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "Status"
@@ -2933,6 +3015,14 @@ msgstr "Aufgehört zu verfolgen, was sich bei einer Verbindung ändert"
 #: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Gestoppt."
+
+#: src/engines/screen-approval.tsx
+msgid "Take back"
+msgstr "Zurücknehmen"
+
+#: src/engines/screen-approval.tsx
+msgid "Take back the approval of {screen}"
+msgstr "Die Genehmigung von {screen} zurücknehmen"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Takes sensitive data"
@@ -3016,6 +3106,10 @@ msgstr "Die Antwort wurde am Limit des Modells abgeschnitten."
 msgid "The app couldn't be loaded."
 msgstr "Die App konnte nicht geladen werden."
 
+#: src/screens/screen-frame.tsx
+msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the engine's page."
+msgstr "Die Genehmigung für den Code dieser App wurde zurückgenommen, und die App wurde gestoppt. Ein Admin kann ihn auf der Seite der Engine erneut genehmigen."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Die Apps, in denen Ihre Workflows arbeiten können. Grasp tut nur, was Sie pro App erlauben."
@@ -3027,6 +3121,10 @@ msgstr "Der Katalog führt {app} nicht, daher können die Tools nicht angezeigt 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 msgstr "Der Katalog der Integrationen konnte nicht gelesen werden, deshalb zeigt diese Seite nur, was Ihre Konten darüber sagen."
+
+#: src/engines/screen-approval.tsx
+msgid "The code of version {version}"
+msgstr "Der Code von Version {version}"
 
 #: src/chat/composer.tsx
 msgid "The default, {each}"
@@ -3201,6 +3299,10 @@ msgid "Took back a guest's link"
 msgstr "Den Link eines Gastes zurückgezogen"
 
 #: src/activity/audit-words.ts
+msgid "Took back the approval of an app's code"
+msgstr "Die Genehmigung für den Code einer App zurückgenommen"
+
+#: src/activity/audit-words.ts
 msgid "Took someone off a team"
 msgstr "Jemanden aus einem Team genommen"
 
@@ -3285,6 +3387,7 @@ msgstr "Nutzer"
 msgid "Verified"
 msgstr "Verifiziert"
 
+#: src/engines/screen-approval.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Version"

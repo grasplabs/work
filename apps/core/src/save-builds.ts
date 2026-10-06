@@ -8,29 +8,12 @@ import type {
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 
-import { buildScreens, buildServer, buildWorkflows } from "./screens.ts";
-
-/**
- * The longest a save waits for one build. A warm build takes milliseconds
- * to a few hundred; a first one after a deploy starts the compiler, about
- * a second. The compiler bounds a build's CPU, not how long it takes, so
- * this is what keeps a build that never answers from holding a save: past
- * it, the build is reported as `error`. A chat's check builds this way too
- * (agent-builds.ts), in a code run that has 30 seconds and runs the tests
- * after the builds, so the wait leaves it room.
- */
-const buildWaitMs = 15_000;
-
-/**
- * How long a save waits for one build: {@link buildWaitMs}, or less where
- * tests set `BUILD_WAIT_MS`.
- */
-const waitMsOf = (env: Env): number => {
-  const set = Number(env.BUILD_WAIT_MS);
-  return Number.isInteger(set) && set > 0 && set < buildWaitMs
-    ? set
-    : buildWaitMs;
-};
+import {
+  buildScreens,
+  buildServer,
+  buildWorkflows,
+  withinBuildWait,
+} from "./screens.ts";
 
 type SavedBuilds = CommittedVersion["builds"];
 
@@ -71,23 +54,20 @@ const toDiagnostic = ({
  * One build of saved files, as the save reports it: `none` when there is
  * nothing of its kind to build, and `error` when the build threw (the
  * compiler couldn't be reached, or ran out of CPU) or didn't answer within
- * `waitMs`: it runs again at its first use.
+ * the build wait (`withinBuildWait`): it runs again at its first use.
  */
 const savedBuild = async (
   kind: keyof SavedBuilds,
   { app, version, files }: SavedSource,
   select: (files: Record<string, string>) => Record<string, string>,
   build: () => Promise<{ ok: boolean; diagnostics?: Diagnostic[] }>,
-  waitMs: number
+  env: Env
 ): Promise<SavedBuild> => {
   try {
     if (Object.keys(select(files)).length === 0) {
       return { status: "none", diagnostics: [] };
     }
-    const built = await Promise.race([
-      build(),
-      scheduler.wait(waitMs).then(() => "late" as const),
-    ]);
+    const built = await withinBuildWait(env, build);
     if (built === "late") {
       log.warn("app.save_build_timed_out", { appId: app, version, kind });
       return { status: "error", diagnostics: [], error: tookTooLong };
@@ -112,7 +92,7 @@ const savedBuild = async (
  * once, into the build cache (screens.ts), so the version opens, answers
  * and runs without building. Answers once all three are done with how each
  * went, for whoever saved (an agent repairs what failed); none takes
- * longer than {@link buildWaitMs}. Never throws: a build is never a reason
+ * longer than the build wait (`buildWaitMs` in screens.ts). Never throws: a build is never a reason
  * for a save to fail.
  */
 export const buildOnSave = async (
@@ -120,28 +100,27 @@ export const buildOnSave = async (
   source: SavedSource
 ): Promise<SavedBuilds> => {
   const { files } = source;
-  const waitMs = waitMsOf(env);
   const [screens, server, workflows] = await Promise.all([
     savedBuild(
       "screens",
       source,
       buildFiles,
       async () => await buildScreens(env, files),
-      waitMs
+      env
     ),
     savedBuild(
       "server",
       source,
       serverFiles,
       async () => await buildServer(env, files),
-      waitMs
+      env
     ),
     savedBuild(
       "workflows",
       source,
       workflowFiles,
       async () => await buildWorkflows(env, files),
-      waitMs
+      env
     ),
   ]);
   return { screens, server, workflows };

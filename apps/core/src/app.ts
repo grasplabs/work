@@ -89,6 +89,15 @@ const suppressedWriteMs = 60_000;
 /** How often, at most, refused requests of an App's screens are logged. */
 const refusalLogMs = 60_000;
 
+/**
+ * How often, at most, the same refusal of the App's data to a screen (who,
+ * which build, why, what and where) is audited (`noteRefusal`).
+ */
+const refusalAuditMs = 10 * 60_000;
+
+/** How many refusals `noteRefusal` remembers at most. */
+const refusalsKept = 1000;
+
 /** The one bucket all of an App's reports share. */
 const appBucket = "app";
 
@@ -417,6 +426,9 @@ export class App extends DurableObject<Env> {
   /** Requests refused since the last line logged of them, and when that was. */
   #refused = { requests: 0, loggedAt: 0 };
 
+  /** When each refusal of a screen was last audited, oldest first (`noteRefusal`). */
+  readonly #refusalsAudited = new Map<string, number>();
+
   get #app(): AppId {
     return appIdSchema.parse(this.ctx.id.name);
   }
@@ -546,6 +558,35 @@ export class App extends DurableObject<Env> {
   /** Puts the App in restricted mode, for good. */
   async restrict(): Promise<void> {
     await this.ctx.storage.put(restrictedKey, true);
+  }
+
+  /**
+   * Whether a screen's refusal of the App's data, named by `refusal`, was
+   * audited within `refusalAuditMs`: then it isn't again. A screen opened
+   * over and over, or a page retrying, adds a row a window, not one a try.
+   */
+  refusalAudited(refusal: string): boolean {
+    const audited = this.#refusalsAudited.get(refusal);
+    return audited !== undefined && Date.now() - audited < refusalAuditMs;
+  }
+
+  /**
+   * Notes that `refusal` was audited now: only once its row is written,
+   * so one whose write failed is audited at the next refusal. Kept in
+   * memory, so a restart of this object audits each once more; past
+   * `refusalsKept`, the oldest are forgotten first, which only audits
+   * them again.
+   */
+  noteRefusal(refusal: string): void {
+    const now = Date.now();
+    this.#refusalsAudited.delete(refusal);
+    this.#refusalsAudited.set(refusal, now);
+    for (const [oldest] of this.#refusalsAudited) {
+      if (this.#refusalsAudited.size <= refusalsKept) {
+        break;
+      }
+      this.#refusalsAudited.delete(oldest);
+    }
   }
 
   /**

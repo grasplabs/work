@@ -39,7 +39,25 @@ export const pastAccessRecheck = async <T>(
 /** Someone signed in, with their API (`signedInApi`). */
 type Builder = Pick<Awaited<ReturnType<typeof signedInApi>>, "api">;
 
-/** Commits `files` as the App's next version and makes it current. */
+/**
+ * Classifies the App's data as ordinary, as an admin does
+ * (`ScreenTrustApi.classify`): its screens then get it whoever approved
+ * their code, or nobody. For tests of what a screen does with its App,
+ * which aren't about who approved its code (screen-trust.test.ts is).
+ */
+export const ordinaryData = async (app: string): Promise<void> => {
+  await env.DB.prepare(
+    `INSERT INTO screen_policies (app_id, output, generation) VALUES (?, 'ordinary', 1)
+     ON CONFLICT (app_id) DO UPDATE SET output = 'ordinary', generation = generation + 1`
+  )
+    .bind(app)
+    .run();
+};
+
+/**
+ * Commits `files` as the App's next version and makes it current, with
+ * the App's data classified as ordinary (`ordinaryData`).
+ */
 export const release = async (
   builder: Builder,
   app: string,
@@ -51,6 +69,7 @@ export const release = async (
     "Release"
   );
   await builder.api.apps.versions.setCurrent(app, version);
+  await ordinaryData(app);
   return version;
 };
 

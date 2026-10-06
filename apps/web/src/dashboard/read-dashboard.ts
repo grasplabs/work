@@ -37,7 +37,7 @@ export const readWaiting = async (
   core: CoreConnection,
   identity: Identity
 ): Promise<Waiting> => {
-  const [held, failed, integrations, requests, dependencies] =
+  const [held, failed, integrations, requests, dependencies, screens] =
     await Promise.all([
       loadFromCore(
         core,
@@ -52,8 +52,14 @@ export const readWaiting = async (
         core,
         async (session) => await session.dependencies.waiting()
       ),
+      decidesRequests(identity)
+        ? loadFromCore(
+            core,
+            async (session) => await session.screenTrust.waiting()
+          )
+        : undefined,
     ]);
-  return { held, failed, integrations, requests, dependencies };
+  return { held, failed, integrations, requests, dependencies, screens };
 };
 
 /**

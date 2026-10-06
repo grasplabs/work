@@ -1,17 +1,11 @@
-import {
-  appModuleName,
-  kitModuleName,
-  kitModules,
-  screenRuntime,
-} from "@grasp-os/compiler";
 import { appErrors, appVersionSchema } from "@grasp-os/shared/apps";
+import type { App } from "@grasp-os/shared/apps";
 import type { DecisionView } from "@grasp-os/shared/decisions";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { ScreenDelivery } from "@grasp-os/shared/screen-trust";
 import {
   jsonBytes,
   screenErrors,
@@ -37,7 +31,18 @@ import { appHost } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
 import { RunSubscription } from "./run-subscription.ts";
-import { buildFailed, buildScreens } from "./screens.ts";
+import { recordBuilds } from "./screen-builds.ts";
+import { frameAccess, stageFrame } from "./screen-frame.ts";
+import {
+  deliveryOf,
+  deliveryOpen,
+  delivering,
+  leasedArtifact,
+  leaseFor,
+  requireDelivery,
+  standingOf,
+} from "./screen-trust.ts";
+import { screenCode } from "./screens.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import {
@@ -67,6 +72,14 @@ import {
 // answers its workflow runs (workflows/screen-runs.ts). Only its builders
 // read its error log.
 //
+// Having a role is not enough to get the App's data into a screen: the
+// code the screen runs must be approved, or the App's data classified as
+// fine for code nobody approved (screen-trust.ts, which says why). Every
+// call here that reaches the App's data or its runs passes that gate, and
+// so does every push; only a screen's own reports of its problems, and
+// the App's version number, don't. Which build a connection's frame runs
+// is the one core leased it (`present`), never what the frame says.
+//
 // A callback the App keeps (a screen's subscription), or its host keeps
 // for the App's run changes (`watchRuns`), outlives the call that passed
 // it, so each push through it checks again that the person
@@ -87,89 +100,30 @@ const recheckMs = 5000;
  */
 const maxRunSubscriptions = 20;
 
-/** What a frame runs of a screen: its code, the kit's it needs, its CSS. */
-type ScreenCode = Omit<ScreenBundle, "app" | "name" | "version">;
-
-/**
- * These of `modules`, by name. A build names only modules it has or the
- * kit has, so one that is missing means the build and the kit are not of
- * one release: that fails here, not as an import the frame can't resolve.
- */
-const pick = (
-  modules: Record<string, string>,
-  names: string[]
-): Record<string, string> =>
-  Object.fromEntries(
-    names.map((name) => {
-      const code = modules[name];
-      if (code === undefined) {
-        throw new Error(`The screen's build names ${name}, which is missing.`);
-      }
-      return [name, code];
-    })
-  );
-
-/**
- * Screen `screen` of an App's `files` (at `version`; null for a chat's
- * draft), built, with what it loads and nothing else: its own module and
- * the App's and the kit's modules it imports, not the App's other screens
- * or the rest of the kit.
- */
-export const screenCode = async (
-  env: Env,
-  files: Record<string, string>,
-  screen: unknown,
-  version: number | null
-): Promise<ScreenCode> => {
-  const name = screenErrors.parse("screen.invalid", screenNameSchema, screen);
-  const path = `screens/${name}.tsx`;
-  if (!Object.hasOwn(files, path)) {
-    throw screenErrors.create("screen.not_found");
-  }
-  const build = await buildScreens(env, files);
-  if (!build.ok) {
-    throw screenErrors.create(
-      "screen.build_failed",
-      buildFailed(version, build)
-    );
-  }
-  const entry = appModuleName(path);
-  const closure = build.screens[entry];
-  if (closure === undefined) {
-    // The file is there and the build passed: the build is at fault.
-    throw new Error(`The build has no closure for the screen in ${path}.`);
-  }
-  const { modules: kit } = await kitModules(env.ASSETS);
-  const code = {
-    entry,
-    runtime: kitModuleName(screenRuntime),
-    modules: pick(build.modules, closure.modules),
-    kit: pick(kit, closure.kitModules),
-    css: build.css,
-  };
-  // Which code a frame was handed, in core's words: the page expects the
-  // frame to say it back once the screen has mounted (screen-host.ts).
-  return {
-    screen: name,
-    ...code,
-    artifact: await sha256Hex(canonicalJson(code)),
-  };
-};
-
 /**
  * The App `app` names, for the person, once the App's host has counted
  * this request of theirs: `screen.rate_limited` past what one person's
  * screens of an App may ask (`screenLimits.requests`).
  */
+const admittedApp = async (
+  env: Env,
+  by: Identity,
+  app: unknown
+): Promise<App> => {
+  const found = await getApp(env, by, app);
+  if (!(await appHost(env, found.id).admitRequest(by.userId))) {
+    throw screenErrors.create("screen.rate_limited");
+  }
+  return found;
+};
+
+/** `admittedApp`, for its ID. */
 const admitted = async (
   env: Env,
   by: Identity,
   app: unknown
 ): Promise<AppId> => {
-  const { id } = await getApp(env, by, app);
-  if (!(await appHost(env, id).admitRequest(by.userId))) {
-    throw screenErrors.create("screen.rate_limited");
-  }
+  const { id } = await admittedApp(env, by, app);
   return id;
 };
 
@@ -195,7 +149,13 @@ export const withinAnswer = <Answer>(answer: Answer): Answer => {
   return answer;
 };
 
-/** A running App's screen, built from its current version. */
+/**
+ * A running App's screen, built from its current version, with core's
+ * lease on that build for the person: only a build that gets the App's
+ * data now, once this request of theirs is counted (`admitted`). One that
+ * doesn't is refused before its code is where a frame can load it; one
+ * that does is put there (`stageFrame`).
+ */
 const openScreen = async (
   env: Env,
   by: Identity,
@@ -206,20 +166,49 @@ const openScreen = async (
     id,
     name: appName,
     currentVersion: version,
-  } = await getApp(env, by, app);
+  } = await admittedApp(env, by, app);
   // A name that can't be a screen's is refused before `app.not_running`.
   screenErrors.parse("screen.invalid", screenNameSchema, screen);
   if (version === null) {
     throw appErrors.create("app.not_running");
   }
   const files = await versionFiles(env, id, version);
+  const built = await screenCode(env, files, screen, version);
+  const { artifact } = built;
+  // What it builds to now, refused or not: a fact about the version, for
+  // what waits on an admin (screen-builds.ts).
+  await recordBuilds(env, id, version, [built]);
+  await requireDelivery(env, by, id, artifact, {
+    operation: "open",
+    stage: "admission",
+  });
+  await stageFrame(env, artifact, built.code);
   return {
     app: id,
     name: appName,
     version,
-    ...(await screenCode(env, files, screen, version)),
+    screen: built.screen,
+    artifact,
+    frameToken: await frameAccess(env, artifact),
+    lease: await leaseFor(env, by.userId, id, artifact),
   };
 };
+
+/** What a connection's calls on an App are decided on. */
+interface Frame {
+  /** The build the connection presented for the App, if it did. */
+  artifactOf: (app: AppId) => string | undefined;
+  /**
+   * Whether the person may still get a callback's pushes from the App:
+   * they still have a role in it, and `artifact` still gets its data.
+   */
+  stillOpen: (
+    by: Identity,
+    app: AppId,
+    artifact: string | undefined,
+    operation: string
+  ) => StillOpen;
+}
 
 /** A function the App gets for a callback the screen passed. */
 type Callback = (value: AppAnswer) => Promise<void>;
@@ -277,21 +266,27 @@ const callServer = async (
   env: Env,
   by: Identity,
   { app, method, args }: { app: unknown; method: unknown; args: unknown },
-  stillOpenFor: (app: AppId) => StillOpen
+  frame: Frame
 ): Promise<AppAnswer> => {
   const id = await admitted(env, by, app);
   if (typeof method !== "string" || !Array.isArray(args)) {
     throw screenErrors.create("screen.invalid");
   }
-  const { passed, callbacks } = argumentsFor(args, stillOpenFor(id));
+  const artifact = frame.artifactOf(id);
+  const { passed, callbacks } = argumentsFor(
+    args,
+    frame.stillOpen(by, id, artifact, "call")
+  );
   try {
-    return withinAnswer(
-      await callApp(
-        env,
-        id,
-        { userId: by.userId, mode: "interactive" },
-        method,
-        passed
+    return await delivering(env, by, id, artifact, "call", async () =>
+      withinAnswer(
+        await callApp(
+          env,
+          id,
+          { userId: by.userId, mode: "interactive" },
+          method,
+          passed
+        )
       )
     );
   } catch (error) {
@@ -318,7 +313,7 @@ const watchRuns = async (
     workflow,
     onChange,
   }: { app: unknown; workflow: unknown; onChange: unknown },
-  stillOpenFor: (app: AppId) => StillOpen,
+  frame: Frame,
   subscriptions: Set<Disposable>
 ): Promise<RunSubscription> => {
   // Following is a request like any other: a screen that follows and
@@ -330,12 +325,17 @@ const watchRuns = async (
   if (!isStub(onChange)) {
     throw screenErrors.create("screen.invalid");
   }
+  const artifact = frame.artifactOf(id);
+  await requireDelivery(env, by, id, artifact, {
+    operation: "watchRuns",
+    stage: "admission",
+  });
   if (subscriptions.size >= maxRunSubscriptions) {
     throw screenErrors.create("screen.too_many_subscriptions");
   }
   const callback: Callback & Disposable = callbackFor(
     onChange,
-    stillOpenFor(id),
+    frame.stillOpen(by, id, artifact, "watchRuns"),
     refusals,
     () => {
       subscriptions.delete(callback);
@@ -453,6 +453,29 @@ export class ScreensRpc extends RpcTarget implements ScreensApi {
     { open: Promise<boolean>; until: number }
   >();
 
+  /**
+   * Which build this connection's frame runs for each App: the one a
+   * lease of core's own named (`present`), so nothing the page or the
+   * frame makes up gets in here.
+   */
+  readonly #presented = new Map<AppId, string>();
+
+  /** What this connection's calls on an App are decided on. */
+  readonly #frame: Frame = {
+    artifactOf: (app) => this.#presented.get(app),
+    stillOpen: (by, app, artifact, operation) => {
+      const hasRole = this.#stillOpen(app);
+      // Trust is read at every push, never kept: an approval taken back
+      // stops the very next one.
+      return async () =>
+        (await hasRole()) &&
+        (await deliveryOpen(this.#env, by, app, artifact, {
+          operation,
+          stage: "push",
+        }));
+    },
+  };
+
   constructor(env: Env, check: SessionCheck) {
     super();
     this.#env = env;
@@ -484,13 +507,49 @@ export class ScreensRpc extends RpcTarget implements ScreensApi {
     );
   }
 
+  async present(app: string, lease: string): Promise<ScreenDelivery> {
+    return await withPerson(this.#check, async (by) => {
+      const { id } = await getApp(this.#env, by, app);
+      const artifact = await leasedArtifact(this.#env, by.userId, id, lease);
+      // A lease core didn't sign for them and this App presents nothing:
+      // what the connection held before is gone too, so it can't keep an
+      // approved build while its frame runs another.
+      if (artifact === undefined) {
+        this.#presented.delete(id);
+      } else {
+        this.#presented.set(id, artifact);
+      }
+      return deliveryOf(await standingOf(this.#env, id, artifact));
+    });
+  }
+
+  /**
+   * `run` for the App `app` names, once this request of the person's is
+   * counted (`admitted`), if the build this connection presented gets the
+   * App's data now (`delivering`).
+   */
+  async #delivered<Answer>(
+    by: Identity,
+    app: string,
+    operation: string,
+    run: (id: AppId) => Promise<Answer>
+  ): Promise<Answer> {
+    const id = await admitted(this.#env, by, app);
+    return await delivering(
+      this.#env,
+      by,
+      id,
+      this.#presented.get(id),
+      operation,
+      async () => await run(id)
+    );
+  }
+
   async call(app: string, method: string, args: unknown[]): Promise<unknown> {
     return await withPerson(
       this.#check,
       async (by) =>
-        await callServer(this.#env, by, { app, method, args }, (id) =>
-          this.#stillOpen(id)
-        )
+        await callServer(this.#env, by, { app, method, args }, this.#frame)
     );
   }
 
@@ -526,12 +585,11 @@ export class ScreensRpc extends RpcTarget implements ScreensApi {
     return await withPerson(
       this.#check,
       async (by) =>
-        await startScreenRun(
-          this.#env,
+        await this.#delivered(
           by,
-          await admitted(this.#env, by, app),
-          workflow,
-          input
+          app,
+          "startRun",
+          async (id) => await startScreenRun(this.#env, by, id, workflow, input)
         )
     );
   }
@@ -540,11 +598,11 @@ export class ScreensRpc extends RpcTarget implements ScreensApi {
     return await withPerson(
       this.#check,
       async (by) =>
-        await screenRuns(
-          this.#env,
+        await this.#delivered(
           by,
-          await admitted(this.#env, by, app),
-          workflow
+          app,
+          "runs",
+          async (id) => await screenRuns(this.#env, by, id, workflow)
         )
     );
   }
@@ -553,7 +611,12 @@ export class ScreensRpc extends RpcTarget implements ScreensApi {
     return await withPerson(
       this.#check,
       async (by) =>
-        await screenRun(this.#env, by, await admitted(this.#env, by, app), run)
+        await this.#delivered(
+          by,
+          app,
+          "run",
+          async (id) => await screenRun(this.#env, by, id, run)
+        )
     );
   }
 
@@ -566,13 +629,12 @@ export class ScreensRpc extends RpcTarget implements ScreensApi {
     return await withPerson(
       this.#check,
       async (by) =>
-        await decideScreenRun(
-          this.#env,
+        await this.#delivered(
           by,
-          await admitted(this.#env, by, app),
-          run,
-          decision,
-          answer
+          app,
+          "decide",
+          async (id) =>
+            await decideScreenRun(this.#env, by, id, run, decision, answer)
         )
     );
   }
@@ -589,7 +651,7 @@ export class ScreensRpc extends RpcTarget implements ScreensApi {
           this.#env,
           by,
           { app, workflow, onChange },
-          (id) => this.#stillOpen(id),
+          this.#frame,
           this.#runSubscriptions
         )
     );

@@ -9,6 +9,7 @@ import { indexApps } from "./knowledge/apps-collection.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
+import { sweepScreenFrames } from "./screen-frame.ts";
 import { sweepStatistics } from "./statistics.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { receiveEmail } from "./workflows/inbound-email.ts";
@@ -79,7 +80,8 @@ export default {
   // once their days are over (see src/workflows/kept-email.ts), guest
   // chats 30 days after they ended (see src/guests.ts), and the details
   // of workflow runs that ended longer ago than their retention (see
-  // src/workflows/retention.ts). And the
+  // src/workflows/retention.ts), and screens' staged builds 30 days
+  // after they were last staged (see src/screen-frame.ts). And the
   // audit log's retention alarm armed, if it isn't yet: retention itself
   // runs on that alarm (see
   // src/audit-log.ts), and a deployment that appends nothing after a
@@ -94,6 +96,7 @@ export default {
             deleteExpiredEmail(env, new Date(controller.scheduledTime)),
             sweepGuestChats(env, new Date(controller.scheduledTime)),
             sweepRunDetails(env, new Date(controller.scheduledTime)),
+            sweepScreenFrames(env, new Date(controller.scheduledTime)),
             auditLog(env).armRetention(),
           ]
         : [

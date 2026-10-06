@@ -5,7 +5,13 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createFromBlueprint } from "../src/app-blueprints.ts";
-import { outlook, release, requestGranted, serverBuilt } from "./apps.ts";
+import {
+  ordinaryData,
+  outlook,
+  release,
+  requestGranted,
+  serverBuilt,
+} from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   collectionWithNote,
@@ -300,6 +306,7 @@ describe("blueprints", { timeout: 60_000 }, () => {
     // shared with nobody.
     const theirs = await maker.api.apps.list();
     await maker.api.apps.versions.setCurrent(app.id, 1);
+    await ordinaryData(app.id);
     await serverBuilt(app.id, 1);
     const { name: sourceName } = await owner.api.apps.get(source);
     expect({

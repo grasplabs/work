@@ -8,13 +8,14 @@ import {
   screenFrameReady,
   screenLimits,
 } from "./screen-limits.ts";
+import type { ScreenDelivery } from "./screen-trust.ts";
 import type { WorkflowRun } from "./workflows.ts";
 
-// An App's screens run in a sandboxed frame in the frontend (apps/web):
-// the page builds the frame's import map from a screen's modules, the kit
-// modules they need and their CSS, and connects the frame to its App's
-// server through core. Core checks the person's session and role on every
-// call; the frame only ever talks to the page.
+// An App's screens run in a sandboxed frame in the frontend (apps/web): a
+// document core serves for one build (core's screen-frame.ts), which runs
+// that build's modules and nothing else, connected to its App's server
+// through the page and core. Core checks the person's session and role on
+// every call; the frame only ever talks to the page.
 
 export {
   jsonBytes,
@@ -23,6 +24,7 @@ export {
   screenFramePath,
   screenFrameReady,
   screenLimits,
+  screenModulePath,
 } from "./screen-limits.ts";
 
 /** A value the page or core made up: never longer than a hash in hex. */
@@ -51,7 +53,10 @@ export const screenNameSchema = z
 /** A screen's file, `screens/<name>.tsx`: its name is the `name` group. */
 export const screenPath = /^screens\/(?<name>[\w-]{1,64})\.tsx$/u;
 
-/** One of an App's screens at its current version, ready for a frame. */
+/**
+ * One of an App's screens at its current version, ready for a frame: the
+ * frame loads its code from core by `artifact` (`screenFramePath`).
+ */
 export interface ScreenBundle {
   app: AppId;
   /** The App's name, which the page shows around the frame. */
@@ -59,21 +64,25 @@ export interface ScreenBundle {
   /** The App's current version, which the screen was built from. */
   version: number;
   screen: string;
-  /** The module to render: its default export is the screen. */
-  entry: string;
-  /** The kit module that renders it in the frame (@grasp-os/sdk/screen-runtime). */
-  runtime: string;
-  /** The App's modules by flat name. */
-  modules: Record<string, string>;
-  /** The kit's modules the App's modules need, by flat name, with their code. */
-  kit: Record<string, string>;
-  css: string;
   /**
-   * The SHA-256, in hex, of the code above, as core built it: which code
-   * this start of the frame was handed. The frame says it back once the
-   * screen has mounted (`screenFrameMounted`).
+   * The SHA-256, in hex, of the code a frame runs (the screen's modules,
+   * the kit's modules they load and their CSS), as core built it: what an
+   * admin approves, and what the frame's document runs and nothing else.
+   * The frame says it back once the screen has mounted
+   * (`screenFrameMounted`).
    */
   artifact: string;
+  /**
+   * What lets the frame load that build's document from core, for a few
+   * minutes (`?token=`): a sandboxed frame sends no session.
+   */
+  frameToken: string;
+  /**
+   * Core's word that it handed this person this build of this App, for
+   * the page to give back on the frame's own connection (`present`):
+   * opaque to the page, and worth nothing to anyone else.
+   */
+  lease: string;
 }
 
 const reportLimits = screenLimits.report;
@@ -187,12 +196,31 @@ export interface RunSubscriptionApi {
  * the App (`AppsApi`); its error log for its builders only.
  */
 export interface ScreensApi {
-  /** A screen of the App, built from its current version. */
+  /**
+   * A screen of the App, built from its current version: refused with
+   * `screen.unreviewed` or `screen.revoked` while the App's data is
+   * sensitive and nobody approved exactly this build
+   * (@grasp-os/shared/screen-trust), or with `screen.revoked` once its
+   * approval was taken back, however the data is classified. Refusals are
+   * audited, the same one once in a while. Counted against what one
+   * person's screens of the App may ask (`screen.rate_limited`).
+   */
   open: (app: string, screen: string) => Promise<ScreenBundle>;
+  /**
+   * Says which build this connection's frame runs for the App, with the
+   * lease `open` gave: what every call below is then decided on. Answers
+   * whether that build gets the App's data now. A connection that
+   * presented nothing runs a build nobody approved, as far as core knows.
+   */
+  present: (app: string, lease: string) => Promise<ScreenDelivery>;
   /**
    * Calls `method` of the App's server with `args`, as the person. Plain
    * data, and functions (callbacks the server may keep and call later
-   * with plain data). The answer is plain data, whatever it holds.
+   * with plain data). The answer is plain data, whatever it holds. Like
+   * every call below that reaches the App's data or runs, it is refused
+   * with `screen.unreviewed` or `screen.revoked` unless the build the
+   * connection presented gets that data now: read before the call, before
+   * its answer and before each push.
    */
   call: (app: string, method: string, args: unknown[]) => Promise<unknown>;
   /** The App's current version; null while it has none. */
@@ -254,6 +282,8 @@ export interface ScreensApi {
 export const screenErrors = defineErrorFamily({
   "screen.not_found": "The App has no such screen.",
   "screen.build_failed": "The App's screens don't build.",
+  "screen.build_slow":
+    "The app's screens are still building. Try again in a moment.",
   "screen.invalid": "That isn't a valid request for a screen.",
   "screen.too_many_subscriptions":
     "A screen follows at most 20 workflows' runs at a time.",
@@ -263,4 +293,10 @@ export const screenErrors = defineErrorFamily({
     "That is more data than a screen may send in one call.",
   "screen.answer_too_large":
     "The App answered with more data than a screen takes in one call.",
+  "screen.unreviewed":
+    "Nobody has approved this app's code for the engine's data yet.",
+  "screen.revoked": "The approval of this app's code was taken back.",
+  "screen.review_outdated":
+    "The app or its approvals changed since they were reviewed. Review them again.",
+  "screen.not_approved": "That build of the app isn't approved.",
 });

@@ -42,7 +42,7 @@ export interface ChatDraft {
  * `ScreenBundle` is for a running App (`ChatsApi.preview`): at the draft's
  * revision instead of a version, with the names of the draft's screens.
  */
-export interface PreviewBundle extends Omit<ScreenBundle, "version"> {
+export interface PreviewBundle extends Omit<ScreenBundle, "version" | "lease"> {
   /** Which write of the draft it was built from: its calls name it. */
   revision: number;
   /** The draft's screens, sorted. */

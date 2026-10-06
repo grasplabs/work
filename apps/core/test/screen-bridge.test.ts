@@ -7,8 +7,25 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { removeMember } from "../src/app-members.ts";
 import { appHost } from "../src/durable-objects.ts";
+import {
+  deleteExpired,
+  frameAccess,
+  stageFrame,
+  sweepScreenFrames,
+} from "../src/screen-frame.ts";
+import { screenCode as buildScreenCode } from "../src/screens.ts";
 import { pastAccessRecheck, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import {
+  appModulesOf,
+  frameDocument,
+  kitModulesOf,
+  loadFrame,
+  pathOf,
+  policyOf,
+  routed,
+} from "./screen-frames.ts";
+import type { Framed } from "./screen-frames.ts";
 import {
   openRpc,
   outcome,
@@ -268,6 +285,43 @@ const nestedArrays = (depth: number): unknown => {
 
 const minuteMs = 60_000;
 
+const day = 24 * 60 * minuteMs;
+
+/** The rule the closing screen's class makes, `</script>` and all. */
+const probeRule = /--probe:\s*'<\/script>'/u;
+
+/** The status core answers `path` with. */
+const status = async (path: string): Promise<number> => {
+  const response = await routed(path);
+  return response.status;
+};
+
+/** The status core answers a frame's document with. */
+const frameStatus = async (framed: Framed): Promise<number> => {
+  const response = await frameDocument(framed);
+  return response.status;
+};
+
+/** The token an address of an import map carries. */
+const tokenOf = (address: string): string =>
+  new URL(address).searchParams.get("token") ?? "";
+
+/** An address of an import map without its token. */
+const without = (address: string): string => new URL(address).pathname;
+
+/** An address of an import map with `token` in place of its own. */
+const withToken = (address: string, token: string): string =>
+  `${without(address)}?${new URLSearchParams({ token }).toString()}`;
+
+/** Runs the cron's sweep at `ahead` until it has read everything once. */
+const sweptAt = async (ahead: number): Promise<void> => {
+  const at = new Date(Date.now() + ahead);
+  for (let run = 0; run < 2; run += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another, as the cron runs
+    await sweepScreenFrames(env, at);
+  }
+};
+
 const waitFor = async <T>(read: () => T | undefined): Promise<T> =>
   await vi.waitFor(() => {
     const value = read();
@@ -284,6 +338,11 @@ describe("screens", { timeout: 60_000 }, () => {
 
     const bundle = await builder.api.screens.open(app, "notes");
     const again = await builder.api.screens.open(app, "notes");
+    const frame = await loadFrame(bundle);
+    if (frame === null) {
+      throw new Error("An opened screen has a frame");
+    }
+    const kit = kitModulesOf(frame);
     expect({
       // Core's own name for the code it hands a frame: the same for the
       // same code, whoever opens it and whenever.
@@ -292,28 +351,30 @@ describe("screens", { timeout: 60_000 }, () => {
         again.artifact === bundle.artifact,
       app: bundle.app,
       version: bundle.version,
-      runtime: bundle.runtime,
-      hasEntry: Object.hasOwn(bundle.modules, bundle.entry),
+      frame: frame.screen.artifact,
+      runtime: frame.screen.runtime,
+      entry: appModulesOf(frame).includes(frame.screen.entry),
       kit: {
-        runtime: Object.hasOwn(bundle.kit, bundle.runtime),
-        hooks: Object.hasOwn(bundle.kit, kitModuleName("@grasp-os/sdk/screen")),
+        runtime: Object.hasOwn(kit, frame.screen.runtime),
+        hooks: Object.hasOwn(kit, kitModuleName("@grasp-os/sdk/screen")),
         button: Object.hasOwn(
-          bundle.kit,
+          kit,
           kitModuleName("@grasp-os/ui/components/button")
         ),
         unused: Object.hasOwn(
-          bundle.kit,
+          kit,
           kitModuleName("@grasp-os/ui/components/dialog")
         ),
-        empty: Object.values(bundle.kit).some((code) => code === ""),
+        empty: Object.values(frame.modules).some((code) => code === ""),
       },
-      theme: bundle.css.includes("--primary:"),
+      theme: frame.screen.css.includes("--primary:"),
     }).toStrictEqual({
       artifact: true,
       app,
       version: 1,
+      frame: bundle.artifact,
       runtime: kitModuleName(screenRuntime),
-      hasEntry: true,
+      entry: true,
       kit: {
         runtime: true,
         hooks: true,
@@ -322,6 +383,222 @@ describe("screens", { timeout: 60_000 }, () => {
         empty: false,
       },
       theme: true,
+    });
+  });
+
+  it("runs in its frame the modules of the build core opened and no other script", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const bundle = await builder.api.screens.open(app, "notes");
+    const frame = await loadFrame(bundle);
+    if (frame === null) {
+      throw new Error("An opened screen has a frame");
+    }
+    const scripts = frame.policy.get("script-src") ?? [];
+    // The policy names each address without its token: browsers match a
+    // policy's paths without the query.
+    const addresses = [
+      ...new Set(
+        Object.values(frame.addresses).map((address) => {
+          const { origin, pathname } = new URL(address);
+          return `${origin}${pathname}`;
+        })
+      ),
+    ];
+    const unknown = { artifact: "0".repeat(64) };
+    const missing = await frameDocument({
+      ...unknown,
+      frameToken: await frameAccess(env, unknown.artifact),
+    });
+
+    expect({
+      // The document's own inline scripts by hash, each module of the
+      // build by its exact address, and nothing else: no inline script or
+      // handler the screen writes, no data: or blob: module, no eval.
+      scripts: scripts.toSorted(),
+      served: Object.values(frame.addresses).every((address) =>
+        new URL(address).pathname.startsWith("/screen-modules/")
+      ),
+      // A build core never staged runs nothing, and a miss is cached for
+      // a minute, not read from storage on every ask.
+      missing: {
+        status: missing.status,
+        scripts: policyOf(missing).get("script-src"),
+        cache: missing.headers.get("cache-control"),
+      },
+    }).toStrictEqual({
+      scripts: [...frame.inline, ...addresses].toSorted(),
+      served: true,
+      missing: {
+        status: 404,
+        scripts: ["'none'"],
+        cache: "public, max-age=60",
+      },
+    });
+  });
+
+  it("serves a frame and its modules only with core's unexpired token for exactly them", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const bundle = await builder.api.screens.open(app, "notes");
+    const frame = await loadFrame(bundle);
+    if (frame === null) {
+      throw new Error("An opened screen has a frame");
+    }
+    const [first, second] = Object.values(frame.addresses);
+    if (first === undefined || second === undefined) {
+      throw new Error("The screen loads modules");
+    }
+    const frameWith = async (frameToken: string): Promise<number> =>
+      await frameStatus({ artifact: bundle.artifact, frameToken });
+    const { id: otherApp } = await builder.api.apps.create({ name: "Other" });
+    await release(builder, otherApp, {
+      ...sampleFiles,
+      "screens/notes.tsx": `${screenCode}// another build\n`,
+    });
+    const other = await builder.api.screens.open(otherApp, "notes");
+
+    const now = {
+      frame: await frameWith(bundle.frameToken),
+      module: await status(pathOf(first)),
+      // A hash alone, a token for something else, a made-up token.
+      frameWithout: await frameWith(""),
+      frameWithOthers: await frameWith(tokenOf(first)),
+      frameMadeUp: await frameWith(`${Date.now() + 60_000}.${"A".repeat(43)}`),
+      moduleWithout: await status(without(first)),
+      moduleWithOthers: await status(withToken(first, tokenOf(second))),
+      moduleWithFrames: await status(withToken(first, bundle.frameToken)),
+      anotherBuild: await frameWith(other.frameToken),
+    };
+    // Expired: the frame's within minutes, a module's within hours.
+    const later = await atStoppedClock(async (advance) => {
+      advance(11 * 60_000);
+      const frameLater = await frameWith(bundle.frameToken);
+      const moduleLater = await status(pathOf(first));
+      advance(13 * 60 * minuteMs);
+      return {
+        frame: frameLater,
+        module: moduleLater,
+        moduleMuchLater: await status(pathOf(first)),
+      };
+    });
+
+    expect({ now, later }).toStrictEqual({
+      now: {
+        frame: 200,
+        module: 200,
+        frameWithout: 403,
+        frameWithOthers: 403,
+        frameMadeUp: 403,
+        moduleWithout: 403,
+        moduleWithOthers: 403,
+        moduleWithFrames: 403,
+        anotherBuild: 403,
+      },
+      later: { frame: 403, module: 200, moduleMuchLater: 403 },
+    });
+  });
+
+  it("keeps what a frame is handed inside its own script elements, whatever the CSS holds", async () => {
+    const builder = await personApi("builder");
+    const { id: app } = await builder.api.apps.create({ name: "Closing" });
+    await release(builder, app, {
+      "app/server.ts": serverCode,
+      "screens/notes.tsx": `export default function Notes() {
+  return <p className="p-2 [--probe:'</script>'] text-sm">Notes</p>;
+}
+`,
+    });
+    const bundle = await builder.api.screens.open(app, "notes");
+    const response = await frameDocument(bundle);
+    const html = await response.text();
+    const frame = await loadFrame(bundle);
+
+    expect({
+      // Only the document's own three script elements end.
+      ends: html.split("</script>").length - 1,
+      css: probeRule.test(frame?.screen.css ?? ""),
+    }).toStrictEqual({ ends: 3, css: true });
+  });
+
+  it("deletes staged builds the cron finds past their days, and stages a build in use again before then", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const bundle = await builder.api.screens.open(app, "notes");
+    const frame = await loadFrame(bundle);
+    if (frame === null) {
+      throw new Error("An opened screen has a frame");
+    }
+    const [module] = Object.values(frame.addresses);
+    if (module === undefined) {
+      throw new Error("The screen loads modules");
+    }
+
+    await sweptAt(day);
+    const young = {
+      frame: await frameStatus(bundle),
+      module: await status(pathOf(module)),
+    };
+    await sweptAt(31 * day);
+    const old = {
+      frame: await frameStatus(bundle),
+      module: await status(pathOf(module)),
+    };
+    // Opened again, it is staged again and loads.
+    const reopened = await loadFrame(
+      await builder.api.screens.open(app, "notes")
+    );
+
+    // The sweep's race: it lists, an open stages the build again, then
+    // the sweep deletes what it listed as old, fresh modules included (R2
+    // deletes take no condition). The clock the sweep goes by is moved on,
+    // so what was staged again still looks old to it.
+    const { artifact, code } = await buildScreenCode(
+      env,
+      sampleFiles,
+      "notes",
+      1
+    );
+    const listedBefore = await env.FILES.list({ prefix: "screen-modules/" });
+    await stageFrame(env, artifact, code, new Date(Date.now() + 16 * day));
+    await deleteExpired(
+      env,
+      listedBefore.objects,
+      new Date(Date.now() + 31 * day)
+    );
+    // The frame's document finds its modules gone: it drops its manifest
+    // and isn't cached, so the next open stages it all again.
+    const raced = await frameDocument(bundle);
+    const afterRace = await builder.api.screens.open(app, "notes");
+    const healed = await loadFrame(afterRace);
+    const healedModule = Object.values(healed?.addresses ?? {})[0] ?? "";
+
+    // A module gone under a fresh manifest is put back at the next open,
+    // before any frame asks for it.
+    const hash = new URL(module).pathname.split("/").at(-1) ?? "";
+    await env.FILES.delete(`screen-modules/${hash}`);
+    await builder.api.screens.open(app, "notes");
+    const putBack = await status(pathOf(module));
+
+    expect({
+      young,
+      old,
+      reopened: reopened !== null,
+      raced: {
+        status: raced.status,
+        cache: raced.headers.get("cache-control"),
+      },
+      healed: healed !== null,
+      healedModule: await status(pathOf(healedModule)),
+      putBack,
+    }).toStrictEqual({
+      young: { frame: 200, module: 200 },
+      old: { frame: 404, module: 404 },
+      reopened: true,
+      raced: { status: 404, cache: "no-store" },
+      healed: true,
+      healedModule: 200,
+      putBack: 200,
     });
   });
 

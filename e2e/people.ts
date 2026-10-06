@@ -136,8 +136,9 @@ export const endSession = async (
 const cast = {
   apps: { builder: "builder", user: "user", admin: "admin" },
   screens: { one: "builder", two: "builder" },
-  screenAttacks: { builder: "builder" },
+  screenAttacks: { builder: "builder", admin: "admin" },
   screenWorkflows: { builder: "builder", admin: "admin" },
+  screenApproval: { builder: "builder", admin: "admin" },
   decisionAnswered: { builder: "builder", decider: "user", other: "admin" },
   decisionUnreachable: { decider: "user" },
   memberActions: { admin: "admin", one: "user", two: "user" },
@@ -191,6 +192,9 @@ const signInsAtOnce = 8;
 /** How `signInCast` hands everyone to the test workers. */
 const castVariable = "E2E_CAST";
 
+/** How `signInCast` hands the configured admin's session to the test workers. */
+const adminVariable = "E2E_ADMIN";
+
 /**
  * Signs in the whole cast, once for each attempt a test may get, so a
  * retry starts from people as they were, not as the failed attempt left
@@ -215,7 +219,10 @@ export const signInCast = async (attempts: number): Promise<Cast> => {
     signInsAtOnce,
     async (person) => ({ ...person, cookie: await signInAs(person.email) })
   );
-  const { core, api } = apiOf({ cookie: await signInAs(localAdmin) });
+  const adminCookie = await signInAs(localAdmin);
+  // Playwright hands the global setup's environment to the test workers.
+  process.env[adminVariable] = adminCookie;
+  const { core, api } = apiOf({ cookie: adminCookie });
   try {
     const members = await api.members.list();
     const userIds = new Map(
@@ -348,8 +355,31 @@ export const pageOf = async (
 };
 
 /**
+ * Classifies the App's data as ordinary, as the configured admin: its
+ * screens then get it without anyone approving their code. For tests of
+ * what a screen does with its App; screen-approval.e2e.ts is the one
+ * about approving its code.
+ */
+export const ordinaryData = async (app: string): Promise<void> => {
+  const cookie = process.env[adminVariable];
+  if (cookie === undefined) {
+    throw new Error(
+      `${adminVariable} is unset: the global setup in playwright.config.ts signs the admin in`
+    );
+  }
+  const { core, api } = apiOf({ cookie });
+  try {
+    const { generation } = await api.screenTrust.review(app);
+    await api.screenTrust.classify(app, "ordinary", generation);
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
  * Writes `files` to the App (null deletes one), commits them and makes
- * that version current.
+ * that version current, with the App's data classified as ordinary
+ * (`ordinaryData`).
  */
 export const release = async (
   api: ReturnType<typeof apiOf>["api"],
@@ -359,4 +389,5 @@ export const release = async (
 ): Promise<void> => {
   const { version } = await api.apps.files.commit(app, files, message);
   await api.apps.versions.setCurrent(app, version);
+  await ordinaryData(app);
 };

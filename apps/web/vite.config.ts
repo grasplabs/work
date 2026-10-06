@@ -61,8 +61,10 @@ export default defineConfig({
     proxy: {
       "/api": "http://localhost:8787",
       "/rpc": { target: "ws://localhost:8787", ws: true },
-      // The document screens run in, with its own policy (core's screen-frame.ts).
+      // The document screens run in, with its own policy, and the modules
+      // it runs (core's screen-frame.ts).
       "/screen-frame": "http://localhost:8787",
+      "/screen-modules": "http://localhost:8787",
     },
   },
 });

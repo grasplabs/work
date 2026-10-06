@@ -2,6 +2,7 @@ import { createSocket } from "node:dgram";
 import type { Socket } from "node:dgram";
 import { once } from "node:events";
 
+import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -15,7 +16,8 @@ import { screenAppFiles, serveAttacker } from "./screen-app.ts";
 // tries to get out of its frame, or to make the page believe something
 // about it, each in Chromium, Firefox and WebKit: navigation, forms,
 // scripts, workers, frames, popups and the network; a frame that never
-// starts, or says it did; and WebRTC.
+// starts, or says it did; WebRTC; and approved code letting in code
+// nobody approved.
 //
 // Every attack is aimed at a receiver this file runs, and carries only a
 // made-up marker. A test passes when the receiver heard nothing, or when
@@ -41,6 +43,20 @@ const stopClock = async (page: Page): Promise<void> => {
   await page.clock.pauseAt(await page.evaluate((ms) => Date.now() + ms, ahead));
 };
 
+/**
+ * The page's bridge as a frame holds it, with what a screen past the SDK
+ * would try on it.
+ */
+interface PageBridge {
+  call: (method: unknown, args: unknown[]) => Promise<unknown>;
+  authenticate: () => Promise<unknown>;
+  apps: { list: () => Promise<unknown> };
+  screens: {
+    call: (app: string, method: string, args: unknown[]) => Promise<unknown>;
+  };
+  constructor: (code: string) => Promise<unknown>;
+}
+
 /** A UDP port standing in for a TURN server: it only counts packets. */
 const serveTurn = async (): Promise<{
   url: string;
@@ -59,6 +75,35 @@ const serveTurn = async (): Promise<{
     packets: () => packets,
     socket,
   };
+};
+
+/**
+ * A new App named `name` with `files`, made current by `builder`, its
+ * screens approved by `admin` exactly as core builds them: its data stays
+ * sensitive.
+ */
+const approvedApp = async (
+  by: { builder: Person; admin: Person },
+  name: string,
+  files: Record<string, string>
+): Promise<string> => {
+  const building = apiOf(by.builder);
+  const deciding = apiOf(by.admin);
+  try {
+    const { id } = await building.api.apps.create({ name });
+    const { version } = await building.api.apps.files.commit(id, files, name);
+    await building.api.apps.versions.setCurrent(id, version);
+    const review = await deciding.api.screenTrust.review(id);
+    await deciding.api.screenTrust.approve(id, {
+      version: review.version,
+      generation: review.generation,
+      artifacts: builtArtifacts(review.screens),
+    });
+    return id;
+  } finally {
+    building.core[Symbol.dispose]();
+    deciding.core[Symbol.dispose]();
+  }
 };
 
 /** A new App named `name` with `files`, released by `builder`. */
@@ -90,17 +135,21 @@ let builder: Person;
 let probing: string;
 /** The App whose screens leave, never render, and try WebRTC. */
 let attacking: string;
+/** The same screens, approved by an admin, for its data. */
+let approved: string;
 
 test.beforeAll(async () => {
   attacker = await serveAttacker();
   turn = await serveTurn();
-  ({ builder } = peopleIn("screenAttacks"));
+  const cast = peopleIn("screenAttacks");
+  ({ builder } = cast);
+  const files = attackAppFiles({ attacker: attacker.url, turn: turn.url });
   probing = await releaseApp(builder, "Probes", screenAppFiles(attacker.url));
-  attacking = await releaseApp(
-    builder,
-    "Attacks",
-    attackAppFiles({ attacker: attacker.url, turn: turn.url })
-  );
+  attacking = await releaseApp(builder, "Attacks", files);
+  approved = await approvedApp(cast, "Approved attacks", {
+    "app/server.ts": files["app/server.ts"] ?? "",
+    "screens/injecting.tsx": files["screens/injecting.tsx"] ?? "",
+  });
 });
 
 test.afterAll(() => {
@@ -141,13 +190,42 @@ test("a screen reaches nothing but its own App's server", async ({
   });
 
   // The bridge, reached past the SDK, offers only the App's own server.
+  // A screen's own code can't get there: the frame runs only its build's
+  // modules (the test below), so the test reaches in itself, as a
+  // browser's devtools can.
   const frame = page.frame({ url: /\/screen-frame\?load=/u });
-  await expect
-    .poll(async () => await frame?.evaluate(() => document.body.dataset.bridge))
-    .toBeDefined();
-  const bridge: unknown = JSON.parse(
-    (await frame?.evaluate(() => document.body.dataset.bridge)) ?? "{}"
-  );
+  const bridge: unknown = await frame?.evaluate(async (runtime) => {
+    // SAFETY: the runtime's own module, whose `bridge` is the page's
+    // bridge as the frame holds it (@grasp-os/sdk/screen-runtime).
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const { bridge: connected } = (await import(runtime)) as {
+      bridge: () => PageBridge;
+    };
+    const toPage = connected();
+    // In the frame, where this runs: nothing from outside it is there.
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- see above
+    const tried = async (run: () => Promise<unknown>): Promise<string> => {
+      try {
+        await run();
+        return "allowed";
+      } catch (error) {
+        return typeof error === "object" && error !== null && "code" in error
+          ? String(error.code)
+          : "refused";
+      }
+    };
+    return {
+      nameObject: await tried(
+        async () => await toPage.call({ toString: () => "notes" }, [])
+      ),
+      session: await tried(async () => await toPage.authenticate()),
+      apps: await tried(async () => await toPage.apps.list()),
+      screens: await tried(
+        async () => await toPage.screens.call("another-app", "notes", [])
+      ),
+      prototype: await tried(async () => await toPage.constructor("return 1")),
+    };
+  }, "@grasp-os~sdk~screen-runtime.js");
   expect(bridge).toStrictEqual({
     nameObject: "screen.invalid",
     session: "refused",
@@ -180,6 +258,61 @@ test("a screen reaches nothing but its own App's server", async ({
     ran: [undefined, undefined, undefined],
     popups: [],
     url: screenPath(probing, "notes"),
+  });
+});
+
+test("an approved screen runs its build and nothing else: no handler, inline script, data: or blob: module or eval it lets in", async ({
+  browser,
+}) => {
+  const page = await pageOf(browser, builder);
+  await page.goto(screenPath(approved, "injecting"));
+  const screen = page.frameLocator('iframe[title="injecting app"]');
+  // Its own modules run: it renders, and calls its server.
+  await expect(screen.getByRole("heading", { name: "Injecting" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(
+    screen.getByRole("status", { name: "Injected" })
+  ).not.toBeEmpty();
+  const tried: unknown = JSON.parse(
+    (await screen.getByRole("status", { name: "Injected" }).textContent()) ?? ""
+  );
+  const frame = page.frame({ url: /\/screen-frame\?load=/u });
+  // The HTML its server sent is on the page, and its image has failed,
+  // which is when its `onerror` would have run.
+  await expect
+    .poll(
+      async () =>
+        await frame?.evaluate(() => {
+          const image = document.querySelector("main img");
+          return image instanceof HTMLImageElement && image.complete;
+        })
+    )
+    .toBe(true);
+
+  expect({
+    tried,
+    ran: await frame?.evaluate(() => {
+      const marks = document.body.dataset;
+      return [
+        "inlineHandler",
+        "inlineScript",
+        "dataModule",
+        "blobModule",
+        "eval",
+        "function",
+        "dataImport",
+      ].filter((mark) => mark in marks);
+    }),
+  }).toStrictEqual({
+    tried: {
+      dataModule: "blocked",
+      blobModule: "blocked",
+      eval: "blocked",
+      function: "blocked",
+      dataImport: "blocked",
+    },
+    ran: [],
   });
 });
 

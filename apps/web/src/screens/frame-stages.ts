@@ -21,10 +21,14 @@ import type { ScreenMounted } from "@grasp-os/shared/screens";
 // - one that names other code than the page handed over;
 // - none at all: the frame never loads, or the screen never renders.
 
-/** Which stage of a screen's start. */
-export type Stage = "ready" | "mounted";
+/**
+ * Which stage of a screen's start: `opened` (core handed over the build,
+ * `screenLimits.openMs`), then the frame's two (`screenLimits.stageMs`
+ * each).
+ */
+export type Stage = "opened" | "ready" | "mounted";
 
-/** A stage that didn't happen within `screenLimits.stageMs`. */
+/** A stage that didn't happen in its time. */
 export class StageTimeoutError extends Error {
   readonly stage: Stage;
 
@@ -109,6 +113,32 @@ const isFrameMessage = (event: Event): event is Event & FrameMessage =>
  * it ends (the message, the time, or `signal` stopping it), it no longer
  * listens and its timer is gone.
  */
+/**
+ * What `work` answers, or `StageTimeoutError` for `name` once `ms` have
+ * passed: so a start never waits on core longer than that, whether a
+ * build stalls or the connection does.
+ */
+export const inTime = async <T>(
+  name: Stage,
+  work: Promise<T>,
+  ms: number
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      // oxlint-disable-next-line promise/avoid-new -- a timer has no promise form here
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new StageTimeoutError(name));
+        }, ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 export const stage = async (
   name: Stage,
   accepts: (message: FrameMessage) => boolean,

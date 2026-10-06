@@ -20,6 +20,18 @@ describe("audit event types", () => {
     expect(typeOf("audit.something_new")).toBeNull();
   });
 
+  it("files an admin's word on an App's screens as a decision, a refused screen as an action, and the rest of an App as configuration", () => {
+    expect(
+      [
+        "app.artifact.approved",
+        "app.artifact.revoked",
+        "app.artifact.refused",
+        "app.output.classified",
+        "app.version.current",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["decision", "decision", "action", "config", "config"]);
+  });
+
   it("files a connector call by whether it changed something", () => {
     expect(typeOf("connection.call", { sideEffect: true })).toBe("action");
     expect(typeOf("connection.call", { sideEffect: false })).toBe("read");

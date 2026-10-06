@@ -2,10 +2,11 @@ import type { PendingAction } from "@grasp-os/shared/connect";
 import type { DependenciesWaiting } from "@grasp-os/shared/dependencies";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
 import { buttonVariants } from "@grasp-os/ui/components/button";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
-import { KeyRoundIcon } from "lucide-react";
+import { KeyRoundIcon, ShieldCheckIcon } from "lucide-react";
 import { useState } from "react";
 
 import { PendingApprovals } from "../activity/pending.tsx";
@@ -28,7 +29,8 @@ import type { NotificationsPage, OlderFailures } from "./failed-workflows.tsx";
 // What waits on the person, as the prototype's To do
 // (`components/dashboard/action-panel.tsx`): each thing with what it is
 // about and its next step, by kind. Changes an agent wants to make wait
-// for them to confirm or reject; permission requests wait for an admin;
+// for them to confirm or reject; permission requests wait for an admin,
+// and so do the current apps of engines whose code nobody approved;
 // packages proposed for an engine wait for someone given the permission
 // to approve them;
 // workflows failed while acting for them, with a way to ask the agent to
@@ -45,6 +47,8 @@ export interface Waiting {
   requests: Loaded<PendingRequests> | undefined;
   /** Packages to approve: none for anyone without that permission. */
   dependencies: Loaded<DependenciesWaiting>;
+  /** Engines with apps whose code waits for approval. Admins only. */
+  screens: Loaded<ScreensWaiting[]> | undefined;
 }
 
 /** Who counts what waits: what they may act on follows from their role. */
@@ -83,10 +87,13 @@ export const decidesRequests = ({ role, staff }: Viewer): boolean =>
  * here is no longer news.)
  */
 export const waitingCount = (
-  { held, failed, integrations, requests, dependencies }: Waiting,
+  { held, failed, integrations, requests, dependencies, screens }: Waiting,
   identity: Viewer,
   olderShown = 0
 ): number =>
+  (screens?.state === "ready" && decidesRequests(identity)
+    ? screens.data.length
+    : 0) +
   (held.state === "ready" ? held.data.length : 0) +
   (failed.state === "ready"
     ? failed.data.page.notifications.length + olderShown
@@ -208,6 +215,57 @@ const DependenciesGroup = ({
   );
 };
 
+/** An engine with apps to approve: its next step is the engine's page, where their code is approved. */
+const ScreensRow = ({ waiting }: { waiting: ScreensWaiting }) => {
+  const { t } = useLingui();
+  const { app, name, screens } = waiting;
+  const count = screens.length;
+  return (
+    <li className="flex min-h-14 items-center gap-3 border-t px-4 py-2">
+      <ItemMark icon={ShieldCheckIcon} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="text-muted-foreground text-xs">
+          <Trans context="kind of thing that waits">App approval</Trans>
+        </span>
+        <span className="truncate">
+          <Plural
+            one={`${name} has # app whose code nobody approved`}
+            other={`${name} has # apps whose code nobody approved`}
+            value={count}
+          />
+        </span>
+      </div>
+      <Link
+        aria-label={t`Review the apps of ${name}`}
+        className={buttonVariants({ size: "xs" })}
+        params={{ engine: app }}
+        to="/engines/$engine"
+      >
+        <Trans>Review</Trans>
+      </Link>
+    </li>
+  );
+};
+
+const ScreensGroup = ({ screens }: { screens: Loaded<ScreensWaiting[]> }) => {
+  const { t } = useLingui();
+  if (screens.state !== "ready") {
+    return <PartNotLoaded part={screens} />;
+  }
+  if (screens.data.length === 0) {
+    return null;
+  }
+  return (
+    <DashboardGroup title={t`Apps to approve`}>
+      <ul aria-label={t`Apps to approve`}>
+        {screens.data.map((waiting) => (
+          <ScreensRow key={waiting.app} waiting={waiting} />
+        ))}
+      </ul>
+    </DashboardGroup>
+  );
+};
+
 const FailedGroup = ({
   failed,
   older,
@@ -282,7 +340,8 @@ export const ToDo = ({
     waiting.failed.state === "ready" &&
     waiting.integrations.state === "ready" &&
     waiting.dependencies.state === "ready" &&
-    (waiting.requests === undefined || waiting.requests.state === "ready");
+    (waiting.requests === undefined || waiting.requests.state === "ready") &&
+    (waiting.screens === undefined || waiting.screens.state === "ready");
   return (
     <DashboardCard id="dashboard-to-do">
       <DashboardCardHeader
@@ -295,6 +354,9 @@ export const ToDo = ({
         <RequestsGroup requests={waiting.requests} />
       )}
       <DependenciesGroup dependencies={waiting.dependencies} />
+      {waiting.screens === undefined ? null : (
+        <ScreensGroup screens={waiting.screens} />
+      )}
       <FailedGroup
         failed={waiting.failed}
         older={older}

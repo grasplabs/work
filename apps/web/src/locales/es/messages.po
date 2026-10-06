@@ -96,6 +96,10 @@ msgstr "{connection}, {resource}"
 msgid "{connection}, {resource} ({tool})"
 msgstr "{connection}, {resource} ({tool})"
 
+#: src/dashboard/to-do.tsx
+msgid "{count, plural, one {{name} has # app whose code nobody approved} other {{name} has # apps whose code nobody approved}}"
+msgstr "{count, plural, one {{name} tiene # aplicación cuyo código nadie ha aprobado} other {{name} tiene # aplicaciones cuyo código nadie ha aprobado}}"
+
 #: src/chat/held-writes.tsx
 msgid "{count, plural, one {# change waits for you to confirm or reject it.} other {# changes wait for you to confirm or reject them.}}"
 msgstr "{count, plural, one {# cambio espera a que lo confirmes o lo rechaces.} other {# cambios esperan a que los confirmes o los rechaces.}}"
@@ -513,6 +517,10 @@ msgstr "Un administrador lo conecta para todos."
 msgid "An admin hasn't set up company memory yet."
 msgstr "Ningún administrador ha configurado aún la memoria de la empresa."
 
+#: src/engines/screen-approval.tsx
+msgid "An admin said this engine's data may go to apps nobody approved, so its apps run without approval, unless their approval was taken back."
+msgstr "Un administrador indicó que los datos de este motor pueden ir a apps que nadie aprobó, así que sus apps funcionan sin aprobación, salvo que se haya retirado su aprobación."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "An amount in {currency} has at most {digits, plural, one {# decimal} other {# decimals}}."
 msgstr "Un importe en {currency} tiene como máximo {digits, plural, one {# decimal} other {# decimales}}."
@@ -521,9 +529,17 @@ msgstr "Un importe en {currency} tiene como máximo {digits, plural, one {# deci
 msgid "An amount in {currency} has no decimals."
 msgstr "Un importe en {currency} no tiene decimales."
 
+#: src/engines/screen-approval.tsx
+msgid "An app is code that runs in people's browsers. It gets this engine's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
+msgstr "Una aplicación es código que se ejecuta en el navegador de las personas. Recibe los datos de este motor solo cuando un administrador ha aprobado exactamente ese código, y un cambio en el código necesita una nueva aprobación. Lee primero el código: el código aprobado aún puede enviar lo que recibe a otro lugar, así que aprobarlo significa que confías en él."
+
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "An app is what this engine's team works in, standing on its workflows and integrations. Ask Grasp in chat to build one."
 msgstr "Una aplicación es donde trabaja el equipo de este motor, apoyada en sus flujos de trabajo e integraciones. Pide a Grasp en el chat que cree una."
+
+#: src/activity/audit-words.ts
+msgid "An app nobody approved was refused the engine's data"
+msgstr "A una aplicación que nadie aprobó se le negaron los datos del motor"
 
 #: src/activity/pending.tsx
 msgid "Another engine already keeps {type} records here: this engine's won't apply."
@@ -537,6 +553,23 @@ msgstr "Desde que se leyó esta lista, otra versión de este motor pasó a ser l
 msgid "Any type"
 msgstr "Cualquier tipo"
 
+#: src/engines/screen-approval.tsx
+msgid "App"
+msgstr "Aplicación"
+
+#: src/dashboard/to-do.tsx
+msgctxt "kind of thing that waits"
+msgid "App approval"
+msgstr "Aprobación de aplicaciones"
+
+#: src/engines/screen-approval.tsx
+msgid "Approval"
+msgstr "Aprobación"
+
+#: src/engines/screen-approval.tsx
+msgid "Approval taken back"
+msgstr "Aprobación retirada"
+
 #: src/activity/pending.tsx
 #: src/dashboard/dependency-requests.tsx
 #: src/routes/decisions.$decision.tsx
@@ -547,9 +580,21 @@ msgstr "Aprobar"
 msgid "Approve {who}"
 msgstr "Aprobar {who}"
 
+#: src/engines/screen-approval.tsx
+msgid "Approve the apps of version {version}"
+msgstr "Aprobar las aplicaciones de la versión {version}"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Approve the packages for {engine}"
 msgstr "Aprobar los paquetes para {engine}"
+
+#: src/engines/screen-approval.tsx
+msgid "Approved"
+msgstr "Aprobado"
+
+#: src/activity/audit-words.ts
+msgid "Approved an app's code"
+msgstr "Aprobó el código de una aplicación"
 
 #: src/routes/decisions.$decision.tsx
 msgid "Approved by {name} on {date}."
@@ -566,6 +611,10 @@ msgstr "Aprobado: {who}."
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "Apps"
 msgstr "Aplicaciones"
+
+#: src/dashboard/to-do.tsx
+msgid "Apps to approve"
+msgstr "Aplicaciones por aprobar"
 
 #: src/activity/pending.tsx
 msgid "as {binding}"
@@ -766,6 +815,10 @@ msgstr "Paso {name} cambiado"
 #: src/activity/audit-words.ts
 msgid "Changed what a connection listens for"
 msgstr "Cambió lo que escucha una conexión"
+
+#: src/activity/audit-words.ts
+msgid "Changed whether an engine's data needs approved apps"
+msgstr "Cambió si los datos de un motor requieren aplicaciones aprobadas"
 
 #: src/activity/audit-words.ts
 msgid "Changed which integrations are offered"
@@ -1155,6 +1208,10 @@ msgstr "Documento no encontrado"
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Los documentos escritos aquí y los archivos que se suban aparecen aquí para que Grasp y sus agentes los lean."
 
+#: src/engines/screen-approval.tsx
+msgid "Doesn't build now"
+msgstr "No se compila ahora"
+
 #: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "Done"
@@ -1192,6 +1249,10 @@ msgstr "Cada flujo de trabajo"
 msgctxt "older chats"
 msgid "Earlier"
 msgstr "Anteriores"
+
+#: src/engines/screen-approval.tsx
+msgid "Earlier versions"
+msgstr "Versiones anteriores"
 
 #: src/knowledge/document.tsx
 msgid "Edit"
@@ -1939,6 +2000,10 @@ msgstr "No: su hash o su enlace con el evento anterior no coincide."
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Nadie respondió a tiempo, así que esta decisión se ha cerrado."
 
+#: src/screens/screen-frame.tsx
+msgid "Nobody has approved this app's code for the engine's data yet. An admin can approve it on the engine's page."
+msgstr "Nadie ha aprobado aún el código de esta aplicación para los datos del motor. Un administrador puede aprobarlo en la página del motor."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Nobody matches."
 msgstr "No coincide nadie."
@@ -1978,6 +2043,10 @@ msgstr "Ninguno."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not allowed"
 msgstr "No permitida"
+
+#: src/engines/screen-approval.tsx
+msgid "Not approved"
+msgstr "No aprobado"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not connected"
@@ -2362,6 +2431,10 @@ msgstr "Leyó cómo se usa el conocimiento"
 msgid "Read restricted sources, and is held to them"
 msgstr "Leyó fuentes restringidas y queda sujeto a ellas"
 
+#: src/engines/screen-approval.tsx
+msgid "Read the code of version {version}"
+msgstr "Leer el código de la versión {version}"
+
 #: src/activity/audit-words.ts
 msgid "Read what a guest wrote"
 msgstr "Leyó lo que escribió un invitado"
@@ -2532,6 +2605,10 @@ msgstr "Resultado"
 msgid "Results"
 msgstr "Resultados"
 
+#: src/dashboard/to-do.tsx
+msgid "Review"
+msgstr "Revisar"
+
 #: src/knowledge/document.tsx
 msgid "Review by"
 msgstr "Revisar antes del"
@@ -2539,6 +2616,10 @@ msgstr "Revisar antes del"
 #: src/dashboard/signals.tsx
 msgid "Review overdue"
 msgstr "Revisión vencida"
+
+#: src/dashboard/to-do.tsx
+msgid "Review the apps of {name}"
+msgstr "Revisar las aplicaciones de {name}"
 
 #: src/connections/connection-list.tsx
 msgid "Revoke"
@@ -2889,6 +2970,7 @@ msgid "Started following what changes at a connection"
 msgstr "Empezó a seguir lo que cambia en una conexión"
 
 #: src/connections/connection-list.tsx
+#: src/engines/screen-approval.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "Status"
@@ -2933,6 +3015,14 @@ msgstr "Dejó de seguir lo que cambia en una conexión"
 #: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Detenido."
+
+#: src/engines/screen-approval.tsx
+msgid "Take back"
+msgstr "Retirar"
+
+#: src/engines/screen-approval.tsx
+msgid "Take back the approval of {screen}"
+msgstr "Retirar la aprobación de {screen}"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Takes sensitive data"
@@ -3016,6 +3106,10 @@ msgstr "La respuesta se cortó en el límite del modelo."
 msgid "The app couldn't be loaded."
 msgstr "No se pudo cargar la aplicación."
 
+#: src/screens/screen-frame.tsx
+msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the engine's page."
+msgstr "Se retiró la aprobación del código de esta aplicación y la aplicación se detuvo. Un administrador puede aprobarlo de nuevo en la página del motor."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Las aplicaciones en las que pueden trabajar tus flujos de trabajo. Grasp solo hace lo que permites en cada una."
@@ -3027,6 +3121,10 @@ msgstr "El catálogo no incluye {app}, así que no se pueden mostrar sus herrami
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 msgstr "No se pudo leer el catálogo de integraciones, así que esta página muestra solo lo que tus cuentas dicen de ella."
+
+#: src/engines/screen-approval.tsx
+msgid "The code of version {version}"
+msgstr "El código de la versión {version}"
 
 #: src/chat/composer.tsx
 msgid "The default, {each}"
@@ -3201,6 +3299,10 @@ msgid "Took back a guest's link"
 msgstr "Retiró el enlace de un invitado"
 
 #: src/activity/audit-words.ts
+msgid "Took back the approval of an app's code"
+msgstr "Retiró la aprobación del código de una aplicación"
+
+#: src/activity/audit-words.ts
 msgid "Took someone off a team"
 msgstr "Sacó a alguien de un equipo"
 
@@ -3285,6 +3387,7 @@ msgstr "Usuario"
 msgid "Verified"
 msgstr "Verificado"
 
+#: src/engines/screen-approval.tsx
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Version"

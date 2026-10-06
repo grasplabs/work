@@ -2,8 +2,9 @@
  * Apps whose screens attack the page around their frame, for
  * screen-attacks.e2e.ts: one leaves for the attacker's address, one for
  * another address of the page's own origin, one never renders and says it
- * did, one tries WebRTC. What they send carries only
- * made-up markers, to receivers the test runs itself.
+ * did, one tries WebRTC, and one, approved, tries to run code that isn't
+ * its build's. What they send carries only made-up markers, to receivers
+ * the test runs itself.
  */
 
 const serverCode = `import { DurableObject } from "cloudflare:workers";
@@ -11,6 +12,12 @@ const serverCode = `import { DurableObject } from "cloudflare:workers";
 export class App extends DurableObject {
   secret(): string {
     return "fictional-marker-7f3a";
+  }
+
+  // HTML as a server might send it for a screen to show, an email's body
+  // say, carrying a script of its own.
+  html(): string {
+    return '<img alt="" src="no-such-image" onerror="document.body.dataset.inlineHandler = \\'ran\\'">';
   }
 }
 `;
@@ -130,6 +137,69 @@ export default function Turn() {
 }
 `;
 
+/**
+ * Code it was approved with lets in code nobody approved, every way a
+ * screen's own code can: it shows HTML its server sent (with an `onerror`
+ * attribute), adds an inline script and modules from `data:` and `blob:`
+ * addresses, and evaluates text. Says what each did; whatever ran marks
+ * the frame's body.
+ */
+const injectingScreen = `import { callServer } from "@grasp-os/sdk/screen";
+import { useEffect, useState } from "react";
+
+const loaded = async (src: string): Promise<string> =>
+  await new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.type = "module";
+    script.addEventListener("load", () => resolve("ran"));
+    script.addEventListener("error", () => resolve("blocked"));
+    script.src = src;
+    document.head.append(script);
+  });
+
+const evaluated = (run: () => unknown): string => {
+  try {
+    run();
+    return "ran";
+  } catch {
+    return "blocked";
+  }
+};
+
+const inject = async (): Promise<Record<string, string>> => {
+  const inline = document.createElement("script");
+  inline.textContent = "document.body.dataset.inlineScript = 'ran'";
+  document.head.append(inline);
+  return {
+    dataModule: await loaded("data:text/javascript,document.body.dataset.dataModule = 'ran'"),
+    blobModule: await loaded(
+      URL.createObjectURL(new Blob(["document.body.dataset.blobModule = 'ran'"], { type: "text/javascript" }))
+    ),
+    eval: evaluated(() => (0, eval)("document.body.dataset.eval = 'ran'")),
+    function: evaluated(() => new Function("document.body.dataset.function = 'ran'")()),
+    dataImport: evaluated(() => (0, eval)('import("data:text/javascript,document.body.dataset.dataImport = 1")')),
+  };
+};
+
+export default function Injecting() {
+  const [html, setHtml] = useState("");
+  const [tried, setTried] = useState("");
+  useEffect(() => {
+    void callServer<string>("html").then(setHtml);
+    void inject().then((results) => {
+      setTried(JSON.stringify(results));
+    });
+  }, []);
+  return (
+    <main>
+      <h1>Injecting</h1>
+      <div dangerouslySetInnerHTML={{ __html: html }} />
+      <output aria-label="Injected">{tried}</output>
+    </main>
+  );
+}
+`;
+
 /** The attacking App's files: a screen for each attack. */
 export const attackAppFiles = ({
   attacker,
@@ -144,4 +214,5 @@ export const attackAppFiles = ({
   "screens/oversized.tsx": oversizedScreen,
   "screens/stuck.tsx": stuckScreen,
   "screens/turn.tsx": turnScreen(turn),
+  "screens/injecting.tsx": injectingScreen,
 });

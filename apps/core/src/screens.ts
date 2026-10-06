@@ -1,6 +1,10 @@
 import {
+  appModuleName,
   buildFiles,
   compilerVersion,
+  kitModuleName,
+  kitModules,
+  screenRuntime,
   limitErrors,
   serverFiles,
   startScreenCompiler,
@@ -14,6 +18,43 @@ import type {
 } from "@grasp-os/compiler";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
+import { canonicalJson } from "@grasp-os/shared/json";
+import { screenErrors, screenNameSchema } from "@grasp-os/shared/screens";
+
+import type { FrameCode } from "./screen-frame.ts";
+
+/**
+ * The longest anything waits for one build. A warm build takes
+ * milliseconds to a few hundred; a first one after a deploy starts the
+ * compiler, about a second. The compiler bounds a build's CPU, not how
+ * long it takes, so this is what keeps a build that never answers from
+ * holding a save, an open, a review or a preview. A chat's check builds
+ * this way too (agent-builds.ts), in a code run that has 30 seconds and
+ * runs the tests after the builds, so the wait leaves it room.
+ */
+export const buildWaitMs = 15_000;
+
+/** The build wait: {@link buildWaitMs}, or less where tests set `BUILD_WAIT_MS`. */
+const buildWaitOf = (env: Env): number => {
+  const set = Number(env.BUILD_WAIT_MS);
+  return Number.isInteger(set) && set > 0 && set < buildWaitMs
+    ? set
+    : buildWaitMs;
+};
+
+/**
+ * What `run` (a build) answers within the build wait, or `late`: every
+ * build anything waits on goes through this. A late build runs on, and
+ * caches what it builds for the next to ask.
+ */
+export const withinBuildWait = async <T>(
+  env: Env,
+  run: () => Promise<T>
+): Promise<T | "late"> =>
+  await Promise.race([
+    run(),
+    scheduler.wait(buildWaitOf(env)).then(() => "late" as const),
+  ]);
 
 /** A hash of an App's files, whatever order they come in. */
 const hashOf = async (files: Record<string, string>): Promise<string> =>
@@ -140,3 +181,88 @@ export const buildFailed = (
     message,
   })),
 });
+
+/** A screen as core built it: its name, its code, and the hash of that code. */
+export interface BuiltScreen {
+  screen: string;
+  code: FrameCode;
+  /** The SHA-256, in hex, of `code`: what an admin approves. */
+  artifact: string;
+}
+
+/**
+ * These of `modules`, by name. A build names only modules it has or the
+ * kit has, so one that is missing means the build and the kit are not of
+ * one release: that fails here, not as an import the frame can't resolve.
+ */
+const pick = (
+  modules: Record<string, string>,
+  names: string[]
+): Record<string, string> =>
+  Object.fromEntries(
+    names.map((name) => {
+      const code = modules[name];
+      if (code === undefined) {
+        throw new Error(`The screen's build names ${name}, which is missing.`);
+      }
+      return [name, code];
+    })
+  );
+
+/**
+ * Screen `screen` of an App's `files` (at `version`; null for a chat's
+ * draft), built, with what it loads and nothing else: its own module and
+ * the App's and the kit's modules it imports, not the App's other screens
+ * or the rest of the kit.
+ */
+export const screenCode = async (
+  env: Env,
+  files: Record<string, string>,
+  screen: unknown,
+  version: number | null
+): Promise<BuiltScreen> => {
+  const name = screenErrors.parse("screen.invalid", screenNameSchema, screen);
+  const path = `screens/${name}.tsx`;
+  if (!Object.hasOwn(files, path)) {
+    throw screenErrors.create("screen.not_found");
+  }
+  // Within the build wait, the kit's modules too: whoever asked hears
+  // `screen.build_slow` rather than wait on a build that doesn't answer.
+  const loaded = await withinBuildWait(
+    env,
+    async () =>
+      await Promise.all([buildScreens(env, files), kitModules(env.ASSETS)])
+  );
+  if (loaded === "late") {
+    throw screenErrors.create("screen.build_slow");
+  }
+  const [build, { modules: kit }] = loaded;
+  if (!build.ok) {
+    throw screenErrors.create(
+      "screen.build_failed",
+      buildFailed(version, build)
+    );
+  }
+  const entry = appModuleName(path);
+  const closure = build.screens[entry];
+  if (closure === undefined) {
+    // The file is there and the build passed: the build is at fault.
+    throw new Error(`The build has no closure for the screen in ${path}.`);
+  }
+  const code = {
+    entry,
+    runtime: kitModuleName(screenRuntime),
+    modules: pick(build.modules, closure.modules),
+    kit: pick(kit, closure.kitModules),
+    css: build.css,
+  };
+  // Which code a frame runs, in core's words: what an admin approves, what
+  // the frame's document runs and nothing else (screen-frame.ts), and what
+  // the page expects the frame to say back once the screen has mounted
+  // (screen-host.ts).
+  return {
+    screen: name,
+    code,
+    artifact: await sha256Hex(canonicalJson(code)),
+  };
+};

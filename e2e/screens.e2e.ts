@@ -30,6 +30,8 @@ declare global {
  */
 const noMoreConnectionsMs = 2000;
 
+const timedOut = "This app didn't start in time.";
+
 /**
  * A new App named `name` running the sample, released by `builder`, and
  * shared with `sharedWith` to use.
@@ -202,6 +204,42 @@ test("a screen opens through core failing at first, subscribes again after its c
   await expect.poll(() => afterDrop).toBeGreaterThanOrEqual(2);
   await page.waitForTimeout(noMoreConnectionsMs);
   expect(afterDrop).toBe(2);
+});
+
+test("a screen whose open core never answers is given up on in its time, and opens when tried again", async ({
+  browser,
+}) => {
+  const page = await pageOf(browser, one);
+  await page.clock.install();
+  let stall = true;
+  const stalled = Promise.withResolvers<boolean>();
+  // Core never hears the open, as with a build that stalls or a
+  // connection that does: the page's own deadline is all that ends it.
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      if (stall && String(message).includes('["screens","open"]')) {
+        stalled.resolve(true);
+        return;
+      }
+      server.send(message);
+    });
+  });
+  await page.goto(`/engines/${app}/apps/notes/full`);
+  await stalled.promise;
+  await expect(page.getByText(timedOut)).toHaveCount(0);
+
+  await page.clock.runFor(20_000);
+  await expect(page.getByText(timedOut)).toBeVisible();
+
+  stall = false;
+  await page.clock.resume();
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(
+    page
+      .frameLocator('iframe[title="notes app"]')
+      .getByRole("heading", { name: "Notes" })
+  ).toBeVisible({ timeout: 20_000 });
 });
 
 test("moving to another App's screen never shows the App it left in the chrome", async ({

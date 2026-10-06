@@ -16,6 +16,7 @@ import { ModelsRpc } from "./models-rpc.ts";
 import { NotificationsRpc } from "./notifications.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
+import { ScreenTrustRpc } from "./screen-trust-rpc.ts";
 import { ScreensRpc } from "./screens-rpc.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -46,6 +47,7 @@ export class SessionRpc extends RpcTarget implements SessionApi {
   readonly #decisions: DecisionsRpc;
   readonly #dependencies: DependenciesRpc;
   readonly #screens: ScreensRpc;
+  readonly #screenTrust: ScreenTrustRpc;
   readonly #members: MembersRpc;
   readonly #audit: AuditRpc;
   readonly #models: ModelsRpc;
@@ -68,6 +70,7 @@ export class SessionRpc extends RpcTarget implements SessionApi {
     this.#decisions = new DecisionsRpc(env, check);
     this.#dependencies = new DependenciesRpc(env, check);
     this.#screens = new ScreensRpc(env, check);
+    this.#screenTrust = new ScreenTrustRpc(env, check);
     this.#members = new MembersRpc(env, check);
     this.#audit = new AuditRpc(env, check);
     this.#models = new ModelsRpc(env, check);
@@ -127,6 +130,10 @@ export class SessionRpc extends RpcTarget implements SessionApi {
 
   get screens(): ScreensRpc {
     return this.#screens;
+  }
+
+  get screenTrust(): ScreenTrustRpc {
+    return this.#screenTrust;
   }
 
   get members(): MembersRpc {

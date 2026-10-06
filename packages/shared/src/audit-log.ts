@@ -106,6 +106,11 @@ const typeRules: readonly {
   { action: "app.call", type: "action" },
   { action: "app.called", access: "read", type: "read" },
   { action: "app.called", type: "action" },
+  // Whether an App's screens get its data (core's src/screen-trust.ts):
+  // an admin approving one exact build or taking that back, and a screen
+  // refused the data because its build isn't approved.
+  { action: "app.artifact.refused", type: "action" },
+  { action: "app.artifact", type: "decision" },
   { action: "app", type: "config" },
   { action: "member", type: "config" },
   { action: "team", type: "config" },

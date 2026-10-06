@@ -22,7 +22,7 @@ import {
 } from "../src/builtins.ts";
 import type { Release } from "../src/builtins.ts";
 import { buildScreens } from "../src/screens.ts";
-import { grantReviewed, racingDb, serverBuilt } from "./apps.ts";
+import { grantReviewed, ordinaryData, racingDb, serverBuilt } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, storedGrant } from "./knowledge.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
@@ -153,6 +153,7 @@ describe("the built-in blueprints", () => {
       name: "Our hello",
     });
     await builder.api.apps.versions.setCurrent(created.app.id, 1);
+    await ordinaryData(created.app.id);
     await serverBuilt(created.app.id, 1);
     expect({
       blueprint: created.app.blueprint,
