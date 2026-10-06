@@ -109,9 +109,35 @@ const sessionApi = (
       server.close(sessionEndedCloseCode, "Session ended");
     }
   };
+  let ended = false;
+  let recheck: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Has the timer read again as the latest reading runs out, whether or
+   * not a call asks first: so an ended session closes the connection
+   * within one window, used or idle, and a busy connection still reads
+   * once a window.
+   */
+  const recheckWhenDue = (run: () => Promise<void>): void => {
+    clearTimeout(recheck);
+    if (!ended) {
+      recheck = setTimeout(() => {
+        void run();
+      }, sessionRecheckMs);
+    }
+  };
+  const checkQuietly = async (): Promise<void> => {
+    try {
+      // oxlint-disable-next-line no-use-before-define -- the check and its timer start each other; this runs only once both exist
+      await check();
+    } catch {
+      // An ended session has closed the connection; a reading that failed
+      // is made again at the next tick or call.
+    }
+  };
   const check = recheckedEvery(
     sessionRecheckMs,
     async (): Promise<Identity> => {
+      recheckWhenDue(checkQuietly);
       const identity = await identify(env, headers);
       if (identity?.userId !== connectedAs.userId) {
         // After the refusal is on its way to the client.
@@ -121,19 +147,12 @@ const sessionApi = (
       return identity;
     }
   );
-  const checkQuietly = async (): Promise<void> => {
-    try {
-      await check();
-    } catch {
-      // An ended session has closed the connection; a reading that failed
-      // is made again at the next tick or call.
-    }
-  };
-  const recheck = setInterval(() => {
-    void checkQuietly();
-  }, sessionRecheckMs);
+  // The upgrade has just read the session: the next reading is due a
+  // window on.
+  recheckWhenDue(checkQuietly);
   server.addEventListener("close", () => {
-    clearInterval(recheck);
+    ended = true;
+    clearTimeout(recheck);
   });
   return new SessionRpc(env, check);
 };

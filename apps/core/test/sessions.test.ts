@@ -97,11 +97,20 @@ describe("sessions end", () => {
       const laptop = await signedIn(idp, "microsoft", person);
       const phone = await signedIn(idp, "microsoft", person);
       // Held from before the connections open, so their rechecks keep it.
-      vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+      // It goes on with real time too, so the close a refusal schedules
+      // comes on its own; only the window is skipped.
+      vi.useFakeTimers({
+        toFake: ["Date", "setTimeout", "clearTimeout"],
+        shouldAdvanceTime: true,
+      });
       try {
         const busy = await openRpc(phone);
         const idle = await openRpc(phone);
         using session = busy.core.authenticate();
+        // Read late in the first window (a second before its end, as real
+        // time moves the clock too): the busy connection's reading then
+        // holds most of a window past the idle one's.
+        await vi.advanceTimersByTimeAsync(sessionRecheckMs - 1000);
         await expect(session.whoami()).resolves.toMatchObject({
           email: person.email,
         });
@@ -110,14 +119,15 @@ describe("sessions end", () => {
         expect(ended.status).toBe(200);
         await vi.advanceTimersByTimeAsync(sessionRecheckMs);
 
-        // Refused, or closed first by its own recheck: either way, unanswered.
-        await expect(session.whoami()).rejects.toBeInstanceOf(Error);
+        // Both closed by their own recheck, without a call: within a window
+        // of the session ending, however late the last reading was.
         await expect(
           Promise.all([busy.closed, idle.closed])
         ).resolves.toStrictEqual([
           sessionEndedCloseCode,
           sessionEndedCloseCode,
         ]);
+        await expect(session.whoami()).rejects.toBeInstanceOf(Error);
         await expect(outcome(whoami(phone))).resolves.toBe(
           "auth.unauthenticated"
         );
