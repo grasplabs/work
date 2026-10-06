@@ -47,11 +47,11 @@ Vite+ docs: `node_modules/vite-plus/docs`.
 - **No docs in the repo**: plans, ADRs, design notes and research live outside it. The only Markdown allowed is `README.md`, this file, `.github/` templates and skills; CI enforces it. Put the why in code comments where the decision sits, and in PR descriptions.
 - **Secrets**: never commit secrets, client names or client configuration; secretlint checks every commit and CI. Local secrets go in `.dev.vars` (see `.dev.vars.example`). Authenticate Wrangler through the 1Password shell plugin.
 - **Schemas** follow expand, then contract: add first, remove in a later release. Code must work against both the old and the new schema.
-- **Features** ship switched off behind a flag; risky changes get a kill switch.
+- **No feature flags**: a feature works by default once it merges, in development too. Don't add a flag or a kill switch.
 
 ## Branches and pull requests
 
-Trunk-based: `main` is the only long-lived branch; every merge deploys all apps to grasp-os-staging. The console and router reach grasp-os-ops only through the manual Deploy grasp-os-ops workflow. Releases reach clients through the console, ring by ring, and risky work ships behind a feature flag.
+Trunk-based: `main` is the only long-lived branch; every merge deploys all apps to grasp-os-staging. The console and router reach grasp-os-ops only through the manual Deploy grasp-os-ops workflow. Releases reach clients through the console, ring by ring.
 
 1. Branch from `main` as `<type>/<kebab-description>`, e.g. `feat/audit-export`, using the commit types. A pre-push hook and CI check the name.
 2. Open a pull request into `main`. CI runs.
@@ -62,13 +62,13 @@ Nobody pushes to `main` directly. In an emergency, organisation owners can merge
 
 Conflicts: rebase your branch on `main`. For generated files (lockfile, Worker types, route trees) take either side and regenerate (`vp install`, `vp run -r typegen`, `vp run -r build`) instead of merging by hand. Migrations are different: keep `main`'s, delete your branch's, and run `vp run -r db:generate` again so yours come after them. A migration on `main` never changes; `vp run check:migrations` enforces it.
 
-## Working from Linear
+## Working from Shipmunk
 
-Work is planned in Linear (team Grasp OS), not in this repo.
+Work is planned in Shipmunk (workspace Grasp), not in this repo. It replaced Linear on 6 October 2026, and issue numbers changed in the move: find an issue by its title, not by a number from an older commit, pull request or note.
 
-- Only pick up issues in **Todo**; their blockers are done. Parent issues are containers; never pick one up.
+- Only pick up issues in **To Do**; their blockers are done. Parent issues are containers; never pick one up.
 - Move the issue to **In Progress** when you start and to **In Review** when the pull request is ready. Branch names and PR titles don't carry the issue ID, so move issues by hand.
-- When your issue is **Done**, move any issue it blocked to **Todo** once all of that issue's blockers are done.
+- When your issue is **Done**, move any issue it blocked to **To Do** once all of that issue's blockers are done.
 - Issues labelled **Security** are reviewed by a person before merge.
 - Don't follow an issue blindly: if its scope conflicts with this file or the code, raise it in the issue.
 
