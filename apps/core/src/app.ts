@@ -4,6 +4,7 @@ import {
   reservedAppMethods,
 } from "@grasp-os/shared/apps";
 import type { AppCaller } from "@grasp-os/shared/apps";
+import type { AuditEntry } from "@grasp-os/shared/audit";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import {
   isExpectedError,
@@ -27,11 +28,13 @@ import {
 import type { StatisticUse } from "@grasp-os/shared/statistics";
 import { TokenBuckets } from "@grasp-os/shared/token-bucket";
 import { DurableObject, exports } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 
 import { appBindings } from "./app-bindings.ts";
 import { ErrorLog } from "./app-error-log.ts";
 import type { ReportedProblem } from "./app-error-log.ts";
 import { findApp, versionFiles } from "./apps.ts";
+import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { appHost } from "./durable-objects.ts";
 import { sandbox } from "./sandbox.ts";
 import { buildFailed, buildServer } from "./screens.ts";
@@ -91,11 +94,11 @@ const refusalLogMs = 60_000;
 
 /**
  * How often, at most, the same refusal of the App's data to a screen (who,
- * which build, why, what and where) is audited (`noteRefusal`).
+ * which build, why, what and where) is audited (`auditRefusal`).
  */
 const refusalAuditMs = 10 * 60_000;
 
-/** How many refusals `noteRefusal` remembers at most. */
+/** How many refusals `auditRefusal` remembers at most. */
 const refusalsKept = 1000;
 
 /** The one bucket all of an App's reports share. */
@@ -426,8 +429,11 @@ export class App extends DurableObject<Env> {
   /** Requests refused since the last line logged of them, and when that was. */
   #refused = { requests: 0, loggedAt: 0 };
 
-  /** When each refusal of a screen was last audited, oldest first (`noteRefusal`). */
+  /** When each refusal of a screen was last audited, oldest first (`auditRefusal`). */
   readonly #refusalsAudited = new Map<string, number>();
+
+  /** The refusals whose rows are being written now (`auditRefusal`). */
+  readonly #refusalsWriting = new Map<string, Promise<void>>();
 
   get #app(): AppId {
     return appIdSchema.parse(this.ctx.id.name);
@@ -561,26 +567,43 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * Whether a screen's refusal of the App's data, named by `refusal`, was
-   * audited within `refusalAuditMs`: then it isn't again. A screen opened
-   * over and over, or a page retrying, adds a row a window, not one a try.
+   * Audits a screen's refusal of the App's data, named by `refusal`
+   * (who, which build, why, what and where), with `entry`: unless it was
+   * audited within `refusalAuditMs`, so a screen opened over and over, or
+   * a page retrying, adds a row a window, not one a try. The check and the
+   * write are one operation per refusal here: the same refusal arriving
+   * while its row is being written waits for that write instead of
+   * writing its own. It counts as audited only once the row is written;
+   * a write that fails fails each that waited on it, and the next refusal
+   * writes again. Kept in memory, so a restart of this object audits each
+   * once more; past `refusalsKept`, the oldest are forgotten first, which
+   * only audits them again.
    */
-  refusalAudited(refusal: string): boolean {
+  async auditRefusal(refusal: string, entry: AuditEntry): Promise<void> {
     const audited = this.#refusalsAudited.get(refusal);
-    return audited !== undefined && Date.now() - audited < refusalAuditMs;
+    if (audited !== undefined && Date.now() - audited < refusalAuditMs) {
+      return;
+    }
+    const writing = this.#refusalsWriting.get(refusal);
+    if (writing !== undefined) {
+      await writing;
+      return;
+    }
+    const write = this.#writeRefusal(refusal, entry);
+    this.#refusalsWriting.set(refusal, write);
+    try {
+      await write;
+    } finally {
+      this.#refusalsWriting.delete(refusal);
+    }
   }
 
-  /**
-   * Notes that `refusal` was audited now: only once its row is written,
-   * so one whose write failed is audited at the next refusal. Kept in
-   * memory, so a restart of this object audits each once more; past
-   * `refusalsKept`, the oldest are forgotten first, which only audits
-   * them again.
-   */
-  noteRefusal(refusal: string): void {
-    const now = Date.now();
+  /** Writes `refusal`'s row, then notes it audited. */
+  async #writeRefusal(refusal: string, entry: AuditEntry): Promise<void> {
+    const db = drizzle(this.env.DB);
+    await auditedBatch(this.env, db, [outboxed(db, entry)]);
     this.#refusalsAudited.delete(refusal);
-    this.#refusalsAudited.set(refusal, now);
+    this.#refusalsAudited.set(refusal, Date.now());
     for (const [oldest] of this.#refusalsAudited) {
       if (this.#refusalsAudited.size <= refusalsKept) {
         break;

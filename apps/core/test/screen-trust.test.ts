@@ -1141,4 +1141,18 @@ describe("screen trust", { timeout: 60_000 }, () => {
       after: ["revoked"],
     });
   });
+
+  it("audits two identical refusals that arrive together once", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+
+    const events = await auditedDuring(async () => {
+      await Promise.all([
+        outcome(builder.api.screens.call(app, "notes", [])),
+        outcome(builder.api.screens.call(app, "notes", [])),
+      ]);
+    });
+
+    expect(refusals(events)).toStrictEqual(["call/admission: unreviewed"]);
+  });
 });
