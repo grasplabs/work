@@ -43,6 +43,7 @@
     "./runtime": "./src/runtime.ts",
     "./screen-limits": "./src/screen-limits.ts",
     "./screen-port": "./src/screen-port.ts",
+    "./screen-trust": "./src/screen-trust.ts",
     "./screens": "./src/screens.ts",
     "./sign-in": "./src/sign-in.ts",
     "./signals": "./src/signals.ts",

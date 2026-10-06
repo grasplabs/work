@@ -6,7 +6,11 @@ import type {
   AuditEntry,
 } from "@grasp-os/shared/audit";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
-import { permissionIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  permissionIdSchema,
+  workspaceIdSchema,
+} from "@grasp-os/shared/ids";
 import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -72,6 +76,7 @@ import { isUniqueViolation } from "./db/d1.ts";
 import { collections } from "./db/knowledge/schema.ts";
 import { appHost, workspace } from "./durable-objects.ts";
 import { byCollection, typeClaims } from "./knowledge/record-types.ts";
+import { widenedByGrant } from "./screen-trust.ts";
 
 // Permission records and the one check every server path runs. A person
 // asks for a permission (it allows nothing yet), an admin grants it, their
@@ -806,6 +811,19 @@ export const grantPermission = async (
           stillReviewed
         )
       ),
+    // More access for an App is more for every App that reaches it
+    // through exports or workflows: their data, if an admin had said it
+    // may go to code nobody approved, is sensitive again, and their
+    // screens' policy moves on (screen-trust.ts).
+    ...(isApp
+      ? widenedByGrant(
+          db,
+          by,
+          appIdSchema.parse(found.subjectId),
+          storedEvent(event.id),
+          { permission: found.id }
+        )
+      : []),
   ]);
   if (!granted) {
     await requireStillAdmin(env, by);

@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, ordinaryData, pageOf, peopleIn } from "./people.ts";
 import { origin } from "./stack.ts";
 
 // The side panel of a chat previews the draft its agent is writing: the
@@ -140,6 +140,7 @@ test("the side panel previews the chat's draft, whose server code changes none o
       "A tally"
     );
     await api.apps.versions.setCurrent(app.id, version);
+    await ordinaryData(app.id);
     const chat = await api.chats.create(`Preview ${tag}`);
     await writeDraft(builder.userId, chat.id, app.id, version, {
       "app/server.ts": server("in the preview"),

@@ -6,11 +6,13 @@ import {
   screenErrors,
   screenFrameMessage,
   screenFramePath,
+  screenLimits,
 } from "@grasp-os/shared/screens";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
 
 import { CoreLink } from "./core-link.ts";
 import {
+  inTime,
   isMounted,
   isReady,
   stage,
@@ -21,9 +23,11 @@ import { openBridge } from "./screen-bridge.ts";
 import type { FrameTarget } from "./screen-bridge.ts";
 
 // The page's side of an App's screen. The screen runs in a sandboxed frame
-// (core's screen-frame.ts) with no network; the page hands it its code and
-// a Cap'n Web bridge over a `MessagePort`, which reaches only its own App's
-// server, through the page's own connection to core. Core checks the
+// (core's screen-frame.ts) with no network, whose document core serves for
+// the one build it handed the page, and which runs that build's modules
+// and nothing else; the page hands it a Cap'n Web bridge over a
+// `MessagePort`, which reaches only its own App's server, through the
+// page's own connection to core. Core checks the
 // person's session and role on every call; the page binds the bridge to
 // one App, which the frame can't change.
 //
@@ -44,6 +48,17 @@ import type { FrameTarget } from "./screen-bridge.ts";
 // port, its bridge, its timers and what it follows in core all go, and
 // the frame is emptied. Which App, version and screen a frame runs is
 // what the page opened, never what the frame says.
+//
+// Core hands an App's data only to code an admin approved, unless an
+// admin classified that data as fine for any code (core's
+// screen-trust.ts). So a screen nobody approved isn't started at all
+// (`open` refuses it), and one whose approval is taken back is stopped:
+// the page gives core's lease on the frame's build back on the frame's
+// connection (`present`), core decides every call on that build, and
+// when it says the build no longer gets the data (as a refused call, or
+// at the page's next check) the frame is emptied, and with it what the
+// screen had been handed. That is all the page can take back; what a
+// screen sent elsewhere before, it can't.
 
 /** What the page shows about a screen besides the screen itself. */
 export type ScreenState =
@@ -64,9 +79,16 @@ export type FailureReason =
   | "left"
   /** The frame's channel to the page ended: over a limit, or closed. */
   | "disconnected"
+  /** Nobody approved the screen's code for the App's data. */
+  | "unreviewed"
+  /** The approval of the screen's code was taken back. */
+  | "revoked"
   | "unknown";
 
-/** How often the page asks whether the App has a new current version. */
+/**
+ * How often the page asks whether the App has a new current version, and
+ * whether the screen's build still gets the App's data.
+ */
 const versionCheckMs = 30_000;
 
 const failures: Readonly<Record<string, FailureReason>> = {
@@ -78,6 +100,9 @@ const failures: Readonly<Record<string, FailureReason>> = {
   "screen.invalid": "not-found",
   "app.not_running": "not-running",
   "screen.build_failed": "broken",
+  "screen.build_slow": "timed-out",
+  "screen.unreviewed": "unreviewed",
+  "screen.revoked": "revoked",
 };
 
 /** Why opening a screen failed, as the page says it. */
@@ -111,39 +136,101 @@ const on = async <T>(
   return await run(session);
 };
 
-/** A running App's screen: its own App's server, runs and error log. */
-const appTarget = (link: CoreLink, bundle: ScreenBundle): FrameTarget => {
-  const { app, version, screen } = bundle;
+/** Why core no longer hands a frame's build its App's data. */
+type Refused = Extract<FailureReason, "unreviewed" | "revoked">;
+
+/**
+ * Asks core whether the frame's build still gets its App's data, and
+ * calls `refused` when it doesn't. Core's own answer on the page's own
+ * connection: never an error a call came back with, which an App's server
+ * can word as it likes.
+ */
+const checkDelivery = async (
+  link: CoreLink,
+  { app, lease }: Pick<ScreenBundle, "app" | "lease">,
+  refused: (reason: Refused) => void
+): Promise<void> => {
+  const session = await link.session();
+  const delivery = await session.screens.present(app, lease);
+  if (delivery !== "open") {
+    refused(delivery);
+  }
+};
+
+/** `checkDelivery`, for a call that doesn't wait for it. */
+const checkDeliveryNow = async (
+  link: CoreLink,
+  bundle: Pick<ScreenBundle, "app" | "lease">,
+  refused: (reason: Refused) => void
+): Promise<void> => {
+  try {
+    await checkDelivery(link, bundle, refused);
+  } catch {
+    // Asked again at the page's next check.
+  }
+};
+
+/** Whether core refused a call for the build the frame runs. */
+const refusedForBuild = (error: unknown): boolean => {
+  const code = screenErrors.codeOf(error);
+  return code === "screen.unreviewed" || code === "screen.revoked";
+};
+
+/**
+ * A running App's screen: its own App's server, runs and error log. Each
+ * connection is told which build the frame runs before its first call,
+ * with core's lease on it, so one made again after a break is too.
+ */
+const appTarget = (
+  link: CoreLink,
+  bundle: ScreenBundle,
+  refused: (reason: Refused) => void
+): FrameTarget => {
+  const { app, version, screen, lease } = bundle;
+  let presentedOn: Session | undefined;
+  const framed = async <T>(
+    run: (screens: Session["screens"]) => Promise<T>
+  ): Promise<T> => {
+    const session = await link.session();
+    if (presentedOn !== session) {
+      await session.screens.present(app, lease);
+      presentedOn = session;
+    }
+    try {
+      return await run(session.screens);
+    } catch (error) {
+      if (refusedForBuild(error)) {
+        // The frame gets the refusal as it is; whether to stop it is
+        // core's answer to the page.
+        void checkDeliveryNow(link, bundle, refused);
+      }
+      throw error;
+    }
+  };
   return {
     call: async (method, args) =>
-      await on(
-        link,
-        async ({ screens }) => await screens.call(app, method, args)
-      ),
+      await framed(async (screens) => await screens.call(app, method, args)),
     report: async (problem) => {
       await on(link, async ({ screens }) => {
         await screens.report(app, { version, screen }, problem);
       });
     },
     startRun: async (workflow, input) =>
-      await on(
-        link,
-        async ({ screens }) => await screens.startRun(app, workflow, input)
+      await framed(
+        async (screens) => await screens.startRun(app, workflow, input)
       ),
     runs: async (workflow) =>
-      await on(link, async ({ screens }) => await screens.runs(app, workflow)),
+      await framed(async (screens) => await screens.runs(app, workflow)),
     run: async (run) =>
-      await on(link, async ({ screens }) => await screens.run(app, run)),
+      await framed(async (screens) => await screens.run(app, run)),
     decide: async (run, decision, answer) =>
-      await on(
-        link,
-        async ({ screens }) =>
+      await framed(
+        async (screens) =>
           await screens.decide(app, run, decision, forCore(answer))
       ),
     watchRuns: async (workflow, onChange) =>
-      await on(
-        link,
-        async ({ screens }) =>
+      await framed(
+        async (screens) =>
           await screens.watchRuns(app, workflow, forCore(onChange))
       ),
   };
@@ -197,43 +284,35 @@ const previewTarget = (
   };
 };
 
-/** A module as a URL the frame's import map can name. */
-const dataUrl = (code: string): string =>
-  `data:text/javascript;charset=utf-8,${encodeURIComponent(code)}`;
-
-/** What a frame runs of a screen, and the App's name to show around it. */
-type FrameCode = Pick<
-  ScreenBundle,
-  "name" | "entry" | "runtime" | "modules" | "kit" | "css" | "artifact"
->;
-
-/** The frame's import map: the kit's modules it needs and the App's own. */
-const importsOf = (bundle: FrameCode): Record<string, string> =>
-  Object.fromEntries(
-    [...Object.entries(bundle.kit), ...Object.entries(bundle.modules)].map(
-      ([name, code]) => [name, dataUrl(code)]
-    )
-  );
+/** Which build a frame runs, and the App's name to show around it. */
+type FrameCode = Pick<ScreenBundle, "name" | "artifact" | "frameToken">;
 
 /** What a frame runs, and what its bridge reaches. */
 interface FrameSource<Bundle extends FrameCode> {
   open: (session: Session) => Promise<Bundle>;
-  target: (link: CoreLink, bundle: Bundle) => FrameTarget;
+  /** `refused` stops the frame: core no longer hands its build the data. */
+  target: (
+    link: CoreLink,
+    bundle: Bundle,
+    refused: (reason: Refused) => void
+  ) => FrameTarget;
   /**
    * Called once the screen runs, if given: `cleanups` stop what it
-   * starts, and `onState` says what the page shows.
+   * starts, `onState` says what the page shows, and `refused` stops the
+   * frame.
    */
   running?: (
     link: CoreLink,
     bundle: Bundle,
     cleanups: (() => void)[],
-    onState: (state: ScreenState) => void
+    onState: (state: ScreenState) => void,
+    refused: (reason: Refused) => void
   ) => void;
 }
 
 /**
- * Runs what `source` opens in `frame`: loads it, and hands the frame its
- * code and bridge. Tells the page what to show with `onState`, and the
+ * Runs what `source` opens in `frame`: loads the frame's document for the
+ * build core opened, and hands the frame its bridge. Tells the page what to show with `onState`, and the
  * App's name with `onOpened`. Returns a function that stops it all.
  */
 const runFrame = <Bundle extends FrameCode>(
@@ -303,6 +382,17 @@ const runFrame = <Bundle extends FrameCode>(
     // compare: which load of the frame, and which start of it.
     const load = crypto.randomUUID();
     const generation = crypto.randomUUID();
+    // The frame's document holds the build core opened, so it loads once
+    // core said which.
+    const bundle = await inTime(
+      "opened",
+      link.retrying(source.open),
+      screenLimits.openMs
+    );
+    // Stopped meanwhile: nothing more is started, as nothing would stop it.
+    if (stopped.signal.aborted) {
+      return;
+    }
     const ready = stage(
       "ready",
       (message) => isReady(message, frameWindow, load),
@@ -310,12 +400,12 @@ const runFrame = <Bundle extends FrameCode>(
       stopped.signal
     );
     // Only now: the page listens before the frame can say it's ready.
-    frame.src = `${screenFramePath}?${new URLSearchParams({ load })}`;
-    // Whichever fails first fails the start: a frame that isn't ready in
-    // time doesn't wait for a build that takes longer.
-    const [bundle] = await Promise.all([link.retrying(source.open), ready]);
-    // Stopped just as both came: nothing more is started, as nothing
-    // would stop it.
+    frame.src = `${screenFramePath}?${new URLSearchParams({
+      load,
+      artifact: bundle.artifact,
+      token: bundle.frameToken,
+    })}`;
+    await ready;
     if (stopped.signal.aborted) {
       return;
     }
@@ -324,9 +414,12 @@ const runFrame = <Bundle extends FrameCode>(
       artifact: bundle.artifact,
       generation,
     };
+    const refused = (reason: Refused): void => {
+      fail({ status: "failed", reason });
+    };
     const { port1, port2 } = new MessageChannel();
     cleanups.push(
-      openBridge(port1, source.target(link, bundle), () => {
+      openBridge(port1, source.target(link, bundle, refused), () => {
         fail({ status: "failed", reason: "disconnected" });
       })
     );
@@ -337,26 +430,19 @@ const runFrame = <Bundle extends FrameCode>(
       stopped.signal
     );
     frame.contentWindow?.postMessage(
-      {
-        type: screenFrameMessage,
-        ...expected,
-        imports: importsOf(bundle),
-        css: bundle.css,
-        runtime: bundle.runtime,
-        entry: bundle.entry,
-      },
+      { type: screenFrameMessage, ...expected },
       "*",
       [port2]
     );
     onOpened(bundle.name);
-    // Running only once the screen has rendered, never because its code
-    // was handed over.
+    // Running only once the screen has rendered, never because its frame
+    // was started.
     await mounted;
     if (stopped.signal.aborted) {
       return;
     }
     onState({ status: "running" });
-    source.running?.(link, bundle, cleanups, onState);
+    source.running?.(link, bundle, cleanups, onState, refused);
   };
 
   const run = async (): Promise<void> => {
@@ -381,7 +467,8 @@ const runFrame = <Bundle extends FrameCode>(
 
 /**
  * Runs `screen` of `app` in `frame`, and watches for a new current
- * version (`runFrame`).
+ * version, and for its build no longer getting the App's data
+ * (`runFrame`).
  */
 export const runScreen = (
   frame: HTMLIFrameElement,
@@ -395,9 +482,13 @@ export const runScreen = (
     {
       open: async (session) => await session.screens.open(app, screen),
       target: appTarget,
-      running: (link, { version }, cleanups, setState) => {
-        const checkVersion = async (): Promise<void> => {
+      running: (link, bundle, cleanups, setState, refused) => {
+        const { version } = bundle;
+        const check = async (): Promise<void> => {
           try {
+            // A screen that asks for nothing more still holds what it was
+            // handed: this is when the page hears its approval is gone.
+            await checkDelivery(link, bundle, refused);
             const session = await link.session();
             if ((await session.screens.version(app)) !== version) {
               setState({ status: "updated" });
@@ -407,7 +498,7 @@ export const runScreen = (
           }
         };
         const timer = setInterval(() => {
-          void checkVersion();
+          void check();
         }, versionCheckMs);
         cleanups.push(() => {
           clearInterval(timer);
@@ -432,6 +523,7 @@ export const runPreview = (
     frame,
     {
       open: async (session) => await session.chats.preview(chatId, app, screen),
+      // A preview reads no real data, so no approval decides it.
       target: (link, bundle) => previewTarget(link, chatId, bundle),
     },
     onState,

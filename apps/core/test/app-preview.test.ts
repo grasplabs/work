@@ -17,6 +17,7 @@ import {
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, readCollection } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
+import { appModulesOf, loadFrame } from "./screen-frames.ts";
 import { auditedDuring, signedInApi } from "./sign-in.ts";
 
 // A chat's preview of its draft of an App: the draft's screens and server
@@ -344,7 +345,12 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
 
     expect({
       bundle,
-      modules: Object.keys(bundle.modules).length > 0,
+      // Its frame runs the draft's own build.
+      modules: appModulesOf(
+        (await loadFrame(bundle)) ?? {
+          modules: {},
+        }
+      ).includes("app~screens~desk.js"),
       first,
       restarted,
       changed,

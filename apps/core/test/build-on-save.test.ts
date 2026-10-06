@@ -3,11 +3,16 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { commitFiles, versionFiles } from "../src/apps.ts";
+import { commitFiles, setCurrentVersion, versionFiles } from "../src/apps.ts";
 import { buildOnSave } from "../src/save-builds.ts";
-import { buildScreens, buildServer, buildWorkflows } from "../src/screens.ts";
+import {
+  buildScreens,
+  buildServer,
+  buildWorkflows,
+  screenCode,
+} from "../src/screens.ts";
 import { mockIdp } from "./idp.ts";
-import { signedInApi } from "./sign-in.ts";
+import { outcome, signedInApi } from "./sign-in.ts";
 import { workflowFiles } from "./workflow-apps.ts";
 
 // Saving an App's files builds them at once, so the version opens without
@@ -240,5 +245,122 @@ export class App {}
         rebuilt: true,
       }
     );
+  });
+
+  it("commits within a build's wait, starting no second build for what waits on an admin", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder);
+    const by = await builder.api.whoami();
+    const held = Promise.withResolvers<boolean>();
+    // The build cache answers reads only once the test lets it: every
+    // build waits on it, a second one too.
+    const holding = new Proxy(env.FILES, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "get" && typeof value === "function") {
+          return async (...args: unknown[]): Promise<unknown> => {
+            await held.promise;
+            return Reflect.apply(value, target, args);
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    // Answers while the cache is still held: a second build would wait on
+    // it, and the commit with it, until the test timed out.
+    const committed = await commitFiles(
+      { ...env, FILES: holding, BUILD_WAIT_MS: "50" },
+      by,
+      app,
+      screen(crypto.randomUUID()),
+      "Save"
+    );
+    held.resolve(true);
+    const recorded = await env.DB.prepare(
+      "SELECT count(*) AS rows FROM screen_builds WHERE app_id = ?"
+    )
+      .bind(app)
+      .first<{ rows: number }>();
+
+    expect({
+      screens: committed.builds.screens.status,
+      recorded: recorded?.rows,
+    }).toStrictEqual({ screens: "error", recorded: 0 });
+  });
+
+  it("makes a version current without waiting on recording what its screens build to, however long that takes", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder);
+    const by = await builder.api.whoami();
+    const { version } = await builder.api.apps.files.commit(
+      app,
+      screen(crypto.randomUUID()),
+      "Save"
+    );
+    const held = Promise.withResolvers<boolean>();
+    // Screen builds answer only once the test lets them: making the
+    // version current reads its files and workflows, never a screen build.
+    const holding = new Proxy(env.FILES, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "get" && typeof value === "function") {
+          return async (key: string, ...rest: unknown[]): Promise<unknown> => {
+            if (key.startsWith("screen-builds/")) {
+              await held.promise;
+            }
+            return Reflect.apply(value, target, [key, ...rest]);
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    // Answers while screen builds are still held.
+    const made = await setCurrentVersion(
+      { ...env, FILES: holding },
+      by,
+      app,
+      version
+    );
+    held.resolve(true);
+
+    expect(made.currentVersion).toBe(version);
+  });
+
+  it("answers a screen whose build doesn't finish within the build wait as still building, rather than wait on", async () => {
+    const files = screen(crypto.randomUUID());
+    const held = Promise.withResolvers<boolean>();
+    const holding = new Proxy(env.FILES, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "get" && typeof value === "function") {
+          return async (...args: unknown[]): Promise<unknown> => {
+            await held.promise;
+            return Reflect.apply(value, target, args);
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    // What an open, a review or a preview builds through.
+    const slow = await outcome(
+      screenCode(
+        { ...env, FILES: holding, BUILD_WAIT_MS: "50" },
+        files,
+        "desk",
+        1
+      )
+    );
+    held.resolve(true);
+
+    expect(slow).toBe("screen.build_slow");
   });
 });

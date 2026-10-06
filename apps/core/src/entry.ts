@@ -21,7 +21,7 @@ import { originalResponse } from "./knowledge/uploads.ts";
 import { platformUpdateResponse } from "./platform-updates.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
-import { screenFrameResponse } from "./screen-frame.ts";
+import { screenFrameResponse, screenModuleResponse } from "./screen-frame.ts";
 import { setSecurityHeaders } from "./security-headers.ts";
 
 const isUnder = (pathname: string, base: string): boolean =>
@@ -36,7 +36,8 @@ const route = async (
   env: Env,
   requestId: string
 ): Promise<Response> => {
-  const { pathname } = new URL(request.url);
+  const url = new URL(request.url);
+  const { pathname } = url;
   if (pathname === "/health") {
     // The version answering, where there is version metadata: the console's
     // smoke check compares it with the version it just deployed. Behind the
@@ -50,7 +51,11 @@ const route = async (
     return await rpcResponse(request, env, requestId);
   }
   if (pathname === screenFramePath) {
-    return screenFrameResponse();
+    return await screenFrameResponse(env, url);
+  }
+  const screenModule = await screenModuleResponse(env, url);
+  if (screenModule !== null) {
+    return screenModule;
   }
   if (isUnder(pathname, authBasePath)) {
     return await handleAuthRequest(request, env, requestId);

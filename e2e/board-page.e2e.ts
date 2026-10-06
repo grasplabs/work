@@ -62,6 +62,8 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
         await api.permissions.grant(id, { version: null });
       }
       await api.apps.versions.setCurrent(created.app.id, 1);
+      const { generation } = await api.screenTrust.review(created.app.id);
+      await api.screenTrust.classify(created.app.id, "ordinary", generation);
       return created.app.id;
     };
     app = await copy(boardPage, `Board page ${run}`);

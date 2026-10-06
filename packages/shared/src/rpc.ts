@@ -12,6 +12,7 @@ import type { ModelsApi } from "./models.ts";
 import type { NotificationsApi } from "./notifications.ts";
 import type { PermissionsApi } from "./permissions.ts";
 import type { Role } from "./roles.ts";
+import type { ScreenTrustApi } from "./screen-trust.ts";
 import type { ScreensApi } from "./screens.ts";
 import type { SignalsApi } from "./signals.ts";
 import type { UploadsApi } from "./uploads.ts";
@@ -97,6 +98,11 @@ export interface SessionApi {
   readonly dependencies: DependenciesApi;
   /** Apps' screens: their builds, their servers and their error logs. */
   readonly screens: ScreensApi;
+  /**
+   * Which of Apps' screens get their data: an admin's approval of exactly
+   * the code a screen runs, and what an App's data is to its screens.
+   */
+  readonly screenTrust: ScreenTrustApi;
   /** The organization's members: offboarding. Admins only. */
   readonly members: MembersApi;
   /** The audit log: search, export and chain verification. Admins only. */

@@ -1,12 +1,13 @@
 import { kitModuleName } from "@grasp-os/compiler";
-import type { ScreenBundle } from "@grasp-os/shared/screens";
 import { describe, expect, it } from "vite-plus/test";
 
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { appModulesOf, kitModulesOf, loadFrame } from "./screen-frames.ts";
+import type { LoadedFrame } from "./screen-frames.ts";
 import { signedInApi } from "./sign-in.ts";
 
-// What a page is sent to run one screen, measured on the bytes it gets:
+// What a frame loads to run one screen, measured on the bytes it gets:
 // the screen's own modules and the kit's modules it imports, built by the
 // real compiler from the real kit. Not the App's other screens, not the
 // rest of the kit, and never the compiler or what it checks with.
@@ -77,9 +78,9 @@ export default function Heavy() {
 `,
 };
 
-/** Everything the page loads for a screen: its modules, the kit's, its CSS. */
-const loaded = ({ modules, kit, css }: ScreenBundle): string =>
-  [...Object.values(kit), ...Object.values(modules), css].join("\n");
+/** Everything a frame loads for a screen: its modules, the kit's, its CSS. */
+const loaded = ({ modules, screen }: LoadedFrame): string =>
+  [...Object.values(modules), screen.css].join("\n");
 
 /** A text's size in bytes once gzipped, as a browser is sent it. */
 const gzipSize = async (text: string): Promise<number> => {
@@ -90,8 +91,8 @@ const gzipSize = async (text: string): Promise<number> => {
   return bytes.byteLength;
 };
 
-const kitNames = (bundle: ScreenBundle, names: string[]): boolean[] =>
-  names.map((name) => Object.hasOwn(bundle.kit, kitModuleName(name)));
+const kitNames = (frame: LoadedFrame, names: string[]): boolean[] =>
+  names.map((name) => Object.hasOwn(kitModulesOf(frame), kitModuleName(name)));
 
 /** Components a small screen has no use for. */
 const specialist = [
@@ -101,17 +102,28 @@ const specialist = [
   "@grasp-os/ui/components/sidebar",
 ];
 
-/** The App's two screens, as a page is sent each. */
+/** One of the App's screens, as its frame loads it. */
+const framed = async (
+  open: Promise<{ artifact: string; frameToken: string }>
+): Promise<LoadedFrame> => {
+  const frame = await loadFrame(await open);
+  if (frame === null) {
+    throw new Error("An opened screen has a frame");
+  }
+  return frame;
+};
+
+/** The App's two screens, as a frame loads each. */
 const opened = async (): Promise<{
-  small: ScreenBundle;
-  heavy: ScreenBundle;
+  small: LoadedFrame;
+  heavy: LoadedFrame;
 }> => {
   const builder = await signedInApi(idp, "builder");
   const { id: app } = await builder.api.apps.create({ name: "Closure" });
   await release(builder, app, files);
   return {
-    small: await builder.api.screens.open(app, "small"),
-    heavy: await builder.api.screens.open(app, "heavy"),
+    small: await framed(builder.api.screens.open(app, "small")),
+    heavy: await framed(builder.api.screens.open(app, "heavy")),
   };
 };
 
@@ -119,41 +131,48 @@ describe("what a screen loads", { timeout: 60_000 }, () => {
   it("is what the screen imports: not the App's other screens, not the rest of the kit", async () => {
     const { small, heavy } = await opened();
     // What both load: React, React DOM and the runtime among it.
-    const both = Object.keys(small.kit).filter((name) =>
-      Object.hasOwn(heavy.kit, name)
+    const smallKit = kitModulesOf(small);
+    const heavyKit = kitModulesOf(heavy);
+    const both = Object.keys(smallKit).filter((name) =>
+      Object.hasOwn(heavyKit, name)
     );
 
     expect({
       small: {
-        modules: Object.keys(small.modules),
+        modules: appModulesOf(small),
         specialist: kitNames(small, specialist),
       },
       heavy: {
-        modules: Object.keys(heavy.modules),
+        modules: appModulesOf(heavy),
         specialist: kitNames(heavy, specialist),
       },
       // Never a module named but not sent.
       empty: [small, heavy]
-        .flatMap(({ kit }) => Object.values(kit))
+        .flatMap(({ modules }) => Object.values(modules))
         .filter((code) => code === ""),
       // The kit's own for both, the same code under the same names: one
       // of each on a page whatever the screen, none built into the App's.
-      different: both.filter((name) => heavy.kit[name] !== small.kit[name]),
+      different: both.filter((name) => heavyKit[name] !== smallKit[name]),
+      // And at the same address: a browser loads it once for both.
+      moved: both.filter(
+        (name) => heavy.addresses[name] !== small.addresses[name]
+      ),
     }).toStrictEqual({
       small: {
-        modules: [small.entry],
+        modules: [small.screen.entry],
         specialist: specialist.map(() => false),
       },
       heavy: {
-        modules: [heavy.entry],
+        modules: [heavy.screen.entry],
         specialist: specialist.map(() => true),
       },
       empty: [],
       different: [],
+      moved: [],
     });
     expect(both).toStrictEqual(
       expect.arrayContaining([
-        small.runtime,
+        small.screen.runtime,
         kitModuleName("react/jsx-runtime"),
         kitModuleName("react/compiler-runtime"),
       ])

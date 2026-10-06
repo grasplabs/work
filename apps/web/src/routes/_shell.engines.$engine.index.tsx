@@ -1,6 +1,7 @@
 import type { App, AppContents, AppMember } from "@grasp-os/shared/apps";
 import { canBuild } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { ScreenTrustReview } from "@grasp-os/shared/screen-trust";
 import type { RunsPage, WorkflowSummary } from "@grasp-os/shared/workflows";
 import {
   Table,
@@ -26,7 +27,9 @@ import { IntegrationRow } from "../connections/integration-row.tsx";
 import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
+import { decidesRequests } from "../dashboard/to-do.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
+import { ScreenApproval } from "../engines/screen-approval.tsx";
 import {
   LoadingLines,
   PageLoading,
@@ -199,51 +202,66 @@ const AppCard = ({ engine, screen }: { engine: string; screen: string }) => (
   </li>
 );
 
-/** The engine's apps, or why there are none. */
+/**
+ * The engine's apps, or why there are none; for an admin, with whether
+ * their code is approved for the engine's data (`approval`).
+ */
 const Apps = ({
   engine,
   contents,
+  approval,
 }: {
   engine: string;
   contents: AppContents;
+  approval: Deferred<ScreenTrustReview> | undefined;
 }) => {
   const { t } = useLingui();
-  if (contents.version === null || contents.screens.length === 0) {
-    return (
-      <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed p-6">
-        <span
-          aria-hidden="true"
-          className="bg-tile flex size-7 items-center justify-center rounded-md border"
-        >
-          <LayoutGridIcon className="size-4" />
-        </span>
-        <div className="flex max-w-prose flex-col gap-1">
-          <span className="font-medium">
-            <Trans>No apps yet</Trans>
-          </span>
-          <p className="text-muted-foreground">
-            {contents.version === null ? (
-              <Trans>This engine has no version to run yet.</Trans>
-            ) : (
-              <Trans>
-                An app is what this engine&apos;s team works in, standing on its
-                workflows and integrations. Ask Grasp in chat to build one.
-              </Trans>
-            )}
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const none = contents.version === null || contents.screens.length === 0;
   return (
-    <ul
-      aria-label={t`Apps`}
-      className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
-    >
-      {contents.screens.map((screen) => (
-        <AppCard engine={engine} key={screen} screen={screen} />
-      ))}
-    </ul>
+    <div className="flex flex-col gap-6">
+      {none ? (
+        <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed p-6">
+          <span
+            aria-hidden="true"
+            className="bg-tile flex size-7 items-center justify-center rounded-md border"
+          >
+            <LayoutGridIcon className="size-4" />
+          </span>
+          <div className="flex max-w-prose flex-col gap-1">
+            <span className="font-medium">
+              <Trans>No apps yet</Trans>
+            </span>
+            <p className="text-muted-foreground">
+              {contents.version === null ? (
+                <Trans>This engine has no version to run yet.</Trans>
+              ) : (
+                <Trans>
+                  An app is what this engine&apos;s team works in, standing on
+                  its workflows and integrations. Ask Grasp in chat to build
+                  one.
+                </Trans>
+              )}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <ul
+          aria-label={t`Apps`}
+          className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        >
+          {contents.screens.map((screen) => (
+            <AppCard engine={engine} key={screen} screen={screen} />
+          ))}
+        </ul>
+      )}
+      {/* Also with no apps now: earlier versions' approvals can still be
+          taken back. Not before a first version, which has nothing. */}
+      {approval === undefined || contents.version === null ? null : (
+        <Later promise={approval}>
+          {(review) => <ScreenApproval review={review} />}
+        </Later>
+      )}
+    </div>
   );
 };
 
@@ -353,7 +371,8 @@ const Count = ({ count }: { count: number }) => (
 );
 
 const EngineView = ({ page }: { page: EnginePage }) => {
-  const { workflows, runs, members, integrations } = Route.useLoaderData();
+  const { workflows, runs, members, integrations, approval } =
+    Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { app, contents } = page;
   const { version } = contents;
@@ -406,7 +425,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
         </TabsContent>
         <TabsContent value="apps">
           <div className="pt-4">
-            <Apps contents={contents} engine={app.id} />
+            <Apps approval={approval} contents={contents} engine={app.id} />
           </div>
         </TabsContent>
         {integrations === undefined ? null : (
@@ -471,6 +490,13 @@ export const Route = createFileRoute("/_shell/engines/$engine/")({
       core,
       async (session) => await session.apps.members.list(params.engine)
     ),
+    // Only for who decides it: the organization's own admins.
+    approval: decidesRequests(identity)
+      ? loadFromCore(
+          core,
+          async (session) => await session.screenTrust.review(params.engine)
+        )
+      : undefined,
     integrations: canBuild(identity.role)
       ? loadFromCore(
           core,

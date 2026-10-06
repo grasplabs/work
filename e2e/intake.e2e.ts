@@ -44,6 +44,8 @@ const intakeFor = async (admin: Person): Promise<string> => {
       await api.permissions.grant(id, { version: null });
     }
     await api.apps.versions.setCurrent(created.app.id, 1);
+    const { generation } = await api.screenTrust.review(created.app.id);
+    await api.screenTrust.classify(created.app.id, "ordinary", generation);
     return created.app.id;
   } finally {
     core[Symbol.dispose]();

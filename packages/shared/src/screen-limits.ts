@@ -6,6 +6,9 @@
 /** Where the frontend frames screens from: a document core serves. */
 export const screenFramePath = "/screen-frame";
 
+/** Where core serves a screen's modules to its frame, each by its hash. */
+export const screenModulePath = "/screen-modules";
+
 /**
  * The limits of a screen's start and traffic, in one place. They are the
  * product's defaults: nothing an App declares or a frame sends raises
@@ -15,6 +18,12 @@ export const screenFramePath = "/screen-frame";
 export const screenLimits = {
   /** How long each stage of a screen's start may take: ready, then mounted. */
   stageMs: 10_000,
+  /**
+   * How long the page waits for core to hand over a screen's build before
+   * the frame starts: past core's own wait for a build (15 s), so core
+   * says why first when it can.
+   */
+  openMs: 20_000,
   /**
    * Cap'n Web's limits on what a frame sends over its port. A message's
    * size is its text's, in UTF-16 code units. A browser's connection to
@@ -68,8 +77,9 @@ export const screenFrameReady = "grasp:screen-ready";
 
 /**
  * What the page posts the frame, with a `MessagePort`, to start the
- * screen: `{ type, load, artifact, generation, imports, css, runtime,
- * entry }`.
+ * screen: `{ type, load, artifact, generation }`. The frame's document
+ * holds the screen's code already (core's screen-frame.ts), for the build
+ * its address named; it starts only if `artifact` is that build.
  */
 export const screenFrameMessage = "grasp:screen";
 
