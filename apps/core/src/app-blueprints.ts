@@ -8,6 +8,7 @@ import type {
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { appIdSchema, blueprintIdSchema } from "@grasp-os/shared/ids";
 import type { BlueprintId } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { canBuild, requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { RpcTarget } from "capnweb";
@@ -23,6 +24,7 @@ import {
   appFor,
   blueprintFiles,
   changeEntry,
+  deleteOtherBlueprintTrees,
   findVersion,
   storeBlueprintTree,
   storeTree,
@@ -426,6 +428,31 @@ const installEntry = (
 });
 
 /**
+ * Deletes the trees of the built-in `id`'s earlier releases, now that its
+ * row names `kept`: best-effort, since nothing reads them. One that isn't
+ * deleted is only logged, and deleted by the next install, which deletes
+ * every tree but the one its row names. Installs run one at a time (the
+ * `Builtins` singleton, builtins.ts), so none deletes a tree another is
+ * about to name. A person creating an App from the built-in just as its
+ * tree is replaced may see that create fail; trying again creates it from
+ * the new one.
+ */
+const deleteReplacedTrees = async (
+  env: Env,
+  id: BlueprintId,
+  kept: string
+): Promise<void> => {
+  try {
+    await deleteOtherBlueprintTrees(env, id, kept);
+  } catch (error) {
+    log.warn("builtins.tree_delete_failed", {
+      blueprint: id,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
  * Installs the release's built-in blueprint as a blueprint like any
  * other, under its folder's name, which never changes: created if it
  * isn't there, or changed if its name, description, code or what it
@@ -433,7 +460,8 @@ const installEntry = (
  * in one audited batch, so installing it again writes nothing. The
  * collections it declares are created first, in Knowledge's database,
  * each only if it isn't there yet, and audited only then. Apps created
- * from it earlier keep their code and their permissions.
+ * from it earlier keep their code and their permissions. The trees of its
+ * earlier releases are deleted once its row names the new one.
  *
  * Two installs at once write the same row: the second changes nothing,
  * and records nothing.
@@ -537,6 +565,7 @@ export const installBuiltinBlueprint = async (
   if (first !== undefined) {
     await auditedBatch(env, db, [first, ...rest]);
   }
+  await deleteReplacedTrees(env, id, tree.tree);
 };
 
 /** A signed-in person's `apps.blueprints`. */

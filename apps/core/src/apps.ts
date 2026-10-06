@@ -399,6 +399,33 @@ export const storeBlueprintTree = async (
   });
 };
 
+/**
+ * Deletes every tree stored for `blueprint` but `kept`, the one its row
+ * names: the trees of its earlier releases, which nothing reads once the
+ * row has moved on (Apps created from it hold their own copies).
+ */
+export const deleteOtherBlueprintTrees = async (
+  env: Env,
+  blueprint: BlueprintId,
+  kept: string
+): Promise<void> => {
+  const keptKey = blueprintTreeKey(blueprint, kept);
+  const prefix = `blueprints/${blueprint}/trees/`;
+  let cursor: string | undefined = undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
+    const listed: R2Objects = await env.FILES.list({ prefix, cursor });
+    const others = listed.objects
+      .map(({ key }) => key)
+      .filter((key) => key !== keptKey);
+    if (others.length > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      await env.FILES.delete(others);
+    }
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor !== undefined);
+};
+
 /** The files of one of an App's versions. For the runtime and the compiler. */
 export const versionFiles = async (
   env: Env,

@@ -31,7 +31,7 @@ import { isUniqueViolation } from "../db/d1.ts";
 import {
   requireMemberAdmin,
   requireStillAdmin,
-  stillAdmin,
+  stillAdminSql,
 } from "../permissions.ts";
 import { advancePolicy } from "./policy.ts";
 
@@ -251,7 +251,7 @@ export const grantApprover = async (
         .insert(dependencyApprovers)
         // The table's columns, in its order.
         .select(
-          sql`SELECT ${id}, ${subject.type}, ${subjectId}, 'active', ${by.userId}, ${Date.now()}, NULL, NULL WHERE ${stillAdmin(by)} AND ${subjectExists(subject)}`
+          sql`SELECT ${id}, ${subject.type}, ${subjectId}, 'active', ${by.userId}, ${Date.now()}, NULL, NULL WHERE ${stillAdminSql(by)} AND ${subjectExists(subject)}`
         )
         .returning(),
       outboxedEventWhere(db, event, sql`changes() > 0`),
@@ -311,7 +311,7 @@ export const revokeApprover = async (
         and(
           eq(dependencyApprovers.id, found.id),
           eq(dependencyApprovers.status, "active"),
-          stillAdmin(by)
+          stillAdminSql(by)
         )
       )
       .returning(),

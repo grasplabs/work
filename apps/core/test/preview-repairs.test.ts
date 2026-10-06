@@ -98,6 +98,13 @@ export class App extends DurableObject {
     return "logged";
   }
 
+  shouting(): string {
+    for (let line = 1; line <= 5; line += 1) {
+      console.log(String(line).repeat(1500));
+    }
+    return "shouted";
+  }
+
   broken(): never {
     throw new Error(atob(${JSON.stringify(btoa(`Invoice 7 has no total. ${attack}`))}));
   }
@@ -121,6 +128,16 @@ const check = `export default async (env) => {
     passed: checked.passed,
     failedInARow: checked.failedInARow,
     problems: checked.preview.problems.map(({ source, at, message }) => ({ source, at, message })),
+  };
+};`;
+
+/** Checks the draft, with what its server code wrote in the preview. */
+const checkLogs = `export default async (env) => {
+  const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
+  const { preview } = await env.build.check(app.id);
+  return {
+    messages: preview.logs.map(({ message }) => message),
+    leftOut: preview.logsLeftOut,
   };
 };`;
 
@@ -576,6 +593,67 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       oldest: "line 10",
       moved: { problems: [], logs: [], seen: false },
     });
+  });
+
+  it("hands the agent's check the newest lines its draft's server code wrote, within a size, and how many it left out", async () => {
+    const { builder, app, chatId, stub } = await setUp([
+      codeStep(checkLogs),
+      says("Checked."),
+      codeStep(checkLogs),
+      says("Checked again."),
+    ]);
+    await buildServer(env, { "app/server.ts": mailing });
+    const id = chatIdSchema.parse(chatId);
+    const { chats } = builder.api;
+    const writeDraft = async (revision: number) => {
+      await stub.saveDraft(
+        id,
+        app,
+        1,
+        { "screens/desk.tsx": screen, "app/server.ts": mailing },
+        [],
+        revision
+      );
+      return revision + 1;
+    };
+    /** Waits until the preview at `revision` keeps `lines` lines. */
+    const logged = async (revision: number, lines: number) => {
+      await vi.waitFor(
+        async () => {
+          const reports = await stub.previewReports(id, app, revision, 0);
+          expect(reports.logs).toHaveLength(lines);
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+    };
+
+    // Forty short lines: the newest twenty reach the check.
+    const first = await writeDraft(0);
+    await chats.previewCall(chatId, app, first, "chatty", ["ship"]);
+    await chats.previewCall(chatId, app, first, "chatty", ["again"]);
+    await logged(first, 40);
+    await stub.ask(id, { text: "Check the invoice desk", model });
+    // Five long lines: the newest two, within 4,000 characters.
+    const second = await writeDraft(first);
+    await chats.previewCall(chatId, app, second, "shouting", []);
+    await logged(second, 5);
+    await stub.ask(id, { text: "Check it again", model });
+
+    const results = await codeResults(stub, chatId);
+    expect(results.map(({ text }) => returned(text))).toStrictEqual([
+      {
+        messages: [
+          'about to log {"note":"again"}',
+          ...Array.from({ length: 19 }, (_, index) => `line ${index + 1}`),
+        ],
+        leftOut: 20,
+      },
+      { messages: ["4".repeat(1500), "5".repeat(1500)], leftOut: 3 },
+    ]);
+    // What the preview keeps stays as it was.
+    await expect(
+      stub.previewReports(id, app, second, 0)
+    ).resolves.toMatchObject({ logs: { length: 5 } });
   });
 
   it("lets the agent call its draft's server code in the preview, never the App's live data", async () => {

@@ -115,6 +115,33 @@ const notesOf = (collectionId: CollectionId): DeclaredPermission => ({
   binding: "NOTES",
 });
 
+/** The trees stored for `hello`, by their hashes. */
+const helloTrees = async (): Promise<string[]> => {
+  const { objects } = await env.FILES.list({
+    prefix: "blueprints/hello/trees/",
+  });
+  return objects
+    .map(({ key }) => key.replace(/^.*\//u, "").replace(/\.json$/u, ""))
+    .toSorted((one, other) => one.localeCompare(other));
+};
+
+/** `files`, where every delete fails. */
+const refusingDeletes = (files: R2Bucket): R2Bucket =>
+  new Proxy(files, {
+    get: (target, key) => {
+      if (key === "delete") {
+        return async () => {
+          await Promise.resolve();
+          throw new Error("R2 unavailable");
+        };
+      }
+      const value: unknown = Reflect.get(target, key);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+
 const writesBlueprint = /^update "blueprints"/iu;
 
 /** `racingDb`, racing the batch that changes a blueprint. */
@@ -410,6 +437,38 @@ describe("the built-in blueprints", () => {
     expect(finished?.tree).not.toBe(before?.tree);
 
     await reinstall();
+  });
+
+  it("keep only the tree of the release they are at, and delete one a failed delete left at the next install", async () => {
+    await reinstall();
+    const before = await helloRow();
+    const deletesDown: Env = { ...env, FILES: refusingDeletes(env.FILES) };
+
+    // The row moves on whether or not the old tree is deleted.
+    await expect(install(changedHello(), deletesDown)).resolves.toBeTruthy();
+    const changed = await helloRow();
+    const leftBehind = await helloTrees();
+    await expect(install(changedHello())).resolves.toBeTruthy();
+    const deletedNext = await helloTrees();
+    const admin = await signedInApi(idp, "admin");
+    const created = await admin.api.apps.blueprints.create("hello", {
+      name: "From the release it is at",
+    });
+    expect({
+      leftBehind,
+      deletedNext,
+      created: await admin.api.apps.files.read(created.app.id, 1),
+    }).toStrictEqual({
+      leftBehind: [before?.tree ?? "", changed?.tree ?? ""].toSorted(
+        (one, other) => one.localeCompare(other)
+      ),
+      deletedNext: [changed?.tree],
+      created: changedHello().blueprints.find(({ id }) => id === "hello")
+        ?.files,
+    });
+
+    await reinstall();
+    await expect(helloTrees()).resolves.toStrictEqual([before?.tree]);
   });
 
   it("ask, in each App created from them, for what their release declares, and stop when it no longer does", async () => {
