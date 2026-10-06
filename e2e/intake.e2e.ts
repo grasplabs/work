@@ -157,6 +157,21 @@ test("an admin sends notes to be read, and follows the reading to its end", asyn
   const { admin } = peopleIn("intake");
   const title = `Notes ${crypto.randomUUID().slice(0, 8)}`;
   const app = await intakeFor(admin);
+  // The local stack reaches no model. A call to the model it allows (the
+  // workflow's default) fails and is tried again for minutes, so the
+  // reading asks for one it doesn't allow, which fails at once; core's
+  // tests read notes with a scripted model (apps/core/test/intake.test.ts).
+  const { core, api } = apiOf(admin);
+  try {
+    await api.workflows.params.set(
+      app,
+      "extract",
+      "model",
+      "anthropic/claude-sonnet-5"
+    );
+  } finally {
+    core[Symbol.dispose]();
+  }
   const page = await pageOf(browser, admin);
   const screen = await openIntake(page, app);
 
@@ -169,10 +184,7 @@ test("an admin sends notes to be read, and follows the reading to its end", asyn
     .fill("Closing the month takes three days.");
   await start.click();
 
-  // Followed live. The local stack reaches no model, and doesn't allow
-  // the workflow's model, so the reading fails, saying so, and keeps no
-  // draft; core's tests read notes with a scripted model
-  // (apps/core/test/intake.test.ts).
+  // Followed live: the reading fails, saying so, and keeps no draft.
   const reading = screen.getByRole("region", { name: "Notes being read" });
   const item = reading.getByRole("listitem").filter({ hasText: title });
   await expect(item).toContainText("Failed:", { timeout: 30_000 });
