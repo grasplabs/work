@@ -16,6 +16,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { ownerName, startOf } from "./build-lock.ts";
 import { compilerAssets, compilerLock } from "./src/kit.ts";
 
 // The build as core, its tests and the dev watcher run it: a process that
@@ -75,11 +76,14 @@ const startBuild = (
   return { done, waiting };
 };
 
-/** Holds the lock of `assets` as the process `pid` would; returns the lock. */
-const heldLock = (assets: string, pid: number): string => {
+/**
+ * Holds the lock of `assets` as a build would whose process is `pid`,
+ * started at `started`; returns the lock.
+ */
+const heldLock = (assets: string, pid: number, started: string): string => {
   const lock = compilerLock(assets);
   mkdirSync(lock, { recursive: true });
-  writeFileSync(path.join(lock, String(pid)), "");
+  writeFileSync(path.join(lock, ownerName(pid, started)), "");
   return lock;
 };
 
@@ -252,8 +256,9 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
     const dir = scratch();
     const assets = path.join(dir, "assets");
     const versionModule = path.join(dir, "version.js");
-    // Another build, as far as the lock says: this process, which runs.
-    const lock = heldLock(assets, process.pid);
+    // Another build, as far as the lock says: this process, which runs
+    // and started when the lock says it did.
+    const lock = heldLock(assets, process.pid, startOf(process.pid));
 
     const building = startBuild(assets, versionModule);
     await building.waiting;
@@ -275,7 +280,21 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
     const versionModule = path.join(dir, "version.js");
     // A process that has ended: its ID is no running build's.
     const { pid: ended } = spawnSync(process.execPath, ["-e", ""]);
-    heldLock(assets, ended);
+    heldLock(assets, ended, startOf(process.pid));
+
+    build(assets, versionModule, "production");
+
+    expect(wholeRelease(assets, versionModule)).toStrictEqual(releaseFiles);
+    expect(readdirSync(dir).toSorted()).toStrictEqual(["assets", "version.js"]);
+  });
+
+  it("takes over the lock of a build whose process ID another process has now", () => {
+    const dir = scratch();
+    const assets = path.join(dir, "assets");
+    const versionModule = path.join(dir, "version.js");
+    // The owner's ID is this process's, which runs, but the owner started
+    // at another time: it was another process, which is gone.
+    heldLock(assets, process.pid, "Thu-Jan-1-00-00-00-1970");
 
     build(assets, versionModule, "production");
 
