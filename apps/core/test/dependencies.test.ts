@@ -23,6 +23,7 @@ import {
 import {
   admitDependencies,
   decideDependency,
+  proposeDependencies,
 } from "../src/dependencies/requests.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
@@ -614,6 +615,80 @@ describe("dependency approval", () => {
       waiting: false,
       decides: "dependency.not_found",
       recorded: [["dependency.superseded", approvedGraph.id, other.graphHash]],
+    });
+  });
+
+  it("drops whatever waits as it lands, when another proposal took the place of the one it read", async () => {
+    const admin = await personApi("admin");
+    const { builder, app } = await builderWithApp();
+    const approver = await approverBy(admin);
+    const approvedGraph = await builder.api.dependencies.propose(
+      proposalFor(app)
+    );
+    await approve(approver.api, approvedGraph);
+    const read = await builder.api.dependencies.propose(
+      proposalFor(app, { graph: charts("3.2.0") })
+    );
+    const identity = await builder.api.whoami();
+    // After going back to the approved graph read what waits, just before
+    // it drops it: someone proposes yet another graph.
+    let newer: DependencyRequest | undefined;
+    let raced = false;
+    const db = racingDb(async () => {
+      if (!raced) {
+        raced = true;
+        newer = await builder.api.dependencies.propose(
+          proposalFor(app, { graph: charts("3.3.0") })
+        );
+      }
+    });
+
+    let back: DependencyRequest | undefined;
+    const events = await auditedDuring(async () => {
+      back = await proposeDependencies(
+        { ...env, DB: db },
+        identity,
+        proposalFor(app)
+      );
+    });
+    const status = await builder.api.dependencies.status(app);
+    const stillWaiting = await waitingFor(approver.api);
+
+    expect({
+      back: back?.id,
+      pending: status.pending,
+      waiting: stillWaiting.filter((id) => id === read.id || id === newer?.id),
+      // Each removal recorded once, naming the row that went and what
+      // replaced it.
+      recorded: events
+        .filter(({ action }) => action === "dependency.superseded")
+        .map(({ actor, target, detail }) => ({
+          actor,
+          request: target?.id,
+          by: detail.by,
+          graphHash: detail.graphHash,
+          targets: detail.targets,
+        })),
+    }).toStrictEqual({
+      back: approvedGraph.id,
+      pending: null,
+      waiting: [],
+      recorded: [
+        {
+          actor: { type: "person", userId: builder.userId },
+          request: read.id,
+          by: newer?.id,
+          graphHash: read.graphHash,
+          targets: "browser",
+        },
+        {
+          actor: { type: "person", userId: builder.userId },
+          request: newer?.id,
+          by: approvedGraph.id,
+          graphHash: newer?.graphHash,
+          targets: "browser",
+        },
+      ],
     });
   });
 

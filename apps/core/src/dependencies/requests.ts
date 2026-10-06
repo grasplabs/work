@@ -40,6 +40,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { appFor } from "../apps.ts";
@@ -47,6 +48,7 @@ import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import {
   apps,
+  auditOutbox,
   dependencyPolicy,
   dependencyRequests,
   users,
@@ -307,6 +309,54 @@ const pendingFor = async (env: Env, app: AppId): Promise<Listed | undefined> =>
     )
     .get();
 
+/**
+ * The statements that drop whatever request waits for `app` as their batch
+ * runs, replaced by `by`, with its audit event by `actor`: the event
+ * first, written from the very row the delete then removes (one waits per
+ * App at most), so it names what was removed whatever was read before,
+ * and nothing is recorded when nothing waits. What `requestEntry` records
+ * of a superseded request, as SQL.
+ */
+const dropPending = (
+  db: DrizzleD1Database,
+  actor: AuditActor,
+  app: AppId,
+  by: string
+) => {
+  const waits = and(
+    eq(dependencyRequests.appId, app),
+    eq(dependencyRequests.status, "pending")
+  );
+  const eventId = crypto.randomUUID();
+  const now = new Date();
+  const event = sql`json_object(
+    'id', ${eventId},
+    'at', ${now.toISOString()},
+    'source', 'core',
+    'actor', json(${JSON.stringify(actor)}),
+    'action', 'dependency.superseded',
+    'target', json_object('type', 'dependency_request', 'id', ${dependencyRequests.id}),
+    'provenance', json('[]'),
+    'detail', json_object(
+      'app', ${dependencyRequests.appId},
+      'sourceRevision', ${dependencyRequests.sourceRevision},
+      'graphHash', ${dependencyRequests.graphHash},
+      'targets', (SELECT group_concat(value, ' ') FROM json_each(${dependencyRequests.targets})),
+      'direct', ${dependencyRequests.direct},
+      'packages', ${dependencyRequests.packages},
+      'by', ${by}
+    )
+  )`;
+  return [
+    db
+      .insert(auditOutbox)
+      .select(
+        sql`SELECT ${eventId}, ${event}, ${now.getTime()} FROM ${dependencyRequests} WHERE ${waits}`
+      ),
+    db.delete(dependencyRequests).where(waits),
+  ] as const;
+};
+
 /** How grave each severity is, for which findings a list shows first. */
 const gravity: Record<DependencyFinding["severity"], number> = {
   critical: 4,
@@ -382,25 +432,16 @@ export const proposeDependencies = async (
     ]);
     const standing = approvals.find((row) => covers(row, proposal.targets));
     if (standing) {
-      // The App is back on a graph it has approved: whatever else waited
+      // The App is back on a graph it has approved: whatever else waits
       // for it is no longer asked for, and goes as any replaced request.
-      if (waiting) {
-        // oxlint-disable-next-line no-await-in-loop
-        await auditedBatch(env, db, [
-          db
-            .delete(dependencyRequests)
-            .where(
-              and(
-                eq(dependencyRequests.id, waiting.id),
-                eq(dependencyRequests.status, "pending")
-              )
-            ),
-          outboxedIfChanged(
-            db,
-            requestEntry(actor, "superseded", waiting, { by: standing.id })
-          ),
-        ]);
-      }
+      // Whatever waits as the batch runs, not what was read above: another
+      // proposal may have taken that one's place since.
+      // oxlint-disable-next-line no-await-in-loop
+      await auditedBatch(
+        env,
+        db,
+        dropPending(db, actor, proposal.app, standing.id)
+      );
       // oxlint-disable-next-line no-await-in-loop
       return await toRequest(env, standing);
     }
