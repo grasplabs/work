@@ -47,6 +47,7 @@ import { appMemoryPath } from "./knowledge/memory-files.ts";
 import { declarableOf, declaredRequests, toPermission } from "./permissions.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { workflowCallsIn } from "./workflows/code.ts";
 
 // Blueprints: code to create Apps from, each its own record. A builder of
 // an App marks one of its versions as a blueprint, which whoever has a
@@ -332,6 +333,7 @@ export const createFromBlueprint = async (
     // builder commits; otherwise approved as any version is.
     approved: blueprint.approved ? 1 : null,
     workflows: workflowsIn(files),
+    workflowCalls: workflowCallsIn(Object.fromEntries(files)),
     exports: exportsIn(files),
     proposedBy: null,
     records: recordTypesIn(files),

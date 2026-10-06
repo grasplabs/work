@@ -1366,6 +1366,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
               sharedCode: false,
             },
           ],
+          calls: ["MAIL"],
           params: [],
         },
       ],
@@ -1394,6 +1395,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
               sharedCode: true,
             },
           ],
+          calls: ["MAIL"],
           params: [],
         },
       ],
@@ -1437,6 +1439,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
           shared: ["app/exports.json"],
           sideEffect: true,
           steps: null,
+          calls: [],
           params: [],
           triggers: [
             {
@@ -1500,6 +1503,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { save: 1 }, ex
         // Its step, unchanged, says it changes things: so the workflow can.
         sideEffect: true,
         steps: [],
+        calls: [],
         params: [],
         triggers: [
           {
