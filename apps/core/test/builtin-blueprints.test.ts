@@ -1,5 +1,8 @@
 import { workflowIdOf } from "@grasp-os/compiler";
-import { checkWorkflowBindings } from "@grasp-os/sdk/describe";
+import {
+  checkWorkflowBindings,
+  describeWorkflow,
+} from "@grasp-os/sdk/describe";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
 import type { DeclaredPermission } from "@grasp-os/shared/permissions";
@@ -254,10 +257,12 @@ describe("the built-in blueprints", () => {
         await serverBuilt(created.app.id, 1);
       }
       // Its workflows call the App's bindings where a review can name each
-      // call, as the check of an agent's draft over it asks: none throws.
+      // call, as the check of an agent's draft over it asks, and its steps
+      // read as the workflow and review pages outline them: none throws.
       for (const [path, source] of Object.entries(blueprint.files)) {
         if (workflowIdOf(path) !== undefined) {
           checkWorkflowBindings(source);
+          describeWorkflow(source);
         }
       }
       // Its screens pass the compiler's checks, as they do when opened.
