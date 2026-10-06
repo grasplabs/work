@@ -42,6 +42,14 @@ export class App extends DurableObject {
     return caller.userId;
   }
 
+  chatty(_caller: Caller, note: string): string {
+    console.error("could not file", { note });
+    for (let line = 1; line <= 25; line += 1) {
+      console.log("line", line);
+    }
+    return "logged";
+  }
+
   notes(): string[] {
     this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS notes (note TEXT)");
     return this.ctx.storage.sql
@@ -854,6 +862,60 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 
+  it("keeps what the App's server code writes with console, the first lines of each call, counted", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const called = await builder.api.screens.call(app, "chatty", ["invoice 7"]);
+    await vi.waitFor(
+      async () => {
+        const { entries } = await builder.api.screens.errors(app);
+        expect(entries).toHaveLength(20);
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    // The same lines again: counted on the entries they match.
+    await builder.api.screens.call(app, "chatty", ["invoice 7"]);
+    const { entries, suppressed } = await vi.waitFor(
+      async () => {
+        const log = await builder.api.screens.errors(app);
+        expect(log.entries.every(({ count }) => count === 2)).toBeTruthy();
+        return log;
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    const undated = entries.map(({ at: _at, ...entry }) => entry);
+    expect({
+      called,
+      kept: entries.length,
+      suppressed,
+      newest: undated[0],
+      oldest: undated.at(-1),
+      dated: entries.every(({ at }) => !Number.isNaN(Date.parse(at))),
+    }).toStrictEqual({
+      called: "logged",
+      kept: 20,
+      suppressed: 0,
+      dated: true,
+      newest: {
+        source: "server",
+        version: 1,
+        method: "chatty",
+        level: "log",
+        message: "line 19",
+        count: 2,
+      },
+      // What the App wrote, with its method and time: never who called.
+      oldest: {
+        source: "server",
+        version: 1,
+        method: "chatty",
+        level: "error",
+        message: 'could not file {"note":"invoice 7"}',
+        count: 2,
+      },
+    });
+  });
+
   it("keeps only the newest hundred different problems", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
@@ -1010,12 +1072,16 @@ describe("screens", { timeout: 60_000 }, () => {
 
     const { entries } = await builder.api.screens.errors(app);
     expect(
-      entries.map(({ kind, message, stack, count }) => ({
-        kind,
-        message,
-        stack,
-        count,
-      }))
+      entries.map((entry) =>
+        entry.source === "screen"
+          ? {
+              kind: entry.kind,
+              message: entry.message,
+              stack: entry.stack,
+              count: entry.count,
+            }
+          : entry
+      )
     ).toStrictEqual([
       { kind: "console", message: loop.message, stack: undefined, count: 1 },
       {
