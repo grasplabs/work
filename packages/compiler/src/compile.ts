@@ -30,6 +30,11 @@ export const compileModule = (
           target: "19",
           panicThreshold: "all_errors",
           enableReanimatedCheck: false,
+          // Otherwise on whenever the compiling process has
+          // NODE_ENV=development, for Fast Refresh: the same file would
+          // compile to other code, and the kit to another version,
+          // depending on who built it.
+          environment: { enableResetCacheOnSourceFileChanges: false },
         },
       ],
     ],

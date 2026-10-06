@@ -1,7 +1,7 @@
+import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import buildScreenCompiler from "../../../packages/compiler/build.ts";
 import {
   blueprintsDir,
   testBlueprintsModule,
@@ -9,6 +9,7 @@ import {
 } from "../build-blueprints.ts";
 import buildExtractor from "../build-extractor.ts";
 import { bundleConnect, connectBundle } from "./build-connect.ts";
+import { testVersionModule } from "./compiler-version.ts";
 
 /**
  * The static assets core's tests serve: a stand-in frontend, so tests don't
@@ -17,12 +18,30 @@ import { bundleConnect, connectBundle } from "./build-connect.ts";
  */
 const testAssets = path.join(import.meta.dirname, "../dist/test-assets");
 
+/**
+ * Builds the screen compiler as core's build does, in a process of its
+ * own: what the tests load and measure is then what a release ships, byte
+ * for byte. Built in this process, Vite's own code would be the copy the
+ * test runner transformed, and some of that ends up in the kit.
+ */
+const buildScreenCompiler = (): void => {
+  execFileSync(
+    process.execPath,
+    [
+      path.join(import.meta.dirname, "../../../packages/compiler/build.ts"),
+      testAssets,
+      testVersionModule,
+    ],
+    { stdio: "inherit" }
+  );
+};
+
 const writeTestAssets = async (): Promise<void> => {
   rmSync(testAssets, { recursive: true, force: true });
   cpSync(path.join(import.meta.dirname, "fixtures/assets"), testAssets, {
     recursive: true,
   });
-  await buildScreenCompiler(testAssets);
+  buildScreenCompiler();
   await buildExtractor(testAssets);
 };
 

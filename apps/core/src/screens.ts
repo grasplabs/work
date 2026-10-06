@@ -81,8 +81,8 @@ const cachedBuild = async <Build>(
 /**
  * Builds an App's screens into ES modules and their CSS, in the compiler's
  * isolate. The modules import the release's kit modules (`kitModules(env.ASSETS)`);
- * `kitModules` in the result names the ones they need. A build is cached
- * in R2.
+ * `screens` in the result names the ones each screen needs. A build is
+ * cached in R2.
  */
 export const buildScreens = async (
   env: Env,

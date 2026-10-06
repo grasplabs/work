@@ -18,8 +18,12 @@ export interface Kit {
   icons: Record<string, string>;
   /** The kit's stylesheet, followed by the stylesheets it imports, by import id. */
   stylesheets: Record<string, string>;
-  /** Tailwind class candidates in the kit's own sources. */
-  candidates: string[];
+  /**
+   * Tailwind class candidates in the kit's own sources, by the flat name of
+   * the module that holds each source: a build's CSS has the classes of the
+   * kit modules its App loads, not of the whole catalog.
+   */
+  moduleCandidates: Record<string, string[]>;
   /** What each of the kit's modules imports, by flat name. */
   moduleImports: Record<string, string[]>;
   /**
@@ -69,6 +73,13 @@ export const compilerAssets = {
   sdkModules: "sdk-modules.json",
 } as const;
 
+/**
+ * The lock a build of the compiler into the assets directory `assets`
+ * holds (build-lock.ts): next to the assets, never in them.
+ */
+export const compilerLock = (assets: string): string =>
+  `${assets}.compiler-lock`;
+
 /** The name the compiler's isolate has `Kit` under, as a JSON module. */
 export const kitModule = "kit.json";
 
@@ -77,7 +88,7 @@ export const screenHooks = "@grasp-os/sdk/screen";
 
 /**
  * What renders a screen in its frame. App code doesn't import it, but every
- * build needs it (`ScreenBuild.kitModules`).
+ * screen needs it (`ScreenClosure.kitModules`).
  */
 export const screenRuntime = "@grasp-os/sdk/screen-runtime";
 

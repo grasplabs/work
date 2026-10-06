@@ -92,6 +92,15 @@ ${imports.map((name, index) => `    "${name}": Object.fromEntries(Object.entries
   return await response.json();
 };
 
+/** The kit's modules a build's screens load, all of them. */
+const kitModulesOf = (built: {
+  screens: Record<string, { kitModules: string[] }>;
+}): string[] => [
+  ...new Set(
+    Object.values(built.screens).flatMap(({ kitModules: names }) => names)
+  ),
+];
+
 /** A screen that says `text`. */
 const screen = (text: string): Record<string, string> => ({
   "screens/desk.tsx": `export default function Desk() {
@@ -124,7 +133,7 @@ describe("screen builds", { timeout: 60_000 }, () => {
     await expect(
       evaluate(
         {
-          ...(await kitModulesNamed(built.kitModules)),
+          ...(await kitModulesNamed(kitModulesOf(built))),
           ...built.modules,
         },
         ["app~screens~desk.js", "app~screens~inbox.js"]
@@ -143,12 +152,128 @@ describe("screen builds", { timeout: 60_000 }, () => {
   it("names only the kit modules the App needs", async () => {
     const built = await buildScreens(env, sampleApp);
 
-    expect(built.ok && built.kitModules).toContain(
+    expect(built.ok && kitModulesOf(built)).toContain(
       "lucide-react~icons~inbox.js"
     );
-    expect(built.ok && built.kitModules).not.toContain(
+    expect(built.ok && kitModulesOf(built)).not.toContain(
       "lucide-react~icons~house.js"
     );
+  });
+
+  it("says what each screen loads: what it imports, not the App's other screens", async () => {
+    const built = await buildScreens(env, sampleApp);
+    if (!built.ok) {
+      throw new Error(JSON.stringify(built.diagnostics, null, 2));
+    }
+    const desk = built.screens["app~screens~desk.js"];
+    const inbox = built.screens["app~screens~inbox.js"];
+
+    expect(desk?.modules).toStrictEqual([
+      "app~components~greeting.js",
+      "app~screens~desk.js",
+    ]);
+    expect(inbox?.modules).toStrictEqual([
+      "app~components~greeting.js",
+      "app~components~icons.js",
+      "app~screens~inbox.js",
+    ]);
+    const button = "@grasp-os~ui~components~button.js";
+    const badge = "@grasp-os~ui~components~badge.js";
+    const icon = "lucide-react~icons~inbox.js";
+    const has = (modules: string[] | undefined): boolean[] =>
+      [button, badge, icon].map((name) => modules?.includes(name) ?? false);
+    expect({
+      desk: has(desk?.kitModules),
+      inbox: has(inbox?.kitModules),
+    }).toStrictEqual({
+      desk: [true, false, false],
+      inbox: [false, true, true],
+    });
+
+    // Each screen runs on what the build names for it and nothing else.
+    const entries = Object.entries(built.screens);
+    await expect(
+      Promise.all(
+        entries.map(
+          async ([entry, closure]) =>
+            await evaluate(
+              {
+                ...(await kitModulesNamed(closure.kitModules)),
+                ...Object.fromEntries(
+                  closure.modules.map((name) => [
+                    name,
+                    built.modules[name] ?? "",
+                  ])
+                ),
+              },
+              [entry]
+            )
+        )
+      )
+    ).resolves.toMatchObject(
+      entries.map(([entry]) => ({ [entry]: { default: "function" } }))
+    );
+  });
+
+  it("keeps every component of the kit available, and loads none a screen doesn't import", async () => {
+    const { modules } = await kitModules(env.ASSETS);
+    const components = Object.keys(modules).filter((name) =>
+      name.startsWith("@grasp-os~ui~components~")
+    );
+    const specifiers = components.map((name) =>
+      name.slice(0, -".js".length).replaceAll("~", "/")
+    );
+    const built = await buildScreens(env, {
+      ...screen("small"),
+      "screens/all.tsx": `${specifiers.map((specifier, index) => `import * as c${index} from "${specifier}";`).join("\n")}
+
+export default function All() {
+  return <p>{[${specifiers.map((_, index) => `c${index}`).join(", ")}].length}</p>;
+}
+`,
+    });
+    if (!built.ok) {
+      throw new Error(JSON.stringify(built.diagnostics, null, 2));
+    }
+    const all = built.screens["app~screens~all.js"];
+    const small = built.screens["app~screens~desk.js"];
+
+    expect(components.length).toBeGreaterThan(0);
+    expect(all?.kitModules).toStrictEqual(expect.arrayContaining(components));
+    await expect(
+      evaluate(
+        {
+          ...(await kitModulesNamed(all?.kitModules ?? [])),
+          "app~screens~all.js": built.modules["app~screens~all.js"] ?? "",
+        },
+        ["app~screens~all.js"]
+      )
+    ).resolves.toMatchObject({ "app~screens~all.js": { default: "function" } });
+    // The screen next to it, which imports none of them, loads none of them.
+    expect(
+      small?.kitModules.filter((name) => name.startsWith("@grasp-os~ui~"))
+    ).toStrictEqual([]);
+  });
+
+  it("has the classes of the kit modules an App loads in its CSS, not the catalog's", async () => {
+    // The sidebar's width, a class only the sidebar has.
+    const sidebarClass = "w-\\(--sidebar-width\\)";
+    const without = await buildScreens(env, sampleApp);
+    const withSidebar = await buildScreens(env, {
+      "screens/desk.tsx": `import { Sidebar, SidebarProvider } from "@grasp-os/ui/components/sidebar";
+
+export default function Desk() {
+  return (
+    <SidebarProvider>
+      <Sidebar />
+    </SidebarProvider>
+  );
+}
+`,
+    });
+
+    expect(without.ok && without.css).not.toContain(sidebarClass);
+    expect(withSidebar.ok && withSidebar.css).toContain(sidebarClass);
   });
 
   it("has React DOM in the kit, for the page that renders screens", async () => {

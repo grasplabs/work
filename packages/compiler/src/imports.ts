@@ -264,6 +264,14 @@ const fromIconModule = (specifier: Specifier, module: string): Statement => {
   };
 };
 
+/** What one compiled file imports, by flat module name. */
+export interface ModuleImports {
+  /** The App's own modules. */
+  app: Set<string>;
+  /** The kit's modules. */
+  kit: Set<string>;
+}
+
 /** What the React Compiler's output imports, besides what App code may. */
 const compilerRuntime = "react/compiler-runtime";
 
@@ -271,7 +279,7 @@ const compilerRuntime = "react/compiler-runtime";
  * A Babel plugin that points a compiled module's imports at flat module
  * names: App files by path, kit modules by specifier, and each lucide-react
  * icon at its own module, so a page loads only the icons it uses. It adds
- * the kit modules it points at to `kitImports`.
+ * the modules it points at to `imported`.
  *
  * It runs on compiled code, so it also sees the imports the compiler and
  * the JSX transform added, which the check of the source can't: a
@@ -283,7 +291,7 @@ export const rewriteImports =
     file: string,
     files: ReadonlySet<string>,
     kit: Kit,
-    kitImports: Set<string>
+    imported: ModuleImports
   ) =>
   () => {
     const allowed = new Set([...kit.imports, compilerRuntime]);
@@ -291,7 +299,7 @@ export const rewriteImports =
       if (module === undefined) {
         throw new Error("Not a lucide-react icon.");
       }
-      kitImports.add(module);
+      imported.kit.add(module);
       return module;
     };
     const moduleFor = (specifier: string): string => {
@@ -307,7 +315,9 @@ export const rewriteImports =
       if (target === undefined) {
         throw new Error(`"${specifier}" is not a file in this App.`);
       }
-      return appModuleName(target);
+      const module = appModuleName(target);
+      imported.app.add(module);
+      return module;
     };
     const rewriteCall = (call: Call): void => {
       const [first] = call.arguments;

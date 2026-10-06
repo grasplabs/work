@@ -2,8 +2,11 @@
  * `vp run dev`: the frontend (localhost:5173) with core and connect behind
  * it (localhost:8787), and the fake IdP people sign in through, as the
  * client's Entra tenant (apps/core/test/idp-worker.ts). Any email at
- * acme.test signs in; admin@acme.test joins as an admin. When one of them
- * stops, or this script is stopped, all of them stop.
+ * acme.test signs in; admin@acme.test joins as an admin. The screen
+ * compiler is built again when the kit or the compiler changes
+ * (packages/compiler/watch.ts), into the assets core serves, so App screens
+ * follow `@grasp-os/ui` as the frontend does. When one of them stops, or
+ * this script is stopped, all of them stop.
  */
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
@@ -36,6 +39,8 @@ const children = [
     "--port",
     String(localIdpPort),
   ]),
+  // Core's dev script builds the compiler once, into these assets.
+  start(process.execPath, ["packages/compiler/watch.ts", "apps/web/dist"]),
 ];
 
 /** How long a stopped process group gets to finish before it's killed. */
