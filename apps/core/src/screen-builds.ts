@@ -6,7 +6,7 @@ import { screenPath } from "@grasp-os/shared/screens";
 import { drizzle } from "drizzle-orm/d1";
 
 import { screenBuilds } from "./db/core/schema.ts";
-import { screenCode } from "./screens.ts";
+import { versionScreens } from "./screens.ts";
 
 // What each screen of a version builds to with this release's kit, kept
 // in D1 (`screen_builds`) so what waits for an admin is a query
@@ -65,8 +65,9 @@ export const recordVersionBuilds = async (
     return name === undefined ? [] : [name];
   });
   try {
+    const codeOf = await versionScreens(env, files, version);
     const built = await Promise.all(
-      screens.map(async (name) => await screenCode(env, files, name, version))
+      screens.map(async (name) => await codeOf(name))
     );
     await recordBuilds(env, app, version, built);
   } catch (error) {

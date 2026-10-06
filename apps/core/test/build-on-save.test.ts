@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { commitFiles, setCurrentVersion, versionFiles } from "../src/apps.ts";
 import { buildOnSave } from "../src/save-builds.ts";
+import { reviewScreens } from "../src/screen-trust-rpc.ts";
 import {
   buildScreens,
   buildServer,
@@ -362,5 +363,114 @@ export class App {}
     held.resolve(true);
 
     expect(slow).toBe("screen.build_slow");
+  });
+
+  it("reviews a version of several screens on one build of it", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder);
+    const by = await builder.api.whoami();
+    const unreachable: WorkerLoader = {
+      get: () => {
+        throw new Error("The compiler is unreachable");
+      },
+      load: () => {
+        throw new Error("The compiler is unreachable");
+      },
+    };
+    const text = crypto.randomUUID();
+    // Saved while the compiler was out of reach: nothing of it is cached.
+    await commitFiles(
+      { ...env, LOADER: unreachable },
+      by,
+      app,
+      {
+        "screens/desk.tsx": screen(text)["screens/desk.tsx"],
+        "screens/inbox.tsx": screen(`${text} inbox`)["screens/desk.tsx"],
+        "screens/report.tsx": screen(`${text} report`)["screens/desk.tsx"],
+      },
+      "Save"
+    );
+    // The compiler, counting the builds that start it.
+    let built = 0;
+    const counting: WorkerLoader = {
+      get: (...args) => {
+        built += 1;
+        return env.LOADER.get(...args);
+      },
+      load: (...args) => {
+        built += 1;
+        return env.LOADER.load(...args);
+      },
+    };
+
+    const review = await reviewScreens(
+      { ...env, LOADER: counting },
+      by,
+      app,
+      1
+    );
+
+    expect({
+      screens: review.screens.map(({ screen: name, artifact }) => ({
+        name,
+        builds: artifact !== null,
+      })),
+      built,
+    }).toStrictEqual({
+      screens: [
+        { name: "desk", builds: true },
+        { name: "inbox", builds: true },
+        { name: "report", builds: true },
+      ],
+      built: 1,
+    });
+  });
+
+  it("reviews a version with no screens without building anything", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder);
+    const by = await builder.api.whoami();
+    await commitFiles(env, by, app, server(crypto.randomUUID()), "Save");
+    let built = 0;
+    const counting: WorkerLoader = {
+      get: (...args) => {
+        built += 1;
+        return env.LOADER.get(...args);
+      },
+      load: (...args) => {
+        built += 1;
+        return env.LOADER.load(...args);
+      },
+    };
+    let read = 0;
+    const reading = new Proxy(env.FILES, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "get" && typeof value === "function") {
+          return (key: string, ...rest: unknown[]): unknown => {
+            if (key.startsWith("screen-builds/")) {
+              read += 1;
+            }
+            return Reflect.apply(value, target, [key, ...rest]);
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    const review = await reviewScreens(
+      { ...env, LOADER: counting, FILES: reading },
+      by,
+      app,
+      1
+    );
+
+    expect({ screens: review.screens, built, read }).toStrictEqual({
+      screens: [],
+      built: 0,
+      read: 0,
+    });
   });
 });

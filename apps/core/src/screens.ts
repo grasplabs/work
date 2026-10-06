@@ -19,7 +19,11 @@ import type {
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { screenErrors, screenNameSchema } from "@grasp-os/shared/screens";
+import {
+  screenErrors,
+  screenNameSchema,
+  screenPath,
+} from "@grasp-os/shared/screens";
 
 import type { FrameCode } from "./screen-frame.ts";
 
@@ -209,25 +213,30 @@ const pick = (
     })
   );
 
+/** The screens of a version, built once, for each screen's code. */
+export type VersionScreens = (screen: unknown) => Promise<BuiltScreen>;
+
 /**
- * Screen `screen` of an App's `files` (at `version`; null for a chat's
- * draft), built, with what it loads and nothing else: its own module and
- * the App's and the kit's modules it imports, not the App's other screens
- * or the rest of the kit.
+ * Builds the screens of an App's `files` (at `version`; null for a chat's
+ * draft) once, within the build wait, the kit's modules too: whoever asked
+ * hears `screen.build_slow` rather than wait on a build that doesn't
+ * answer, and `screen.build_failed` when it doesn't build. All screens
+ * build together, so one build serves each of them: the answer gives each
+ * screen's code from it (`screenCode` for one). Files with no screen
+ * build nothing (the compiler would refuse them): there is no screen's
+ * code to give.
  */
-export const screenCode = async (
+export const versionScreens = async (
   env: Env,
   files: Record<string, string>,
-  screen: unknown,
   version: number | null
-): Promise<BuiltScreen> => {
-  const name = screenErrors.parse("screen.invalid", screenNameSchema, screen);
-  const path = `screens/${name}.tsx`;
-  if (!Object.hasOwn(files, path)) {
-    throw screenErrors.create("screen.not_found");
+): Promise<VersionScreens> => {
+  if (!Object.keys(files).some((path) => screenPath.test(path))) {
+    return async () => {
+      await Promise.resolve();
+      throw screenErrors.create("screen.not_found");
+    };
   }
-  // Within the build wait, the kit's modules too: whoever asked hears
-  // `screen.build_slow` rather than wait on a build that doesn't answer.
   const loaded = await withinBuildWait(
     env,
     async () =>
@@ -243,26 +252,54 @@ export const screenCode = async (
       buildFailed(version, build)
     );
   }
-  const entry = appModuleName(path);
-  const closure = build.screens[entry];
-  if (closure === undefined) {
-    // The file is there and the build passed: the build is at fault.
-    throw new Error(`The build has no closure for the screen in ${path}.`);
+  return async (screen) => {
+    const name = screenErrors.parse("screen.invalid", screenNameSchema, screen);
+    const path = `screens/${name}.tsx`;
+    if (!Object.hasOwn(files, path)) {
+      throw screenErrors.create("screen.not_found");
+    }
+    const entry = appModuleName(path);
+    const closure = build.screens[entry];
+    if (closure === undefined) {
+      // The file is there and the build passed: the build is at fault.
+      throw new Error(`The build has no closure for the screen in ${path}.`);
+    }
+    const code = {
+      entry,
+      runtime: kitModuleName(screenRuntime),
+      modules: pick(build.modules, closure.modules),
+      kit: pick(kit, closure.kitModules),
+      css: build.css,
+    };
+    // Which code a frame runs, in core's words: what an admin approves,
+    // what the frame's document runs and nothing else (screen-frame.ts),
+    // and what the page expects the frame to say back once the screen has
+    // mounted (screen-host.ts).
+    return {
+      screen: name,
+      code,
+      artifact: await sha256Hex(canonicalJson(code)),
+    };
+  };
+};
+
+/**
+ * Screen `screen` of an App's `files` (at `version`; null for a chat's
+ * draft), built, with what it loads and nothing else: its own module and
+ * the App's and the kit's modules it imports, not the App's other screens
+ * or the rest of the kit. A name that isn't one of its screens is refused
+ * before anything builds.
+ */
+export const screenCode = async (
+  env: Env,
+  files: Record<string, string>,
+  screen: unknown,
+  version: number | null
+): Promise<BuiltScreen> => {
+  const name = screenErrors.parse("screen.invalid", screenNameSchema, screen);
+  if (!Object.hasOwn(files, `screens/${name}.tsx`)) {
+    throw screenErrors.create("screen.not_found");
   }
-  const code = {
-    entry,
-    runtime: kitModuleName(screenRuntime),
-    modules: pick(build.modules, closure.modules),
-    kit: pick(kit, closure.kitModules),
-    css: build.css,
-  };
-  // Which code a frame runs, in core's words: what an admin approves, what
-  // the frame's document runs and nothing else (screen-frame.ts), and what
-  // the page expects the frame to say back once the screen has mounted
-  // (screen-host.ts).
-  return {
-    screen: name,
-    code,
-    artifact: await sha256Hex(canonicalJson(code)),
-  };
+  const built = await versionScreens(env, files, version);
+  return await built(name);
 };

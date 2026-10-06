@@ -17,7 +17,6 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import {
   auditOutbox,
   permissions,
@@ -351,26 +350,18 @@ const recordRefusal = async (
     operation,
     stage,
   ]);
-  const host = appHost(env, app);
-  if (await host.refusalAudited(refusal)) {
-    return;
-  }
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    outboxed(db, {
-      actor: actorOf(by),
-      action: "app.artifact.refused",
-      target: { type: "app", id: app },
-      detail: {
-        artifact: artifact ?? null,
-        reason,
-        operation,
-        stage,
-        generation,
-      },
-    }),
-  ]);
-  await host.noteRefusal(refusal);
+  await appHost(env, app).auditRefusal(refusal, {
+    actor: actorOf(by),
+    action: "app.artifact.refused",
+    target: { type: "app", id: app },
+    detail: {
+      artifact: artifact ?? null,
+      reason,
+      operation,
+      stage,
+      generation,
+    },
+  });
 };
 
 /**
