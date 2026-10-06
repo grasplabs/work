@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { sessionEndedCloseCode } from "../src/rpc.ts";
-import { sessionRecheckMs } from "../src/session-check.ts";
+import { recheckedEvery, sessionRecheckMs } from "../src/session-check.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant, clientOrigin } from "./sign-in-config.ts";
 import {
@@ -165,6 +165,56 @@ describe("sessions end", () => {
         stillFirst,
         second: reads.sessions - opening,
       }).toStrictEqual({ opening: 1, first: 1, stillFirst: 1, second: 2 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// How a connection keeps its reading (`recheckedEvery`), as pure logic: a
+// reading that failed for a reason other than an ended session (a busy
+// database) must never keep refusing once the database is back.
+describe("a reading of the session", () => {
+  it("that failed isn't kept: the next ask reads again, in the same moment", async () => {
+    let reads = 0;
+    const read = recheckedEvery(sessionRecheckMs, async () => {
+      reads += 1;
+      return reads === 1
+        ? await Promise.reject(new Error("The database is busy"))
+        : reads;
+    });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      await expect(read()).rejects.toThrow("The database is busy");
+      await expect(read()).resolves.toBe(2);
+      // And the reading that succeeded is kept for the window.
+      await expect(read()).resolves.toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("that failed late doesn't drop a newer one made meanwhile", async () => {
+    const older = Promise.withResolvers<string>();
+    const answers = [older.promise, Promise.resolve("newer")];
+    let reads = 0;
+    const read = recheckedEvery(sessionRecheckMs, async () => {
+      const answer = answers[reads] ?? Promise.resolve("read again");
+      reads += 1;
+      return await answer;
+    });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const first = read();
+      // The older reading runs past its window; the next ask reads anew.
+      vi.setSystemTime(Date.now() + sessionRecheckMs);
+      await expect(read()).resolves.toBe("newer");
+      older.reject(new Error("The database is busy"));
+      await expect(first).rejects.toThrow("The database is busy");
+      expect({ kept: await read(), reads }).toStrictEqual({
+        kept: "newer",
+        reads: 2,
+      });
     } finally {
       vi.useRealTimers();
     }
