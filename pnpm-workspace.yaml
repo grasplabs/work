@@ -58,6 +58,8 @@ catalog:
   semver: 7.8.5
   "@types/semver": 7.8.0
   zod: 4.6.5
+  # The types of Standard Schema, which the SDK's value schemas implement.
+  "@standard-schema/spec": 1.1.0
 
   # Identity, agents, connections
   # Better Auth's core, for its IP normalisation in the router; same release

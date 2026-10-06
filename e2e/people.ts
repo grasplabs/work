@@ -87,8 +87,8 @@ export interface Person {
   cookie: string;
 }
 
-/** The person's API over `/rpc`, from Node, as their browser would open it. */
-export const apiOf = (person: Pick<Person, "cookie">) => {
+/** A connection to `/rpc` from Node, with the person's session cookie. */
+const rpcSocket = (person: Pick<Person, "cookie">): WebSocket => {
   const url = new URL("/rpc", origin);
   url.protocol = "ws:";
   const headers = {
@@ -98,8 +98,12 @@ export const apiOf = (person: Pick<Person, "cookie">) => {
   // SAFETY: Node's WebSocket (undici) takes `{ headers }` as its second
   // argument, which the DOM's types, loaded for page code, don't know.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const socket = new WebSocket(url, { headers } as never);
-  const core = newWebSocketRpcSession<CoreApi>(socket);
+  return new WebSocket(url, { headers } as never);
+};
+
+/** The person's API over `/rpc`, from Node, as their browser would open it. */
+export const apiOf = (person: Pick<Person, "cookie">) => {
+  const core = newWebSocketRpcSession<CoreApi>(rpcSocket(person));
   return { core, api: core.authenticate() };
 };
 
@@ -132,6 +136,7 @@ export const endSession = async (
 const cast = {
   apps: { builder: "builder", user: "user", admin: "admin" },
   screens: { one: "builder", two: "builder" },
+  screenAttacks: { builder: "builder" },
   screenWorkflows: { builder: "builder", admin: "admin" },
   decisionAnswered: { builder: "builder", decider: "user", other: "admin" },
   decisionUnreachable: { decider: "user" },
@@ -271,11 +276,53 @@ export const peopleIn = <S extends Scene>(
   return people as Record<keyof (typeof cast)[S], Person>;
 };
 
+/**
+ * Carries a page's `/rpc` connection through Node, which adds the
+ * person's session cookie. Only for WebKit, which keeps a Secure cookie
+ * from `http://localhost` where Chromium and Firefox send it: the stack
+ * runs without TLS, so its pages would be signed out there. Everything
+ * the page and core say to each other passes as it is.
+ */
+const carrySession = async (
+  context: BrowserContext,
+  person: Person
+): Promise<void> => {
+  await context.routeWebSocket("**/rpc", (page) => {
+    const core = rpcSocket(person);
+    const waiting: string[] = [];
+    core.addEventListener("open", () => {
+      for (const message of waiting) {
+        core.send(message);
+      }
+      waiting.length = 0;
+    });
+    core.addEventListener("message", (event: MessageEvent<string>) => {
+      page.send(event.data);
+    });
+    core.addEventListener("close", (event) => {
+      void page.close({ code: event.code, reason: event.reason });
+    });
+    page.onMessage((message) => {
+      if (core.readyState === WebSocket.OPEN) {
+        core.send(String(message));
+      } else {
+        waiting.push(String(message));
+      }
+    });
+    page.onClose(() => {
+      core.close();
+    });
+  });
+};
+
 /** Gives a browser context the person's session. */
 export const signInTo = async (
   context: BrowserContext,
   person: Person
 ): Promise<void> => {
+  if (context.browser()?.browserType().name() === "webkit") {
+    await carrySession(context, person);
+  }
   await context.addCookies([
     {
       name: sessionCookie,

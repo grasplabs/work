@@ -46,9 +46,29 @@ const contentSecurityPolicy = policy({
  *   frames, no form targets and no `<base>`.
  * - Only the product page may frame it.
  *
- * What a sandboxed frame keeps despite its policy (navigating itself away,
- * WebRTC) is an accepted risk for now: the screen sees only what the person
- * can already see in that App.
+ * A sandboxed frame may still load another address in its own place. This
+ * policy says nothing about that; the page's does (`frame-src 'self'`
+ * above), so the frame gets no further than this origin, where the page
+ * notices and stops the screen (the frontend's screen-host.ts).
+ *
+ * This is not a promise that nothing leaves the frame. WebRTC stays open,
+ * and no header here closes it: a screen can make an `RTCPeerConnection`
+ * with a TURN or STUN server of its choosing, and the browser sends that
+ * server packets, with a username the screen wrote. `connect-src` doesn't
+ * govern ICE, and the `webrtc 'block'` directive changed nothing in any
+ * browser we test. Chromium and WebKit send the packets; Firefox, run
+ * headless against a server on the same machine, sent none in the time
+ * the test waits, which says nothing about a server elsewhere. Deleting
+ * or wrapping `RTCPeerConnection` in the frame would be no boundary
+ * either: the screen's code runs in the same realm and can get the
+ * original back from a frame of its own, so we don't pretend to.
+ *
+ * So what keeps data in is not this policy but what a screen is handed in
+ * the first place: only what its person may already see in that App, and,
+ * for data that must not leave, only code a person has reviewed (artifact
+ * approval: core's to enforce, never the browser's). The browser tests
+ * write down what each browser did with WebRTC and never count it as
+ * blocked (e2e/screen-attacks.e2e.ts).
  */
 const screenFramePolicy = policy({
   sandbox: "allow-scripts",

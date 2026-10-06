@@ -14,16 +14,19 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
-import type { AppErrorEntry, RunChange } from "@grasp-os/shared/screens";
+import { screenLimits } from "@grasp-os/shared/screens";
+import type { AppErrorLog, RunChange } from "@grasp-os/shared/screens";
 import {
   statisticErrors,
   statisticLimitsOf,
 } from "@grasp-os/shared/statistics";
 import type { StatisticUse } from "@grasp-os/shared/statistics";
+import { TokenBuckets } from "@grasp-os/shared/token-bucket";
 import { DurableObject } from "cloudflare:workers";
 
 import { appBindings } from "./app-bindings.ts";
-import { addToErrorLog, readErrorLog } from "./app-error-log.ts";
+import { ErrorLog } from "./app-error-log.ts";
+import type { ReportedProblem } from "./app-error-log.ts";
 import { findApp, versionFiles } from "./apps.ts";
 import { appHost } from "./durable-objects.ts";
 import { sandbox } from "./sandbox.ts";
@@ -75,6 +78,15 @@ const reservedMethods: ReadonlySet<string> = new Set(reservedAppMethods);
 
 /** Where the host counts starts on new code or permissions (`#load`, `restart`). */
 const generationKey = "generation";
+
+/** How often, at most, the count of dropped reports is written to the log. */
+const suppressedWriteMs = 60_000;
+
+/** How often, at most, refused requests of an App's screens are logged. */
+const refusalLogMs = 60_000;
+
+/** The one bucket all of an App's reports share. */
+const appBucket = "app";
 
 /** Where the host keeps the version its code last started on. */
 const versionKey = "version";
@@ -377,6 +389,28 @@ export class App extends DurableObject<Env> {
   /** The minute a read refused past its bounds was last audited. */
   #limitedAuditMinute = -1;
 
+  // What the App's screens may ask and report, counted here because every
+  // connection of every person to this App ends at this one object: a
+  // count the page or one connection kept is skipped by opening another.
+  // Kept in memory: a restart of this object starts the buckets full,
+  // which an idle App's are anyway.
+
+  /** Each person's requests of the App's screens. */
+  readonly #requests = new TokenBuckets(screenLimits.requests);
+
+  /** The reports kept of each person's screens, and of all of them. */
+  readonly #callerReports = new TokenBuckets(screenLimits.callerReports);
+  readonly #appReports = new TokenBuckets(screenLimits.appReports);
+
+  /** The App's error log, in this object's own storage. */
+  readonly #errorLog = new ErrorLog(this.ctx.storage);
+
+  /** Reports dropped unread and not yet in the log's count, and when it was last written. */
+  readonly #suppressed = { writtenAt: 0, writing: false };
+
+  /** Requests refused since the last line logged of them, and when that was. */
+  #refused = { requests: 0, loggedAt: 0 };
+
   get #app(): AppId {
     return appIdSchema.parse(this.ctx.id.name);
   }
@@ -508,14 +542,86 @@ export class App extends DurableObject<Env> {
     await this.ctx.storage.put(restrictedKey, true);
   }
 
-  /** Adds an entry to the App's error log (app-error-log.ts). */
-  async logError(entry: AppErrorEntry): Promise<void> {
-    await addToErrorLog(this.ctx.storage, entry);
+  /**
+   * Whether `userId`'s screen may ask the App one more thing now
+   * (`screenLimits.requests`). Asked before the request is read, so one
+   * that is refused or malformed counts too.
+   */
+  admitRequest(userId: string): boolean {
+    const now = Date.now();
+    const admitted = this.#requests.take(userId, now);
+    if (!admitted) {
+      this.#refused.requests += 1;
+      // One line a minute for whoever audits it, not one a request.
+      if (now - this.#refused.loggedAt >= refusalLogMs) {
+        log.warn("screen.requests_limited", {
+          appId: this.#app,
+          refused: this.#refused.requests,
+        });
+        this.#refused = { requests: 0, loggedAt: now };
+      }
+    }
+    return admitted;
   }
 
-  /** The App's error log, newest first. */
-  async errors(): Promise<AppErrorEntry[]> {
-    return await readErrorLog(this.ctx.storage);
+  /**
+   * Whether one more report of `userId`'s screen is kept now: within what
+   * one person's screens may report, and all of the App's together. One
+   * that isn't is only counted. The count reaches the log at once the
+   * first time and at most once a minute after, so a flood of reports
+   * writes one number, not a record each.
+   */
+  async admitReport(userId: string): Promise<boolean> {
+    const now = Date.now();
+    // Asked of the App's bucket first, taken from it last: a report the
+    // App has no room for must not use up the person's own.
+    const admitted =
+      this.#appReports.has(appBucket, now) &&
+      this.#callerReports.take(userId, now) &&
+      this.#appReports.take(appBucket, now);
+    if (!admitted) {
+      this.#errorLog.suppress();
+      if (
+        !this.#suppressed.writing &&
+        now - this.#suppressed.writtenAt >= suppressedWriteMs
+      ) {
+        await this.#writeSuppressed(now);
+      }
+    }
+    return admitted;
+  }
+
+  /**
+   * Writes the count of dropped reports to the log. The time of the write
+   * moves on only once the log has it: after one that fails, the next
+   * dropped report tries again.
+   */
+  async #writeSuppressed(now: number): Promise<void> {
+    this.#suppressed.writing = true;
+    try {
+      const reports = await this.#errorLog.writeSuppressed();
+      this.#suppressed.writtenAt = now;
+      // One line for the operator too, as often as the number is written.
+      if (reports > 0) {
+        log.warn("screen.reports_suppressed", { appId: this.#app, reports });
+      }
+    } finally {
+      this.#suppressed.writing = false;
+    }
+  }
+
+  /** Adds an admitted report to the App's error log (app-error-log.ts). */
+  async logError(reported: ReportedProblem): Promise<void> {
+    await this.#errorLog.add(reported);
+  }
+
+  /**
+   * The App's error log, with every report dropped so far counted.
+   * Reading it writes nothing: the count is written only as reports are
+   * dropped, at most once a minute (`admitReport`).
+   */
+  async errors(): Promise<AppErrorLog> {
+    return await this.#errorLog.read();
   }
 
   /**
