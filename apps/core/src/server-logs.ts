@@ -62,20 +62,23 @@ const textOf = (message: unknown): string =>
     .join(" ")
     .slice(0, maxMessage);
 
-/** The first lines the calls in `events` wrote. */
-export const serverLogsOf = (events: TraceItem[]): ServerLog[] =>
-  events
-    .flatMap(({ event, logs }) => {
-      const method =
-        event !== null && "rpcMethod" in event ? event.rpcMethod : null;
-      return logs.slice(0, maxLinesPerCall).map((line) => ({
-        at: new Date(line.timestamp).toISOString(),
-        level: levelOf(line.level),
-        message: textOf(line.message),
-        method,
-      }));
-    })
-    .slice(0, maxLinesPerCall);
+/**
+ * What the calls in `events` wrote: the first lines of each call, so one
+ * call that logs a lot crowds out none of the others in the same batch.
+ */
+export const serverLogsOf = (
+  events: readonly Pick<TraceItem, "event" | "logs">[]
+): ServerLog[] =>
+  events.flatMap(({ event, logs }) => {
+    const method =
+      event !== null && "rpcMethod" in event ? event.rpcMethod : null;
+    return logs.slice(0, maxLinesPerCall).map((line) => ({
+      at: new Date(line.timestamp).toISOString(),
+      level: levelOf(line.level),
+      message: textOf(line.message),
+      method,
+    }));
+  });
 
 /** The tail of an isolate running App server code. */
 export class AppTail extends WorkerEntrypoint<Env, TailOf> {
