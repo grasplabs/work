@@ -14,4 +14,3 @@ We don't accept outside pull requests.
 - [ ] Schema changes are expand-only (no drops or renames in the same release)
 - [ ] New external calls go through connect; new model calls through the model gateway
 - [ ] No secrets, client names or client configuration
-- [ ] Risky or user-visible changes ship behind a feature flag
