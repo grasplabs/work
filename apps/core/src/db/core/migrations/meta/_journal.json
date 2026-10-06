@@ -295,6 +295,13 @@
       "when": 1791246912722,
       "tag": "0041_dependency_approval",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1791311175831,
+      "tag": "0042_blueprint_declared_permissions",
+      "breakpoints": true
     }
   ]
 }
