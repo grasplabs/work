@@ -289,10 +289,13 @@ describe("the built-in blueprints", () => {
       listed: listed
         .filter(({ id }) => id === "hello")
         .map(({ name, description }) => [name, description]),
-      audited: helloActions(events),
+      audited: events
+        .filter(({ target }) => target?.id === "hello")
+        .map(({ action, detail }) => [action, detail.name, detail.description]),
     }).toStrictEqual({
       listed: [["Hi", "Says hi."]],
-      audited: ["blueprint.changed"],
+      // What it became: with the events before it, what it was.
+      audited: [["blueprint.changed", "Hi", "Says hi."]],
     });
 
     await reinstall();

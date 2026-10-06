@@ -532,6 +532,32 @@ describe("blueprints", { timeout: 60_000 }, () => {
     });
   });
 
+  it("leave nothing behind in storage, marked and unmarked again and again", async () => {
+    const owner = await personApi("builder");
+    const source = await notesApp(owner);
+    /** What is stored under blueprints/ and under the App. */
+    const stored = async (): Promise<string[]> => {
+      const [blueprintObjects, appObjects] = await Promise.all([
+        env.FILES.list({ prefix: "blueprints/" }),
+        env.FILES.list({ prefix: `apps/${source}/` }),
+      ]);
+      return [...blueprintObjects.objects, ...appObjects.objects]
+        .map(({ key }) => key)
+        .toSorted();
+    };
+    const before = await stored();
+
+    const markAndUnmark = async (): Promise<void> => {
+      const { id } = await owner.api.apps.blueprints.mark(source, 1);
+      await owner.api.apps.blueprints.unmark(id);
+    };
+    await markAndUnmark();
+    await markAndUnmark();
+    await markAndUnmark();
+
+    await expect(stored()).resolves.toStrictEqual(before);
+  });
+
   it("are listed newest first", async () => {
     const owner = await personApi("builder");
     const source = await notesApp(owner);

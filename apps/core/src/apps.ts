@@ -84,7 +84,7 @@ const versionsPerPage = 100;
 const treeKey = (app: AppId, tree: string): string =>
   `apps/${app}/trees/${tree}.json`;
 
-/** A blueprint's code (app-blueprints.ts), stored as a version's is. */
+/** A built-in blueprint's code (app-blueprints.ts), stored as a version's is. */
 const blueprintTreeKey = (blueprint: BlueprintId, tree: string): string =>
   `blueprints/${blueprint}/trees/${tree}.json`;
 
@@ -110,13 +110,20 @@ const readTree = async (
 ): Promise<Map<string, string>> =>
   await readTreeAt(env, treeKey(app, tree), tree);
 
-/** A blueprint's files, checked against the hash that names them. */
+/**
+ * A blueprint's files, checked against the hash that names them: a marked
+ * one's are its version's, stored once under its App (versions are never
+ * deleted, so neither are they); a built-in's are its own.
+ */
 export const blueprintFiles = async (
   env: Env,
-  blueprint: BlueprintId,
-  tree: string
+  { id, appId, tree }: { id: BlueprintId; appId: AppId | null; tree: string }
 ): Promise<Map<string, string>> =>
-  await readTreeAt(env, blueprintTreeKey(blueprint, tree), tree);
+  await readTreeAt(
+    env,
+    appId === null ? blueprintTreeKey(id, tree) : treeKey(appId, tree),
+    tree
+  );
 
 export const toApp = (row: AppRow): App => ({
   id: appIdSchema.parse(row.id),

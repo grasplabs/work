@@ -391,8 +391,9 @@ export const appMembers = sqliteTable(
 );
 
 /**
- * Blueprints (src/app-blueprints.ts), to create Apps from: code, stored
- * under `tree` in R2 as a version's files are, and what each App created
+ * Blueprints (src/app-blueprints.ts), to create Apps from: code (`tree`,
+ * a marked one's its version's, a built-in's stored as a version's files
+ * are), and what each App created
  * from it asks for. One is a version of an App a builder marked (`app_id`
  * and `version`, at most one per version), or one the release ships
  * (`blueprints/` in core), which has neither and is changed only by the

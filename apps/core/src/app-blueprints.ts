@@ -28,7 +28,6 @@ import {
   storeTree,
   toApp,
   toVersion,
-  versionFiles,
   versionTree,
   workflowsIn,
 } from "./apps.ts";
@@ -62,8 +61,7 @@ import type { SessionCheck } from "./session-check.ts";
 // permissions.ts). Its builders ask for the rest themselves. Nothing else
 // comes with it: none of the App's data (its storage, its workflows'
 // state, its runs), settings (parameter values), members or error log.
-// A marked blueprint keeps its own copy of the version's files, which
-// never change.
+// A marked blueprint's code is its version's tree, which never changes.
 //
 // The copy doesn't inherit what its source may have read
 // (app-provenance.ts): it has no sources until an admin grants its
@@ -159,7 +157,7 @@ const approvedVersion = (
   approved === 1 || (approved === null && app.currentVersion === version);
 
 /**
- * Marks a version as a blueprint: a copy of its files, its App's name and
+ * Marks a version as a blueprint: its tree, its App's name and
  * description, and what its App asks for or was given that each App
  * created from it asks for too (`declarableOf`). Marking it again changes
  * nothing.
@@ -187,10 +185,9 @@ export const markBlueprint = async (
     return toBlueprint(already);
   }
   const id = blueprintIdSchema.parse(crypto.randomUUID());
-  const tree = await versionTree(
-    new Map(Object.entries(await versionFiles(env, found.id, row.version)))
-  );
-  await storeBlueprintTree(env, id, tree);
+  // Its code is the version's tree, already stored under the App and never
+  // deleted: nothing is copied, so marking and unmarking leave nothing
+  // behind in storage.
   await auditedBatch(env, db, [
     db
       .insert(blueprints)
@@ -198,7 +195,7 @@ export const markBlueprint = async (
         id,
         name: found.name,
         description: found.description,
-        tree: tree.tree,
+        tree: row.tree,
         appId: found.id,
         version: row.version,
         approved: approvedVersion(found, row),
@@ -295,11 +292,11 @@ export const createFromBlueprint = async (
     fromBlueprintSchema,
     input
   );
-  const files = await blueprintFiles(
-    env,
-    blueprintIdSchema.parse(blueprint.id),
-    blueprint.tree
-  );
+  const files = await blueprintFiles(env, {
+    id: blueprintIdSchema.parse(blueprint.id),
+    appId: source?.id ?? null,
+    tree: blueprint.tree,
+  });
   // Replaced, not added: the copy has as many files as the blueprint.
   if (files.has(appMemoryPath)) {
     files.set(appMemoryPath, copiedMemory(blueprint.name));
@@ -508,7 +505,11 @@ export const installBuiltinBlueprint = async (
           ),
         outboxedIfChanged(
           db,
-          installEntry("blueprint.changed", id, { tree: tree.tree })
+          installEntry("blueprint.changed", id, {
+            name,
+            description,
+            tree: tree.tree,
+          })
         ),
       ]
     : [];
