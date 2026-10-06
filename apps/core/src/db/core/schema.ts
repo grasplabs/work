@@ -7,6 +7,7 @@ import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
 import type { Json } from "@grasp-os/shared/json";
 import type { DeclaredPermission } from "@grasp-os/shared/permissions";
+import { artifactDecisions } from "@grasp-os/shared/screen-trust";
 import { signalKinds } from "@grasp-os/shared/signals";
 import type {
   EventFilter,
@@ -408,6 +409,74 @@ export const appMembers = sqliteTable(
     index("app_members_member_idx").on(table.memberType, table.memberId),
   ]
 );
+
+/**
+ * What an admin decided about one exact build of an App's screen
+ * (src/screen-trust.ts): `artifact` is the SHA-256 of the code a frame is
+ * handed, so other code, other packages or another kit is another row.
+ * A row is written only by a decision: `approved` when an admin approves
+ * a version's screens, `revoked` when one takes that back; it keeps who
+ * made the last one and when. A build with no row is nobody's decision
+ * (`unreviewed`); what waits for an admin is worked out from the current
+ * versions' builds, never recorded. `version` and `screen` say where the
+ * build was first decided on: the same code in a later version is the
+ * same row. Rows are never deleted.
+ */
+export const screenArtifacts = sqliteTable(
+  "screen_artifacts",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    artifact: text().notNull(),
+    version: integer().notNull(),
+    screen: text().notNull(),
+    status: text({ enum: artifactDecisions }).notNull(),
+    decidedBy: text("decided_by").notNull(),
+    decidedAt: timestamp("decided_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.artifact] })]
+);
+
+/**
+ * What each screen of an App's version builds to with a release's kit
+ * (`release`, the compiler version): its hash, recorded where builds
+ * happen anyway (src/screen-builds.ts), so what waits for an admin is a
+ * query, never a build. The same files build the same way with the same
+ * release, so a row never changes; one for another release is another row.
+ */
+export const screenBuilds = sqliteTable(
+  "screen_builds",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    version: integer().notNull(),
+    release: text().notNull(),
+    screen: text().notNull(),
+    artifact: text().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.appId, table.version, table.release, table.screen],
+    }),
+  ]
+);
+
+/**
+ * An App's policy for its screens, one row per App once anything set it
+ * (none yet is `sensitive`, generation 0): what its data is to them
+ * (`output`), and a generation that goes up, in the batch that makes the
+ * change, with every approval, revocation and change of `output`. An
+ * approval lands only under the generation its admin reviewed.
+ */
+export const screenPolicies = sqliteTable("screen_policies", {
+  appId: text("app_id")
+    .primaryKey()
+    .references(() => apps.id),
+  output: text({ enum: ["sensitive", "ordinary"] }).notNull(),
+  generation: integer().notNull(),
+});
 
 /**
  * Blueprints (src/app-blueprints.ts), to create Apps from: code (`tree`,

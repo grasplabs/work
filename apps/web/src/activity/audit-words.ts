@@ -103,6 +103,19 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "app.member.refused",
     text: msg`Was refused adding a member to an engine`,
   },
+  { action: "app.artifact.approved", text: msg`Approved an app's code` },
+  {
+    action: "app.artifact.revoked",
+    text: msg`Took back the approval of an app's code`,
+  },
+  {
+    action: "app.artifact.refused",
+    text: msg`An app nobody approved was refused the engine's data`,
+  },
+  {
+    action: "app.output.classified",
+    text: msg`Changed whether an engine's data needs approved apps`,
+  },
   { action: "app", text: msg`Changed an engine` },
   { action: "member.removed", text: msg`Removed a member` },
   { action: "member.role", text: msg`Changed a member's role` },

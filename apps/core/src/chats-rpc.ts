@@ -33,13 +33,14 @@ import { callbackFor, isStub, recheckedEvery } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
 import { fixQuestion, runToFix } from "./run-fixes.ts";
 import { RunSubscription } from "./run-subscription.ts";
+import { frameAccess, stageFrame } from "./screen-frame.ts";
 import {
   admitPreviewCall,
   argumentsFor,
-  screenCode,
   stillHasRole,
   withinAnswer,
 } from "./screens-rpc.ts";
+import { screenCode } from "./screens.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { questionSchema } from "./workspace.ts";
@@ -290,17 +291,23 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
       if (screens.length === 0) {
         throw screenErrors.create("screen.not_found");
       }
+      const built = await screenCode(
+        this.#env,
+        Object.fromEntries(files),
+        screen ?? screens[0],
+        null
+      );
+      // A preview reads no real data, so no approval decides it; its
+      // frame still runs exactly this build and nothing else.
+      await stageFrame(this.#env, built.artifact, built.code);
       return {
         app: id,
         name,
         revision: draft.revision,
         screens,
-        ...(await screenCode(
-          this.#env,
-          Object.fromEntries(files),
-          screen ?? screens[0],
-          null
-        )),
+        screen: built.screen,
+        artifact: built.artifact,
+        frameToken: await frameAccess(this.#env, built.artifact),
       };
     });
   }

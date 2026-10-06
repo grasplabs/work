@@ -20,7 +20,7 @@ import type { Viewer } from "./to-do.tsx";
 // The nav's way to the dashboard, with how many things wait on the person
 // (as the prototype's badge, `app-sidebar.tsx`): changes to confirm,
 // unread failed workflows, connections to sign in to again, packages to
-// approve and, for admins, permission requests. Read again on every other page the person
+// approve and, for admins, permission requests and apps to approve. Read again on every other page the person
 // opens and after every change on one; nothing is marked read by counting.
 
 /** A count, or none when core couldn't say. Outside the component, as the React Compiler can't compile `try`. */
@@ -73,6 +73,14 @@ const readCount = async (
           readWithin(core, async (session) => {
             const { requests } = await readPendingRequests(session);
             return requests.length;
+          })
+        )
+      : 0,
+    decidesRequests(identity)
+      ? countOf(
+          readWithin(core, async (session) => {
+            const waiting = await session.screenTrust.waiting();
+            return waiting.length;
           })
         )
       : 0,

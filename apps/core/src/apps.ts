@@ -26,6 +26,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { screenPath } from "@grasp-os/shared/screens";
+import { waitUntil } from "cloudflare:workers";
 import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -48,6 +49,7 @@ import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { requireOwnTypes } from "./knowledge/record-types.ts";
 import { madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
+import { recordVersionBuilds } from "./screen-builds.ts";
 import { requireWorkflowTestsPass } from "./workflows/code.ts";
 import {
   registerTriggers,
@@ -637,14 +639,21 @@ export const commitFiles = async (
   // whoever saved hears what doesn't build (save-builds.ts). Built from
   // the files as the version reads back, paths in order, so a build says
   // the same here as at its first use.
-  return {
-    ...toVersion(row),
-    builds: await buildOnSave(env, {
-      app: appId,
-      version: row.version,
-      files: storedTreeSchema.parse(JSON.parse(json)),
-    }),
-  };
+  const saved = storedTreeSchema.parse(JSON.parse(json));
+  const builds = await buildOnSave(env, {
+    app: appId,
+    version: row.version,
+    files: saved,
+  });
+  // What its screens build to, for what waits on an admin
+  // (screen-builds.ts), in the background: only once they built just now,
+  // so from the cache.
+  // A build that failed, or didn't finish in its wait, isn't started again
+  // here: it is recorded once it is made current, opened or reviewed.
+  if (builds.screens.status === "ok") {
+    waitUntil(recordVersionBuilds(env, appId, row.version, saved));
+  }
+  return { ...toVersion(row), builds };
 };
 
 /** A chat's draft of an App (agent-builds.ts), as a commit takes it. */
@@ -973,5 +982,10 @@ export const setCurrentVersion = async (
   if (!changed) {
     throw appErrors.create("app.conflict");
   }
+  // What its screens build to with this release's kit, which may not be
+  // the one it was committed under (screen-builds.ts): in the background,
+  // never something making it current waits on. Bounded by the build
+  // wait; what doesn't get recorded now is when it is opened or reviewed.
+  waitUntil(recordVersionBuilds(env, appId, number, files));
   return toApp(changed);
 };

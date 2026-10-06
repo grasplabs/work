@@ -34,16 +34,22 @@ const contentSecurityPolicy = policy({
 });
 
 /**
- * The policy of the document screens run in (screen-frame.ts): App code
- * nobody reviewed line by line, so no network at all.
+ * The policy of the document screens run in (screen-frame.ts), for one
+ * build: App code nobody reviewed line by line, so no network at all, and
+ * no script but `scripts`, the hash sources of the document's own inline
+ * scripts and the exact addresses of the build's modules.
  *
  * - `sandbox allow-scripts` gives it an opaque origin even when it is
  *   opened on its own, not framed: no cookies, storage or DOM of this
  *   origin, no popups, no top-level navigation, no forms.
- * - Scripts, styles, images and fonts only inline and from `data:` URLs,
- *   which is how the page hands it the screen's modules. Nothing to
- *   connect to (fetch, WebSocket, beacons, EventSource), no workers, no
- *   frames, no form targets and no `<base>`.
+ * - Scripts only from `scripts`: no `'unsafe-inline'` (so no inline
+ *   script or event handler the screen writes into its page), no `data:`
+ *   or `blob:` module, no eval, no WebAssembly. A screen that renders HTML
+ *   it was sent, or imports from a string, runs none of it.
+ * - Styles inline and from `data:` URLs, images and fonts from `data:`:
+ *   how a screen's CSS and assets come. Nothing to connect to (fetch,
+ *   WebSocket, beacons, EventSource), no workers, no frames, no form
+ *   targets and no `<base>`.
  * - Only the product page may frame it.
  *
  * A sandboxed frame may still load another address in its own place. This
@@ -66,36 +72,41 @@ const contentSecurityPolicy = policy({
  * So what keeps data in is not this policy but what a screen is handed in
  * the first place: only what its person may already see in that App, and,
  * for data that must not leave, only code a person has reviewed (artifact
- * approval: core's to enforce, never the browser's). The browser tests
- * write down what each browser did with WebRTC and never count it as
- * blocked (e2e/screen-attacks.e2e.ts).
+ * approval: core's to enforce, never the browser's). What this policy
+ * adds is that the code which runs is that code. The browser tests write
+ * down what each browser did with WebRTC and never count it as blocked
+ * (e2e/screen-attacks.e2e.ts).
  */
-const screenFramePolicy = policy({
-  sandbox: "allow-scripts",
-  "default-src": "'none'",
-  "script-src": "data: 'unsafe-inline'",
-  "style-src": "data: 'unsafe-inline'",
-  "img-src": "data:",
-  "font-src": "data:",
-  "connect-src": "'none'",
-  "worker-src": "'none'",
-  "frame-src": "'none'",
-  "form-action": "'none'",
-  "base-uri": "'none'",
-  "frame-ancestors": "'self'",
-});
+export const screenFramePolicy = (scripts: readonly string[]): string =>
+  policy({
+    sandbox: "allow-scripts",
+    "default-src": "'none'",
+    "script-src": scripts.length === 0 ? "'none'" : scripts.join(" "),
+    "style-src": "data: 'unsafe-inline'",
+    "img-src": "data:",
+    "font-src": "data:",
+    "connect-src": "'none'",
+    "worker-src": "'none'",
+    "frame-src": "'none'",
+    "form-action": "'none'",
+    "base-uri": "'none'",
+    "frame-ancestors": "'self'",
+  });
 
 /**
  * Sets the security headers on a response core sends for `url`. HSTS goes
  * only on https, since browsers ignore it over http (local development). A
  * route may send a stricter referrer policy of its own, such as
- * `no-referrer` where its URL carries a secret; it is kept.
+ * `no-referrer` where its URL carries a secret; it is kept. So is the
+ * screen frame's policy, which names its build's scripts; a frame
+ * response without one runs no script at all.
  */
 export const setSecurityHeaders = (headers: Headers, url: URL): void => {
-  headers.set(
-    "content-security-policy",
-    url.pathname === screenFramePath ? screenFramePolicy : contentSecurityPolicy
-  );
+  if (url.pathname !== screenFramePath) {
+    headers.set("content-security-policy", contentSecurityPolicy);
+  } else if (!headers.has("content-security-policy")) {
+    headers.set("content-security-policy", screenFramePolicy([]));
+  }
   headers.set("x-content-type-options", "nosniff");
   if (headers.get("referrer-policy") !== "no-referrer") {
     headers.set("referrer-policy", "strict-origin-when-cross-origin");
