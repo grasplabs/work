@@ -8,8 +8,8 @@
  *
  * Each build is a process of its own (build.ts), so it builds with the
  * compiler's sources as they are now. It writes the new release next to
- * the ones before it (`keptReleases`) and the version last; the dev server
- * reloads on the version. A build that fails (a file saved half-written, say) leaves
+ * the ones before it, which a server may still read, and the version
+ * last; the dev server reloads on the version. A build that fails (a file saved half-written, say) leaves
  * everything as it was and says so.
  */
 import { spawn } from "node:child_process";
@@ -43,16 +43,6 @@ const watched: Watched[] = [
 /** How long after a watch fails it is started again. */
 const rewatchMs = 1000;
 
-/**
- * How many releases the assets keep, the newest first. The dev server
- * reloads on a new version about a second after a build, and until then
- * reads the release it started on. Three covers a server that hasn't
- * reloaded while two more builds finished, each some seconds long; with
- * only the last two, the second of those builds would take away the
- * release the server is still on.
- */
-const keptReleases = 3;
-
 /** How long after the last change a build starts: an editor saves in bursts. */
 const settleMs = 200;
 
@@ -78,7 +68,6 @@ const rebuild = (): void => {
       path.join(root, "build.ts"),
       assets,
       ...(versionModule === undefined ? [] : [versionModule]),
-      `--keep=${keptReleases}`,
     ],
     { stdio: "inherit" }
   );

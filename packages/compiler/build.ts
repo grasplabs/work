@@ -711,12 +711,14 @@ const versionIn = (file: string): string | undefined =>
     : undefined;
 
 /**
- * Puts a release's `files` in `assets`, whole or not at all: written next
- * to where they go and moved there in one step, so a server reading its
- * assets never finds some of a release's files without the others. A
- * release that is there already is left as it is, but for its directory's
- * time, which says it is the newest again (`pruneReleases`): the same
- * version is the same files, and a server may be reading them.
+ * Puts a release's `files` in `assets`, whole or not at all: written into
+ * a directory of this build's own next to where they go and moved there in
+ * one step, so a server reading its assets never finds some of a release's
+ * files without the others, and two builds at once never write into each
+ * other's. A release that is there already is left as it is, but for its
+ * directory's time, which says it is the newest again (`pruneReleases`):
+ * the same version is the same files, and a server may be reading them.
+ * That also holds when another build put it there while this one wrote.
  */
 const writeRelease = (
   assets: string,
@@ -724,11 +726,14 @@ const writeRelease = (
   files: Record<string, string>
 ): void => {
   const release = path.join(assets, compilerAssets.directory(version));
-  if (
-    Object.keys(files).every((file) => existsSync(path.join(release, file)))
-  ) {
+  const whole = (): boolean =>
+    Object.keys(files).every((file) => existsSync(path.join(release, file)));
+  const newestAgain = (): void => {
     const now = new Date();
     utimesSync(release, now, now);
+  };
+  if (whole()) {
+    newestAgain();
     return;
   }
   mkdirSync(path.dirname(release), { recursive: true });
@@ -737,34 +742,51 @@ const writeRelease = (
     for (const [file, content] of Object.entries(files)) {
       writeFileSync(path.join(written, file), content);
     }
-    // Only what an interrupted build of an older compiler left half-written.
-    rmSync(release, { recursive: true, force: true });
     renameSync(written, release);
+  } catch (error) {
+    // A directory can't be moved onto one with files in it: another build
+    // of the same version got there first, with the same files.
+    if (!whole()) {
+      throw error;
+    }
+    newestAgain();
   } finally {
     rmSync(written, { recursive: true, force: true });
   }
 };
 
 /**
- * Removes all but the `keep` newest releases in `assets`, by the time each
- * was put there or last built again.
- *
- * Core's own build keeps one, the release it just built: no server runs
- * on the others, and a release ships with exactly its own compiler. The
- * dev watcher keeps a few (watch.ts), because the server it builds for
- * reloads only some time after a build: until then it reads the release it
- * started on, and removing that one fails its screen builds.
+ * How many releases a build leaves in the assets, the newest first. A dev
+ * server reads the release it started on until it has reloaded, about a
+ * second after a build writes a new version, and removing that release
+ * fails its screen builds. Three covers a server that hasn't reloaded while
+ * two more builds finished: the watcher's (watch.ts), or core's own build
+ * as the server starts next to it. Every build keeps as many, so no build
+ * has to know whether a server is running. What a release ships is the one
+ * it built: its frontend build empties the assets first
+ * (scripts/release/build-release.ts).
  */
-const pruneReleases = (assets: string, keep: number): void => {
+const keptReleases = 3;
+
+/**
+ * Removes the releases in `assets` that are neither among the
+ * `keptReleases` newest nor newer than `version`'s, this build's: one put
+ * there since is another build's, for it to count. Only whole releases are
+ * looked at: what a build is still writing is elsewhere (`writeRelease`).
+ * By the time each was put there or last built again.
+ */
+const pruneReleases = (assets: string, version: string): void => {
   const releases = path.join(assets, compilerAssets.directory(""));
+  const putAt = (name: string): number =>
+    statSync(path.join(releases, name)).mtimeMs;
+  const own = putAt(version);
   const newestFirst = readdirSync(releases)
-    .map((name) => ({
-      name,
-      at: statSync(path.join(releases, name)).mtimeMs,
-    }))
+    .map((name) => ({ name, at: putAt(name) }))
     .toSorted((a, b) => b.at - a.at);
-  for (const { name } of newestFirst.slice(keep)) {
-    rmSync(path.join(releases, name), { recursive: true, force: true });
+  for (const { name, at } of newestFirst.slice(keptReleases)) {
+    if (at < own) {
+      rmSync(path.join(releases, name), { recursive: true, force: true });
+    }
   }
 };
 
@@ -778,14 +800,10 @@ const pruneReleases = (assets: string, keep: number): void => {
  * core ships, and core's tests write theirs (test/global-setup.ts). One
  * module for both would let a test run point a running dev server, which
  * reloads on it, at a release its own assets don't have.
- *
- * `keep` is how many releases `assets` has afterwards, this one included
- * (`pruneReleases`).
  */
 const buildScreenCompiler = async (
   assets = path.join(dist, "assets"),
-  versionModule = releaseVersionModule,
-  keep = 1
+  versionModule = releaseVersionModule
 ): Promise<void> => {
   const { entries: icons, icons: iconNames } = iconEntries();
   const components = uiEntries();
@@ -851,32 +869,14 @@ const buildScreenCompiler = async (
     writeFileSync(written, `export const version = "${version}";\n`);
     renameSync(written, versionModule);
   }
-  pruneReleases(assets, keep);
+  pruneReleases(assets, version);
   const kitSize = Object.values(kitCode).join("").length;
   console.info(
     `Screen compiler ${version}: ${(compiler.length / 1e6).toFixed(1)} MB and ${(kitJson.length / 1e6).toFixed(1)} MB of what it knows of the kit; kit ${kitModules.version}: ${Object.keys(kitCode).length} modules, ${(kitSize / 1e6).toFixed(1)} MB`
   );
 };
 
-// `node build.ts [assets] [version module] [--keep=<releases>]`: core's
-// build runs this with its own static assets directory, core's tests with
-// theirs and a version module of their own, and the dev watcher (watch.ts)
-// as core's build does, keeping the releases a server may still read.
-const keepFlag = "--keep=";
-const flags = process.argv.slice(2).filter((arg) => arg.startsWith("--"));
-const [assetsArg, versionModuleArg] = process.argv
-  .slice(2)
-  .filter((arg) => !arg.startsWith("--"));
-const keepArg = flags.find((flag) => flag.startsWith(keepFlag));
-const keepReleases =
-  keepArg === undefined ? undefined : Number(keepArg.slice(keepFlag.length));
-if (
-  flags.length > (keepArg === undefined ? 0 : 1) ||
-  (keepReleases !== undefined &&
-    !(Number.isInteger(keepReleases) && keepReleases >= 1))
-) {
-  throw new Error(
-    "Usage: node build.ts [assets] [version module] [--keep=<releases, 1 or more>]"
-  );
-}
-await buildScreenCompiler(assetsArg, versionModuleArg, keepReleases);
+// `node build.ts [assets] [version module]`: core's build runs this with
+// its own static assets directory, core's tests with theirs and a version
+// module of their own, and the dev watcher (watch.ts) as core's build does.
+await buildScreenCompiler(process.argv[2], process.argv[3]);

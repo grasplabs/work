@@ -33,20 +33,11 @@ const scratch = (): string => {
 };
 
 /** Builds into `assets`, as a process with `NODE_ENV` set to `mode`. */
-const build = (
-  assets: string,
-  versionModule: string,
-  mode: string,
-  flags: string[] = []
-): void => {
-  execFileSync(
-    process.execPath,
-    [buildScript, assets, versionModule, ...flags],
-    {
-      env: { ...process.env, NODE_ENV: mode },
-      stdio: "pipe",
-    }
-  );
+const build = (assets: string, versionModule: string, mode: string): void => {
+  execFileSync(process.execPath, [buildScript, assets, versionModule], {
+    env: { ...process.env, NODE_ENV: mode },
+    stdio: "pipe",
+  });
 };
 
 const versionIn = (versionModule: string): string =>
@@ -56,14 +47,21 @@ const versionIn = (versionModule: string): string =>
 const releasesIn = (assets: string): string[] =>
   readdirSync(path.join(assets, compilerAssets.directory(""))).toSorted();
 
-/** Releases left in `assets` by earlier builds, each a minute newer than the last. */
-const earlierReleases = (assets: string, names: string[]): void => {
+/**
+ * Releases in `assets` put there by other builds, the first `fromNowMs`
+ * from now and each a minute newer than the last.
+ */
+const earlierReleases = (
+  assets: string,
+  names: string[],
+  fromNowMs: number
+): void => {
   const releases = path.join(assets, compilerAssets.directory(""));
-  const longAgo = Date.now() - 3_600_000;
+  const first = Date.now() + fromNowMs;
   for (const [index, name] of names.entries()) {
     const release = path.join(releases, name);
     mkdirSync(release, { recursive: true });
-    const at = new Date(longAgo + index * 60_000);
+    const at = new Date(first + index * 60_000);
     utimesSync(release, at, at);
   }
 };
@@ -176,18 +174,7 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
     expect(versionIn(versionModule)).toBe(version);
   });
 
-  it("leaves only its own release, as a release ships", () => {
-    const dir = scratch();
-    const assets = path.join(dir, "assets");
-    const versionModule = path.join(dir, "version.js");
-    earlierReleases(assets, ["0000000000000001", "0000000000000002"]);
-
-    build(assets, versionModule, "production");
-
-    expect(releasesIn(assets)).toStrictEqual([versionIn(versionModule)]);
-  });
-
-  it("keeps, for the dev watcher, the release a server started on through two more builds", () => {
+  it("keeps the release a server started on through two more builds, and drops the one before", () => {
     const dir = scratch();
     const assets = path.join(dir, "assets");
     const versionModule = path.join(dir, "version.js");
@@ -198,13 +185,29 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
       "0000000000000002",
       "0000000000000003",
     ];
-    earlierReleases(assets, [older, running, second]);
+    earlierReleases(assets, [older, running, second], -3_600_000);
 
     // The next build finishes before the server reloads, too.
-    build(assets, versionModule, "production", ["--keep=3"]);
+    build(assets, versionModule, "production");
 
     expect(releasesIn(assets)).toStrictEqual(
       [running, second, versionIn(versionModule)].toSorted()
+    );
+  });
+
+  it("never removes its own release or one put there after it, whatever else is newer", () => {
+    const dir = scratch();
+    const assets = path.join(dir, "assets");
+    const versionModule = path.join(dir, "version.js");
+    // Three other builds end after this one, as their releases' times say.
+    const later = ["0000000000000007", "0000000000000008", "0000000000000009"];
+    earlierReleases(assets, ["0000000000000001"], -3_600_000);
+    earlierReleases(assets, later, 3_600_000);
+
+    build(assets, versionModule, "production");
+
+    expect(releasesIn(assets)).toStrictEqual(
+      [...later, versionIn(versionModule)].toSorted()
     );
   });
 });
