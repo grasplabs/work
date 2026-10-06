@@ -80,7 +80,9 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      - run: vp exec playwright install --with-deps chromium
+      # Firefox and WebKit run only the attacks on a screen's frame
+      # (playwright.config.ts): the sandbox is each browser's own.
+      - run: vp exec playwright install --with-deps chromium firefox webkit
       - run: vp run e2e
       # A failing test is retried with a trace (playwright.config.ts): keep it.
       - if: failure()

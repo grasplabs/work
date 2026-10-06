@@ -1,3 +1,7 @@
+import {
+  screenFrameMounted,
+  screenLimits,
+} from "@grasp-os/shared/screen-limits";
 /**
  * What runs an App's screen inside its sandboxed frame: it connects to the
  * page around the frame over the `MessagePort` the page hands it, renders
@@ -9,10 +13,11 @@
  * is the screen's only way out: to its App's server, through the page,
  * which binds it to that one App.
  */
-import type { ScreenProblem } from "@grasp-os/shared/screens";
-import { newMessagePortRpcSession } from "capnweb";
+import { portTransport } from "@grasp-os/shared/screen-port";
+import type { ScreenMounted, ScreenProblem } from "@grasp-os/shared/screens";
+import { RpcSession } from "capnweb";
 import type { RpcStub } from "capnweb";
-import { createElement } from "react";
+import { createElement, Fragment, useEffect } from "react";
 import type { ComponentType } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -62,14 +67,41 @@ export const bridge = (): RpcStub<ScreenBridge> => {
   return connected;
 };
 
-/** Connects the frame to the page's bridge over `port`. */
+/**
+ * Connects the frame to the page's bridge over `port`, each message as
+ * text, which the page holds to a size (@grasp-os/shared/screen-port).
+ */
 export const connectBridge = (port: MessagePort): RpcStub<ScreenBridge> => {
-  connected = newMessagePortRpcSession<ScreenBridge>(port);
+  connected = new RpcSession<ScreenBridge>(portTransport(port)).getRemoteMain();
   return connected;
 };
 
+/**
+ * Which start of the frame this is, as the page handed it over with the
+ * screen: the frame's load, the hash of the code and the page's name for
+ * this start. The runtime only says them back (`screenFrameMounted`).
+ */
+export type ScreenStart = Omit<ScreenMounted, "type">;
+
+/**
+ * Renders nothing; tells the page the screen has rendered for the first
+ * time. An effect runs once React has put the first render on the page,
+ * so a screen that fails or never finishes its first render says nothing,
+ * and the page gives up on it.
+ *
+ * This only tells the page a start that worked from one that didn't. The
+ * screen's own code runs in this same frame and could post the same
+ * message; the page gives a mounted screen nothing it wouldn't otherwise.
+ */
+const Mounted = ({ start }: { start: ScreenStart }) => {
+  useEffect(() => {
+    parent.postMessage({ type: screenFrameMounted, ...start }, "*");
+  }, [start]);
+  return null;
+};
+
 /** An error's message and stack, as far as it has them, never throwing. */
-const describe = (value: unknown): Pick<ScreenProblem, "message" | "stack"> => {
+const read = (value: unknown): Pick<ScreenProblem, "message" | "stack"> => {
   if (value instanceof Error) {
     return { message: value.message, stack: value.stack };
   }
@@ -78,6 +110,20 @@ const describe = (value: unknown): Pick<ScreenProblem, "message" | "stack"> => {
   } catch {
     return { message: "(an error that can't be shown)" };
   }
+};
+
+/**
+ * An error's message and stack, cut to what a report keeps. The page
+ * takes no message over its port beyond a size and ends the session over
+ * one that is; a stack names each module by its whole address, which in
+ * this frame is the module's code, so it is far longer than what is kept.
+ */
+const describe = (value: unknown): Pick<ScreenProblem, "message" | "stack"> => {
+  const { message, stack } = read(value);
+  return {
+    message: message.slice(0, screenLimits.report.message),
+    stack: stack?.slice(0, screenLimits.report.stack),
+  };
 };
 
 const send = async (problem: ScreenProblem): Promise<void> => {
@@ -108,7 +154,10 @@ const reportProblems = (): void => {
     report({
       kind: "console",
       ...described,
-      message: args.map((arg) => describe(arg).message).join(" "),
+      message: args
+        .map((arg) => describe(arg).message)
+        .join(" ")
+        .slice(0, screenLimits.report.message),
     });
   };
 };
@@ -121,11 +170,13 @@ const isScreenModule = (value: unknown): value is { default: ComponentType } =>
 
 /**
  * Runs the screen whose module is `screen` (a name in the frame's import
- * map), connected to the page through `port`.
+ * map), connected to the page through `port`, and tells the page once it
+ * has rendered for the first time, as the `start` the page named.
  */
 export const runScreen = async (
   port: MessagePort,
-  screen: string
+  screen: string,
+  start: ScreenStart
 ): Promise<void> => {
   const page = connectBridge(port);
   reportProblems();
@@ -143,7 +194,14 @@ export const runScreen = async (
       onUncaughtError: (error) => {
         report({ kind: "error", ...describe(error) });
       },
-    }).render(createElement(loaded.default));
+    }).render(
+      createElement(
+        Fragment,
+        null,
+        createElement(loaded.default),
+        createElement(Mounted, { start })
+      )
+    );
   } catch (error) {
     report({ kind: "error", ...describe(error) });
   }

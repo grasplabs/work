@@ -3,6 +3,11 @@ import { z } from "zod";
 import type { DecisionAnswerInput, DecisionView } from "./decisions.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { AppId } from "./ids.ts";
+import {
+  screenFrameMounted,
+  screenFrameReady,
+  screenLimits,
+} from "./screen-limits.ts";
 import type { WorkflowRun } from "./workflows.ts";
 
 // An App's screens run in a sandboxed frame in the frontend (apps/web):
@@ -11,21 +16,32 @@ import type { WorkflowRun } from "./workflows.ts";
 // server through core. Core checks the person's session and role on every
 // call; the frame only ever talks to the page.
 
-/** Where the frontend frames screens from: a document core serves. */
-export const screenFramePath = "/screen-frame";
+export {
+  jsonBytes,
+  screenFrameMessage,
+  screenFrameMounted,
+  screenFramePath,
+  screenFrameReady,
+  screenLimits,
+} from "./screen-limits.ts";
 
-/**
- * What the frame posts to the page once it listens for its screen:
- * `{ type, load }`, with the `load` its address carried, so the page can
- * tell this load of the frame from an earlier one.
- */
-export const screenFrameReady = "grasp:screen-ready";
+/** A value the page or core made up: never longer than a hash in hex. */
+const stageValue = z.string().min(1).max(128);
 
-/**
- * What the page posts the frame, with a `MessagePort`, to start the
- * screen: `{ type, imports, css, runtime, entry }`.
- */
-export const screenFrameMessage = "grasp:screen";
+/** The frame's `ready`, as the page reads it. */
+export const screenReadySchema = z.strictObject({
+  type: z.literal(screenFrameReady),
+  load: stageValue,
+});
+
+/** The runtime's `mounted`, as the page reads it. */
+export const screenMountedSchema = z.strictObject({
+  type: z.literal(screenFrameMounted),
+  load: stageValue,
+  artifact: stageValue,
+  generation: stageValue,
+});
+export type ScreenMounted = z.output<typeof screenMountedSchema>;
 
 /** A screen's name: `desk` for `screens/desk.tsx`. */
 export const screenNameSchema = z
@@ -52,10 +68,15 @@ export interface ScreenBundle {
   /** The kit's modules the App's modules need, by flat name, with their code. */
   kit: Record<string, string>;
   css: string;
+  /**
+   * The SHA-256, in hex, of the code above, as core built it: which code
+   * this start of the frame was handed. The frame says it back once the
+   * screen has mounted (`screenFrameMounted`).
+   */
+  artifact: string;
 }
 
-/** The most one problem report may carry, in characters. */
-const reportLimits = { message: 2000, stack: 8000 } as const;
+const reportLimits = screenLimits.report;
 
 /**
  * A problem in a screen, as the frame reports it: an uncaught error, an
@@ -72,12 +93,32 @@ export const screenProblemSchema = z.strictObject({
 });
 export type ScreenProblem = z.output<typeof screenProblemSchema>;
 
-/** One entry of an App's error log. Times are ISO 8601. */
+/**
+ * One entry of an App's error log: a problem, and how often it was
+ * reported. The same problem in the same screen and version is one entry.
+ * Times are ISO 8601.
+ */
 export interface AppErrorEntry extends ScreenProblem {
+  /** When it was last reported. */
   at: string;
   source: "screen";
   version: number;
   screen: string;
+  /** How many times it was reported. */
+  count: number;
+}
+
+/** An App's error log, as its builders read it. */
+export interface AppErrorLog {
+  /** The newest different problems, newest first. */
+  entries: AppErrorEntry[];
+  /**
+   * At least how many reports were dropped unread because the App's
+   * screens reported more than they may: counted, never kept one by one.
+   * The last minute's count is held in memory before it is written, so a
+   * flood right before the App's host restarts is counted short.
+   */
+  suppressed: number;
 }
 
 /** A decision a run waits for, as its App's screens see it. */
@@ -136,14 +177,18 @@ export interface ScreensApi {
   call: (app: string, method: string, args: unknown[]) => Promise<unknown>;
   /** The App's current version; null while it has none. */
   version: (app: string) => Promise<number | null>;
-  /** Adds a problem in a screen at `version` to the App's error log. */
+  /**
+   * Adds a problem in a screen at `version` to the App's error log:
+   * `screen.rate_limited` past what one person's screens, or all of the
+   * App's, may report a minute, whatever the report holds.
+   */
   report: (
     app: string,
     at: { version: number; screen: string },
     problem: ScreenProblem
   ) => Promise<void>;
-  /** The App's error log, newest first. */
-  errors: (app: string) => Promise<AppErrorEntry[]>;
+  /** The App's error log. */
+  errors: (app: string) => Promise<AppErrorLog>;
   /**
    * Starts a run of the App's workflow, for the person: anyone with a role
    * in the App. Audited as started on a screen (`via: "screen"`). Behind
@@ -192,4 +237,10 @@ export const screenErrors = defineErrorFamily({
   "screen.invalid": "That isn't a valid request for a screen.",
   "screen.too_many_subscriptions":
     "A screen follows at most 20 workflows' runs at a time.",
+  "screen.rate_limited":
+    "This screen asks for too much at once. Try again in a moment.",
+  "screen.input_too_large":
+    "That is more data than a screen may send in one call.",
+  "screen.answer_too_large":
+    "The App answered with more data than a screen takes in one call.",
 });

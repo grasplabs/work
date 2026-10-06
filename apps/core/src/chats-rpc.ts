@@ -31,7 +31,13 @@ import { callbackFor, isStub, recheckedEvery } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
 import { fixQuestion, runToFix } from "./run-fixes.ts";
 import { RunSubscription } from "./run-subscription.ts";
-import { argumentsFor, screenCode, stillHasRole } from "./screens-rpc.ts";
+import {
+  admitPreviewCall,
+  argumentsFor,
+  screenCode,
+  stillHasRole,
+  withinAnswer,
+} from "./screens-rpc.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { questionSchema } from "./workspace.ts";
@@ -313,6 +319,7 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
   ): Promise<unknown> {
     return await withPerson(this.#check, async (by) => {
       const { id } = await appFor(this.#env, by, app, "builder");
+      await admitPreviewCall(this.#env, by, id);
       if (typeof method !== "string" || !Array.isArray(args)) {
         throw screenErrors.create("screen.invalid");
       }
@@ -322,13 +329,15 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
       );
       const { passed, callbacks } = argumentsFor(args, stillOpen);
       try {
-        return await this.#chatsOf(by.userId).previewCall(
-          chatIdOf(chatId),
-          by.userId,
-          id,
-          revision,
-          method,
-          passed
+        return withinAnswer(
+          await this.#chatsOf(by.userId).previewCall(
+            chatIdOf(chatId),
+            by.userId,
+            id,
+            revision,
+            method,
+            passed
+          )
         );
       } catch (error) {
         // A failed call keeps no callback.

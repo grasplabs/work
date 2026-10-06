@@ -63,6 +63,21 @@ const follower = (fails = false) => {
   return { received, state, callback };
 };
 
+/**
+ * Runs `run` as if `minutes` had passed. Following counts as a request,
+ * and a person asks an App's screens twenty things at once at most: a
+ * test that fills a screen's twenty subscriptions has used them up, and
+ * what it asks next comes a moment later, as a screen's would.
+ */
+const later = async <T>(minutes: number, run: () => Promise<T>): Promise<T> => {
+  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + minutes * 60_000 });
+  try {
+    return await run();
+  } finally {
+    vi.useRealTimers();
+  }
+};
+
 /** Once more than `seen` pushes have reached `received`. */
 const pushedAfter = async (
   received: unknown[],
@@ -334,16 +349,24 @@ describe("run status on screens", { timeout: 60_000 }, () => {
           await builder.api.screens.watchRuns(app, "approval", callback)
       )
     );
-    const full = await outcome(
-      builder.api.screens.watchRuns(app, "approval", follower().callback)
+    const full = await later(
+      1,
+      async () =>
+        await outcome(
+          builder.api.screens.watchRuns(app, "approval", follower().callback)
+        )
     );
     const [released] = screens;
     await subscriptions[0]?.release();
     // Released again, or once more by the screen letting go: nothing more.
     await subscriptions[0]?.release();
     const latest = follower();
-    const freed = await outcome(
-      builder.api.screens.watchRuns(app, "approval", latest.callback)
+    const freed = await later(
+      2,
+      async () =>
+        await outcome(
+          builder.api.screens.watchRuns(app, "approval", latest.callback)
+        )
     );
     await nudge(app);
     await pushedAfter(latest.received, 0);
@@ -378,17 +401,29 @@ describe("run status on screens", { timeout: 60_000 }, () => {
       builder.api.screens.watchRuns(app, "approval", unchecked("callback"))
     );
     // One connection is one open screen: it follows at most 20 at once.
-    const followed = await Promise.all(
-      Array.from(
-        { length: 20 },
-        async () =>
-          await outcome(
-            builder.api.screens.watchRuns(app, "approval", follower().callback)
+    const followed = await later(
+      1,
+      async () =>
+        await Promise.all(
+          Array.from(
+            { length: 20 },
+            async () =>
+              await outcome(
+                builder.api.screens.watchRuns(
+                  app,
+                  "approval",
+                  follower().callback
+                )
+              )
           )
-      )
+        )
     );
-    const tooMany = await outcome(
-      builder.api.screens.watchRuns(app, "approval", follower().callback)
+    const tooMany = await later(
+      2,
+      async () =>
+        await outcome(
+          builder.api.screens.watchRuns(app, "approval", follower().callback)
+        )
     );
 
     expect({

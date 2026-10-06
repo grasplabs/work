@@ -1,19 +1,16 @@
-import { once } from "node:events";
-import { createServer } from "node:http";
-import type { Server } from "node:http";
-
-import { expect, test as base } from "@playwright/test";
+import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, pageOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
-import { screenAppFiles } from "./screen-app.ts";
+import { screenAppFiles, serveAttacker } from "./screen-app.ts";
 
 // An App's screen in its sandboxed frame, end to end: the page, the frame,
 // core and the App's server, in a real browser. The screen reads and writes
 // through its server, sees another person's changes live, and reports its
-// errors; and, as code nobody reviewed line by line, it gets nowhere else.
+// errors. What it does as code nobody reviewed line by line, to get
+// anywhere else, is in screen-attacks.e2e.ts, in every browser.
 
 declare global {
   interface Window {
@@ -32,25 +29,6 @@ declare global {
  * well within this.
  */
 const noMoreConnectionsMs = 2000;
-
-/** Counts every request that reaches it: none should. */
-const serveAttacker = async (): Promise<{
-  url: string;
-  hits: string[];
-  server: Server;
-}> => {
-  const hits: string[] = [];
-  const server = createServer((request, response) => {
-    hits.push(request.url ?? "");
-    response.end("stolen");
-  });
-  await once(server.listen(0, "127.0.0.1"), "listening");
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("The attacker's server has no port");
-  }
-  return { url: `http://127.0.0.1:${address.port}`, hits, server };
-};
 
 /**
  * A new App named `name` running the sample, released by `builder`, and
@@ -149,83 +127,14 @@ test("two people see each other's notes live, in their theme, and a failing scre
   try {
     await expect
       .poll(async () => {
-        const log = await api.screens.errors(app);
-        return log.map(({ message }) => message);
+        const { entries } = await api.screens.errors(app);
+        return entries.map(({ message }) => message);
       })
       .toContain("Invoice 7 has no total");
   } finally {
     core[Symbol.dispose]();
   }
 });
-
-base(
-  "the screen reaches nothing but its own App's server",
-  async ({ browser }) => {
-    const page = await pageOf(browser, one);
-    const popups: string[] = [];
-    page.on("popup", (popup) => {
-      popups.push(popup.url());
-    });
-    const screen = await openScreen(page, app);
-
-    await expect(
-      screen.getByRole("status", { name: "Probes" })
-    ).not.toBeEmpty();
-    const probes: unknown = JSON.parse(
-      (await screen.getByRole("status", { name: "Probes" }).textContent()) ?? ""
-    );
-    expect(probes).toStrictEqual({
-      fetch: "blocked",
-      fetchCore: "blocked",
-      socket: "blocked",
-      image: "blocked",
-      popup: "blocked",
-      top: "blocked",
-      parentDocument: "blocked",
-      cookie: "blocked",
-      storage: "blocked",
-      tailwindRule: "applied",
-      styleRule: "applied",
-    });
-
-    // The bridge, reached past the SDK, offers only the App's own server.
-    const frame = page.frame({ url: /\/screen-frame\?load=/u });
-    await expect
-      .poll(
-        async () => await frame?.evaluate(() => document.body.dataset.bridge)
-      )
-      .toBeDefined();
-    const bridge: unknown = JSON.parse(
-      (await frame?.evaluate(() => document.body.dataset.bridge)) ?? "{}"
-    );
-    expect(bridge).toStrictEqual({
-      nameObject: "screen.invalid",
-      session: "refused",
-      apps: "refused",
-      screens: "refused",
-      prototype: "refused",
-    });
-
-    // An answer shaped like the platform's error is only an answer: the page
-    // doesn't end the session over it.
-    await screen.getByRole("button", { name: "Ask" }).click();
-    await expect(screen.getByRole("status", { name: "Answer" })).toHaveText(
-      "an answer"
-    );
-    await expect(page.getByText("Your session has ended")).toHaveCount(0);
-
-    // Nothing got out, and the page stayed where it was.
-    expect({
-      hits: attacker.hits,
-      popups,
-      url: new URL(page.url()).pathname,
-    }).toStrictEqual({
-      hits: [],
-      popups: [],
-      url: `/engines/${app}/apps/notes/full`,
-    });
-  }
-);
 
 test("a screen opens through core failing at first, subscribes again after its connection drops, and tries one connection at a time", async ({
   browser,

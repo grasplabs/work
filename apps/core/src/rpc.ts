@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { CoreApi, Identity, SignInOption } from "@grasp-os/shared/rpc";
+import { screenLimits } from "@grasp-os/shared/screens";
 import { newWebSocketRpcSession, RpcTarget } from "capnweb";
 
 import { oidcProviders, signInConfig } from "./auth/config.ts";
@@ -178,6 +179,16 @@ export const rpcResponse = async (
     ? sessionApi({ env, headers, connectedAs }, server)
     : undefined;
   newWebSocketRpcSession(server, new CoreRpc(signInOptions(env), session), {
+    // What a browser sends is untrusted, a screen's calls among it: no
+    // deeper and no longer numbers than a screen's port takes
+    // (`screenLimits.rpc`). A message's size keeps Cap'n Web's default
+    // here: the product's own calls share this connection, and a
+    // document or an App's files are longer than a screen's message. A
+    // screen's call is held to its bytes where it lands (screens-rpc.ts).
+    limits: {
+      maxDepth: screenLimits.rpc.maxDepth,
+      maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
+    },
     onSendError: (error) => {
       // Every call of the tab goes over this one connection, so each
       // failure gets a request ID of its own for the person to quote, and

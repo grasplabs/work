@@ -1,5 +1,6 @@
 /* oxlint-disable max-classes-per-file -- the fake page, and the subscriptions it answers as core does */
-import { newMessagePortRpcSession, RpcStub, RpcTarget } from "capnweb";
+import { portTransport } from "@grasp-os/shared/screen-port";
+import { RpcSession, RpcStub, RpcTarget } from "capnweb";
 import {
   afterEach,
   beforeEach,
@@ -19,6 +20,10 @@ import { callServer, followRun, followRuns, live } from "../src/screen.ts";
 // connection does.
 
 type Callback = (value: unknown) => Promise<void>;
+
+/** Serves `page` on `port` as the page does: each message as text. */
+const servePage = (port: MessagePort, page: RpcTarget): Disposable =>
+  new RpcSession(portTransport(port), page).getRemoteMain();
 
 /** A callback the screen passed, as the page receives it. */
 const isCallback = (value: unknown): value is RpcStub<Callback> =>
@@ -122,7 +127,7 @@ describe(live, () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { port1, port2 } = new MessageChannel();
     page = new FakePage();
-    sessions = [newMessagePortRpcSession(port2, page), connectBridge(port1)];
+    sessions = [servePage(port2, page), connectBridge(port1)];
   });
 
   afterEach(() => {
@@ -231,7 +236,7 @@ describe(followRuns, () => {
   beforeEach(() => {
     const { port1, port2 } = new MessageChannel();
     page = new FakePage();
-    sessions = [newMessagePortRpcSession(port2, page), connectBridge(port1)];
+    sessions = [servePage(port2, page), connectBridge(port1)];
   });
 
   afterEach(() => {
@@ -428,7 +433,7 @@ describe(followRun, () => {
   beforeEach(() => {
     const { port1, port2 } = new MessageChannel();
     page = new FakePage();
-    sessions = [newMessagePortRpcSession(port2, page), connectBridge(port1)];
+    sessions = [servePage(port2, page), connectBridge(port1)];
   });
 
   afterEach(() => {
