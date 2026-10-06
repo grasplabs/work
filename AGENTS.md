@@ -55,8 +55,7 @@ Trunk-based: `main` is the only long-lived branch; every merge deploys all apps 
 
 1. Branch from `main` as `<type>/<kebab-description>`, e.g. `feat/audit-export`, using the commit types. A pre-push hook and CI check the name.
 2. Open a pull request into `main`. CI runs.
-3. Nick or Jakob approves (CODEOWNERS); pushing after an approval needs a new one.
-4. Add it to the merge queue, which tests it on top of the latest `main` and squash-merges it. No need to keep the branch up to date by hand.
+3. Turn on auto-merge ("Merge when ready", or `gh pr merge --auto --squash`). No approval is required: once checks pass and review threads are resolved, the PR enters the merge queue, which tests it on top of the latest `main` and squash-merges it. No need to keep the branch up to date by hand. Nick and Jakob are requested as reviewers (CODEOWNERS) and an unresolved review comment holds the merge until it is resolved.
 
 Nobody pushes to `main` directly. In an emergency, organisation owners can merge a pull request without a second review or passing checks; GitHub records every bypass. Use it only when waiting would do more harm. The rules live in `.github/rulesets/`; apply changes with `vp run github:setup`.
 
@@ -69,7 +68,7 @@ Work is planned in Linear (team Grasp OS), not in this repo.
 - Only pick up issues in **Todo**; their blockers are done. Parent issues are containers; never pick one up.
 - Move the issue to **In Progress** when you start and to **In Review** when the pull request is ready. Branch names and PR titles don't carry the issue ID, so move issues by hand.
 - When your issue is **Done**, move any issue it blocked to **Todo** once all of that issue's blockers are done.
-- Issues labelled **Security** are reviewed by a person before merge.
+- Issues labelled **Security** are reviewed by a person before merge: don't turn on auto-merge for their pull requests until they are.
 - Don't follow an issue blindly: if its scope conflicts with this file or the code, raise it in the issue.
 
 ## Architecture rules
