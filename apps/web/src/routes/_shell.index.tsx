@@ -12,6 +12,7 @@ import { ChatList, ChatSidebar } from "../chat/chat-list.tsx";
 import { chatMarkdown } from "../chat/chat-markdown.ts";
 import { useFollowedChat } from "../chat/chat-watch.ts";
 import { Composer } from "../chat/composer.tsx";
+import { ConnectionRequests } from "../chat/connection-requests.tsx";
 import { HeldWrites } from "../chat/held-writes.tsx";
 import { SidePanel } from "../chat/side-panel.tsx";
 import { ChatSources } from "../chat/sources.tsx";
@@ -204,6 +205,7 @@ const OpenChat = ({
             </div>
           )}
           <HeldWrites chatId={chat.id} version={view.held} />
+          <ConnectionRequests chatId={chat.id} version={view.held} />
         </ChatThread>
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 pb-4 md:px-6">
           <ChatSources names={sourceNames} provenance={view.provenance} />
