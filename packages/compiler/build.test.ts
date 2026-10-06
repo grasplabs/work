@@ -252,6 +252,34 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
     );
   });
 
+  it("words a process's start time the same in every time zone and language", () => {
+    const { LC_ALL: language, TZ: zone } = process.env;
+    const worded: string[] = [];
+    try {
+      for (const [timeZone, locale] of [
+        ["Asia/Tokyo", "C"],
+        ["America/New_York", "nl_NL.UTF-8"],
+      ] as const) {
+        process.env.TZ = timeZone;
+        process.env.LC_ALL = locale;
+        worded.push(startOf(process.pid));
+      }
+    } finally {
+      for (const [name, value] of [
+        ["TZ", zone],
+        ["LC_ALL", language],
+      ] as const) {
+        if (value === undefined) {
+          Reflect.deleteProperty(process.env, name);
+        } else {
+          process.env[name] = value;
+        }
+      }
+    }
+    expect(worded[0]).not.toBe("unknown");
+    expect(worded[1]).toBe(worded[0]);
+  });
+
   it("waits for a build that holds the assets' lock, then builds", async () => {
     const dir = scratch();
     const assets = path.join(dir, "assets");

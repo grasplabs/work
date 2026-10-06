@@ -58,6 +58,9 @@ export const startOf = (pid: number): string => {
   try {
     const started = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
       encoding: "utf-8",
+      // One wording whoever asks: `ps` prints the time in the asker's time
+      // zone and language, and two builds may run with different ones.
+      env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     return started === ""
