@@ -55,7 +55,10 @@ import {
 
 // What the frontend's screen host reaches for the frames it runs (see
 // @grasp-os/sdk/screen-runtime): an App's screen to load, its server to
-// call, its current version and its error log. Screens run code nobody
+// call and its current version. Next to them, never on the frame bridge
+// and for the App's builders only, its error log (`errors`): its screens'
+// problems and what its server code wrote with `console`
+// (server-logs.ts). Screens run code nobody
 // reviewed line by line, which the page passes on as it is, so everything
 // here takes the frame's input as untrusted and checks the person's
 // session and role on every call.
@@ -76,8 +79,9 @@ import {
 // code the screen runs must be approved, or the App's data classified as
 // fine for code nobody approved (screen-trust.ts, which says why). Every
 // call here that reaches the App's data or its runs passes that gate, and
-// so does every push; only a screen's own reports of its problems, and
-// the App's version number, don't. Which build a connection's frame runs
+// so does every push; only a screen's own reports of its problems, the
+// App's version number and its error log, which only its builders read
+// and no frame reaches, don't. Which build a connection's frame runs
 // is the one core leased it (`present`), never what the frame says.
 //
 // A callback the App keeps (a screen's subscription), or its host keeps
