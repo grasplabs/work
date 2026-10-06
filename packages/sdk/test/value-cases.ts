@@ -28,6 +28,10 @@ const declare = (make: () => unknown): string => {
   }
 };
 
+/** The schema of a descriptor given as data, read from its JSON text. */
+const fromData = (descriptor: unknown): AnySchema =>
+  schemaFromDescriptor(JSON.stringify(descriptor));
+
 /** A descriptor as it is stored and sent: through JSON and back. */
 const stored = (schema: AnySchema): unknown => {
   const text = JSON.stringify(schema.descriptor);
@@ -120,13 +124,6 @@ const unreadable = (): unknown =>
       },
     }
   );
-
-/** A descriptor that contains itself. */
-const cyclicDescriptor = (): unknown => {
-  const descriptor: Record<string, unknown> = { ...base, kind: "array" };
-  descriptor.item = descriptor;
-  return descriptor;
-};
 
 /** Arrays nested `depth` deep around a string. */
 const nestedDescriptor = (depth: number): unknown => {
@@ -1709,7 +1706,7 @@ add(
       kind: v.union(v.literal("note"), v.literal(2), v.literal(null)),
       scores: v.record(v.number().integer().min(0)),
     });
-    const rebuilt = schemaFromDescriptor(stored(schema));
+    const rebuilt = fromData(stored(schema));
     const values = [
       { title: " a ", owner: null, kind: "note", scores: { a: 1 } },
       { title: "a", owner: recordId, kind: null, scores: {}, tags: ["b"] },
@@ -1753,7 +1750,7 @@ add(
       email: false,
       min: 1,
     };
-    const schema = schemaFromDescriptor(descriptor);
+    const schema = fromData(descriptor);
     descriptor.min = 5;
     return [check(schema, "ab"), Object.is(schema.descriptor, descriptor)];
   },
@@ -1780,16 +1777,34 @@ add(
       { ...base, kind: "string", trim: "yes", email: false },
       { ...base, kind: "string", email: false },
       { ...base, kind: "number" },
-    ].map((descriptor) => declare(() => schemaFromDescriptor(descriptor))),
+    ].map((descriptor) => declare(() => fromData(descriptor))),
   Array.from({ length: 17 }, () => "definition.invalid_descriptor")
 );
 add(
-  "a descriptor that isn't a JSON object is refused",
+  "a descriptor is read from JSON text that holds an object",
   () =>
-    [null, undefined, "string", 1, [], () => 1, new Map(), unreadable()].map(
-      (descriptor) => declare(() => schemaFromDescriptor(descriptor))
+    ["", "{", "nope", "null", '"string"', "1", "[]", "undefined"].map((text) =>
+      declare(() => schemaFromDescriptor(text))
     ),
   Array.from({ length: 8 }, () => "definition.invalid_descriptor")
+);
+add(
+  "a descriptor passed as an object, not as its text, is refused unread",
+  () => {
+    let ran = false;
+    const descriptor: unknown = {
+      ...base,
+      get kind(): string {
+        ran = true;
+        return "boolean";
+      },
+    };
+    // The type says text; a caller without types can pass anything.
+    const untyped = (): unknown =>
+      Reflect.apply(schemaFromDescriptor, undefined, [descriptor]);
+    return [declare(untyped), ran];
+  },
+  ["definition.invalid_descriptor", false]
 );
 add(
   "a descriptor is checked as strictly as a declaration",
@@ -1830,7 +1845,7 @@ add(
       },
       { ...base, presence: "default", kind: "number", integer: true },
       { ...base, kind: "number", integer: true, defaultValue: 1 },
-    ].map((descriptor) => declare(() => schemaFromDescriptor(descriptor))),
+    ].map((descriptor) => declare(() => fromData(descriptor))),
   [
     "definition.contradictory_bounds",
     "definition.invalid_bound",
@@ -1853,7 +1868,7 @@ add(
   "a stored default is normalized again, and copied",
   () => {
     const defaultValue = ["  a  "];
-    const schema = schemaFromDescriptor({
+    const schema = fromData({
       ...base,
       presence: "default",
       kind: "array",
@@ -1866,33 +1881,28 @@ add(
   [["a"], { value: ["a"] }]
 );
 add(
-  "a descriptor that contains itself is refused, not followed",
-  () => declare(() => schemaFromDescriptor(cyclicDescriptor())),
-  "definition.too_large"
-);
-add(
   "a descriptor nested too deep is refused",
   () => [
-    declare(() => schemaFromDescriptor(nestedDescriptor(32))),
-    declare(() => schemaFromDescriptor(nestedDescriptor(33))),
-    declare(() => schemaFromDescriptor(nestedDescriptor(5000))),
+    declare(() => fromData(nestedDescriptor(32))),
+    declare(() => fromData(nestedDescriptor(33))),
+    declare(() => fromData(nestedDescriptor(5000))),
   ],
   ["declared", "definition.too_large", "definition.too_large"]
 );
 add(
   "a descriptor that declares too much is refused",
   () => [
-    declare(() => schemaFromDescriptor(wideDescriptor(9999))),
-    declare(() => schemaFromDescriptor(wideDescriptor(10_000))),
+    declare(() => fromData(wideDescriptor(9999))),
+    declare(() => fromData(wideDescriptor(10_000))),
     declare(() =>
-      schemaFromDescriptor({
+      fromData({
         ...base,
         kind: "enum",
         values: Array.from({ length: 10_001 }, (_, index) => `v${index}`),
       })
     ),
     declare(() =>
-      schemaFromDescriptor({
+      fromData({
         ...base,
         kind: "union",
         members: Array.from({ length: 65 }, () => ({
@@ -1902,7 +1912,7 @@ add(
       })
     ),
     declare(() =>
-      schemaFromDescriptor({ ...base, kind: "literal", value: "x".repeat(257) })
+      fromData({ ...base, kind: "literal", value: "x".repeat(257) })
     ),
   ],
   [
@@ -1914,31 +1924,11 @@ add(
   ]
 );
 add(
-  "a descriptor that runs code when read is refused, and what it threw stays here",
-  () => {
-    const descriptor = {
-      ...base,
-      get kind(): string {
-        throw new Error("secret");
-      },
-    };
-    try {
-      schemaFromDescriptor(descriptor);
-      return "declared";
-    } catch (error) {
-      return error instanceof ValueDefinitionError
-        ? [error.code, error.message.includes("secret")]
-        : "threw";
-    }
-  },
-  ["definition.invalid_descriptor", false]
-);
-add(
   "a schema with a large default is read back from its descriptor",
   () => {
     const rows = Array.from({ length: 25_000 }, () => ({}));
     const schema = v.array(v.object({})).default(rows);
-    const reloaded = schemaFromDescriptor(stored(schema));
+    const reloaded = fromData(stored(schema));
     // Nothing is passed, so the default is what comes back.
     const nothing: unknown = [][0];
     const result = reloaded["~standard"].validate(nothing);
@@ -1947,60 +1937,6 @@ add(
       : "refused";
   },
   25_000
-);
-add(
-  "a default that contains itself is refused, not followed",
-  () => {
-    const rows: unknown[] = [];
-    rows.push(rows);
-    return declare(() =>
-      schemaFromDescriptor({
-        ...base,
-        kind: "array",
-        item: { ...base, kind: "boolean" },
-        presence: "default",
-        defaultValue: rows,
-      })
-    );
-  },
-  "definition.too_large"
-);
-add(
-  "a descriptor with a getter is refused without the getter being run",
-  () => {
-    let ran = false;
-    const descriptor = {
-      ...base,
-      get kind(): string {
-        ran = true;
-        return "boolean";
-      },
-    };
-    return [declare(() => schemaFromDescriptor(descriptor)), ran];
-  },
-  ["definition.invalid_descriptor", false]
-);
-add(
-  "a descriptor can't choose the error its reader gets",
-  () => {
-    const descriptor = new Proxy(
-      { ...base, kind: "boolean" },
-      {
-        ownKeys: () => {
-          throw new ValueDefinitionError("definition.too_large", "secret");
-        },
-      }
-    );
-    try {
-      schemaFromDescriptor(descriptor);
-      return "declared";
-    } catch (error) {
-      return error instanceof ValueDefinitionError
-        ? [error.code, error.message.includes("secret")]
-        : "threw";
-    }
-  },
-  ["definition.invalid_descriptor", false]
 );
 add(
   "a definition error carries its code as its own property",
