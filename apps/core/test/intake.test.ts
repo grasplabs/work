@@ -1,4 +1,5 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
+import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
@@ -900,8 +901,9 @@ describe("reading notes", { timeout: 60_000 }, () => {
   };
 
   it("has a model take tagged statements out of pasted notes, as a draft reviewed before it is saved to the Playbook", async () => {
+    // No model set: the run reads with its default, which a new
+    // deployment allows.
     const { admin, app } = await setUp();
-    await admin.api.workflows.params.set(app, "extract", "model", testModel);
     const title = `Close ${unique()}`;
     const source = {
       title,
@@ -968,8 +970,15 @@ describe("reading notes", { timeout: 60_000 }, () => {
     ]);
     const [request] = gateway.requests;
     const sent = JSON.stringify(request?.body);
+    const { params } = await admin.api.workflows.get(app, "extract");
+    const model = params?.find(({ name }) => name === "model");
 
     expect({
+      model: {
+        value: model?.value,
+        default: model?.default,
+        allowed: defaultGatewayModels.some((ref) => ref === model?.default),
+      },
       output: draftId.statements,
       origin: opened.origin,
       draft: opened.draft,
@@ -984,6 +993,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
       ),
       tags: statementDocuments.map(({ text }) => text.includes("  - blocker")),
     }).toStrictEqual({
+      model: { value: null, default: testModel, allowed: true },
       output: 2,
       origin: "notes",
       draft: {
@@ -1017,6 +1027,28 @@ describe("reading notes", { timeout: 60_000 }, () => {
         ["title: Invoices over 5,000 wait for a second signature."],
       ],
       tags: [false, false],
+    });
+  });
+
+  it("shows its steps as its code runs them, where its runs are reviewed", async () => {
+    const { admin, app } = await setUp();
+    const { steps } = await admin.api.workflows.get(app, "extract");
+    expect(steps).toMatchObject({
+      ok: true,
+      outline: {
+        steps: [
+          {
+            type: "branch",
+            condition: '"chat" in input',
+            steps: [
+              { type: "step", name: "read-chat", kind: "exact", locked: true },
+            ],
+            otherwise: [],
+          },
+          { type: "step", name: "extract", kind: "ai", params: ["model"] },
+          { type: "step", name: "propose", kind: "exact", sideEffect: true },
+        ],
+      },
     });
   });
 
