@@ -425,4 +425,52 @@ export class App {}
       built: 1,
     });
   });
+
+  it("reviews a version with no screens without building anything", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await newApp(builder);
+    const by = await builder.api.whoami();
+    await commitFiles(env, by, app, server(crypto.randomUUID()), "Save");
+    let built = 0;
+    const counting: WorkerLoader = {
+      get: (...args) => {
+        built += 1;
+        return env.LOADER.get(...args);
+      },
+      load: (...args) => {
+        built += 1;
+        return env.LOADER.load(...args);
+      },
+    };
+    let read = 0;
+    const reading = new Proxy(env.FILES, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "get" && typeof value === "function") {
+          return (key: string, ...rest: unknown[]): unknown => {
+            if (key.startsWith("screen-builds/")) {
+              read += 1;
+            }
+            return Reflect.apply(value, target, [key, ...rest]);
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    const review = await reviewScreens(
+      { ...env, LOADER: counting, FILES: reading },
+      by,
+      app,
+      1
+    );
+
+    expect({ screens: review.screens, built, read }).toStrictEqual({
+      screens: [],
+      built: 0,
+      read: 0,
+    });
+  });
 });

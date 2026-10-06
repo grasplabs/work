@@ -19,7 +19,11 @@ import type {
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { screenErrors, screenNameSchema } from "@grasp-os/shared/screens";
+import {
+  screenErrors,
+  screenNameSchema,
+  screenPath,
+} from "@grasp-os/shared/screens";
 
 import type { FrameCode } from "./screen-frame.ts";
 
@@ -218,13 +222,21 @@ export type VersionScreens = (screen: unknown) => Promise<BuiltScreen>;
  * hears `screen.build_slow` rather than wait on a build that doesn't
  * answer, and `screen.build_failed` when it doesn't build. All screens
  * build together, so one build serves each of them: the answer gives each
- * screen's code from it (`screenCode` for one).
+ * screen's code from it (`screenCode` for one). Files with no screen
+ * build nothing (the compiler would refuse them): there is no screen's
+ * code to give.
  */
 export const versionScreens = async (
   env: Env,
   files: Record<string, string>,
   version: number | null
 ): Promise<VersionScreens> => {
+  if (!Object.keys(files).some((path) => screenPath.test(path))) {
+    return async () => {
+      await Promise.resolve();
+      throw screenErrors.create("screen.not_found");
+    };
+  }
   const loaded = await withinBuildWait(
     env,
     async () =>
