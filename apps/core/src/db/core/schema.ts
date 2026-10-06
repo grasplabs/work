@@ -722,11 +722,18 @@ export const dependencyRequests = sqliteTable(
     uniqueIndex("dependency_requests_pending_idx")
       .on(table.appId)
       .where(sql`status = 'pending'`),
-    // An App's requests by status, newest first, and the admission check.
+    // The approval an App got last (its status, and what a new request
+    // is compared with).
     index("dependency_requests_app_idx").on(
       table.appId,
       table.status,
-      table.requestedAt
+      table.decidedAt
+    ),
+    // Whether a graph is approved for an App: a proposal, and admission.
+    index("dependency_requests_graph_idx").on(
+      table.appId,
+      table.graphHash,
+      table.status
     ),
   ]
 );

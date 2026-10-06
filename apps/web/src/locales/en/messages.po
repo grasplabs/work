@@ -188,6 +188,14 @@ msgstr "{moreFindings, plural, one {And # more finding: show every package to re
 msgid "{name} (Grasp staff)"
 msgstr "{name} (Grasp staff)"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "{name} {range}, met by {resolved}"
+msgstr "{name} {range}, met by {resolved}"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "{name} {range}, not met"
+msgstr "{name} {range}, not met"
+
 #: src/chat/builds-state.ts
 msgid "{name} changed"
 msgstr "{name} changed"
@@ -1799,6 +1807,10 @@ msgstr "Name"
 msgid "Native"
 msgstr "Native"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Needs alongside it"
+msgstr "Needs alongside it"
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "Needs attention"
 msgstr "Needs attention"
@@ -2314,6 +2326,10 @@ msgstr "Proposed by the agent, in their chat, <0>{asked}</0>"
 msgid "Proposed packages"
 msgstr "Proposed packages"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Provided by Grasp, not installed again: {provided}"
+msgstr "Provided by Grasp, not installed again: {provided}"
+
 #: src/activity/audit-words.ts
 msgid "Ran a step of a workflow"
 msgstr "Ran a step of a workflow"
@@ -2699,6 +2715,10 @@ msgstr "Show all {count} lines ({characters} characters)"
 #: src/dashboard/dependency-requests.tsx
 msgid "Show every package"
 msgstr "Show every package"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "Show every package before you approve them."
+msgstr "Show every package before you approve them."
 
 #: src/chat/held-writes.tsx
 msgid "Show exactly what will be sent"

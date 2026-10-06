@@ -114,6 +114,14 @@ test("someone given the permission approves the packages proposed for an engine,
     card.getByText("2 packages in all, to run in: Browser")
   ).toBeVisible();
   await expect(card.getByText(/are as reported by/u)).toBeVisible();
+  // Approving waits for the whole graph to be shown; denying doesn't.
+  const approveButton = card.getByRole("button", {
+    name: "Approve the packages for Totals",
+  });
+  await expect(approveButton).toBeDisabled();
+  await expect(
+    card.getByRole("button", { name: "Deny the packages for Totals" })
+  ).toBeEnabled();
   await card
     .getByRole("button", { name: "Show the packages for Totals" })
     .click();
@@ -121,17 +129,15 @@ test("someone given the permission approves the packages proposed for an engine,
   await expect(
     card.getByRole("row").filter({ hasText: "ISC" }).getByRole("cell").first()
   ).toHaveText("d3-scale@4.0.2");
-  await card
-    .getByRole("button", { name: "Approve the packages for Totals" })
-    .click();
+  await approveButton.click();
 
   await expect(card).toHaveCount(0);
   await expect
     .poll(async () => {
       const { approved } = await asBuilder.api.dependencies.status(app);
-      return approved.map(({ id }) => id);
+      return approved?.id;
     })
-    .toStrictEqual([request.id]);
+    .toBe(request.id);
   asAdmin.core[Symbol.dispose]();
   asBuilder.core[Symbol.dispose]();
 });

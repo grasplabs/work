@@ -401,8 +401,12 @@ export interface DependencyStatus {
   policyGeneration: number;
   /** The request waiting for a decision, if any. */
   pending: DependencyRequest | null;
-  /** The graphs approved for it, newest first. */
-  approved: DependencyRequest[];
+  /**
+   * The approval it got last, if any. Earlier ones still hold for their
+   * own graphs: whether a graph is approved is the admission check's to
+   * say.
+   */
+  approved: DependencyRequest | null;
 }
 
 /** What a person decides, and what they reviewed as they did. */

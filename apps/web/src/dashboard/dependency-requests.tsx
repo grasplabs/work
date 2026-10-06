@@ -21,7 +21,7 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { PackageIcon } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime, formatList } from "../format.ts";
@@ -84,6 +84,11 @@ const Packages = ({ review }: { review: DependencyReview }) => {
   const { t } = useLingui();
   const { previous } = review;
   const changed = formatList((previous?.changed ?? []).map(packageKey));
+  const provided = formatList(
+    Object.entries(review.graph.platformPeers).map(([name, version]) =>
+      packageKey({ name, version })
+    )
+  );
   const added = formatList((previous?.added ?? []).map(packageKey));
   const removed = formatList((previous?.removed ?? []).map(packageKey));
   return (
@@ -132,6 +137,11 @@ const Packages = ({ review }: { review: DependencyReview }) => {
           })}
         </ul>
       )}
+      {provided === "" ? null : (
+        <p className="text-muted-foreground">
+          <Trans>Provided by Grasp, not installed again: {provided}</Trans>
+        </p>
+      )}
       <Table>
         <TableHeader>
           <TableRow>
@@ -145,6 +155,9 @@ const Packages = ({ review }: { review: DependencyReview }) => {
               <Trans>Depends on</Trans>
             </TableHead>
             <TableHead>
+              <Trans>Needs alongside it</Trans>
+            </TableHead>
+            <TableHead>
               <Trans>Registry and hash</Trans>
             </TableHead>
           </TableRow>
@@ -155,14 +168,22 @@ const Packages = ({ review }: { review: DependencyReview }) => {
               <TableCell>{packageKey(node)}</TableCell>
               <TableCell>{node.license ?? t`None stated`}</TableCell>
               <TableCell className="whitespace-normal">
-                {formatList([
-                  ...node.dependencies.map(packageKey),
-                  ...node.peers.map(({ name, resolved }) =>
-                    resolved === null
-                      ? name
-                      : packageKey({ name, version: resolved })
-                  ),
-                ])}
+                {formatList(node.dependencies.map(packageKey))}
+              </TableCell>
+              <TableCell className="whitespace-normal">
+                {node.peers.map(({ name, range, resolved }) => (
+                  <span className="block" key={name}>
+                    {resolved === null ? (
+                      <Trans>
+                        {name} {range}, not met
+                      </Trans>
+                    ) : (
+                      <Trans>
+                        {name} {range}, met by {resolved}
+                      </Trans>
+                    )}
+                  </span>
+                ))}
               </TableCell>
               <TableCell className="whitespace-normal">
                 {node.origin}
@@ -189,6 +210,7 @@ const RequestCard = ({
 }) => {
   const { busy, failure, run } = useCoreAction();
   const [review, setReview] = useState<DependencyReview>();
+  const hintId = useId();
   const { t } = useLingui();
   const engine = request.app.name;
   const requester = request.requestedBy.name;
@@ -207,7 +229,11 @@ const RequestCard = ({
       async (session) =>
         await session.dependencies.decide(request.id, {
           approved,
-          reviewed: { graphHash: request.graphHash, policyGeneration },
+          // The graph the person was shown in full, once they were.
+          reviewed: {
+            graphHash: review?.graphHash ?? request.graphHash,
+            policyGeneration,
+          },
         })
     );
     if (decided !== undefined) {
@@ -325,8 +351,9 @@ const RequestCard = ({
           </Button>
         ) : null}
         <Button
+          aria-describedby={review === undefined ? hintId : undefined}
           aria-label={t`Approve the packages for ${engine}`}
-          disabled={busy}
+          disabled={busy || review === undefined}
           onClick={() => {
             void decide(true);
           }}
@@ -344,6 +371,11 @@ const RequestCard = ({
           <Trans>Deny</Trans>
         </Button>
       </div>
+      {review === undefined ? (
+        <p className="text-muted-foreground" id={hintId}>
+          <Trans>Show every package before you approve them.</Trans>
+        </p>
+      ) : null}
       <ErrorText>{failure}</ErrorText>
     </article>
   );

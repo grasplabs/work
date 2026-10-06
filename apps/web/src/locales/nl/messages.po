@@ -188,6 +188,14 @@ msgstr "{moreFindings, plural, one {En nog # bevinding: toon alle pakketten om d
 msgid "{name} (Grasp staff)"
 msgstr "{name} (Grasp-medewerker)"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "{name} {range}, met by {resolved}"
+msgstr "{name} {range}, vervuld door {resolved}"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "{name} {range}, not met"
+msgstr "{name} {range}, niet vervuld"
+
 #: src/chat/builds-state.ts
 msgid "{name} changed"
 msgstr "{name} gewijzigd"
@@ -1799,6 +1807,10 @@ msgstr "Naam"
 msgid "Native"
 msgstr "Native"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Needs alongside it"
+msgstr "Heeft daarnaast nodig"
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "Needs attention"
 msgstr "Vraagt aandacht"
@@ -2314,6 +2326,10 @@ msgstr "Voorgesteld door de agent, in hun chat, <0>{asked}</0>"
 msgid "Proposed packages"
 msgstr "Pakketten voorgesteld"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Provided by Grasp, not installed again: {provided}"
+msgstr "Geleverd door Grasp, niet opnieuw geïnstalleerd: {provided}"
+
 #: src/activity/audit-words.ts
 msgid "Ran a step of a workflow"
 msgstr "Een stap van een workflow uitgevoerd"
@@ -2699,6 +2715,10 @@ msgstr "Alle {count} regels tonen ({characters} tekens)"
 #: src/dashboard/dependency-requests.tsx
 msgid "Show every package"
 msgstr "Alle pakketten tonen"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "Show every package before you approve them."
+msgstr "Toon alle pakketten voordat je ze goedkeurt."
 
 #: src/chat/held-writes.tsx
 msgid "Show exactly what will be sent"

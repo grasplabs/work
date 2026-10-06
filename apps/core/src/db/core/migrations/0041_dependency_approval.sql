@@ -42,4 +42,5 @@ CREATE TABLE `dependency_requests` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `dependency_requests_pending_idx` ON `dependency_requests` (`app_id`) WHERE status = 'pending';--> statement-breakpoint
-CREATE INDEX `dependency_requests_app_idx` ON `dependency_requests` (`app_id`,`status`,`requested_at`);
+CREATE INDEX `dependency_requests_app_idx` ON `dependency_requests` (`app_id`,`status`,`decided_at`);--> statement-breakpoint
+CREATE INDEX `dependency_requests_graph_idx` ON `dependency_requests` (`app_id`,`graph_hash`,`status`);

@@ -30,6 +30,7 @@ import { allEvents } from "./audit-events.ts";
 import { actingFor, envOf } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
+import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { racingDb } from "./racing-db.ts";
 import {
   auditedDuring,
@@ -485,6 +486,25 @@ describe("dependency approval", () => {
           scale,
         ],
       }),
+      // A peer "met" by a version outside the range it states.
+      peerOutsideRange: withGraph({
+        packages: [
+          {
+            ...chartsNode,
+            peers: [{ name: "react", range: "^18.0.0", resolved: "19.2.0" }],
+          },
+          scale,
+        ],
+      }),
+      unreadableRange: withGraph({
+        packages: [
+          {
+            ...chartsNode,
+            peers: [{ name: "react", range: "the newest", resolved: "19.2.0" }],
+          },
+          scale,
+        ],
+      }),
       findingAboutNothing: proposalFor(app, {
         findings: [
           {
@@ -517,7 +537,117 @@ describe("dependency approval", () => {
         Object.keys(invalid).map((name) => [name, "dependency.invalid"])
       )
     );
-    expect(status).toMatchObject({ pending: null, approved: [] });
+    expect(status).toMatchObject({ pending: null, approved: null });
+  });
+
+  it("takes a peer met within the range it states, however npm lets it be written", async () => {
+    const { builder, app } = await builderWithApp();
+    const ranges = [
+      "19.2.0",
+      "^19.0.0",
+      "~19.2.0",
+      ">=18",
+      "18.x || 19.x",
+      "*",
+    ];
+    const names = ranges.map((_, index) => `uses-react-${index}`);
+    const request = await builder.api.dependencies.propose(
+      proposalFor(app, {
+        graph: {
+          direct: names.map((name) => ({ name, version: "1.0.0" })),
+          packages: names.map((name, index) =>
+            node(`${name}@1.0.0`, [], {
+              peers: [
+                {
+                  name: "react",
+                  range: ranges[index] ?? "*",
+                  resolved: "19.2.0",
+                },
+                // Left unmet: nothing to check.
+                { name: "vue", range: "^3.0.0", resolved: null },
+              ],
+            })
+          ),
+          platformPeers,
+        },
+      })
+    );
+
+    expect(request).toMatchObject({
+      status: "pending",
+      counts: { direct: ranges.length, packages: ranges.length },
+    });
+  });
+
+  it("drops what waited once the App is back on a graph it has approved", async () => {
+    const admin = await personApi("admin");
+    const { builder, app } = await builderWithApp();
+    const approver = await approverBy(admin);
+    const approvedGraph = await builder.api.dependencies.propose(
+      proposalFor(app)
+    );
+    await approve(approver.api, approvedGraph);
+    const other = await builder.api.dependencies.propose(
+      proposalFor(app, { graph: charts("3.2.0") })
+    );
+
+    let back: DependencyRequest | undefined;
+    const events = await auditedDuring(async () => {
+      back = await builder.api.dependencies.propose(
+        proposalFor(app, { sourceRevision: "rev-2" })
+      );
+    });
+    const status = await builder.api.dependencies.status(app);
+    const stillWaiting = await waitingFor(approver.api);
+
+    expect({
+      back: back?.id,
+      pending: status.pending,
+      waiting: stillWaiting.includes(other.id),
+      decides: await outcome(approve(approver.api, other)),
+      recorded: events
+        .filter(({ target }) => target?.id === other.id)
+        .map(({ action, detail }) => [action, detail.by, detail.graphHash]),
+    }).toStrictEqual({
+      back: approvedGraph.id,
+      pending: null,
+      waiting: false,
+      decides: "dependency.not_found",
+      recorded: [["dependency.superseded", approvedGraph.id, other.graphHash]],
+    });
+  });
+
+  it("reads an App's requests by index, however many it has had", async () => {
+    const admin = await personApi("admin");
+    const { builder, app } = await builderWithApp();
+    const approver = await approverBy(admin);
+    const request = await builder.api.dependencies.propose(proposalFor(app));
+    await approve(approver.api, request);
+
+    const queries = await recordedQueries(async () => {
+      await builder.api.dependencies.propose(
+        proposalFor(app, { graph: charts("3.2.0") })
+      );
+      await builder.api.dependencies.status(app);
+      await admission(builder, request);
+    });
+    const plans = await Promise.all(
+      queries
+        .filter(({ query }) => /from "dependency_requests"/iu.test(query))
+        .map(async (recorded) => ({
+          query: recorded.query,
+          plan: await planOf(recorded),
+        }))
+    );
+
+    // The approvals of a graph, the latest approval, the one waiting, and
+    // admission: none reads the table whole, or sorts what it read.
+    expect(plans.length).toBeGreaterThanOrEqual(4);
+    expect(
+      plans.filter(({ plan }) =>
+        plan.some((step) => fullScan.test(step) || step.includes("TEMP B-TREE"))
+      )
+    ).toStrictEqual([]);
   });
 
   it("bounds a request by the packages it names and the bytes it stores", async () => {
@@ -1195,7 +1325,7 @@ describe("dependency approval", () => {
         onBehalfOf: builder.userId,
       },
     });
-    expect(status.approved).toStrictEqual([]);
+    expect(status.approved).toBeNull();
     expect(requested?.actor).toStrictEqual({
       type: "agent",
       agentId: chat.agent.agentId,

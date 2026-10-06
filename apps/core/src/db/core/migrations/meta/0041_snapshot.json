@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "68b96199-3e87-4cc4-bf00-8119445d9ff9",
+  "id": "1c06312f-a1b9-44d5-939e-7d8c3101a1aa",
   "prevId": "099604ad-e294-4ab7-bfc8-b1c2a569edda",
   "tables": {
     "accounts": {
@@ -1032,7 +1032,16 @@
           "columns": [
             "app_id",
             "status",
-            "requested_at"
+            "decided_at"
+          ],
+          "isUnique": false
+        },
+        "dependency_requests_graph_idx": {
+          "name": "dependency_requests_graph_idx",
+          "columns": [
+            "app_id",
+            "graph_hash",
+            "status"
           ],
           "isUnique": false
         }
