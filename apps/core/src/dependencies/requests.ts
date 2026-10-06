@@ -1,3 +1,4 @@
+import { appErrors } from "@grasp-os/shared/apps";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
@@ -8,6 +9,8 @@ import {
   dependencyGraphSchema,
   dependencyMaxBytes,
   dependencyProposalSchema,
+  dependencySummaryDirect,
+  dependencySummaryFindings,
   dependencyTargetSchema,
   packageKey,
 } from "@grasp-os/shared/dependencies";
@@ -15,6 +18,7 @@ import type {
   DependenciesWaiting,
   DependencyFinding,
   DependencyGraph,
+  DependencyPackage,
   DependencyRefusal,
   DependencyRequest,
   DependencyReview,
@@ -26,7 +30,15 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -50,10 +62,10 @@ import { policyGeneration, policyGenerationSql } from "./policy.ts";
 //
 // - Packages used before anyone approved them. A request allows nothing.
 //   `admitDependencies` is the only way a graph counts as approved, and it
-//   answers yes for exactly what a person approved: this App, this source
-//   revision, this graph (by its hash, which core computes itself from the
-//   packages, never takes from the request) and these targets. Anything
-//   else is refused, and the refusal is audited.
+//   answers yes for exactly what a person approved: this App, this graph
+//   (by its hash, which core computes itself from the packages, never
+//   takes from the request) and these targets. Anything else is refused,
+//   and the refusal is audited.
 // - An agent, a workflow or App code approving. They propose
 //   (agent-builds.ts) and nothing more: deciding is only on a person's own
 //   `/rpc` session, and takes the session's identity, never one handed in.
@@ -64,13 +76,18 @@ import { policyGeneration, policyGenerationSql } from "./policy.ts";
 // - A decision on something other than what the person reviewed. The same
 //   update lands only while the request is still pending, its graph is the
 //   one they named, and the policy generation is the one they saw. A
-//   request never changes; a proposal for another revision, graph or
-//   target takes the pending one's place (`superseded`), so the source
-//   moving on refuses the old request, and an approval never covers a
-//   revision other than the one reviewed.
+//   request never changes: a proposal for other packages or targets takes
+//   the pending one's place, so the source asking for something else
+//   refuses the old request. What is approved is the graph, whichever
+//   revision of the source it was resolved from: the same packages at a
+//   later revision need no new approval, and any other package, version,
+//   byte, edge or target is another graph, with another hash.
 // - Two decisions. The first lands; the second finds nothing pending.
-// - One huge request. The size is measured on what core stores, never
-//   taken from a count in the request, and the lists are capped.
+// - One huge request, or many. The size is measured on what core stores,
+//   never taken from a count in the request, and the lists are capped. One
+//   request waits per App, and one that is replaced is deleted, so asking
+//   again and again stores nothing more. No list reads a request's whole
+//   graph: lists select the columns they show.
 // - Package text steering anyone. A licence or a finding's summary is
 //   bounded text shown as text; nothing reads it as instructions.
 // - A request showing more than the decision needs. It holds package
@@ -80,8 +97,22 @@ import { policyGeneration, policyGenerationSql } from "./policy.ts";
 //   collection, file or model access, approves no browser artifact for
 //   sensitive data, and every use still runs under the App's own
 //   permissions.
+//
+// Not stopped here: what a request says of its packages (versions,
+// integrity hashes, licences, peers, findings) is what its proposer
+// reported. Nothing has checked it against the registry: that is the
+// resolver's, which doesn't exist yet. The person who decides is told so,
+// and what they approve is the graph as stated, by its hash, so what is
+// later fetched must match it byte for byte to be admitted.
 
 type Row = typeof dependencyRequests.$inferSelect;
+
+/**
+ * A request as lists read it: every column but its whole review
+ * (`snapshot`, up to {@link dependencyMaxBytes} each).
+ */
+const { snapshot: _snapshot, ...listed } = getTableColumns(dependencyRequests);
+type Listed = Omit<Row, "snapshot">;
 
 /** What a request keeps of its review, as JSON in `snapshot`. */
 const snapshotSchema = z.object({
@@ -94,6 +125,15 @@ const targetsSchema = z.array(dependencyTargetSchema);
 
 const targetsOf = (row: Pick<Row, "targets">): DependencyTarget[] =>
   targetsSchema.parse(JSON.parse(row.targets));
+
+/** Whether `row` is for every one of `targets`. */
+const covers = (
+  row: Pick<Row, "targets">,
+  targets: readonly DependencyTarget[]
+): boolean => {
+  const approved = targetsOf(row);
+  return targets.every((target) => approved.includes(target));
+};
 
 /** How often a proposal starts over when another one for the App lands first. */
 const proposalTries = 3;
@@ -140,7 +180,7 @@ const requestEntry = (
 /** `rows` as the API returns them, with the App's and the people's names. */
 const toRequests = async (
   env: Env,
-  rows: readonly Row[]
+  rows: readonly Listed[]
 ): Promise<DependencyRequest[]> => {
   if (rows.length === 0) {
     return [];
@@ -186,6 +226,7 @@ const toRequests = async (
       findings: row.findings,
       refused: row.refused,
     },
+    summary: row.summary,
     requestedBy: person(row.requestedBy),
     requestedAt: row.requestedAt.toISOString(),
     requestedVia: row.requestedVia ?? null,
@@ -205,7 +246,7 @@ const toRequests = async (
   }));
 };
 
-const toRequest = async (env: Env, row: Row): Promise<DependencyRequest> => {
+const toRequest = async (env: Env, row: Listed): Promise<DependencyRequest> => {
   const [request] = await toRequests(env, [row]);
   if (request === undefined) {
     throw new Error(`Dependency request ${row.id} is missing`);
@@ -213,33 +254,60 @@ const toRequest = async (env: Env, row: Row): Promise<DependencyRequest> => {
   return request;
 };
 
-/** An App's requests in `status`, newest first. */
-const requestsOf = async (
-  env: Env,
-  app: AppId,
-  status: Row["status"]
-): Promise<Row[]> =>
+/** An App's approved requests, newest first, without their graphs. */
+const approvedFor = async (env: Env, app: AppId): Promise<Listed[]> =>
   await drizzle(env.DB)
-    .select()
+    .select(listed)
     .from(dependencyRequests)
     .where(
       and(
         eq(dependencyRequests.appId, app),
-        eq(dependencyRequests.status, status)
+        eq(dependencyRequests.status, "approved")
       )
     )
-    .orderBy(desc(dependencyRequests.requestedAt), desc(dependencyRequests.id));
+    .orderBy(desc(dependencyRequests.decidedAt), desc(dependencyRequests.id));
+
+/** The one request waiting for an App, if any, without its graph. */
+const pendingFor = async (env: Env, app: AppId): Promise<Listed | undefined> =>
+  await drizzle(env.DB)
+    .select(listed)
+    .from(dependencyRequests)
+    .where(
+      and(
+        eq(dependencyRequests.appId, app),
+        eq(dependencyRequests.status, "pending")
+      )
+    )
+    .get();
+
+/** How grave each severity is, for which findings a list shows first. */
+const gravity: Record<DependencyFinding["severity"], number> = {
+  critical: 4,
+  high: 3,
+  moderate: 2,
+  low: 1,
+  info: 0,
+};
 
 /**
  * Proposes a graph for an App, as one of its builders or the chat's agent
  * acting for one: a pending request, which allows nothing. Never Grasp
  * staff, who neither ask for nor decide what a client's Apps may use.
  *
- * What is already there decides what happens. The same graph, revision
- * and targets already approved: that approval, and nothing new. The same
- * review already waiting: that request. Anything else waiting for the App
- * is superseded in the batch that stores the new request, as one waits per
- * App. A proposal that loses that race to another starts over.
+ * The graph is what the proposer says it is: its versions, integrity
+ * hashes, licences, peers and findings are checked for shape and for
+ * being whole, never against the registry. Nothing here can check them;
+ * the request is shown as its proposer's report, and the approval names
+ * the graph by its hash, so what is later fetched has to match it.
+ *
+ * What is already there decides what happens. The same graph already
+ * approved for these targets, at any revision of the source: that
+ * approval, and nothing new. The same review already waiting: that
+ * request. Anything else waiting for the App is replaced, in the batch
+ * that stores the new request: its row is deleted (one waits per App, so
+ * asking again and again stores nothing more) and the audit log keeps its
+ * ID and graph hash. A proposal that loses that race to another starts
+ * over.
  */
 export const proposeDependencies = async (
   env: Env,
@@ -269,28 +337,41 @@ export const proposeDependencies = async (
   }
   const graphHash = await dependencyGraphHash(graph);
   const targets = JSON.stringify(proposal.targets.toSorted());
-  const same = (row: Row): boolean =>
-    row.sourceRevision === proposal.sourceRevision &&
-    row.graphHash === graphHash &&
-    row.targets === targets;
   const actor = by.actor ?? actorOf(by);
   const db = drizzle(env.DB);
   for (let attempt = 0; attempt < proposalTries; attempt += 1) {
     // Each attempt reads how things stand now.
     // oxlint-disable-next-line no-await-in-loop
-    const [approved, [waiting], generation] = await Promise.all([
-      requestsOf(env, proposal.app, "approved"),
-      requestsOf(env, proposal.app, "pending"),
+    const [approved, waiting, generation] = await Promise.all([
+      approvedFor(env, proposal.app),
+      pendingFor(env, proposal.app),
       policyGeneration(db),
     ]);
-    const standing = approved.find(same);
+    const standing = approved.find(
+      (row) => row.graphHash === graphHash && covers(row, proposal.targets)
+    );
     if (standing) {
       // oxlint-disable-next-line no-await-in-loop
       return await toRequest(env, standing);
     }
-    if (waiting && same(waiting) && waiting.snapshot === snapshot) {
+    if (waiting?.graphHash === graphHash && waiting.targets === targets) {
+      // The same graph and targets: the same request if what was reported
+      // of it is the same too. Only this one row's review is read.
       // oxlint-disable-next-line no-await-in-loop
-      return await toRequest(env, waiting);
+      const same = await db
+        .select({ id: dependencyRequests.id })
+        .from(dependencyRequests)
+        .where(
+          and(
+            eq(dependencyRequests.id, waiting.id),
+            eq(dependencyRequests.snapshot, snapshot)
+          )
+        )
+        .get();
+      if (same) {
+        // oxlint-disable-next-line no-await-in-loop
+        return await toRequest(env, waiting);
+      }
     }
     const row: Row = {
       id: crypto.randomUUID(),
@@ -300,6 +381,12 @@ export const proposeDependencies = async (
       targets,
       purpose: proposal.purpose,
       snapshot,
+      summary: {
+        direct: graph.direct.slice(0, dependencySummaryDirect).map(packageKey),
+        findings: proposal.findings
+          .toSorted((a, b) => gravity[b.severity] - gravity[a.severity])
+          .slice(0, dependencySummaryFindings),
+      },
       direct: graph.direct.length,
       packages: graph.packages.length,
       findings: proposal.findings.length,
@@ -335,8 +422,7 @@ export const proposeDependencies = async (
         waiting
           ? [
               db
-                .update(dependencyRequests)
-                .set({ status: "superseded" })
+                .delete(dependencyRequests)
                 .where(
                   and(
                     eq(dependencyRequests.id, waiting.id),
@@ -371,16 +457,14 @@ export const dependencyStatus = async (
   app: unknown
 ): Promise<DependencyStatus> => {
   const { id } = await appFor(env, by, app, "builder");
-  const db = drizzle(env.DB);
   const [generation, pending, approved] = await Promise.all([
-    policyGeneration(db),
-    requestsOf(env, id, "pending"),
-    requestsOf(env, id, "approved"),
+    policyGeneration(drizzle(env.DB)),
+    pendingFor(env, id),
+    approvedFor(env, id),
   ]);
-  const [waiting] = await toRequests(env, pending);
   return {
     policyGeneration: generation,
-    pending: waiting ?? null,
+    pending: pending ? await toRequest(env, pending) : null,
     approved: await toRequests(env, approved),
   };
 };
@@ -388,6 +472,9 @@ export const dependencyStatus = async (
 /**
  * The requests waiting on `by`: every pending one, oldest first, if they
  * hold `dependencies.approve` now; none otherwise, whatever their role.
+ * The permission is the deployment's, so a holder sees the request of
+ * every App, shared with them or not: its package metadata, never its
+ * source.
  */
 export const waitingDependencies = async (
   env: Env,
@@ -399,7 +486,7 @@ export const waitingDependencies = async (
     return { policyGeneration: generation, requests: [] };
   }
   const rows = await db
-    .select()
+    .select(listed)
     .from(dependencyRequests)
     .where(eq(dependencyRequests.status, "pending"))
     .orderBy(dependencyRequests.requestedAt, dependencyRequests.id);
@@ -407,6 +494,22 @@ export const waitingDependencies = async (
     policyGeneration: generation,
     requests: await toRequests(env, rows),
   };
+};
+
+/** How many requests wait on `by`: as many as `waitingDependencies` lists. */
+export const waitingDependencyCount = async (
+  env: Env,
+  by: Identity
+): Promise<number> => {
+  if (!(await holdsApprove(env, by))) {
+    return 0;
+  }
+  const row = await drizzle(env.DB)
+    .select({ waiting: count() })
+    .from(dependencyRequests)
+    .where(eq(dependencyRequests.status, "pending"))
+    .get();
+  return row?.waiting ?? 0;
 };
 
 const findRow = async (env: Env, input: unknown): Promise<Row> => {
@@ -424,15 +527,41 @@ const findRow = async (env: Env, input: unknown): Promise<Row> => {
   return row;
 };
 
-const keysOf = (
+const byKey = (graph: DependencyGraph): Map<string, DependencyPackage> =>
+  new Map(graph.packages.map((node) => [packageKey(node), node]));
+
+const refOf = ({ name, version }: DependencyPackage) => ({ name, version });
+
+/**
+ * What `graph` changes of the graph `before` was approved with: the
+ * packages it adds, those it no longer brings, and those with the same
+ * name and version whose bytes or origin are not the same.
+ */
+const changesFrom = (
+  before: Row,
   graph: DependencyGraph
-): Map<string, { name: string; version: string }> =>
-  new Map(
-    graph.packages.map(({ name, version }) => [
-      packageKey({ name, version }),
-      { name, version },
-    ])
-  );
+): NonNullable<DependencyReview["previous"]> => {
+  const was = byKey(snapshotSchema.parse(JSON.parse(before.snapshot)).graph);
+  const now = byKey(graph);
+  return {
+    request: before.id,
+    added: [...now]
+      .filter(([key]) => !was.has(key))
+      .map(([, node]) => refOf(node)),
+    removed: [...was]
+      .filter(([key]) => !now.has(key))
+      .map(([, node]) => refOf(node)),
+    changed: [...now]
+      .filter(([key, node]) => {
+        const old = was.get(key);
+        return (
+          old !== undefined &&
+          (old.integrity !== node.integrity || old.origin !== node.origin)
+        );
+      })
+      .map(([, node]) => refOf(node)),
+  };
+};
 
 /**
  * One request in full, for whoever may decide it (they hold
@@ -448,8 +577,15 @@ export const dependencyReview = async (
   if (!(await holdsApprove(env, by))) {
     try {
       await appFor(env, by, row.appId, "builder");
-    } catch {
-      throw notFound();
+    } catch (error) {
+      // Not theirs to read: as if it weren't there. Anything else failed.
+      if (
+        appErrors.codeOf(error) === "app.not_found" ||
+        roleErrors.codeOf(error) === "role.forbidden"
+      ) {
+        throw notFound();
+      }
+      throw error;
     }
   }
   const { graph, findings, refused } = snapshotSchema.parse(
@@ -457,17 +593,13 @@ export const dependencyReview = async (
   );
   const before =
     row.previous === null ? undefined : await findRow(env, row.previous);
-  let previous: DependencyReview["previous"] = null;
-  if (before) {
-    const was = keysOf(snapshotSchema.parse(JSON.parse(before.snapshot)).graph);
-    const now = keysOf(graph);
-    previous = {
-      request: before.id,
-      added: [...now].filter(([key]) => !was.has(key)).map(([, ref]) => ref),
-      removed: [...was].filter(([key]) => !now.has(key)).map(([, ref]) => ref),
-    };
-  }
-  return { ...(await toRequest(env, row)), graph, findings, refused, previous };
+  return {
+    ...(await toRequest(env, row)),
+    graph,
+    findings,
+    refused,
+    previous: before ? changesFrom(before, graph) : null,
+  };
 };
 
 /**
@@ -493,14 +625,24 @@ export const decideDependency = async (
   if (!(await holdsApprove(env, by))) {
     throw dependencyErrors.create("dependency.forbidden");
   }
-  const found = await findRow(env, input);
   const { approved, reviewed, reason } = dependencyErrors.parse(
     "dependency.invalid",
     dependencyDecisionSchema,
     decision
   );
-  const status = approved ? "approved" : "denied";
+  const id = identifierSchema.safeParse(input);
   const db = drizzle(env.DB);
+  const found = id.success
+    ? await db
+        .select(listed)
+        .from(dependencyRequests)
+        .where(eq(dependencyRequests.id, id.data))
+        .get()
+    : undefined;
+  if (!found) {
+    throw notFound();
+  }
+  const status = approved ? "approved" : "denied";
   const [[decided]] = await auditedBatch(env, db, [
     db
       .update(dependencyRequests)
@@ -520,7 +662,7 @@ export const decideDependency = async (
           holdsApproveSql(by.userId)
         )
       )
-      .returning(),
+      .returning(listed),
     outboxedIfChanged(
       db,
       requestEntry(actorOf(by), status, found, {
@@ -543,22 +685,25 @@ export const decideDependency = async (
 
 const admissionSchema = z.strictObject({
   app: appIdSchema,
-  sourceRevision: z.string().min(1).max(128),
   graphHash: z.string().regex(/^[0-9a-f]{64}$/u),
   targets: z.array(dependencyTargetSchema).min(1),
   policyGeneration: z.int().nonnegative(),
 });
 
-/** What a build asks to use: one graph, for one App, revision and targets. */
+/** What a build asks to use: one graph, for one App and targets. */
 export type DependencyAdmission = z.input<typeof admissionSchema>;
 
 /**
- * Whether exactly this graph is approved: for this App, at this source
- * revision, for every one of these targets, under the policy generation
- * the caller read. The one check for anything that would build with, run
- * or publish an App's packages; it answers with the approval it relied
- * on, to record with what was built. One read of the database answers it,
- * so a decision or a policy change lands wholly before or after.
+ * Whether exactly this graph is approved: for this App, for every one of
+ * these targets, under the policy generation the caller read. The one
+ * check for anything that would build with, run or publish an App's
+ * packages; it answers with the approval it relied on, to record with
+ * what was built. One read of the database answers it, so a decision or a
+ * policy change lands wholly before or after.
+ *
+ * Which revision of the source the graph comes from is not asked: an
+ * approved graph holds for every revision that resolves to it, and a
+ * source that asks for anything else resolves to another hash.
  *
  * Refused with `dependency.policy_changed` when the generation moved on
  * since the caller read it (read the status again), and with
@@ -589,7 +734,6 @@ export const admitDependencies = async (
       .where(
         and(
           eq(dependencyRequests.appId, asked.app),
-          eq(dependencyRequests.sourceRevision, asked.sourceRevision),
           eq(dependencyRequests.graphHash, asked.graphHash),
           inArray(dependencyRequests.status, ["approved", "pending"])
         )
@@ -597,18 +741,15 @@ export const admitDependencies = async (
       .orderBy(desc(dependencyRequests.requestedAt)),
   ]);
   const generation = policy?.generation ?? 0;
-  const approval =
-    generation === asked.policyGeneration
-      ? candidates.find(
-          (row) =>
-            row.status === "approved" &&
-            asked.targets.every((target) => targetsOf(row).includes(target))
-        )
-      : undefined;
+  const policyChanged = generation !== asked.policyGeneration;
+  const approval = policyChanged
+    ? undefined
+    : candidates.find(
+        (row) => row.status === "approved" && covers(row, asked.targets)
+      );
   if (approval) {
     return { approval: approval.id, policyGeneration: generation };
   }
-  const policyChanged = generation !== asked.policyGeneration;
   const waiting = candidates.find((row) => row.status === "pending");
   await auditedBatch(env, db, [
     outboxed(db, {
@@ -617,7 +758,6 @@ export const admitDependencies = async (
       target: { type: "app", id: asked.app },
       detail: {
         app: asked.app,
-        sourceRevision: asked.sourceRevision,
         graphHash: asked.graphHash,
         targets: asked.targets.toSorted().join(" "),
         policyGeneration: asked.policyGeneration,

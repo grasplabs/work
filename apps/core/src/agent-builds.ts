@@ -1090,7 +1090,8 @@ build: {
    * person who was given the permission to approve dependencies approves or
    * denies it as a whole; until then nothing may use the packages, and you
    * can't approve it or give anyone that permission. Another proposal for
-   * the App replaces one still waiting.
+   * the App replaces one still waiting. Report only what you resolved: the
+   * person is told the packages are as you reported them, unchecked.
    */
   proposeDependencies(app: string, proposal: {
     /** The revision of the source the graph was resolved from. */
@@ -1124,7 +1125,7 @@ build: {
     }[];
     /** What a package needs that the platform refuses, such as an install script. */
     refused: { package: { name: string; version: string }; requirement: string }[];
-  }): Promise<{ id: string; status: "pending" | "approved" | "denied" | "superseded"; graphHash: string }>;
+  }): Promise<{ id: string; status: "pending" | "approved" | "denied"; graphHash: string }>;
 };`;
 
 /** `env.build`. */

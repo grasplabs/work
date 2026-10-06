@@ -57,10 +57,33 @@ const severities: Record<DependencyFinding["severity"], MessageDescriptor> = {
   critical: msg({ message: "Critical", context: "severity of a finding" }),
 };
 
-/** Every package of a request, with what the registry says of each. */
+/** What was reported of a request's packages, each as text. */
+const Findings = ({ findings }: { findings: readonly DependencyFinding[] }) => {
+  const { t } = useLingui();
+  return (
+    <ul aria-label={t`Findings`} className="flex flex-col gap-1">
+      {findings.map((finding) => {
+        const kind = i18n._(findingKinds[finding.kind]);
+        const severity = i18n._(severities[finding.severity]);
+        const about = packageKey(finding.package);
+        const { summary } = finding;
+        return (
+          <li key={`${finding.kind} ${about} ${finding.id} ${summary}`}>
+            <Trans>
+              {kind}, {severity}, {about}: {summary}
+            </Trans>
+          </li>
+        );
+      })}
+    </ul>
+  );
+};
+
+/** Every package of a request, as its proposer reported each. */
 const Packages = ({ review }: { review: DependencyReview }) => {
   const { t } = useLingui();
   const { previous } = review;
+  const changed = formatList((previous?.changed ?? []).map(packageKey));
   const added = formatList((previous?.added ?? []).map(packageKey));
   const removed = formatList((previous?.removed ?? []).map(packageKey));
   return (
@@ -81,24 +104,15 @@ const Packages = ({ review }: { review: DependencyReview }) => {
               <Trans>No longer used: {removed}</Trans>
             </p>
           )}
+          {previous.changed.length === 0 ? null : (
+            <p>
+              <Trans>Same version, different contents: {changed}</Trans>
+            </p>
+          )}
         </div>
       )}
       {review.findings.length === 0 ? null : (
-        <ul aria-label={t`Findings`} className="flex flex-col gap-1">
-          {review.findings.map((finding) => {
-            const kind = i18n._(findingKinds[finding.kind]);
-            const severity = i18n._(severities[finding.severity]);
-            const about = packageKey(finding.package);
-            const { summary } = finding;
-            return (
-              <li key={`${finding.kind} ${about} ${finding.id} ${summary}`}>
-                <Trans>
-                  {kind}, {severity}, {about}: {summary}
-                </Trans>
-              </li>
-            );
-          })}
-        </ul>
+        <Findings findings={review.findings} />
       )}
       {review.refused.length === 0 ? null : (
         <ul
@@ -182,17 +196,23 @@ const RequestCard = ({
     request.targets.map((target) => i18n._(targetNames[target]))
   );
   const asked = formatDateTime(request.requestedAt);
-  // Read again however it went: a refused decision says the request
-  // changed, and the list shows how it stands now.
+  const shown = formatList(request.summary.direct);
+  const more = request.counts.direct - request.summary.direct.length;
+  const moreFindings =
+    request.counts.findings - request.summary.findings.length;
+  // Read again once it is decided. A refused decision stays, with why:
+  // reading again would take the card, and the reason, away.
   const decide = async (approved: boolean): Promise<void> => {
-    await run(
+    const decided = await run(
       async (session) =>
         await session.dependencies.decide(request.id, {
           approved,
           reviewed: { graphHash: request.graphHash, policyGeneration },
         })
     );
-    onDecided();
+    if (decided !== undefined) {
+      onDecided();
+    }
   };
   return (
     <article
@@ -217,6 +237,17 @@ const RequestCard = ({
             other={`${requester} asks for # packages`}
           />
         </p>
+        <p>
+          {more > 0 ? (
+            <Plural
+              value={more}
+              one={`${shown} and # more`}
+              other={`${shown} and # more`}
+            />
+          ) : (
+            shown
+          )}
+        </p>
         <p className="text-muted-foreground">
           <Plural
             value={request.counts.packages}
@@ -235,6 +266,12 @@ const RequestCard = ({
               <time dateTime={request.requestedAt}>{asked}</time>
             </Trans>
           )}
+        </p>
+        <p className="text-muted-foreground">
+          <Trans>
+            The packages, their licences and the findings are as reported by{" "}
+            {requester}. Grasp hasn&apos;t checked them against the registry.
+          </Trans>
         </p>
         <div className="flex flex-wrap gap-2">
           {request.counts.findings === 0 ? null : (
@@ -257,6 +294,20 @@ const RequestCard = ({
           )}
         </div>
       </div>
+      {review === undefined && request.summary.findings.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <Findings findings={request.summary.findings} />
+          {moreFindings > 0 ? (
+            <p className="text-muted-foreground">
+              <Plural
+                value={moreFindings}
+                one="And # more finding: show every package to read it."
+                other="And # more findings: show every package to read them."
+              />
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {review === undefined ? null : <Packages review={review} />}
       <div className="flex flex-wrap gap-2">
         {review === undefined ? (

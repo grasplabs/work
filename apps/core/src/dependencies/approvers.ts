@@ -21,7 +21,12 @@ import {
   storedEvent,
 } from "../audit-outbox.ts";
 import { activeMember, organizationId } from "../auth/auth.ts";
-import { permissions, teamMembers, teams, users } from "../db/core/schema.ts";
+import {
+  dependencyApprovers,
+  teamMembers,
+  teams,
+  users,
+} from "../db/core/schema.ts";
 import { isUniqueViolation } from "../db/d1.ts";
 import {
   requireMemberAdmin,
@@ -30,11 +35,12 @@ import {
 } from "../permissions.ts";
 import { advancePolicy } from "./policy.ts";
 
-// `dependencies.approve`: who may approve npm packages for Apps. It is a
-// permission like any other, a row in `permissions` that an admin of the
-// organization grants and revokes, audited as `permission.granted` and
-// `permission.revoked`; only its holder differs: a member or a team,
-// never an App or an agent. What could go wrong, and what stops it:
+// `dependencies.approve`: who may approve npm packages for Apps. Its
+// grants are rows of their own (`dependency_approvers`), as its holder is
+// a member or a team, where every other permission's is an App or an
+// agent; the rules are those of every permission: an admin of the
+// organization grants and revokes it, audited as `permission.granted` and
+// `permission.revoked`. What could go wrong, and what stops it:
 //
 // - A role standing in for it. No role gives it: an admin or a builder
 //   holds it only by a row of their own (an admin may grant themselves
@@ -43,8 +49,7 @@ import { advancePolicy } from "./policy.ts";
 //   revoke nor hold it, as for every other permission.
 // - An agent, a workflow or App code granting it, or asking for it.
 //   Nothing they reach leads here: this is only on a person's own `/rpc`
-//   session, and the permissions API they do reach takes an App's
-//   permissions only (permissions.ts).
+//   session, and the permissions an agent may ask for are an App's.
 // - Someone who lost it, left, or was taken off the team, still deciding.
 //   Whether a person holds it is part of the one update that takes their
 //   decision (requests.ts), read then, from the rows as they are.
@@ -54,18 +59,7 @@ import { advancePolicy } from "./policy.ts";
 //   grant and revoke moves the policy generation on in its own batch
 //   (policy.ts).
 
-type Row = typeof permissions.$inferSelect;
-
-/** What fills the columns every permission has, for this one. */
-const objectType = "dependencies";
-const action = "approve";
-const binding = "DEPENDENCIES_APPROVE";
-
-/** The rows that are `dependencies.approve`, as a condition. */
-const isApprover = and(
-  eq(permissions.objectType, objectType),
-  inArray(permissions.subjectType, ["person", "team"])
-);
+type Row = typeof dependencyApprovers.$inferSelect;
 
 const subjectIdOf = (subject: DependencyApproverSubject): string =>
   subject.type === "person" ? subject.userId : subject.teamId;
@@ -84,17 +78,16 @@ const subjectOf = (row: Row): DependencyApproverSubject =>
 export const holdsApproveSql = (userId: string): SQL => sql`(
   ${activeMember(userId)}
   AND EXISTS (
-    SELECT 1 FROM ${permissions}
-    WHERE ${permissions.objectType} = ${objectType}
-      AND ${permissions.status} = 'active'
+    SELECT 1 FROM ${dependencyApprovers}
+    WHERE ${dependencyApprovers.status} = 'active'
       AND (
-        (${permissions.subjectType} = 'person' AND ${permissions.subjectId} = ${userId})
+        (${dependencyApprovers.subjectType} = 'person' AND ${dependencyApprovers.subjectId} = ${userId})
         OR (
-          ${permissions.subjectType} = 'team'
+          ${dependencyApprovers.subjectType} = 'team'
           AND EXISTS (
             SELECT 1 FROM ${teamMembers}
             INNER JOIN ${teams} ON ${teams.id} = ${teamMembers.teamId}
-            WHERE ${teamMembers.teamId} = ${permissions.subjectId}
+            WHERE ${teamMembers.teamId} = ${dependencyApprovers.subjectId}
               AND ${teamMembers.userId} = ${userId}
               AND ${teams.organizationId} = ${organizationId}
           )
@@ -139,8 +132,8 @@ const entry = (
   detail: {
     subjectType: row.subjectType,
     subjectId: row.subjectId,
-    objectType,
-    actions: action,
+    objectType: "dependencies",
+    actions: "approve",
   },
 });
 
@@ -174,9 +167,9 @@ const withNames = async (
     id: row.id,
     subject: subjectOf(row),
     name: names.get(row.subjectId) ?? null,
-    status: row.status === "active" ? "active" : "revoked",
-    grantedBy: row.grantedBy ?? row.requestedBy,
-    grantedAt: (row.grantedAt ?? row.requestedAt).toISOString(),
+    status: row.status,
+    grantedBy: row.grantedBy,
+    grantedAt: row.grantedAt.toISOString(),
     revokedBy: row.revokedBy,
     revokedAt: row.revokedAt?.toISOString() ?? null,
   }));
@@ -198,9 +191,8 @@ export const listApprovers = async (
   requireAdmin(by);
   const rows = await drizzle(env.DB)
     .select()
-    .from(permissions)
-    .where(isApprover)
-    .orderBy(asc(permissions.requestedAt), asc(permissions.id));
+    .from(dependencyApprovers)
+    .orderBy(asc(dependencyApprovers.grantedAt), asc(dependencyApprovers.id));
   return await withNames(env, rows);
 };
 
@@ -211,13 +203,12 @@ const liveGrant = async (
 ): Promise<Row | undefined> =>
   await drizzle(env.DB)
     .select()
-    .from(permissions)
+    .from(dependencyApprovers)
     .where(
       and(
-        isApprover,
-        eq(permissions.subjectType, subject.type),
-        eq(permissions.subjectId, subjectIdOf(subject)),
-        eq(permissions.status, "active")
+        eq(dependencyApprovers.subjectType, subject.type),
+        eq(dependencyApprovers.subjectId, subjectIdOf(subject)),
+        eq(dependencyApprovers.status, "active")
       )
     )
     .get();
@@ -245,7 +236,6 @@ export const grantApprover = async (
   }
   const id = crypto.randomUUID();
   const subjectId = subjectIdOf(subject);
-  const now = Date.now();
   const event = createAuditEvent(
     entry(by, "permission.granted", {
       id,
@@ -258,10 +248,10 @@ export const grantApprover = async (
   try {
     const [[granted]] = await auditedBatch(env, db, [
       db
-        .insert(permissions)
-        // Every column, in the table's order.
+        .insert(dependencyApprovers)
+        // The table's columns, in its order.
         .select(
-          sql`SELECT ${id}, ${subject.type}, ${subjectId}, ${objectType}, ${objectType}, NULL, ${JSON.stringify([action])}, ${binding}, 'active', ${by.userId}, ${now}, ${by.userId}, ${now}, NULL, NULL, NULL WHERE ${stillAdmin(by)} AND ${subjectExists(subject)}`
+          sql`SELECT ${id}, ${subject.type}, ${subjectId}, 'active', ${by.userId}, ${Date.now()}, NULL, NULL WHERE ${stillAdmin(by)} AND ${subjectExists(subject)}`
         )
         .returning(),
       outboxedEventWhere(db, event, sql`changes() > 0`),
@@ -299,13 +289,13 @@ export const revokeApprover = async (
   requireMemberAdmin(by);
   const id = identifierSchema.safeParse(input);
   const db = drizzle(env.DB);
-  const found = id.success
-    ? await db
-        .select()
-        .from(permissions)
-        .where(and(isApprover, eq(permissions.id, id.data)))
-        .get()
-    : undefined;
+  const find = async (grant: string): Promise<Row | undefined> =>
+    await db
+      .select()
+      .from(dependencyApprovers)
+      .where(eq(dependencyApprovers.id, grant))
+      .get();
+  const found = id.success ? await find(id.data) : undefined;
   if (!found) {
     throw dependencyErrors.create("dependency.not_found");
   }
@@ -315,13 +305,12 @@ export const revokeApprover = async (
   );
   const [[revoked]] = await auditedBatch(env, db, [
     db
-      .update(permissions)
+      .update(dependencyApprovers)
       .set({ status: "revoked", revokedBy: by.userId, revokedAt: new Date() })
       .where(
         and(
-          isApprover,
-          eq(permissions.id, found.id),
-          eq(permissions.status, "active"),
+          eq(dependencyApprovers.id, found.id),
+          eq(dependencyApprovers.status, "active"),
           stillAdmin(by)
         )
       )
@@ -334,10 +323,5 @@ export const revokeApprover = async (
   }
   await requireStillAdmin(env, by);
   // Already revoked: nothing changed, and nothing is recorded.
-  const now = await db
-    .select()
-    .from(permissions)
-    .where(eq(permissions.id, found.id))
-    .get();
-  return await one(env, now ?? found);
+  return await one(env, (await find(found.id)) ?? found);
 };

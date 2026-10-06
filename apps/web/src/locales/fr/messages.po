@@ -176,6 +176,14 @@ msgstr "{link} dans {appName} a échoué"
 msgid "{link} in {appName} failed {failures, plural, one {once} other {# times}}"
 msgstr "{link} dans {appName} a échoué {failures, plural, one {une fois} other {# fois}}"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
+msgstr "{more, plural, one {{shown} et # autre} other {{shown} et # autres}}"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "{moreFindings, plural, one {And # more finding: show every package to read it.} other {And # more findings: show every package to read them.}}"
+msgstr "{moreFindings, plural, one {Et # autre constat : affichez tous les paquets pour le lire.} other {Et # autres constats : affichez tous les paquets pour les lire.}}"
+
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
 msgstr "{name} (équipe Grasp)"
@@ -2578,6 +2586,10 @@ msgstr "S’exécute actuellement"
 msgid "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 msgstr "Exécute les cas de test propres au workflow avec les valeurs définies actuellement. Rien n’est modifié : ce qu’il modifierait est listé à la place."
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Same version, different contents: {changed}"
+msgstr "Même version, contenu différent : {changed}"
+
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Save"
@@ -3016,6 +3028,10 @@ msgstr "Le lien fonctionne jusqu’au {until}."
 #: src/chat/thread.tsx
 msgid "The model call failed."
 msgstr "L’appel au modèle a échoué."
+
+#: src/dashboard/dependency-requests.tsx
+msgid "The packages, their licences and the findings are as reported by {requester}. Grasp hasn't checked them against the registry."
+msgstr "Les paquets, leurs licences et les constats sont ceux indiqués par {requester}. Grasp ne les a pas vérifiés auprès du registre."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."

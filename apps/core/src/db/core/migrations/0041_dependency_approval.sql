@@ -1,3 +1,15 @@
+CREATE TABLE `dependency_approvers` (
+	`id` text PRIMARY KEY NOT NULL,
+	`subject_type` text NOT NULL,
+	`subject_id` text NOT NULL,
+	`status` text NOT NULL,
+	`granted_by` text NOT NULL,
+	`granted_at` integer NOT NULL,
+	`revoked_by` text,
+	`revoked_at` integer
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `dependency_approvers_live_idx` ON `dependency_approvers` (`subject_type`,`subject_id`) WHERE status = 'active';--> statement-breakpoint
 CREATE TABLE `dependency_policy` (
 	`id` text PRIMARY KEY NOT NULL,
 	`generation` integer NOT NULL
@@ -11,6 +23,7 @@ CREATE TABLE `dependency_requests` (
 	`targets` text NOT NULL,
 	`purpose` text NOT NULL,
 	`snapshot` text NOT NULL,
+	`summary` text NOT NULL,
 	`direct` integer NOT NULL,
 	`packages` integer NOT NULL,
 	`findings` integer NOT NULL,

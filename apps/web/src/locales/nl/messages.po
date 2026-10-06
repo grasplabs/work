@@ -176,6 +176,14 @@ msgstr "{link} in {appName} is mislukt"
 msgid "{link} in {appName} failed {failures, plural, one {once} other {# times}}"
 msgstr "{link} in {appName} is {failures, plural, one {één keer} other {# keer}} mislukt"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
+msgstr "{more, plural, one {{shown} en nog #} other {{shown} en nog #}}"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "{moreFindings, plural, one {And # more finding: show every package to read it.} other {And # more findings: show every package to read them.}}"
+msgstr "{moreFindings, plural, one {En nog # bevinding: toon alle pakketten om die te lezen.} other {En nog # bevindingen: toon alle pakketten om ze te lezen.}}"
+
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
 msgstr "{name} (Grasp-medewerker)"
@@ -2578,6 +2586,10 @@ msgstr "Draait nu"
 msgid "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 msgstr "Voert de eigen testcases van de workflow uit met de waarden die nu zijn ingesteld. Er wordt niets gewijzigd: wat hij zou wijzigen, wordt in plaats daarvan opgesomd."
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Same version, different contents: {changed}"
+msgstr "Zelfde versie, andere inhoud: {changed}"
+
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Save"
@@ -3016,6 +3028,10 @@ msgstr "De link werkt tot {until}."
 #: src/chat/thread.tsx
 msgid "The model call failed."
 msgstr "De modelaanroep is mislukt."
+
+#: src/dashboard/dependency-requests.tsx
+msgid "The packages, their licences and the findings are as reported by {requester}. Grasp hasn't checked them against the registry."
+msgstr "De pakketten, hun licenties en de bevindingen zijn zoals {requester} ze heeft opgegeven. Grasp heeft ze niet met de registry vergeleken."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."

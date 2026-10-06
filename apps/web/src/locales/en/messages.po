@@ -176,6 +176,14 @@ msgstr "{link} in {appName} failed"
 msgid "{link} in {appName} failed {failures, plural, one {once} other {# times}}"
 msgstr "{link} in {appName} failed {failures, plural, one {once} other {# times}}"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
+msgstr "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "{moreFindings, plural, one {And # more finding: show every package to read it.} other {And # more findings: show every package to read them.}}"
+msgstr "{moreFindings, plural, one {And # more finding: show every package to read it.} other {And # more findings: show every package to read them.}}"
+
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
 msgstr "{name} (Grasp staff)"
@@ -2578,6 +2586,10 @@ msgstr "Runs now"
 msgid "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 msgstr "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Same version, different contents: {changed}"
+msgstr "Same version, different contents: {changed}"
+
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Save"
@@ -3016,6 +3028,10 @@ msgstr "The link works until {until}."
 #: src/chat/thread.tsx
 msgid "The model call failed."
 msgstr "The model call failed."
+
+#: src/dashboard/dependency-requests.tsx
+msgid "The packages, their licences and the findings are as reported by {requester}. Grasp hasn't checked them against the registry."
+msgstr "The packages, their licences and the findings are as reported by {requester}. Grasp hasn't checked them against the registry."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."

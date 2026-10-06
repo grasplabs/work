@@ -108,9 +108,12 @@ test("someone given the permission approves the packages proposed for an engine,
   await expect(
     card.getByText("Draw the monthly totals as a chart.")
   ).toBeVisible();
+  // What it asks for, by name, and that nobody checked it yet.
+  await expect(card.getByText("charts@3.1.0", { exact: true })).toBeVisible();
   await expect(
     card.getByText("2 packages in all, to run in: Browser")
   ).toBeVisible();
+  await expect(card.getByText(/are as reported by/u)).toBeVisible();
   await card
     .getByRole("button", { name: "Show the packages for Totals" })
     .click();

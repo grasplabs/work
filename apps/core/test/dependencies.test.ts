@@ -161,7 +161,6 @@ const admission = async (
   return await outcome(
     admitDependencies(env, builderActor(builder), {
       app: request.app.id,
-      sourceRevision: request.sourceRevision,
       graphHash: request.graphHash,
       targets: request.targets,
       policyGeneration,
@@ -226,10 +225,10 @@ describe("dependency approval", () => {
     }
     const review = await approver.api.dependencies.get(request.id);
     const waiting = await approver.api.dependencies.waiting();
+    const waitingCount = await approver.api.dependencies.waitingCount();
     const before = await admission(builder, request);
     const refusal = await admitDependencies(env, builderActor(builder), {
       app: request.app.id,
-      sourceRevision: "rev-1",
       graphHash: request.graphHash,
       targets: ["browser"],
       policyGeneration: waiting.policyGeneration,
@@ -237,7 +236,6 @@ describe("dependency approval", () => {
     const decided = await approve(approver.api, request);
     const after = await admitDependencies(env, builderActor(builder), {
       app: request.app.id,
-      sourceRevision: "rev-1",
       graphHash: request.graphHash,
       targets: ["browser"],
       policyGeneration: waiting.policyGeneration,
@@ -253,6 +251,11 @@ describe("dependency approval", () => {
       // Core's own hash of the packages, never one the request states.
       graphHash: await dependencyGraphHash(graph),
       counts: { direct: 1, packages: 2, findings: 2, refused: 1 },
+      // What a list shows of it: the gravest findings first.
+      summary: {
+        direct: ["charts@3.1.0"],
+        findings: [{ severity: "moderate" }, { severity: "info" }],
+      },
       requestedBy: { userId: builder.userId },
       requestedVia: null,
       graph: {
@@ -275,7 +278,11 @@ describe("dependency approval", () => {
       refused: proposal.refused,
       previous: null,
     });
-    expect(waiting.requests.map(({ id }) => id)).toContain(request.id);
+    // Listed to who decides, and counted as listed.
+    expect({
+      listed: waiting.requests.some(({ id }) => id === request?.id),
+      counted: waitingCount === waiting.requests.length,
+    }).toStrictEqual({ listed: true, counted: true });
     // The refusal names the request that waits, for whoever asks.
     expect({ before, refusal }).toMatchObject({
       before: "dependency.approval_required",
@@ -333,7 +340,6 @@ describe("dependency approval", () => {
 
     const about = {
       app,
-      sourceRevision: "rev-1",
       graphHash: request.graphHash,
       targets: "browser",
     };
@@ -355,6 +361,7 @@ describe("dependency approval", () => {
         target: { type: "dependency_request", id: request.id },
         detail: {
           ...about,
+          sourceRevision: "rev-1",
           direct: 1,
           packages: 2,
           requestedBy: builder.userId,
@@ -387,11 +394,12 @@ describe("dependency approval", () => {
       throw new Error("No request");
     }
     const status = await builder.api.dependencies.status(app);
-    // The replaced request can no longer be approved.
+    // The replaced request is gone: nobody approves it, and nothing of it
+    // is kept but its audit events.
     const replaced = await outcome(approve(approver.api, first));
     await approve(approver.api, other);
     const approvedAgain = await builder.api.dependencies.propose(
-      proposalFor(app, { graph: charts("3.2.0") })
+      proposalFor(app, { sourceRevision: "rev-9", graph: charts("3.2.0") })
     );
 
     expect(again.id).toBe(first.id);
@@ -401,7 +409,7 @@ describe("dependency approval", () => {
     }).toStrictEqual({ id: false, graph: false });
     expect({ pending: status.pending?.id, replaced }).toStrictEqual({
       pending: other.id,
-      replaced: "dependency.stale",
+      replaced: "dependency.not_found",
     });
     // What is approved already asks nobody again.
     expect(approvedAgain).toMatchObject({ id: other.id, status: "approved" });
@@ -446,6 +454,24 @@ describe("dependency approval", () => {
         packages: [chartsNode, scale, node("left-pad@1.3.0")],
       }),
       listedTwice: withGraph({ packages: [chartsNode, scale, scale] }),
+      sameEdgeTwice: withGraph({
+        packages: [
+          {
+            ...chartsNode,
+            dependencies: [
+              ...chartsNode.dependencies,
+              ...chartsNode.dependencies,
+            ],
+          },
+          scale,
+        ],
+      }),
+      samePeerTwice: withGraph({
+        packages: [
+          { ...chartsNode, peers: [...chartsNode.peers, ...chartsNode.peers] },
+          scale,
+        ],
+      }),
       secondReact: withGraph({
         direct: [...graph.direct, { name: "react", version: "18.3.1" }],
         packages: [chartsNode, scale, node("react@18.3.1")],
@@ -578,6 +604,7 @@ describe("dependency approval", () => {
       // Nor does anyone without it see what waits, or read a request of
       // an App they don't build.
       adminWaiting: await waitingFor(admin.api),
+      adminCount: await admin.api.dependencies.waitingCount(),
       strangerReads: await outcome(stranger.api.dependencies.get(request.id)),
       staffProposes: await outcome(
         staff.dependencies.propose(proposalFor(app))
@@ -602,6 +629,7 @@ describe("dependency approval", () => {
       stranger: "dependency.forbidden",
       staff: "dependency.forbidden",
       adminWaiting: [],
+      adminCount: 0,
       strangerReads: "dependency.not_found",
       staffProposes: "role.forbidden",
       strangerProposes: "app.not_found",
@@ -794,11 +822,14 @@ describe("dependency approval", () => {
           })
         );
       });
-      const after = await builder.api.dependencies.get(request.id);
+      const after = await builder.api.dependencies.get(request.id).then(
+        ({ status }) => status,
+        () => "gone"
+      );
       return {
         result,
-        status: after.status,
-        admitted: await admission(builder, after),
+        status: after,
+        admitted: await admission(builder, request),
         decisions: eventsOf(events, request)
           .map(({ action }) => action)
           .filter((action) => action === "dependency.approved"),
@@ -813,7 +844,7 @@ describe("dependency approval", () => {
     });
     const replaced = await racedBy(async ({ builder, app }) => {
       await builder.api.dependencies.propose(
-        proposalFor(app, { sourceRevision: "rev-2" })
+        proposalFor(app, { graph: charts("3.2.0") })
       );
     });
     const policyChanged = await racedBy(async () => {
@@ -837,7 +868,7 @@ describe("dependency approval", () => {
     });
     expect(replaced).toStrictEqual({
       result: "dependency.stale",
-      status: "superseded",
+      status: "gone",
       ...nothing,
     });
     expect(policyChanged).toStrictEqual({
@@ -884,12 +915,21 @@ describe("dependency approval", () => {
         })
       ),
     };
-    const denied = await approver.api.dependencies.decide(request.id, {
-      approved: false,
-      reviewed,
-      reason: "Too many packages for a chart",
+    let denied: DependencyRequest | undefined;
+    const events = await auditedDuring(async () => {
+      denied = await approver.api.dependencies.decide(request.id, {
+        approved: false,
+        reviewed,
+        reason: "Too many packages for a chart",
+      });
     });
     const afterwards = {
+      recorded: eventsOf(events, request).map(({ action, actor, detail }) => ({
+        action,
+        actor,
+        reason: detail.reason,
+        graphHash: detail.graphHash,
+      })),
       approvedAfterDenial: await outcome(
         second.api.dependencies.decide(request.id, { approved: true, reviewed })
       ),
@@ -912,6 +952,14 @@ describe("dependency approval", () => {
       },
     });
     expect(afterwards).toStrictEqual({
+      recorded: [
+        {
+          action: "dependency.denied",
+          actor: { type: "person", userId: approver.userId },
+          reason: "Too many packages for a chart",
+          graphHash: request.graphHash,
+        },
+      ],
       approvedAfterDenial: "dependency.stale",
       admitted: "dependency.approval_required",
     });
@@ -919,7 +967,7 @@ describe("dependency approval", () => {
     expect(askedAgain.id).not.toBe(request.id);
   });
 
-  it("admits exactly what was approved: this App, revision, graph and targets", async () => {
+  it("admits exactly what was approved: this App, graph and targets, at any revision of the source", async () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
     const { id: otherApp } = await builder.api.apps.create({
@@ -928,18 +976,20 @@ describe("dependency approval", () => {
     const approver = await approverBy(admin);
     const request = await builder.api.dependencies.propose(proposalFor(app));
     await approve(approver.api, request);
-    // The source moves on: the same packages at another revision, and
-    // other packages, are requests of their own.
+    // The source moves on. The same packages at a later revision are the
+    // approved graph still, and ask nobody again; other packages are a
+    // request of their own.
+    const laterRevision = await builder.api.dependencies.propose(
+      proposalFor(app, { sourceRevision: "rev-2" })
+    );
     const edited = await builder.api.dependencies.propose(
-      proposalFor(app, { sourceRevision: "rev-2", graph: charts("3.2.0") })
+      proposalFor(app, { sourceRevision: "rev-3", graph: charts("3.2.0") })
     );
     const review = await approver.api.dependencies.get(edited.id);
 
     const outcomes = {
       approved: await admission(builder, request),
-      otherRevision: await admission(builder, request, {
-        sourceRevision: "rev-2",
-      }),
+      laterRevision: [laterRevision.id, laterRevision.status].join(" "),
       otherGraph: await admission(builder, request, {
         graphHash: edited.graphHash,
       }),
@@ -958,10 +1008,43 @@ describe("dependency approval", () => {
       // The earlier approval stands for what it was given for.
       earlier: await admission(builder, request),
     };
+    // The same names and versions with other bytes are another graph, and
+    // the review says which package's bytes differ.
+    const [chartsNode, scale] = charts("3.2.0").packages;
+    const swapped = await builder.api.dependencies.propose(
+      proposalFor(app, {
+        graph: {
+          ...charts("3.2.0"),
+          packages: [
+            ...(chartsNode ? [chartsNode] : []),
+            ...(scale
+              ? [{ ...scale, integrity: `sha512-${"B".repeat(86)}==` }]
+              : []),
+          ],
+        },
+      })
+    );
+    const swappedReview = await approver.api.dependencies.get(swapped.id);
 
+    expect({
+      status: swapped.status,
+      sameHash: swapped.graphHash === edited.graphHash,
+      admitted: await admission(builder, swapped),
+      previous: swappedReview.previous,
+    }).toStrictEqual({
+      status: "pending",
+      sameHash: false,
+      admitted: "dependency.approval_required",
+      previous: {
+        request: edited.id,
+        added: [],
+        removed: [],
+        changed: [{ name: "d3-scale", version: "4.0.2" }],
+      },
+    });
     expect(outcomes).toStrictEqual({
       approved: "ok",
-      otherRevision: "dependency.approval_required",
+      laterRevision: `${request.id} approved`,
       otherGraph: "dependency.approval_required",
       widerTargets: "dependency.approval_required",
       otherTarget: "dependency.approval_required",
@@ -974,6 +1057,7 @@ describe("dependency approval", () => {
       request: request.id,
       added: [{ name: "charts", version: "3.2.0" }],
       removed: [{ name: "charts", version: "3.1.0" }],
+      changed: [],
     });
   });
 

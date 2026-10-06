@@ -63,10 +63,10 @@ const readCount = async (
       })
     ),
     countOf(
-      readWithin(core, async (session) => {
-        const { requests } = await session.dependencies.waiting();
-        return requests.length;
-      })
+      readWithin(
+        core,
+        async (session) => await session.dependencies.waitingCount()
+      )
     ),
     decidesRequests(identity)
       ? countOf(

@@ -12,7 +12,8 @@ import { canonicalJson } from "./json.ts";
 // bring, direct and transitive, each by exact version and integrity hash.
 // It is a request, and allows nothing. A person who holds
 // `dependencies.approve` approves or denies the graph as a whole. Nothing
-// here fetches, installs or runs a package: the graph is data, and a
+// here fetches, installs or runs a package: the graph is data its proposer
+// supplies, which nothing has checked against the registry yet, and a
 // package's own words in it (a licence, a finding's summary) are shown as
 // text, never followed.
 
@@ -148,9 +149,18 @@ export const dependencyGraphSchema = z
       issue("direct", `${key} is listed twice`);
     }
     const byKey = new Map(packages.map((node) => [packageKey(node), node]));
-    for (const { name } of packages) {
-      if (Object.hasOwn(platformPeers, name)) {
-        issue("packages", `${name} is provided by the platform`);
+    for (const node of packages) {
+      if (Object.hasOwn(platformPeers, node.name)) {
+        issue("packages", `${node.name} is provided by the platform`);
+      }
+      // Each edge and each peer once: a list with one twice would be
+      // another graph by its hash, and the same one to whoever reads it.
+      for (const key of repeated(node.dependencies)) {
+        issue("packages", `${packageKey(node)} depends on ${key} twice`);
+      }
+      const peerNames = node.peers.map(({ name }) => name);
+      if (new Set(peerNames).size !== peerNames.length) {
+        issue("packages", `${packageKey(node)} names a peer twice`);
       }
     }
     const reached = new Set<string>();
@@ -213,8 +223,10 @@ export type DependencyRefusal = z.infer<typeof refusedSchema>;
 
 /**
  * The revision of the source a graph was resolved from, as whoever
- * resolved it names it. Core only compares it: a graph is approved for
- * the revision it was reviewed at, and no other.
+ * resolved it names it: provenance, kept with the request. What is
+ * approved is the graph: the same graph at a later revision needs no
+ * new approval, and a change of what the source asks for is another
+ * graph, with another hash.
  */
 const sourceRevisionSchema = z
   .string()
@@ -297,21 +309,32 @@ export const dependencyGraphHash = async (
 
 /**
  * Where a request stands. Pending: asked, allows nothing. Approved: a
- * person approved exactly this graph, for this App, source revision and
- * targets. Denied: a person refused it. Superseded: another proposal for
- * the App took its place before anyone decided.
+ * person approved exactly this graph, for this App and these targets.
+ * Denied: a person refused it. A pending request another proposal for the
+ * App replaces is gone: only the audit log keeps it.
  */
-export type DependencyRequestStatus =
-  | "pending"
-  | "approved"
-  | "denied"
-  | "superseded";
+export type DependencyRequestStatus = "pending" | "approved" | "denied";
+
+/** Most direct packages, and most findings, a request shows in a list. */
+export const dependencySummaryDirect = 8;
+export const dependencySummaryFindings = 5;
+
+/**
+ * The little of a request a list shows without its whole graph: the first
+ * direct packages (`name@version`, in order) and the gravest findings.
+ * `counts` says how many there are in all.
+ */
+export interface DependencySummary {
+  direct: string[];
+  findings: DependencyFinding[];
+}
 
 /** A request, without its packages. */
 export interface DependencyRequest {
   id: string;
   app: { id: AppId; name: string };
   status: DependencyRequestStatus;
+  /** The revision of the source the graph was resolved from: provenance. */
   sourceRevision: string;
   purpose: string;
   targets: DependencyTarget[];
@@ -324,7 +347,13 @@ export interface DependencyRequest {
     findings: number;
     refused: number;
   };
-  /** Who asked, and when (ISO 8601). */
+  /** What a list shows of its packages and findings. */
+  summary: DependencySummary;
+  /**
+   * Who asked, and when (ISO 8601). Everything the request says of its
+   * packages (versions, hashes, licences, peers, findings) is as they
+   * reported it: nothing has checked it against the registry.
+   */
   requestedBy: { userId: string; name: string };
   requestedAt: string;
   /** The chat's agent that proposed it, acting for `requestedBy`; null for a person's own. */
@@ -348,13 +377,15 @@ export interface DependencyReview extends DependencyRequest {
   refused: DependencyRefusal[];
   /**
    * What it changes of the graph approved for the App when it was asked:
-   * the packages it adds and those it no longer brings. Null when none was
-   * approved yet: then every package is new.
+   * the packages it adds, those it no longer brings, and those with the
+   * same name and version whose bytes or origin differ (`changed`). Null
+   * when none was approved yet: then every package is new.
    */
   previous: {
     request: string;
     added: DependencyPackageRef[];
     removed: DependencyPackageRef[];
+    changed: DependencyPackageRef[];
   } | null;
 }
 
@@ -416,7 +447,7 @@ export const dependencyErrors = defineErrorFamily({
 
 /** Someone who holds `dependencies.approve`, as the API returns it. */
 export interface DependencyApprover {
-  /** The permission's ID. */
+  /** The grant's ID. */
   id: string;
   subject: DependencyApproverSubject;
   /** The member's or team's name, as it is now; null once it is gone. */
@@ -448,6 +479,8 @@ export interface DependenciesApi {
    * `dependencies.approve` now; none otherwise.
    */
   waiting: () => Promise<DependenciesWaiting>;
+  /** How many wait on the person: what `waiting` would list. */
+  waitingCount: () => Promise<number>;
   /** One request in full, for whoever may decide it or builds its App. */
   get: (request: string) => Promise<DependencyReview>;
   /**

@@ -20,6 +20,7 @@ import {
   dependencyStatus,
   proposeDependencies,
   waitingDependencies,
+  waitingDependencyCount,
 } from "./requests.ts";
 
 /**
@@ -56,6 +57,13 @@ export class DependenciesRpc extends RpcTarget implements DependenciesApi {
     return await withPerson(
       this.#check,
       async (by) => await waitingDependencies(this.#env, by)
+    );
+  }
+
+  async waitingCount(): Promise<number> {
+    return await withPerson(
+      this.#check,
+      async (by) => await waitingDependencyCount(this.#env, by)
     );
   }
 
