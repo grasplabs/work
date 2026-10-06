@@ -122,9 +122,28 @@ const workersAiMaxTokens = 32_768;
  */
 const defaultMaxTokens = 16_384;
 
+/**
+ * When the call doesn't say, an answer takes at most one in this many of
+ * the model's window. Providers such as Workers AI count the answer's cap
+ * against the window, so on a small one (Llama 3.3's 24,000 tokens)
+ * {@link defaultMaxTokens} would leave too little for the request itself.
+ */
+const windowPerAnswer = 4;
+
 /** The most tokens a request's answer may take, as the request says it. */
-const answerTokens = (call: { maxTokens?: number }, model: Model<Api>) =>
-  Math.min(call.maxTokens ?? defaultMaxTokens, model.maxTokens);
+const answerTokens = (
+  call: { maxTokens?: number },
+  model: Model<Api>
+): number => {
+  const fallback =
+    model.contextWindow > 0
+      ? Math.min(
+          defaultMaxTokens,
+          Math.floor(model.contextWindow / windowPerAnswer)
+        )
+      : defaultMaxTokens;
+  return Math.min(call.maxTokens ?? fallback, model.maxTokens);
+};
 
 /**
  * How long a call may take, retries included, when it doesn't say; and the

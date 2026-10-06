@@ -393,8 +393,9 @@ const fitTurnUnderWay = (
  * system messages carry them too, and those copies aren't counted); the
  * system messages (the instructions, the API declarations, memory and
  * skills); the note of turns left out, kept room for whether or not any
- * are; and the request's own fields ({@link envelopeChars}). The one place that says what fits: the check of a question
- * (`runTurn`) and the request itself ({@link recentHistory}) both go by it.
+ * are; and the request's own fields ({@link envelopeChars}). The one
+ * place that says what fits: the check of a question (`runTurn`) and the
+ * request itself ({@link recentHistory}) both go by it.
  */
 const measureTurns = (
   messages: readonly Message[],

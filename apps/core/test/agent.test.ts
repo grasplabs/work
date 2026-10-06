@@ -43,7 +43,8 @@ const idp = mockIdp();
 /**
  * Models of different context windows, as pi's catalog gives them: the
  * tests' own, of 1,000,000 tokens, one of 200,000 and one of 24,000. Each
- * request keeps 16,384 of them for the answer.
+ * request keeps 16,384 of them for the answer, or a quarter of a window
+ * too small for that (6,000 of the 24,000).
  */
 const smallModel = "anthropic/claude-haiku-4-5";
 const tinyModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
@@ -953,7 +954,8 @@ describe("chat agent turns", () => {
     const { stub, chat, gateway } = await newChat(says("Hi."));
     await pointAtGateway(stub, gateway, { config: bothModels });
 
-    // 50,000 characters, to a model that takes 7,616 tokens.
+    // 50,000 characters, to a model that takes 18,000 tokens: its window
+    // of 24,000 less a quarter kept for the answer.
     await expect(
       codeOf(stub.ask(chat.id, { text: "q".repeat(50_000), model: tinyModel }))
     ).resolves.toBe("agent.question_too_long");
@@ -964,6 +966,18 @@ describe("chat agent turns", () => {
     await expect(
       stub.ask(chat.id, { text: "q".repeat(50_000), model })
     ).resolves.toMatchObject({ outcome: "answered", answer: "Hi." });
+  });
+
+  it("answers a short question on a model with a small window", async () => {
+    const { stub, chat, gateway } = await newChat(says("Hi."));
+    await pointAtGateway(stub, gateway, { config: bothModels });
+
+    await expect(
+      stub.ask(chat.id, { text: "Hi.", model: tinyModel })
+    ).resolves.toMatchObject({ outcome: "answered", answer: "Hi." });
+    // Instructions, tool and question all within the 18,000 tokens left.
+    const sent = JSON.stringify(gateway.requests.at(-1)?.body);
+    expect(sent.length).toBeLessThanOrEqual(requestChars(18_000));
   });
 
   it("sizes a chat to a fixed number of characters when the model's window is unknown", () => {
