@@ -20,6 +20,26 @@ msgstr "(van jou)"
 msgid "{0, plural, one {{engine}: # file changed in this chat, not proposed yet} other {{engine}: # files changed in this chat, not proposed yet}}"
 msgstr "{0, plural, one {{engine}: # bestand gewijzigd in deze chat, nog niet voorgesteld} other {{engine}: # bestanden gewijzigd in deze chat, nog niet voorgesteld}}"
 
+#. placeholder {0}: request.counts.direct
+#: src/dashboard/dependency-requests.tsx
+msgid "{0, plural, one {{requester} asks for # package} other {{requester} asks for # packages}}"
+msgstr "{0, plural, one {{requester} vraagt om # pakket} other {{requester} vraagt om # pakketten}}"
+
+#. placeholder {0}: request.counts.findings
+#: src/dashboard/dependency-requests.tsx
+msgid "{0, plural, one {# finding reported} other {# findings reported}}"
+msgstr "{0, plural, one {# bevinding gemeld} other {# bevindingen gemeld}}"
+
+#. placeholder {0}: request.counts.packages
+#: src/dashboard/dependency-requests.tsx
+msgid "{0, plural, one {# package in all, to run in: {targets}} other {# packages in all, to run in: {targets}}}"
+msgstr "{0, plural, one {# pakket in totaal, om te draaien in: {targets}} other {# pakketten in totaal, om te draaien in: {targets}}}"
+
+#. placeholder {0}: request.counts.refused
+#: src/dashboard/dependency-requests.tsx
+msgid "{0, plural, one {Needs # thing Grasp refuses to run} other {Needs # things Grasp refuses to run}}"
+msgstr "{0, plural, one {Heeft # ding nodig dat Grasp weigert uit te voeren} other {Heeft # dingen nodig die Grasp weigert uit te voeren}}"
+
 #: src/dashboard/signals.tsx
 msgid "{about} cost {cost} a run in model calls, over {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "{about} kostte {days, plural, one {de afgelopen dag} other {de afgelopen # dagen}} {cost} per run aan modelaanroepen, over {runs, plural, one {# run} other {# runs}}."
@@ -136,6 +156,10 @@ msgstr "{holder}: {actions} op {resource}"
 msgid "{hours, plural, one {# hour} other {# hours}}"
 msgstr "{hours, plural, one {# uur} other {# uur}}"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "{kind}, {severity}, {about}: {summary}"
+msgstr "{kind}, {severity}, {about}: {summary}"
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "{label}: {count}"
 msgstr "{label}: {count}"
@@ -152,9 +176,25 @@ msgstr "{link} in {appName} is mislukt"
 msgid "{link} in {appName} failed {failures, plural, one {once} other {# times}}"
 msgstr "{link} in {appName} is {failures, plural, one {één keer} other {# keer}} mislukt"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
+msgstr "{more, plural, one {{shown} en nog #} other {{shown} en nog #}}"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "{moreFindings, plural, one {And # more finding: show every package to read it.} other {And # more findings: show every package to read them.}}"
+msgstr "{moreFindings, plural, one {En nog # bevinding: toon alle pakketten om die te lezen.} other {En nog # bevindingen: toon alle pakketten om ze te lezen.}}"
+
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
 msgstr "{name} (Grasp-medewerker)"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "{name} {range}, met by {resolved}"
+msgstr "{name} {range}, vervuld door {resolved}"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "{name} {range}, not met"
+msgstr "{name} {range}, niet vervuld"
 
 #: src/chat/builds-state.ts
 msgid "{name} changed"
@@ -498,6 +538,7 @@ msgid "Any type"
 msgstr "Elk type"
 
 #: src/activity/pending.tsx
+#: src/dashboard/dependency-requests.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Approve"
 msgstr "Goedkeuren"
@@ -506,9 +547,17 @@ msgstr "Goedkeuren"
 msgid "Approve {who}"
 msgstr "{who} goedkeuren"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Approve the packages for {engine}"
+msgstr "De pakketten voor {engine} goedkeuren"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Approved by {name} on {date}."
 msgstr "Goedgekeurd door {name} op {date}."
+
+#: src/activity/audit-words.ts
+msgid "Approved packages"
+msgstr "Pakketten goedgekeurd"
 
 #: src/activity/pending.tsx
 msgid "Approved: {who}."
@@ -560,6 +609,7 @@ msgid "Asked by"
 msgstr "Gevraagd door"
 
 #: src/chat/held-writes.tsx
+#: src/dashboard/dependency-requests.tsx
 msgid "Asked for <0>{asked}</0>"
 msgstr "Gevraagd <0>{asked}</0>"
 
@@ -615,6 +665,11 @@ msgstr "Kruimelpad"
 #: src/knowledge/frame.tsx
 msgid "Browse"
 msgstr "Bladeren"
+
+#: src/dashboard/dependency-requests.tsx
+msgctxt "where a package runs"
+msgid "Browser"
+msgstr "Browser"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Budgets"
@@ -675,6 +730,10 @@ msgstr "De rol van een lid gewijzigd"
 #: src/activity/audit-words.ts
 msgid "Changed a permission"
 msgstr "Een toestemming gewijzigd"
+
+#: src/activity/audit-words.ts
+msgid "Changed a request for packages"
+msgstr "Een pakketaanvraag gewijzigd"
 
 #: src/activity/audit-words.ts
 msgid "Changed a team"
@@ -830,6 +889,11 @@ msgstr "Voltooid"
 msgid "Composio's toolkits can't be listed right now. Try again shortly."
 msgstr "De toolkits van Composio kunnen nu niet worden getoond. Probeer het zo opnieuw."
 
+#: src/dashboard/dependency-requests.tsx
+msgctxt "where a package runs"
+msgid "Computations"
+msgstr "Berekeningen"
+
 #: src/activity/audit-log.tsx
 msgid "Configuration"
 msgstr "Configuratie"
@@ -960,6 +1024,11 @@ msgstr "Gemaakt door het lid {owner}."
 msgid "Created by you."
 msgstr "Door jou gemaakt."
 
+#: src/dashboard/dependency-requests.tsx
+msgctxt "severity of a finding"
+msgid "Critical"
+msgstr "Kritiek"
+
 #: src/dashboard/nav-item.tsx
 #: src/routes/_shell.dashboard.tsx
 msgid "Dashboard"
@@ -1007,6 +1076,22 @@ msgstr "Een team verwijderd"
 #: src/activity/audit-words.ts
 msgid "Deleted entries past their retention"
 msgstr "Vermeldingen na hun bewaartermijn verwijderd"
+
+#: src/activity/audit-words.ts
+msgid "Denied packages"
+msgstr "Pakketten geweigerd"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "Deny"
+msgstr "Weigeren"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "Deny the packages for {engine}"
+msgstr "De pakketten voor {engine} weigeren"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "Depends on"
+msgstr "Hangt af van"
 
 #: src/routes/_shell.index.tsx
 msgid "Describe what you want. The agent answers from what it can read, and holds every change to an outside system until you confirm it."
@@ -1273,6 +1358,10 @@ msgctxt "heading of the column that filters the integrations"
 msgid "Filters"
 msgstr "Filters"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Findings"
+msgstr "Bevindingen"
+
 #: src/routes/guest.tsx
 msgid "Finish"
 msgstr "Afronden"
@@ -1362,6 +1451,10 @@ msgstr "Grasp-medewerkers kunnen hier geen accounts koppelen of wijzigen wat wor
 msgid "Grasp staff signed in"
 msgstr "Grasp-medewerkers hebben zich aangemeld"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Grasp won't run what {about} needs: {requirement}"
+msgstr "Grasp voert niet uit wat {about} nodig heeft: {requirement}"
+
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Gastaccounts kunnen niet inloggen. Gebruik een eigen account van je organisatie."
@@ -1389,6 +1482,11 @@ msgstr "Verbergen"
 #: src/chat/held-writes.tsx
 msgid "Hide exactly what will be sent"
 msgstr "Verberg wat precies wordt verstuurd"
+
+#: src/dashboard/dependency-requests.tsx
+msgctxt "severity of a finding"
+msgid "High"
+msgstr "Hoog"
 
 #: src/knowledge/timeline.tsx
 msgid "History"
@@ -1563,6 +1661,15 @@ msgstr "Recente activiteit"
 msgid "Let go to add them"
 msgstr "Laat los om ze toe te voegen"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Licence"
+msgstr "Licentie"
+
+#: src/dashboard/dependency-requests.tsx
+msgctxt "kind of finding"
+msgid "Licence"
+msgstr "Licentie"
+
 #: src/knowledge/document.tsx
 msgid "Links to"
 msgstr "Linkt naar"
@@ -1585,6 +1692,11 @@ msgstr "Servercode opnieuw laden"
 #: src/knowledge/nav.tsx
 msgid "Loading…"
 msgstr "Laden…"
+
+#: src/dashboard/dependency-requests.tsx
+msgctxt "severity of a finding"
+msgid "Low"
+msgstr "Laag"
 
 #: src/frame/app-sidebar.tsx
 msgid "Main"
@@ -1670,6 +1782,11 @@ msgstr "Er zijn nog geen modellen ingesteld voor deze omgeving, dus er kan geen 
 msgid "Models for your organization"
 msgstr "Modellen voor je organisatie"
 
+#: src/dashboard/dependency-requests.tsx
+msgctxt "severity of a finding"
+msgid "Moderate"
+msgstr "Gemiddeld"
+
 #: src/chat/chat-list.tsx
 msgid "More for {title}"
 msgstr "Meer voor {title}"
@@ -1689,6 +1806,10 @@ msgstr "Naam"
 #: src/connections/source-badge.tsx
 msgid "Native"
 msgstr "Native"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "Needs alongside it"
+msgstr "Heeft daarnaast nodig"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Needs attention"
@@ -1712,6 +1833,10 @@ msgstr "Nooit"
 #: src/routes/_shell.index.tsx
 msgid "New chat"
 msgstr "Nieuwe chat"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "New since the last approval: {added}"
+msgstr "Nieuw sinds de laatste goedkeuring: {added}"
 
 #: src/dashboard/failed-workflows.tsx
 msgid "New: failed while acting for you"
@@ -1760,6 +1885,10 @@ msgstr "Geen integraties komen overeen met je zoekopdracht."
 msgid "No longer runs {how}"
 msgstr "Draait niet meer {how}"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "No longer used: {removed}"
+msgstr "Niet meer gebruikt: {removed}"
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "No memory files are written yet."
 msgstr "Er zijn nog geen geheugenbestanden geschreven."
@@ -1768,6 +1897,10 @@ msgstr "Er zijn nog geen geheugenbestanden geschreven."
 #: src/chat/composer.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "Er is nog geen model ingesteld voor deze omgeving."
+
+#: src/dashboard/dependency-requests.tsx
+msgid "No packages were approved for this engine before."
+msgstr "Voor deze engine zijn nog niet eerder pakketten goedgekeurd."
 
 #: src/chat/builds.tsx
 msgid "No permissions."
@@ -1830,6 +1963,10 @@ msgstr "Geen actuele"
 msgid "none now"
 msgstr "nu geen"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "None stated"
+msgstr "Niet vermeld"
+
 #: src/chat/builds.tsx
 msgid "None waiting for an admin."
 msgstr "Geen wacht op een beheerder."
@@ -1874,6 +2011,11 @@ msgstr "Niet uitgebracht"
 #: src/activity/audit-log.tsx
 msgid "Not verified"
 msgstr "Niet geverifieerd"
+
+#: src/dashboard/dependency-requests.tsx
+msgctxt "severity of a finding"
+msgid "Note"
+msgstr "Opmerking"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
@@ -2069,6 +2211,18 @@ msgstr "Eigenaar: {owner}"
 msgid "Owned by you"
 msgstr "Jij bent eigenaar"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Package"
+msgstr "Pakket"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "Packages for {engine}"
+msgstr "Pakketten voor {engine}"
+
+#: src/dashboard/to-do.tsx
+msgid "Packages to approve"
+msgstr "Goed te keuren pakketten"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
 msgid "Parameters"
@@ -2164,6 +2318,18 @@ msgstr "Voorgesteld door de agent, in een chat van jou die is verwijderd."
 msgid "Proposed by the agent, in another person's chat."
 msgstr "Voorgesteld door de agent, in de chat van iemand anders."
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Proposed by the agent, in their chat, <0>{asked}</0>"
+msgstr "Voorgesteld door de agent, in hun chat, <0>{asked}</0>"
+
+#: src/activity/audit-words.ts
+msgid "Proposed packages"
+msgstr "Pakketten voorgesteld"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "Provided by Grasp, not installed again: {provided}"
+msgstr "Geleverd door Grasp, niet opnieuw geïnstalleerd: {provided}"
+
 #: src/activity/audit-words.ts
 msgid "Ran a step of a workflow"
 msgstr "Een stap van een workflow uitgevoerd"
@@ -2246,6 +2412,10 @@ msgstr "Klaar"
 msgid "Recent chats"
 msgstr "Recente chats"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Registry and hash"
+msgstr "Registry en hash"
+
 #: src/activity/pending.tsx
 #: src/chat/held-writes.tsx
 #: src/routes/decisions.$decision.tsx
@@ -2327,6 +2497,10 @@ msgstr "Herhaalt, één keer per item:"
 #: src/knowledge/document.tsx
 msgid "Replace version {newerVersion} with mine"
 msgstr "Versie {newerVersion} vervangen door de mijne"
+
+#: src/activity/audit-words.ts
+msgid "Replaced a request for packages"
+msgstr "Een pakketaanvraag vervangen"
 
 #: src/knowledge/timeline.tsx
 msgid "Restore"
@@ -2428,6 +2602,10 @@ msgstr "Draait nu"
 msgid "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 msgstr "Voert de eigen testcases van de workflow uit met de waarden die nu zijn ingesteld. Er wordt niets gewijzigd: wat hij zou wijzigen, wordt in plaats daarvan opgesomd."
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Same version, different contents: {changed}"
+msgstr "Zelfde versie, andere inhoud: {changed}"
+
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Save"
@@ -2473,6 +2651,11 @@ msgstr "In kennis gezocht"
 msgid "Searched the audit trail"
 msgstr "In het auditlogboek gezocht"
 
+#: src/dashboard/dependency-requests.tsx
+msgctxt "kind of finding"
+msgid "Security"
+msgstr "Beveiliging"
+
 #: src/activity/pending.tsx
 msgid "See it in the log"
 msgstr "Bekijk het in het log"
@@ -2490,6 +2673,11 @@ msgstr "Gevoelig"
 #: src/routes/_shell.settings.models.tsx
 msgid "Sensitive connections: {connections}."
 msgstr "Gevoelige koppelingen: {connections}."
+
+#: src/dashboard/dependency-requests.tsx
+msgctxt "where a package runs"
+msgid "Server"
+msgstr "Server"
 
 #: src/chat/builds.tsx
 msgid "Server code"
@@ -2524,6 +2712,14 @@ msgstr "Gedeeld met"
 msgid "Show all {count} lines ({characters} characters)"
 msgstr "Alle {count} regels tonen ({characters} tekens)"
 
+#: src/dashboard/dependency-requests.tsx
+msgid "Show every package"
+msgstr "Alle pakketten tonen"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "Show every package before you approve them."
+msgstr "Toon alle pakketten voordat je ze goedkeurt."
+
 #: src/chat/held-writes.tsx
 msgid "Show exactly what will be sent"
 msgstr "Toon wat precies wordt verstuurd"
@@ -2543,6 +2739,10 @@ msgstr "Oudere tonen"
 #: src/frame/site-header.tsx
 msgid "Show or hide the sidebar"
 msgstr "Zijbalk tonen of verbergen"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "Show the packages for {engine}"
+msgstr "De pakketten voor {engine} tonen"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Showing the first {count} of {total}. Refine your search to find others."
@@ -2849,6 +3049,10 @@ msgstr "De link werkt tot {until}."
 msgid "The model call failed."
 msgstr "De modelaanroep is mislukt."
 
+#: src/dashboard/dependency-requests.tsx
+msgid "The packages, their licences and the findings are as reported by {requester}. Grasp hasn't checked them against the registry."
+msgstr "De pakketten, hun licenties en de bevindingen zijn zoals {requester} ze heeft opgegeven. Grasp heeft ze niet met de registry vergeleken."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."
 msgstr "De regels in de configuratie van deze omgeving kunnen niet worden gelezen, dus elke modelaanroep wordt geweigerd. Neem contact op met Grasp."
@@ -3139,6 +3343,10 @@ msgstr "Is door een andere engine aangeroepen"
 msgid "Was refused adding a member to an engine"
 msgstr "Mocht geen lid aan een engine toevoegen"
 
+#: src/activity/audit-words.ts
+msgid "Was refused packages nobody approved"
+msgstr "Kreeg pakketten geweigerd die niemand had goedgekeurd"
+
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
@@ -3152,6 +3360,10 @@ msgstr "Wat elke agent altijd in zijn context heeft."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What Grasp may do"
 msgstr "Wat Grasp mag doen"
+
+#: src/dashboard/dependency-requests.tsx
+msgid "What Grasp refuses to run"
+msgstr "Wat Grasp weigert uit te voeren"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
@@ -3230,6 +3442,11 @@ msgstr "Workflowtests mislukken:"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/decisions.$decision.tsx
+msgid "Workflows"
+msgstr "Workflows"
+
+#: src/dashboard/dependency-requests.tsx
+msgctxt "where a package runs"
 msgid "Workflows"
 msgstr "Workflows"
 

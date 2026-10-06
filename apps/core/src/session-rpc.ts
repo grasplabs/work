@@ -6,6 +6,7 @@ import { AuditRpc } from "./audit-rpc.ts";
 import { ChatsRpc } from "./chats-rpc.ts";
 import { ConnectionsRpc } from "./connections.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
+import { DependenciesRpc } from "./dependencies/rpc.ts";
 import { MemoryRpc } from "./knowledge/memory-rpc.ts";
 import { KnowledgeRpc } from "./knowledge/rpc.ts";
 import { KnowledgeSignalsRpc } from "./knowledge/signals-rpc.ts";
@@ -43,6 +44,7 @@ export class SessionRpc extends RpcTarget implements SessionApi {
   readonly #connections: ConnectionsRpc;
   readonly #workflows: WorkflowsRpc;
   readonly #decisions: DecisionsRpc;
+  readonly #dependencies: DependenciesRpc;
   readonly #screens: ScreensRpc;
   readonly #members: MembersRpc;
   readonly #audit: AuditRpc;
@@ -64,6 +66,7 @@ export class SessionRpc extends RpcTarget implements SessionApi {
     this.#connections = new ConnectionsRpc(env, check);
     this.#workflows = new WorkflowsRpc(env, check);
     this.#decisions = new DecisionsRpc(env, check);
+    this.#dependencies = new DependenciesRpc(env, check);
     this.#screens = new ScreensRpc(env, check);
     this.#members = new MembersRpc(env, check);
     this.#audit = new AuditRpc(env, check);
@@ -116,6 +119,10 @@ export class SessionRpc extends RpcTarget implements SessionApi {
 
   get decisions(): DecisionsRpc {
     return this.#decisions;
+  }
+
+  get dependencies(): DependenciesRpc {
+    return this.#dependencies;
   }
 
   get screens(): ScreensRpc {

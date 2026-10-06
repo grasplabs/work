@@ -18,6 +18,7 @@
     "./connect": "./src/connect.ts",
     "./deadline": "./src/deadline.ts",
     "./decisions": "./src/decisions.ts",
+    "./dependencies": "./src/dependencies.ts",
     "./deployment-config": "./src/deployment-config.ts",
     "./encoding": "./src/encoding.ts",
     "./error-reports": "./src/error-reports.ts",

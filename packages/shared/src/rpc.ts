@@ -3,6 +3,7 @@ import type { AuditApi } from "./audit-log.ts";
 import type { ChatsApi } from "./chat.ts";
 import type { ConnectionsApi, PendingActionsApi } from "./connect.ts";
 import type { DecisionsApi } from "./decisions.ts";
+import type { DependenciesApi } from "./dependencies.ts";
 import type { KnowledgeSignalsApi } from "./knowledge-signals.ts";
 import type { KnowledgeApi } from "./knowledge.ts";
 import type { MembersApi } from "./members.ts";
@@ -89,6 +90,11 @@ export interface SessionApi {
    * from, whatever their role.
    */
   readonly decisions: DecisionsApi;
+  /**
+   * npm packages proposed for Apps, and the people who approve them: a
+   * permission of its own, which no role gives.
+   */
+  readonly dependencies: DependenciesApi;
   /** Apps' screens: their builds, their servers and their error logs. */
   readonly screens: ScreensApi;
   /** The organization's members: offboarding. Admins only. */

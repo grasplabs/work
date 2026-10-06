@@ -1,4 +1,5 @@
 import type { PendingAction } from "@grasp-os/shared/connect";
+import type { DependenciesWaiting } from "@grasp-os/shared/dependencies";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { buttonVariants } from "@grasp-os/ui/components/button";
@@ -20,6 +21,7 @@ import {
   DashboardGroup,
   ItemMark,
 } from "./dashboard-card.tsx";
+import { DependencyRequests } from "./dependency-requests.tsx";
 import { FailedWorkflows } from "./failed-workflows.tsx";
 import type { NotificationsPage, OlderFailures } from "./failed-workflows.tsx";
 
@@ -27,6 +29,8 @@ import type { NotificationsPage, OlderFailures } from "./failed-workflows.tsx";
 // (`components/dashboard/action-panel.tsx`): each thing with what it is
 // about and its next step, by kind. Changes an agent wants to make wait
 // for them to confirm or reject; permission requests wait for an admin;
+// packages proposed for an engine wait for someone given the permission
+// to approve them;
 // workflows failed while acting for them, with a way to ask the agent to
 // fix it; connections they can sign in to again ran out. Decisions a run
 // waits on aren't here: core can't list a person's decisions yet (they
@@ -39,6 +43,8 @@ export interface Waiting {
   integrations: Loaded<Integration[]>;
   /** Admins only. */
   requests: Loaded<PendingRequests> | undefined;
+  /** Packages to approve: none for anyone without that permission. */
+  dependencies: Loaded<DependenciesWaiting>;
 }
 
 /** Who counts what waits: what they may act on follows from their role. */
@@ -77,7 +83,7 @@ export const decidesRequests = ({ role, staff }: Viewer): boolean =>
  * here is no longer news.)
  */
 export const waitingCount = (
-  { held, failed, integrations, requests }: Waiting,
+  { held, failed, integrations, requests, dependencies }: Waiting,
   identity: Viewer,
   olderShown = 0
 ): number =>
@@ -90,7 +96,8 @@ export const waitingCount = (
     : 0) +
   (requests?.state === "ready" && decidesRequests(identity)
     ? requests.data.requests.length
-    : 0);
+    : 0) +
+  (dependencies.state === "ready" ? dependencies.data.requests.length : 0);
 
 /** An account to sign in to again: its next step opens its account on its integration's page. */
 const ReconnectRow = ({ ranOut }: { ranOut: RanOut }) => {
@@ -176,6 +183,31 @@ const RequestsGroup = ({ requests }: { requests: Loaded<PendingRequests> }) => {
   );
 };
 
+const DependenciesGroup = ({
+  dependencies,
+}: {
+  dependencies: Loaded<DependenciesWaiting>;
+}) => {
+  const router = useRouter();
+  const { t } = useLingui();
+  if (dependencies.state !== "ready") {
+    return <PartNotLoaded part={dependencies} />;
+  }
+  if (dependencies.data.requests.length === 0) {
+    return null;
+  }
+  return (
+    <DashboardGroup title={t`Packages to approve`}>
+      <DependencyRequests
+        onDecided={() => {
+          void router.invalidate();
+        }}
+        waiting={dependencies.data}
+      />
+    </DashboardGroup>
+  );
+};
+
 const FailedGroup = ({
   failed,
   older,
@@ -249,6 +281,7 @@ export const ToDo = ({
     waiting.held.state === "ready" &&
     waiting.failed.state === "ready" &&
     waiting.integrations.state === "ready" &&
+    waiting.dependencies.state === "ready" &&
     (waiting.requests === undefined || waiting.requests.state === "ready");
   return (
     <DashboardCard id="dashboard-to-do">
@@ -261,6 +294,7 @@ export const ToDo = ({
       {waiting.requests === undefined ? null : (
         <RequestsGroup requests={waiting.requests} />
       )}
+      <DependenciesGroup dependencies={waiting.dependencies} />
       <FailedGroup
         failed={waiting.failed}
         older={older}

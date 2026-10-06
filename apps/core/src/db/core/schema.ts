@@ -4,6 +4,7 @@ import type {
   AppRecordTypes,
 } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
+import type { DependencySummary } from "@grasp-os/shared/dependencies";
 import type { Json } from "@grasp-os/shared/json";
 import { signalKinds } from "@grasp-os/shared/signals";
 import type {
@@ -661,6 +662,120 @@ export const workflowDecisions = sqliteTable(
       table.id
     ),
     index("workflow_decisions_decided_idx").on(table.decidedAt, table.id),
+  ]
+);
+
+/**
+ * npm packages proposed for an App (src/dependencies/requests.ts), one row
+ * per request. What was asked never changes: the App, where the packages
+ * would run (`targets`, a sorted JSON array), the graph's hash, the whole
+ * review (`snapshot`: the graph, findings and refusals, as JSON, up to
+ * 512 KiB, so no list reads it) and the little of it a list shows
+ * (`summary`). `source_revision` says which revision of the source the
+ * graph was resolved from: provenance, not part of what is approved.
+ * `status` moves from `pending` once, in one conditional update, to a
+ * person's decision (`approved`, `denied`), which keeps who made it, when,
+ * why and under which policy generation. A decided row is never deleted;
+ * a pending one is deleted when another proposal for the App takes its
+ * place, and its audit event keeps its ID and hash. An approval is this
+ * row: another decision on the same graph is another request.
+ */
+export const dependencyRequests = sqliteTable(
+  "dependency_requests",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    sourceRevision: text("source_revision").notNull(),
+    graphHash: text("graph_hash").notNull(),
+    targets: text().notNull(),
+    purpose: text().notNull(),
+    snapshot: text().notNull(),
+    summary: text({ mode: "json" }).$type<DependencySummary>().notNull(),
+    /** How many packages it asks for directly, and brings in all. */
+    direct: integer().notNull(),
+    packages: integer().notNull(),
+    findings: integer().notNull(),
+    refused: integer().notNull(),
+    /** The request approved for the App when this one was asked, if any. */
+    previous: text(),
+    status: text({
+      enum: ["pending", "approved", "denied"],
+    }).notNull(),
+    requestedBy: text("requested_by").notNull(),
+    /** The chat's agent that proposed it (JSON); null for a person's own. */
+    requestedVia: text("requested_via", {
+      mode: "json",
+    }).$type<AgentProposer>(),
+    requestedAt: timestamp("requested_at").notNull(),
+    /** The policy generation it was asked under. */
+    policyGeneration: integer("policy_generation").notNull(),
+    decidedBy: text("decided_by"),
+    decidedAt: timestamp("decided_at"),
+    /** The policy generation the decision was made under. */
+    decidedGeneration: integer("decided_generation"),
+    reason: text(),
+  },
+  (table) => [
+    // One request waits per App: a second pending row is refused.
+    uniqueIndex("dependency_requests_pending_idx")
+      .on(table.appId)
+      .where(sql`status = 'pending'`),
+    // The approval an App got last (its status, and what a new request
+    // is compared with).
+    index("dependency_requests_app_idx").on(
+      table.appId,
+      table.status,
+      table.decidedAt
+    ),
+    // Whether a graph is approved for an App: a proposal, and admission.
+    index("dependency_requests_graph_idx").on(
+      table.appId,
+      table.graphHash,
+      table.status
+    ),
+  ]
+);
+
+/**
+ * The dependency policy generation, in its one row (`id` is `policy`;
+ * none yet counts as 0). It goes up, in the batch that makes the change,
+ * each time who holds `dependencies.approve` changes. A decision lands
+ * only under the generation its person reviewed, and a build is admitted
+ * only under the one it read: what was checked before a change isn't
+ * acted on after it.
+ */
+export const dependencyPolicy = sqliteTable("dependency_policy", {
+  id: text().primaryKey(),
+  generation: integer().notNull(),
+});
+
+/**
+ * Who holds `dependencies.approve` (src/dependencies/approvers.ts): a
+ * member (`subject_type` `person`, `subject_id` their user ID) or a team.
+ * One row per grant, never deleted, so who granted and who revoked stays
+ * readable; only its status and the revoke columns ever change. Whether
+ * the member or team is still there is read from the organization's own
+ * tables each time.
+ */
+export const dependencyApprovers = sqliteTable(
+  "dependency_approvers",
+  {
+    id: text().primaryKey(),
+    subjectType: text("subject_type", { enum: ["person", "team"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
+    status: text({ enum: ["active", "revoked"] }).notNull(),
+    grantedBy: text("granted_by").notNull(),
+    grantedAt: timestamp("granted_at").notNull(),
+    revokedBy: text("revoked_by"),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => [
+    // A member or team holds it once: a second live grant is refused.
+    uniqueIndex("dependency_approvers_live_idx")
+      .on(table.subjectType, table.subjectId)
+      .where(sql`status = 'active'`),
   ]
 );
 
