@@ -14,6 +14,7 @@ import {
   sweepScreenFrames,
 } from "../src/screen-frame.ts";
 import { screenCode as buildScreenCode } from "../src/screens.ts";
+import { sessionRecheckMs } from "../src/session-check.ts";
 import { pastAccessRecheck, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -27,10 +28,12 @@ import {
 } from "./screen-frames.ts";
 import type { Framed } from "./screen-frames.ts";
 import {
+  countingSessionReads,
   openRpc,
   outcome,
   signedIn,
   signedInApi,
+  signedInWithRole,
   staffPerson,
 } from "./sign-in.ts";
 
@@ -842,6 +845,90 @@ describe("screens", { timeout: 60_000 }, () => {
       pushed: ["For staff"],
       left: 0,
     });
+  });
+
+  it("stops pushing within seconds to someone whose role in the organization no longer gives them the App, and refuses their calls", async () => {
+    const owner = await personApi("admin");
+    const admin = await personApi("admin");
+    const app = await sampleApp(owner);
+    const watching = collector();
+    // Admins have every App: this one isn't shared with them.
+    await admin.api.screens.call(app, "watchNotes", [watching.callback]);
+    await waitFor(() => watching.received[0]);
+
+    await owner.api.members.setRole(admin.userId, "user");
+    const left = await pastAccessRecheck(
+      async () =>
+        await vi.waitFor(
+          async () => {
+            await owner.api.screens.call(app, "addNote", ["After demotion"]);
+            const count = await owner.api.screens.call(app, "watching", []);
+            if (count !== 0) {
+              throw new Error("Still watching");
+            }
+            return count;
+          },
+          { timeout: 3000, interval: 250 }
+        )
+    );
+    expect({
+      left,
+      received: watching.received,
+      calls: await outcome(admin.api.screens.call(app, "watching", [])),
+    }).toStrictEqual({ left: 0, received: [[]], calls: "app.not_found" });
+  });
+
+  it("reads its person's session once every few seconds, however many calls and pushes their connection carries", async () => {
+    const owner = await personApi("builder");
+    const app = await sampleApp(owner);
+    const watcher = await signedInWithRole(idp, "admin");
+    const reads = { sessions: 0 };
+    const counted = { ...env, DB: countingSessionReads(env.DB, reads) };
+    const watching = collector();
+
+    const result = await atStoppedClock(async (advance) => {
+      const { core } = await openRpc(watcher.session, { coreEnv: counted });
+      // The upgrade reads the cookie to decide what the connection gets.
+      const opening = reads.sessions;
+      using api = core.authenticate();
+      let notes = 0;
+      /**
+       * `count` notes pushed to the connection and as many calls of its
+       * own, at once; how often its session was read once all arrived.
+       */
+      const busy = async (count: number): Promise<number> => {
+        const added = Array.from({ length: count }, (_value, index) => {
+          notes += 1;
+          return `Note ${notes} (${index})`;
+        });
+        await Promise.all([
+          ...added.map(
+            async (note) => await owner.api.screens.call(app, "addNote", [note])
+          ),
+          ...added.map(async () => await api.screens.call(app, "watching", [])),
+        ]);
+        await waitFor(() =>
+          watching.received.find(
+            (pushed) => Array.isArray(pushed) && pushed.length === notes
+          )
+        );
+        return reads.sessions - opening;
+      };
+      await api.screens.call(app, "watchNotes", [watching.callback]);
+      await waitFor(() => watching.received[0]);
+      const first = await busy(5);
+      advance(sessionRecheckMs);
+      const second = await busy(10);
+      return { opening, first, second, pushes: watching.received.length };
+    });
+
+    // One reading for the first few seconds' calls and pushes, then one more.
+    expect({
+      opening: result.opening,
+      first: result.first,
+      second: result.second,
+    }).toStrictEqual({ opening: 1, first: 1, second: 2 });
+    expect(result.pushes).toBeGreaterThan(10);
   });
 
   it("closes nobody's screens when unsharing someone it isn't shared with", async () => {

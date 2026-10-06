@@ -9,26 +9,22 @@ import { vi } from "vite-plus/test";
 
 import { versionFiles } from "../src/apps.ts";
 import { buildServer } from "../src/screens.ts";
+import { sessionRecheckMs } from "../src/session-check.ts";
 import type { Idp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 
 /**
- * How soon a screen stops hearing from an App once its person lost access
- * to it: the platform promises within seconds, and checks again every 5 s.
- */
-const promisedWithinMs = 5000;
-
-/**
- * What `run` returns, run with core's clock `promisedWithinMs` on: past
- * the time the last answer to whether someone may still use an App holds,
- * so the next push to their screen checks again. Waiting that out for real
+ * What `run` returns, run with core's clock `sessionRecheckMs` on: past
+ * the time the connection's last reading of the session, and with it the
+ * last answer to whether someone may still use an App, holds, so the next
+ * push to their screen checks again. Waiting that out for real
  * took five seconds a test, and raced a loaded runner. Tests wait at most
  * 3 s for the push that is refused, so only the moved clock can get there.
  */
 export const pastAccessRecheck = async <T>(
   run: () => Promise<T>
 ): Promise<T> => {
-  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + promisedWithinMs });
+  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + sessionRecheckMs });
   try {
     return await run();
   } finally {

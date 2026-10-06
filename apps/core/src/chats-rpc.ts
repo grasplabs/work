@@ -29,7 +29,7 @@ import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import { workspace } from "./durable-objects.ts";
 import { gatewaySettings } from "./models.ts";
-import { callbackFor, isStub, recheckedEvery } from "./page-callbacks.ts";
+import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
 import { fixQuestion, runToFix } from "./run-fixes.ts";
 import { RunSubscription } from "./run-subscription.ts";
@@ -71,9 +71,6 @@ export const chatAgentId = organizationId;
 export const personalWorkspaceId = (userId: string): WorkspaceId =>
   workspaceIdSchema.parse(`person:${userId}`);
 
-/** How long one answer to whether the person may still follow chats holds. */
-const recheckMs = 5000;
-
 /**
  * Most chats one connection follows at once: a page shows one, and a page
  * that watches over and over holds no more than this in the object.
@@ -114,9 +111,10 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
   /** This connection's watches, each until it's released. */
   readonly #watches = new Set<Disposable>();
   /**
-   * Whether this connection may still follow chats: its session holds, as
-   * every call checks, read again at most every {@link recheckMs} as
-   * updates are pushed.
+   * Whether this connection may still follow chats, before each push: its
+   * session holds, as the connection's own check last read it, the same
+   * reading its calls share (at most `sessionRecheckMs` old,
+   * session-check.ts).
    */
   readonly #stillOpen: StillOpen;
 
@@ -124,14 +122,14 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
     super();
     this.#env = env;
     this.#check = check;
-    this.#stillOpen = recheckedEvery(recheckMs, async () => {
+    this.#stillOpen = async () => {
       try {
         await check();
         return true;
       } catch {
         return false;
       }
-    });
+    };
   }
 
   /** The object that holds `userId`'s chats. */
@@ -315,8 +313,8 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
   /**
    * Calls a method of the draft's server code in its preview, with plain
    * data and the screen's callbacks, as a screen's call does
-   * (screens-rpc.ts); each push through a callback checks again, at most
-   * every {@link recheckMs}, what the call itself needs: the session and
+   * (screens-rpc.ts); each push through a callback checks again, with each
+   * reading of the session, what the call itself needs: the session and
    * a builder's role in the App. Once either is gone, the callback is
    * released and forwards nothing more.
    */
@@ -333,11 +331,10 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
       if (typeof method !== "string" || !Array.isArray(args)) {
         throw screenErrors.create("screen.invalid");
       }
-      const stillOpen = recheckedEvery(
-        recheckMs,
-        async () => await stillHasRole(this.#env, this.#check, id, "builder")
+      const { passed, callbacks } = argumentsFor(
+        args,
+        stillHasRole(this.#env, this.#check, id, "builder")
       );
-      const { passed, callbacks } = argumentsFor(args, stillOpen);
       try {
         return withinAnswer(
           await this.#chatsOf(by.userId).previewCall(

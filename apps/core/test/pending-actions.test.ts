@@ -13,6 +13,7 @@ import { connectionIn, newChat } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import {
+  letSessionRecheckPass,
   openRpc,
   outcome,
   signedIn,
@@ -167,6 +168,7 @@ describe("a side effect an agent asks for in chat", () => {
       staffDecline: await outcome(staff.api.pendingActions.decline(held.id)),
     };
     await admin.api.members.remove(owner.userId);
+    using _clock = letSessionRecheckPass();
     expect({
       ...others,
       removed: await confirm(owner, held),
