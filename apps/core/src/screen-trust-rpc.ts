@@ -53,7 +53,8 @@ import {
   generationSql,
   standingOf,
 } from "./screen-trust.ts";
-import { screenCode } from "./screens.ts";
+import { versionScreens } from "./screens.ts";
+import type { VersionScreens } from "./screens.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
@@ -94,9 +95,10 @@ const builtScreens = async (
   version: number
 ): Promise<{ screen: string; artifact: string }[]> => {
   const files = await versionFiles(env, app, version);
+  const codeOf = await versionScreens(env, files, version);
   const built = await Promise.all(
     screensIn(new Map(Object.entries(files))).map(async (name) => {
-      const { screen, artifact } = await screenCode(env, files, name, version);
+      const { screen, artifact } = await codeOf(name);
       return { screen, artifact };
     })
   );
@@ -117,9 +119,10 @@ const versionOf = (app: App, version: unknown): number => {
 
 /**
  * Each screen of the App's `version`, with the hash core builds it to now,
- * or null for one that doesn't build now: each built on its own, within
- * the build wait, so one that fails or stalls leaves the others, and the
- * review, as they are.
+ * or null for one that doesn't build now: the version built once, within
+ * the build wait, so a build that fails or stalls leaves every screen
+ * without a hash and the review as it is, and each screen's code taken
+ * from it on its own, so one that fails leaves the others.
  */
 const reviewedBuilds = async (
   env: Env,
@@ -127,20 +130,32 @@ const reviewedBuilds = async (
   version: number
 ): Promise<{ screen: string; artifact: string | null }[]> => {
   const files = await versionFiles(env, app, version);
+  const noted = (error: unknown): null => {
+    if (!isExpectedError(error)) {
+      log.warn("screen.review_build_failed", {
+        appId: app,
+        version,
+        ...errorFields(error),
+      });
+    }
+    return null;
+  };
+  let codeOf: VersionScreens | null;
+  try {
+    codeOf = await versionScreens(env, files, version);
+  } catch (error) {
+    codeOf = noted(error);
+  }
   const built = await Promise.all(
     screensIn(new Map(Object.entries(files))).map(async (name) => {
+      if (codeOf === null) {
+        return { screen: name, artifact: null };
+      }
       try {
-        const { artifact } = await screenCode(env, files, name, version);
+        const { artifact } = await codeOf(name);
         return { screen: name, artifact };
       } catch (error) {
-        if (!isExpectedError(error)) {
-          log.warn("screen.review_build_failed", {
-            appId: app,
-            version,
-            ...errorFields(error),
-          });
-        }
-        return { screen: name, artifact: null };
+        return { screen: name, artifact: noted(error) };
       }
     })
   );
