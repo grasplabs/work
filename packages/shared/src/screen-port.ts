@@ -3,6 +3,13 @@
 // hands values over as they are (structured clone), which has no size to
 // measure; text does, so the page's limit on a message's size
 // (`screenLimits.rpc`) holds for exactly what the frame sent.
+//
+// Messages that arrive before they are read wait here, and only so many
+// (`screenLimits.portQueue`): a side that sends faster than the other
+// reads would otherwise fill the reader's memory. Past that the port is
+// closed, which ends the session as any other failure of it does.
+
+import { screenLimits } from "./screen-limits.ts";
 
 /** What Cap'n Web needs of a transport that carries text. */
 export interface TextTransport {
@@ -20,6 +27,7 @@ const closedByPeer = (): Error => new Error("The other side closed the port.");
  */
 export const portTransport = (port: MessagePort): TextTransport => {
   const received: string[] = [];
+  let held = 0;
   let failure: Error | undefined;
   let waiting:
     | { resolve: (message: string) => void; reject: (error: Error) => void }
@@ -44,6 +52,18 @@ export const portTransport = (port: MessagePort): TextTransport => {
       return;
     }
     if (waiting === undefined) {
+      held += event.data.length;
+      if (
+        received.length >= screenLimits.portQueue.messages ||
+        held > screenLimits.portQueue.characters
+      ) {
+        // Nothing of it is read: what waited is let go with the port.
+        received.length = 0;
+        held = 0;
+        port.close();
+        fail(new Error("More arrived on the port than is held unread."));
+        return;
+      }
       received.push(event.data);
       return;
     }
@@ -65,6 +85,7 @@ export const portTransport = (port: MessagePort): TextTransport => {
     receive: async () => {
       const next = received.shift();
       if (next !== undefined) {
+        held -= next.length;
         return next;
       }
       if (failure !== undefined) {

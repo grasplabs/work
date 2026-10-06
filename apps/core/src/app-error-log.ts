@@ -10,7 +10,12 @@ import type { AppErrorEntry, AppErrorLog } from "@grasp-os/shared/screens";
 // different problems are kept, and what comes in past the rate the host
 // allows (app.ts, `admitReport`) is only counted, in one number.
 
-const sequenceKey = "error-log-sequence";
+/**
+ * Where the log keeps the number of its newest entry. The stored name
+ * stays as it is: an App with reports already has its number under it,
+ * and one that started again at 1 would write over the entries it has.
+ */
+const sequenceKey = "error-log-count";
 const suppressedKey = "error-log-suppressed";
 const entryPrefix = "error-log:";
 
@@ -50,21 +55,27 @@ export class ErrorLog {
   }
 
   /**
-   * Runs `write` after every write before it. Each reads the log before
-   * it writes, and many reports arrive at once: two that read the same
-   * log would each add the same problem as new, or count over each other.
+   * Reports dropped unread that the stored count doesn't have yet: they
+   * are written at intervals (`writeSuppressed`), never one by one.
+   */
+  #pending = 0;
+
+  /**
+   * Runs `turn` after every one before it. Each reads the log before it
+   * writes, and many reports arrive at once: two that read the same log
+   * would each add the same problem as new, or count over each other.
    * The object's own ordering of requests doesn't cover it: without this,
    * two hundred reports sent at once come out as dozens of entries (the
    * test of that in screen-bridge.test.ts fails).
    */
-  async #inTurn(write: () => Promise<void>): Promise<void> {
+  async #inTurn<T>(turn: () => Promise<T>): Promise<T> {
     const before = this.#written;
-    const mine = (async (): Promise<void> => {
+    const mine = (async (): Promise<T> => {
       await before;
-      await write();
+      return await turn();
     })();
     this.#written = settled(mine);
-    await mine;
+    return await mine;
   }
 
   /**
@@ -100,25 +111,46 @@ export class ErrorLog {
     });
   }
 
-  /** Counts `reports` more as dropped unread, in the log's one number. */
-  async suppress(reports: number): Promise<void> {
-    await this.#inTurn(async () => {
+  /** Counts one more report as dropped unread: in memory, for now. */
+  suppress(): void {
+    this.#pending += 1;
+  }
+
+  /**
+   * Adds the reports dropped since the last write to the stored count.
+   * They leave memory only once storage has them, so a write that fails
+   * loses none. Answers how many it wrote.
+   */
+  async writeSuppressed(): Promise<number> {
+    return await this.#inTurn(async () => {
+      const reports = this.#pending;
+      if (reports === 0) {
+        return 0;
+      }
       const before = (await this.#storage.get<number>(suppressedKey)) ?? 0;
       await this.#storage.put(suppressedKey, before + reports);
+      this.#pending -= reports;
+      return reports;
     });
   }
 
-  /** The log, newest first, once every write so far is in it. */
+  /**
+   * The log, newest first, once every write so far is in it, with every
+   * report dropped so far counted: those stored and those still in
+   * memory. Reading writes nothing.
+   */
   async read(): Promise<AppErrorLog> {
-    await this.#written;
-    const entries = await this.#storage.list<AppErrorEntry>({
-      prefix: entryPrefix,
-      reverse: true,
-      limit: screenLimits.keptReports,
+    return await this.#inTurn(async () => {
+      const entries = await this.#storage.list<AppErrorEntry>({
+        prefix: entryPrefix,
+        reverse: true,
+        limit: screenLimits.keptReports,
+      });
+      const stored = (await this.#storage.get<number>(suppressedKey)) ?? 0;
+      return {
+        entries: [...entries.values()],
+        suppressed: stored + this.#pending,
+      };
     });
-    return {
-      entries: [...entries.values()],
-      suppressed: (await this.#storage.get<number>(suppressedKey)) ?? 0,
-    };
   }
 }

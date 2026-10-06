@@ -35,6 +35,12 @@ export const screenLimits = {
   keptReports: 100,
   /** The most one problem report may carry, in characters. */
   report: { message: 2000, stack: 8000 },
+  /**
+   * What a port holds of messages nobody has read yet, in number and in
+   * characters together (four of the longest): they are read as they
+   * come, so more than this is a side sending faster than it is heard.
+   */
+  portQueue: { messages: 256, characters: 4 * 262_144 },
 } as const;
 
 // A screen starts in two stages, each bound to this load of the frame and

@@ -406,7 +406,7 @@ export class App extends DurableObject<Env> {
   readonly #errorLog = new ErrorLog(this.ctx.storage);
 
   /** Reports dropped unread and not yet in the log's count, and when it was last written. */
-  readonly #suppressed = { reports: 0, writtenAt: 0, writing: false };
+  readonly #suppressed = { writtenAt: 0, writing: false };
 
   /** Requests refused since the last line logged of them, and when that was. */
   #refused = { requests: 0, loggedAt: 0 };
@@ -580,7 +580,7 @@ export class App extends DurableObject<Env> {
       this.#callerReports.take(userId, now) &&
       this.#appReports.take(appBucket, now);
     if (!admitted) {
-      this.#suppressed.reports += 1;
+      this.#errorLog.suppress();
       if (
         !this.#suppressed.writing &&
         now - this.#suppressed.writtenAt >= suppressedWriteMs
@@ -592,27 +592,19 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * Adds the reports dropped since the last write to the log's count. The
-   * time of the write moves on only once the log has them, and a write
-   * that fails puts them back: it loses nothing.
+   * Writes the count of dropped reports to the log. The time of the write
+   * moves on only once the log has it: after one that fails, the next
+   * dropped report tries again.
    */
   async #writeSuppressed(now: number): Promise<void> {
-    const { reports } = this.#suppressed;
-    if (reports === 0) {
-      return;
-    }
-    // Taken out before the write, so two writes at once never count the
-    // same reports, and put back if it fails.
-    this.#suppressed.reports = 0;
     this.#suppressed.writing = true;
     try {
-      await this.#errorLog.suppress(reports);
+      const reports = await this.#errorLog.writeSuppressed();
       this.#suppressed.writtenAt = now;
       // One line for the operator too, as often as the number is written.
-      log.warn("screen.reports_suppressed", { appId: this.#app, reports });
-    } catch (error) {
-      this.#suppressed.reports += reports;
-      throw error;
+      if (reports > 0) {
+        log.warn("screen.reports_suppressed", { appId: this.#app, reports });
+      }
     } finally {
       this.#suppressed.writing = false;
     }
@@ -623,9 +615,12 @@ export class App extends DurableObject<Env> {
     await this.#errorLog.add(reported);
   }
 
-  /** The App's error log, with every report dropped so far counted. */
+  /**
+   * The App's error log, with every report dropped so far counted.
+   * Reading it writes nothing: the count is written only as reports are
+   * dropped, at most once a minute (`admitReport`).
+   */
   async errors(): Promise<AppErrorLog> {
-    await this.#writeSuppressed(Date.now());
     return await this.#errorLog.read();
   }
 

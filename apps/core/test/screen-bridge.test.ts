@@ -1,9 +1,12 @@
 import { kitModuleName, screenRuntime } from "@grasp-os/compiler";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { removeMember } from "../src/app-members.ts";
+import { appHost } from "../src/durable-objects.ts";
 import { pastAccessRecheck, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -218,6 +221,29 @@ const followAndRelease = async (person: Person, app: string): Promise<void> => {
   );
   await subscription.release();
 };
+
+/** A report as an App's log stored it before problems were counted. */
+const earlier = (message: string) => ({
+  at: "2026-09-01T00:00:00.000Z",
+  source: "screen",
+  version: 1,
+  screen: "notes",
+  kind: "error",
+  message,
+});
+
+/**
+ * Runs `run` on what the App's host has stored: what a test can't reach
+ * through `/rpc`, which is what was written, and when.
+ */
+const inAppStorage = async <T>(
+  app: string,
+  run: (storage: DurableObjectStorage) => Promise<T>
+): Promise<T> =>
+  await runInDurableObject(
+    appHost(env, appIdSchema.parse(app)),
+    async (_host, state) => await run(state.storage)
+  );
 
 /** How many of `outcomes` ended as `code`. */
 const ended = (outcomes: string[], code: string): number =>
@@ -856,6 +882,111 @@ describe("screens", { timeout: 60_000 }, () => {
       newest: "Problem 101",
       oldest: "Problem 2",
       suppressed: 0,
+    });
+  });
+
+  it("keeps the reports an App already has, and numbers the next after them", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    // As an App's log was stored before problems were counted: numbered
+    // from a count under `error-log-count`.
+    await inAppStorage(app, async (storage) => {
+      await storage.put({
+        "error-log-count": 7,
+        "error-log:000000000006": earlier("An older problem"),
+        "error-log:000000000007": earlier("An old problem"),
+      });
+    });
+
+    await builder.api.screens.report(
+      app,
+      { version: 1, screen: "notes" },
+      { kind: "error", message: "A new problem" }
+    );
+    await builder.api.screens.report(
+      app,
+      { version: 1, screen: "notes" },
+      { kind: "error", message: "An older problem" }
+    );
+
+    const { entries } = await builder.api.screens.errors(app);
+    expect({
+      entries: entries.map(({ message, count }) => ({ message, count })),
+      stored: await inAppStorage(app, async (storage) => {
+        const kept = await storage.list({ prefix: "error-log:" });
+        return [...kept.keys()];
+      }),
+    }).toStrictEqual({
+      entries: [
+        // Seen again: once more of the entry it had, now the newest.
+        { message: "An older problem", count: 1 },
+        { message: "A new problem", count: 1 },
+        { message: "An old problem", count: undefined },
+      ],
+      stored: [
+        "error-log:000000000007",
+        "error-log:000000000008",
+        "error-log:000000000009",
+      ],
+    });
+  });
+
+  it("writes the count of dropped reports once a minute at most, however often the log is read, and reads all of them", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const at = { version: 1, screen: "notes" };
+    const report = async (): Promise<string> =>
+      await outcome(
+        builder.api.screens.report(app, at, {
+          kind: "error",
+          message: "Rendered too often",
+        })
+      );
+    const stored = async (): Promise<number | undefined> =>
+      await inAppStorage(
+        app,
+        async (storage) => await storage.get<number>("error-log-suppressed")
+      );
+
+    const result = await atStoppedClock(async (advance) => {
+      for (let kept = 0; kept < 20; kept += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await report();
+      }
+      // The first one dropped is written at once; the rest of the minute
+      // are only counted, read or not.
+      const read: number[] = [];
+      const written: (number | undefined)[] = [];
+      for (let dropped = 0; dropped < 6; dropped += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await report();
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        const log = await builder.api.screens.errors(app);
+        read.push(log.suppressed);
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        written.push(await stored());
+      }
+      // A minute on, the person may report twenty more, and the next
+      // one dropped writes what was counted meanwhile.
+      advance(minuteMs);
+      for (let later = 0; later < 21; later += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await report();
+      }
+      const log = await builder.api.screens.errors(app);
+      return {
+        read,
+        written,
+        readLater: log.suppressed,
+        writtenLater: await stored(),
+      };
+    });
+
+    expect(result).toStrictEqual({
+      read: [1, 2, 3, 4, 5, 6],
+      written: [1, 1, 1, 1, 1, 1],
+      readLater: 7,
+      writtenLater: 7,
     });
   });
 
