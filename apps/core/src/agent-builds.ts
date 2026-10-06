@@ -14,6 +14,7 @@ import type {
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { PreviewProblem } from "@grasp-os/shared/chat";
+import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import { messageOf } from "@grasp-os/shared/errors";
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -39,6 +40,7 @@ import {
   proposeDraft,
 } from "./apps.ts";
 import type { Acting, Member } from "./auth/identity.ts";
+import { proposeDependencies } from "./dependencies/requests.ts";
 import { workspace } from "./durable-objects.ts";
 import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { requestPermission } from "./permissions.ts";
@@ -771,6 +773,36 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   }
 
   /**
+   * Proposes npm packages for `app`, as its builders do: one exact graph,
+   * as a request that waits for a person who holds `dependencies.approve`
+   * and allows nothing until they approve it (dependencies/requests.ts).
+   * Proposing is all the agent does with dependencies: nothing here, or
+   * anywhere it reaches, approves one or gives anyone the permission to.
+   */
+  async proposeDependencies(
+    app: unknown,
+    proposal: unknown
+  ): Promise<DependencyRequest> {
+    return await this.#build(
+      "build.proposeDependencies",
+      async (by) => {
+        const id = await this.#buildable(by, app);
+        return await proposeDependencies(
+          this.env,
+          by,
+          typeof proposal === "object" && proposal !== null
+            ? { ...proposal, app: id }
+            : proposal
+        );
+      },
+      (requested) => ({
+        app: typeof app === "string" ? app : null,
+        request: requested.id,
+      })
+    );
+  }
+
+  /**
    * Dry-runs each test of workflow `workflow` in the chat's draft of
    * `app`, with `params` over each test's own values: what it would do,
    * with every step's side effect recorded, never made.
@@ -1053,6 +1085,47 @@ build: {
     actions: string[];
     binding: string;
   }): Promise<{ id: string; status: string }>;
+  /**
+   * Proposes npm packages for the App: one exact, fully resolved graph. A
+   * person who was given the permission to approve dependencies approves or
+   * denies it as a whole; until then nothing may use the packages, and you
+   * can't approve it or give anyone that permission. Another proposal for
+   * the App replaces one still waiting. Report only what you resolved: the
+   * person is told the packages are as you reported them, unchecked.
+   */
+  proposeDependencies(app: string, proposal: {
+    /** The revision of the source the graph was resolved from. */
+    sourceRevision: string;
+    /** Why the App needs them. */
+    purpose: string;
+    targets: ("browser" | "server" | "workflow" | "computation")[];
+    graph: {
+      /** The packages the source asks for; each is one of \`packages\`. */
+      direct: { name: string; version: string }[];
+      /** Every package, direct and transitive, by exact version. */
+      packages: {
+        name: string;
+        version: string;
+        origin: "https://registry.npmjs.org";
+        /** \`sha512-…\`, as the registry gives it. */
+        integrity: string;
+        license: string | null;
+        dependencies: { name: string; version: string }[];
+        peers: { name: string; range: string; resolved: string | null }[];
+      }[];
+      /** The exact versions the platform provides (React, the SDK, the UI kit). */
+      platformPeers: Record<string, string>;
+    };
+    findings: {
+      kind: "license" | "security";
+      package: { name: string; version: string };
+      severity: "info" | "low" | "moderate" | "high" | "critical";
+      id: string | null;
+      summary: string;
+    }[];
+    /** What a package needs that the platform refuses, such as an install script. */
+    refused: { package: { name: string; version: string }; requirement: string }[];
+  }): Promise<{ id: string; status: "pending" | "approved" | "denied"; graphHash: string }>;
 };`;
 
 /** `env.build`. */

@@ -111,6 +111,13 @@ const typeRules: readonly {
   { action: "team", type: "config" },
   // A decision a run put to people: opened, asked, answered, timed out.
   { action: "workflow.decision", type: "decision" },
+  // npm packages proposed for an App: the request, another proposal
+  // taking its place, a build refused packages nobody approved, and a
+  // person approving or denying a request.
+  { action: "dependency.requested", type: "action" },
+  { action: "dependency.admission_refused", type: "action" },
+  { action: "dependency.superseded", type: "action" },
+  { action: "dependency", type: "decision" },
   // A run reading an attachment of a message its email trigger kept.
   { action: "workflow.email.read", type: "read" },
   { action: "workflow.run", type: "action" },

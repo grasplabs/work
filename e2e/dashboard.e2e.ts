@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { pageOf, peopleIn } from "./people.ts";
+import { apiOf, pageOf, peopleIn } from "./people.ts";
 
 // The dashboard, from the nav: what waits on the person, what could be
 // better (only for someone with signals), and, for admins, the latest of
@@ -47,4 +47,97 @@ test("an admin sees the latest activity, with the way to the audit trail", async
   ).not.toHaveCount(0);
   await activity.getByRole("link", { name: "The full audit trail" }).click();
   await expect(page).toHaveURL(/\/settings\/audit$/u);
+});
+
+test("someone given the permission approves the packages proposed for an engine, and an admin without it isn't asked", async ({
+  browser,
+}) => {
+  const { admin, builder, approver } = peopleIn("dependencyApproval");
+  const asAdmin = apiOf(admin);
+  const asBuilder = apiOf(builder);
+  const { id: app } = await asBuilder.api.apps.create({ name: "Totals" });
+  await asAdmin.api.dependencies.grantApprover({
+    type: "person",
+    userId: approver.userId,
+  });
+  const origin = "https://registry.npmjs.org";
+  const request = await asBuilder.api.dependencies.propose({
+    app,
+    sourceRevision: "rev-1",
+    purpose: "Draw the monthly totals as a chart.",
+    targets: ["browser"],
+    graph: {
+      direct: [{ name: "charts", version: "3.1.0" }],
+      packages: [
+        {
+          name: "charts",
+          version: "3.1.0",
+          origin,
+          integrity: `sha512-${"A".repeat(86)}==`,
+          license: "MIT",
+          dependencies: [{ name: "d3-scale", version: "4.0.2" }],
+          peers: [],
+        },
+        {
+          name: "d3-scale",
+          version: "4.0.2",
+          origin,
+          integrity: `sha512-${"B".repeat(86)}==`,
+          license: "ISC",
+          dependencies: [],
+          peers: [],
+        },
+      ],
+      platformPeers: {},
+    },
+    findings: [],
+    refused: [],
+  });
+
+  // An admin manages who approves, and is asked nothing without it.
+  const adminPage = await pageOf(browser, admin);
+  await adminPage.goto("/dashboard");
+  await expect(adminPage.getByRole("region", { name: "To do" })).toBeVisible();
+  await expect(
+    adminPage.getByRole("article", { name: "Packages for Totals" })
+  ).toHaveCount(0);
+
+  const page = await pageOf(browser, approver);
+  await page.goto("/dashboard");
+  const card = page.getByRole("article", { name: "Packages for Totals" });
+  await expect(
+    card.getByText("Draw the monthly totals as a chart.")
+  ).toBeVisible();
+  // What it asks for, by name, and that nobody checked it yet.
+  await expect(card.getByText("charts@3.1.0", { exact: true })).toBeVisible();
+  await expect(
+    card.getByText("2 packages in all, to run in: Browser")
+  ).toBeVisible();
+  await expect(card.getByText(/are as reported by/u)).toBeVisible();
+  // Approving waits for the whole graph to be shown; denying doesn't.
+  const approveButton = card.getByRole("button", {
+    name: "Approve the packages for Totals",
+  });
+  await expect(approveButton).toBeDisabled();
+  await expect(
+    card.getByRole("button", { name: "Deny the packages for Totals" })
+  ).toBeEnabled();
+  await card
+    .getByRole("button", { name: "Show the packages for Totals" })
+    .click();
+  // The whole graph: what the direct package brings, too.
+  await expect(
+    card.getByRole("row").filter({ hasText: "ISC" }).getByRole("cell").first()
+  ).toHaveText("d3-scale@4.0.2");
+  await approveButton.click();
+
+  await expect(card).toHaveCount(0);
+  await expect
+    .poll(async () => {
+      const { approved } = await asBuilder.api.dependencies.status(app);
+      return approved?.id;
+    })
+    .toBe(request.id);
+  asAdmin.core[Symbol.dispose]();
+  asBuilder.core[Symbol.dispose]();
 });

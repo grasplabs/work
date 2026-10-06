@@ -265,7 +265,7 @@ const changeEntry = (
  * and revoke. Grasp staff are admins, but never decide a client's
  * permissions.
  */
-const requireMemberAdmin = (by: Identity): void => {
+export const requireMemberAdmin = (by: Identity): void => {
   requireAdmin(by);
   if (by.staff) {
     throw roleErrors.create("role.forbidden");
@@ -277,13 +277,17 @@ const requireMemberAdmin = (by: Identity): void => {
  * the very update that grants or revokes, so an admin demoted or removed
  * after their session was checked changes nothing.
  */
-const stillAdmin = (by: Identity): SQL => activeMember(by.userId, ["admin"]);
+export const stillAdmin = (by: Identity): SQL =>
+  activeMember(by.userId, ["admin"]);
 
 /**
  * After a grant or revoke changed nothing: refuses with `role.forbidden`
  * if that was because `by` is no longer an active admin.
  */
-const requireStillAdmin = async (env: Env, by: Identity): Promise<void> => {
+export const requireStillAdmin = async (
+  env: Env,
+  by: Identity
+): Promise<void> => {
   const row = await drizzle(env.DB).get<{ admin: number }>(
     sql`SELECT ${stillAdmin(by)} AS admin`
   );

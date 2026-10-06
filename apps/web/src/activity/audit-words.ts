@@ -116,6 +116,18 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "workflow.decision",
     text: msg`A decision was put to people, or answered`,
   },
+  { action: "dependency.requested", text: msg`Proposed packages` },
+  { action: "dependency.approved", text: msg`Approved packages` },
+  { action: "dependency.denied", text: msg`Denied packages` },
+  {
+    action: "dependency.superseded",
+    text: msg`Replaced a request for packages`,
+  },
+  {
+    action: "dependency.admission_refused",
+    text: msg`Was refused packages nobody approved`,
+  },
+  { action: "dependency", text: msg`Changed a request for packages` },
   { action: "workflow.email.read", text: msg`Read an email attachment` },
   { action: "workflow.run.fix_asked", text: msg`Asked the agent to fix a run` },
   { action: "workflow.run", text: msg`Ran a workflow` },
