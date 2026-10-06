@@ -9,10 +9,13 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { builtinModules, createRequire } from "node:module";
@@ -24,6 +27,7 @@ import { build } from "vite-plus";
 import type { InlineConfig, Plugin, Rolldown } from "vite-plus";
 import { z } from "zod";
 
+import { withBuildLock } from "./build-lock.ts";
 import { extractCandidates } from "./src/candidates.ts";
 import { compileModule } from "./src/compile.ts";
 import { sdkImports } from "./src/imports.ts";
@@ -74,10 +78,18 @@ const manifestOf = (dir: string) =>
 
 const exportsOf = (dir: string) => manifestOf(dir).exports ?? {};
 
-/** Every source file under a directory. */
+/**
+ * A test or a declaration among the kit's sources: no part of a release.
+ * It is never a module of the kit, so never sent to a screen, and the
+ * compiler doesn't read it either: adding or changing one builds the same
+ * release.
+ */
+const notShipped = /\.(?:test|d)\.tsx?$/u;
+
+/** Every source file under a directory that a release is built from. */
 const sourcesIn = (dir: string): string[] =>
   readdirSync(dir, { recursive: true, encoding: "utf-8" })
-    .filter((file) => /\.tsx?$/u.test(file))
+    .filter((file) => /\.tsx?$/u.test(file) && !notShipped.test(file))
     .map((file) => path.join(dir, file));
 
 /** A kit module's entry: its specifier and the file or virtual module it is. */
@@ -95,7 +107,9 @@ const uiEntries = (): Entry[] =>
     const [prefix = "", suffix = ""] = target.split("*");
     const dir = path.join(ui, prefix);
     const files = existsSync(dir)
-      ? readdirSync(dir).filter((file) => file.endsWith(suffix))
+      ? readdirSync(dir).filter(
+          (file) => file.endsWith(suffix) && !notShipped.test(file)
+        )
       : [];
     return files.map((file) => ({
       specifier: `@grasp-os/ui/${key.slice(2, -1)}${file.slice(0, -suffix.length)}`,
@@ -146,12 +160,41 @@ const iconEntries = (): { entries: Entry[]; icons: Kit["icons"] } => {
   return { entries, icons };
 };
 
+/**
+ * What a release is built as, whatever `NODE_ENV` the building process has:
+ * `vp test` runs with `test`, and a shell may have anything. React's
+ * packages pick their development build by it, and Vite puts it in the
+ * code, so without this the same sources built into another kit, under
+ * another version, depending on who built them.
+ */
+const production = {
+  "process.env.NODE_ENV": JSON.stringify("production"),
+};
+
+/** A CommonJS package as it loads in production (see `production`). */
+const requireProduction = (specifier: string): unknown => {
+  const { NODE_ENV: before } = process.env;
+  process.env.NODE_ENV = "production";
+  try {
+    // Not a copy this process loaded earlier, under its own NODE_ENV.
+    Reflect.deleteProperty(require.cache, require.resolve(specifier));
+    return require(specifier);
+  } finally {
+    if (before === undefined) {
+      Reflect.deleteProperty(process.env, "NODE_ENV");
+    } else {
+      process.env.NODE_ENV = before;
+    }
+  }
+};
+
 const virtualEntry = "\0kit-entry:";
 const identifier = /^[A-Za-z_$][\w$]*$/u;
 
 /**
  * React's packages are CommonJS, whose exports a bundler can't list. Each
- * gets an ES module that re-exports what the package exports under Node.
+ * gets an ES module that re-exports what the package exports under Node,
+ * in production.
  */
 const reactEntries: Plugin = {
   name: "kit-react-entries",
@@ -163,7 +206,7 @@ const reactEntries: Plugin = {
     const specifier = id.slice(virtualEntry.length);
     const exported = z
       .record(z.string(), z.unknown())
-      .parse(require(specifier));
+      .parse(requireProduction(specifier));
     const names = Object.keys(exported).filter(
       (name) => identifier.test(name) && name !== "default"
     );
@@ -194,15 +237,22 @@ const chunksOf = (
     .flatMap((output) => ("output" in output ? output.output : []))
     .filter((file) => file.type === "chunk");
 
+/** Built modules by flat name: their code, imports and source files. */
+interface FlatModules {
+  code: Record<string, string>;
+  imports: Record<string, string[]>;
+  /** The files bundled into each module, by path. */
+  sources: Record<string, string[]>;
+}
+
 /**
  * Built chunks as modules by flat name, importing each other by that name
- * instead of by relative path, and what each imports.
+ * instead of by relative path, what each imports and what it was built from.
  */
-const flatModules = (
-  chunks: Rolldown.OutputChunk[]
-): { code: Record<string, string>; imports: Record<string, string[]> } => {
+const flatModules = (chunks: Rolldown.OutputChunk[]): FlatModules => {
   const code: Record<string, string> = {};
   const imports: Record<string, string[]> = {};
+  const sources: Record<string, string[]> = {};
   for (const chunk of chunks) {
     let flat = chunk.code;
     const imported = [...chunk.imports, ...chunk.dynamicImports];
@@ -214,8 +264,63 @@ const flatModules = (
     }
     code[chunk.fileName] = flat;
     imports[chunk.fileName] = imported;
+    sources[chunk.fileName] = chunk.moduleIds;
   }
-  return { code, imports };
+  return { code, imports, sources };
+};
+
+/**
+ * What every screen shares one instance of: React and what renders with it.
+ * A page loads each kit module once, by its flat name, and the bundler puts
+ * each file in one module, so there is one of each unless a dependency
+ * brings a second copy from another directory. That fails the build, like
+ * two versions of one package in the kit's types.
+ */
+const singlePackages = ["react", "react-dom", "scheduler"];
+
+const assertSinglePackages = (sources: FlatModules["sources"]): void => {
+  for (const name of singlePackages) {
+    const marker = `/node_modules/${name}/`;
+    const copies = new Set(
+      Object.values(sources)
+        .flat()
+        .filter((file) => file.includes(marker))
+        .map((file) => file.slice(0, file.lastIndexOf(marker) + marker.length))
+    );
+    if (copies.size > 1) {
+      throw new Error(
+        `The kit must have one copy of ${name}, not ${copies.size}: ${[...copies].join(", ")}`
+      );
+    }
+  }
+};
+
+/**
+ * Tailwind class candidates in the kit's own sources, by the module each
+ * source was built into (`Kit.moduleCandidates`). Every source must be in a
+ * module: one that isn't would lose its classes without a word.
+ */
+const candidatesByModule = (
+  sources: FlatModules["sources"]
+): Record<string, string[]> => {
+  const own = new Set(sourcesIn(path.join(ui, "src")));
+  const placed = new Set<string>();
+  const candidates: Record<string, string[]> = {};
+  for (const [name, files] of Object.entries(sources)) {
+    const mine = files.filter((file) => own.has(file));
+    const found = mine.flatMap((file) => extractCandidates(readText(file)));
+    if (found.length > 0) {
+      candidates[name] = [...new Set(found)].toSorted();
+    }
+    for (const file of mine) {
+      placed.add(file);
+    }
+  }
+  const missing = [...own].filter((file) => !placed.has(file));
+  if (missing.length > 0) {
+    throw new Error(`Not in any of the kit's modules: ${missing.join(", ")}`);
+  }
+  return candidates;
 };
 
 /**
@@ -225,17 +330,13 @@ const flatModules = (
  * import each other by that name instead of by relative path. Returns their
  * code and what each imports, by flat name.
  */
-const buildKitModules = async (
-  entries: Entry[]
-): Promise<{
-  code: Record<string, string>;
-  imports: Record<string, string[]>;
-}> => {
+const buildKitModules = async (entries: Entry[]): Promise<FlatModules> => {
   const config: InlineConfig = {
     configFile: false,
     root,
     logLevel: "warn",
     mode: "production",
+    define: production,
     // Babel compiles TypeScript here, with the React Compiler.
     oxc: false,
     plugins: [reactEntries, reactCompiler],
@@ -274,6 +375,7 @@ const buildKitModules = async (
       throw new Error(`The kit has no module for ${specifier}`);
     }
   }
+  assertSinglePackages(built.sources);
   return built;
 };
 
@@ -290,6 +392,7 @@ const buildSdkModules = async (): Promise<Record<string, string>> => {
     root,
     logLevel: "warn",
     mode: "production",
+    define: production,
     resolve: { conditions: ["workerd", "worker"] },
     build: {
       write: false,
@@ -458,7 +561,7 @@ const collectLintProject = (
     encoding: "utf-8",
   })) {
     const source = path.join(ui, "src", file);
-    if (statSync(source).isFile()) {
+    if (statSync(source).isFile() && !notShipped.test(file)) {
       files[`ui/src/${file}`] = readText(source);
     }
   }
@@ -565,7 +668,7 @@ const buildCompiler = async (): Promise<string> => {
     mode: "production",
     resolve: { conditions: ["workerd", "worker", "browser"] },
     ssr: { noExternal: true, target: "webworker" },
-    define: moduleLocation,
+    define: { ...production, ...moduleLocation },
     plugins: [shadcnParser],
     build: {
       ssr: "src/worker.ts",
@@ -599,26 +702,118 @@ const modulesOf = (code: Record<string, string>): KitModules => ({
   modules: code,
 });
 
-/** Builds the kit, then the compiler, into dist/. */
+/** The module core imports the compiler's version from, as `#version`. */
+const releaseVersionModule = path.join(dist, "version.js");
+
+/** The version a version module names, if it is there. */
+const versionIn = (file: string): string | undefined =>
+  existsSync(file)
+    ? /version = "(?<version>[0-9a-f]+)"/u.exec(readText(file))?.groups?.version
+    : undefined;
+
+/**
+ * Puts a release's `files` in `assets`, whole or not at all: written next
+ * to where they go and moved there in one step, so a server reading its
+ * assets never finds some of a release's files without the others. A
+ * release that is there already is left as it is, but for its directory's
+ * time, which says it is the newest again (`pruneReleases`): the same
+ * version is the same files, and a server may be reading them.
+ */
+const writeRelease = (
+  assets: string,
+  version: string,
+  files: Record<string, string>
+): void => {
+  const release = path.join(assets, compilerAssets.directory(version));
+  if (
+    Object.keys(files).every((file) => existsSync(path.join(release, file)))
+  ) {
+    const now = new Date();
+    utimesSync(release, now, now);
+    return;
+  }
+  mkdirSync(path.dirname(release), { recursive: true });
+  const written = mkdtempSync(path.join(assets, ".compiler-"));
+  try {
+    for (const [file, content] of Object.entries(files)) {
+      writeFileSync(path.join(written, file), content);
+    }
+    // Only what a build that was killed left of this release, if anything.
+    rmSync(release, { recursive: true, force: true });
+    renameSync(written, release);
+  } finally {
+    rmSync(written, { recursive: true, force: true });
+  }
+};
+
+/**
+ * How many releases a build leaves in the assets, the newest first. A dev
+ * server reads the release it started on until it has reloaded, about a
+ * second after a build writes a new version, and removing that release
+ * fails its screen builds. Three covers a server that hasn't reloaded while
+ * two more builds finished: the watcher's (watch.ts), or core's own build
+ * as the server starts next to it. Every build keeps as many, so no build
+ * has to know whether a server is running. What a release ships is the one
+ * it built: its frontend build empties the assets first
+ * (scripts/release/build-release.ts).
+ */
+const keptReleases = 3;
+
+/**
+ * Removes all but the `keptReleases` newest releases in `assets`, by the
+ * time each was put there or last built again. This build's is the newest:
+ * builds run one at a time (build-lock.ts). A release that goes while this
+ * looks (a frontend build emptying the assets) is skipped.
+ */
+const pruneReleases = (assets: string): void => {
+  const releases = path.join(assets, compilerAssets.directory(""));
+  const found = readdirSync(releases).flatMap((name) => {
+    try {
+      return [{ name, at: statSync(path.join(releases, name)).mtimeMs }];
+    } catch {
+      return [];
+    }
+  });
+  const newestFirst = found.toSorted((a, b) => b.at - a.at);
+  for (const { name } of newestFirst.slice(keptReleases)) {
+    rmSync(path.join(releases, name), { recursive: true, force: true });
+  }
+};
+
+/**
+ * Builds the kit, then the compiler: its files into `assets`, and the
+ * version that names them into `versionModule`.
+ *
+ * Core has the version in its code and reads the files by it, so the two
+ * are one identity and must change together. Each assets directory
+ * therefore has a version module of its own: core's build writes the one
+ * core ships, and core's tests write theirs (test/global-setup.ts). One
+ * module for both would let a test run point a running dev server, which
+ * reloads on it, at a release its own assets don't have.
+ *
+ * Everything it reads, it reads here, after the caller took the build's
+ * lock (build-lock.ts).
+ */
 const buildScreenCompiler = async (
-  assets = path.join(dist, "assets")
+  assets: string,
+  versionModule: string
 ): Promise<void> => {
-  mkdirSync(dist, { recursive: true });
   const { entries: icons, icons: iconNames } = iconEntries();
   const components = uiEntries();
   const react = reactSpecifiers.map((specifier) => ({
     specifier,
     id: `${virtualEntry}${specifier}`,
   }));
-  const { code: kitCode, imports: moduleImports } = await buildKitModules([
+  const {
+    code: kitCode,
+    imports: moduleImports,
+    sources,
+  } = await buildKitModules([
     ...react,
     ...components,
     ...icons,
     ...sdkEntries(),
   ]);
-  const candidates = sourcesIn(path.join(ui, "src")).flatMap((file) =>
-    extractCandidates(readText(file))
-  );
   const imports = [
     ...reactImports,
     ...components.map(({ specifier }) => specifier),
@@ -629,7 +824,7 @@ const buildScreenCompiler = async (
     imports,
     icons: iconNames,
     stylesheets,
-    candidates: [...new Set(candidates)].toSorted(),
+    moduleCandidates: candidatesByModule(sources),
     moduleImports,
     types: collectTypes([...imports, "lucide-react"]),
     lintProject: collectLintProject(stylesheets),
@@ -649,37 +844,38 @@ const buildScreenCompiler = async (
     .update(sdkModules.version)
     .digest("hex")
     .slice(0, 16);
+  writeRelease(assets, version, {
+    [compilerAssets.source]: compiler,
+    [compilerAssets.kit]: kitJson,
+    [compilerAssets.kitModules]: JSON.stringify(kitModules),
+    [compilerAssets.sdkModules]: JSON.stringify(sdkModules),
+  });
   // Core imports only the version; the rest it reads from its static
-  // assets when it starts a build, so it never loads them otherwise.
-  writeFileSync(
-    path.join(dist, "version.js"),
-    `export const version = "${version}";\n`
-  );
-  const releases = path.join(assets, compilerAssets.directory(""));
-  rmSync(releases, { recursive: true, force: true });
-  const release = path.join(assets, compilerAssets.directory(version));
-  mkdirSync(release, { recursive: true });
-  writeFileSync(path.join(release, compilerAssets.source), compiler);
-  writeFileSync(path.join(release, compilerAssets.kit), kitJson);
-  writeFileSync(
-    path.join(release, compilerAssets.kitModules),
-    JSON.stringify(kitModules)
-  );
-  writeFileSync(
-    path.join(release, compilerAssets.sdkModules),
-    JSON.stringify(sdkModules)
-  );
+  // assets when it starts a build, so it never loads them otherwise. The
+  // version goes last, once its release is in place, and in one step: a
+  // dev server that reloads on it finds the whole release. A module that
+  // names this version already is left alone, so a build that changes
+  // nothing (a test among the kit's sources was edited) reloads nothing.
+  if (versionIn(versionModule) !== version) {
+    mkdirSync(path.dirname(versionModule), { recursive: true });
+    const written = `${versionModule}.${process.pid}.tmp`;
+    writeFileSync(written, `export const version = "${version}";\n`);
+    renameSync(written, versionModule);
+  }
+  pruneReleases(assets);
   const kitSize = Object.values(kitCode).join("").length;
   console.info(
     `Screen compiler ${version}: ${(compiler.length / 1e6).toFixed(1)} MB and ${(kitJson.length / 1e6).toFixed(1)} MB of what it knows of the kit; kit ${kitModules.version}: ${Object.keys(kitCode).length} modules, ${(kitSize / 1e6).toFixed(1)} MB`
   );
 };
 
-/**
- * Builds the compiler, with its files in `assets` (dist/assets unless
- * given): core runs this with its own static assets directory.
- */
-export default buildScreenCompiler;
-if (import.meta.main) {
-  await buildScreenCompiler(process.argv[2]);
-}
+// `node build.ts [assets] [version module]`: core's build runs this with
+// its own static assets directory, core's tests with theirs and a version
+// module of their own, and the dev watcher (watch.ts) as core's build does.
+// One at a time per assets directory: the lock is taken before any source
+// is read and held until the version is written and old releases are gone.
+const assets = process.argv[2] ?? path.join(dist, "assets");
+const versionModule = process.argv[3] ?? releaseVersionModule;
+await withBuildLock(assets, async () => {
+  await buildScreenCompiler(assets, versionModule);
+});
