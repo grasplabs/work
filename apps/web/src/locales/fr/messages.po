@@ -2882,8 +2882,20 @@ msgid "They are signed out everywhere, their personal connections are disconnect
 msgstr "La personne est déconnectée partout, ses connexions personnelles sont coupées et elle ne peut plus se connecter."
 
 #: src/screens/screen-frame.tsx
+msgid "This app didn't start in time."
+msgstr "Cette application n'a pas démarré à temps."
+
+#: src/screens/screen-frame.tsx
 msgid "This app doesn't build. Ask a builder to fix it."
 msgstr "Cette application ne se construit pas. Demandez à un concepteur de la corriger."
+
+#: src/screens/screen-frame.tsx
+msgid "This app left its frame and was stopped."
+msgstr "Cette application a quitté son cadre et a été arrêtée."
+
+#: src/screens/screen-frame.tsx
+msgid "This app lost its connection to the page and was stopped."
+msgstr "Cette application a perdu sa connexion avec la page et a été arrêtée."
 
 #: src/routes/guest.tsx
 msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."

@@ -1,4 +1,3 @@
-import type { ScreenBridge, Theme } from "@grasp-os/sdk/screen-runtime";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewBundle } from "@grasp-os/shared/chat";
 import { authErrors } from "@grasp-os/shared/errors";
@@ -7,13 +6,19 @@ import {
   screenErrors,
   screenFrameMessage,
   screenFramePath,
-  screenFrameReady,
-  screenProblemSchema,
 } from "@grasp-os/shared/screens";
-import type { ScreenBundle, ScreenProblem } from "@grasp-os/shared/screens";
-import { newMessagePortRpcSession, RpcStub, RpcTarget } from "capnweb";
+import type { ScreenBundle } from "@grasp-os/shared/screens";
 
 import { CoreLink } from "./core-link.ts";
+import {
+  isMounted,
+  isReady,
+  stage,
+  StageTimeoutError,
+} from "./frame-stages.ts";
+import type { ExpectedStart } from "./frame-stages.ts";
+import { openBridge } from "./screen-bridge.ts";
+import type { FrameTarget } from "./screen-bridge.ts";
 
 // The page's side of an App's screen. The screen runs in a sandboxed frame
 // (core's screen-frame.ts) with no network; the page hands it its code and
@@ -31,6 +36,14 @@ import { CoreLink } from "./core-link.ts";
 // Nothing the frame sends or its App answers is ever read as the platform
 // speaking: answers and failures go back to the frame as they are, and the
 // page shows a session as ended only when its own connection says so.
+//
+// A screen starts in two stages, ten seconds each (frame-stages.ts): the
+// frame's document says it listens, then the screen says it has rendered.
+// The page shows it as running only after the second, and a frame that
+// misses either, or that leaves for another address, is stopped: its
+// port, its bridge, its timers and what it follows in core all go, and
+// the frame is emptied. Which App, version and screen a frame runs is
+// what the page opened, never what the frame says.
 
 /** What the page shows about a screen besides the screen itself. */
 export type ScreenState =
@@ -45,13 +58,16 @@ export type FailureReason =
   | "not-found"
   | "not-running"
   | "broken"
+  /** The frame wasn't ready, or its screen hadn't rendered, in time. */
+  | "timed-out"
+  /** The frame went to another address, and was stopped. */
+  | "left"
+  /** The frame's channel to the page ended: over a limit, or closed. */
+  | "disconnected"
   | "unknown";
 
 /** How often the page asks whether the App has a new current version. */
 const versionCheckMs = 30_000;
-/** How many problems a screen may report a minute; the rest are dropped. */
-const reportsPerMinute = 20;
-const minuteMs = 60_000;
 
 const failures: Readonly<Record<string, FailureReason>> = {
   "role.forbidden": "forbidden",
@@ -73,39 +89,6 @@ const failureOf = (error: unknown): FailureReason => {
   return (code === undefined ? undefined : failures[code]) ?? "unknown";
 };
 
-/** The page's theme, as the `dark` class on its root says (theme.js). */
-const pageTheme = (): Theme =>
-  document.documentElement.classList.contains("dark") ? "dark" : "light";
-
-type ThemeCallback = (theme: Theme) => void;
-
-/**
- * A stub the frame passed for its theme callback. The page only calls it;
- * a stub of anything else fails in the frame, not here.
- */
-const isThemeCallback = (value: unknown): value is RpcStub<ThemeCallback> =>
-  value instanceof RpcStub;
-
-/** Sends the page's theme to the frame, until the frame is gone. */
-const sendTheme = async (
-  toFrame: RpcStub<ThemeCallback>,
-  observer: MutationObserver
-): Promise<void> => {
-  try {
-    await toFrame(pageTheme());
-  } catch {
-    observer.disconnect();
-  }
-};
-
-/** A string the frame passed, or `screen.invalid`. */
-const text = (value: unknown): string => {
-  if (typeof value !== "string") {
-    throw screenErrors.create("screen.invalid");
-  }
-  return value;
-};
-
 /**
  * `value` as what core's call takes: the frame's input, passed on as it is
  * for core to check, as `call` passes its arguments.
@@ -115,117 +98,6 @@ const forCore = (value: unknown): never =>
   // page only binds the call to the screen's own App.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   value as never;
-
-/**
- * Where a frame's calls go, checked by the bridge first: a running App's
- * screen (`appTarget`), or a draft's preview (`previewTarget`).
- */
-interface FrameTarget {
-  call: (method: string, args: unknown[]) => Promise<unknown>;
-  report: (problem: ScreenProblem) => Promise<void>;
-  startRun: (workflow: string, input: unknown) => Promise<unknown>;
-  runs: (workflow: string) => Promise<unknown>;
-  run: (run: string) => Promise<unknown>;
-  decide: (run: string, decision: string, answer: unknown) => Promise<unknown>;
-  watchRuns: (workflow: string, onChange: unknown) => Promise<unknown>;
-}
-
-/**
- * What the frame reaches through its port: its target (its own App's
- * server and workflow runs, and where its problems go) and the page's
- * theme. Everything it passes is untrusted.
- */
-class Bridge extends RpcTarget implements ScreenBridge {
-  readonly #target: FrameTarget;
-  readonly #cleanups: (() => void)[];
-  #reports = 0;
-  #themed = false;
-
-  constructor(target: FrameTarget, cleanups: (() => void)[]) {
-    super();
-    this.#target = target;
-    this.#cleanups = cleanups;
-    const timer = setInterval(() => {
-      this.#reports = 0;
-    }, minuteMs);
-    cleanups.push(() => {
-      clearInterval(timer);
-    });
-  }
-
-  async call(method: unknown, args: unknown): Promise<unknown> {
-    if (typeof method !== "string" || !Array.isArray(args)) {
-      throw screenErrors.create("screen.invalid");
-    }
-    return await this.#target.call(method, args);
-  }
-
-  async startRun(workflow: unknown, input: unknown): Promise<unknown> {
-    return await this.#target.startRun(text(workflow), input);
-  }
-
-  async runs(workflow: unknown): Promise<unknown> {
-    return await this.#target.runs(text(workflow));
-  }
-
-  async run(run: unknown): Promise<unknown> {
-    return await this.#target.run(text(run));
-  }
-
-  async decide(
-    run: unknown,
-    decision: unknown,
-    answer: unknown
-  ): Promise<unknown> {
-    return await this.#target.decide(text(run), text(decision), answer);
-  }
-
-  /**
-   * The frame's callback goes on to core, which may only call it; the
-   * subscription core answers goes back to the frame, to release.
-   */
-  async watchRuns(workflow: unknown, onChange: unknown): Promise<unknown> {
-    return await this.#target.watchRuns(text(workflow), onChange);
-  }
-
-  report(problem: unknown): void {
-    const parsed = screenProblemSchema.safeParse(problem);
-    if (!parsed.success || this.#reports >= reportsPerMinute) {
-      return;
-    }
-    this.#reports += 1;
-    void this.#report(parsed.data);
-  }
-
-  /** Once per frame: each call would keep another observer and stub. */
-  theme(onTheme: unknown): void {
-    if (this.#themed || !isThemeCallback(onTheme)) {
-      return;
-    }
-    this.#themed = true;
-    const toFrame = onTheme.dup();
-    const observer = new MutationObserver(() => {
-      void sendTheme(toFrame, observer);
-    });
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-    void sendTheme(toFrame, observer);
-    this.#cleanups.push(() => {
-      observer.disconnect();
-      toFrame[Symbol.dispose]();
-    });
-  }
-
-  async #report(problem: ScreenProblem): Promise<void> {
-    try {
-      await this.#target.report(problem);
-    } catch {
-      // A problem that can't be reported is dropped: there's no one to tell.
-    }
-  }
-}
 
 /** A signed-in session's API, as the page's link to core gives it. */
 type Session = Awaited<ReturnType<CoreLink["session"]>>;
@@ -332,7 +204,7 @@ const dataUrl = (code: string): string =>
 /** What a frame runs of a screen, and the App's name to show around it. */
 type FrameCode = Pick<
   ScreenBundle,
-  "name" | "entry" | "runtime" | "modules" | "kit" | "css"
+  "name" | "entry" | "runtime" | "modules" | "kit" | "css" | "artifact"
 >;
 
 /** The frame's import map: the kit's modules it needs and the App's own. */
@@ -342,45 +214,6 @@ const importsOf = (bundle: FrameCode): Record<string, string> =>
       ([name, code]) => [name, dataUrl(code)]
     )
   );
-
-/** Whether a message says the frame document loaded as `load` listens. */
-const isReady = (data: unknown, load: string): boolean =>
-  typeof data === "object" &&
-  data !== null &&
-  "type" in data &&
-  data.type === screenFrameReady &&
-  "load" in data &&
-  data.load === load;
-
-/**
- * Loads the frame document into `frame`, and resolves once it says it
- * listens. Only the document of this load counts, once: not one from an
- * earlier load, nor one the frame navigates to later.
- */
-const loadFrame = async (
-  frame: HTMLIFrameElement,
-  signal: AbortSignal
-): Promise<void> => {
-  const load = crypto.randomUUID();
-  // oxlint-disable-next-line promise/avoid-new -- a message event has no promise form
-  const ready = new Promise<void>((resolve) => {
-    const listen = (event: MessageEvent): void => {
-      // Only the frame's own document, whose origin is opaque: "null".
-      if (
-        event.source === frame.contentWindow &&
-        event.origin === "null" &&
-        isReady(event.data, load)
-      ) {
-        window.removeEventListener("message", listen);
-        resolve();
-      }
-    };
-    window.addEventListener("message", listen, { signal });
-  });
-  // Only now: the page listens before the frame can say it's ready.
-  frame.src = `${screenFramePath}?${new URLSearchParams({ load })}`;
-  await ready;
-};
 
 /** What a frame runs, and what its bridge reaches. */
 interface FrameSource<Bundle extends FrameCode> {
@@ -414,26 +247,99 @@ const runFrame = <Bundle extends FrameCode>(
   const link = new CoreLink(() => {
     onState({ status: "signed-out" });
   });
+  const frameWindow = (): unknown => frame.contentWindow;
 
-  const start = async (): Promise<void> => {
-    const ready = loadFrame(frame, stopped.signal);
-    const bundle = await link.retrying(source.open);
-    await ready;
+  /**
+   * Stops it all, once: what waits for the frame stops waiting, the
+   * bridge and its port close, timers end, and the page's connection for
+   * this frame closes, and with it what the frame followed in core.
+   */
+  const stop = (): void => {
     if (stopped.signal.aborted) {
       return;
     }
-    const target = source.target(link, bundle);
-    const { port1, port2 } = new MessageChannel();
-    const bridge = newMessagePortRpcSession(
-      port1,
-      new Bridge(target, cleanups)
+    stopped.abort();
+    for (const cleanup of cleanups) {
+      cleanup();
+    }
+    link.close();
+  };
+
+  /**
+   * Stops a start that went wrong, and says so. The frame is emptied, so
+   * no code of the screen runs on behind the message; trying again is a
+   * new frame (screen-frame.tsx).
+   */
+  const fail = (state: ScreenState): void => {
+    if (stopped.signal.aborted) {
+      return;
+    }
+    stop();
+    frame.removeAttribute("src");
+    onState(state);
+  };
+
+  // The frame loads one document: its own, which `ready` answers for. A
+  // load after that is the screen sending its frame to another address,
+  // which the sandbox allows (the page's policy keeps it to this origin,
+  // core's security-headers.ts); what loaded there is not ours, whatever
+  // it says. A browser doesn't say where a frame went, and may say
+  // nothing when that address fails to load: the screen is gone all the
+  // same then, and only this message is missing.
+  let loads = 0;
+  frame.addEventListener(
+    "load",
+    () => {
+      loads += 1;
+      if (loads > 1) {
+        fail({ status: "failed", reason: "left" });
+      }
+    },
+    { signal: stopped.signal }
+  );
+
+  const start = async (): Promise<void> => {
+    // Made up here for this start, and read back from the frame only to
+    // compare: which load of the frame, and which start of it.
+    const load = crypto.randomUUID();
+    const generation = crypto.randomUUID();
+    const ready = stage(
+      "ready",
+      (message) => isReady(message, frameWindow, load),
+      window,
+      stopped.signal
     );
-    cleanups.push(() => {
-      bridge[Symbol.dispose]();
-    });
+    // Only now: the page listens before the frame can say it's ready.
+    frame.src = `${screenFramePath}?${new URLSearchParams({ load })}`;
+    // Whichever fails first fails the start: a frame that isn't ready in
+    // time doesn't wait for a build that takes longer.
+    const [bundle] = await Promise.all([link.retrying(source.open), ready]);
+    // Stopped just as both came: nothing more is started, as nothing
+    // would stop it.
+    if (stopped.signal.aborted) {
+      return;
+    }
+    const expected: ExpectedStart = {
+      load,
+      artifact: bundle.artifact,
+      generation,
+    };
+    const { port1, port2 } = new MessageChannel();
+    cleanups.push(
+      openBridge(port1, source.target(link, bundle), () => {
+        fail({ status: "failed", reason: "disconnected" });
+      })
+    );
+    const mounted = stage(
+      "mounted",
+      (message) => isMounted(message, frameWindow, expected),
+      window,
+      stopped.signal
+    );
     frame.contentWindow?.postMessage(
       {
         type: screenFrameMessage,
+        ...expected,
         imports: importsOf(bundle),
         css: bundle.css,
         runtime: bundle.runtime,
@@ -443,6 +349,12 @@ const runFrame = <Bundle extends FrameCode>(
       [port2]
     );
     onOpened(bundle.name);
+    // Running only once the screen has rendered, never because its code
+    // was handed over.
+    await mounted;
+    if (stopped.signal.aborted) {
+      return;
+    }
     onState({ status: "running" });
     source.running?.(link, bundle, cleanups, onState);
   };
@@ -451,10 +363,11 @@ const runFrame = <Bundle extends FrameCode>(
     try {
       await start();
     } catch (error) {
-      if (stopped.signal.aborted) {
+      if (error instanceof StageTimeoutError) {
+        fail({ status: "failed", reason: "timed-out" });
         return;
       }
-      onState(
+      fail(
         authErrors.codeOf(error) === "auth.unauthenticated"
           ? { status: "signed-out" }
           : { status: "failed", reason: failureOf(error) }
@@ -463,13 +376,7 @@ const runFrame = <Bundle extends FrameCode>(
   };
   void run();
 
-  return () => {
-    stopped.abort();
-    for (const cleanup of cleanups) {
-      cleanup();
-    }
-    link.close();
-  };
+  return stop;
 };
 
 /**

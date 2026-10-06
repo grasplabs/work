@@ -12,13 +12,24 @@ import { screenFrameMessage, screenFrameReady } from "@grasp-os/shared/screens";
 // It holds no App code itself. The page posts it the screen (an import map
 // of `data:` modules, the CSS and the module to run) with a `MessagePort`,
 // the frame's only channel to the page. Only the first message from the
-// page counts, so nothing can restart it with other code later; the page
-// in turn talks to the first frame document only.
+// page that names this load counts, so nothing can restart it with other
+// code later; the page in turn talks to the first frame document only.
+//
+// It starts in two stages (@grasp-os/shared/screens): this script says it
+// listens, with the `load` its address carries; the runtime says the
+// screen has mounted, with what the page handed it. The page waits ten
+// seconds for each and stops the frame otherwise (screen-host.ts).
 
 const bootstrap = `"use strict";
+const load = new URLSearchParams(location.search).get("load");
 const start = (event) => {
   const { data, ports } = event;
-  if (event.source !== parent || data?.type !== "${screenFrameMessage}" || ports.length !== 1) {
+  if (
+    event.source !== parent ||
+    data?.type !== "${screenFrameMessage}" ||
+    data.load !== load ||
+    ports.length !== 1
+  ) {
     return;
   }
   removeEventListener("message", start);
@@ -29,13 +40,16 @@ const start = (event) => {
   const style = document.createElement("style");
   style.textContent = data.css;
   document.head.append(style);
-  import(data.runtime).then((runtime) => runtime.runScreen(ports[0], data.entry));
+  import(data.runtime).then((runtime) =>
+    runtime.runScreen(ports[0], data.entry, {
+      load,
+      artifact: data.artifact,
+      generation: data.generation,
+    })
+  );
 };
 addEventListener("message", start);
-parent.postMessage(
-  { type: "${screenFrameReady}", load: new URLSearchParams(location.search).get("load") },
-  "*"
-);`;
+parent.postMessage({ type: "${screenFrameReady}", load }, "*");`;
 
 const html = `<!doctype html>
 <html lang="en">

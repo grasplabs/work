@@ -6,17 +6,21 @@ import {
 } from "@grasp-os/compiler";
 import { appErrors, appVersionSchema } from "@grasp-os/shared/apps";
 import type { DecisionView } from "@grasp-os/shared/decisions";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
+import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
+  jsonBytes,
   screenErrors,
+  screenLimits,
   screenNameSchema,
   screenProblemSchema,
 } from "@grasp-os/shared/screens";
 import type {
-  AppErrorEntry,
+  AppErrorLog,
   RunChange,
   ScreenBundle,
   ScreenRun,
@@ -50,6 +54,13 @@ import {
 // reviewed line by line, which the page passes on as it is, so everything
 // here takes the frame's input as untrusted and checks the person's
 // session and role on every call.
+//
+// What a screen may ask is bounded here and in the App's host, never only
+// on the page, which a person can change: each person's requests of an
+// App and its screens' reports by rate (`admitted`, `reportProblem`), a
+// call's arguments and answer by their size in bytes (`argumentsFor`,
+// `withinAnswer`). Who is asking is always the session core checked; a
+// screen names only its App, and has a role in it or is refused.
 //
 // Anyone with a role in the App (app-access.ts) uses its screens: opens
 // them, calls its server, reports problems, and starts, follows and
@@ -129,14 +140,59 @@ export const screenCode = async (
     throw new Error(`The build has no closure for the screen in ${path}.`);
   }
   const { modules: kit } = await kitModules(env.ASSETS);
-  return {
-    screen: name,
+  const code = {
     entry,
     runtime: kitModuleName(screenRuntime),
     modules: pick(build.modules, closure.modules),
     kit: pick(kit, closure.kitModules),
     css: build.css,
   };
+  // Which code a frame was handed, in core's words: the page expects the
+  // frame to say it back once the screen has mounted (screen-host.ts).
+  return {
+    screen: name,
+    ...code,
+    artifact: await sha256Hex(canonicalJson(code)),
+  };
+};
+
+/**
+ * The App `app` names, for the person, once the App's host has counted
+ * this request of theirs: `screen.rate_limited` past what one person's
+ * screens of an App may ask (`screenLimits.requests`).
+ */
+const admitted = async (
+  env: Env,
+  by: Identity,
+  app: unknown
+): Promise<AppId> => {
+  const { id } = await getApp(env, by, app);
+  if (!(await appHost(env, id).admitRequest(by.userId))) {
+    throw screenErrors.create("screen.rate_limited");
+  }
+  return id;
+};
+
+/**
+ * Counts a call of a draft's preview as a request of the person's
+ * (`admitted`), for an App whose role core has checked already.
+ */
+export const admitPreviewCall = async (
+  env: Env,
+  by: Identity,
+  app: AppId
+): Promise<void> => {
+  if (!(await appHost(env, app).admitRequest(by.userId))) {
+    throw screenErrors.create("screen.rate_limited");
+  }
+};
+
+/** `answer`, if it is no more than a screen takes in one call. */
+export const withinAnswer = <Answer>(answer: Answer): Answer => {
+  if (jsonBytes(answer) > screenLimits.answerBytes) {
+    throw screenErrors.create("screen.answer_too_large");
+  }
+  return answer;
 };
 
 /** A running App's screen, built from its current version. */
@@ -168,10 +224,18 @@ const openScreen = async (
 /** A function the App gets for a callback the screen passed. */
 type Callback = (value: AppAnswer) => Promise<void>;
 
-/** How the App's pushes through a screen's callback are refused. */
+/**
+ * How the App's pushes through a screen's callback are refused. A push is
+ * held to the size of an answer: what `live` sends a screen is the same
+ * data a call would answer.
+ */
 const refusals = {
   invalid: () => appErrors.create("app.answer_invalid"),
   closed: () => appErrors.create("app.not_found"),
+  tooLarge: {
+    maxBytes: screenLimits.answerBytes,
+    refuse: () => screenErrors.create("screen.answer_too_large"),
+  },
 };
 
 /**
@@ -185,6 +249,11 @@ export const argumentsFor = (
 ): { passed: unknown[]; callbacks: Disposable[] } => {
   if (!args.every((arg) => isStub(arg) || isPlainData(arg))) {
     throw screenErrors.create("screen.invalid");
+  }
+  // Measured without the callbacks, which carry nothing yet.
+  const data = args.filter((arg) => !isStub(arg));
+  if (jsonBytes(data) > screenLimits.inputBytes) {
+    throw screenErrors.create("screen.input_too_large");
   }
   const callbacks: Disposable[] = [];
   const passed = args.map((arg) => {
@@ -210,18 +279,20 @@ const callServer = async (
   { app, method, args }: { app: unknown; method: unknown; args: unknown },
   stillOpenFor: (app: AppId) => StillOpen
 ): Promise<AppAnswer> => {
-  const { id } = await getApp(env, by, app);
+  const id = await admitted(env, by, app);
   if (typeof method !== "string" || !Array.isArray(args)) {
     throw screenErrors.create("screen.invalid");
   }
   const { passed, callbacks } = argumentsFor(args, stillOpenFor(id));
   try {
-    return await callApp(
-      env,
-      id,
-      { userId: by.userId, mode: "interactive" },
-      method,
-      passed
+    return withinAnswer(
+      await callApp(
+        env,
+        id,
+        { userId: by.userId, mode: "interactive" },
+        method,
+        passed
+      )
     );
   } catch (error) {
     // A failed call keeps no callback.
@@ -250,7 +321,11 @@ const watchRuns = async (
   stillOpenFor: (app: AppId) => StillOpen,
   subscriptions: Set<Disposable>
 ): Promise<RunSubscription> => {
-  const { id } = await getApp(env, by, app);
+  // Following is a request like any other: a screen that follows and
+  // lets go over and over is held to what a person may ask. What core
+  // then pushes is not counted, and how many it follows at once has its
+  // own bound below.
+  const id = await admitted(env, by, app);
   const name = screenWorkflow(workflow);
   if (!isStub(onChange)) {
     throw screenErrors.create("screen.invalid");
@@ -329,24 +404,33 @@ const reportProblem = async (
   at: unknown,
   problem: unknown
 ): Promise<void> => {
-  const where = screenErrors.parse("screen.invalid", reportedAtSchema, at);
   const { id } = await getApp(env, by, app);
+  // Counted before it is read: a report that says nothing valid, or more
+  // than is kept, costs the App's log one number at most.
+  if (!(await appHost(env, id).admitReport(by.userId))) {
+    throw screenErrors.create("screen.rate_limited");
+  }
+  const where = screenErrors.parse("screen.invalid", reportedAtSchema, at);
+  const reported = screenErrors.parse(
+    "screen.invalid",
+    screenProblemSchema,
+    problem
+  );
   // One of the App's versions, or `app.version_not_found`.
   await findVersion(env, id, where.version);
-  const entry: AppErrorEntry = {
+  await appHost(env, id).logError({
     at: new Date().toISOString(),
     source: "screen",
     ...where,
-    ...screenErrors.parse("screen.invalid", screenProblemSchema, problem),
-  };
-  await appHost(env, id).logError(entry);
+    ...reported,
+  });
 };
 
 const errorLog = async (
   env: Env,
   by: Identity,
   app: unknown
-): Promise<AppErrorEntry[]> => {
+): Promise<AppErrorLog> => {
   const { id } = await appFor(env, by, app, "builder");
   return await appHost(env, id).errors();
 };
@@ -427,7 +511,7 @@ export class ScreensRpc extends RpcTarget implements ScreensApi {
     });
   }
 
-  async errors(app: string): Promise<AppErrorEntry[]> {
+  async errors(app: string): Promise<AppErrorLog> {
     return await withPerson(
       this.#check,
       async (by) => await errorLog(this.#env, by, app)
@@ -441,21 +525,35 @@ export class ScreensRpc extends RpcTarget implements ScreensApi {
   ): Promise<WorkflowRun> {
     return await withPerson(
       this.#check,
-      async (by) => await startScreenRun(this.#env, by, app, workflow, input)
+      async (by) =>
+        await startScreenRun(
+          this.#env,
+          by,
+          await admitted(this.#env, by, app),
+          workflow,
+          input
+        )
     );
   }
 
   async runs(app: string, workflow: string): Promise<ScreenRun[]> {
     return await withPerson(
       this.#check,
-      async (by) => await screenRuns(this.#env, by, app, workflow)
+      async (by) =>
+        await screenRuns(
+          this.#env,
+          by,
+          await admitted(this.#env, by, app),
+          workflow
+        )
     );
   }
 
   async run(app: string, run: string): Promise<ScreenRun> {
     return await withPerson(
       this.#check,
-      async (by) => await screenRun(this.#env, by, app, run)
+      async (by) =>
+        await screenRun(this.#env, by, await admitted(this.#env, by, app), run)
     );
   }
 
@@ -468,7 +566,14 @@ export class ScreensRpc extends RpcTarget implements ScreensApi {
     return await withPerson(
       this.#check,
       async (by) =>
-        await decideScreenRun(this.#env, by, app, run, decision, answer)
+        await decideScreenRun(
+          this.#env,
+          by,
+          await admitted(this.#env, by, app),
+          run,
+          decision,
+          answer
+        )
     );
   }
 

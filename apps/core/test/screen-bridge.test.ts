@@ -1,9 +1,12 @@
 import { kitModuleName, screenRuntime } from "@grasp-os/compiler";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { removeMember } from "../src/app-members.ts";
+import { appHost } from "../src/durable-objects.ts";
 import { pastAccessRecheck, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -19,6 +22,11 @@ import {
 // page passes on as it is. It tries to call more than its server, as
 // someone it isn't, to forge the platform's errors, and to get a way into
 // the App or the platform out of a callback. The sample App runs for real.
+//
+// And it asks and reports without end: a page someone changed passes on
+// whatever it likes, on as many connections as it likes, so only what
+// core keeps and counts bounds it. Each person's requests and reports of
+// an App are counted in the App's own host, the size of a call in bytes.
 
 const idp = mockIdp();
 
@@ -113,6 +121,10 @@ export class App extends DurableObject {
     return back === undefined ? "nothing" : typeof back;
   }
 
+  failure(_caller: Caller, length: number): { failed: Error } {
+    return { failed: new Error("A".repeat(length)) };
+  }
+
   lookLikeThePlatform(): Error {
     return Object.assign(new Error("Sign in to continue."), { code: "auth.unauthenticated" });
   }
@@ -182,6 +194,72 @@ const collector = () => {
   };
 };
 
+/**
+ * Runs `run` with the clock stopped, moved on only by `advance`: what a
+ * person may ask or report in a minute is then exact, not a matter of how
+ * long the test took.
+ */
+const atStoppedClock = async <T>(
+  run: (advance: (ms: number) => void) => Promise<T>
+): Promise<T> => {
+  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+  try {
+    return await run((ms) => {
+      vi.setSystemTime(Date.now() + ms);
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+};
+
+/** Follows the App's runs of a workflow, and lets go of them again. */
+const followAndRelease = async (person: Person, app: string): Promise<void> => {
+  const subscription = await person.api.screens.watchRuns(
+    app,
+    "invoices",
+    noop
+  );
+  await subscription.release();
+};
+
+/** A report as an App's log stored it before problems were counted. */
+const earlier = (message: string) => ({
+  at: "2026-09-01T00:00:00.000Z",
+  source: "screen",
+  version: 1,
+  screen: "notes",
+  kind: "error",
+  message,
+});
+
+/**
+ * Runs `run` on what the App's host has stored: what a test can't reach
+ * through `/rpc`, which is what was written, and when.
+ */
+const inAppStorage = async <T>(
+  app: string,
+  run: (storage: DurableObjectStorage) => Promise<T>
+): Promise<T> =>
+  await runInDurableObject(
+    appHost(env, appIdSchema.parse(app)),
+    async (_host, state) => await run(state.storage)
+  );
+
+/** How many of `outcomes` ended as `code`. */
+const ended = (outcomes: string[], code: string): number =>
+  outcomes.filter((result) => result === code).length;
+
+/** A value nested `depth` arrays deep. */
+const nestedArrays = (depth: number): unknown => {
+  let value: unknown = "bottom";
+  for (let level = 0; level < depth; level += 1) {
+    value = [value];
+  }
+  return value;
+};
+
+const minuteMs = 60_000;
+
 const waitFor = async <T>(read: () => T | undefined): Promise<T> =>
   await vi.waitFor(() => {
     const value = read();
@@ -197,7 +275,13 @@ describe("screens", { timeout: 60_000 }, () => {
     const app = await sampleApp(builder);
 
     const bundle = await builder.api.screens.open(app, "notes");
+    const again = await builder.api.screens.open(app, "notes");
     expect({
+      // Core's own name for the code it hands a frame: the same for the
+      // same code, whoever opens it and whenever.
+      artifact:
+        /^[0-9a-f]{64}$/u.test(bundle.artifact) &&
+        again.artifact === bundle.artifact,
       app: bundle.app,
       version: bundle.version,
       runtime: bundle.runtime,
@@ -217,6 +301,7 @@ describe("screens", { timeout: 60_000 }, () => {
       },
       theme: bundle.css.includes("--primary:"),
     }).toStrictEqual({
+      artifact: true,
       app,
       version: 1,
       runtime: kitModuleName(screenRuntime),
@@ -560,7 +645,8 @@ describe("screens", { timeout: 60_000 }, () => {
   it("takes a screen's callbacks in any argument, and keeps as many as its App holds", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
-    const many = 70;
+    // With the calls around them, within what one person may ask at once.
+    const many = 15;
 
     const ignored = await builder.api.screens.call(app, "ignore", [noop, noop]);
     // Two callbacks, in two places around plain data, each reaching the
@@ -733,14 +819,17 @@ describe("screens", { timeout: 60_000 }, () => {
       ),
     ]);
 
-    const [newest, oldest, ...rest] = await builder.api.screens.errors(app);
+    const { entries, suppressed } = await builder.api.screens.errors(app);
+    const [newest, oldest, ...rest] = entries;
     expect({
+      suppressed,
       newest,
       oldest,
       rest,
       refused,
       dated: !Number.isNaN(Date.parse(oldest?.at ?? "")),
     }).toMatchObject({
+      suppressed: 0,
       dated: true,
       newest: {
         source: "screen",
@@ -748,6 +837,7 @@ describe("screens", { timeout: 60_000 }, () => {
         version: 1,
         screen: "notes",
         message: "x".repeat(2000),
+        count: 1,
       },
       oldest: {
         kind: "error",
@@ -764,26 +854,505 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 
-  it("keeps only the newest hundred problems", async () => {
+  it("keeps only the newest hundred different problems", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
-    for (let count = 1; count <= 101; count += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- in order
-      await builder.api.screens.report(
-        app,
-        { version: 1, screen: "notes" },
-        { kind: "error", message: `Problem ${count}` }
-      );
-    }
-    const log = await builder.api.screens.errors(app);
+    const log = await atStoppedClock(async (advance) => {
+      for (let count = 1; count <= 101; count += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await builder.api.screens.report(
+          app,
+          { version: 1, screen: "notes" },
+          { kind: "error", message: `Problem ${count}` }
+        );
+        // Twenty a minute is all one person's screens may report.
+        if (count % 20 === 0) {
+          advance(minuteMs);
+        }
+      }
+      return await builder.api.screens.errors(app);
+    });
     expect({
-      entries: log.length,
-      newest: log[0]?.message,
-      oldest: log.at(-1)?.message,
+      entries: log.entries.length,
+      newest: log.entries[0]?.message,
+      oldest: log.entries.at(-1)?.message,
+      suppressed: log.suppressed,
     }).toStrictEqual({
       entries: 100,
       newest: "Problem 101",
       oldest: "Problem 2",
+      suppressed: 0,
     });
+  });
+
+  it("keeps the reports an App already has, and numbers the next after them", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    // As an App's log was stored before problems were counted: numbered
+    // from a count under `error-log-count`.
+    await inAppStorage(app, async (storage) => {
+      await storage.put({
+        "error-log-count": 7,
+        "error-log:000000000006": earlier("An older problem"),
+        "error-log:000000000007": earlier("An old problem"),
+      });
+    });
+
+    await builder.api.screens.report(
+      app,
+      { version: 1, screen: "notes" },
+      { kind: "error", message: "A new problem" }
+    );
+    await builder.api.screens.report(
+      app,
+      { version: 1, screen: "notes" },
+      { kind: "error", message: "An older problem" }
+    );
+
+    const { entries } = await builder.api.screens.errors(app);
+    expect({
+      entries: entries.map(({ message, count }) => ({ message, count })),
+      stored: await inAppStorage(app, async (storage) => {
+        const kept = await storage.list({ prefix: "error-log:" });
+        return [...kept.keys()];
+      }),
+    }).toStrictEqual({
+      entries: [
+        // Seen again: once more of the entry it had, now the newest.
+        { message: "An older problem", count: 1 },
+        { message: "A new problem", count: 1 },
+        { message: "An old problem", count: undefined },
+      ],
+      stored: [
+        "error-log:000000000007",
+        "error-log:000000000008",
+        "error-log:000000000009",
+      ],
+    });
+  });
+
+  it("writes the count of dropped reports once a minute at most, however often the log is read, and reads all of them", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const at = { version: 1, screen: "notes" };
+    const report = async (): Promise<string> =>
+      await outcome(
+        builder.api.screens.report(app, at, {
+          kind: "error",
+          message: "Rendered too often",
+        })
+      );
+    const stored = async (): Promise<number | undefined> =>
+      await inAppStorage(
+        app,
+        async (storage) => await storage.get<number>("error-log-suppressed")
+      );
+
+    const result = await atStoppedClock(async (advance) => {
+      for (let kept = 0; kept < 20; kept += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await report();
+      }
+      // The first one dropped is written at once; the rest of the minute
+      // are only counted, read or not.
+      const read: number[] = [];
+      const written: (number | undefined)[] = [];
+      for (let dropped = 0; dropped < 6; dropped += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await report();
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        const log = await builder.api.screens.errors(app);
+        read.push(log.suppressed);
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        written.push(await stored());
+      }
+      // A minute on, the person may report twenty more, and the next
+      // one dropped writes what was counted meanwhile.
+      advance(minuteMs);
+      for (let later = 0; later < 21; later += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- in order
+        await report();
+      }
+      const log = await builder.api.screens.errors(app);
+      return {
+        read,
+        written,
+        readLater: log.suppressed,
+        writtenLater: await stored(),
+      };
+    });
+
+    expect(result).toStrictEqual({
+      read: [1, 2, 3, 4, 5, 6],
+      written: [1, 1, 1, 1, 1, 1],
+      readLater: 7,
+      writtenLater: 7,
+    });
+  });
+
+  it("keeps the same problem once, counted, as the newest", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const at = { version: 1, screen: "notes" };
+    const loop = { kind: "error", message: "Rendered too often" } as const;
+    for (const problem of [
+      loop,
+      loop,
+      { kind: "error", message: "Invoice 7 has no total" } as const,
+      loop,
+      // The same words from elsewhere are another problem.
+      { ...loop, stack: "at Notes (app~screens~notes.js:3:9)" },
+      { ...loop, kind: "console" } as const,
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await builder.api.screens.report(app, at, problem);
+    }
+
+    const { entries } = await builder.api.screens.errors(app);
+    expect(
+      entries.map(({ kind, message, stack, count }) => ({
+        kind,
+        message,
+        stack,
+        count,
+      }))
+    ).toStrictEqual([
+      { kind: "console", message: loop.message, stack: undefined, count: 1 },
+      {
+        kind: "error",
+        message: loop.message,
+        stack: "at Notes (app~screens~notes.js:3:9)",
+        count: 1,
+      },
+      { kind: "error", message: loop.message, stack: undefined, count: 3 },
+      {
+        kind: "error",
+        message: "Invoice 7 has no total",
+        stack: undefined,
+        count: 1,
+      },
+    ]);
+  });
+
+  it("keeps twenty of one person's flood of reports a minute, on any number of connections, and counts the rest in one number", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const at = { version: 1, screen: "notes" };
+    // The same person again, on a connection of their own: a second tab,
+    // or a page changed to open more.
+    const second = await openRpc(builder.session);
+    const connections = [builder.api, second.core.authenticate()];
+
+    const result = await atStoppedClock(async (advance) => {
+      const flood = await Promise.all(
+        Array.from(
+          { length: 300 },
+          async (_value, index) =>
+            await outcome(
+              connections[index % 2]?.screens.report(app, at, {
+                kind: "error",
+                message: `Problem ${index}`,
+              }) ?? Promise.resolve()
+            )
+        )
+      );
+      const afterFlood = await builder.api.screens.errors(app);
+      advance(minuteMs);
+      const nextMinute = await Promise.all(
+        Array.from(
+          { length: 30 },
+          async (_value, index) =>
+            await outcome(
+              builder.api.screens.report(app, at, {
+                kind: "error",
+                message: `Later problem ${index}`,
+              })
+            )
+        )
+      );
+      return {
+        flood,
+        afterFlood,
+        nextMinute,
+        afterNextMinute: await builder.api.screens.errors(app),
+      };
+    });
+
+    expect({
+      kept: ended(result.flood, "ok"),
+      refused: ended(result.flood, "screen.rate_limited"),
+      entries: result.afterFlood.entries.length,
+      suppressed: result.afterFlood.suppressed,
+      keptNextMinute: ended(result.nextMinute, "ok"),
+      entriesNextMinute: result.afterNextMinute.entries.length,
+      suppressedNextMinute: result.afterNextMinute.suppressed,
+    }).toStrictEqual({
+      kept: 20,
+      refused: 280,
+      entries: 20,
+      suppressed: 280,
+      keptNextMinute: 20,
+      entriesNextMinute: 40,
+      suppressedNextMinute: 290,
+    });
+  });
+
+  it("counts a report that says nothing valid against what a screen may report", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const at = { version: 1, screen: "notes" };
+
+    const result = await atStoppedClock(async () => {
+      const malformed = await Promise.all(
+        Array.from(
+          { length: 20 },
+          async (_value, index) =>
+            await outcome(
+              builder.api.screens.report(
+                app,
+                index % 2 === 0 ? at : unchecked({ version: "one" }),
+                unchecked({ kind: "alert", message: "not a kind", index })
+              )
+            )
+        )
+      );
+      const valid = await outcome(
+        builder.api.screens.report(app, at, {
+          kind: "error",
+          message: "Invoice 7 has no total",
+        })
+      );
+      return { malformed, valid, log: await builder.api.screens.errors(app) };
+    });
+
+    expect({
+      invalid: ended(result.malformed, "screen.invalid"),
+      valid: result.valid,
+      log: result.log,
+    }).toStrictEqual({
+      invalid: 20,
+      valid: "screen.rate_limited",
+      log: { entries: [], suppressed: 1 },
+    });
+  });
+
+  it("keeps two hundred reports a minute of an App's screens, whoever sends them", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const at = { version: 1, screen: "notes" };
+    const problem = { kind: "error", message: "Rendered too often" } as const;
+    const people = [builder];
+    for (let person = 0; person < 10; person += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one sign-in at a time
+      const user = await personApi("user");
+      // oxlint-disable-next-line no-await-in-loop -- one sign-in at a time
+      await builder.api.apps.members.add(app, {
+        type: "person",
+        id: user.userId,
+        role: "user",
+      });
+      people.push(user);
+    }
+
+    const result = await atStoppedClock(async () => {
+      // Each within what one person may report: twenty.
+      const reports = await Promise.all(
+        people.flatMap(({ api }) =>
+          Array.from(
+            { length: 20 },
+            async () => await outcome(api.screens.report(app, at, problem))
+          )
+        )
+      );
+      return { reports, log: await builder.api.screens.errors(app) };
+    });
+
+    expect({
+      kept: ended(result.reports, "ok"),
+      refused: ended(result.reports, "screen.rate_limited"),
+      entries: result.log.entries.map(({ count }) => count),
+      suppressed: result.log.suppressed,
+    }).toStrictEqual({
+      kept: 200,
+      refused: 20,
+      entries: [200],
+      suppressed: 20,
+    });
+  });
+
+  it("answers a burst of one person's requests of an App, refuses the rest, and another person's none", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const other = await personApi("user");
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: other.userId,
+      role: "user",
+    });
+    const second = await openRpc(builder.session);
+    const connections = [builder.api, second.core.authenticate()];
+
+    const result = await atStoppedClock(async (advance) => {
+      const flood = await Promise.all(
+        Array.from({ length: 60 }, async (_value, index) => {
+          const screens =
+            connections[index % 2]?.screens ?? builder.api.screens;
+          // Every kind of request counts, the refused and malformed too.
+          if (index % 3 === 0) {
+            return await outcome(screens.call(app, "whoami", []));
+          }
+          if (index % 3 === 1) {
+            return await outcome(screens.call(app, unchecked({}), []));
+          }
+          return await outcome(screens.runs(app, "no-such-workflow"));
+        })
+      );
+      const others = await outcome(other.api.screens.call(app, "whoami", []));
+      // Two a second.
+      advance(1000);
+      const later = await Promise.all(
+        [0, 0, 0].map(
+          async () => await outcome(builder.api.screens.call(app, "whoami", []))
+        )
+      );
+      return { flood, others, later };
+    });
+
+    expect({
+      admitted: 60 - ended(result.flood, "screen.rate_limited"),
+      others: result.others,
+      later: result.later.toSorted(),
+    }).toStrictEqual({
+      admitted: 20,
+      others: "ok",
+      later: ["ok", "ok", "screen.rate_limited"],
+    });
+  });
+
+  it("holds a call's arguments and answer to their size in bytes, not characters", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const add = async (note: string): Promise<string> =>
+      await outcome(builder.api.screens.call(app, "addNote", [note]));
+
+    const results = {
+      // 120,000 bytes: within the 128 KiB a call may send.
+      ascii: await add("a".repeat(120_000)),
+      // Fewer characters, but three bytes each: 150,000 bytes.
+      euros: await add("€".repeat(50_000)),
+      // The App answers every note: 240,000 bytes, within 256 KiB.
+      second: await add("b".repeat(120_000)),
+      // And now 360,000.
+      third: await add("c".repeat(120_000)),
+      read: await outcome(builder.api.screens.call(app, "notes", [])),
+    };
+
+    expect(results).toStrictEqual({
+      ascii: "ok",
+      euros: "screen.input_too_large",
+      second: "ok",
+      third: "screen.answer_too_large",
+      read: "screen.answer_too_large",
+    });
+  });
+
+  it("counts an error by the message it carries, sent or answered", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const call = async (method: string, argument: unknown): Promise<string> =>
+      await outcome(builder.api.screens.call(app, method, [argument]));
+
+    // As JSON an error is "{}"; over the connection it is its message.
+    expect({
+      smallSent: await call("whoami", new Error("small")),
+      bigSent: await call("whoami", new Error("A".repeat(200_000))),
+      bigSentInside: await call("whoami", {
+        deep: [new Error("A".repeat(200_000))],
+      }),
+      smallAnswered: await call("failure", 10),
+      bigAnswered: await call("failure", 300_000),
+    }).toStrictEqual({
+      smallSent: "ok",
+      bigSent: "screen.input_too_large",
+      bigSentInside: "screen.input_too_large",
+      smallAnswered: "ok",
+      bigAnswered: "screen.answer_too_large",
+    });
+  });
+
+  it("holds what an App pushes a screen to the size of an answer, and drops the callback it refused", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const watching = collector();
+    await builder.api.screens.call(app, "watchNotes", [watching.callback]);
+    const sizes = (): number[] =>
+      watching.received.map((notes) => JSON.stringify(notes).length);
+
+    // Each note is pushed with all before it: 120,000 bytes, 240,000,
+    // then 360,000, which is more than a screen takes.
+    for (const letter of ["a", "b", "c"]) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await outcome(
+        builder.api.screens.call(app, "addNote", [letter.repeat(120_000)])
+      );
+    }
+    // Asked slowly enough to stay within what a person may ask.
+    await vi.waitFor(
+      async () => {
+        expect({
+          watching: await builder.api.screens.call(app, "watching", []),
+          pushes: watching.received.length,
+        }).toStrictEqual({ watching: 0, pushes: 3 });
+      },
+      { timeout: 10_000, interval: 500 }
+    );
+
+    expect(sizes().map((size) => size > 256 * 1024)).toStrictEqual([
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("counts following an App's runs as a request, however often a screen lets go again", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+
+    const followed = await atStoppedClock(async () => {
+      const results: string[] = [];
+      for (let attempt = 0; attempt < 25; attempt += 1) {
+        // Let go at once, so never near the twenty a screen may hold.
+        // oxlint-disable-next-line no-await-in-loop -- follow, let go, follow again
+        results.push(await outcome(followAndRelease(builder, app)));
+      }
+      return results;
+    });
+
+    expect({
+      followed: ended(followed, "ok"),
+      refused: ended(followed, "screen.rate_limited"),
+    }).toStrictEqual({ followed: 20, refused: 5 });
+  });
+
+  it("ends a connection that sends a value nested deeper than a screen's may be", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const attacker = await openRpc(builder.session);
+
+    const shallow = await outcome(
+      builder.api.screens.call(app, "whoami", [nestedArrays(20)])
+    );
+    const deep = await outcome(
+      attacker.core
+        .authenticate()
+        .screens.call(app, "whoami", [nestedArrays(40)])
+    );
+
+    expect({
+      shallow,
+      deepAnswered: deep === "ok",
+      // Only the connection that sent it ends.
+      after: await outcome(builder.api.screens.call(app, "whoami", [])),
+    }).toStrictEqual({ shallow: "ok", deepAnswered: false, after: "ok" });
   });
 });

