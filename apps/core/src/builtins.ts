@@ -7,6 +7,7 @@ import builtinBlueprints from "#blueprints";
 import type { BuiltinBlueprint } from "#blueprints";
 
 import { installBuiltinBlueprint } from "./app-blueprints.ts";
+import coreMigrations from "./db/core/migrations/meta/_journal.json" with { type: "json" };
 import { inJurisdiction } from "./durable-objects.ts";
 import { graspSkills, syncGraspSkills } from "./knowledge/grasp-skills.ts";
 import type { GraspSkill } from "./knowledge/grasp-skills.ts";
@@ -86,19 +87,18 @@ const installBlueprints = async (
 };
 
 /**
- * How the install stores what it writes. Raise it whenever that changes,
- * such as a column it fills, so the next request of every deployment
- * installs again even when the release itself didn't change: the
- * fingerprint lives in the singleton's storage, out of a migration's
- * reach. 2: built-ins' declarations on their blueprint, not as requests.
+ * The core database's latest migration: part of the fingerprint, so a
+ * release that changes the schema installs again, as what the install
+ * writes may have moved (a migration can't reach the fingerprint, which
+ * lives in the singleton's storage).
  */
-const installRevision = 2;
+const coreSchema = coreMigrations.entries.at(-1)?.tag ?? null;
 
 /** The fingerprint of what installing `of` writes. */
 export const fingerprintOf = async (of: Release): Promise<string> =>
   await sha256Hex(
     canonicalJson({
-      revision: installRevision,
+      schema: coreSchema,
       blueprints: of.blueprints.map(
         ({ id, name, description, collections, permissions, files }) => ({
           id,
