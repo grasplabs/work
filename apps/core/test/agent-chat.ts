@@ -55,14 +55,18 @@ export type WorkspaceStub = ReturnType<typeof workspace>;
 export const gatewayConfig = { gateway: "grasp-os-test", models: [model] };
 
 /**
- * Points the object's model gateway at a fake AI Gateway, with `config`.
- * Objects may share their env, so every test sets it; a restarted object
- * may get a new one, so it is pointed again.
+ * Points the object's model gateway at a fake AI Gateway, with `config`,
+ * and sets the memory files' limits when given. Objects may share their
+ * env, so every test sets it; a restarted object may get a new one, so it
+ * is pointed again.
  */
 export const pointAtGateway = async (
   stub: WorkspaceStub,
   gateway: ReturnType<typeof fakeGateway>,
-  { config = gatewayConfig }: { config?: object } = {}
+  {
+    config = gatewayConfig,
+    memoryLimits,
+  }: { config?: object; memoryLimits?: object } = {}
 ) => {
   await runInDurableObject(stub, (instance) => {
     const objectEnv: unknown = Reflect.get(instance, "env");
@@ -72,6 +76,7 @@ export const pointAtGateway = async (
     Object.assign(objectEnv, {
       AI: gateway.binding,
       MODEL_GATEWAY: config,
+      ...(memoryLimits === undefined ? {} : { MEMORY_LIMITS: memoryLimits }),
     });
   });
 };

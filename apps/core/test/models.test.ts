@@ -698,6 +698,24 @@ describe("model gateway", { timeout: 30_000 }, () => {
     ]);
   });
 
+  it("keeps a small window's default answer to a quarter of it, so the request has room", async () => {
+    const { gateway, gatewayEnv } = withGateway([answer("Hi.")]);
+
+    await models(gatewayEnv).call({
+      model: workersAi,
+      input: "Write something.",
+      purpose: "chat.turn",
+      trigger: newPerson(),
+      work: work(),
+    });
+
+    // Llama 3.3's window is 24,000 tokens, which Workers AI counts the
+    // answer's cap against.
+    expect(gateway.requests.map(({ body }) => body)).toMatchObject([
+      { max_completion_tokens: 6000 },
+    ]);
+  });
+
   it("keeps a paid answer when the audit log is down, and appends its event later", async () => {
     const trigger = newPerson();
     const { gatewayEnv } = withGateway([answer("Hello, Ada.")]);
