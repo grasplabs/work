@@ -6,6 +6,8 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    ".": "./src/values.ts",
+    "./host": "./src/host.ts",
     "./workflow": "./src/workflow.ts",
     "./engine": "./src/engine.ts",
     "./params": "./src/params.ts",
@@ -17,6 +19,7 @@
   "dependencies": {
     "@babel/parser": "catalog:",
     "@grasp-os/shared": "workspace:*",
+    "@standard-schema/spec": "catalog:",
     "capnweb": "catalog:",
     "zod": "catalog:"
   },
