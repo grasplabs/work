@@ -558,10 +558,94 @@ const leavingOutput = (
       ),
     ].slice(0, limit);
   }
-  if (path.endsWith(".js")) {
-    return runtimeLoadsInJs(text).map((why) => `the module ${path} ${why}`);
-  }
   return [];
+};
+
+/** The output files of one build, or why it failed. */
+type Outputs =
+  | { ok: true; outputs: { path: string; contents: Uint8Array }[] }
+  | { ok: false; refusals: string[] };
+
+/**
+ * One esbuild run over the entries, through `resolver`. With `marked`,
+ * the globals that load at run time are replaced by markers
+ * (`runtimeLoadMarkers`): a check build, never shipped. Everything else
+ * is the same, so the check covers exactly what ships.
+ */
+const run = async (
+  entries: readonly string[],
+  resolver: Resolver,
+  marked: boolean
+): Promise<Outputs> => {
+  try {
+    const result = await build({
+      entryPoints: Object.fromEntries(
+        entries.map((entry) => [entryModuleName(entry), entry])
+      ),
+      bundle: true,
+      write: false,
+      format: "esm",
+      splitting: false,
+      platform: "neutral",
+      target: "es2022",
+      mainFields: [],
+      conditions: [],
+      outdir: "/artifact",
+      entryNames: "[name]",
+      assetNames: "assets/[name]-[hash]",
+      minify: true,
+      logLevel: "silent",
+      // An import whose path is computed at run time can't be bundled.
+      logOverride: {
+        "unsupported-dynamic-import": "error",
+        "unsupported-require-call": "error",
+      },
+      define: {
+        "process.env.NODE_ENV": '"production"',
+        ...(marked ? runtimeLoadMarkers : {}),
+      },
+      plugins: [resolver.plugin()],
+    });
+    return { ok: true, outputs: result.outputFiles ?? [] };
+  } catch (error) {
+    return { ok: false, refusals: refusalsOf(error) };
+  }
+};
+
+/** Whether shipped code could use a global that loads at run time. */
+const mentionsRuntimeLoads = /Worker|importScripts|import\.meta/u;
+
+/**
+ * Why the modules would load code or files at run time from outside the
+ * artifact. Only when the shipped code names such a global at all (a
+ * real use can't be minified away): then a check build with markers in
+ * their place tells real uses from text that only mentions them.
+ */
+const runtimeLoadRefusals = async (
+  input: BundleInput,
+  entries: readonly string[],
+  shipped: { path: string; contents: Uint8Array }[]
+): Promise<string[]> => {
+  const named = shipped.some(
+    ({ path, contents }) =>
+      path.endsWith(".js") &&
+      mentionsRuntimeLoads.test(decoder.decode(contents))
+  );
+  if (!named) {
+    return [];
+  }
+  const checked = await run(entries, new Resolver(input), true);
+  if (!checked.ok) {
+    return checked.refusals;
+  }
+  return checked.outputs.flatMap(({ path, contents }) => {
+    const name = path.replace(/^\/artifact\//u, "");
+    return name.endsWith(".js")
+      ? runtimeLoadsInJs(decoder.decode(contents)).map(
+          (why) => `the module ${name} ${why}`
+        )
+      : [];
+  });
 };
 
 /**
@@ -587,37 +671,11 @@ export const bundle = async (input: BundleInput): Promise<Bundled> => {
     names.set(name, entry);
   }
   const resolver = new Resolver(input);
-  let outputs: { path: string; contents: Uint8Array }[];
-  try {
-    const result = await build({
-      entryPoints: Object.fromEntries(
-        entries.map((entry) => [entryModuleName(entry), entry])
-      ),
-      bundle: true,
-      write: false,
-      format: "esm",
-      splitting: false,
-      platform: "neutral",
-      target: "es2022",
-      mainFields: [],
-      conditions: [],
-      outdir: "/artifact",
-      entryNames: "[name]",
-      assetNames: "assets/[name]-[hash]",
-      minify: true,
-      logLevel: "silent",
-      // An import whose path is computed at run time can't be bundled.
-      logOverride: {
-        "unsupported-dynamic-import": "error",
-        "unsupported-require-call": "error",
-      },
-      define: { "process.env.NODE_ENV": '"production"', ...runtimeLoadMarkers },
-      plugins: [resolver.plugin()],
-    });
-    outputs = result.outputFiles ?? [];
-  } catch (error) {
-    return { ok: false, refusals: refusalsOf(error) };
+  const shipped = await run(entries, resolver, false);
+  if (!shipped.ok) {
+    return shipped;
   }
+  const { outputs } = shipped;
   const files = new Map<string, Uint8Array>();
   const leaving: string[] = [];
   for (const output of outputs) {
@@ -627,8 +685,9 @@ export const bundle = async (input: BundleInput): Promise<Bundled> => {
       ...leavingOutput(path, output.contents, maxRefusals - leaving.length)
     );
   }
+  leaving.push(...(await runtimeLoadRefusals(input, entries, outputs)));
   if (leaving.length > 0) {
-    return { ok: false, refusals: leaving };
+    return { ok: false, refusals: leaving.slice(0, maxRefusals) };
   }
   return {
     ok: true,

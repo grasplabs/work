@@ -108,3 +108,67 @@ describe("an SVG's references", () => {
     ]).toStrictEqual(["taken", "taken", "taken", "taken", "taken"]);
   });
 });
+
+describe("an SVG's text and values, second probe", () => {
+  it("is refused for references hidden by character references, quotes, CDATA or nesting", () => {
+    const probes: Record<string, string> = {
+      decimalAtImport: '<style>&#64;import "https://x.example/a.css";</style>',
+      decimalUrl: "<style>rect{fill:&#117;rl(https://x.example/a)}</style>",
+      hexUrl: "<style>rect{fill:&#x75;rl(https://x.example/a)}</style>",
+      midWordReference:
+        "<style>rect{fill:u&#x72;l(https://x.example/a)}</style>",
+      ltAdjacent: '<style>&lt;x&gt;@import "https://x.example/a.css";</style>',
+      mixedCdata:
+        '<style>@im<![CDATA[port "https://x.example/a.css";]]></style>',
+      cdataThenText:
+        "<style><![CDATA[rect{fill:u]]>rl(https://x.example/a)}</style>",
+      nested:
+        '<g><svg><style>@import "https://x.example/a.css";</style></svg></g>',
+      prefixedStyle:
+        '<svg:style xmlns:svg="http://www.w3.org/2000/svg">@import "https://x.example/a.css";</svg:style>',
+      styleAttributeEntity:
+        '<rect style="fill:&#117;rl(https://x.example/a)"/>',
+      styleAttributeImport:
+        '<rect style="&#64;import &quot;https://x.example/a.css&quot;"/>',
+      presentationEntity: '<rect fill="&#117;rl(https://x.example/a)"/>',
+      hrefAfterQuotedGt:
+        '<image data-x="a > b" href="https://x.example/a.png"/>',
+      hrefAfterQuotedQuote:
+        '<image data-x=\'"\' href="https://x.example/a.png"/>',
+      hrefEntityColon: '<image href="https&#58;//x.example/a.png"/>',
+      hrefEntityHash: '<use href="&#35;a/../https://x.example/b.svg"/>',
+      hrefLeadingSpace: '<image href=" https://x.example/a.png"/>',
+      hrefTab: '<image href="&#9;https://x.example/a.png"/>',
+    };
+    const outcomes = Object.fromEntries(
+      Object.entries(probes).map(([name, inner]) => [name, refusalOf(inner)])
+    );
+    // Only the one that stays: `#a/../https://…` is a fragment of this
+    // document, whatever it reads like, so nothing is loaded.
+    expect(
+      Object.entries(outcomes)
+        .filter(([, outcome]) => outcome === "taken")
+        .map(([name]) => name)
+    ).toStrictEqual(["hrefEntityHash"]);
+  });
+
+  it("refuses markup no XML parser reads, and takes what one does", () => {
+    expect({
+      notAComment: refusalOf(
+        "<style>@im<!-->port 'https://x.example/a.css';</style>"
+      ),
+      oddName: refusalOf("<r\u00E9ct/>"),
+      bareAmpersandInStyle: refusalOf("<style>a & b {}</style>"),
+      unknownEntityInStyle: refusalOf("<style>&commat;import 'x';</style>"),
+      quotedGt: refusalOf('<rect data-x="a > b"/>'),
+      ltInText: refusalOf("<style>rect::after{content:'&lt;'}</style>"),
+    }).toStrictEqual({
+      notAComment: "is an SVG Grasp can't read",
+      oddName: "is an SVG with an element that isn't drawing: r",
+      bareAmpersandInStyle: "is an SVG Grasp can't read",
+      unknownEntityInStyle: "is an SVG Grasp can't read",
+      quotedGt: "taken",
+      ltInText: "taken",
+    });
+  });
+});

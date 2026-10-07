@@ -266,11 +266,32 @@ const endOf = (text: string, from: number, marker: string): number => {
 };
 
 /** Checks one start or end tag at `at`; returns where it ends and what it is. */
+/**
+ * Where the tag opened at `at` ends: its first `>` outside a quoted
+ * attribute value, as XML reads it.
+ */
+const tagEnd = (text: string, at: number): number => {
+  let quote: string | undefined;
+  for (let index = at + 1; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote !== undefined) {
+      if (char === quote) {
+        quote = undefined;
+      }
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === ">") {
+      return index;
+    }
+  }
+  return refuse(unreadable);
+};
+
 const readTag = (
   text: string,
   at: number
 ): { end: number; name: string; closing: boolean; empty: boolean } => {
-  const end = endOf(text, at, ">");
+  const end = tagEnd(text, at);
   const tag = text.slice(at + 1, end);
   const closing = tag.startsWith("/");
   const empty = tag.endsWith("/");
@@ -301,14 +322,17 @@ const checkMarkup = (text: string): void => {
     const open = text.indexOf("<", at);
     const next = open === -1 ? text.length : open;
     if (style !== undefined) {
-      style += text.slice(at, next);
+      // Character references in text are decoded before CSS reads it, as
+      // a browser does (CDATA, below, is taken as it is).
+      style += decodeXml(text.slice(at, next));
     }
     if (open === -1) {
       break;
     }
     if (text.startsWith("<!--", open)) {
       // Comments go, so what they split reads joined, as XML reads it.
-      at = endOf(text, open, "-->") + 3;
+      // `<!-->` isn't a comment: its end is looked for past its start.
+      at = endOf(text, open + 4, "-->") + 3;
     } else if (text.startsWith("<![CDATA[", open)) {
       const end = endOf(text, open, "]]>");
       if (style !== undefined) {

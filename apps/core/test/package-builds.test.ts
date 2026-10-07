@@ -900,12 +900,18 @@ export const supported = typeof Worker !== "undefined";`,
     );
     const harmless = await approvedApp({ [mentions]: "1" });
     const built = await buildOf(harmless, "browser");
+    const shipped = await artifactText(built.hash, `${mentions}.js`);
     const loader = await approvedApp({ [worker]: "1" });
     expect({
       built: built.artifact.entries[mentions]?.module,
+      // What ships tests the real global; the check's markers never ship.
+      realWorker: /typeof Worker/u.test(shipped),
+      markers: shipped.includes("__grasp_refused"),
       refused: await refusalsOf(buildOf(loader, "browser")),
     }).toStrictEqual({
       built: `${mentions}.js`,
+      realWorker: true,
+      markers: false,
       refused: [`the module ${worker}.js starts a worker`],
     });
   });
