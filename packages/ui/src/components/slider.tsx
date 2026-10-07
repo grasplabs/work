@@ -9,12 +9,14 @@ function Slider({
   max = 100,
   ...props
 }: SliderPrimitive.Root.Props) {
-  // One thumb per value: a range has two, a single value one.
+  // One thumb per value: a range has two, a single value one. Upstream
+  // counts only arrays, so a single number got two thumbs.
+  const given = value ?? defaultValue;
   let _values: readonly number[] = [min, max];
-  if (typeof value === "object") {
-    _values = value;
-  } else if (typeof defaultValue === "object") {
-    _values = defaultValue;
+  if (typeof given === "number") {
+    _values = [given];
+  } else if (given !== undefined) {
+    _values = given;
   }
 
   return (

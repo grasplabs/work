@@ -537,7 +537,7 @@ export const shadcnComponents = {
     summary: "A handle dragged along a track to pick a value or a range.",
     exports: ["Slider"],
     changes:
-      "The thumb is filled with the theme's `background` instead of raw white, so it follows dark mode.",
+      "The thumb is filled with the theme's `background` instead of raw white, so it follows dark mode. A single number as the value gets one thumb; upstream gave it two.",
   },
   sonner: {
     status: "unsupported",
@@ -614,7 +614,7 @@ export const shadcnComponents = {
     summary: "Toggles of which one, or several, are pressed.",
     exports: ["ToggleGroup", "ToggleGroupItem"],
     changes:
-      "`spacing` is 0 to 4, each a static gap class, instead of any number in an inline style.",
+      "`spacing` is 0 to 4, each a static gap class, instead of any number in an inline style. `orientation` reaches Base UI too, so a vertical group moves with the up and down arrows.",
   },
   tooltip: {
     status: "supported",
