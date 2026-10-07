@@ -14,6 +14,8 @@ import { UploadsRpc } from "./knowledge/uploads-rpc.ts";
 import { MembersRpc } from "./members.ts";
 import { ModelsRpc } from "./models-rpc.ts";
 import { NotificationsRpc } from "./notifications.ts";
+import { OnboardingRpc } from "./onboarding/rpc.ts";
+import { OnboardingStaffRpc } from "./onboarding/staff-rpc.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
 import { ScreenTrustRpc } from "./screen-trust-rpc.ts";
@@ -55,6 +57,8 @@ export class SessionRpc extends RpcTarget implements SessionApi {
   readonly #signals: SignalsRpc;
   readonly #chats: ChatsRpc;
   readonly #notifications: NotificationsRpc;
+  readonly #onboarding: OnboardingRpc;
+  readonly #onboardingStaff: OnboardingStaffRpc;
 
   constructor(env: Env, check: SessionCheck) {
     super();
@@ -78,10 +82,20 @@ export class SessionRpc extends RpcTarget implements SessionApi {
     this.#signals = new SignalsRpc(env, check);
     this.#chats = new ChatsRpc(env, check);
     this.#notifications = new NotificationsRpc(env, check);
+    this.#onboarding = new OnboardingRpc(env, check);
+    this.#onboardingStaff = new OnboardingStaffRpc(env, check);
   }
 
   get notifications(): NotificationsRpc {
     return this.#notifications;
+  }
+
+  get onboarding(): OnboardingRpc {
+    return this.#onboarding;
+  }
+
+  get onboardingStaff(): OnboardingStaffRpc {
+    return this.#onboardingStaff;
   }
 
   get chats(): ChatsRpc {

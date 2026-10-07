@@ -10,6 +10,7 @@ import type { MembersApi } from "./members.ts";
 import type { MemoryApi } from "./memory.ts";
 import type { ModelsApi } from "./models.ts";
 import type { NotificationsApi } from "./notifications.ts";
+import type { OnboardingApi, OnboardingStaffApi } from "./onboarding.ts";
 import type { PermissionsApi } from "./permissions.ts";
 import type { Role } from "./roles.ts";
 import type { ScreenTrustApi } from "./screen-trust.ts";
@@ -123,6 +124,13 @@ export interface SessionApi {
    * one for admins, an App's for its builders.
    */
   readonly signals: SignalsApi;
+  /**
+   * The onboarding: who works where, the plan, and numbers per team, never
+   * anyone's words. Admins only, Grasp staff included.
+   */
+  readonly onboarding: OnboardingApi;
+  /** What only Grasp's staff do in the onboarding: pause it, the agreements. */
+  readonly onboardingStaff: OnboardingStaffApi;
 }
 
 /**

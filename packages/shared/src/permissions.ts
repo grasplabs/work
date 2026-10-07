@@ -167,6 +167,7 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "MICROSOFT_CLIENT_ID",
   "MICROSOFT_CLIENT_SECRET",
   "MODEL_GATEWAY",
+  "ONBOARDING",
   "PLATFORM_CHANGE",
   "ROUTER_SECRET",
   "ROUTER_SECRET_PREVIOUS",
