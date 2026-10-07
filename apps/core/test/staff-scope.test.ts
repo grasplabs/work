@@ -48,10 +48,10 @@ const stillIn = async (session: string, coreEnv: Env): Promise<string> => {
   return await outcome(core.authenticate().whoami());
 };
 
-/** Every test leaves staff access as it found it: no go, nothing ended. */
+/** Every test leaves the gate as it found it: open, no go, nothing ended. */
 const reset = async () => {
   await env.DB.prepare(
-    "UPDATE onboarding_gate SET opened_at = NULL, staff_ended_at = NULL"
+    "UPDATE onboarding_gate SET closed_at = NULL, opened_at = NULL, staff_ended_at = NULL"
   ).run();
 };
 
@@ -110,6 +110,38 @@ describe("staff with the onboarding scope", () => {
       within: "ok",
       after: "auth.unauthenticated",
       full: "ok",
+    });
+  });
+});
+
+describe("staff with the onboarding scope, after Grasp's go", () => {
+  afterEach(reset);
+
+  it("don't get access back when the gate closes again, and see when theirs ends", async () => {
+    const { session, api: staff } = await staffOn();
+    await staff.onboardingGate.close();
+    await staff.onboardingGate.open();
+    const sixDays = Date.now() - 6 * 24 * 60 * 60 * 1000;
+    await env.DB.prepare("UPDATE onboarding_gate SET opened_at = ?")
+      .bind(sixDays)
+      .run();
+    const view = await staff.onboardingGate.view();
+    await staff.onboardingGate.close();
+    const eightDays = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    await env.DB.prepare("UPDATE onboarding_gate SET opened_at = ?")
+      .bind(eightDays)
+      .run();
+    const again = await outcome(
+      signedIn(idp, "grasp-staff", staffPerson(), { coreEnv: onboardingScope })
+    );
+    expect({
+      until: view.staff?.until,
+      after: await stillIn(session, onboardingScope),
+      again: again.startsWith("Error: Sign-in refused") ? "refused" : again,
+    }).toStrictEqual({
+      until: new Date(sixDays + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      after: "auth.unauthenticated",
+      again: "refused",
     });
   });
 });
