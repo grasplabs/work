@@ -100,11 +100,14 @@
       // The one object that installs what ships with each release
       // (src/builtins.ts).
       { "name": "BUILTINS", "class_name": "Builtins" },
+      // The onboarding's one store (src/onboarding/store.ts).
+      { "name": "ONBOARDING", "class_name": "Onboarding" },
     ],
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Workspace", "App", "AuditLog"] },
     { "tag": "v2", "new_sqlite_classes": ["Builtins"] },
+    { "tag": "v3", "new_sqlite_classes": ["Onboarding"] },
   ],
   // The one dispatcher of every App's workflow runs (src/workflows/): it
   // loads each run's code by App and pinned version, with an env rebuilt
