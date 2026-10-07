@@ -78,7 +78,7 @@ export interface Budgeted {
 /** What budgets count a call by. */
 export interface BudgetInput {
   trigger: AuditActor;
-  work?: { authority: Authority };
+  work?: { authority: Authority } | { onboarding: true };
 }
 
 /** The person a call is made by or for, if any. */
@@ -93,7 +93,9 @@ const personOf = ({ trigger, work }: BudgetInput): string | undefined => {
   if (trigger.type === "guest") {
     return trigger.invitedBy;
   }
-  return work?.authority.onBehalfOf;
+  return work !== undefined && "authority" in work
+    ? work.authority.onBehalfOf
+    : undefined;
 };
 
 const monthPattern = /^\d{4}-(?:0[1-9]|1[0-2])$/u;

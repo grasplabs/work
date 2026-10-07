@@ -321,10 +321,19 @@ const sessionShape = {
    * can't be known.
    */
   work: z
-    .strictObject({
-      authority: authoritySchema,
-      context: workContextSchema,
-    })
+    .union([
+      z.strictObject({
+        authority: authoritySchema,
+        context: workContextSchema,
+      }),
+      /**
+       * Core's own onboarding (onboarding/): reading the kickoff, Stephen's
+       * turns. It carries what the company told Grasp, so the rules always
+       * judge it as carrying sensitive data (model-rules.ts). Only core's
+       * own code makes such a call: no App or client names a `work` here.
+       */
+      z.strictObject({ onboarding: z.literal(true) }),
+    ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,
 };
@@ -893,7 +902,9 @@ interface Recorded extends Used {
  * organization's agent, in everyone's chats.
  */
 const chatOf = ({ work }: Session): string | null =>
-  work?.context.type === "chat" ? work.context.chatId : null;
+  work !== undefined && "context" in work && work.context.type === "chat"
+    ? work.context.chatId
+    : null;
 
 /** Whether `entry` makes an event the audit log takes. */
 const fitsAuditLog = (entry: AuditEntry): boolean => {

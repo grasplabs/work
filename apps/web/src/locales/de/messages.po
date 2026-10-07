@@ -35,6 +35,11 @@ msgstr "{0, plural, one {# Befund gemeldet} other {# Befunde gemeldet}}"
 msgid "{0, plural, one {# package in all, to run in: {targets}} other {# packages in all, to run in: {targets}}}"
 msgstr "{0, plural, one {Insgesamt # Paket, ausgeführt in: {targets}} other {Insgesamt # Pakete, ausgeführt in: {targets}}}"
 
+#. placeholder {0}: team.people
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "{0, plural, one {# person} other {# people}}"
+msgstr "{0, plural, one {# Person} other {# Personen}}"
+
 #. placeholder {0}: request.counts.refused
 #: src/dashboard/dependency-requests.tsx
 msgid "{0, plural, one {Needs # thing Grasp refuses to run} other {Needs # things Grasp refuses to run}}"
@@ -151,6 +156,10 @@ msgstr "{failed, plural, one {# fehlgeschlagen in den letzten {days} Tagen} othe
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed run} other {# failed runs}} of {name}"
 msgstr "{failed, plural, one {# fehlgeschlagener Lauf} other {# fehlgeschlagene Läufe}} von {name}"
+
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "{fileName}, brought in on {when}. Bring it in again to read it again."
+msgstr "{fileName}, eingebracht am {when}. Bringen Sie es erneut ein, um es neu lesen zu lassen."
 
 #: src/knowledge/timeline.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
@@ -333,6 +342,10 @@ msgstr "**Grasp:**"
 #: src/chat/chat-markdown.ts
 msgid "**You:**"
 msgstr "**Sie:**"
+
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "A .txt, .vtt, .srt or .docx file, or pasted text."
+msgstr "Eine .txt-, .vtt-, .srt- oder .docx-Datei oder eingefügter Text."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
@@ -652,6 +665,10 @@ msgstr "Zu genehmigende Apps"
 msgid "as {binding}"
 msgstr "als {binding}"
 
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "As the company named them, until the staff list is in."
+msgstr "Wie das Unternehmen sie genannt hat, bis die Personalliste vorliegt."
+
 #: src/chat/thread.tsx
 msgid "Ask again"
 msgstr "Erneut fragen"
@@ -672,6 +689,10 @@ msgstr "Bitten Sie Grasp, eine zu erstellen. Während es daran arbeitet, erschei
 #: src/workflows/fix-in-chat.tsx
 msgid "Ask the agent to fix"
 msgstr "Agenten um Behebung bitten"
+
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Ask the sponsor: {ask}"
+msgstr "Fragen Sie den Sponsor: {ask}"
 
 #: src/activity/pending.tsx
 msgid "Asked"
@@ -901,6 +922,10 @@ msgstr "Chats"
 #: src/activity/audit-words.ts
 msgid "Checked the audit trail's chain"
 msgstr "Die Kette des Audit-Trails geprüft"
+
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Choose a file"
+msgstr "Datei auswählen"
 
 #: src/activity/audit-log.tsx
 msgid "Clear"
@@ -1540,6 +1565,11 @@ msgstr "Einer Verbindung zugestimmt"
 msgid "Go to Grasp"
 msgstr "Zu Grasp"
 
+#: src/onboarding/staff-words.ts
+msgctxt "kickoff field"
+msgid "Goals, and why AI now"
+msgstr "Ziele, und warum jetzt KI"
+
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
 msgstr "Eine Berechtigung erteilt"
@@ -1595,6 +1625,10 @@ msgstr "Grasp-Mitarbeitende haben sich angemeldet"
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp won't run what {about} needs: {requirement}"
 msgstr "Grasp führt nicht aus, was {about} braucht: {requirement}"
+
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Grasp's first conversation with the sponsor, read for the ten things Stephen needs before his first interview."
+msgstr "Das erste Gespräch von Grasp mit dem Sponsor, gelesen auf die zehn Dinge, die Stephen vor seinem ersten Interview braucht."
 
 #: src/onboarding/staff-words.ts
 msgctxt "who did it, in the log"
@@ -1775,9 +1809,18 @@ msgstr "Zur neuesten Nachricht springen"
 msgid "Just for you"
 msgstr "Nur für Sie"
 
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Keep the answer"
+msgstr "Antwort behalten"
+
 #: src/dashboard/signals.tsx
 msgid "Keeps failing"
 msgstr "Schlägt immer wieder fehl"
+
+#: src/routes/_shell.onboarding.tsx
+msgctxt "onboarding area section"
+msgid "Kickoff"
+msgstr "Kickoff"
 
 #: src/onboarding/staff-words.ts
 msgctxt "onboarding stage"
@@ -1804,6 +1847,11 @@ msgstr "Sprache"
 #: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Sprache: {name}"
+
+#: src/onboarding/staff-words.ts
+msgctxt "kickoff field"
+msgid "Languages"
+msgstr "Sprachen"
 
 #: src/chat/chat-list.tsx
 msgctxt "chats from the past week"
@@ -2481,6 +2529,14 @@ msgstr "Parameter"
 msgid "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 msgstr "Ein Teil dessen, was gesendet wird, ist oben gekürzt. Zeigen Sie alles an oder genau das Gesendete, um zu bestätigen."
 
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Paste the transcript of the first conversation with the sponsor"
+msgstr "Fügen Sie das Transkript des ersten Gesprächs mit dem Sponsor ein"
+
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Pasted on {when}. Bring it in again to read it again."
+msgstr "Eingefügt am {when}. Bringen Sie es erneut ein, um es neu lesen zu lassen."
+
 #: src/knowledge/document.tsx
 msgid "Path"
 msgstr "Pfad"
@@ -2615,6 +2671,14 @@ msgstr "Die Statistiken einer Engine gelesen"
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"
 msgstr "Gelesen, wie Wissen genutzt wird"
+
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Read it"
+msgstr "Lesen lassen"
+
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Read it again"
+msgstr "Erneut lesen lassen"
 
 #: src/activity/audit-words.ts
 msgid "Read restricted sources, and is held to them"
@@ -3187,6 +3251,10 @@ msgstr "Status"
 msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "Schritt {step} von {about} ist {days, plural, one {am letzten Tag} other {in den letzten # Tagen}} in {failures} von {runs, plural, one {# Durchlauf} other {# Durchläufen}} fehlgeschlagen."
 
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Stephen is reading it. This takes a minute."
+msgstr "Stephen liest es. Das dauert eine Minute."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
 msgid "Steps"
@@ -3248,6 +3316,10 @@ msgstr "Team"
 msgid "Teams"
 msgstr "Teams"
 
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Teams named"
+msgstr "Genannte Teams"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Test"
 msgstr "Testen"
@@ -3288,6 +3360,10 @@ msgstr "Das hat nicht funktioniert. Versuchen Sie es gleich noch einmal."
 msgid "That email address already signs in with another account."
 msgstr "Mit dieser E-Mail-Adresse wird bereits ein anderes Konto angemeldet."
 
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "That file is too large for a transcript."
+msgstr "Diese Datei ist zu groß für ein Transkript."
+
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
 msgstr "Dieses Konto des Grasp-Teams hat hier keinen Zugang erhalten."
@@ -3325,6 +3401,11 @@ msgstr "Die Genehmigung für den Code dieser App wurde zurückgenommen, und die 
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Die Apps, in denen Ihre Workflows arbeiten können. Grasp tut nur, was Sie pro App erlauben."
 
+#: src/onboarding/staff-words.ts
+msgctxt "kickoff field"
+msgid "The business"
+msgstr "Das Geschäft"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "The catalog doesn't list {app}, so its tools can't be shown."
 msgstr "Der Katalog führt {app} nicht, daher können die Tools nicht angezeigt werden."
@@ -3341,6 +3422,10 @@ msgstr "Der Code von Version {version}"
 msgctxt "who did it, in the log"
 msgid "The company"
 msgstr "Das Unternehmen"
+
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "The conversation didn't say."
+msgstr "Das Gespräch hat es nicht gesagt."
 
 #: src/onboarding/staff-words.ts
 msgid "The data processing agreement isn't signed"
@@ -3369,6 +3454,10 @@ msgstr "Die Interviews sind vorbei, {known} % bekannt, weniger als {threshold} %
 #: src/onboarding/staff-words.ts
 msgid "The interviews are paused"
 msgstr "Die Interviews sind pausiert"
+
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "The kickoff"
+msgstr "Das Kickoff"
 
 #: src/onboarding/staff-words.ts
 msgid "The kickoff with the company"
@@ -3404,9 +3493,22 @@ msgstr "Die Risikobewertung ist nicht erledigt"
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."
 msgstr "Die Regeln in der Konfiguration dieser Instanz können nicht gelesen werden, daher wird jeder Modellaufruf abgelehnt. Wenden Sie sich an Grasp."
 
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "The sponsor's answer"
+msgstr "Die Antwort des Sponsors"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "The steps can't be read from this workflow's code: {message}"
 msgstr "Die Schritte lassen sich nicht aus dem Code dieses Workflows lesen: {message}"
+
+#: src/onboarding/staff-words.ts
+msgctxt "kickoff field"
+msgid "The teams"
+msgstr "Die Teams"
+
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "The transcript"
+msgstr "Das Transkript"
 
 #: src/connections/connection-list.tsx
 msgid "the whole connection"
@@ -3419,6 +3521,11 @@ msgstr "Der Workflow-Lauf, der dies gefragt hat, ist beendet, daher ist diese En
 #: src/onboarding/staff-words.ts
 msgid "The works council hasn't been heard"
 msgstr "Der Betriebsrat wurde nicht angehört"
+
+#: src/onboarding/staff-words.ts
+msgctxt "kickoff field"
+msgid "Their tools"
+msgstr "Ihre Tools"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "There are no collections you can read yet."
@@ -3713,6 +3820,11 @@ msgstr "Was"
 msgid "What changed"
 msgstr "Was sich geändert hat"
 
+#: src/onboarding/staff-words.ts
+msgctxt "kickoff field"
+msgid "What counts as success"
+msgstr "Was als Erfolg zählt"
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "What every agent has in its context, all the time."
 msgstr "Was jeder Agent ständig im Kontext hat."
@@ -3729,6 +3841,15 @@ msgstr "Was Grasp nicht ausführt"
 #: src/routes/_shell.onboarding.log.tsx
 msgid "What happened at the company and what Grasp's staff did, the newest first."
 msgstr "Was im Unternehmen passiert ist und was das Grasp-Team getan hat, das Neueste zuerst."
+
+#: src/onboarding/staff-words.ts
+msgctxt "kickoff field"
+msgid "What is sensitive now"
+msgstr "Was gerade heikel ist"
+
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "What it brought"
+msgstr "Was es gebracht hat"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
@@ -3753,6 +3874,15 @@ msgstr "Was sollte die nächste Person bei Grasp wissen?"
 #: src/routes/_shell.index.tsx
 msgid "What should we look at today?"
 msgstr "Was sollen wir uns heute ansehen?"
+
+#: src/onboarding/staff-words.ts
+msgctxt "kickoff field"
+msgid "What Stephen leaves alone"
+msgstr "Was Stephen auslässt"
+
+#: src/routes/_shell.onboarding.kickoff.tsx
+msgid "What Stephen takes into every interview. What the conversation left open goes to the sponsor."
+msgstr "Was Stephen in jedes Interview mitnimmt. Was das Gespräch offen ließ, geht an den Sponsor."
 
 #: src/chat/builds.tsx
 msgid "What the engine holds"
@@ -3784,6 +3914,11 @@ msgctxt "log filter"
 msgid "Who"
 msgstr "Wer"
 
+#: src/onboarding/staff-words.ts
+msgctxt "kickoff field"
+msgid "Who decides, who can block"
+msgstr "Wer entscheidet, wer blockieren kann"
+
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
 msgstr "Wer es nutzt"
@@ -3791,6 +3926,11 @@ msgstr "Wer es nutzt"
 #: src/onboarding/staff-words.ts
 msgid "Who works where is in"
 msgstr "Wer wo arbeitet, liegt vor"
+
+#: src/onboarding/staff-words.ts
+msgctxt "kickoff field"
+msgid "Work that costs too much time"
+msgstr "Arbeit, die zu viel Zeit kostet"
 
 #: src/dashboard/signals.tsx
 msgid "Worked out daily, last on {date}"
