@@ -92,6 +92,32 @@ const maxRefusals = 50;
 /** How the runtime says it stopped an isolate over its limits. */
 const overLimit = /exceeded (?:its )?(?:CPU|memory)/iu;
 
+/**
+ * Refusals as they are found, each once, keeping the first
+ * `maxRefusals`: never every one of a large graph's.
+ */
+interface Refusals {
+  add: (refusal: string) => void;
+  readonly kept: ReadonlySet<string>;
+  /** How many were found, kept or not. */
+  total: () => number;
+}
+
+const refusalCollector = (): Refusals => {
+  const kept = new Set<string>();
+  let total = 0;
+  return {
+    add: (refusal) => {
+      total += 1;
+      if (kept.size < maxRefusals) {
+        kept.add(refusal);
+      }
+    },
+    kept,
+    total: () => total,
+  };
+};
+
 /** A package resolved into the graph, while the graph is being built. */
 interface Node {
   name: string;
@@ -554,10 +580,10 @@ const inspectionsSchema = z.array(packageInspectionSchema);
 const inspectGraph = async (
   env: Env,
   nodes: readonly Node[],
-  limits: PackageLimits
-): Promise<string[]> => {
+  limits: PackageLimits,
+  refusals: Refusals
+): Promise<void> => {
   const builder = await startPackageBuilder(env.LOADER, env.ASSETS);
-  const refusals: string[] = [];
   let archiveBytes = 0;
   let extractedBytes = 0;
   const pending = [...nodes];
@@ -623,7 +649,9 @@ const inspectGraph = async (
           "its package.json states other dependencies than the registry's metadata"
         );
       }
-      refusals.push(...reasons.map((reason) => `${inspection.key}: ${reason}`));
+      for (const reason of reasons) {
+        refusals.add(`${inspection.key}: ${reason}`);
+      }
     }
     if (extractedBytes > limits.graphExtractedBytes) {
       throw packageErrors.create("package.quota", {
@@ -632,7 +660,6 @@ const inspectGraph = async (
       });
     }
   }
-  return refusals;
 };
 
 /** The lock for a resolved graph. */
@@ -807,21 +834,20 @@ export const resolveDependencies = async (
       issues: ["dependencies: the platform provides every one of them"],
     });
   }
-  const refusals = [
-    ...nodes.flatMap((node) =>
-      metadataRefusals(node.meta).map(
-        (reason) => `${packageKey(node)}: ${reason}`
-      )
-    ),
-    ...(await inspectGraph(env, nodes, limits)),
-  ];
-  if (refusals.length > 0) {
+  const refusals = refusalCollector();
+  for (const node of nodes) {
+    for (const reason of metadataRefusals(node.meta)) {
+      refusals.add(`${packageKey(node)}: ${reason}`);
+    }
+  }
+  await inspectGraph(env, nodes, limits, refusals);
+  if (refusals.total() > 0) {
     log.info("packages.refused", {
       app: intent.app,
-      refusals: refusals.length,
+      refusals: refusals.total(),
     });
     throw packageErrors.create("package.refused", {
-      refusals: [...new Set(refusals)].slice(0, maxRefusals),
+      refusals: [...refusals.kept],
     });
   }
   const lock = lockOf(

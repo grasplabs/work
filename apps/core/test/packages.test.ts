@@ -687,6 +687,23 @@ describe("a package's tarball", () => {
     expect(outcomes).toStrictEqual(attacks.map(({ attack }) => [attack, true]));
   });
 
+  it("is read through a PAX path that isn't ASCII", async () => {
+    const { builder, app } = await builderWithApp();
+    const name = await crafted((own) => [
+      manifestEntry(own),
+      {
+        path: "PaxHeader",
+        type: "x",
+        pax: { path: "package/lib/caf\u00E9.js" },
+      },
+      { path: "package/placeholder", content: "export const cafe = 1;" },
+    ]);
+    const { lock } = await builder.api.dependencies.resolve(
+      intentFor(app, { [name]: "1" })
+    );
+    expect(Object.keys(lock.packages)).toStrictEqual([`${name}@1.0.0`]);
+  });
+
   it("is refused for links, devices, FIFOs and two entries for one path", async () => {
     const { builder, app } = await builderWithApp();
     const cases: { expected: string; entries: Entries }[] = [

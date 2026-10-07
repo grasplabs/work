@@ -53,9 +53,11 @@ const pax = (records: Record<string, string>): Uint8Array =>
   encoder.encode(
     Object.entries(records)
       .map(([key, value]) => {
+        // The length counts UTF-8 bytes, its own digits included.
         const body = ` ${key}=${value}\n`;
-        let length = body.length + 1;
-        while (`${length}${body}`.length !== length) {
+        const bodyBytes = encoder.encode(body).byteLength;
+        let length = bodyBytes + 1;
+        while (String(length).length + bodyBytes !== length) {
           length += 1;
         }
         return `${length}${body}`;
@@ -154,6 +156,19 @@ describe("the tarball reader", () => {
     expect(new Set(outcomes)).toStrictEqual(
       new Set(["an entry's path has control or bidirectional characters"])
     );
+  });
+
+  it("reads a PAX path that isn't ASCII, by its length in bytes", async () => {
+    const bytes = await tarball([
+      {
+        path: "PaxHeader",
+        content: pax({ path: "package/lib/caf\u00E9.js" }),
+        type: "x",
+      },
+      file("package/placeholder", "export const cafe = 1;"),
+    ]);
+    const { files } = await extractTarball(bytes, limits, () => true);
+    expect([...files.keys()]).toStrictEqual(["lib/caf\u00E9.js"]);
   });
 
   it("refuses PAX records whose length isn't plain digits, and GNU sparse files", async () => {

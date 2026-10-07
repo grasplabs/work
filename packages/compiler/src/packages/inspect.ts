@@ -86,16 +86,21 @@ export const inspectPackage = async (
   if ((await sha512Integrity(tarball)) !== integrity) {
     return refused(["its bytes aren't the ones its integrity hash names"]);
   }
+  // The first few paths of each, to name: never every one a tarball has.
   const native: string[] = [];
   const bundled: string[] = [];
+  const shownPaths = 3;
   let gyp = false;
   let extracted: Awaited<ReturnType<typeof extractTarball>>;
   try {
     extracted = await extractTarball(tarball, limits, (path) => {
-      if (path.endsWith(".node")) {
+      if (path.endsWith(".node") && native.length < shownPaths) {
         native.push(path);
       }
-      if (path.split("/").includes("node_modules")) {
+      if (
+        bundled.length < shownPaths &&
+        path.split("/").includes("node_modules")
+      ) {
         bundled.push(path);
       }
       gyp ||= path === "binding.gyp";
@@ -147,11 +152,11 @@ export const inspectPackage = async (
     reasons.push("it builds native code (binding.gyp)");
   }
   if (native.length > 0) {
-    reasons.push(`it ships native binaries: ${native.slice(0, 3).join(", ")}`);
+    reasons.push(`it ships native binaries: ${native.join(", ")}`);
   }
   if (bundled.length > 0) {
     reasons.push(
-      `it bundles packages the graph doesn't name: ${bundled.slice(0, 3).join(", ")}`
+      `it bundles packages the graph doesn't name: ${bundled.join(", ")}`
     );
   }
   return {
