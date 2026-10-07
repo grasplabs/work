@@ -105,7 +105,6 @@ describe("the builtin allowlist", () => {
       'halt_error("x")',
       'error("x")',
       "empty",
-      "not",
       "limit(1; .)",
       "first(.)",
       "recurse",
@@ -146,6 +145,18 @@ describe("the builtin allowlist", () => {
       locale: "expression.unsupported",
       long: "expression.unsupported",
     });
+  });
+
+  it("negates with not, as a boolean operator", async () => {
+    const condition = { kind: "boolean" } as const;
+    expect({
+      done: await run(".done | not", { input: { done: true } }, condition),
+      pending: await run(
+        "(.done | not) and .ready",
+        { input: { done: false, ready: true } },
+        condition
+      ),
+    }).toStrictEqual({ done: { result: false }, pending: { result: true } });
   });
 
   it("converts dates in UTC", async () => {

@@ -1,12 +1,15 @@
 /**
  * The jq that evaluates workflow expressions, pinned to its exact bytes.
  *
- * jq 1.8.2 (MIT, with dtoa/decNumber/Oniguruma notices: licenses/) as
- * compiled to WebAssembly by the jq-wasm package (MIT), whose Emscripten
- * runtime runs it. scripts/jq-wasm/build.ts takes the package's jq.wasm,
- * refuses it unless its SHA-256 is `upstreamSha256`, meters it
- * (scripts/jq-wasm/meter.ts) and writes src/jq.wasm, whose SHA-256 must be
- * `sha256`. A test in scripts/ rebuilds it from the package and compares.
+ * jq 1.8.2 (MIT, with dtoa/decNumber/Oniguruma notices) as compiled to
+ * WebAssembly by the jq-wasm package (MIT) with Emscripten, whose
+ * runtime and libraries are in the module and its JavaScript glue:
+ * Emscripten (MIT/NCSA), musl libc (MIT) and compiler-rt (Apache 2.0
+ * with LLVM exceptions). Every notice is in licenses/.
+ *
+ * scripts/jq-wasm/build.ts takes the package's jq.wasm, refuses it unless
+ * its SHA-256 is `upstreamSha256`, meters it (scripts/jq-wasm/meter.ts) and
+ * writes src/jq.wasm, whose SHA-256 must be `sha256`. A test in scripts/ rebuilds it from the package and compares.
  * Changing any of these is a new evaluator: a reviewed profile revision.
  */
 export const jqProvenance = {

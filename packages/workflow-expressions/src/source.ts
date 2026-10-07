@@ -106,6 +106,8 @@ export const builtinAllowlist: Readonly<Record<string, readonly number[]>> = {
   min: [0],
   max: [0],
   min_by: [1],
+  // Boolean negation: jq has it as a builtin, not an operator.
+  not: [0],
   max_by: [1],
   getpath: [1],
   setpath: [2],
@@ -245,6 +247,12 @@ const readString = (source: string, start: number): number => {
     if (char === '"') {
       return index + 1;
     }
+    if (char !== undefined && char < " ") {
+      throw new SourceError(
+        "invalid",
+        "a raw control character in a string; escape it"
+      );
+    }
     if (char === "\\") {
       const escape = source[index + 1];
       if (escape === "(") {
@@ -373,61 +381,6 @@ const tokenize = (source: string): Token[] => {
   return tokens;
 };
 
-const closers: Readonly<Record<string, string>> = {
-  ")": "(",
-  "]": "[",
-  "}": "{",
-  end: "if",
-};
-
-/**
- * Whether the identifier at `index` is an object key (`{a: …}`, `{a}`,
- * including keywords), not a call: it follows `{` or a `,` directly inside
- * braces, and is followed by `:`, `,` or `}`.
- */
-const isObjectKey = (
-  tokens: readonly Token[],
-  index: number,
-  stack: readonly string[]
-): boolean => {
-  const before = tokens[index - 1];
-  const after = tokens[index + 1];
-  const startsMember =
-    before?.kind === "punct" &&
-    (before.text === "{" || (before.text === "," && stack.at(-1) === "{"));
-  return (
-    startsMember &&
-    after?.kind === "punct" &&
-    (after.text === ":" || after.text === "," || after.text === "}")
-  );
-};
-
-/** Checks brackets and `if … end` balance, within the nesting limit. */
-const checkNesting = (tokens: readonly Token[]): void => {
-  const stack: string[] = [];
-  for (const [index, token] of tokens.entries()) {
-    const isKeyword =
-      token.kind === "ident" && !isObjectKey(tokens, index, stack);
-    const opens =
-      (token.kind === "punct" && ["(", "[", "{"].includes(token.text)) ||
-      (isKeyword && token.text === "if");
-    const closes =
-      (token.kind === "punct" && [")", "]", "}"].includes(token.text)) ||
-      (isKeyword && token.text === "end");
-    if (opens) {
-      stack.push(token.text);
-      if (stack.length > sourceLimits.maxNesting) {
-        throw new SourceError("too_deep", "nesting deeper than 32 levels");
-      }
-    } else if (closes && stack.pop() !== closers[token.text]) {
-      throw new SourceError("invalid", "unbalanced brackets or if … end");
-    }
-  }
-  if (stack.length > 0) {
-    throw new SourceError("invalid", "unbalanced brackets or if … end");
-  }
-};
-
 /** The argument count of a call whose name is at `index`. */
 const arityAt = (tokens: readonly Token[], index: number): number => {
   if (tokens[index + 1]?.text !== "(") {
@@ -462,7 +415,15 @@ const checkDateFormat = (tokens: readonly Token[], index: number): void => {
       `${name} with a format that isn't a string literal`
     );
   }
-  const text: unknown = JSON.parse(format.text);
+  let text: unknown;
+  try {
+    text = JSON.parse(format.text);
+  } catch {
+    throw new SourceError(
+      "invalid",
+      `${name} with a format that isn't JSON text`
+    );
+  }
   if (typeof text !== "string") {
     throw new SourceError(
       "invalid",
@@ -520,31 +481,91 @@ const boundVariables = (tokens: readonly Token[]): Set<string> => {
   return bound;
 };
 
-const checkIdentifiers = (tokens: readonly Token[]): void => {
-  const stack: string[] = [];
+const checkIdentifier = (tokens: readonly Token[], index: number): void => {
+  const name = tokens[index]?.text ?? "";
+  if (refusedKeywords.has(name)) {
+    throw new SourceError("unsupported", `the ${name} keyword`);
+  }
+  if (allowedKeywords.has(name) || literalNames.has(name)) {
+    return;
+  }
+  const arity = arityAt(tokens, index);
+  if (builtinAllowlist[name]?.includes(arity) !== true) {
+    throw new SourceError("unsupported", `the builtin ${name}/${arity}`);
+  }
+  if (name === "strptime" || name === "strftime") {
+    checkDateFormat(tokens, index);
+  }
+};
+
+/**
+ * Whether the identifier at `index` is an object key (`{a: …}`, `{a}`,
+ * keywords included), not a keyword or a call. `scopes` holds what
+ * encloses it: brackets and `if … end`. A key starts a member of the
+ * innermost enclosing object: right after its `{`, or after a `,` with
+ * the object itself innermost. Inside `if … end`, `(…)` or `[…]` within
+ * the object, a `,` separates outputs, not members, so what follows it is
+ * never a key. A member's value is a term or pipe of terms (jq's grammar
+ * has no bare `,` there), so a `,` directly in an object separates members.
+ */
+const isObjectKey = (
+  tokens: readonly Token[],
+  index: number,
+  scopes: readonly string[]
+): boolean => {
+  const before = tokens[index - 1];
+  const after = tokens[index + 1];
+  const startsMember =
+    scopes.at(-1) === "{" &&
+    before?.kind === "punct" &&
+    (before.text === "{" || before.text === ",");
+  return (
+    startsMember &&
+    after?.kind === "punct" &&
+    (after.text === ":" || after.text === "," || after.text === "}")
+  );
+};
+
+const opening = new Set(["(", "[", "{"]);
+const closing: Readonly<Record<string, string>> = {
+  ")": "(",
+  "]": "[",
+  "}": "{",
+  end: "if",
+};
+
+/**
+ * One pass over the tokens with what encloses each: brackets and
+ * `if … end` must balance within the nesting limit, and every identifier
+ * that isn't an object key must be an allowed keyword or builtin. Both
+ * checks share the one view of the structure, so no construct can make an
+ * identifier look like a key to one and a call to jq.
+ */
+const checkStructure = (tokens: readonly Token[]): void => {
+  const scopes: string[] = [];
   for (const [index, token] of tokens.entries()) {
-    if (token.kind === "punct" && ["(", "[", "{"].includes(token.text)) {
-      stack.push(token.text);
-    } else if (token.kind === "punct" && [")", "]", "}"].includes(token.text)) {
-      stack.pop();
+    const isWord =
+      token.kind === "ident" && !isObjectKey(tokens, index, scopes);
+    if (isWord) {
+      checkIdentifier(tokens, index);
     }
-    if (token.kind !== "ident" || isObjectKey(tokens, index, stack)) {
-      continue;
+    const opens =
+      (token.kind === "punct" && opening.has(token.text)) ||
+      (isWord && token.text === "if");
+    const closes =
+      (token.kind === "punct" && Object.hasOwn(closing, token.text)) ||
+      (isWord && token.text === "end");
+    if (opens) {
+      scopes.push(token.text);
+      if (scopes.length > sourceLimits.maxNesting) {
+        throw new SourceError("too_deep", "nesting deeper than 32 levels");
+      }
+    } else if (closes && scopes.pop() !== closing[token.text]) {
+      throw new SourceError("invalid", "unbalanced brackets or if … end");
     }
-    const name = token.text;
-    if (refusedKeywords.has(name)) {
-      throw new SourceError("unsupported", `the ${name} keyword`);
-    }
-    if (allowedKeywords.has(name) || literalNames.has(name)) {
-      continue;
-    }
-    const arity = arityAt(tokens, index);
-    if (builtinAllowlist[name]?.includes(arity) !== true) {
-      throw new SourceError("unsupported", `the builtin ${name}/${arity}`);
-    }
-    if (name === "strptime" || name === "strftime") {
-      checkDateFormat(tokens, index);
-    }
+  }
+  if (scopes.length > 0) {
+    throw new SourceError("invalid", "unbalanced brackets or if … end");
   }
 };
 
@@ -565,8 +586,7 @@ export const checkSource = (
     if (tokens.length === 0) {
       throw new SourceError("invalid", "an empty expression");
     }
-    checkNesting(tokens);
-    checkIdentifiers(tokens);
+    checkStructure(tokens);
     const bound = boundVariables(tokens);
     const free = new Set<string>();
     for (const token of tokens) {

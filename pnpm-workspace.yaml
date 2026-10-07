@@ -166,3 +166,9 @@ peerDependencyRules:
     "@typescript-eslint/project-service>typescript": "7"
     "@typescript-eslint/tsconfig-utils>typescript": "7"
     "@typescript-eslint/typescript-estree>typescript": "7"
+
+# jq-wasm's Workers entry imports its own, unmetered jq.wasm as a default;
+# the patch drops that import, so a bundle carries only the metered module
+# (packages/workflow-expressions/src/jq.wasm).
+patchedDependencies:
+  jq-wasm@3.0.0-jq-1.8.2: patches/jq-wasm@3.0.0-jq-1.8.2.patch

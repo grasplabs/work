@@ -375,18 +375,30 @@ const checkContract = (
 };
 
 /**
- * Evaluates a compiled expression on `scope` and checks its one result
- * against `contract`. Fails with an expression error, which never carries
- * the values: when the context is over its limits or not plain JSON, when
- * jq fails or runs out of fuel or memory, when there isn't exactly one
- * result, or when the result is over its limits or breaks the contract.
+ * The JSON text jq reads: `[input, ...variables]`, in the order the
+ * program binds them, once it is plain JSON within the limits.
  */
-export const evaluateExpression = async <S extends Stage>(
+const contextText = <S extends Stage>(
   expression: CompiledExpression<S>,
-  scope: EvaluationScope<S>,
-  contract: ResultContract
-): Promise<Json> => {
+  scope: EvaluationScope<S>
+): string => {
   const { site } = expression;
+  const stageNames = new Set<string>(stageVariables[expression.stage]);
+  const loopNames = new Set(expression.loopVariables);
+  // Each group only its own names: a loop value can't stand in for
+  // $context or $params, nor a stage variable for a loop's.
+  const extra = [
+    ...Object.keys(scope.variables).filter((name) => !stageNames.has(name)),
+    ...Object.keys(scope.loop ?? {}).filter((name) => !loopNames.has(name)),
+  ];
+  if (extra.length > 0) {
+    fail(
+      site,
+      "expression.context_invalid",
+      "Provide only the stage's variables and the loop variables it was compiled with.",
+      { reason: `$${(extra[0] ?? "").slice(0, 64)} isn't available here` }
+    );
+  }
   const provided: Record<string, Json> = { ...scope.variables, ...scope.loop };
   const values: Json[] = [scope.input];
   for (const name of variableNamesOf(expression)) {
@@ -404,23 +416,16 @@ export const evaluateExpression = async <S extends Stage>(
     }
     values.push(provided[name] ?? null);
   }
-  const expected = new Set(variableNamesOf(expression));
-  for (const name of Object.keys(provided)) {
-    if (!expected.has(name)) {
-      fail(
-        site,
-        "expression.context_invalid",
-        "Provide only the stage's variables.",
-        { reason: `$${name} isn't available here` }
-      );
-    }
-  }
-  if (!values.every((value) => isAcceptedJson(value, 0, false))) {
+  const invalidContext = (): never =>
     fail(
       site,
       "expression.context_invalid",
       "Pass plain JSON at most 32 levels deep, with finite numbers and no __proto__ keys."
     );
+  // Refuses what isn't JSON at all (functions, dates, NaN, cycles), which
+  // JSON.stringify would otherwise turn into something that is.
+  if (!values.every((value) => isAcceptedJson(value, 0, false))) {
+    invalidContext();
   }
   const stdin = JSON.stringify(values);
   if (utf8Bytes(stdin) > evaluatorLimits.maxContextBytes) {
@@ -430,6 +435,35 @@ export const evaluateExpression = async <S extends Stage>(
       "Keep the input and variables under 1 MiB together."
     );
   }
+  // Checks the text jq gets, not the values it came from: a getter can
+  // answer differently the second time it is read. The array adds a level.
+  if (jsonTextDepth(stdin) > evaluatorLimits.maxJsonDepth + 1) {
+    invalidContext();
+  }
+  const sent: unknown = JSON.parse(stdin);
+  if (
+    !Array.isArray(sent) ||
+    !sent.every((value: unknown) => isAcceptedJson(value, 0, false))
+  ) {
+    invalidContext();
+  }
+  return stdin;
+};
+
+/**
+ * Evaluates a compiled expression on `scope` and checks its one result
+ * against `contract`. Fails with an expression error, which never carries
+ * the values: when the context is over its limits or not plain JSON, when
+ * jq fails or runs out of fuel or memory, when there isn't exactly one
+ * result, or when the result is over its limits or breaks the contract.
+ */
+export const evaluateExpression = async <S extends Stage>(
+  expression: CompiledExpression<S>,
+  scope: EvaluationScope<S>,
+  contract: ResultContract
+): Promise<Json> => {
+  const { site } = expression;
+  const stdin = contextText(expression, scope);
 
   const run = await runJq(
     programFor(expression.source, variableNamesOf(expression)),

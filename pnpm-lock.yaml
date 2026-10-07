@@ -262,6 +262,9 @@ overrides:
   vitest: 4.1.11
   '@cloudflare/vitest-pool-workers>miniflare': 5.20260921.0-alpha
 
+patchedDependencies:
+  jq-wasm@3.0.0-jq-1.8.2: 3fe839845a97b5c18ce6163b2cbb2bfd1542eff126efd1da93dc9bbda2e283ed
+
 importers:
 
   .:
@@ -872,7 +875,7 @@ importers:
         version: 1.1.0
       jq-wasm:
         specifier: 'catalog:'
-        version: 3.0.0-jq-1.8.2
+        version: 3.0.0-jq-1.8.2(patch_hash=3fe839845a97b5c18ce6163b2cbb2bfd1542eff126efd1da93dc9bbda2e283ed)
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: 'catalog:'
@@ -11981,7 +11984,7 @@ snapshots:
 
   jose@6.2.12: {}
 
-  jq-wasm@3.0.0-jq-1.8.2: {}
+  jq-wasm@3.0.0-jq-1.8.2(patch_hash=3fe839845a97b5c18ce6163b2cbb2bfd1542eff126efd1da93dc9bbda2e283ed): {}
 
   js-sha256@0.10.1: {}
 

@@ -22,9 +22,10 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 
+import { expressionErrors } from "../src/errors.ts";
 import { compileExpression, evaluateExpression } from "../src/evaluate.ts";
 import jqModule from "../src/jq.wasm";
-import { compileError, run } from "./run.ts";
+import { compileError, json, run } from "./run.ts";
 
 /**
  * `value` as JSON, whatever it is: what a caller that isn't type-checked
@@ -35,6 +36,17 @@ const unchecked = (value: unknown): never =>
   // SAFETY: invalid on purpose; the evaluator checks values at run time.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   value as never;
+
+/** An object whose `value` is 1 when first read, then `later`. */
+const shifting = (later: unknown): unknown => {
+  let reads = 0;
+  return {
+    get value(): unknown {
+      reads += 1;
+      return reads === 1 ? 1 : later;
+    },
+  };
+};
 
 describe("source outside the profile", () => {
   it("refuses definitions, modules, error handling and other grammar", async () => {
@@ -96,6 +108,63 @@ describe("source outside the profile", () => {
       strayEnd: "expression.invalid",
       unterminatedString: "expression.invalid",
       bracketInString: { result: ")) | $ENV | ((" },
+    });
+  });
+
+  it("can't hide a refused builtin where an object key could be", async () => {
+    const hidden = {
+      // A `,` inside if … end, within an object, separates outputs.
+      ifThen: "{a: if true then 1, now, 2 else 3 end}",
+      ifThenEnv: "{a: if true then 1, env, 2 else 3 end}",
+      ifThenFile: "{a: if true then 1, input_filename, 2 else 3 end}",
+      ifThenHalt: '{a: if true then 1, halt_error("x"), 2 else 3 end}',
+      elif: "{a: if false then 1 elif true then 2, env else 3 end}",
+      else: "{a: if false then 1 else 2, now end}",
+      nestedIf: "{a: if true then if true then 1, now else 2 end else 3 end}",
+      ifInPattern: ". as {a: $x} | {b: if true then $x, now else 0 end}",
+      reduceSource: "{a: reduce (1, now) as $x (0; .)}",
+      reduceUpdate: "{a: reduce .[] as $x (0; ., now)}",
+      reducePattern: "{a: reduce .[] as {b: $x} (0; ., env)}",
+      foreach: "{a: foreach .[] as $x (0; .; ., now)}",
+      label: "{a: label $out | 1, now}",
+      array: "{a: [1, now]}",
+      parentheses: "{a: (1, now)}",
+      pipe: "{a: . | now, b: 1}",
+      computedKey: "{(now): 1}",
+      value: "{a: now}",
+    };
+    const codes = Object.fromEntries(
+      await Promise.all(
+        Object.entries(hidden).map(
+          async ([name, source]) => [name, await compileError(source)] as const
+        )
+      )
+    );
+    expect(codes).toStrictEqual(
+      Object.fromEntries(
+        Object.keys(hidden).map((name) => [name, "expression.unsupported"])
+      )
+    );
+  });
+
+  it("keeps real object keys keys, keywords and builtin names included", async () => {
+    await expect(
+      run(
+        '. as $in | {now, env: 1, if: 2, end: 3, "then": 4} | [.now, .env, .if, .end, .then, ($in | {input_filename} | .input_filename)]',
+        { input: { now: "data", input_filename: "also data" } }
+      )
+    ).resolves.toStrictEqual({ result: ["data", 1, 2, 3, 4, "also data"] });
+  });
+
+  it("refuses raw control characters in strings", async () => {
+    expect({
+      inAString: await compileError('"a\nb"'),
+      inADateFormat: await compileError('strftime("%Y\u0001")'),
+      escaped: await compileError('"a\\nb"'),
+    }).toStrictEqual({
+      inAString: "expression.invalid",
+      inADateFormat: "expression.invalid",
+      escaped: undefined,
     });
   });
 
@@ -185,6 +254,65 @@ describe("hostile values", () => {
         ])
       )
     );
+  });
+
+  it("checks the values jq gets, not what a getter answered first", async () => {
+    let deep: unknown = 0;
+    for (let level = 0; level < 40; level += 1) {
+      deep = [deep];
+    }
+    expect({
+      deepLater: await run(".", { input: unchecked(shifting(deep)) }),
+      protoLater: await run(".", {
+        input: unchecked(shifting(JSON.parse('{"__proto__": {"x": 1}}'))),
+      }),
+    }).toStrictEqual({
+      deepLater: { error: "expression.context_invalid" },
+      protoLater: { error: "expression.context_invalid" },
+    });
+  });
+
+  it("takes each variable only from its own group", async () => {
+    const expression = await compileExpression("[$context, $attempt]", {
+      stage: "taskIf",
+      scope: ["poll"],
+      pointer: "/do/0/poll/if",
+      loopVariables: ["attempt"],
+    });
+    const variables = {
+      context: { done: false },
+      task: null,
+      workflow: null,
+      params: null,
+    };
+    const outcome = async (scope: unknown) =>
+      await evaluateExpression(expression, unchecked(scope), json).then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error: expressionErrors.codeOf(error) })
+      );
+    expect({
+      own: await outcome({ input: null, variables, loop: { attempt: 0 } }),
+      loopOverridesContext: await outcome({
+        input: null,
+        variables,
+        loop: { attempt: 0, context: { done: true } },
+      }),
+      undeclaredLoopVariable: await outcome({
+        input: null,
+        variables,
+        loop: { attempt: 0, other: 1 },
+      }),
+      loopVariableAmongStageVariables: await outcome({
+        input: null,
+        variables: { ...variables, attempt: 5 },
+        loop: { attempt: 0 },
+      }),
+    }).toStrictEqual({
+      own: { result: [{ done: false }, 0] },
+      loopOverridesContext: { error: "expression.context_invalid" },
+      undeclaredLoopVariable: { error: "expression.context_invalid" },
+      loopVariableAmongStageVariables: { error: "expression.context_invalid" },
+    });
   });
 
   it("refuses __proto__ keys in, and out, without polluting prototypes", async () => {
