@@ -5,17 +5,19 @@ import type { BindingKind } from "./catalog.ts";
 import type { Checker, Site } from "./checker.ts";
 import { compileDataSchema } from "./data-schema.ts";
 import { pointerJoin } from "./diagnostics.ts";
+import {
+  checkErrorDefinition,
+  checkRetryPolicy,
+  checkTimeout,
+} from "./errors.ts";
 import { isObject } from "./json-text.ts";
 import type { JsonObject, JsonValue } from "./json-text.ts";
 import { dslVersion, profileLimits, profileName } from "./limits.ts";
 import {
   checkDataFlow,
-  checkErrorDefinition,
-  checkRetryPolicy,
   checkTask,
   checkTaskId,
   checkTaskList,
-  checkTimeout,
   namePattern,
   semverPattern,
 } from "./tasks.ts";
