@@ -870,7 +870,7 @@ describe("what a build names and keeps", () => {
         `${sprite}@1.0.0's icon.svg is an SVG that loads something from outside itself`,
       ],
       loader: [
-        `the module ${wasm}.js loads a file next to itself at run time (new URL(…, import.meta.url))`,
+        `the module ${wasm}.js loads a file next to itself at run time (import.meta.url)`,
         `the module ${wasm}.js starts a worker`,
       ],
     });
@@ -878,6 +878,36 @@ describe("what a build names and keeps", () => {
     await expect(refusalsOf(buildOf(css, "browser"))).resolves.toStrictEqual([
       `the stylesheet ${photos}.css names ./photo.png in image-set() as a string, which isn't bundled: use url()`,
     ]);
+  });
+
+  it("tells code that loads at run time from text that only mentions it", async () => {
+    const mentions = named("mentions");
+    const worker = named("self-worker");
+    await publish(
+      esm(mentions, {
+        "index.js": `// new Worker(example) and importScripts("x.js") in a comment
+/* import.meta.url */
+export const docs = "new Worker(example) or new URL('./a.wasm', import.meta.url)";
+export const template = \`self.importScripts("x") \${"new SharedWorker(s)"}\`;
+export const pattern = /new Worker\\(/u;
+export const supported = typeof Worker !== "undefined";`,
+      })
+    );
+    await publish(
+      esm(worker, {
+        "index.js": "export const start = () => new self.Worker('./w.js');",
+      })
+    );
+    const harmless = await approvedApp({ [mentions]: "1" });
+    const built = await buildOf(harmless, "browser");
+    const loader = await approvedApp({ [worker]: "1" });
+    expect({
+      built: built.artifact.entries[mentions]?.module,
+      refused: await refusalsOf(buildOf(loader, "browser")),
+    }).toStrictEqual({
+      built: `${mentions}.js`,
+      refused: [`the module ${worker}.js starts a worker`],
+    });
   });
 
   it("builds again when a kept artifact's description can't be read, to the same pin", async () => {

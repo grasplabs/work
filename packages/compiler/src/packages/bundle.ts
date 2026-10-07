@@ -48,11 +48,12 @@ import type { PackageFiles } from "./exports.ts";
 import {
   inertDataUrl,
   remoteInCss,
+  runtimeLoadMarkers,
   runtimeLoadsInJs,
-  svgRefusal,
   unbundledInCss,
 } from "./inert.ts";
 import { platformModules, platformPeers } from "./platform.ts";
+import { svgRefusal } from "./svg.ts";
 
 /** Node.js's built-in modules: never available to an App's packages. */
 const nodeBuiltins = new Set([
@@ -610,7 +611,7 @@ export const bundle = async (input: BundleInput): Promise<Bundled> => {
         "unsupported-dynamic-import": "error",
         "unsupported-require-call": "error",
       },
-      define: { "process.env.NODE_ENV": '"production"' },
+      define: { "process.env.NODE_ENV": '"production"', ...runtimeLoadMarkers },
       plugins: [resolver.plugin()],
     });
     outputs = result.outputFiles ?? [];

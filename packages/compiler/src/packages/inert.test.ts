@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  remoteInCss,
-  runtimeLoadsInJs,
-  svgRefusal,
-  unbundledInCss,
-} from "./inert.ts";
+import { remoteInCss, unbundledInCss } from "./inert.ts";
+import { svgRefusal } from "./svg.ts";
 
 // The checks on what an artifact carries, on their own: pure, so tested in
 // isolation, each with the ways around a naive check (the builds that use
@@ -57,18 +53,22 @@ describe("an SVG an artifact carries", () => {
       '<rect onload="x()"/>',
       '<rect x:onclick="x()"/>',
       "<rect\nonmouseover='x()'/>",
-      '<rect/onfocus="x()"/>',
+      "<rect ONCLICK='x()'/>",
     ];
     expect(
       new Set(handlers.map((handler) => svgRefusal(utf8(svg(handler)))))
     ).toStrictEqual(new Set(["is an SVG with an event handler"]));
+    // Markup HTML would read as a handler isn't XML at all.
+    expect(svgRefusal(utf8(svg('<rect/onfocus="x()"/>')))).toBe(
+      "is an SVG Grasp can't read"
+    );
   });
 
   it("is refused for a link to script, however it is encoded", () => {
     const links = [
       '<a href="javascript:alert(1)"><text>x</text></a>',
       '<a href="jav&#x61;script:alert(1)"><text>x</text></a>',
-      '<a href="jav&#97;script&colon;alert(1)"><text>x</text></a>',
+      '<a href="jav&#97;script&#58;alert(1)"><text>x</text></a>',
       '<a href="java\tscript:alert(1)"><text>x</text></a>',
       '<a href="data:text/html,&lt;b&gt;"><text>x</text></a>',
     ];
@@ -117,28 +117,7 @@ describe("an SVG an artifact carries", () => {
       "is an SVG that isn't plain UTF-8",
       "is an SVG that isn't plain UTF-8",
       "is an SVG that isn't plain UTF-8",
-      "is an SVG that declares its own entities",
-    ]);
-  });
-});
-
-describe("a module an artifact carries", () => {
-  it("is refused for loading files by URL or starting workers", () => {
-    expect([
-      runtimeLoadsInJs('const w=new URL("./a.wasm",import.meta.url);'),
-      runtimeLoadsInJs(
-        'const w=new Worker(new URL("./w.js",import.meta.url));'
-      ),
-      runtimeLoadsInJs("self.importScripts('x.js')"),
-      runtimeLoadsInJs("export const a = typeof Worker;"),
-    ]).toStrictEqual([
-      ["loads a file next to itself at run time (new URL(…, import.meta.url))"],
-      [
-        "loads a file next to itself at run time (new URL(…, import.meta.url))",
-        "starts a worker",
-      ],
-      ["loads scripts into a worker"],
-      [],
+      "is an SVG that declares its own entities or document type",
     ]);
   });
 });
@@ -182,6 +161,18 @@ describe("a stylesheet an artifact carries", () => {
     const css =
       '.p{background:image-set("./photo.png" 1x, url(./assets/x-HASH.png) 2x, "data:image/png;base64,AAAA" 3x)}';
     expect(unbundledInCss(css)).toStrictEqual(["./photo.png"]);
+  });
+
+  it("reads image-set() strings in image position only, never a type()", () => {
+    expect([
+      unbundledInCss(
+        '.p{background:image-set(url("./assets/p-HASH.png") type("image/png") 1x)}'
+      ),
+      unbundledInCss('.p{background:image-set("./photo.png" 1x)}'),
+      unbundledInCss(
+        ".p{background:-webkit-image-set(url(a.png) 1x, 'b.png' type('image/png') 2x)}"
+      ),
+    ]).toStrictEqual([[], ["./photo.png"], ["b.png"]]);
   });
 
   it("leaves what stays within the artifact", () => {

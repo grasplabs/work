@@ -10,31 +10,8 @@
 export const inertDataUrl =
   /^data:(?:image\/(?:png|jpeg|gif|webp|avif)|font\/[a-z0-9]+|application\/font-woff2?)[;,]/iu;
 
-const strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-
-/** Elements that run or embed something, under any namespace prefix. */
-const activeElement =
-  /<\s*(?:[\w.-]+:)?(?:script|foreignObject|iframe|embed|object|handler)\b/iu;
-
-/** An event handler attribute, under any namespace prefix. */
-const eventAttribute = /[\s/"'](?:[\w.-]+:)?on[\w-]*\s*=/iu;
-
-/** A script or HTML URL, once entities and whitespace are taken out. */
-const scriptUrl = /(?:javascript|vbscript|livescript):|data:text\/html/iu;
-
-const namedEntities: Readonly<Record<string, string>> = {
-  amp: "&",
-  apos: "'",
-  colon: ":",
-  gt: ">",
-  lt: "<",
-  newline: "\n",
-  quot: '"',
-  tab: "\t",
-};
-
 /** `text` with each match of `pattern` replaced by what `replace` makes of it. */
-const replaced = (
+export const replaced = (
   text: string,
   pattern: RegExp,
   replace: (groups: Record<string, string | undefined>, whole: string) => string
@@ -49,106 +26,10 @@ const replaced = (
 };
 
 /** A code point as text, or nothing for one Unicode doesn't have. */
-const character = (code: number): string =>
+export const character = (code: number): string =>
   Number.isInteger(code) && code > 0 && code <= 0x10_ff_ff
     ? String.fromCodePoint(code)
     : "";
-
-const entity = /&(?:#x(?<hex>[0-9a-f]+)|#(?<decimal>\d+)|(?<name>[a-z]+));?/giu;
-
-/** `text` with numeric and the common named character references decoded. */
-const decodeEntities = (text: string): string =>
-  replaced(text, entity, ({ hex, decimal, name }, whole) => {
-    if (hex !== undefined) {
-      return character(Number.parseInt(hex, 16));
-    }
-    if (decimal !== undefined) {
-      return character(Number(decimal));
-    }
-    return namedEntities[(name ?? "").toLowerCase()] ?? whole;
-  });
-
-/** `text` without whitespace and control characters, which URLs may hide. */
-const squeezed = (text: string): string => {
-  let kept = "";
-  for (const char of text) {
-    if ((char.codePointAt(0) ?? 0) > 0x20) {
-      kept += char;
-    }
-  }
-  return kept;
-};
-
-const notUtf8 = "is an SVG that isn't plain UTF-8";
-
-/** Whether bytes start with a byte-order mark: UTF-8's or UTF-16's. */
-const hasBom = ([first = 0, second = 0, third = 0]: Uint8Array): boolean =>
-  (first === 0xef && second === 0xbb && third === 0xbf) ||
-  (first === 0xfe && second === 0xff) ||
-  (first === 0xff && second === 0xfe);
-
-/** The SVG's text, if it is plain UTF-8: no mark, no invalid bytes, no NUL. */
-const plainText = (bytes: Uint8Array): string | undefined => {
-  if (hasBom(bytes)) {
-    return undefined;
-  }
-  try {
-    const text = strictUtf8.decode(bytes);
-    return text.includes("\0") ? undefined : text;
-  } catch {
-    return undefined;
-  }
-};
-
-/** An SVG's references: `href`/`xlink:href`/`src` values and CSS `url()`s. */
-const svgReferences = (text: string): string[] => [
-  ...[
-    ...text.matchAll(
-      /[\s/"'](?:[\w.-]+:)?(?:href|src)\s*=\s*(?<quote>["']?)(?<value>.*?)\k<quote>(?=[\s/>])/giu
-    ),
-  ].map((match) => match.groups?.value ?? ""),
-  ...[
-    ...text.matchAll(/url\(\s*(?<quote>["']?)(?<value>.*?)\k<quote>\s*\)/giu),
-  ].map((match) => match.groups?.value ?? ""),
-];
-
-/**
- * Whether a reference leaves the SVG: anything but a same-document
- * fragment (`#id`) or an inline image or font data URL.
- */
-const leaves = (reference: string): boolean => {
-  const value = squeezed(reference);
-  return !(value.startsWith("#") || inertDataUrl.test(value));
-};
-
-/**
- * Why an SVG could run script when opened as a document, or undefined if
- * nothing in it can. Anything that isn't plain UTF-8 (a byte-order mark,
- * UTF-16, invalid bytes, NULs) is refused rather than guessed at.
- */
-export const svgRefusal = (bytes: Uint8Array): string | undefined => {
-  const text = plainText(bytes);
-  if (text === undefined) {
-    return notUtf8;
-  }
-  if (/<!ENTITY/iu.test(text)) {
-    return "is an SVG that declares its own entities";
-  }
-  if (activeElement.test(text)) {
-    return "is an SVG with an element that can run or embed something";
-  }
-  if (eventAttribute.test(text)) {
-    return "is an SVG with an event handler";
-  }
-  const decoded = decodeEntities(text);
-  if (scriptUrl.test(squeezed(decoded))) {
-    return "is an SVG that links to script";
-  }
-  if (/@import/iu.test(decoded) || svgReferences(decoded).some(leaves)) {
-    return "is an SVG that loads something from outside itself";
-  }
-  return undefined;
-};
 
 /** A URL that reaches outside the artifact: a scheme, or `//`. */
 const outside = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/iu;
@@ -163,7 +44,7 @@ const fetchedString =
 const cssEscape = /\\(?:(?<hex>[0-9a-f]{1,6})\s?|(?<char>[^\n]))/giu;
 
 /** CSS text with its escapes (`\74`, `\:`) read as the characters they are. */
-const cssUnescape = (text: string): string =>
+export const cssUnescape = (text: string): string =>
   replaced(text, cssEscape, ({ hex, char }) =>
     hex === undefined ? (char ?? "") : character(Number.parseInt(hex, 16))
   );
@@ -174,18 +55,56 @@ const cssString = /(?<quote>["'])(?<value>(?:\\.|(?!\k<quote>).)*)\k<quote>/gu;
 const quoted = /^(?<quote>["'])(?<inner>.*)\k<quote>$/u;
 
 /**
- * Strings `image-set()` names a local file by: esbuild resolves `url()`s
- * in it but leaves strings as they are, so they would name paths the
- * artifact doesn't have. Up to `limit`.
+ * The options of an `image-set()`, split at its top-level commas: each is
+ * an image (a string, `url()` or another image function) and then its
+ * resolution and `type()`.
+ */
+const imageSetOptions = (args: string): string[] => {
+  const options: string[] = [];
+  let depth = 0;
+  let quote: string | undefined;
+  let start = 0;
+  for (let at = 0; at < args.length; at += 1) {
+    const char = args[at];
+    if (quote !== undefined) {
+      if (char === "\\") {
+        at += 1;
+      } else if (char === quote) {
+        quote = undefined;
+      }
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === "(") {
+      depth += 1;
+    } else if (char === ")") {
+      depth -= 1;
+    } else if (char === "," && depth === 0) {
+      options.push(args.slice(start, at));
+      start = at + 1;
+    }
+  }
+  options.push(args.slice(start));
+  return options;
+};
+
+/** An option's image, if it is a string: the image position only. */
+const leadingString =
+  /^\s*(?<quote>["'])(?<value>(?:\\.|(?!\k<quote>).)*)\k<quote>/u;
+
+/**
+ * Strings `image-set()` names a local file by, in image position:
+ * esbuild resolves `url()`s in it but leaves strings as they are, so they
+ * would name paths the artifact doesn't have. A `type("image/png")` is
+ * the option's type, not an image. Up to `limit`.
  */
 export const unbundledInCss = (css: string, limit = 50): string[] => {
   const found = new Set<string>();
   for (const set of css.matchAll(imageSet)) {
-    // `url()`s in it are esbuild's to resolve, and were.
-    const strings = (set.groups?.args ?? "").replaceAll(cssUrl, "");
-    for (const match of strings.matchAll(cssString)) {
-      const value = cssUnescape(match.groups?.value ?? "").trim();
+    for (const option of imageSetOptions(set.groups?.args ?? "")) {
+      const image = leadingString.exec(option)?.groups?.value;
+      const value = image === undefined ? undefined : cssUnescape(image).trim();
       if (
+        value !== undefined &&
         found.size < limit &&
         !fetchedString.test(value) &&
         !inertDataUrl.test(value)
@@ -197,23 +116,53 @@ export const unbundledInCss = (css: string, limit = 50): string[] => {
   return [...found];
 };
 
-/** What a module would load at run time that isn't in the artifact. */
-const runtimeLoads: readonly [RegExp, string][] = [
-  [
-    /new\s+URL\s*\([^)]*import\.meta\.url/u,
-    "loads a file next to itself at run time (new URL(…, import.meta.url))",
-  ],
-  [/\bnew\s+(?:Shared)?Worker\s*\(/u, "starts a worker"],
-  [/\bimportScripts\s*\(/u, "loads scripts into a worker"],
-];
+/**
+ * The globals that load code or files at run time from outside the
+ * artifact, and what esbuild replaces each with (`define`): only real
+ * references in code are replaced, never text in strings, templates,
+ * regular expressions or comments, so the build's output names a marker
+ * exactly where the code uses one.
+ */
+export const runtimeLoadMarkers = {
+  Worker: "__grasp_refused_Worker",
+  "self.Worker": "__grasp_refused_Worker",
+  "window.Worker": "__grasp_refused_Worker",
+  "globalThis.Worker": "__grasp_refused_Worker",
+  SharedWorker: "__grasp_refused_SharedWorker",
+  "self.SharedWorker": "__grasp_refused_SharedWorker",
+  "window.SharedWorker": "__grasp_refused_SharedWorker",
+  "globalThis.SharedWorker": "__grasp_refused_SharedWorker",
+  importScripts: "__grasp_refused_importScripts",
+  "self.importScripts": "__grasp_refused_importScripts",
+  "globalThis.importScripts": "__grasp_refused_importScripts",
+  "import.meta.url": "__grasp_refused_import_meta_url",
+} as const;
+
+const runtimeLoadReasons: Readonly<Record<string, string>> = {
+  __grasp_refused_Worker: "starts a worker",
+  __grasp_refused_SharedWorker: "starts a worker",
+  __grasp_refused_importScripts: "loads scripts into a worker",
+  __grasp_refused_import_meta_url:
+    "loads a file next to itself at run time (import.meta.url)",
+};
+
+const marker = /\b(?<typeof>typeof\s+)?(?<name>__grasp_refused_\w+)\b/gu;
 
 /**
  * Why a module esbuild wrote would load code or files at run time that
- * aren't part of the artifact: files next to it by URL, and workers
- * (not in the first package release).
+ * aren't part of the artifact: a use of a global `runtimeLoadMarkers`
+ * replaced, other than asking whether it exists (`typeof Worker`).
  */
-export const runtimeLoadsInJs = (code: string): string[] =>
-  runtimeLoads.filter(([pattern]) => pattern.test(code)).map(([, why]) => why);
+export const runtimeLoadsInJs = (code: string): string[] => {
+  const reasons = new Set<string>();
+  for (const match of code.matchAll(marker)) {
+    const reason = runtimeLoadReasons[match.groups?.name ?? ""];
+    if (match.groups?.typeof === undefined && reason !== undefined) {
+      reasons.add(reason);
+    }
+  }
+  return [...reasons];
+};
 
 /**
  * Every place a stylesheet esbuild wrote names a URL that would load
