@@ -1,0 +1,24 @@
+{
+  "name": "@grasp-os/workflow-expressions",
+  "private": true,
+  "description": "jq expressions of JSON workflows: a pinned, metered jq 1.8 build, run inside workerd within hard limits",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./errors": "./src/errors.ts",
+    "./evaluate": "./src/evaluate.ts",
+    "./provenance": "./src/provenance.ts",
+    "./source": "./src/source.ts"
+  },
+  "dependencies": {
+    "@grasp-os/shared": "workspace:*",
+    "@standard-schema/spec": "catalog:",
+    "jq-wasm": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "@grasp-os/sdk": "workspace:*"
+  }
+}
