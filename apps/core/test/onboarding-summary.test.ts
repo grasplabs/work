@@ -94,8 +94,9 @@ describe("the onboarding summary", () => {
     }).toStrictEqual({
       status: 200,
       cache: "no-store",
-      // On the roster, the gate never closed: the company is in.
-      summary: { stage: "open", day: null, days: null, known: 25, needs: 0 },
+      // On the roster, the gate never closed: the company is in. The
+      // agreements aren't in yet, which waits on staff.
+      summary: { stage: "open", day: null, days: null, known: 25, needs: 1 },
     });
     expect(text).not.toContain(sentinel);
     expect(text).not.toContain("Sales");
@@ -175,5 +176,17 @@ describe("where the summary says an onboarding stands", () => {
         "2031-10-05T09:00:00.000Z"
       ).needs
     ).toBe(3);
+  });
+
+  it("counts missing agreements while the company is in too: they hold up the interviews either way", () => {
+    const open: GateView = { ...closed(30), open: true, closedSince: null };
+    expect([
+      summaryOf(view({ agreed: false }), open, at("2031-10-05")).needs,
+      summaryOf(
+        view({ roster: null, plan: null, agreed: false }),
+        open,
+        at("2031-10-05")
+      ).needs,
+    ]).toStrictEqual([1, 0]);
   });
 });

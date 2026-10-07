@@ -51,11 +51,12 @@ export const summaryOf = (
     }
     return started ? "interviews" : "preparing";
   };
-  const closed = !gate.open;
+  // The agreements hold up the interviews whether or not the company is in.
+  const begun = roster !== null || plan !== null;
   const needs = [
-    closed && !view.agreed,
+    begun && !view.agreed,
     view.paused,
-    closed && gate.ready,
+    !gate.open && gate.ready,
   ].filter(Boolean).length;
   return {
     stage: stage(),
