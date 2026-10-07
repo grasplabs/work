@@ -13,6 +13,7 @@ import type {
   EventFilter,
   ParamValue,
   RunFailure,
+  WorkflowCalls,
 } from "@grasp-os/shared/workflows";
 /**
  * Core D1 database: identity (Better Auth), permissions and the App registry.
@@ -557,6 +558,17 @@ export const appVersions = sqliteTable(
       .$type<string[]>()
       .notNull()
       .default(sql`'[]'`),
+    /**
+     * The App's bindings each of the version's workflows calls, by
+     * workflow ID (JSON, `WorkflowCalls`), written when it is committed
+     * from the same reading its review shows: a run's calls are held to
+     * it (workflows/host.ts). A workflow it keeps no entry for doesn't run
+     * (`workflow.calls_not_kept`), and its review shows no calls.
+     */
+    workflowCalls: text("workflow_calls", { mode: "json" })
+      .$type<Record<string, WorkflowCalls>>()
+      .notNull()
+      .default(sql`'{}'`),
     /**
      * The version's exports (JSON, `AppExports`), read from its
      * `app/exports.json` when it is committed (app-exports.ts): so a call

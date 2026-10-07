@@ -737,8 +737,8 @@ msgid "Called another engine"
 msgstr "Llamó a otro motor"
 
 #: src/chat/builds.tsx
-msgid "Calls {tools}: may change things"
-msgstr "Llama a {tools}: puede cambiar cosas"
+msgid "Calls {tools} (any of their methods): may change things"
+msgstr "Llama a {tools} (cualquiera de sus métodos): puede cambiar algo"
 
 #: src/knowledge/document.tsx
 msgid "Cancel"
@@ -1661,8 +1661,12 @@ msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in 
 msgstr "Su programación se detuvo: su ejecución no pudo empezar {maxFailedStarts} veces seguidas. Vuelve a empezar cuando se configura la programación en Parámetros o cuando una nueva versión del motor pasa a ser la actual."
 
 #: src/chat/builds.tsx
-msgid "Its steps can't be read from its code, so it may do anything its code does."
-msgstr "Sus pasos no se pueden leer de su código, así que puede hacer todo lo que haga su código."
+msgid "Its steps can't be read from its code, so any step may do anything its code does, calling {tools}."
+msgstr "Sus pasos no se pueden leer de su código, así que cualquier paso puede hacer todo lo que hace su código, llamando a {tools}."
+
+#: src/chat/builds.tsx
+msgid "Its steps can't be read from its code, so any step may do anything its code does, calling none of the App's bindings."
+msgstr "Sus pasos no se pueden leer de su código, así que cualquier paso puede hacer todo lo que hace su código, sin llamar a ninguna conexión de la App."
 
 #: src/connections/connection-list.tsx
 msgid "Its tokens are deleted, every engine and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."

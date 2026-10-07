@@ -10,7 +10,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { z } from "zod";
 
 import { callApp } from "../app.ts";
-import { versionFiles } from "../apps.ts";
+import { callsFor, versionFiles } from "../apps.ts";
 import { runBindingsFor } from "../bindings.ts";
 import { runExtraction } from "../knowledge/extraction.ts";
 import type { WorkContext } from "../restricted.ts";
@@ -192,14 +192,16 @@ const runWorkflow = async (
       authority,
       contextOf(pinned.data.app, runId)
     );
+    const files = await versionFiles(env, pinned.data.app, pinned.data.version);
     const run: HostedRun = {
       ...pinned.data,
       runId,
       authority,
+      collections: bindings,
       connections,
       apps,
+      calls: await callsFor(env, pinned.data),
     };
-    const files = await versionFiles(env, run.app, run.version);
     // Read on every load, though only the run's first uses them: after
     // that the SDK replays the values its `$params` step recorded.
     const params = await paramValues(
@@ -212,7 +214,6 @@ const runWorkflow = async (
       version: run.version,
       workflow: run.workflow,
       files,
-      env: bindings,
     });
     const host = new RunHost(env, step, run, {
       stepFailed,
@@ -227,6 +228,7 @@ const runWorkflow = async (
       runId,
       params: Object.fromEntries(params),
       input: event.payload,
+      collections: Object.keys(bindings),
       connections: Object.keys(connections),
       apps: Object.keys(apps),
     });
