@@ -1,4 +1,8 @@
-import { leadWaitWorkingDays, minTeamShown } from "@grasp-os/shared/onboarding";
+import {
+  leadWaitWorkingDays,
+  minTalkedShown,
+  minTeamShown,
+} from "@grasp-os/shared/onboarding";
 import type {
   Agreements,
   OnboardingProgress,
@@ -157,7 +161,9 @@ export interface TeamCount {
  * editing the roster afterwards (someone marked away, moved, removed)
  * moves no number. They count only what happened before today, so they
  * move once a day and two looks can't tell who just talked. A team shows
- * its numbers only once `minTeamShown` people in it were asked.
+ * its numbers only once `minTeamShown` people in it were asked, and how
+ * many talked only once `minTalkedShown` did: the admin controls the list,
+ * so made-up people could fill a team up to five asked.
  */
 export const progressOf = (
   roster: Roster,
@@ -191,7 +197,7 @@ export const progressOf = (
       people: roster.people.filter((person) => person.team === team.id).length,
       off: team.off,
       leadTalked: leadDone(team.lead),
-      talked: shown ? talked : null,
+      talked: shown && talked >= minTalkedShown ? talked : null,
       asked: shown ? asked : null,
     };
   });
