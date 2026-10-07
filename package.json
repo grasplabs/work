@@ -14,6 +14,7 @@
     "check:wrangler-configs": "node scripts/check-wrangler-configs.ts",
     "github:setup": "node scripts/github-setup.ts",
     "check:branch": "node scripts/check-branch-name.ts",
+    "build:jq-wasm": "node scripts/jq-wasm/build.ts",
     "check:secrets": "secretlint \"**/*\"",
     "release:build": "node scripts/release/build-release.ts",
     "release:upload": "node scripts/release/upload-release.ts"
