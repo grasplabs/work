@@ -196,6 +196,7 @@ const swatches = [
   { name: "tile", className: "bg-tile" },
   { name: "status-agreed", className: "bg-status-agreed" },
   { name: "status-attention", className: "bg-status-attention" },
+  { name: "scrim", className: "bg-scrim" },
 ];
 
 const buttonVariants = [
