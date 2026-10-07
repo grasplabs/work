@@ -6,11 +6,12 @@ import type { DependencyTarget } from "@grasp-os/shared/dependencies";
  * measured, with nothing run. The answer says every file the artifact
  * has, with its SHA-256, which core checks before keeping any of it.
  */
-import { sha512Integrity, toHex } from "@grasp-os/shared/encoding";
+import { toHex } from "@grasp-os/shared/encoding";
 import type {
   GraspLock,
   PackageArtifact,
   PackageBuildAnswer,
+  PackageInspection,
   PackageLimits,
   PackageTarball,
 } from "@grasp-os/shared/packages";
@@ -18,6 +19,7 @@ import { initialize } from "esbuild-wasm/esm/browser.js";
 
 import { assetTypes, bundle, isBuildable } from "./bundle.ts";
 import type { PackageFiles } from "./exports.ts";
+import { inspectPackage } from "./inspect.ts";
 import { TarballRefusedError } from "./refused.ts";
 import { extractTarball } from "./tarball.ts";
 
@@ -83,9 +85,92 @@ const sha256 = async (bytes: Uint8Array): Promise<string> =>
     new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes)))
   );
 
+/**
+ * Where the lock's edges for a package aren't what its own package.json
+ * asks for: the dependencies it names (optional ones left out, as when
+ * resolving) must be exactly the lock's, or the graph built isn't the
+ * graph the tarball needs.
+ */
+const lockEdgeRefusals = (
+  lock: GraspLock,
+  key: string,
+  inspection: PackageInspection
+): string[] => {
+  const entry = lock.packages[key];
+  const { manifest } = inspection;
+  if (entry === undefined || manifest === null) {
+    return entry === undefined ? ["it isn't a package of the lock"] : [];
+  }
+  const required = Object.keys(manifest.dependencies)
+    .filter((name) => !Object.hasOwn(manifest.optionalDependencies, name))
+    .toSorted();
+  const locked = Object.keys(entry.dependencies).toSorted();
+  return JSON.stringify(required) === JSON.stringify(locked)
+    ? []
+    : ["its package.json depends on other packages than the lock names"];
+};
+
+/** Whether `value` is an `exports`/`imports` target in every part. */
+const isTarget = (value: unknown, depth = 0): boolean => {
+  if (depth > 16) {
+    return false;
+  }
+  if (value === null || typeof value === "string") {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every((item) => isTarget(item, depth + 1));
+  }
+  return (
+    typeof value === "object" &&
+    Object.values(value).every((item) => isTarget(item, depth + 1))
+  );
+};
+
+/** Whether `value` is a `browser` field: a path, or paths and names to a path or `false`. */
+const isBrowserField = (value: unknown): boolean =>
+  typeof value === "string" ||
+  (typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value).every(
+      (item) => typeof item === "string" || item === false
+    ));
+
+/**
+ * Why the fields a build resolves imports by can't be read, if they
+ * can't: each is read whole or the package refused, never a malformed
+ * one skipped for a fallback (`main` wrong, so `index.js`).
+ */
+const manifestShapeRefusal = (manifest: object): string | undefined => {
+  const field = (name: string): unknown =>
+    Object.hasOwn(manifest, name) ? Reflect.get(manifest, name) : undefined;
+  const wrong = [
+    ["main", (value: unknown) => typeof value === "string"],
+    ["module", (value: unknown) => typeof value === "string"],
+    ["browser", isBrowserField],
+    ["exports", (value: unknown) => isTarget(value)],
+    [
+      "imports",
+      (value: unknown) =>
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        isTarget(value),
+    ],
+  ] as const;
+  const bad = wrong
+    .filter(([name, valid]) => field(name) !== undefined && !valid(field(name)))
+    .map(([name]) => name);
+  return bad.length === 0
+    ? undefined
+    : `its package.json's ${bad.join(", ")} can't be read`;
+};
+
 /** Each package unpacked for building, or the first reason one can't be. */
 const unpackAll = async ({
   limits,
+  lock,
   packages,
 }: BuildRequest): Promise<
   | {
@@ -99,14 +184,34 @@ const unpackAll = async ({
   const unpacked = new Map<string, PackageFiles>();
   let files = 0;
   let bytes = 0;
+  let extractedBytes = 0;
+  if (packages.length > limits.graphPackages) {
+    return {
+      ok: false,
+      refusals: [`the lock has more than ${limits.graphPackages} packages`],
+    };
+  }
   for (const pkg of packages) {
-    // One at a time: each holds its files in memory.
+    // The same checks a resolve made, again under this release's rules:
+    // an approval never makes a package the platform refuses usable.
     // oxlint-disable-next-line no-await-in-loop
-    if ((await sha512Integrity(pkg.tarball)) !== pkg.integrity) {
+    const inspection = await inspectPackage(pkg, limits);
+    const refusals = [
+      ...inspection.refusals,
+      ...lockEdgeRefusals(lock, pkg.key, inspection),
+    ];
+    if (refusals.length > 0) {
+      return {
+        ok: false,
+        refusals: refusals.map((reason) => `${pkg.key}: ${reason}`),
+      };
+    }
+    extractedBytes += inspection.bytes;
+    if (extractedBytes > limits.graphExtractedBytes) {
       return {
         ok: false,
         refusals: [
-          `${pkg.key}: its bytes aren't the ones its integrity hash names`,
+          `the packages unpack to more than ${limits.graphExtractedBytes} bytes`,
         ],
       };
     }
@@ -135,6 +240,10 @@ const unpackAll = async ({
         ok: false,
         refusals: [`${pkg.key}: its package.json can't be read`],
       };
+    }
+    const shape = manifestShapeRefusal(manifest);
+    if (shape !== undefined) {
+      return { ok: false, refusals: [`${pkg.key}: ${shape}`] };
     }
     unpacked.set(pkg.key, {
       files: extracted.files,

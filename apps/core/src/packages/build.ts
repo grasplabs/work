@@ -226,6 +226,13 @@ const lockedTarballs = async (
   lock: GraspLock,
   limits: PackageLimits
 ): Promise<PackageTarball[]> => {
+  // The count first: nothing is fetched for a lock past the limit.
+  if (Object.keys(lock.packages).length > limits.graphPackages) {
+    throw packageErrors.create("package.quota", {
+      quota: "graphPackages",
+      limit: limits.graphPackages,
+    });
+  }
   const packages: PackageTarball[] = [];
   let archiveBytes = 0;
   for (const [key, entry] of Object.entries(lock.packages)) {

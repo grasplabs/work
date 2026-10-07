@@ -164,30 +164,36 @@ const directoryMain = (
   { files }: PackageFiles,
   directory: string,
   browser: boolean
-): string | undefined => {
+): string | null | undefined => {
   const bytes = files.get(
     directory === "" ? "package.json" : `${directory}/package.json`
   );
   if (bytes === undefined || directory === "") {
     return undefined;
   }
+  // Read whole or not at all: a package.json that can't be read, or a
+  // main field of another shape or out of the package, resolves to
+  // nothing (null), never past it to an index file.
   let manifest: unknown;
   try {
     manifest = JSON.parse(utf8.decode(bytes));
   } catch {
-    return undefined;
+    return null;
   }
   if (!isRecord(manifest)) {
-    return undefined;
+    return null;
   }
   for (const field of mainFields(browser)) {
     const value = manifest[field];
-    const path =
-      typeof value === "string"
-        ? withinPackage(`${directory}/${value}`)
-        : undefined;
-    if (path !== undefined) {
-      return path;
+    if (value !== undefined && field !== "browser") {
+      const path =
+        typeof value === "string"
+          ? withinPackage(`${directory}/${value}`)
+          : undefined;
+      return path ?? null;
+    }
+    if (typeof value === "string") {
+      return withinPackage(`${directory}/${value}`) ?? null;
     }
   }
   return undefined;
@@ -212,6 +218,9 @@ export const resolveFile = (
     return found;
   }
   const main = directoryMain(pkg, path, browser);
+  if (main === null) {
+    return undefined;
+  }
   const viaMain =
     main === undefined
       ? undefined

@@ -490,6 +490,41 @@ describe("what a package's code may reach", () => {
     ]);
   });
 
+  it("refuses a package whose fields for finding its files can't be read, rather than guessing", async () => {
+    const badMain = named("bad-main");
+    const badDirectory = named("bad-directory");
+    const user = named("uses-directory");
+    await publish({
+      ...esm(badMain, { "index.js": "export const fallback = 1;" }),
+      manifest: { main: 5, license: "MIT" },
+    });
+    await publish(
+      esm(badDirectory, {
+        "index.js": 'export { x } from "./lib";',
+        "lib/package.json": '{ "main": 7 }',
+        "lib/index.js": "export const x = 1;",
+      })
+    );
+    await publish(
+      esm(
+        user,
+        { "index.js": `export * from "${badDirectory}";` },
+        { dependencies: { [badDirectory]: "1" } }
+      )
+    );
+    const main = await approvedApp({ [badMain]: "1" });
+    const directory = await approvedApp({ [user]: "1" });
+    await expect(
+      Promise.all([
+        refusalsOf(buildOf(main, "browser")),
+        refusalsOf(buildOf(directory, "browser")),
+      ])
+    ).resolves.toStrictEqual([
+      [`${badMain}@1.0.0: its package.json's main can't be read`],
+      [`${badDirectory}@1.0.0 imports ./lib, which it doesn't have`],
+    ]);
+  });
+
   it("refuses a package that exports nothing for the target", async () => {
     const cjsOnly = named("cjs-only");
     await publish(
