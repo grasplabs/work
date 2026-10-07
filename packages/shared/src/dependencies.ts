@@ -6,6 +6,7 @@ import { defineErrorFamily } from "./errors.ts";
 import { appIdSchema, identifierMaxLength } from "./ids.ts";
 import type { AppId } from "./ids.ts";
 import { canonicalJson } from "./json.ts";
+import type { DependencyIntent, GraspLock } from "./packages.ts";
 
 // npm packages an App wants to use, and a person's approval of them. An
 // agent or a builder proposes one exact graph: every package it would
@@ -482,6 +483,15 @@ export interface DependenciesApi {
    * the same request; another one for the App takes a waiting one's place.
    */
   propose: (proposal: DependencyProposal) => Promise<DependencyRequest>;
+  /**
+   * Resolves what an App's package.json asks for into an exact graph
+   * from the npm registry, checks every package's bytes without running
+   * them, and proposes it, as `propose` does: for one of its builders.
+   */
+  resolve: (intent: DependencyIntent) => Promise<{
+    request: DependencyRequest;
+    lock: GraspLock;
+  }>;
   /** How an App's dependencies stand, for its builders. */
   status: (app: string) => Promise<DependencyStatus>;
   /**

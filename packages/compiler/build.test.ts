@@ -102,6 +102,7 @@ const releaseFiles = [
   compilerAssets.kit,
   compilerAssets.kitModules,
   compilerAssets.sdkModules,
+  compilerAssets.packageBuilder,
 ].toSorted();
 
 /**
@@ -154,6 +155,7 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
         compilerAssets.kit,
         compilerAssets.kitModules,
         compilerAssets.sdkModules,
+        compilerAssets.packageBuilder,
       ].toSorted()
     );
     // The same sources are the same release, under any NODE_ENV.

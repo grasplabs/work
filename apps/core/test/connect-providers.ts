@@ -11,6 +11,7 @@
  * (workerd), so it only holds data.
  */
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
+import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { clients } from "../../connect/test/provider-config.ts";
 import { composioApiScript } from "./composio-api.ts";
 import { mailServerScript } from "./mail-server.ts";
@@ -32,6 +33,12 @@ export const consentCode = (url: URL, tenant: string, subject: string) =>
  */
 export const graphControlUrl = "https://graph-control.test/receive";
 
+/**
+ * Where tests publish a package on the fake npm registry: POST one
+ * version as connect's test/npm-registry-fake.ts takes it, as JSON.
+ */
+export const npmPublishUrl = "https://npm-control.test/publish";
+
 /** The tokens the fake issues for `subject`, to look for where they mustn't be. */
 export const tokensFor = (subject: string): string[] => [
   `access.${subject}`,
@@ -47,6 +54,7 @@ const base64Url = (bytes) =>
 const encoded = (value) =>
   base64Url(new TextEncoder().encode(JSON.stringify(value)));
 const graphEvents = (${graphEventsFake.toString()})();
+const npm = (${npmRegistryFake.toString()})();
 
 export default {
   async fetch(request) {
@@ -59,6 +67,16 @@ export default {
     }
     if (url.hostname === "graph.microsoft.com") {
       return graphEvents.answer(request, url);
+    }
+    if (url.hostname === "registry.npmjs.org") {
+      return await npm.answer(request);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(npmPublishUrl)}) {
+      const published = await request.json();
+      await npm.publish(published);
+      return Response.json({
+        integrity: npm.integrityOf(published.name, published.version),
+      });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(graphControlUrl)}) {
       const { mailbox, message } = await request.json();

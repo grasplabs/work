@@ -1,11 +1,16 @@
 import { z } from "zod";
 
 import {
+  dependencyMaxPackages,
+  dependencyTargetSchema,
   exactVersionSchema,
   integritySchema,
+  npmRegistryOrigin,
   packageNameSchema,
 } from "./dependencies.ts";
+import type { DependencyTarget } from "./dependencies.ts";
 import { defineErrorFamily } from "./errors.ts";
+import { appIdSchema } from "./ids.ts";
 
 // npm packages as the registry has them, as connect fetches them for core.
 // Connect is the only part of Grasp that talks to the registry: core asks
@@ -111,4 +116,223 @@ export const packageErrors = defineErrorFamily({
   "package.too_large": "The package is larger than Grasp takes.",
   "package.integrity_mismatch":
     "The registry sent other bytes than the package's integrity hash names.",
+  "package.unsupported_source":
+    "Packages come from the npm registry by version range only: no git, file, URL, alias or tag.",
+  "package.unresolvable":
+    "No version of a package meets what is asked of it and is at least three days old.",
+  "package.peer_conflict":
+    "A package needs another version of React, the UI kit or the SDK than the platform provides.",
+  "package.quota": "The dependencies are larger than Grasp takes.",
+  "package.refused":
+    "A package needs something Grasp doesn't run: install scripts, native code, links or files outside itself.",
 });
+
+/**
+ * How long a version must have been published before an App may newly
+ * resolve to it: the repo's own rule for its dependencies. Versions
+ * already in an App's approved lock stay usable.
+ */
+export const packageMaturityMs = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * How large an App's packages may be, from resolving to unpacking. Each is
+ * measured on what is read or produced, never on what a package or the
+ * registry says of itself. A deployment may set lower ones
+ * (`packageLimitsOf`), never higher.
+ */
+export const packageLimits = {
+  /** Longest chain of dependencies from a direct one. */
+  graphDepth: 32,
+  /** Packages in one graph. */
+  graphPackages: dependencyMaxPackages,
+  /** Tarballs of one graph together, as fetched. */
+  graphArchiveBytes: 48 * 1024 * 1024,
+  /** What one package's tarball unpacks to (gzip's output). */
+  extractedBytes: 64 * 1024 * 1024,
+  /** Entries in one package's tarball. */
+  extractedEntries: 20_000,
+  /** What a whole graph's tarballs unpack to. */
+  graphExtractedBytes: 256 * 1024 * 1024,
+  /** Longest path in a tarball, in bytes, and most segments. */
+  pathBytes: 1024,
+  pathDepth: 64,
+  /** The lock as core stores it. */
+  lockBytes: 1024 * 1024,
+} as const;
+export type PackageLimits = Record<keyof typeof packageLimits, number>;
+
+const limitNames = Object.keys(packageLimits).filter(
+  (name): name is keyof PackageLimits => Object.hasOwn(packageLimits, name)
+);
+
+/**
+ * The limits a deployment set (`PACKAGE_LIMITS`, partial), each no higher
+ * than the default: anything else is ignored.
+ */
+export const packageLimitsOf = (configured: unknown): PackageLimits => {
+  const limits: PackageLimits = { ...packageLimits };
+  if (typeof configured !== "object" || configured === null) {
+    return limits;
+  }
+  for (const name of limitNames) {
+    const value: unknown = Object.hasOwn(configured, name)
+      ? Reflect.get(configured, name)
+      : undefined;
+    if (
+      typeof value === "number" &&
+      Number.isInteger(value) &&
+      value > 0 &&
+      value < limits[name]
+    ) {
+      limits[name] = value;
+    }
+  }
+  return limits;
+};
+
+/**
+ * The export conditions each target resolves a package's `exports` by,
+ * in order: pinned in the lock, so a build reads the same files.
+ */
+export const targetConditions: Readonly<
+  Record<DependencyTarget, readonly string[]>
+> = {
+  browser: ["browser", "import", "module", "default"],
+  server: ["workerd", "worker", "import", "module", "default"],
+  workflow: ["workerd", "worker", "import", "module", "default"],
+  computation: ["workerd", "worker", "import", "module", "default"],
+};
+
+/**
+ * What an App imports from its packages: a direct dependency's name, or
+ * a subpath of it (`date-fns/format`), never a relative or absolute path.
+ */
+export const packageEntrySchema = z
+  .string()
+  .max(256)
+  .regex(
+    /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/u,
+    "a package or one of its subpaths"
+  );
+
+/** The package an entry is of: `date-fns/format` is `date-fns`'s. */
+export const entryPackage = (entry: string): string => {
+  const segments = entry.split("/");
+  return entry.startsWith("@")
+    ? segments.slice(0, 2).join("/")
+    : (segments[0] ?? entry);
+};
+
+/** What the source asks for: package.json's dependencies, and where they run. */
+export const dependencyIntentSchema = z.strictObject({
+  app: appIdSchema,
+  sourceRevision: z.string().regex(/^[\w.:-]{1,128}$/u, "a source revision"),
+  purpose: z.string().trim().min(1).max(500),
+  targets: z
+    .array(dependencyTargetSchema)
+    .min(1)
+    .refine((targets) => new Set(targets).size === targets.length, {
+      message: "Each target once",
+    }),
+  /** package.json's `dependencies`: names and ranges. */
+  dependencies: z
+    .record(packageNameSchema, z.string().min(1).max(registryLimits.textLength))
+    .refine((dependencies) => Object.keys(dependencies).length > 0, {
+      message: "At least one dependency",
+    })
+    .refine(
+      (dependencies) =>
+        Object.keys(dependencies).length <= dependencyMaxPackages,
+      { message: `At most ${dependencyMaxPackages} dependencies` }
+    ),
+  /**
+   * What the App imports of them; each direct dependency's own name
+   * unless given.
+   */
+  entries: z.array(packageEntrySchema).min(1).max(256).optional(),
+});
+export type DependencyIntent = z.input<typeof dependencyIntentSchema>;
+
+/** One package of the lock, by `name@version`. */
+const lockedPackageSchema = z.strictObject({
+  name: packageNameSchema,
+  version: exactVersionSchema,
+  integrity: integritySchema,
+  license: z.string().min(1).max(128).nullable(),
+  /** When the registry says it was published: why it was mature enough. */
+  publishedAt: z.iso.datetime({ offset: true }),
+  /** Each dependency's exact version, by name. */
+  dependencies: z.record(packageNameSchema, exactVersionSchema),
+  /**
+   * Each peer: the range it states, and what meets it, the platform's
+   * version or a package of the graph; null for an optional one unmet.
+   */
+  peers: z.record(
+    packageNameSchema,
+    z.strictObject({
+      range: z.string().min(1).max(registryLimits.textLength),
+      resolved: exactVersionSchema.nullable(),
+      by: z.enum(["platform", "graph"]).nullable(),
+    })
+  ),
+});
+export type LockedPackage = z.infer<typeof lockedPackageSchema>;
+
+/**
+ * `grasp.lock.json`: the exact graph an App's package.json resolved to.
+ * Every package by exact version and integrity, each edge and peer
+ * resolved, the platform's peers (never installed), and per target the
+ * export conditions and entries a build resolves.
+ */
+export const graspLockSchema = z.strictObject({
+  lockfileVersion: z.literal(1),
+  registry: z.literal(npmRegistryOrigin),
+  /** package.json's dependencies as they were resolved. */
+  requested: z.record(packageNameSchema, z.string()),
+  /** Each direct dependency's exact version. */
+  direct: z.record(packageNameSchema, exactVersionSchema),
+  platformPeers: z.record(packageNameSchema, exactVersionSchema),
+  targets: z.partialRecord(
+    dependencyTargetSchema,
+    z.strictObject({
+      conditions: z.array(z.string().max(32)).max(16),
+      entries: z.array(packageEntrySchema).min(1).max(256),
+    })
+  ),
+  packages: z.record(z.string(), lockedPackageSchema),
+});
+export type GraspLock = z.infer<typeof graspLockSchema>;
+
+/**
+ * What the package builder found in one tarball, unpacked in its own
+ * isolate without running anything: its package.json's own say on what
+ * it needs, and every reason it can't be used.
+ */
+export const packageInspectionSchema = z.strictObject({
+  key: z.string(),
+  /** Bytes unpacked and entries read. */
+  bytes: z.int().nonnegative(),
+  entries: z.int().nonnegative(),
+  /** What its package.json says, when it could be read. */
+  manifest: z
+    .strictObject({
+      name: z.string(),
+      version: z.string(),
+      dependencies: z.record(z.string(), z.string()),
+      optionalDependencies: z.record(z.string(), z.string()),
+      peerDependencies: z.record(z.string(), z.string()),
+    })
+    .nullable(),
+  /** Why it can't be used: empty when nothing was found. */
+  refusals: z.array(z.string().max(200)).max(16),
+});
+export type PackageInspection = z.infer<typeof packageInspectionSchema>;
+
+/** One tarball for the builder, checked against `integrity` again there. */
+export interface PackageTarball {
+  key: string;
+  name: string;
+  version: string;
+  integrity: string;
+  tarball: Uint8Array;
+}

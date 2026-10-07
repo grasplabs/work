@@ -704,6 +704,38 @@ const buildCompiler = async (): Promise<string> => {
   return chunk.code;
 };
 
+/**
+ * The package builder's module (src/packages/worker.ts), which core runs
+ * in an isolate of its own for each use. It runs without Node.js
+ * compatibility: nothing it bundles may import Node's built-ins.
+ */
+const buildPackageBuilder = async (): Promise<string> => {
+  const config: InlineConfig = {
+    configFile: false,
+    root,
+    logLevel: "warn",
+    mode: "production",
+    resolve: { conditions: ["workerd", "worker", "browser"] },
+    ssr: { noExternal: true, target: "webworker" },
+    define: production,
+    build: {
+      ssr: "src/packages/worker.ts",
+      write: false,
+      minify: true,
+      target: "es2022",
+      rolldownOptions: {
+        external: ["cloudflare:workers"],
+        output: { format: "es", codeSplitting: false },
+      },
+    },
+  };
+  const [chunk, ...rest] = chunksOf(await build(config));
+  if (chunk === undefined || rest.length > 0) {
+    throw new Error("The package builder should build to one module");
+  }
+  return chunk.code;
+};
+
 /** Modules with a version that changes with any change to them. */
 const modulesOf = (code: Record<string, string>): KitModules => ({
   version: createHash("sha256")
@@ -844,6 +876,7 @@ const buildScreenCompiler = async (
   };
   const kitJson = JSON.stringify(kit);
   const compiler = await buildCompiler();
+  const packageBuilder = await buildPackageBuilder();
   const kitModules = modulesOf(kitCode);
   const sdkModules = modulesOf(await buildSdkModules());
   // Everything a build depends on: the compiler, what it knows of the kit,
@@ -853,6 +886,7 @@ const buildScreenCompiler = async (
     .update(kitJson)
     .update(kitModules.version)
     .update(sdkModules.version)
+    .update(packageBuilder)
     .digest("hex")
     .slice(0, 16);
   writeRelease(assets, version, {
@@ -860,6 +894,7 @@ const buildScreenCompiler = async (
     [compilerAssets.kit]: kitJson,
     [compilerAssets.kitModules]: JSON.stringify(kitModules),
     [compilerAssets.sdkModules]: JSON.stringify(sdkModules),
+    [compilerAssets.packageBuilder]: packageBuilder,
   });
   // Core imports only the version; the rest it reads from its static
   // assets when it starts a build, so it never loads them otherwise. The
