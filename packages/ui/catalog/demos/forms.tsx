@@ -209,7 +209,7 @@ const SelectDemo = () => (
 const SliderDemo = () => (
   <Field>
     <FieldLabel id="demo-volume">Volume</FieldLabel>
-    <Slider defaultValue={[40]} aria-labelledby="demo-volume" />
+    <Slider defaultValue={40} aria-labelledby="demo-volume" />
   </Field>
 );
 
@@ -231,17 +231,29 @@ const ToggleDemo = () => (
 );
 
 const ToggleGroupDemo = () => (
-  <ToggleGroup defaultValue={["bold"]} aria-label="Text style">
-    <ToggleGroupItem value="bold" aria-label="Bold">
-      <BoldIcon />
-    </ToggleGroupItem>
-    <ToggleGroupItem value="italic" aria-label="Italic">
-      <ItalicIcon />
-    </ToggleGroupItem>
-    <ToggleGroupItem value="underline" aria-label="Underline">
-      <UnderlineIcon />
-    </ToggleGroupItem>
-  </ToggleGroup>
+  <div className="flex flex-col items-start gap-4">
+    <ToggleGroup defaultValue={["bold"]} aria-label="Text style">
+      <ToggleGroupItem value="bold" aria-label="Bold">
+        <BoldIcon />
+      </ToggleGroupItem>
+      <ToggleGroupItem value="italic" aria-label="Italic">
+        <ItalicIcon />
+      </ToggleGroupItem>
+      <ToggleGroupItem value="underline" aria-label="Underline">
+        <UnderlineIcon />
+      </ToggleGroupItem>
+    </ToggleGroup>
+    {/* Vertical: the up and down arrows move between its items. */}
+    <ToggleGroup
+      orientation="vertical"
+      defaultValue={["left"]}
+      aria-label="Alignment"
+    >
+      <ToggleGroupItem value="left">Left</ToggleGroupItem>
+      <ToggleGroupItem value="center">Center</ToggleGroupItem>
+      <ToggleGroupItem value="right">Right</ToggleGroupItem>
+    </ToggleGroup>
+  </div>
 );
 
 export const formDemos = {

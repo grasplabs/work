@@ -316,6 +316,24 @@ const unexpectedViolations = (
   });
 };
 
+/** Keyboard behaviour particular to a component, checked on its page. */
+const keyboardChecks: Record<string, (page: Page) => Promise<void>> = {
+  // A vertical group moves with the up and down arrows, which only works
+  // when the orientation reaches Base UI, not just the styles.
+  "toggle-group": async (page) => {
+    const alignment = page.getByRole("group", { name: "Alignment" });
+    await alignment.getByRole("button", { name: "Left" }).focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(
+      alignment.getByRole("button", { name: "Center" })
+    ).toBeFocused();
+  },
+  // A single value is one thumb.
+  slider: async (page) => {
+    await expect(page.getByRole("main").getByRole("slider")).toHaveCount(1);
+  },
+};
+
 const bodyBackground = async (page: Page): Promise<string> =>
   await page
     .locator("body")
@@ -343,6 +361,7 @@ for (const { name, heading, path } of pages) {
     if (overlay !== undefined) {
       await expectOverlayOpensAndCloses(page, overlay);
     }
+    await keyboardChecks[name]?.(page);
 
     const light = await bodyBackground(page);
     await page.emulateMedia({ colorScheme: "dark" });
