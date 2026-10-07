@@ -119,9 +119,11 @@ export const npmRegistryFake = () => {
   const paxContent = (records: Record<string, string>): string =>
     Object.entries(records)
       .map(([key, value]) => {
+        // The length counts the record's UTF-8 bytes, its own digits too.
         const body = ` ${key}=${value}\n`;
-        let length = body.length + 1;
-        while (`${length}${body}`.length !== length) {
+        const bodyBytes = encoder.encode(body).byteLength;
+        let length = bodyBytes + 1;
+        while (String(length).length + bodyBytes !== length) {
           length += 1;
         }
         return `${length}${body}`;

@@ -56,6 +56,35 @@ const outcome = async (promise: Promise<unknown>): Promise<string> => {
 
 const connect = exports.default;
 
+/**
+ * An answer streamed in `count` chunks of `size` bytes of `fill`, made
+ * only as they are read: how many were pulled, and whether the reader
+ * cancelled the rest.
+ */
+const streamed = (count: number, size: number, fill = 0x20) => {
+  const state = { pulled: 0, cancelled: false };
+  const respond = (): Response =>
+    new Response(
+      new ReadableStream<Uint8Array>(
+        {
+          pull: (controller) => {
+            if (state.pulled === count) {
+              controller.close();
+              return;
+            }
+            state.pulled += 1;
+            controller.enqueue(new Uint8Array(size).fill(fill));
+          },
+          cancel: () => {
+            state.cancelled = true;
+          },
+        },
+        { highWaterMark: 0 }
+      )
+    );
+  return { state, respond };
+};
+
 /** An answer whose connection is lost after its first bytes. */
 const broken = (): Response =>
   new Response(
@@ -271,6 +300,76 @@ describe("a package's metadata", () => {
       "package.registry_unavailable",
       "package.registry_unavailable",
     ]);
+  });
+
+  it("stops pulling a streamed answer once it passes the limit, and cancels the rest", async () => {
+    await registry.publish(leftPad);
+    const integrity = registry.integrityOf("left-pad", "1.3.0") ?? "";
+    const chunk = 1024 * 1024;
+    const metadata = streamed(registryLimits.metadataBytes / chunk + 40, chunk);
+    const tarball = streamed(registryLimits.archiveBytes / chunk + 40, chunk);
+    registry.override("/left-pad", metadata.respond);
+    registry.override(
+      registry.tarballPath("left-pad", "1.3.0"),
+      tarball.respond
+    );
+    const outcomes = [
+      await outcome(connect.npmMetadata("left-pad")),
+      await outcome(
+        connect.npmTarball({ name: "left-pad", version: "1.3.0", integrity })
+      ),
+    ];
+    expect({
+      outcomes,
+      metadata: metadata.state,
+      tarball: tarball.state,
+    }).toStrictEqual({
+      outcomes: ["package.too_large", "package.too_large"],
+      // The chunk that crossed the limit is the last one read.
+      metadata: {
+        pulled: registryLimits.metadataBytes / chunk + 1,
+        cancelled: true,
+      },
+      tarball: {
+        pulled: registryLimits.archiveBytes / chunk + 1,
+        cancelled: true,
+      },
+    });
+  });
+
+  it("passes on only the newest versions when a package has more than it keeps", async () => {
+    const count = registryLimits.versions + 25;
+    const day = 24 * 60 * 60 * 1000;
+    const start = Date.parse("2020-01-01T00:00:00.000Z");
+    const versions: Record<string, unknown> = {};
+    const time: Record<string, string> = {};
+    // Listed newest first, so keeping the registry's first ones would be
+    // the wrong ones.
+    for (let index = count - 1; index >= 0; index -= 1) {
+      const version = `1.0.${index}`;
+      versions[version] = {
+        name: "many",
+        version,
+        dist: { integrity: `sha512-${"A".repeat(86)}==` },
+      };
+      time[version] = new Date(start + index * day).toISOString();
+    }
+    const body = JSON.stringify({ name: "many", versions, time });
+    expect(new TextEncoder().encode(body).byteLength).toBeLessThan(
+      registryLimits.metadataBytes
+    );
+    registry.override("/many", () => new Response(body));
+    const metadata = await connect.npmMetadata("many");
+    const kept = metadata.versions.map(({ version }) => version);
+    expect({
+      count: kept.length,
+      oldestKept: kept.includes("1.0.25"),
+      newestDropped: kept.includes("1.0.24"),
+    }).toStrictEqual({
+      count: registryLimits.versions,
+      oldestKept: true,
+      newestDropped: false,
+    });
   });
 
   it("stops reading metadata past its limit, whatever Content-Length says", async () => {

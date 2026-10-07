@@ -310,6 +310,69 @@ const packumentSchema = z.looseObject({
 });
 
 /**
+ * The `registryLimits.versions` keys newest by `published` (an ISO time;
+ * "" for none, the oldest), chosen in one pass with a min-heap of at most
+ * that many: never the whole list sorted.
+ */
+const newestKeys = (
+  keys: readonly string[],
+  published: (key: string) => string
+): Set<string> => {
+  const limit = registryLimits.versions;
+  if (keys.length <= limit) {
+    return new Set(keys);
+  }
+  const heap: { key: string; at: string }[] = [];
+  const less = (a: number, b: number): boolean =>
+    (heap[a]?.at ?? "") < (heap[b]?.at ?? "");
+  const swap = (a: number, b: number): void => {
+    const first = heap[a];
+    const second = heap[b];
+    if (first !== undefined && second !== undefined) {
+      heap[a] = second;
+      heap[b] = first;
+    }
+  };
+  const down = (from: number): void => {
+    let at = from;
+    for (;;) {
+      const left = at * 2 + 1;
+      const right = left + 1;
+      let smallest = at;
+      if (left < heap.length && less(left, smallest)) {
+        smallest = left;
+      }
+      if (right < heap.length && less(right, smallest)) {
+        smallest = right;
+      }
+      if (smallest === at) {
+        return;
+      }
+      swap(at, smallest);
+      at = smallest;
+    }
+  };
+  for (const key of keys) {
+    const at = published(key);
+    if (heap.length < limit) {
+      heap.push({ key, at });
+      for (let child = heap.length - 1; child > 0;) {
+        const parent = Math.floor((child - 1) / 2);
+        if (!less(child, parent)) {
+          break;
+        }
+        swap(child, parent);
+        child = parent;
+      }
+    } else if (at > (heap[0]?.at ?? "")) {
+      heap[0] = { key, at };
+      down(0);
+    }
+  }
+  return new Set(heap.map(({ key }) => key));
+};
+
+/**
  * A package's metadata, from the registry, as core resolves with it. A
  * version whose metadata can't be read as npm's (a name or range that
  * isn't one, another package's name, a key that isn't its version) is
@@ -338,22 +401,27 @@ export const npmMetadata = async (input: unknown): Promise<NpmMetadata> => {
     throw packageErrors.create("package.registry_unavailable");
   }
   const { versions, time } = packument.data;
+  const published = (key: string): string => {
+    const at = time?.[key];
+    return typeof at === "string" ? at : "";
+  };
+  // Only the newest versions by publication are read at all: chosen while
+  // scanning the keys, in a heap of at most that many, before any version
+  // is parsed. The registry's order is kept for those passed on.
+  const chosen = newestKeys(Object.keys(versions), published);
   const kept: NpmVersion[] = [];
   let dropped = 0;
   for (const [key, value] of Object.entries(versions)) {
+    if (!chosen.has(key)) {
+      continue;
+    }
     const entry = registryVersionSchema.safeParse(value);
     if (
       entry.success &&
       entry.data.name === name &&
       entry.data.version === key
     ) {
-      const published = time?.[key];
-      kept.push(
-        toVersion(
-          entry.data,
-          typeof published === "string" ? published : undefined
-        )
-      );
+      kept.push(toVersion(entry.data, published(key) || undefined));
     } else {
       dropped += 1;
     }
@@ -361,16 +429,7 @@ export const npmMetadata = async (input: unknown): Promise<NpmMetadata> => {
   if (dropped > 0) {
     log.info("npm.versions_dropped", { package: name, dropped });
   }
-  // The newest by publication, when there are more than are passed on.
-  const newest =
-    kept.length > registryLimits.versions
-      ? kept
-          .toSorted((a, b) =>
-            (b.publishedAt ?? "").localeCompare(a.publishedAt ?? "")
-          )
-          .slice(0, registryLimits.versions)
-      : kept;
-  return npmMetadataSchema.parse({ name, versions: newest });
+  return npmMetadataSchema.parse({ name, versions: kept });
 };
 
 /**
