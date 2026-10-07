@@ -49,6 +49,13 @@ const shifting = (later: unknown): unknown => {
   };
 };
 
+/** An object whose `value` getter answers `value`, from its first read. */
+const hostileFirst = (value: unknown): unknown => ({
+  get value(): unknown {
+    return value;
+  },
+});
+
 /** The expression error code `promise` fails with, if any. */
 const codeOf = async (promise: Promise<unknown>) =>
   expressionErrors.codeOf(
@@ -308,38 +315,76 @@ describe("hostile values", () => {
     );
   });
 
-  it("checks the values jq gets, not what a getter answered first", async () => {
+  it("reads each getter once, so what it checks is what jq gets", async () => {
     let deep: unknown = 0;
     for (let level = 0; level < 40; level += 1) {
       deep = [deep];
     }
     expect({
+      // A getter that would answer differently later is read once.
       deepLater: await run(".", { input: unchecked(shifting(deep)) }),
       protoLater: await run(".", {
         input: unchecked(shifting(JSON.parse('{"__proto__": {"x": 1}}'))),
       }),
+      deepFirst: await run(".", { input: unchecked(hostileFirst(deep)) }),
+      protoFirst: await run(".", {
+        input: unchecked(hostileFirst(JSON.parse('{"__proto__": {"x": 1}}'))),
+      }),
     }).toStrictEqual({
-      deepLater: { error: "expression.context_invalid" },
-      protoLater: { error: "expression.context_invalid" },
+      deepLater: { result: { value: 1 } },
+      protoLater: { result: { value: 1 } },
+      deepFirst: { error: "expression.context_invalid" },
+      protoFirst: { error: "expression.context_invalid" },
     });
   });
 
-  it("refuses a context that throws or changes while it is read, without its message", async () => {
+  it("refuses shared references that would blow up, before any other work", async () => {
+    // 31 arrays in memory, 2^31 leaves to write.
+    let doubling: unknown = 0;
+    for (let level = 0; level < 31; level += 1) {
+      doubling = [doubling, doubling];
+    }
+    // One wide object, shared by every member of another.
+    const wide = Object.fromEntries(
+      Array.from({ length: 10_000 }, (_, index) => [`k${index}`, undefined])
+    );
+    const sharing = Object.fromEntries(
+      Array.from({ length: 10_000 }, (_, index) => [`s${index}`, wide])
+    );
+    const mebibyte = 1024 * 1024;
+    expect({
+      doubling: await run(".", { input: unchecked(doubling) }),
+      doublingAsAVariable: await run("1", {
+        variables: { context: unchecked(doubling) },
+      }),
+      wide: await run(".", { input: unchecked(sharing) }),
+      underTheBudget: await run("length", {
+        input: "x".repeat(mebibyte - 1024),
+      }),
+    }).toStrictEqual({
+      doubling: { error: "expression.context_too_large" },
+      doublingAsAVariable: { error: "expression.context_too_large" },
+      wide: { error: "expression.context_too_large" },
+      underTheBudget: { result: mebibyte - 1024 },
+    });
+  });
+
+  it("refuses a context that throws while it is read, without its message", async () => {
     const secret = "getter-secret-51c9";
     const throwing = {
       get value(): unknown {
         throw new Error(secret);
       },
     };
-    let reads = 0;
-    const throwingLater = {
-      get value(): unknown {
-        reads += 1;
-        if (reads > 1) {
-          throw new Error(secret);
-        }
-        return 1;
-      },
+    const throwingDeeper = {
+      list: [
+        1,
+        {
+          get value(): unknown {
+            throw new Error(secret);
+          },
+        },
+      ],
     };
     const proxy = new Proxy(
       {},
@@ -356,9 +401,7 @@ describe("hostile values", () => {
     });
     const outcomes = {
       throwing: await run(".", { input: unchecked(throwing) }),
-      throwingWhenSerialised: await run(".", {
-        input: unchecked(throwingLater),
-      }),
+      throwingDeeper: await run(".", { input: unchecked(throwingDeeper) }),
       proxy: await run(".", { input: unchecked(proxy) }),
       inAVariable: await run("1", { variables: { context: unchecked(proxy) } }),
     };
@@ -379,7 +422,7 @@ describe("hostile values", () => {
     }).toStrictEqual({
       outcomes: {
         throwing: { error: "expression.context_invalid" },
-        throwingWhenSerialised: { error: "expression.context_invalid" },
+        throwingDeeper: { error: "expression.context_invalid" },
         proxy: { error: "expression.context_invalid" },
         inAVariable: { error: "expression.context_invalid" },
       },

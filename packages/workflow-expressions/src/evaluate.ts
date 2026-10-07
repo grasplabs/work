@@ -2,6 +2,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
+import { writeJson, writeJsonArray } from "./bounded-json.ts";
 import { expressionError, expressionErrors } from "./errors.ts";
 import type { ExpressionSite } from "./errors.ts";
 import { runJq } from "./jq.ts";
@@ -502,11 +503,19 @@ const checkContract = async (
   let same: boolean;
   try {
     const accepted = acceptedValue(await read.validate(JSON.parse(snapshot)));
-    const value: unknown = accepted?.value;
-    same =
-      accepted !== undefined &&
-      isAcceptedJson(value, 0, true) &&
-      canonicalJson(value) === snapshot;
+    // The schema's answer is caller data: written with the same bounds,
+    // and no bigger than the snapshot it must equal.
+    const answer =
+      accepted === undefined
+        ? undefined
+        : writeJson(accepted.value, {
+            maxBytes: utf8Bytes(snapshot),
+            maxDepth: evaluatorLimits.maxJsonDepth,
+            maxNodes: evaluatorLimits.maxResultBytes,
+            sortKeys: true,
+            safeIntegers: true,
+          });
+    same = answer?.ok === true && answer.text === snapshot;
   } catch {
     // A schema that throws accepts nothing; its message isn't passed on.
     same = false;
@@ -565,21 +574,28 @@ const contextText = <S extends Stage>(
       "expression.context_invalid",
       "Pass plain JSON at most 32 levels deep, with finite numbers and no __proto__ keys."
     );
-  // Refuses what isn't JSON at all (functions, dates, NaN, cycles), which
-  // JSON.stringify would otherwise turn into something that is.
-  if (!values.every((value) => isAcceptedJson(value, 0, false))) {
+  // One bounded pass writes the text jq gets and checks it is plain JSON:
+  // shared references (`[v, v]` nested) can't make it visit more than the
+  // budget, and a getter is read once, so what is checked is what is sent.
+  const written = writeJsonArray(values, {
+    maxBytes: evaluatorLimits.maxContextBytes,
+    maxDepth: evaluatorLimits.maxJsonDepth,
+    maxNodes: evaluatorLimits.maxContextBytes,
+    sortKeys: false,
+    safeIntegers: false,
+  });
+  if (!written.ok) {
+    if (written.refusal === "too_large") {
+      fail(
+        site,
+        "expression.context_too_large",
+        "Keep the input and variables under 1 MiB together."
+      );
+    }
     invalidContext();
   }
-  const stdin = JSON.stringify(values);
-  if (utf8Bytes(stdin) > evaluatorLimits.maxContextBytes) {
-    fail(
-      site,
-      "expression.context_too_large",
-      "Keep the input and variables under 1 MiB together."
-    );
-  }
-  // Checks the text jq gets, not the values it came from: a getter can
-  // answer differently the second time it is read. The array adds a level.
+  const stdin = written.ok ? written.text : "";
+  // The text is at most 1 MiB, so checking it again is bounded too.
   if (jsonTextDepth(stdin) > evaluatorLimits.maxJsonDepth + 1) {
     invalidContext();
   }
