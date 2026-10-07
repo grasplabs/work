@@ -52,7 +52,6 @@ type Caller = { userId: string; token: string };
 const LABEL: string = "${label}";
 let count = 0;
 let kept: Caller | undefined;
-let mailed = "not yet";
 
 export class App extends DurableObject {
   label(): string {
@@ -106,8 +105,35 @@ export class App extends DurableObject {
     return {
       fetch: await outcome(fetch("https://example.com/")),
       request: await outcome(fetch(new Request("http://10.0.0.1/"))),
+      metadata: await outcome(fetch("http://169.254.169.254/latest/meta-data/")),
+      loopback: await outcome(fetch("http://127.0.0.1:8787/")),
+      ipv6: await outcome(fetch("http://[::1]/")),
+      localhost: await outcome(fetch("http://localhost/")),
       cache: await outcome(caches.default.put("https://example.com/", new Response("x"))),
+      cacheRead: await outcome(caches.default.match("https://example.com/")),
+      cacheOpen: await outcome(caches.open("other").then((cache) => cache.put("https://example.com/", new Response("x")))),
+      cacheOpenRead: await outcome(caches.open("other").then((cache) => cache.match("https://example.com/"))),
     };
+  }
+
+  async platform(): Promise<Record<string, unknown>> {
+    const global = globalThis as Record<string, unknown>;
+    const processEnv = (global.process as { env?: object } | undefined)?.env;
+    return {
+      fromStrings: [
+        await outcome((async () => eval("import('cloudflare:sockets')"))()),
+        await outcome((async () => new Function("return import('node:net')")())()),
+      ],
+      processEnv: Object.keys(processEnv ?? {}),
+      require: typeof global.require,
+      bindingsInGlobals: Object.keys(global).filter((name) => /^[A-Z][A-Z0-9_]+$/.test(name)),
+    };
+  }
+
+  async writeLater(caller: Caller, wait: (caller: Caller) => Promise<void>, note: string): Promise<string> {
+    await wait(caller);
+    this.remember(caller, note);
+    return await this.mail(caller);
   }
 
   async mail(caller: Caller, as?: unknown): Promise<string> {
@@ -130,12 +156,7 @@ export class App extends DurableObject {
 
   async mailLater(caller: Caller, wait: (caller: Caller) => Promise<void>): Promise<string> {
     await wait(caller);
-    mailed = await this.mail(caller);
-    return mailed;
-  }
-
-  mailed(): string {
-    return mailed;
+    return await this.mail(caller);
   }
 
   keep(caller: Caller): string {
@@ -332,11 +353,60 @@ describe("App server code", { timeout: 60_000 }, () => {
       .record(z.string(), z.string())
       .parse(await callApp(env, app, as(builder.userId), "reachOut"));
     const blocked = "not permitted to access the internet";
+    const noCache = "No Cache was configured";
+    const { cache, cacheRead, cacheOpen, cacheOpenRead, ...fetches } = reachOut;
     expect({
-      fetch: reachOut.fetch?.includes(blocked),
-      request: reachOut.request?.includes(blocked),
-      cache: reachOut.cache !== undefined && reachOut.cache !== "ok",
-    }).toStrictEqual({ fetch: true, request: true, cache: true });
+      fetches: Object.fromEntries(
+        Object.entries(fetches).map(([name, ended]) => [
+          name,
+          ended.includes(blocked),
+        ])
+      ),
+      caches: [cache, cacheRead, cacheOpen, cacheOpenRead].map(
+        (ended) => ended?.includes(noCache) ?? false
+      ),
+    }).toStrictEqual({
+      // The internet, the cloud's metadata address, a private network,
+      // and the host itself, by name and by address.
+      fetches: {
+        fetch: true,
+        request: true,
+        metadata: true,
+        loopback: true,
+        ipv6: true,
+        localhost: true,
+      },
+      // The default cache and one it names: neither is there to keep or
+      // read anything, so nothing one App caches reaches another.
+      caches: [true, true, true, true],
+    });
+  });
+
+  it("can't make code from strings, or find a secret or binding outside its env", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const evalRefused = "Code generation from strings disallowed";
+    const platform = z
+      .object({
+        fromStrings: z.array(z.string()),
+        processEnv: z.array(z.string()),
+        require: z.string(),
+        bindingsInGlobals: z.array(z.string()),
+      })
+      .parse(await callApp(env, app, as(builder.userId), "platform"));
+    expect({
+      ...platform,
+      // `eval` and `new Function` would import what the build refuses
+      // (`cloudflare:sockets`, `node:net`).
+      fromStrings: platform.fromStrings.map((ended) =>
+        ended.includes(evalRefused)
+      ),
+    }).toStrictEqual({
+      fromStrings: [true, true],
+      processEnv: [],
+      require: "undefined",
+      bindingsInGlobals: [],
+    });
   });
 
   it("has only its own granted connections in its env, never core's bindings", async () => {
@@ -622,7 +692,7 @@ describe("App server code", { timeout: 60_000 }, () => {
     });
   });
 
-  it("can't keep acting for a caller by holding a call open", async () => {
+  it("can't keep acting or writing by holding a call open past its time", async () => {
     const admin = await personApi("admin");
     const app = await sampleApp(admin);
     await requestGranted(idp, admin, outlook(app));
@@ -630,27 +700,43 @@ describe("App server code", { timeout: 60_000 }, () => {
     await callApp(env, app, caller, "label");
 
     // A busy loop ends at the CPU limit, which the platform enforces and
-    // workerd doesn't; a call that waits too long is given up on.
-    const held = gate();
-    const holding = outcome(
-      callApp(env, app, caller, "mailLater", [held.wait])
+    // workerd doesn't; a call that waits too long is given up on, and the
+    // App's code it waits in is stopped.
+    const late = gate();
+    const lateCall = outcome(
+      callApp(env, app, caller, "writeLater", [late.wait, "late"])
     );
-    await held.entered;
-    const timedOut = await holding;
-    const meanwhile = await callApp(env, app, caller, "mail");
-    // The held call goes on in the App, but its caller has stopped working.
-    held.release();
-    const mailedAfter = await vi.waitFor(async () => {
-      const mailed = await callApp(env, app, caller, "mailed");
-      if (mailed === "not yet") {
-        throw new Error("The held call hasn't mailed yet");
-      }
-      return mailed;
-    }, 10_000);
-    expect({ timedOut, meanwhile, mailedAfter }).toStrictEqual({
+    await late.entered;
+    // Another call in the same code meanwhile, which stops with it.
+    const alongside = gate();
+    const alongsideCall = outcome(
+      callApp(env, app, caller, "writeLater", [alongside.wait, "alongside"])
+    );
+    await alongside.entered;
+    const timedOut = await lateCall;
+
+    // A call after it runs on code started afresh. All three are let go
+    // at once: what the first two would write and mail, the third does.
+    const after = gate();
+    const afterCall = callApp(env, app, caller, "writeLater", [
+      after.wait,
+      "after",
+    ]);
+    await after.entered;
+    late.release();
+    alongside.release();
+    after.release();
+    const afterAnswer = await afterCall;
+    expect({
+      timedOut,
+      alongsideAnswered: (await alongsideCall) === reached,
+      afterAnswer,
+      notes: await callApp(env, app, caller, "notes"),
+    }).toStrictEqual({
       timedOut: "app.timed_out",
-      meanwhile: reached,
-      mailedAfter: "app.caller_invalid",
+      alongsideAnswered: false,
+      afterAnswer: reached,
+      notes: ["after"],
     });
   });
 
@@ -790,6 +876,79 @@ export default class extends WorkerEntrypoint {
         result.includes("not permitted to access the internet")
       )
     ).toStrictEqual([true, true, true, true]);
+  });
+
+  it("can't import a module that reaches past its env, however it names it", async () => {
+    // Each loaded by the App's server code, as a file of its own.
+    const reachesOut = {
+      sockets:
+        'import { connect } from "cloudflare:sockets";\nexport const open = connect;\n',
+      net: 'import net from "node:net";\nexport default net;\n',
+      processes: 'export { spawn } from "node:child_process";\n',
+      email: 'export { EmailMessage } from "cloudflare:email";\n',
+      named:
+        "export const load = async (name: string) => await import(name);\n",
+      required: 'export const net = require("node:net");\n',
+    };
+    const builds = await Promise.all(
+      Object.values(reachesOut).map(
+        async (probe) =>
+          await buildServer(env, {
+            "app/server.ts":
+              'export * from "./probe.ts";\nexport class App {}\n',
+            "app/probe.ts": probe,
+          })
+      )
+    );
+    expect(
+      builds.map((build) =>
+        build.ok ? "built" : build.diagnostics.map(({ file }) => file)
+      )
+    ).toStrictEqual(builds.map(() => ["app/probe.ts"]));
+  });
+
+  it("is inspected without running any of its code in core, or reaching out as it is", async () => {
+    const builder = await personApi("builder");
+    const { id } = await builder.api.apps.create({ name: "Inspected" });
+    // As each module loads: a mark on the global scope it runs in, and a
+    // try at the network, whose outcome the workflow's parameter shows.
+    const marks = `const global = globalThis as Record<string, unknown>;
+global.graspInspected = true;
+`;
+    const files = {
+      "app/server.ts": `${marks}export class App {}\n`,
+      "workflows/probe.ts": `import { text, workflow, z } from "@grasp-os/sdk/workflow";
+
+${marks}const reached = await fetch("https://example.com/").then(
+  () => "reached",
+  (error: unknown) => String(error).slice(0, 150)
+);
+
+export default workflow(
+  "probe",
+  { input: z.unknown(), params: { reached: text({ label: reached, default: "" }) } },
+  async (step) => await step.do("one", { description: "One" }, async () => 1)
+);
+`,
+      "workflows/probe.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+
+import definition from "./probe.ts";
+
+export default workflowTests(definition, [{ name: "runs", mocks: { one: 1 }, expect: { output: 1 } }]);
+`,
+    };
+    Reflect.deleteProperty(globalThis, "graspInspected");
+    // Built, its workflows' tests run, and their parameters read.
+    await serverBuilt(id, await release(builder, id, files));
+    const params = await builder.api.workflows.params.list(id, "probe");
+    expect({
+      inCore: Object.hasOwn(globalThis, "graspInspected"),
+      // It ran, in an isolate of its own: no I/O as a module loads, and
+      // no network after.
+      reached: params.map(({ label }) =>
+        label.includes("Disallowed operation called within global scope")
+      ),
+    }).toStrictEqual({ inCore: false, reached: [true] });
   });
 
   it("runs nothing without a current version that builds, and builds it once", async () => {

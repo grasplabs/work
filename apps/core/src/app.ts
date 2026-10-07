@@ -324,6 +324,16 @@ interface RunningCall {
   readOnly: boolean;
 }
 
+/**
+ * The code an App's facet runs: its version, which read of the current
+ * version chose it (see `App.#facet`), and its class once loaded.
+ */
+interface ServerCode {
+  version: number;
+  read: number;
+  loaded: Promise<DurableObjectClass>;
+}
+
 /** The App's current version: the one that runs. */
 const currentVersion = async (env: Env, app: AppId): Promise<number> => {
   const { currentVersion: version } = await findApp(env, app);
@@ -392,9 +402,7 @@ export class App extends DurableObject<Env> {
    * The code the facet runs: its version, which read of the current
    * version chose it (see `#facet`), and its class once loaded.
    */
-  #server:
-    | { version: number; read: number; loaded: Promise<DurableObjectClass> }
-    | undefined;
+  #server: ServerCode | undefined;
 
   /** How many times a call has read the current version. */
   #reads = 0;
@@ -460,8 +468,10 @@ export class App extends DurableObject<Env> {
    * Answers plain data only.
    *
    * A call that isn't answered in time gets `app.timed_out`, and its
-   * caller stops working at once. The App's code keeps running for the
-   * other calls: it is one facet, shared by them all.
+   * caller stops working at once. Once its method was handed to the
+   * App's code, that code is stopped too (`#overran`), so it can't go on
+   * writing the App's data after the call ended: it is one facet, shared
+   * by all the App's calls, so calls running in it alongside fail with it.
    *
    * A call from another App's code through an export (`via`, from
    * app-calls.ts) runs only on the version core checked it against, ends
@@ -493,6 +503,8 @@ export class App extends DurableObject<Env> {
     };
     this.#calls.set(token, call);
     let version: number | undefined;
+    /** The code the method was handed to, once it was: see `#overran`. */
+    let ranOn: ServerCode | undefined;
     const run = async (): Promise<AppAnswer> => {
       const read = this.#nextRead();
       const current = await currentVersion(this.env, this.#app);
@@ -512,6 +524,7 @@ export class App extends DurableObject<Env> {
       }
       // What the App's stub calls in this call are audited with.
       this.#calls.set(token, { ...call, version });
+      ranOn = this.#server;
       return await invokeServer(
         running.facet,
         { ...shown, token } satisfies AppCaller,
@@ -536,6 +549,9 @@ export class App extends DurableObject<Env> {
     try {
       outcome = await Promise.race([settled(), whenAborted(limit.signal)]);
     } catch {
+      if (ranOn !== undefined) {
+        await this.#overran(ranOn);
+      }
       throw appErrors.create("app.timed_out", {
         version: version ?? null,
         method,
@@ -891,6 +907,36 @@ export class App extends DurableObject<Env> {
   async restart(reason: string): Promise<void> {
     await this.ctx.storage.put(generationKey, (await this.#generation()) + 1);
     this.#stop(reason);
+  }
+
+  /**
+   * Stops the App's code after a call in it ran past its time, as a
+   * restart does: a token stops working when its call ends, but the code
+   * would otherwise go on, and its database is its own, so a timed-out
+   * method could still write once nobody waits for it. Only while
+   * `ranOn`, the code the call ran on, is still the code that runs:
+   * another call that ran over in it already stopped it, and a newer
+   * version may have started since. Stopped before anything is awaited,
+   * so nothing started meanwhile is stopped with it. Then a new
+   * generation, so the next call starts a new isolate, with none of the
+   * module state the method left behind.
+   */
+  async #overran(ranOn: ServerCode): Promise<void> {
+    if (this.#server !== ranOn) {
+      return;
+    }
+    this.#stop("A call to the App ran past its time.");
+    try {
+      await this.ctx.storage.put(generationKey, (await this.#generation()) + 1);
+    } catch (error) {
+      // The code is stopped all the same: without the new generation, the
+      // next call may get the same isolate back, with its module state,
+      // but none of the stopped call's work goes on in it.
+      log.error("app.restart_failed", {
+        appId: this.#app,
+        errorName: errorNameOf(error),
+      });
+    }
   }
 
   async #generation(): Promise<number> {
