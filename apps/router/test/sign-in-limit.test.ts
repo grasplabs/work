@@ -265,3 +265,94 @@ describe("guest chat rate limit", () => {
     expect(response.status).toBe(200);
   });
 });
+
+/** An interview page's request to core, through the router. */
+const interviewFrom = async (
+  ip: string,
+  url: string,
+  limiter: RateLimit
+): Promise<Response> =>
+  await worker.fetch(
+    new Request(url, {
+      method: "POST",
+      headers: { "cf-connecting-ip": ip },
+      body: "{}",
+    }),
+    {
+      ...env,
+      INTERVIEW_RATE_LIMIT: limiter,
+      GUEST_RATE_LIMIT: limiterAllowing(1000),
+      AUTH_RATE_LIMIT: limiterAllowing(1000),
+    }
+  );
+
+describe("interview link rate limit", () => {
+  const cores = fakeCores();
+
+  beforeAll(async () => {
+    const admin = await routerKeyAdmin();
+    await admin.create(testRouterKey);
+    const core = { coreUrl: "https://grasp-os-core.acme.workers.dev" };
+    await Promise.all([
+      mapHost("acme.interview.test", {
+        ...core,
+        clientId: "acme",
+        generation: 1,
+      }),
+      mapHost("beta.interview.test", {
+        ...core,
+        clientId: "beta",
+        generation: 1,
+      }),
+    ]);
+  });
+
+  it("limits an interview link's endpoint per hostname and client address, without reaching core", async () => {
+    const limiter = limiterAllowing(2);
+    const interview = "https://acme.interview.test/api/interview";
+    const statuses = [
+      await interviewFrom("192.0.2.21", interview, limiter),
+      await interviewFrom("192.0.2.21", interview, limiter),
+      await interviewFrom("192.0.2.21", interview, limiter),
+      // The same /64 counts as one address.
+      await interviewFrom("2001:db8:8:8::1", interview, limiter),
+      await interviewFrom("2001:db8:8:8::2", interview, limiter),
+      await interviewFrom("2001:db8:8:8::3", interview, limiter),
+      await interviewFrom("192.0.2.22", interview, limiter),
+      await interviewFrom(
+        "192.0.2.21",
+        "https://beta.interview.test/api/interview",
+        limiter
+      ),
+    ].map(({ status }) => status);
+    expect(statuses).toStrictEqual([200, 200, 429, 200, 200, 429, 200, 200]);
+    expect(
+      cores.received.filter(
+        ({ url }) => new URL(url).pathname === "/api/interview"
+      )
+    ).toHaveLength(6);
+  });
+
+  it("limits nothing else by it", async () => {
+    const none = limiterAllowing(0);
+    const others = await Promise.all(
+      ["/", "/interview", "/api/interviews", "/api/guest"].map(async (path) => {
+        const response = await interviewFrom(
+          "192.0.2.23",
+          `https://acme.interview.test${path}`,
+          none
+        );
+        return response.status;
+      })
+    );
+    expect(others).toStrictEqual([200, 200, 200, 200]);
+  });
+
+  it("counts with the rate limiter binding it's deployed with", async () => {
+    const response = await exports.default.fetch(
+      "https://acme.interview.test/api/interview",
+      { method: "POST", headers: { "cf-connecting-ip": "192.0.2.24" } }
+    );
+    expect(response.status).toBe(200);
+  });
+});

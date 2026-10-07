@@ -4,6 +4,10 @@ import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { internalErrors, requestErrors } from "@grasp-os/shared/errors";
 import { guestApiPath } from "@grasp-os/shared/guests";
 import { requestIdHeader } from "@grasp-os/shared/http";
+import {
+  interviewApiPath,
+  interviewPagePath,
+} from "@grasp-os/shared/interview-links";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
@@ -18,6 +22,7 @@ import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
+import { interviewResponse } from "./onboarding/links.ts";
 import { platformUpdateResponse } from "./platform-updates.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
@@ -74,6 +79,11 @@ const route = async (
   if (pathname === guestApiPath) {
     return await guestResponse(request, env, requestId);
   }
+  // Someone's own interview link, which has no session either: the link's
+  // secret and the device's key in the body (src/onboarding/links.ts).
+  if (pathname === interviewApiPath) {
+    return await interviewResponse(request, env, requestId);
+  }
   if (pathname === errorReportPath) {
     return await errorReportResponse(request, env, requestId);
   }
@@ -92,7 +102,15 @@ const route = async (
     );
   }
   // The frontend's files; unknown paths get index.html (single-page app).
-  return await env.ASSETS.fetch(request);
+  const page = await env.ASSETS.fetch(request);
+  if (pathname !== interviewPagePath) {
+    return page;
+  }
+  // The interview's page carries its link's secret: no referrer, whatever
+  // it links to.
+  const kept = new Response(page.body, page);
+  kept.headers.set("referrer-policy", "no-referrer");
+  return kept;
 };
 
 /** A response, and what the request's log line says about it. */

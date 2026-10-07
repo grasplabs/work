@@ -67,6 +67,39 @@ export const links = sqliteTable("links", {
   sentAt: text("sent_at").notNull(),
   openedAt: text("opened_at"),
   remindedAt: text("reminded_at"),
+  /**
+   * The SHA-256 (hex) of the key of the device that opened the link
+   * first: only that device opens the interview after. None before any
+   * did, or since staff gave them a new start.
+   */
+  keyMark: text("key_mark"),
+  /** When they deleted their interview: a copy left open can't save it back. */
+  deletedAt: text("deleted_at"),
+});
+
+/**
+ * What each person's link is made from: a random id of its own, which
+ * core's key turns into the link's secret (onboarding/links.ts), and the
+ * SHA-256 (hex) of that secret, which a request's is looked up by. The
+ * secret itself is kept nowhere. Made when someone is added to the
+ * roster, gone when they leave it, so someone added back gets a new link.
+ */
+export const linkCodes = sqliteTable("link_codes", {
+  person: text().primaryKey(),
+  linkId: text("link_id").notNull(),
+  mark: text().notNull().unique(),
+});
+
+/**
+ * What was said in each interview, as the person's page last saved it,
+ * and the version it was saved as. Only the device the link opened on
+ * reads it back, and Grasp's staff.
+ */
+export const interviews = sqliteTable("interviews", {
+  person: text().primaryKey(),
+  version: integer().notNull(),
+  progress: text().notNull(),
+  updatedAt: text("updated_at").notNull(),
 });
 
 /**
