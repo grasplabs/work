@@ -24,6 +24,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { expressionErrors } from "../src/errors.ts";
 import { compileExpression, evaluateExpression } from "../src/evaluate.ts";
+import type { ResultContract } from "../src/evaluate.ts";
 import jqModule from "../src/jq.wasm";
 import { resolveEvaluate } from "../src/source.ts";
 import { compileError, json, run } from "./run.ts";
@@ -55,6 +56,33 @@ const hostileFirst = (value: unknown): unknown => ({
     return value;
   },
 });
+
+const manyKeys = Array.from({ length: 16_000 }, (_, index) => `k${index}`);
+/** An object whose 16,000 own keys are all non-enumerable. */
+const hiddenKeys: object = Object.defineProperties(
+  {},
+  Object.fromEntries(
+    manyKeys.map((key) => [key, { value: 1, enumerable: false }])
+  )
+);
+/** An object with 16,000 enumerable symbol keys. */
+const symbolKeys: object = Object.defineProperties(
+  {},
+  Object.fromEntries(
+    manyKeys.map((key) => [Symbol(key), { value: 1, enumerable: true }])
+  )
+);
+/** A proxy that claims 16,000 own keys and has none. */
+const manyKeysProxy: object = new Proxy({}, { ownKeys: () => manyKeys });
+
+/** `leaf` wrapped in `[v, v]` 31 times: 2^31 leaves, 31 arrays. */
+const sharedThrough31Levels = (leaf: unknown): unknown => {
+  let value = leaf;
+  for (let level = 0; level < 31; level += 1) {
+    value = [value, value];
+  }
+  return value;
+};
 
 /** The expression error code `promise` fails with, if any. */
 const codeOf = async (promise: Promise<unknown>) =>
@@ -368,6 +396,38 @@ describe("hostile values", () => {
       underTheBudget: { result: mebibyte - 1024 },
     });
   });
+
+  it.each([
+    { name: "non-enumerable keys", leaf: hiddenKeys },
+    { name: "symbol keys", leaf: symbolKeys },
+    { name: "a proxy with many own keys", leaf: manyKeysProxy },
+  ])(
+    "charges $name, in the input, a loop variable and a schema's answer",
+    async ({ leaf }) => {
+      // Shared through 31 levels of `[v, v]`: refused before it blows up.
+      const dag = unchecked(sharedThrough31Levels(leaf));
+      const answering: ResultContract = {
+        kind: "schema",
+        expected: "anything",
+        schema: {
+          "~standard": {
+            version: 1,
+            vendor: "test",
+            validate: () => ({ value: dag }),
+          },
+        },
+      };
+      expect({
+        input: await run(".", { input: dag }),
+        loop: await run("$item", { loop: { item: dag } }),
+        answer: await run("1", {}, answering),
+      }).toStrictEqual({
+        input: { error: "expression.context_invalid" },
+        loop: { error: "expression.context_invalid" },
+        answer: { error: "expression.type_mismatch" },
+      });
+    }
+  );
 
   it("refuses a context that throws while it is read, without its message", async () => {
     const secret = "getter-secret-51c9";
