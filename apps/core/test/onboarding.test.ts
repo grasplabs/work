@@ -180,7 +180,7 @@ describe("the admin's numbers", () => {
       by
     );
     await store.releaseDue(yesterday);
-    for (const id of ["s1", "s2", "o1"]) {
+    for (const id of ["s1", "s2", "s3", "o1"]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       await store.noteInterview({
         person: id,
@@ -196,7 +196,7 @@ describe("the admin's numbers", () => {
     const store = await storeWithLinksOut();
     const { progress } = await store.view();
     expect(progress?.teams).toStrictEqual([
-      expect.objectContaining({ id: "support", talked: 2, asked: 5 }),
+      expect.objectContaining({ id: "support", talked: 3, asked: 5 }),
       expect.objectContaining({ id: "ops", talked: null, asked: null }),
     ]);
     expect(JSON.stringify(progress)).not.toContain(sentinel);

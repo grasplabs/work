@@ -55,6 +55,13 @@ export const onboardingTeamsMax = 120;
 export const minTeamShown = 5;
 
 /**
+ * Fewer than this many who talked show as none known: the admin controls
+ * the list, so made-up people could fill a team to five asked, and one or
+ * two who talked would stand out.
+ */
+export const minTalkedShown = 3;
+
+/**
  * A team's links go out once its lead has talked; after this many working
  * days without the lead they go out anyway.
  */
@@ -192,7 +199,8 @@ export interface TeamProgress {
   leadTalked: boolean;
   /**
    * How many talked, and how many were asked, as of the start of today:
-   * `null` for a team under {@link minTeamShown}.
+   * `null` for a team under {@link minTeamShown}, and `talked` also
+   * while under {@link minTalkedShown}.
    */
   talked: number | null;
   asked: number | null;

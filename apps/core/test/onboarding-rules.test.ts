@@ -155,14 +155,14 @@ describe("what the company's admin sees", () => {
     const progress = progressOf(
       roster,
       new Map(),
-      counts(["sales", "2026-10-12", 5, 2], ["ops", "2026-10-12", 2, 1]),
+      counts(["sales", "2026-10-12", 5, 3], ["ops", "2026-10-12", 2, 1]),
       at("2026-10-14")
     );
     const [sales, ops] = progress.teams;
-    expect(sales).toMatchObject({ people: 6, talked: 2, asked: 5 });
+    expect(sales).toMatchObject({ people: 6, talked: 3, asked: 5 });
     expect(ops).toMatchObject({ people: 2, talked: null, asked: null });
     // Together, only the teams that are shown count.
-    expect(progress).toMatchObject({ talked: 2, asked: 5 });
+    expect(progress).toMatchObject({ talked: 3, asked: 5 });
   });
 
   it("shows nothing of a team of five where fewer than five were asked: its lead and those away aren't asked", () => {
@@ -175,9 +175,20 @@ describe("what the company's admin sees", () => {
     expect(progress.teams[0]).toMatchObject({ talked: null, asked: null });
   });
 
+  it("shows how many talked only once three did, so made-up people can't single one out", () => {
+    const progress = progressOf(
+      roster,
+      new Map(),
+      counts(["sales", "2026-10-12", 5, 2]),
+      at("2026-10-14")
+    );
+    expect(progress.teams[0]).toMatchObject({ talked: null, asked: 5 });
+    expect(progress).toMatchObject({ talked: 0, asked: 5 });
+  });
+
   it("moves its numbers once a day, so two looks can't tell who just talked", () => {
     const tallies = counts(
-      ["sales", "2026-10-12", 5, 1],
+      ["sales", "2026-10-12", 5, 3],
       ["sales", "2026-10-14", 0, 1]
     );
     const morning = progressOf(
