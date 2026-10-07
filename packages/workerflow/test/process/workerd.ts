@@ -21,7 +21,10 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { until } from "./outside.ts";
+import { requestTimeoutMs, until } from "./outside.ts";
+
+/** Bundling the fixture takes seconds; a stuck Wrangler fails the suite. */
+const bundleTimeoutMs = 120_000;
 
 const require = createRequire(import.meta.url);
 const packageRoot = path.join(import.meta.dirname, "../..");
@@ -42,6 +45,9 @@ export const bundleFixture = (directory: string): string => {
   execFileSync(
     process.execPath,
     [
+      // Node 24's Sparkplug bug segfaults long runs (see the root
+      // vite.config.ts); off here too, as Wrangler runs in a Node of its own.
+      "--no-sparkplug",
       wranglerCli,
       "deploy",
       "--dry-run",
@@ -53,7 +59,7 @@ export const bundleFixture = (directory: string): string => {
       "2026-09-15",
       "test/death-fixture.ts",
     ],
-    { cwd: packageRoot, stdio: "pipe" }
+    { cwd: packageRoot, stdio: "pipe", timeout: bundleTimeoutMs }
   );
   const module = readdirSync(directory).find((file) => file.endsWith(".js"));
   if (module === undefined) {
@@ -155,7 +161,9 @@ export class Workerd {
       }
       let ready = false;
       try {
-        const response = await fetch(`${this.url}/ready`);
+        const response = await fetch(`${this.url}/ready`, {
+          signal: AbortSignal.timeout(requestTimeoutMs),
+        });
         ready = response.status === 204;
       } catch {
         // Not listening yet.
@@ -188,7 +196,9 @@ export class Workerd {
     pathname: string,
     body?: unknown
   ): Promise<{ status: number; body: unknown }> {
+    // The signal bounds the body read as well as the answer.
     const response = await fetch(`${this.url}${pathname}`, {
+      signal: AbortSignal.timeout(requestTimeoutMs),
       method: body === undefined ? "GET" : "POST",
       body: body === undefined ? undefined : JSON.stringify(body),
     });

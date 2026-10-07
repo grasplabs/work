@@ -10,17 +10,36 @@ const pollMs = 25;
 /** How long any wait in these tests may take before it fails. */
 const deadlineMs = 20_000;
 
-/** Polls `check` until it returns something, or throws at the deadline. */
+/** How long one request to workerd may take, its body included. */
+export const requestTimeoutMs = 10_000;
+
+const timedOut = Symbol("timed out");
+
+/**
+ * Polls `check` until it returns something, or throws at the deadline. A
+ * check that hangs is cut off at the deadline too, not waited for.
+ */
 export const until = async <T>(
   what: string,
   check: () => Promise<T | undefined> | T | undefined
 ): Promise<T> => {
-  const started = Date.now();
-  while (Date.now() - started < deadlineMs) {
-    // oxlint-disable-next-line no-await-in-loop -- polling, one check at a time
-    const value = await check();
-    if (value !== undefined) {
-      return value;
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    const timer = new AbortController();
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- polling, one check at a time
+      const value = await Promise.race([
+        Promise.resolve(check()),
+        wait(deadline - Date.now(), timedOut, { signal: timer.signal }),
+      ]);
+      if (value === timedOut) {
+        break;
+      }
+      if (value !== undefined) {
+        return value;
+      }
+    } finally {
+      timer.abort();
     }
     // oxlint-disable-next-line no-await-in-loop -- polling, one check at a time
     await wait(pollMs);

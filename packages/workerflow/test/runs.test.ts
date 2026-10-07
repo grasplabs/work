@@ -246,6 +246,56 @@ describe("creating a run", () => {
     expect(activations).toHaveLength(1);
   });
 
+  it("finds the run when the start comes again with its params' keys in another order, nested too", async () => {
+    const id = newId();
+    const key = `trigger-${newId()}`;
+    await workflow("orders").admit({
+      id,
+      key,
+      params: {
+        order: 7,
+        customer: { name: "A", tier: "gold" },
+        lines: [{ sku: "x", qty: 1 }],
+      },
+    });
+
+    const again = await workflow("orders").admit({
+      id,
+      key,
+      params: {
+        lines: [{ qty: 1, sku: "x" }],
+        customer: { tier: "gold", name: "A" },
+        order: 7,
+      },
+    });
+
+    expect(again).toMatchObject({ created: false });
+  });
+
+  it("keeps a Map's entry order part of the params: the same entries in another order are another start", async () => {
+    const id = newId();
+    const key = `trigger-${newId()}`;
+    await workflow("orders").admit({
+      id,
+      key,
+      params: new Map([
+        ["a", 1],
+        ["b", 2],
+      ]),
+    });
+
+    await expect(
+      workflow("orders").admit({
+        id,
+        key,
+        params: new Map([
+          ["b", 2],
+          ["a", 1],
+        ]),
+      })
+    ).rejects.toThrow(/made with other params/u);
+  });
+
   it("refuses a start key reused with other params, and another key for the same ID", async () => {
     const id = newId();
     await workflow("orders").admit({ id, key: "k1", params: { order: 7 } });

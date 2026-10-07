@@ -32,7 +32,7 @@ import { DurableObject } from "cloudflare:workers";
 
 import { Activation, superseded } from "./activation.ts";
 import type { Settlement } from "./activation.ts";
-import { decode } from "./codec.ts";
+import { canonical, decode } from "./codec.ts";
 import type {
   DefinitionIdentity,
   InstanceStatus,
@@ -141,7 +141,8 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         return "collision";
       }
       if (
-        existing.params !== command.params ||
+        // The same params, whatever order a retry put their keys in.
+        canonical(existing.params) !== canonical(command.params) ||
         existing.version !== command.version
       ) {
         return "conflict";

@@ -2,6 +2,7 @@
 import { describe, expect, test } from "vite-plus/test";
 
 import {
+  canonical,
   decode,
   encode,
   maxEncodedBytes,
@@ -76,6 +77,67 @@ describe("values the journal keeps come back equal and fresh", () => {
   test("every decode is a new value", () => {
     const text = encode({ a: [1] });
     expect(decode(text)).not.toBe(decode(text));
+  });
+});
+
+// What an override would have the codec keep instead.
+const forgedEntries = function* forgedEntries(): Generator<[string, number]> {
+  yield ["forged", 2];
+};
+const forgedItems = function* forgedItems(): Generator<string> {
+  yield "forged";
+};
+
+describe("a built-in value's own overrides can't change what is kept", () => {
+  test("a Date with its own getTime", () => {
+    const date = new Date("2026-10-07T12:00:00.000Z");
+    Object.defineProperty(date, "getTime", { value: () => 0 });
+    expect(roundTrip(date)).toStrictEqual(new Date("2026-10-07T12:00:00.000Z"));
+  });
+
+  test("a Map with its own iterator, entries and forEach", () => {
+    const map = new Map([["kept", 1]]);
+    Object.defineProperty(map, Symbol.iterator, { value: forgedEntries });
+    Object.defineProperty(map, "entries", { value: forgedEntries });
+    Object.defineProperty(map, "forEach", { value: forgedEntries });
+    expect(roundTrip(map)).toStrictEqual(new Map([["kept", 1]]));
+  });
+
+  test("a Set with its own iterator and values", () => {
+    const set = new Set(["kept"]);
+    Object.defineProperty(set, Symbol.iterator, { value: forgedItems });
+    Object.defineProperty(set, "values", { value: forgedItems });
+    expect(roundTrip(set)).toStrictEqual(new Set(["kept"]));
+  });
+
+  test("an array with its own iterator", () => {
+    const array = ["kept"];
+    Object.defineProperty(array, Symbol.iterator, { value: forgedItems });
+    expect(roundTrip(array)).toStrictEqual(["kept"]);
+  });
+});
+
+describe("canonical codec text", () => {
+  test("is the same for plain objects whose keys come in another order, nested too", () => {
+    expect(canonical(encode({ b: 1, a: { d: [{ f: 1, e: 2 }], c: 3 } }))).toBe(
+      canonical(encode({ a: { c: 3, d: [{ e: 2, f: 1 }] }, b: 1 }))
+    );
+  });
+
+  test("keeps the order of a Map's entries, a Set's items and an array's elements", () => {
+    const pairs: [string, number][] = [
+      ["a", 1],
+      ["b", 2],
+    ];
+    expect(canonical(encode(new Map(pairs)))).not.toBe(
+      canonical(encode(new Map(pairs.toReversed())))
+    );
+    expect(canonical(encode(new Set(["a", "b"])))).not.toBe(
+      canonical(encode(new Set(["b", "a"])))
+    );
+    expect(canonical(encode(["a", "b"]))).not.toBe(
+      canonical(encode(["b", "a"]))
+    );
   });
 });
 

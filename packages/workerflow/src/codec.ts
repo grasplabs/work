@@ -58,7 +58,11 @@ const fromBase64 = (text: string): Uint8Array =>
 
 /**
  * Whether `value` is exactly of the built-in kind, not a subclass of it: a
- * subclass's own behaviour would not come back after a decode.
+ * subclass's own behaviour would not come back after a decode. Its content
+ * is then read through the built-in's own methods and internal slots, never
+ * through anything the value itself carries: an own `getTime`, iterator or
+ * `entries` can't change or hide what is kept. Own properties beyond the
+ * content are not kept, as structured clone doesn't keep them either.
  */
 const isExactly = (value: object, prototype: object): boolean =>
   Object.getPrototypeOf(value) === prototype;
@@ -68,15 +72,21 @@ const isPlainObject = (value: object): boolean => {
   return prototype === Object.prototype || prototype === null;
 };
 
+/** A name for the kind of `value`, for the message; never throws. */
 const kindOf = (value: object): string => {
-  const prototype: unknown = Object.getPrototypeOf(value);
-  const maker =
-    typeof prototype === "object" &&
-    prototype !== null &&
-    "constructor" in prototype
-      ? prototype.constructor
-      : undefined;
-  return typeof maker === "function" ? maker.name : "object";
+  try {
+    const prototype: unknown = Object.getPrototypeOf(value);
+    const maker =
+      typeof prototype === "object" &&
+      prototype !== null &&
+      "constructor" in prototype
+        ? prototype.constructor
+        : undefined;
+    const name: unknown = typeof maker === "function" ? maker.name : undefined;
+    return typeof name === "string" ? name : "object";
+  } catch {
+    return "object";
+  }
 };
 
 const encodeNumber = (value: number): Node => {
@@ -101,18 +111,22 @@ const encodeObject = (
     encodeNode(item, at, ancestors);
   let node: Node;
   if (Array.isArray(value) && isExactly(value, Array.prototype)) {
+    // By index and length, not the array's (possibly own) iterator.
     node = [
       "A",
-      ...Array.from(value, (item, index) => inner(item, `${path}[${index}]`)),
+      ...Array.from({ length: value.length }, (_, index): Node =>
+        inner(value[index], `${path}[${index}]`)
+      ),
     ];
   } else if (value instanceof Date && isExactly(value, Date.prototype)) {
-    const time = value.getTime();
+    const time = Date.prototype.getTime.call(value);
     node = ["D", Number.isNaN(time) ? null : time];
   } else if (
     value instanceof Uint8Array &&
     isExactly(value, Uint8Array.prototype)
   ) {
-    node = ["B", toBase64(value)];
+    // Copied from its internal slots into a fresh array of our own.
+    node = ["B", toBase64(new Uint8Array(value))];
   } else if (
     value instanceof ArrayBuffer &&
     isExactly(value, ArrayBuffer.prototype)
@@ -120,11 +134,16 @@ const encodeObject = (
     node = ["R", toBase64(new Uint8Array(value))];
   } else if (value instanceof Map && isExactly(value, Map.prototype)) {
     node = ["M"];
-    for (const [key, item] of value) {
+    for (const [key, item] of Map.prototype.entries.call(value)) {
       node.push(inner(key, `${path} key`), inner(item, `${path} value`));
     }
   } else if (value instanceof Set && isExactly(value, Set.prototype)) {
-    node = ["S", ...Array.from(value, (item) => inner(item, `${path} item`))];
+    node = [
+      "S",
+      ...Array.from(Set.prototype.values.call(value), (item) =>
+        inner(item, `${path} item`)
+      ),
+    ];
   } else if (isPlainObject(value)) {
     node = ["O"];
     for (const [key, item] of Object.entries(value)) {
@@ -291,8 +310,8 @@ const isNode = (value: unknown): value is Node =>
   typeof value === "string" ||
   (Array.isArray(value) && value.every((item) => isNode(item)));
 
-/** Decodes what `encode` made: a fresh value, every time. */
-export const decode = (text: string): unknown => {
+/** The node of codec text, checked: its version and its shape. */
+const readNode = (text: string): Node => {
   const parsed: unknown = JSON.parse(text);
   if (!Array.isArray(parsed) || parsed[0] !== codecVersion) {
     throw corrupt(
@@ -303,5 +322,35 @@ export const decode = (text: string): unknown => {
   if (!isNode(node)) {
     throw corrupt("an object where only arrays and scalars are written");
   }
-  return decodeNode(node);
+  return node;
 };
+
+/** Sorts each plain object's keys; Map, Set and array order stays. */
+const canonicalNode = (node: Node): Node => {
+  if (!Array.isArray(node)) {
+    return node;
+  }
+  const [tag, ...rest] = node;
+  if (tag !== "O") {
+    return [tag ?? null, ...rest.map((item) => canonicalNode(item))];
+  }
+  const entries: [string, Node][] = [];
+  for (let index = 0; index < rest.length; index += 2) {
+    entries.push([String(rest[index]), canonicalNode(rest[index + 1] ?? null)]);
+  }
+  // By code unit, the same in every runtime (not locale order).
+  entries.sort(([a], [b]) => (a < b ? -1 : Number(a > b)));
+  return ["O", ...entries.flat()];
+};
+
+/**
+ * Codec text with every plain object's keys in sorted order, so two
+ * encodings of the same value compare equal however their keys were
+ * ordered. A Map's entries, a Set's items and an array's elements keep
+ * their order: the codec keeps it, and it is part of the value.
+ */
+export const canonical = (text: string): string =>
+  JSON.stringify([codecVersion, canonicalNode(readNode(text))]);
+
+/** Decodes what `encode` made: a fresh value, every time. */
+export const decode = (text: string): unknown => decodeNode(readNode(text));
