@@ -435,6 +435,8 @@ export const shadcnComponents = {
     status: "supported",
     summary: "A one-time code input, one box per character.",
     exports: ["InputOTP", "InputOTPGroup", "InputOTPSeparator", "InputOTPSlot"],
+    changes:
+      "Its slots take only the width they need, so the input's room for a password manager's badge doesn't push the page sideways on a phone. The kit's stylesheet carries the rules input-otp adds at runtime in a `<style>` element, which a strict style-src blocks.",
   },
   item: {
     status: "supported",
@@ -829,7 +831,83 @@ export const graspComponents = {
 
 export type GraspComponent = keyof typeof graspComponents;
 
+/** Every component in the kit: shadcn's it has, and its own. */
+export type KitComponent =
+  | {
+      [Name in ShadcnComponent]: (typeof shadcnComponents)[Name] extends {
+        status: "supported";
+      }
+        ? Name
+        : never;
+    }[ShadcnComponent]
+  | GraspComponent;
+
 /** The specifier screens import a component's module by. */
-export const componentImport = (
-  name: ShadcnComponent | GraspComponent
-): string => `@grasp-os/ui/components/${name}`;
+export const componentImport = (name: KitComponent): string =>
+  `@grasp-os/ui/components/${name}`;
+
+/** An example of composing the kit into a screen. */
+export interface ExampleEntry {
+  /** What it shows, in a line. */
+  summary: string;
+  /** The components it imports. */
+  uses: readonly KitComponent[];
+}
+
+/**
+ * Short examples for agents that build screens: how the kit's components
+ * compose into common screens. Each is in `catalog/examples/<name>.tsx`,
+ * and `catalog/examples.ts` loads one by name, only when asked for.
+ */
+export const examples = {
+  list: {
+    summary:
+      "A list of records with a page header, a status per record and an empty state.",
+    uses: ["badge", "button", "empty", "item", "page-header", "stack"],
+  },
+  "detail-form": {
+    summary:
+      "A record's detail form: labelled fields in groups, a description, an error and the actions.",
+    uses: [
+      "button",
+      "field",
+      "inline",
+      "input",
+      "page-header",
+      "select",
+      "stack",
+      "switch",
+      "textarea",
+    ],
+  },
+  dialog: {
+    summary:
+      "A dialog that asks for input, and an alert dialog that confirms a destructive action.",
+    uses: ["alert-dialog", "button", "dialog", "field", "inline", "input"],
+  },
+  table: {
+    summary:
+      "A table with a labelled search, a caption, numbers aligned right and pages.",
+    uses: ["badge", "input-group", "pagination", "stack", "table"],
+  },
+  "responsive-navigation": {
+    summary:
+      "Links in a row on a wide screen and in a sheet behind a menu button on a phone.",
+    uses: ["button", "inline", "sheet", "stack"],
+  },
+  "specialised-panel": {
+    summary:
+      "The main work beside an inspector for the selected record, with tabs for its details and history.",
+    uses: [
+      "badge",
+      "card",
+      "progress",
+      "scroll-area",
+      "separator",
+      "split-pane",
+      "tabs",
+    ],
+  },
+} as const satisfies Record<string, ExampleEntry>;
+
+export type ExampleName = keyof typeof examples;
