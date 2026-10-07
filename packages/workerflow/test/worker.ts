@@ -318,6 +318,43 @@ export const definitions: Record<string, WorkflowDefinition> = {
       }
     },
   },
+  // A definition whose replay strays from its first activation, on
+  // something outside any step: the wait it reaches, its event type, or
+  // its timeout.
+  drifts: {
+    run: async (event, step) => {
+      const what = paramOf(event.payload, "what");
+      const first = (await checkpoint(event.instanceId, "drift")) === 1;
+      if (what === "new-wait") {
+        return await step.waitForEvent(first ? "first" : "second", {
+          type: "x",
+        });
+      }
+      if (what === "type") {
+        return await step.waitForEvent("held", { type: first ? "a" : "b" });
+      }
+      return await step.waitForEvent("held", {
+        type: "x",
+        timeout: first ? "1 hour" : "2 hours",
+      });
+    },
+  },
+  // A wait raced against a sleep, inside the author's own handlers.
+  races: {
+    run: async (event, step) => {
+      try {
+        return await Promise.race([
+          step.waitForEvent("reply", { type: "reply" }),
+          step.sleep("give-up", "1 hour"),
+        ]);
+      } catch {
+        witness(event.instanceId, "caught");
+        return "caught";
+      } finally {
+        witness(event.instanceId, "finally");
+      }
+    },
+  },
   // An author who tries every way there is to hear of a wait that hasn't
   // ended: catch and finally, a transport that turns rejections into
   // values, and a sibling that rejects under Promise.allSettled.

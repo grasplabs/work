@@ -32,7 +32,7 @@ const testLeaseMs = 1000;
 
 /**
  * Long enough for a test to see the run asleep and kill or evict it, short
- * enough to wait out.
+ * enough to wait out; a run's params can ask for another (`nap`, in ms).
  */
 const napMs = 3000;
 
@@ -102,7 +102,13 @@ const definitionsFor = (
         async (context) =>
           await effect(env, event.instanceId, "before", context)
       );
-      await step.sleep("nap", napMs);
+      const nap: unknown =
+        typeof event.payload === "object" &&
+        event.payload !== null &&
+        "nap" in event.payload
+          ? event.payload.nap
+          : undefined;
+      await step.sleep("nap", typeof nap === "number" ? nap : napMs);
       const after = await step.do(
         "after",
         async (context) => await effect(env, event.instanceId, "after", context)

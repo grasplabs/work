@@ -12,6 +12,8 @@ describe("a duration", () => {
     ["1 second", 1000],
     ["10 seconds", 10_000],
     ["1.5 hours", 5_400_000],
+    // Not 3_960_001: the multiplication's floating-point error is dropped.
+    ["1.1 hours", 3_960_000],
     ["1 day", 86_400_000],
     ["2 weeks", 1_209_600_000],
     // The reference's units: a month is 30 days, a year 365.25 days.

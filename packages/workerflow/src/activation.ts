@@ -10,6 +10,13 @@
 // that call and resolves it. The driver learns of the suspension through
 // `stopped`, a typed outcome of its own: nothing is thrown through the
 // definition, and nothing is recognised by an error's name or message.
+//
+// Waits come one at a time. A second sleep or wait reached while one is
+// pending ends the run with a WorkflowParallelWaitError, and a replay that
+// reaches a wait other than the one the journal holds (another event type
+// or duration, or a new wait while the run's suspended one still waits)
+// ends it with a WorkflowReplayMismatchError: a `Halt`, through the same
+// typed outcome, never a loop of activations.
 import { decode, encode } from "./codec.ts";
 import type {
   WorkflowDefinition,
@@ -25,7 +32,7 @@ import {
   parseDuration,
   waitTimedOut,
 } from "./durations.ts";
-import { errorRecord, rebuild } from "./errors.ts";
+import { errorRecord, namedError, rebuild } from "./errors.ts";
 import { assertEventType, assertStepName, stepKey } from "./identity.ts";
 import {
   readConsumedEvent,
@@ -49,8 +56,25 @@ export interface Fault {
   readonly fault: unknown;
 }
 
+/**
+ * The definition did something this engine can't run on: its replay
+ * strayed from what the journal holds, or it waited on two things at
+ * once. The run ends with `halt` as its error; no handler of the author's
+ * sees it, and replaying would only do the same again.
+ */
+export interface Halt {
+  readonly halt: Error;
+}
+
 /** Why an activation stopped short of settling the run. */
-export type Stop = typeof superseded | typeof suspended | Fault;
+export type Stop = typeof superseded | typeof suspended | Fault | Halt;
+
+/** A replay that reaches what the journal doesn't hold. */
+const replayMismatch = (detail: string): Error =>
+  namedError(
+    "WorkflowReplayMismatchError",
+    `The run's definition no longer replays as its journal recorded: ${detail}`
+  );
 
 /**
  * What a refused or suspended call gets: a promise that never settles.
@@ -84,6 +108,7 @@ type WaitOutcome =
   | { ok: true; event: EventRow | undefined }
   | { ok: false; error: string }
   | { suspend: number }
+  | { mismatch: string }
   | null;
 
 /** What a wait journals when it is first reached. */
@@ -92,8 +117,12 @@ interface WaitPlan {
   name: string;
   deadline: (now: number) => number;
   eventType: string | null;
-  /** For a wait's timeout error; the deadline is what decides. */
-  timeoutMs: number;
+  /**
+   * A sleep's duration or a wait's timeout, journaled to compare a replay
+   * with; null for `sleepUntil`, whose time a definition may compute
+   * afresh each replay. The deadline, not this, decides when it's due.
+   */
+  durationMs: number | null;
 }
 
 const stepEvent = <Payload>(event: EventRow): WorkflowStepEvent<Payload> => ({
@@ -105,6 +134,12 @@ const stepEvent = <Payload>(event: EventRow): WorkflowStepEvent<Payload> => ({
   type: event.type,
 });
 
+// Taken once, when the module loads: nothing a definition later does to
+// Date.prototype, Function.prototype or Reflect changes how a time is read.
+// oxlint-disable-next-line typescript/unbound-method -- applied with the value as `this`, on purpose
+const { getTime } = Date.prototype;
+const { apply } = Reflect;
+
 /** A Date's time through the built-in, or undefined for anything else. */
 const timeOf = (value: unknown): number | undefined => {
   if (typeof value === "number") {
@@ -112,10 +147,49 @@ const timeOf = (value: unknown): number | undefined => {
   }
   try {
     // Throws for anything but a real Date, whatever it claims to be.
-    return Date.prototype.getTime.call(value);
+    const time: unknown = apply(getTime, value, []);
+    return typeof time === "number" ? time : undefined;
   } catch {
     return undefined;
   }
+};
+
+/**
+ * Why the journaled wait `step` isn't the one `plan` describes, or why
+ * the journal holds another wait still waiting: waits run one at a time,
+ * so a replay that reaches this one while another waits has strayed
+ * from the run it replays. Undefined when the journal agrees.
+ */
+const mismatchIn = (
+  sql: SqlStorage,
+  identity: StepIdentity,
+  step: StepRow | undefined,
+  plan: WaitPlan
+): string | undefined => {
+  const named = `the ${identity.type} ${JSON.stringify(identity.name)}`;
+  if (step !== undefined) {
+    // A wait the journal holds: it must be the same wait. Passing it
+    // while the one the run suspended on waits is every replay's way.
+    if (step.event_type !== plan.eventType) {
+      return `${named} was for events of type ${JSON.stringify(step.event_type)}, and is now for ${JSON.stringify(plan.eventType)}`;
+    }
+    if (step.duration_ms !== plan.durationMs) {
+      return `${named} was given ${String(step.duration_ms)}ms, and is now given ${String(plan.durationMs)}ms`;
+    }
+    return undefined;
+  }
+  // A new wait: the run's waits come one at a time, so none may still be
+  // waiting. One that is was never reached by this replay.
+  const [other] = sql
+    .exec<{
+      type: string;
+      name: string;
+    }>("SELECT type, name FROM steps WHERE state = 'waiting' LIMIT 1")
+    .toArray();
+  if (other !== undefined) {
+    return `it reached ${named} while the ${other.type} ${JSON.stringify(other.name)} it suspended on is still waiting`;
+  }
+  return undefined;
 };
 
 export class Activation {
@@ -129,6 +203,11 @@ export class Activation {
   /** Resolves when the activation stopped without settling the run. */
   readonly stopped: Promise<Stop>;
   readonly #occurrences = new Map<string, number>();
+  /**
+   * A sleep or wait of this activation that hasn't settled. One that
+   * suspended never does, so this stays set once the activation let go.
+   */
+  #waitPending = false;
 
   /** What the definition is handed as `step`. */
   readonly step: WorkflowStep;
@@ -174,9 +253,22 @@ export class Activation {
 
   /** Whether this activation may still act: not over, not superseded. */
   #current(): boolean {
-    return (
-      !this.#over && readRun(this.#storage.sql)?.generation === this.#generation
-    );
+    return !this.#over && this.#holdsGeneration();
+  }
+
+  /** Whether no later activation has taken the run over. */
+  #holdsGeneration(): boolean {
+    return readRun(this.#storage.sql)?.generation === this.#generation;
+  }
+
+  /**
+   * Ends the activation on something it can't run (`Halt`): the driver
+   * settles the run with `error`, and the definition's call never settles.
+   */
+  async #halt(error: Error): Promise<never> {
+    this.#over = true;
+    this.#stop({ halt: error });
+    return await never();
   }
 
   /** Records how this activation ended, if nothing has yet. */
@@ -447,14 +539,10 @@ export class Activation {
 
   /**
    * Suspends this activation: the run waits, with no activation, until
-   * `wake`. Called in the transaction that found the wait not due.
+   * `wake`, the deadline of the wait it suspends on. Called in the
+   * transaction that found the wait not due.
    */
-  #suspendIn(sql: SqlStorage, now: number): number {
-    const { wake } = sql
-      .exec<{
-        wake: number;
-      }>("SELECT MIN(deadline) AS wake FROM steps WHERE state = 'waiting'")
-      .one();
+  #suspendIn(sql: SqlStorage, now: number, wake: number): number {
     sql.exec(
       "UPDATE run SET status = 'waiting', lease_until = NULL, wake_at = ?",
       wake
@@ -482,15 +570,22 @@ export class Activation {
       const { sql } = this.#storage;
       const now = Date.now();
       let step = readStep(sql, identity);
+      // Checked before anything is written: a replay that strayed leaves
+      // the journal as it found it.
+      const mismatch = mismatchIn(sql, identity, step, plan);
+      if (mismatch !== undefined) {
+        return { mismatch };
+      }
       if (step === undefined) {
         sql.exec(
-          "INSERT INTO steps (type, name, occurrence, idempotency_key, state, attempt, deadline, event_type) VALUES (?, ?, ?, ?, 'waiting', 1, ?, ?)",
+          "INSERT INTO steps (type, name, occurrence, idempotency_key, state, attempt, deadline, event_type, duration_ms) VALUES (?, ?, ?, ?, 'waiting', 1, ?, ?, ?)",
           identity.type,
           identity.name,
           identity.occurrence,
           stepKey(this.#run.run_uid, identity),
           plan.deadline(now),
-          plan.eventType
+          plan.eventType,
+          plan.durationMs
         );
         step = readStep(sql, identity);
       }
@@ -523,7 +618,7 @@ export class Activation {
         return { ok: true, event: { ...event, consumed_by: step.ordinal } };
       }
       if (now < step.deadline) {
-        return { suspend: this.#suspendIn(sql, now) };
+        return { suspend: this.#suspendIn(sql, now, step.deadline) };
       }
       if (step.type === "sleep") {
         sql.exec(
@@ -533,7 +628,9 @@ export class Activation {
         this.#renewLease(now);
         return { ok: true, event: undefined };
       }
-      const error = JSON.stringify(errorRecord(waitTimedOut(plan.timeoutMs)));
+      const error = JSON.stringify(
+        errorRecord(waitTimedOut(step.duration_ms ?? 0))
+      );
       sql.exec(
         "UPDATE steps SET state = 'failed', error = ? WHERE ordinal = ?",
         error,
@@ -546,6 +643,27 @@ export class Activation {
 
   /** A sleep or an event wait, from the definition's call to its outcome. */
   async #wait(plan: WaitPlan): Promise<EventRow | undefined> {
+    if (this.#waitPending) {
+      // Racing a wait against a sleep would quietly lose the sleep: the
+      // first suspends the activation, and the second is never reached.
+      // Until parallel waits are built, the run ends saying so.
+      return await this.#halt(
+        namedError(
+          "WorkflowParallelWaitError",
+          `The ${plan.type} ${JSON.stringify(plan.name)} was reached while another sleep or wait of the run was pending; parallel waits aren't supported yet`
+        )
+      );
+    }
+    this.#waitPending = true;
+    try {
+      return await this.#waitAlone(plan);
+    } finally {
+      // Never reached by a wait that suspended: its call never settles.
+      this.#waitPending = false;
+    }
+  }
+
+  async #waitAlone(plan: WaitPlan): Promise<EventRow | undefined> {
     const current = this.#write(() => this.#current());
     if (current === failed) {
       return await never();
@@ -560,6 +678,9 @@ export class Activation {
     }
     if (outcome === null) {
       return await this.#refuse();
+    }
+    if ("mismatch" in outcome) {
+      return await this.#halt(replayMismatch(outcome.mismatch));
     }
     if ("suspend" in outcome) {
       this.#over = true;
@@ -583,7 +704,7 @@ export class Activation {
       name,
       deadline: (now) => now + ms,
       eventType: null,
-      timeoutMs: ms,
+      durationMs: ms,
     });
   }
 
@@ -606,7 +727,7 @@ export class Activation {
       // A time already past is due at once.
       deadline: () => until,
       eventType: null,
-      timeoutMs: 0,
+      durationMs: null,
     });
   }
 
@@ -619,19 +740,18 @@ export class Activation {
       throw new TypeError("waitForEvent takes a name and { type, timeout? }");
     }
     const eventType = assertEventType(options.type);
-    const timeoutMs =
-      options.timeout === undefined
-        ? defaultEventTimeoutMs
-        : parseDuration(options.timeout, "An event wait's timeout");
-    if (timeoutMs === 0) {
-      throw new TypeError("An event wait's timeout is more than 0");
-    }
+    // As Cloudflare's reference: any falsy timeout (0, "", null, none at
+    // all) is the default.
+    const timeoutGiven = Boolean(options.timeout);
+    const timeoutMs = timeoutGiven
+      ? parseDuration(options.timeout, "An event wait's timeout")
+      : defaultEventTimeoutMs;
     const event = await this.#wait({
       type: "waitForEvent",
       name,
       deadline: (now) => now + timeoutMs,
       eventType,
-      timeoutMs,
+      durationMs: timeoutMs,
     });
     if (event === undefined) {
       throw new Error(`The journal holds no event for the wait ${name}`);
@@ -653,8 +773,12 @@ export class Activation {
     }
   }
 
-  /** Journals the run's end, unless a later activation took over. */
-  async settle(settlement: Settlement): Promise<void> {
+  /**
+   * Journals the run's end, unless a later activation took over. `halted`:
+   * the activation stopped on a `Halt`, so it is over already, and only
+   * the generation decides.
+   */
+  async settle(settlement: Settlement, halted = false): Promise<void> {
     let output: string | null = null;
     let failure: string | null = null;
     if (settlement.ok) {
@@ -667,7 +791,7 @@ export class Activation {
       failure = JSON.stringify(errorRecord(settlement.error));
     }
     const settled = this.#storage.transactionSync(() => {
-      if (!this.#current()) {
+      if (!(halted ? this.#holdsGeneration() : this.#current())) {
         return false;
       }
       const now = Date.now();

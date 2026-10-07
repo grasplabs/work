@@ -1,6 +1,11 @@
 import { encode } from "./codec.ts";
 import type { InstanceStatus } from "./contracts.ts";
 import { assertEventType, maxEventKeyLength } from "./identity.ts";
+import {
+  maxEventPayloadBytes,
+  maxInboxBytes,
+  maxInboxEvents,
+} from "./journal.ts";
 import type { EventOutcome, WorkflowRun } from "./run.ts";
 
 export type RunStub = DurableObjectStub<WorkflowRun>;
@@ -52,6 +57,16 @@ export class WorkflowInstance {
       case "conflict": {
         throw new Error(
           `The event ${JSON.stringify(key)} sent to workflow instance ${JSON.stringify(this.id)} was sent before with another type or payload`
+        );
+      }
+      case "too_large": {
+        throw new TypeError(
+          `An event's payload takes at most ${maxEventPayloadBytes} bytes encoded`
+        );
+      }
+      case "full": {
+        throw new Error(
+          `instance.inbox_full: workflow instance ${JSON.stringify(this.id)} holds as many events as it takes (${maxInboxEvents} events, ${maxInboxBytes} bytes)`
         );
       }
       case "ended": {

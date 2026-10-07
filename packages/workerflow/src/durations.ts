@@ -47,8 +47,10 @@ export const parseDuration = (duration: unknown, what: string): number => {
       `${what} is a number of milliseconds or a duration such as "10 seconds", from 0 up to 365 days: ${JSON.stringify(duration)}`
     );
   }
-  // A deadline is a whole millisecond, never earlier than asked.
-  return Math.ceil(ms);
+  // A deadline is a whole millisecond, never earlier than asked. The
+  // product's floating-point noise (1.1 * 3_600_000 is 3_960_000.0000000005)
+  // goes first, so it doesn't round up a whole number.
+  return Math.ceil(Number(ms.toPrecision(15)));
 };
 
 /** What an event wait that ran out throws, on first run and on replay. */

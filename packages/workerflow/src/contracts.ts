@@ -89,9 +89,13 @@ export interface WorkflowStep {
    * Resolves with the oldest event of `type` the run accepted before the
    * wait's deadline (sent before the wait was reached, too) and not taken
    * by another wait. Rejects with a WorkflowTimeoutError when there was
-   * none by the deadline, `timeout` (24 hours by default) after the wait
-   * was first reached. Each replay returns the same event, or rejects the
-   * same way.
+   * none by the deadline, `timeout` after the wait was first reached (24
+   * hours when it is missing or falsy, 0 included, as on Cloudflare). Each
+   * replay returns the same event, or rejects the same way.
+   *
+   * Sleeps and waits run one at a time: racing one against another (say
+   * `Promise.race([waitForEvent(…), sleep(…)])`) ends the run with a
+   * WorkflowParallelWaitError until parallel waits are built.
    */
   waitForEvent: <Payload = unknown>(
     name: string,

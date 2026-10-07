@@ -8,6 +8,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { SerializationError, encode } from "../src/codec.ts";
 import type { InstanceEvent } from "../src/instance.ts";
 import {
+  maxEventPayloadBytes,
+  maxInboxBytes,
+  maxInboxEvents,
+} from "../src/journal.ts";
+import { WorkflowRun } from "../src/run.ts";
+import {
   alarmOf,
   deliverAlarm,
   ended,
@@ -84,7 +90,7 @@ describe("a sleep", () => {
 
   it("wakes at its deadline by the alarm alone, and the run goes on from there", async () => {
     const id = newId();
-    await workflow("napper").create({ id, params: { duration: 1000 } });
+    await workflow("napper").create({ id, params: { duration: "2 seconds" } });
     const { deadline } = await suspendedOn("napper", id, "nap");
 
     const status = await ended("napper", id);
@@ -348,7 +354,7 @@ describe("an event wait", () => {
     const id = newId();
     await workflow("approval").create({
       id,
-      params: { duration: "1 second" },
+      params: { duration: "3 seconds" },
     });
     await suspendedOn("approval", id, "approval");
 
@@ -358,7 +364,7 @@ describe("an event wait", () => {
       status: "errored",
       error: {
         name: "WorkflowTimeoutError",
-        message: "Execution timed out after 1000ms",
+        message: "Execution timed out after 3000ms",
       },
     });
     expect(labels(id)).toStrictEqual(["before"]);
@@ -368,7 +374,7 @@ describe("an event wait", () => {
     const id = newId();
     await workflow("deadline").create({
       id,
-      params: { duration: "2 seconds" },
+      params: { duration: "3 seconds" },
     });
     const { deadline } = await suspendedOn("deadline", id, "reply");
 
@@ -400,7 +406,7 @@ describe("an event wait", () => {
     const id = newId();
     await workflow("deadline").create({
       id,
-      params: { duration: "2 seconds" },
+      params: { duration: "3 seconds" },
     });
     const { deadline } = await suspendedOn("deadline", id, "reply");
     await holdAlarmUntil("deadline", id, deadline + heldBackMs);
@@ -421,7 +427,7 @@ describe("an event wait", () => {
       output: {
         timedOut: {
           name: "WorkflowTimeoutError",
-          message: "Execution timed out after 2000ms",
+          message: "Execution timed out after 3000ms",
         },
         later: "late",
       },
@@ -449,6 +455,135 @@ describe("an event wait", () => {
         key: null,
       })
     ).resolves.toBe("missing");
+  });
+});
+
+describe("an event wait's timeout", () => {
+  it.each([0, ""])(
+    "is Cloudflare's 24-hour default when it is falsy (%j)",
+    async (duration) => {
+      const id = newId();
+      await workflow("approval").create({ id, params: { duration } });
+
+      const { journal } = await suspendedOn("approval", id, "approval");
+
+      const wait = journal.steps.find((step) => step.name === "approval");
+      expect(wait?.duration_ms).toBe(24 * 60 * 60 * 1000);
+    }
+  );
+});
+
+/** Encoded text of `bytes` bytes, as the binding would send it. */
+const payloadOf = (bytes: number): string =>
+  JSON.stringify([1, "x".repeat(bytes - '[1,""]'.length)]);
+
+/** Sends straight to the run object, past the binding's own checks. */
+const sendAll = async (id: string, payloads: string[]): Promise<string[]> =>
+  await runInDurableObject(runObject("approval", id), async (run) => {
+    if (!(run instanceof WorkflowRun)) {
+      throw new TypeError("the object isn't a run object");
+    }
+    const outcomes: string[] = [];
+    for (const payload of payloads) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, as a sender would
+      const outcome = await run.sendEvent({ type: "spam", payload, key: null });
+      outcomes.push(outcome);
+    }
+    return outcomes;
+  });
+
+describe("an inbox", () => {
+  it("refuses a payload over the limit, measured on its encoded bytes", async () => {
+    const id = newId();
+    await workflow("approval").create({ id });
+
+    // Characters of two bytes: within the limit in length, over it in bytes.
+    const wide = JSON.stringify([1, "é".repeat(maxEventPayloadBytes / 2)]);
+    const outcomes = await sendAll(id, [payloadOf(maxEventPayloadBytes), wide]);
+
+    expect(wide.length).toBeLessThan(maxEventPayloadBytes);
+    expect(outcomes).toStrictEqual(["accepted", "too_large"]);
+  });
+
+  it("stops taking events at its byte limit, and the caller hears why", async () => {
+    const id = newId();
+    await workflow("approval").create({ id });
+    const bytes = 1_000_000;
+    const fit = Math.floor(maxInboxBytes / bytes);
+
+    const outcomes = await sendAll(
+      id,
+      Array.from({ length: fit + 1 }, () => payloadOf(bytes))
+    );
+
+    expect(outcomes.filter((outcome) => outcome === "accepted")).toHaveLength(
+      fit
+    );
+    expect(outcomes.at(-1)).toBe("full");
+    // Through the binding: one more payload of that size doesn't fit.
+    await expect(
+      send("approval", id, { type: "spam", payload: "x".repeat(bytes) })
+    ).rejects.toThrow(/^instance\.inbox_full/u);
+  });
+
+  it("stops taking events at its count limit", async () => {
+    const id = newId();
+    await workflow("approval").create({ id });
+
+    const outcomes = await sendAll(
+      id,
+      Array.from({ length: maxInboxEvents + 1 }, () => encode(null))
+    );
+
+    expect(outcomes.lastIndexOf("accepted")).toBe(maxInboxEvents - 1);
+    expect(outcomes.at(-1)).toBe("full");
+  });
+});
+
+describe("a replay that strays from its journal", () => {
+  it.each([
+    ["a new wait while the one it suspended on still waits", "new-wait"],
+    ["the same wait for another event type", "type"],
+    ["the same wait with another timeout", "timeout"],
+  ])("ends the run with a WorkflowReplayMismatchError: %s", async (_, what) => {
+    const id = newId();
+    await workflow("drifts").create({ id, params: { what } });
+    const first = what === "new-wait" ? "first" : "held";
+    const { journal: before } = await suspendedOn("drifts", id, first);
+
+    // The next activation replays differently.
+    await deliverAlarm("drifts", id);
+    const status = await ended("drifts", id);
+
+    expect(status).toMatchObject({
+      status: "errored",
+      error: { name: "WorkflowReplayMismatchError" },
+    });
+    // The journal is as the first activation left it, and nothing is
+    // left to wake for: no alarm loops on the stale wait.
+    const after = await journalOf("drifts", id);
+    expect(after.steps).toStrictEqual(before.steps);
+    expect(after.activations).toMatchObject([
+      { ended: "suspended" },
+      { ended: "settled" },
+    ]);
+    await expect(alarmOf("drifts", id)).resolves.toBeNull();
+  });
+});
+
+describe("waits raced against each other", () => {
+  it("end the run with a WorkflowParallelWaitError, and the author's handlers hear nothing", async () => {
+    const id = newId();
+    await workflow("races").create({ id });
+
+    const status = await ended("races", id);
+
+    expect(status).toMatchObject({
+      status: "errored",
+      error: { name: "WorkflowParallelWaitError" },
+    });
+    expect(witnessed(id)).toStrictEqual([]);
+    await expect(alarmOf("races", id)).resolves.toBeNull();
   });
 });
 

@@ -461,7 +461,12 @@ describe("a run on disk-backed workerd", () => {
 
   it("neither brings a sleep forward nor puts it back when the process restarts before its deadline", async () => {
     const id = "restarted-before-the-deadline";
-    await workerd.request("/start", startOf("napper", id));
+    // Long enough that a restart, however slow the machine, lands before
+    // the deadline.
+    await workerd.request(
+      "/start",
+      startOf("napper", id, { params: { order: id, nap: 10_000 } })
+    );
     const deadline = await asleepAt("napper", id, "nap");
 
     await workerd.restart();

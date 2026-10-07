@@ -53,6 +53,9 @@ import {
   hasJournal,
   journalSchemaVersion,
   readJournal,
+  maxEventPayloadBytes,
+  maxInboxBytes,
+  maxInboxEvents,
   readRun,
 } from "./journal.ts";
 import type { Journal, RunRow } from "./journal.ts";
@@ -83,13 +86,17 @@ export interface EventCommand {
 /**
  * `accepted`: the event is in the run's inbox. `duplicate`: an event with
  * this key and this content was accepted before. `conflict`: the key came
- * with another type or payload. `ended`: the run has ended and takes no
- * events. `missing`: there is no such run.
+ * with another type or payload. `too_large`: the payload is over
+ * `maxEventPayloadBytes`. `full`: the inbox is at one of its limits.
+ * `ended`: the run has ended and takes no events. `missing`: there is no
+ * such run.
  */
 export type EventOutcome =
   | "accepted"
   | "duplicate"
   | "conflict"
+  | "too_large"
+  | "full"
   | "ended"
   | "missing";
 
@@ -302,6 +309,12 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       // holds no compute.
       return;
     }
+    if ("halt" in settlement) {
+      // Replaying would only reach the same thing again: the run ends,
+      // with the reason as its error.
+      await activation.settle({ ok: false, error: settlement.halt }, true);
+      return;
+    }
     if ("fault" in settlement) {
       // The journal write failed; the activation journaled that, if it
       // could. Returning leaves the alarm as it was, the watchdog or the
@@ -350,6 +363,23 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       }
       if (hasEnded(run)) {
         return { outcome: "ended", wake: false };
+      }
+      // Measured on the encoded text the journal keeps, here as well as
+      // in the binding: this method is the run's boundary.
+      const bytes = new TextEncoder().encode(command.payload).byteLength;
+      if (bytes > maxEventPayloadBytes) {
+        return { outcome: "too_large", wake: false };
+      }
+      const inbox = storage.sql
+        .exec<{ events: number; bytes: number }>(
+          "SELECT COUNT(*) AS events, COALESCE(SUM(LENGTH(CAST(payload AS BLOB))), 0) AS bytes FROM events"
+        )
+        .one();
+      if (
+        inbox.events >= maxInboxEvents ||
+        inbox.bytes + bytes > maxInboxBytes
+      ) {
+        return { outcome: "full", wake: false };
       }
       storage.sql.exec(
         "INSERT INTO events (type, payload, key, accepted_at) VALUES (?, ?, ?, ?)",

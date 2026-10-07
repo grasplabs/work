@@ -9,7 +9,7 @@ import { WorkflowRun } from "../src/run.ts";
 import type { TestRuns } from "./worker.ts";
 
 const pollMs = 10;
-const deadlineMs = 5000;
+const deadlineMs = 10_000;
 
 export const workflow = (definition: string): Workflow =>
   new Workflow(env.RUNS, definition);

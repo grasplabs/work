@@ -19,6 +19,22 @@
 /** The journal's own layout; a change to it is a new version. */
 export const journalSchemaVersion = 1;
 
+/**
+ * The largest event payload a run accepts, as encoded: the most the codec
+ * keeps of any one value (codec.ts), and Cloudflare's per-step limit.
+ */
+export const maxEventPayloadBytes = 1024 * 1024;
+
+/**
+ * What one run's inbox holds at most, taken and untaken events alike, so
+ * no sender can fill a run's storage. Taken events aren't pruned: each is
+ * what its wait returns on every replay, for as long as the run lives.
+ * They go with the rest of the journal when retention (a later slice)
+ * removes it; an ended run takes no events, so its inbox no longer grows.
+ */
+export const maxInboxEvents = 10_000;
+export const maxInboxBytes = 32 * 1024 * 1024;
+
 export type RunState =
   | "queued"
   | "running"
@@ -83,6 +99,11 @@ export interface StepRow extends Record<string, SqlStorageValue> {
   deadline: number | null;
   /** The event type a wait takes. */
   event_type: string | null;
+  /**
+   * A sleep's duration or a wait's timeout as first given, which every
+   * replay must give again; null for `sleepUntil`.
+   */
+  duration_ms: number | null;
 }
 
 /**
@@ -172,6 +193,7 @@ export const createJournal = (sql: SqlStorage): void => {
       error TEXT,
       deadline INTEGER,
       event_type TEXT,
+      duration_ms INTEGER,
       UNIQUE (type, name, occurrence)
     );
     CREATE TABLE IF NOT EXISTS attempts (
@@ -213,7 +235,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined =>
     .toArray()[0];
 
 const stepColumns =
-  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type";
+  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, duration_ms";
 
 export const readStep = (
   sql: SqlStorage,
