@@ -93,8 +93,13 @@ export const DetailFormExample = () => (
           </Field>
           <Field>
             <FieldLabel htmlFor="customer-notes">Notes</FieldLabel>
-            <Textarea id="customer-notes" />
-            <FieldDescription>Only your team sees these.</FieldDescription>
+            <Textarea
+              id="customer-notes"
+              aria-describedby="customer-notes-hint"
+            />
+            <FieldDescription id="customer-notes-hint">
+              Only your team sees these.
+            </FieldDescription>
           </Field>
         </FieldSet>
         <Inline justify="end">

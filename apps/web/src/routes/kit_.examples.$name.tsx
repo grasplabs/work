@@ -39,7 +39,9 @@ const ExampleDemo = () => {
     <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
       <h1 className="text-2xl font-medium">{name}</h1>
       <Suspense>
-        <Example />
+        <div data-catalog-content="">
+          <Example />
+        </div>
       </Suspense>
     </main>
   );

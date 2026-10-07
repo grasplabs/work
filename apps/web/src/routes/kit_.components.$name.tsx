@@ -20,7 +20,9 @@ const ComponentDemo = () => {
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
       <h1 className="text-2xl font-medium">{name}</h1>
-      <Demo />
+      <div data-catalog-content="">
+        <Demo />
+      </div>
     </main>
   );
 };

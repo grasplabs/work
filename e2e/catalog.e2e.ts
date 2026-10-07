@@ -48,12 +48,14 @@ interface Overlay {
   trigger: (page: Page) => Locator;
   open: "Enter" | "ArrowDown" | "focus" | "hover" | "right click";
   opened: (page: Page) => Locator;
+  /** Only there at this width, such as a phone's menu button. */
+  viewport?: { width: number; height: number };
 }
 
 const openButton = (name: string) => (page: Page) =>
   page.getByRole("button", { name: `Open ${name}`, exact: true });
 
-const overlays: Record<string, Overlay> = {
+const overlayList: Record<string, Overlay> = {
   "alert-dialog": {
     trigger: openButton("alert dialog"),
     open: "Enter",
@@ -122,6 +124,37 @@ const overlays: Record<string, Overlay> = {
   },
 };
 
+/** A button in the page's own content, not in a popup over it. */
+const pageButton = (name: string) => (page: Page) =>
+  page.getByRole("main").getByRole("button", { name, exact: true });
+
+/** Every page's overlays: one per component demo, several on an example. */
+const overlays: Record<string, readonly Overlay[]> = {
+  ...Object.fromEntries(
+    Object.entries(overlayList).map(([name, overlay]) => [name, [overlay]])
+  ),
+  "example dialog": [
+    {
+      trigger: pageButton("Rename"),
+      open: "Enter",
+      opened: (page) => page.getByRole("dialog"),
+    },
+    {
+      trigger: pageButton("Delete"),
+      open: "Enter",
+      opened: (page) => page.getByRole("alertdialog"),
+    },
+  ],
+  "example responsive-navigation": [
+    {
+      trigger: pageButton("Open the menu"),
+      open: "Enter",
+      opened: (page) => page.getByRole("dialog"),
+      viewport: { width: 390, height: 844 },
+    },
+  ],
+};
+
 /** The roles of controls, each of which needs a name. */
 const namedRoles = [
   "button",
@@ -152,6 +185,36 @@ const expectNamedControls = async (main: Locator): Promise<void> => {
 
 // Polled: content that sizes itself to the viewport, such as a chart,
 // re-lays out a frame after the viewport changes.
+const controlCount = async (main: Locator): Promise<number> => {
+  let count = 0;
+  for (const role of namedRoles) {
+    // oxlint-disable-next-line no-await-in-loop -- counted one role at a time
+    count += await main.getByRole(role).count();
+  }
+  return count;
+};
+
+/**
+ * Help and error text under a field is read out with its control: each
+ * one's id is in some control's aria-describedby.
+ */
+const expectConnectedHints = async (main: Locator): Promise<void> => {
+  const loose = await main.evaluate((root) =>
+    [
+      ...root.querySelectorAll(
+        '[data-slot="field-description"], [data-slot="field-error"]'
+      ),
+    ]
+      .filter(
+        (hint) =>
+          hint.id === "" ||
+          root.querySelector(`[aria-describedby~="${hint.id}"]`) === null
+      )
+      .map((hint) => hint.textContent)
+  );
+  expect(loose).toStrictEqual([]);
+};
+
 const expectNoSidewaysScroll = async (page: Page): Promise<void> => {
   await expect
     .poll(
@@ -271,6 +334,10 @@ const expectOverlayOpensAndCloses = async (
   page: Page,
   overlay: Overlay
 ): Promise<void> => {
+  const viewport = page.viewportSize();
+  if (overlay.viewport !== undefined) {
+    await page.setViewportSize(overlay.viewport);
+  }
   const trigger = overlay.trigger(page);
   await openOverlay(page, trigger, overlay.open);
   const opened = overlay.opened(page);
@@ -281,6 +348,9 @@ const expectOverlayOpensAndCloses = async (
   // Opened from the keyboard, focus goes back where it was.
   if (overlay.open !== "hover" && overlay.open !== "right click") {
     await expect(trigger).toBeFocused();
+  }
+  if (overlay.viewport !== undefined && viewport !== null) {
+    await page.setViewportSize(viewport);
   }
 };
 
@@ -377,14 +447,21 @@ for (const { name, heading, path } of pages) {
     await expect(
       main.getByRole("heading", { level: 1, name: heading, exact: true })
     ).toBeVisible();
+    // The demo or example itself, which on an example page loads after the
+    // heading: every check below reads it.
+    await expect(main.locator("[data-catalog-content]")).toBeVisible();
+    if (path.startsWith("/kit/examples/")) {
+      expect(await controlCount(main)).toBeGreaterThan(0);
+    }
     await expectNoSidewaysScroll(page);
     await expectNamedControls(main);
+    await expectConnectedHints(main);
 
     await page.setViewportSize(desktop);
     await expectNoSidewaysScroll(page);
     await expectVisibleKeyboardFocus(page, main);
-    const overlay = overlays[name];
-    if (overlay !== undefined) {
+    for (const overlay of overlays[name] ?? []) {
+      // oxlint-disable-next-line no-await-in-loop -- one overlay open at a time
       await expectOverlayOpensAndCloses(page, overlay);
     }
     await keyboardChecks[name]?.(page);

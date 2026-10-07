@@ -120,8 +120,10 @@ const FieldDemo = () => (
   <FieldGroup>
     <Field>
       <FieldLabel htmlFor="demo-field-name">Name</FieldLabel>
-      <Input id="demo-field-name" />
-      <FieldDescription>As it appears on invoices.</FieldDescription>
+      <Input id="demo-field-name" aria-describedby="demo-field-name-hint" />
+      <FieldDescription id="demo-field-name-hint">
+        As it appears on invoices.
+      </FieldDescription>
     </Field>
   </FieldGroup>
 );
