@@ -31,6 +31,7 @@ export { KnowledgeApi } from "./agent-knowledge.ts";
 export { MemoryApi } from "./agent-memory.ts";
 export { WorkflowsApi } from "./agent-workflows.ts";
 export { Builtins } from "./builtins.ts";
+export { Onboarding } from "./onboarding/store.ts";
 export { AppTail } from "./server-logs.ts";
 export { AppConnectionBinding } from "./app-bindings.ts";
 export { AppExportBinding } from "./app-calls.ts";
