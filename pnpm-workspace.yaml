@@ -50,6 +50,9 @@ catalog:
   drizzle-orm: 0.45.3
   # Knowledge frontmatter.
   yaml: 2.9.1
+  # jq 1.8.2 compiled to WebAssembly (MIT): the expression language of JSON
+  # workflows. scripts/jq-wasm meters and pins its bytes.
+  jq-wasm: 3.0.0-jq-1.8.2
   # Text of uploaded files, extracted in core: PDF, Word and Excel.
   fflate: 0.8.3
   unpdf: 1.8.1

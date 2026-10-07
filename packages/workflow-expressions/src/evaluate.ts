@@ -1,0 +1,495 @@
+import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
+
+import { expressionError } from "./errors.ts";
+import type { ExpressionSite } from "./errors.ts";
+import { runJq } from "./jq.ts";
+import { checkSource } from "./source.ts";
+
+/**
+ * Where in a workflow's data flow an expression runs. Each stage sees the
+ * variables Open Workflow 1.0 gives it (dsl.md, "Runtime expression
+ * arguments"), less `$secrets` and `$authorization`, which the profile
+ * doesn't have, plus Grasp's `$params` everywhere and a loop's variables
+ * inside its tasks.
+ */
+export const stageVariables = {
+  workflowInputFrom: ["workflow", "runtime", "params"],
+  taskIf: ["context", "task", "workflow", "runtime", "params"],
+  taskInputFrom: ["context", "task", "workflow", "runtime", "params"],
+  taskDefinition: ["context", "input", "task", "workflow", "runtime", "params"],
+  taskOutputAs: ["context", "input", "task", "workflow", "runtime", "params"],
+  taskExportAs: [
+    "context",
+    "input",
+    "output",
+    "task",
+    "workflow",
+    "runtime",
+    "params",
+  ],
+  workflowOutputAs: ["context", "workflow", "runtime", "params"],
+} as const satisfies Record<string, readonly string[]>;
+
+export type Stage = keyof typeof stageVariables;
+type StageVariable<S extends Stage> = (typeof stageVariables)[S][number];
+
+/** Stages inside a task, where a loop's variables are in scope. */
+const taskStages = new Set<Stage>([
+  "taskIf",
+  "taskInputFrom",
+  "taskDefinition",
+  "taskOutputAs",
+  "taskExportAs",
+]);
+
+/** The pinned descriptor every expression sees as `$runtime`. */
+export const runtimeDescriptor = {
+  name: "Grasp",
+  version: "grasp-open-workflow/1",
+} as const;
+
+/** The limits on one evaluation. */
+export const evaluatorLimits = {
+  /**
+   * CPU and wall time of one evaluation. Fuel (jq.ts) enforces both
+   * deterministically, everywhere; an isolate running the evaluator gives
+   * `cpuMs` to the platform as a backstop.
+   */
+  cpuMs: 100,
+  wallMs: 1000,
+  /** The input and every variable together, as JSON. */
+  maxContextBytes: 1024 * 1024,
+  maxResultBytes: 1024 * 1024,
+  /** Of JSON values, in and out. */
+  maxJsonDepth: 32,
+  /** Of the task an expression belongs to, counting from the workflow. */
+  maxTaskScopes: 16,
+} as const;
+
+// Loop variable names: jq identifiers, never one of a stage's own names.
+const variableName = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+const reservedNames = new Set<string>([
+  ...Object.values(stageVariables).flat(),
+  "secrets",
+  "authorization",
+  "ENV",
+  "ARGS",
+]);
+
+/** An expression that passed the profile, ready to evaluate. */
+export interface CompiledExpression<S extends Stage = Stage> {
+  readonly source: string;
+  readonly stage: S;
+  readonly loopVariables: readonly string[];
+  readonly site: ExpressionSite;
+}
+
+export interface CompileOptions<S extends Stage = Stage> {
+  stage: S;
+  /** Task IDs from the workflow's top-level list down to this task. */
+  scope: readonly string[];
+  /** Where the expression is, for errors. */
+  pointer: string;
+  /** Variables of the loops around this task (`for.each`/`for.at`). */
+  loopVariables?: readonly string[];
+}
+
+// jq's exit codes: 3 for a compile error, 5 for a runtime one.
+const jqCompileError = 3;
+
+const fail = (
+  site: ExpressionSite,
+  code: Parameters<typeof expressionError>[0],
+  remedy: string,
+  more: { expected?: string; reason?: string } = {}
+): never => {
+  throw expressionError(code, site, { remedy, ...more });
+};
+
+// jq's compile errors name the source position and the construct, never
+// a value; the position is that of the generated program, so drop it.
+const compileMessage = (stderr: string): string => {
+  const first = stderr.split("\n")[0] ?? "";
+  return first
+    .replace(/^jq: error: /u, "")
+    .replace(/ at <top-level>, line \d+, column \d+:?$/u, "")
+    .replace(/ at <top-level>, line \d+:?$/u, "")
+    .slice(0, 200);
+};
+
+/**
+ * The jq program for an expression: binds the stage's variables from the
+ * JSON array jq reads (`[input, ...variables]`), then runs the source,
+ * parenthesised, on the input. The source passed the profile check, so its
+ * brackets balance and the parentheses hold exactly it; the bindings are
+ * generated from fixed names, never from data.
+ */
+const programFor = (source: string, names: readonly string[]): string => {
+  const bindings = names.map((name, index) => `.[${index + 1}] as $${name} | `);
+  return `${bindings.join("")}.[0] | (\n${source}\n)`;
+};
+
+const variableNamesOf = (expression: CompiledExpression): string[] => [
+  ...stageVariables[expression.stage],
+  ...expression.loopVariables,
+];
+
+/**
+ * Checks `source` against the profile and compiles it with jq, as at
+ * publication: the stage's variables, nothing else, are in scope. Refuses
+ * with an expression error; never runs the expression on real data.
+ */
+export const compileExpression = async <S extends Stage>(
+  source: string,
+  options: CompileOptions<S>
+): Promise<CompiledExpression<S>> => {
+  const site: ExpressionSite = { pointer: options.pointer };
+  const taskId = options.scope.at(-1);
+  if (taskId !== undefined) {
+    site.taskId = taskId;
+  }
+  if (options.scope.length > evaluatorLimits.maxTaskScopes) {
+    fail(
+      site,
+      "expression.scope_too_deep",
+      "Move the task up, or split the workflow."
+    );
+  }
+  const loopVariables = options.loopVariables ?? [];
+  if (loopVariables.length > 0 && !taskStages.has(options.stage)) {
+    fail(
+      site,
+      "expression.unavailable_variable",
+      "Loop variables exist only in the loop's tasks."
+    );
+  }
+  for (const name of loopVariables) {
+    const reserved = reservedNames.has(name) || name.startsWith("__");
+    if (!variableName.test(name) || reserved) {
+      fail(
+        site,
+        "expression.unavailable_variable",
+        "Name the loop variable as a plain identifier that isn't a workflow variable.",
+        { reason: `loop variable ${name.slice(0, 64)}` }
+      );
+    }
+  }
+  const checked = checkSource(source);
+  if (!checked.ok) {
+    const remedy =
+      checked.problem.code === "unsupported"
+        ? "Use only the profile's grammar and builtins."
+        : "Shorten or simplify the expression.";
+    fail(site, `expression.${checked.problem.code}`, remedy, {
+      reason: checked.problem.reason,
+    });
+  }
+  const expression: CompiledExpression<S> = {
+    source,
+    stage: options.stage,
+    loopVariables: [...loopVariables],
+    site,
+  };
+  const available = new Set(variableNamesOf(expression));
+  if (checked.ok) {
+    for (const name of checked.source.freeVariables) {
+      if (!available.has(name)) {
+        fail(
+          site,
+          "expression.unavailable_variable",
+          `Use only the variables of this stage: ${[...available].map((variable) => `$${variable}`).join(", ")}.`,
+          { reason: `$${name}` }
+        );
+      }
+    }
+  }
+  // jq compiles it against nulls; only a compile error matters here.
+  const names = variableNamesOf(expression);
+  const run = await runJq(
+    programFor(source, names),
+    JSON.stringify(Array.from({ length: names.length + 1 }, () => null))
+  );
+  if (run.kind === "completed" && run.exitCode === jqCompileError) {
+    fail(site, "expression.invalid", "Fix the expression's jq syntax.", {
+      reason: compileMessage(run.stderr),
+    });
+  }
+  return expression;
+};
+
+/** What the values an expression runs on are: its input and variables. */
+export interface EvaluationScope<S extends Stage = Stage> {
+  /** `.`: what the stage evaluates on. */
+  input: Json;
+  /** The stage's variables, except `$runtime`, which is pinned. */
+  variables: Record<Exclude<StageVariable<S>, "runtime">, Json>;
+  /** The loop variables the expression was compiled with. */
+  loop?: Record<string, Json>;
+}
+
+/**
+ * The type the result must have where the expression sits. A condition is
+ * a boolean, a duration a safe positive integer of milliseconds, and a
+ * selector exactly what its schema accepts, as is. No truthiness, no
+ * coercion, no defaults.
+ */
+export type ResultContract =
+  | { kind: "boolean" }
+  | { kind: "duration" }
+  | { kind: "json" }
+  | { kind: "schema"; schema: StandardSchemaV1; expected: string };
+
+const contractNames = {
+  boolean: "boolean",
+  duration: "positive safe integer (milliseconds)",
+  json: "one JSON value",
+} as const;
+
+const contractName = (contract: ResultContract): string =>
+  contract.kind === "schema" ? contract.expected : contractNames[contract.kind];
+
+const isPlainObject = (value: object): boolean => {
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+/**
+ * Whether `value` is plain JSON the evaluator accepts: finite numbers,
+ * well-formed strings, dense arrays and plain objects at most
+ * `maxJsonDepth` deep, no `__proto__` key.
+ * `safeIntegers` also refuses integers beyond 2^53, as jq prints them for
+ * overflowing or non-finite numbers.
+ */
+const isAcceptedJson = (
+  value: unknown,
+  depth: number,
+  safeIntegers: boolean
+): value is Json => {
+  if (value === null || typeof value === "boolean") {
+    return true;
+  }
+  // jq refuses lone surrogates; they aren't text.
+  if (typeof value === "string") {
+    return value.isWellFormed();
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      return false;
+    }
+    return (
+      !safeIntegers || !Number.isInteger(value) || Number.isSafeInteger(value)
+    );
+  }
+  if (typeof value !== "object" || depth >= evaluatorLimits.maxJsonDepth) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      if (
+        !(index in value) ||
+        !isAcceptedJson(value[index], depth + 1, safeIntegers)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (!isPlainObject(value) || Object.hasOwn(value, "__proto__")) {
+    return false;
+  }
+  for (const [key, member] of Object.entries(value)) {
+    // A member set to undefined is left out, as JSON.stringify does.
+    const accepted =
+      member === undefined || isAcceptedJson(member, depth + 1, safeIntegers);
+    if (!key.isWellFormed() || !accepted) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const utf8Bytes = (text: string): number =>
+  new TextEncoder().encode(text).length;
+
+/** How deep JSON text nests, without parsing it. */
+const jsonTextDepth = (text: string): number => {
+  let depth = 0;
+  let deepest = 0;
+  let inString = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (char === "\\") {
+        index += 1;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === "[" || char === "{") {
+      depth += 1;
+      deepest = Math.max(deepest, depth);
+    } else if (char === "]" || char === "}") {
+      depth -= 1;
+    }
+  }
+  return deepest;
+};
+
+const checkContract = (
+  expression: CompiledExpression,
+  result: Json,
+  contract: ResultContract
+): Json => {
+  const mismatch = (): never =>
+    fail(
+      expression.site,
+      "expression.type_mismatch",
+      "Make the expression return exactly the required type.",
+      { expected: contractName(contract) }
+    );
+  if (contract.kind === "boolean") {
+    return typeof result === "boolean" ? result : mismatch();
+  }
+  if (contract.kind === "duration") {
+    const isDuration =
+      typeof result === "number" && Number.isSafeInteger(result) && result > 0;
+    return isDuration ? result : mismatch();
+  }
+  if (contract.kind === "json") {
+    return result;
+  }
+  const validated = contract.schema["~standard"].validate(result);
+  if (validated instanceof Promise || validated.issues !== undefined) {
+    return mismatch();
+  }
+  // Exactly the contract: a schema that would transform, coerce or fill in
+  // the value doesn't make a different value acceptable.
+  const value: unknown = validated.value;
+  const same =
+    isAcceptedJson(value, 0, true) &&
+    canonicalJson(value) === canonicalJson(result);
+  return same ? result : mismatch();
+};
+
+/**
+ * Evaluates a compiled expression on `scope` and checks its one result
+ * against `contract`. Fails with an expression error, which never carries
+ * the values: when the context is over its limits or not plain JSON, when
+ * jq fails or runs out of fuel or memory, when there isn't exactly one
+ * result, or when the result is over its limits or breaks the contract.
+ */
+export const evaluateExpression = async <S extends Stage>(
+  expression: CompiledExpression<S>,
+  scope: EvaluationScope<S>,
+  contract: ResultContract
+): Promise<Json> => {
+  const { site } = expression;
+  const provided: Record<string, Json> = { ...scope.variables, ...scope.loop };
+  const values: Json[] = [scope.input];
+  for (const name of variableNamesOf(expression)) {
+    if (name === "runtime") {
+      values.push(runtimeDescriptor);
+      continue;
+    }
+    if (!Object.hasOwn(provided, name)) {
+      fail(
+        site,
+        "expression.context_invalid",
+        "Provide every variable of the stage.",
+        { reason: `$${name} missing` }
+      );
+    }
+    values.push(provided[name] ?? null);
+  }
+  const expected = new Set(variableNamesOf(expression));
+  for (const name of Object.keys(provided)) {
+    if (!expected.has(name)) {
+      fail(
+        site,
+        "expression.context_invalid",
+        "Provide only the stage's variables.",
+        { reason: `$${name} isn't available here` }
+      );
+    }
+  }
+  if (!values.every((value) => isAcceptedJson(value, 0, false))) {
+    fail(
+      site,
+      "expression.context_invalid",
+      "Pass plain JSON at most 32 levels deep, with finite numbers and no __proto__ keys."
+    );
+  }
+  const stdin = JSON.stringify(values);
+  if (utf8Bytes(stdin) > evaluatorLimits.maxContextBytes) {
+    fail(
+      site,
+      "expression.context_too_large",
+      "Keep the input and variables under 1 MiB together."
+    );
+  }
+
+  const run = await runJq(
+    programFor(expression.source, variableNamesOf(expression)),
+    stdin
+  );
+  if (run.kind === "exhausted") {
+    return fail(
+      site,
+      "expression.resource_exhausted",
+      "Do less work in one expression, or move it to a compute module.",
+      { reason: run.resource }
+    );
+  }
+  if (run.kind === "crashed") {
+    return fail(
+      site,
+      "expression.failed",
+      "Check the expression against the data it runs on."
+    );
+  }
+  if (run.exitCode === jqCompileError) {
+    return fail(site, "expression.invalid", "Fix the expression's jq syntax.", {
+      reason: compileMessage(run.stderr),
+    });
+  }
+  // jq's runtime error messages quote values, so none is passed on.
+  if (run.exitCode !== 0) {
+    return fail(
+      site,
+      "expression.failed",
+      "Check the expression against the data it runs on."
+    );
+  }
+  const lines = run.stdout === "" ? [] : run.stdout.split("\n");
+  const [line] = lines;
+  if (lines.length !== 1 || line === undefined) {
+    return fail(
+      site,
+      "expression.result_count",
+      "Make the expression produce exactly one value.",
+      { reason: `${lines.length} results` }
+    );
+  }
+  if (utf8Bytes(line) > evaluatorLimits.maxResultBytes) {
+    return fail(site, "expression.result_too_large", "Return less than 1 MiB.");
+  }
+  if (jsonTextDepth(line) > evaluatorLimits.maxJsonDepth) {
+    return fail(
+      site,
+      "expression.result_invalid",
+      "Return JSON at most 32 levels deep."
+    );
+  }
+  const result: unknown = JSON.parse(line);
+  if (!isAcceptedJson(result, 0, true)) {
+    return fail(
+      site,
+      "expression.result_invalid",
+      "Return finite, safe numbers and no __proto__ keys."
+    );
+  }
+  return checkContract(expression, result, contract);
+};

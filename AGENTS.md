@@ -14,6 +14,7 @@ One codebase, deployed once per client into the client's own Cloudflare account 
 | `packages/sdk` | `@grasp-os/sdk`: workflow SDK and screen hooks, the only API App code sees |
 | `packages/ui` | `@grasp-os/ui`: shadcn on Base UI, Tailwind v4, shared with App screens |
 | `packages/compiler` | `@grasp-os/compiler`: the screen compiler |
+| `packages/workflow-expressions` | `@grasp-os/workflow-expressions`: jq expressions of JSON workflows, on a pinned, metered jq build |
 | `packages/connectors/*` | Native MCP servers, loaded by connect |
 | `packages/connector-kit` | `@grasp-os/connector-kit`: how a native connector is written (manifest, tools, MCP server) |
 | `packages/shared` | `@grasp-os/shared`: types and Zod schemas |

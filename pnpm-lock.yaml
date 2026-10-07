@@ -174,6 +174,9 @@ catalogs:
     jose:
       specifier: 6.2.12
       version: 6.2.12
+    jq-wasm:
+      specifier: 3.0.0-jq-1.8.2
+      version: 3.0.0-jq-1.8.2
     lucide-react:
       specifier: 1.47.0
       version: 1.47.0
@@ -858,6 +861,28 @@ importers:
       wrangler:
         specifier: 'catalog:'
         version: 4.136.0(@cloudflare/workers-types@5.20260921.1)(@types/node@26.6.2)
+
+  packages/workflow-expressions:
+    dependencies:
+      '@grasp-os/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@standard-schema/spec':
+        specifier: 'catalog:'
+        version: 1.1.0
+      jq-wasm:
+        specifier: 'catalog:'
+        version: 3.0.0-jq-1.8.2
+    devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: 'catalog:'
+        version: 0.22.0(@cloudflare/workers-types@5.20260921.1)(@types/node@26.6.2)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11)
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 5.20260921.1
+      '@grasp-os/sdk':
+        specifier: workspace:*
+        version: link:../sdk
 
 packages:
 
@@ -5731,6 +5756,10 @@ packages:
 
   jose@6.2.12:
     resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
+
+  jq-wasm@3.0.0-jq-1.8.2:
+    resolution: {integrity: sha512-jgWSEBJSd0lYR4Q5Fw8333MxQS5jCRI+g9KwAGL7yK1spwzTJy8C5uOS08wbpKE0Gz8oQYLlRpNLE/W70Ksp2g==}
+    engines: {node: '>=20'}
 
   js-sha256@0.10.1:
     resolution: {integrity: sha512-5obBtsz9301ULlsgggLg542s/jqtddfOpV5KJc4hajc9JV8GeY2gZHSVpYBn4nWqAUTJ9v+xwtbJ1mIBgIH5Vw==}
@@ -11951,6 +11980,8 @@ snapshots:
   jiti@2.7.0: {}
 
   jose@6.2.12: {}
+
+  jq-wasm@3.0.0-jq-1.8.2: {}
 
   js-sha256@0.10.1: {}
 
