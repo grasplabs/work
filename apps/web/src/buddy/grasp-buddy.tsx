@@ -1,5 +1,21 @@
 import { useEffect, useRef } from "react";
 
+import {
+  ALPHAS,
+  bucketOf,
+  CANVAS,
+  DOT_MOST,
+  dotAlpha,
+  dotShare,
+  HEATS,
+  LOOK,
+  MORPH_S,
+  palette,
+  patchAt,
+  REACH,
+  shimmerAt,
+  SPREAD_S,
+} from "../brain/dot-ink.ts";
 import { headDotCount, headDots, headEar, headPitch } from "./head-dots.ts";
 
 // Grasp's buddy: the head from the prototype's onboarding, Stephen in dots,
@@ -14,28 +30,8 @@ import { headDotCount, headDots, headEar, headPitch } from "./head-dots.ts";
 /** How large the buddy is on screen, in pixels, and drawn at that size. */
 const size = 128;
 /** The onboarding's own drawing size: the buddy's reach and ring scale from it. */
-const onboardingSize = 380;
-const small = size / onboardingSize;
+const small = size / CANVAS;
 const tau = Math.PI * 2;
-/** How the dots look and move, as in the onboarding (`dot-ink.ts`). */
-const look = {
-  air: 1.06,
-  lightDot: 0.13,
-  darkDot: 0.34,
-  variety: 0.95,
-  tideSize: 1.1,
-  tideSpeed: 0.16,
-  reach: 1.7,
-  reveal: 1,
-  grow: 1.1,
-  warm: 0.5,
-};
-const morphSeconds = 1.3;
-const spreadSeconds = 0.5;
-const reachPixels = 64;
-/** Steps of ink and of warmth: one colour each, so a frame is a few fills. */
-const alphas = 12;
-const heats = 6;
 /** This small, its patches of faintness go this deep at most. */
 const tideDepth = 0.5;
 /** The sway through its rows and each dot's own drift, in the figure's units. */
@@ -98,54 +94,6 @@ const smoothstep = (edge0: number, edge1: number, value: number): number => {
   return t * t * (3 - 2 * t);
 };
 
-type Rgb = [number, number, number];
-
-/** Any CSS colour as red, green and blue, by letting a canvas paint it. */
-const rgbOf = (color: string, probe: CanvasRenderingContext2D): Rgb => {
-  probe.clearRect(0, 0, 1, 1);
-  probe.fillStyle = "#000";
-  probe.fillStyle = color;
-  probe.fillRect(0, 0, 1, 1);
-  const [red = 0, green = 0, blue = 0] = probe.getImageData(0, 0, 1, 1).data;
-  return [red, green, blue];
-};
-
-const mix = (from: Rgb, to: Rgb, t: number): Rgb => [
-  Math.round(from[0] + (to[0] - from[0]) * t),
-  Math.round(from[1] + (to[1] - from[1]) * t),
-  Math.round(from[2] + (to[2] - from[2]) * t),
-];
-
-/** Every colour a dot can have, by warmth then ink, from the brain tokens. */
-const paletteOf = (element: HTMLElement): string[] => {
-  const probe = document
-    .createElement("canvas")
-    .getContext("2d", { willReadFrequently: true });
-  if (probe === null) {
-    return Array.from({ length: alphas * heats }, () => "rgba(26, 26, 25, 1)");
-  }
-  const style = getComputedStyle(element);
-  const read = (name: string, fallback: string): Rgb =>
-    rgbOf(style.getPropertyValue(name).trim() || fallback, probe);
-  const ink = read("--brain-ink", "#1a1a19");
-  const heat = read("--brain-heat", "#e5572b");
-  const glow = read("--brain-glow", "#f6c35a");
-  const styles: string[] = [];
-  for (let level = 0; level < heats; level += 1) {
-    const warmth = level / (heats - 1);
-    const color =
-      warmth < 0.6
-        ? mix(ink, heat, warmth / 0.6)
-        : mix(heat, glow, (warmth - 0.6) / 0.4);
-    for (let alpha = 0; alpha < alphas; alpha += 1) {
-      styles.push(
-        `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${(alpha / (alphas - 1)).toFixed(3)})`
-      );
-    }
-  }
-  return styles;
-};
-
 interface Cloud {
   seed: Float32Array;
   grain: Float32Array;
@@ -173,7 +121,7 @@ const cloudOf = (shape: Head): Cloud => {
   for (let at = 0; at < count; at += 1) {
     seed[at] = random();
     grain[at] = random() ** 2;
-    delay[at] = random() * spreadSeconds;
+    delay[at] = random() * SPREAD_S;
     lift[at] = 0.12 + random() * 0.4;
     const angle = random() * tau;
     const far = Math.sqrt(random()) * 0.35;
@@ -198,7 +146,6 @@ interface Moment {
   still: boolean;
   /** How deep the patches of faintness go now, and where they are. */
   tide: number;
-  tideAt: number;
   /** How hard it listens to typing. */
   listening: number;
   /** How much of the warm ring is left, and how far it has run. */
@@ -238,7 +185,7 @@ const gathered = (
   let lit = shape.tone[at] ?? 0;
   let printed = shape.ink[at] ?? 0;
   if (morphing) {
-    const eased = easeInOut((age - (cloud.delay[at] ?? 0)) / morphSeconds);
+    const eased = easeInOut((age - (cloud.delay[at] ?? 0)) / MORPH_S);
     const fromX = cloud.from[at * 3] ?? 0;
     const fromY = cloud.from[at * 3 + 1] ?? 0;
     const fromZ = cloud.from[at * 3 + 2] ?? 0;
@@ -278,7 +225,7 @@ const heatOf = (
   ringOff: number,
   { now, still, listening, ringLeft }: Moment
 ): number => {
-  let heat = look.warm * near;
+  let heat = LOOK.warm * near;
   if (ear > 0 && listening > 0.02) {
     const pulse = still ? 0.6 : 0.75 + 0.25 * Math.sin(now * 9 + own * 3);
     heat = Math.max(heat, ear * listening * pulse);
@@ -295,24 +242,17 @@ const alphaOf = (
   own: number,
   near: number,
   heat: number,
-  { now, still, tide, tideAt }: Moment
+  { now, still, tide }: Moment
 ): number => {
-  let alpha = 0.58 + 0.32 * printed + 0.08 * lit;
+  let alpha = dotAlpha(printed, lit, true);
   if (!still) {
-    alpha *= 0.92 + 0.08 * Math.sin(now * 1.4 + own * 60);
+    alpha *= shimmerAt(own, now);
   }
   alpha *= Math.min(1, Math.max(0, (1.3 - Math.hypot(x, y)) / 0.35));
   if (tide > 0) {
-    const tx = x * look.tideSize;
-    const ty = y * look.tideSize;
-    const swell =
-      Math.sin(tx * 2.3 + tideAt + 1.7 * Math.sin(ty * 1.6 - tideAt * 0.7)) *
-      Math.cos(
-        ty * 2.1 - tideAt * 0.9 + 1.3 * Math.sin(tx * 1.2 + tideAt * 0.5)
-      );
-    const shown = 1 - tide * (1 - smoothstep(0.2, 0.8, 0.5 + 0.5 * swell));
+    const shown = 1 - tide * (1 - patchAt(x, y, now));
     // The pointer finds what the tide hides.
-    alpha *= shown + (1 - shown) * look.reveal * near;
+    alpha *= shown + (1 - shown) * LOOK.reveal * near;
   }
   return heat > 0.12 ? Math.max(alpha, 0.45 + 0.5 * heat) : alpha;
 };
@@ -324,19 +264,8 @@ const radiusOf = (
   near: number,
   heat: number
 ): number => {
-  const variety = 1 - 0.55 * look.variety + 1.3 * look.variety * grain;
-  const share = Math.min(
-    0.4,
-    (look.lightDot + (look.darkDot - look.lightDot) * printed) * variety
-  );
-  return share * Math.min(1 + 0.25 * heat + look.grow * near, 0.44 / share);
-};
-
-/** The colour a dot of this ink and warmth, each 0 to 1, is printed in. */
-const bucketOf = (alpha: number, heat: number): number => {
-  const a = Math.min(alphas - 1, Math.max(0, Math.round(alpha * (alphas - 1))));
-  const h = Math.min(heats - 1, Math.round(heat * (heats - 1)));
-  return h * alphas + a;
+  const share = dotShare(printed, true, grain);
+  return share * Math.min(1 + 0.25 * heat + LOOK.grow * near, DOT_MOST / share);
 };
 
 /** Where a frame put every dot, how large, and in which colour. */
@@ -373,7 +302,7 @@ const paint = (
   for (let b = 0; b < counts.length; b += 1) {
     const many = counts[b] ?? 0;
     // The faintest colour is not printed at all.
-    if (many > 0 && b % alphas !== 0) {
+    if (many > 0 && b % ALPHAS !== 0) {
       context.fillStyle = styles[b] ?? "transparent";
       context.beginPath();
       for (let k = next; k < next + many; k += 1) {
@@ -409,9 +338,9 @@ const animate = (element: HTMLCanvasElement): (() => void) => {
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  let styles = paletteOf(element);
+  let styles = palette(element);
   const repaint = (): void => {
-    styles = paletteOf(element);
+    styles = palette(element);
   };
   const scheme = matchMedia("(prefers-color-scheme: dark)");
   scheme.addEventListener("change", repaint);
@@ -429,14 +358,14 @@ const animate = (element: HTMLCanvasElement): (() => void) => {
   const screenY = new Float32Array(count);
   const radius = new Float32Array(count);
   const bucket = new Uint16Array(count);
-  const counts = new Uint32Array(alphas * heats);
-  const starts = new Uint32Array(alphas * heats);
+  const counts = new Uint32Array(ALPHAS * HEATS);
+  const starts = new Uint32Array(ALPHAS * HEATS);
   const order = new Uint32Array(count);
 
-  const scale = size * 0.43 * look.air;
+  const scale = size * 0.43 * LOOK.air;
   const middle = size / 2;
   const gap = headPitch * scale;
-  const reach = reachPixels * look.reach * small;
+  const reach = REACH * LOOK.reach * small;
 
   // The warm spot glides after the pointer and fades in and out.
   const pointer = { x: middle, y: middle, inside: false };
@@ -468,8 +397,8 @@ const animate = (element: HTMLCanvasElement): (() => void) => {
     const since = then < 0 ? 1 / 60 : Math.min(now - then, 0.1);
     then = now;
     const age = now - born;
-    const morphing = !still && age < morphSeconds + spreadSeconds;
-    if (!still && !greeted && age > morphSeconds + spreadSeconds + 0.15) {
+    const morphing = !still && age < MORPH_S + SPREAD_S;
+    if (!still && !greeted && age > MORPH_S + SPREAD_S + 0.15) {
       greeted = true;
       ring.x = middle;
       ring.y = middle;
@@ -478,7 +407,6 @@ const animate = (element: HTMLCanvasElement): (() => void) => {
     const tide = still
       ? 0
       : tideDepth * smoothstep(0.12, 0.6, 0.5 - 0.5 * Math.cos(age * 0.21));
-    const tideAt = now * look.tideSpeed;
     const follow = still ? 1 : 0.22;
     if (pointer.inside) {
       spotX += (pointer.x - spotX) * follow;
@@ -497,7 +425,6 @@ const animate = (element: HTMLCanvasElement): (() => void) => {
       morphing,
       still,
       tide,
-      tideAt,
       listening,
       ringLeft,
       travelled,

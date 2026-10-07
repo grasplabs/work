@@ -146,6 +146,8 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import { DotBrain } from "../brain/dot-brain.tsx";
+import type { ShapeKey } from "../brain/dot-shapes.ts";
 import {
   PageSidebar,
   PageSidebarBody,
@@ -261,6 +263,114 @@ const Theme = () => (
     </CardContent>
   </Card>
 );
+
+// The dot brain's figures (brain/dot-shapes.ts), one per onboarding step and
+// interview: each beside the others, then one that flows from figure to figure.
+// `teams` is how far each team, or each connection, is: its share inked.
+const figures: {
+  name: string;
+  shape: ShapeKey;
+  fill: number;
+  teams?: number[];
+}[] = [
+  { name: "Head", shape: { kind: "head" }, fill: 0.2 },
+  { name: "Stephen listening", shape: { kind: "listen" }, fill: 0.4 },
+  {
+    name: "Claire listening",
+    shape: { kind: "listen", who: "claire" },
+    fill: 0.4,
+  },
+  {
+    name: "Teams",
+    shape: { kind: "org", teams: [42, 38, 30, 18, 14, 0, 0, 0], leads: true },
+    fill: 0.35,
+    teams: [0.8, 0.5, 0.25, 0.1, 0, 0, 0, 0],
+  },
+  {
+    name: "Where documents live",
+    shape: {
+      kind: "hub",
+      linked: [true, false, true, false, false, false],
+      beyond: 1,
+    },
+    fill: 0.45,
+  },
+  { name: "Documents", shape: { kind: "sheets" }, fill: 0.5 },
+  { name: "Laptop", shape: { kind: "laptop" }, fill: 0.55 },
+  {
+    name: "Connections",
+    shape: { kind: "spokes", count: 5 },
+    fill: 0.6,
+    teams: [1, 1, 0.6, 0, 0],
+  },
+  { name: "The team", shape: { kind: "crowd" }, fill: 0.65 },
+  { name: "Two people", shape: { kind: "pair" }, fill: 0.75 },
+  { name: "Brain", shape: { kind: "brain" }, fill: 0.9 },
+];
+
+const DotBrains = () => {
+  const [step, setStep] = useState(0);
+  const current = figures[step % figures.length] ?? figures[0];
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Dot brain</CardTitle>
+        <CardDescription>
+          Every figure, inked as far as the brain is full; then one that flows
+          from figure to figure.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col gap-6">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            {figures.map((figure) => (
+              <figure
+                className="flex flex-col items-center gap-1"
+                key={figure.name}
+              >
+                <DotBrain
+                  apart={{ leaves: false }}
+                  className="w-full"
+                  label={figure.name}
+                  scene={{
+                    shape: figure.shape,
+                    fill: figure.fill,
+                    teams: figure.teams,
+                    clear: 1,
+                  }}
+                />
+                <figcaption className="text-muted-foreground text-xs">
+                  {figure.name}
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+          {current === undefined ? null : (
+            <div className="flex flex-col items-center gap-3">
+              <DotBrain
+                className="w-72"
+                label={`Flowing: ${current.name}`}
+                scene={{
+                  shape: current.shape,
+                  fill: current.fill,
+                  teams: current.teams,
+                }}
+              />
+              <Button
+                onClick={() => {
+                  setStep(step + 1);
+                }}
+                variant="outline"
+              >
+                Next figure
+              </Button>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
 
 /** How every page finds nothing, fails and loads (frame/page-states.tsx). */
 const States = () => (
@@ -552,6 +662,8 @@ const Kit = () => (
         <PageColumn />
 
         <States />
+
+        <DotBrains />
 
         <Card>
           <CardHeader>
