@@ -143,6 +143,23 @@ function getPayloadConfigFromPayload(
   return configLabelKey in config ? config[configLabelKey] : config[key];
 }
 
+/**
+ * Which of the props recharts hands its tooltip and legend content are
+ * HTML for the content's element: an id, a title, a role, ARIA and data
+ * attributes. The rest of what recharts passes (coordinate, viewBox and the
+ * like) stays off the DOM.
+ */
+const htmlAttribute = /^(?:id|title|role|lang|dir|tabIndex|aria-.+|data-.+)$/u;
+
+const htmlPropsOf = (
+  props: Record<string, unknown>
+): React.HTMLAttributes<HTMLDivElement> =>
+  // SAFETY: only names of HTML attributes pass the filter, with the values
+  // the caller gave for them.
+  Object.fromEntries(
+    Object.entries(props).filter(([name]) => htmlAttribute.test(name))
+  );
+
 const ChartTooltip = RechartsPrimitive.Tooltip;
 
 type TooltipEntry = RechartsPrimitive.TooltipPayloadEntry<
@@ -197,8 +214,9 @@ function ChartTooltipLabel({
     keyText(labelKey, item?.dataKey, item?.name)
   );
   const value =
-    labelKey === undefined && typeof label === "string"
-      ? (config[label]?.label ?? label)
+    labelKey === undefined &&
+    (typeof label === "string" || typeof label === "number")
+      ? (config[String(label)]?.label ?? label)
       : itemConfig?.label;
 
   if (labelFormatter) {
@@ -263,6 +281,7 @@ function ChartTooltipContent({
   color,
   nameKey,
   labelKey,
+  ...props
 }: ChartTooltipContentProps) {
   const { config } = useChart();
 
@@ -284,6 +303,7 @@ function ChartTooltipContent({
 
   return (
     <div
+      {...htmlPropsOf(props)}
       className={cn(
         "border-border/50 bg-background grid min-w-32 items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs shadow-xl",
         className
@@ -360,6 +380,7 @@ function ChartLegendContent({
   // oxlint-disable-next-line typescript/no-deprecated -- recharts still passes it to the content
   verticalAlign = "bottom",
   nameKey,
+  ...props
 }: React.ComponentProps<"div"> & {
   hideIcon?: boolean;
   nameKey?: string;
@@ -372,6 +393,7 @@ function ChartLegendContent({
 
   return (
     <div
+      {...htmlPropsOf(props)}
       className={cn(
         "flex items-center justify-center gap-4",
         verticalAlign === "top" ? "pb-3" : "pt-3",

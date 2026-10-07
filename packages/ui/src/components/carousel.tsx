@@ -1,5 +1,6 @@
 "use client";
 
+import { useDirection } from "@base-ui/react/direction-provider";
 import { Button } from "@grasp-os/ui/components/button";
 import { cn } from "@grasp-os/ui/lib/utils";
 import useEmblaCarousel from "embla-carousel-react";
@@ -8,6 +9,30 @@ import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import * as React from "react";
 
 type CarouselApi = UseEmblaCarouselType[1];
+
+/** Whether a key press belongs to a field the person is typing in. */
+const isEditable = (target: EventTarget): boolean =>
+  target instanceof HTMLInputElement ||
+  target instanceof HTMLTextAreaElement ||
+  target instanceof HTMLSelectElement ||
+  (target instanceof HTMLElement && target.isContentEditable);
+
+/**
+ * The keys for the previous and next slide: up and down when vertical, and
+ * left and right the other way round in right-to-left text.
+ */
+const slideKeys = (
+  orientation: "horizontal" | "vertical",
+  direction: "ltr" | "rtl"
+): { previous: string; next: string } => {
+  if (orientation === "vertical") {
+    return { previous: "ArrowUp", next: "ArrowDown" };
+  }
+  if (direction === "rtl") {
+    return { previous: "ArrowRight", next: "ArrowLeft" };
+  }
+  return { previous: "ArrowLeft", next: "ArrowRight" };
+};
 type UseCarouselParameters = Parameters<typeof useEmblaCarousel>;
 type CarouselOptions = UseCarouselParameters[0];
 type CarouselPlugin = UseCarouselParameters[1];
@@ -49,8 +74,11 @@ function Carousel({
   children,
   ...props
 }: React.ComponentProps<"div"> & CarouselProps) {
+  // Right-to-left text scrolls the slides the other way (embla's `direction`).
+  const direction = useDirection();
   const [carouselRef, api] = useEmblaCarousel(
     {
+      direction,
       ...opts,
       axis: orientation === "horizontal" ? "x" : "y",
     },
@@ -83,11 +111,17 @@ function Carousel({
     api?.scrollNext();
   };
 
+  // Upstream takes the left and right arrows from everything inside,
+  // fields too, and only those two, whatever the orientation.
+  const keys = slideKeys(orientation, opts?.direction ?? direction);
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "ArrowLeft") {
+    if (isEditable(event.target)) {
+      return;
+    }
+    if (event.key === keys.previous) {
       event.preventDefault();
       scrollPrev();
-    } else if (event.key === "ArrowRight") {
+    } else if (event.key === keys.next) {
       event.preventDefault();
       scrollNext();
     }
@@ -194,7 +228,9 @@ function CarouselPrevious({
       onClick={scrollPrev}
       {...props}
     >
-      <ChevronLeftIcon className="rtl:rotate-180" />
+      <ChevronLeftIcon
+        className={cn(orientation === "horizontal" && "rtl:rotate-180")}
+      />
       <span className="sr-only">{label}</span>
     </Button>
   );
@@ -228,7 +264,9 @@ function CarouselNext({
       onClick={scrollNext}
       {...props}
     >
-      <ChevronRightIcon className="rtl:rotate-180" />
+      <ChevronRightIcon
+        className={cn(orientation === "horizontal" && "rtl:rotate-180")}
+      />
       <span className="sr-only">{label}</span>
     </Button>
   );

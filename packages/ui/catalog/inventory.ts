@@ -192,7 +192,7 @@ export const shadcnComponents = {
       "useCarousel",
     ],
     changes:
-      "Reads whether it can scroll from the carousel as it changes, instead of copying it into state from an effect; `label` names the previous and next buttons, for translations.",
+      "Reads whether it can scroll from the carousel as it changes, instead of copying it into state from an effect; `label` names the previous and next buttons, for translations. The arrow keys leave fields inside the slides alone, follow the orientation (up and down when vertical) and turn around in right-to-left text, where the slides scroll the other way too.",
   },
   chart: {
     status: "supported",
@@ -239,7 +239,7 @@ export const shadcnComponents = {
       "chartColors",
     ],
     changes:
-      "A series' colour is a chart token (`chart-1` to `chart-5`): marks take `chartColor(token)`, markers use the token's class. No `<style>` element, no inline styles, no ChartStyle, and no per-theme colours: the tokens have their own dark values. Hands on recharts' charts and their parts, since screens can't import recharts. The chart's surface shows a focus ring instead of hiding it.",
+      "A series' colour is a chart token (`chart-1` to `chart-5`): marks take `chartColor(token)`, markers use the token's class. No `<style>` element, no inline styles, no ChartStyle, and no per-theme colours: the tokens have their own dark values. Hands on recharts' charts and their parts, since screens can't import recharts. The chart's surface shows a focus ring instead of hiding it. The tooltip shows numeric labels, such as a year, and the tooltip and legend content hand HTML props (id, ARIA, data) on to their element.",
   },
   checkbox: {
     status: "supported",
