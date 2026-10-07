@@ -92,6 +92,8 @@ function ChartContainer({
   const chartId = `chart-${id ?? uniqueId.replaceAll(":", "")}`;
   const contextValue = { config };
 
+  // Upstream hides the outline of the chart's surface, which takes focus
+  // for keyboard use (recharts' accessibility layer); here it shows a ring.
   return (
     // oxlint-disable-next-line react/jsx-no-constructed-context-values -- compiled
     <ChartContext.Provider value={contextValue}>
@@ -99,7 +101,7 @@ function ChartContainer({
         data-slot="chart"
         data-chart={chartId}
         className={cn(
-          "[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border flex aspect-video justify-center text-xs [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden",
+          "[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-surface:focus-visible]:outline-ring flex aspect-video justify-center text-xs [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden [&_.recharts-surface:focus-visible]:outline-2 [&_.recharts-surface:focus-visible]:outline-solid",
           className
         )}
         {...props}
@@ -414,3 +416,39 @@ export {
   chartColor,
   chartColors,
 };
+
+// Screens import only the kit's modules, never recharts itself, so the chart
+// module hands on recharts' charts and their parts.
+export {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  Brush,
+  CartesianGrid,
+  ComposedChart,
+  Funnel,
+  FunnelChart,
+  Label,
+  LabelList,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  PolarAngleAxis,
+  PolarGrid,
+  PolarRadiusAxis,
+  Radar,
+  RadarChart,
+  RadialBar,
+  RadialBarChart,
+  ReferenceArea,
+  ReferenceDot,
+  ReferenceLine,
+  Scatter,
+  ScatterChart,
+  Treemap,
+  XAxis,
+  YAxis,
+  ZAxis,
+} from "recharts";
