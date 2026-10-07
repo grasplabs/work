@@ -128,9 +128,11 @@ interface VersionAt {
 
 /**
  * A step its version's row keeps that its source's outline doesn't show:
- * named, and nothing more is known of it.
+ * named, and nothing more is known of it. Its code may be anywhere in
+ * the workflow's file, so it is compared as the whole file (`source`):
+ * any change to the file shows as a change to it.
  */
-const keptOnly = (name: string): StepOutline => ({
+const keptOnly = (name: string, source: string): StepOutline => ({
   type: "step",
   name,
   kind: "exact",
@@ -139,7 +141,7 @@ const keptOnly = (name: string): StepOutline => ({
   locked: false,
   params: [],
   options: {},
-  code: "",
+  code: source,
   line: 0,
 });
 
@@ -149,9 +151,12 @@ const keptOnly = (name: string): StepOutline => ({
  * come from the version's row (`keptCallsOf`), the reading its runs are
  * held to, never from reading its source again, which a later describer
  * may read otherwise. The source's outline gives each step's layout and
- * options only. None where the version has no such workflow; null when
- * its row keeps its steps as unread, or keeps nothing for it (its runs
- * then fail with `workflow.calls_not_kept`).
+ * options only, and how each changed: a step the outline doesn't show
+ * changes with the file (`keptOnly`). None where the version has no such
+ * workflow; null when its row keeps its steps as unread, or keeps nothing
+ * for it (its runs then fail with `workflow.calls_not_kept`), and when
+ * its source can't be read as steps at all, so their changes can't be
+ * either: the review then lists the workflow's every call (`calls`).
  */
 const stepsOf = (
   at: VersionAt | undefined,
@@ -165,13 +170,17 @@ const stepsOf = (
   if (kept === null) {
     return null;
   }
+  // Source the outline can't read says nothing of how its steps changed:
+  // said as unreadable, though the row keeps what each step may call.
   const outline = readOutline(source);
-  const read =
-    outline === null ? new Map<string, StepOutline>() : stepsIn(outline.steps);
+  if (outline === null) {
+    return null;
+  }
+  const read = stepsIn(outline.steps);
   return new Map(
     Object.entries(kept).map(([name, calls]) => [
       name,
-      { ...(read.get(name) ?? keptOnly(name)), env: [...calls] },
+      { ...(read.get(name) ?? keptOnly(name, source)), env: [...calls] },
     ])
   );
 };

@@ -63,15 +63,16 @@ const storedCalls = async (app: string): Promise<unknown> => {
   return row === null ? null : JSON.parse(row.workflow_calls);
 };
 
-/** Keeps `calls` as what version 1 of `app`'s review showed. */
+/** Keeps `calls` as what version `version` (1 by default) of `app`'s review showed. */
 const describedAs = async (
   app: string,
-  calls: Record<string, WorkflowCalls>
+  calls: Record<string, WorkflowCalls>,
+  version = 1
 ): Promise<void> => {
   await env.DB.prepare(
-    "UPDATE app_versions SET workflow_calls = ? WHERE app_id = ? AND version = 1"
+    "UPDATE app_versions SET workflow_calls = ? WHERE app_id = ? AND version = ?"
   )
-    .bind(JSON.stringify(calls), app)
+    .bind(JSON.stringify(calls), app, version)
     .run();
 };
 
@@ -545,6 +546,77 @@ queueMicrotask(() => {
           sideEffect: true,
         },
       ],
+    });
+  });
+
+  it("show a workflow's change when its source changed in a way the outline can't attribute to the steps its row keeps, and say its steps can't be read when its source can't be read", async () => {
+    const admin = await personApi("admin");
+    const { id: app } = await admin.api.apps.create({ name: "Invoices" });
+    const files: Record<string, string> = {
+      "app/server.ts": server,
+      ...mailer(""),
+    };
+    const { version: first } = await admin.api.apps.files.commit(
+      app,
+      files,
+      "Mailer"
+    );
+    await admin.api.apps.versions.setCurrent(app, first);
+    // Code outside any step the outline reads changes.
+    const edited = `// Mails the invoice.\n${files["workflows/mailer.ts"] ?? ""}`;
+    const { version: second } = await admin.api.apps.files.commit(
+      app,
+      { ...files, "workflows/mailer.ts": edited },
+      "Mailer, noted"
+    );
+    // Both rows keep the same steps and calls, one of them a step the
+    // outline doesn't show.
+    const kept: Record<string, WorkflowCalls> = {
+      mailer: {
+        steps: { send: ["MAIL"], notify: ["APP"] },
+        all: ["APP", "MAIL"],
+      },
+    };
+    await describedAs(app, kept, first);
+    await describedAs(app, kept, second);
+    const attributed = await admin.api.apps.versions.review(app, second);
+    // Its source can't be read as steps (one sits in a `try`), though the
+    // row keeps them.
+    const guarded = edited
+      .replace("  return await step.do(", "  try {\n    return await step.do(")
+      .replace(
+        "\n  );\n});",
+        "\n  );\n  } catch (error) {\n    throw error;\n  }\n});"
+      );
+    const { version: third } = await admin.api.apps.files.commit(
+      app,
+      { ...files, "workflows/mailer.ts": guarded },
+      "Mailer, guarded"
+    );
+    await describedAs(app, kept, third);
+    const unread = await admin.api.apps.versions.review(app, third);
+
+    expect({
+      attributed: attributed.workflows.map(({ id, change, steps }) => ({
+        id,
+        change,
+        steps: steps?.map(({ name, change: stepChange }) => ({
+          name,
+          change: stepChange,
+        })),
+      })),
+      unread: unread.workflows.map(({ id, steps }) => ({ id, steps })),
+    }).toStrictEqual({
+      attributed: [
+        {
+          id: "mailer",
+          change: "modified",
+          // `send` reads the same; `notify`, which the outline doesn't
+          // show, may be anywhere in the file that changed.
+          steps: [{ name: "notify", change: "modified" }],
+        },
+      ],
+      unread: [{ id: "mailer", steps: null }],
     });
   });
 
