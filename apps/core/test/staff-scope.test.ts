@@ -117,7 +117,7 @@ describe("staff with the onboarding scope", () => {
 describe("staff with the onboarding scope, after Grasp's go", () => {
   afterEach(reset);
 
-  it("don't get access back when the gate closes again, and see when theirs ends", async () => {
+  it("don't get access back when the gate closes and opens again, and see when theirs ends", async () => {
     const { session, api: staff } = await staffOn();
     await staff.onboardingGate.close();
     await staff.onboardingGate.open();
@@ -131,6 +131,9 @@ describe("staff with the onboarding scope, after Grasp's go", () => {
     await env.DB.prepare("UPDATE onboarding_gate SET opened_at = ?")
       .bind(eightDays)
       .run();
+    // Opening again, by staff with the full scope, keeps the go's time.
+    const { api: full } = await staffOn(env);
+    await full.onboardingGate.open();
     const again = await outcome(
       signedIn(idp, "grasp-staff", staffPerson(), { coreEnv: onboardingScope })
     );
