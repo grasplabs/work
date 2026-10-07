@@ -51,7 +51,7 @@ const maxPeers = 32;
 const maxPlatformPeers = 16;
 
 /** An npm package name, scoped or not, as the registry allows them. */
-const packageNameSchema = z
+export const packageNameSchema = z
   .string()
   .max(214)
   .regex(
@@ -60,7 +60,7 @@ const packageNameSchema = z
   );
 
 /** One exact version: never a range, a tag or a URL. */
-const exactVersionSchema = z
+export const exactVersionSchema = z
   .string()
   .max(128)
   .regex(
@@ -68,8 +68,16 @@ const exactVersionSchema = z
     "an exact version"
   );
 
+/**
+ * The registry's SHA-512 of a tarball, as npm writes it (Subresource
+ * Integrity): which bytes, not whether they are safe.
+ */
+export const integritySchema = z
+  .string()
+  .regex(/^sha512-[A-Za-z0-9+/]{86}==$/u, "a sha512 integrity hash");
+
 /** One package of a graph, by name and exact version. */
-const packageRefSchema = z.strictObject({
+export const packageRefSchema = z.strictObject({
   name: packageNameSchema,
   version: exactVersionSchema,
 });
@@ -96,9 +104,7 @@ const packageSchema = z.strictObject({
   version: exactVersionSchema,
   origin: z.literal(npmRegistryOrigin),
   /** The registry's SHA-512 of its tarball: which bytes, not whether they are safe. */
-  integrity: z
-    .string()
-    .regex(/^sha512-[A-Za-z0-9+/]{86}==$/u, "a sha512 integrity hash"),
+  integrity: integritySchema,
   /** The licence it reports, as it reports it; null when it reports none. */
   license: z.string().min(1).max(128).nullable(),
   /** The packages it depends on, each one of the graph. */
