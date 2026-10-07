@@ -56,6 +56,17 @@ const outcome = async (promise: Promise<unknown>): Promise<string> => {
 
 const connect = exports.default;
 
+/** An answer whose connection is lost after its first bytes. */
+const broken = (): Response =>
+  new Response(
+    new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        controller.enqueue(new TextEncoder().encode('{"name":"le'));
+        controller.error(new TypeError("Network connection lost."));
+      },
+    })
+  );
+
 const leftPad = {
   name: "left-pad",
   version: "1.3.0",
@@ -127,8 +138,17 @@ describe("a package's metadata", () => {
       "/@acme%2fpad",
     ]);
     const headers = registry.asked[0]?.headers ?? {};
-    expect(Object.keys(headers)).not.toContain("authorization");
-    expect(Object.keys(headers)).not.toContain("cookie");
+    // The full packument (npm's abbreviated one has no publication
+    // times), and no credentials.
+    expect({
+      accept: headers.accept,
+      authorization: "authorization" in headers,
+      cookie: "cookie" in headers,
+    }).toStrictEqual({
+      accept: "application/json",
+      authorization: false,
+      cookie: false,
+    });
     expect(
       registry.asked.map(({ method, body }) => [method, body])
     ).toStrictEqual([["GET", ""]]);
@@ -232,6 +252,22 @@ describe("a package's metadata", () => {
       )
     ).resolves.toStrictEqual([
       "package.registry_unavailable",
+      "package.registry_unavailable",
+      "package.registry_unavailable",
+    ]);
+  });
+
+  it("fails as unavailable when the registry's answer breaks off mid-body", async () => {
+    await registry.publish(leftPad);
+    const integrity = registry.integrityOf("left-pad", "1.3.0") ?? "";
+    registry.override("/left-pad", broken);
+    registry.override(registry.tarballPath("left-pad", "1.3.0"), broken);
+    expect([
+      await outcome(connect.npmMetadata("left-pad")),
+      await outcome(
+        connect.npmTarball({ name: "left-pad", version: "1.3.0", integrity })
+      ),
+    ]).toStrictEqual([
       "package.registry_unavailable",
       "package.registry_unavailable",
     ]);

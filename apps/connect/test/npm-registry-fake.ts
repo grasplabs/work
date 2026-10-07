@@ -236,9 +236,36 @@ export const npmRegistryFake = () => {
   const notFound = (): Response =>
     Response.json({ error: "Not found" }, { status: 404 });
 
-  const packument = (name: string, versions: Map<string, Stored>): Response => {
+  /** The fields npm's abbreviated metadata keeps of a version. */
+  const abbreviatedFields = new Set([
+    "name",
+    "version",
+    "dependencies",
+    "optionalDependencies",
+    "peerDependencies",
+    "peerDependenciesMeta",
+    "bundleDependencies",
+    "bin",
+    "engines",
+    "os",
+    "cpu",
+    "deprecated",
+    "hasInstallScript",
+    "dist",
+  ]);
+
+  /**
+   * A package's metadata: the full packument, or, when asked for npm's
+   * abbreviated install metadata (`application/vnd.npm.install-v1+json`),
+   * that one, which has no `time`, licence or scripts.
+   */
+  const packument = (
+    name: string,
+    versions: Map<string, Stored>,
+    abbreviated: boolean
+  ): Response => {
     const time: Record<string, string> = {};
-    const listed: Record<string, unknown> = {};
+    const listed: Record<string, Record<string, unknown>> = {};
     let latest = "";
     for (const [version, stored] of versions) {
       const publishedAt =
@@ -260,6 +287,25 @@ export const npmRegistryFake = () => {
             : { integrity: stored.published.integrity ?? stored.integrity }),
         },
       };
+    }
+    if (abbreviated) {
+      const kept: Record<string, unknown> = {};
+      for (const [version, manifest] of Object.entries(listed)) {
+        kept[version] = Object.fromEntries(
+          Object.entries(manifest).filter(([field]) =>
+            abbreviatedFields.has(field)
+          )
+        );
+      }
+      return Response.json(
+        {
+          name,
+          modified: Object.values(time).at(-1),
+          "dist-tags": { latest },
+          versions: kept,
+        },
+        { headers: { "content-type": "application/vnd.npm.install-v1+json" } }
+      );
     }
     return Response.json({
       _id: name,
@@ -308,7 +354,12 @@ export const npmRegistryFake = () => {
     }
     const name = decodeURIComponent(url.pathname.slice(1));
     const versions = packages.get(name);
-    return versions === undefined ? notFound() : packument(name, versions);
+    const abbreviated = (request.headers.get("accept") ?? "").includes(
+      "application/vnd.npm.install-v1+json"
+    );
+    return versions === undefined
+      ? notFound()
+      : packument(name, versions, abbreviated);
   };
 
   return {

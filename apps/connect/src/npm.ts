@@ -94,9 +94,15 @@ const readCapped = async (
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
-    // Each chunk is read in turn: the count decides whether to read on.
-    // oxlint-disable-next-line no-await-in-loop
-    const chunk = await reader.read();
+    let chunk: ReadableStreamReadResult<unknown>;
+    try {
+      // Each chunk is read in turn: the count decides whether to read on.
+      // oxlint-disable-next-line no-await-in-loop
+      chunk = await reader.read();
+    } catch {
+      // The timeout, or the connection reset, mid-body.
+      throw packageErrors.create("package.registry_unavailable");
+    }
     if (chunk.done) {
       break;
     }
