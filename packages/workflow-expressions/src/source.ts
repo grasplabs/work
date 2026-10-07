@@ -41,8 +41,9 @@ export const resolveEvaluate = (
     if ([...settings.keys()].some((key) => !allowedKeys.has(key))) {
       return undefined;
     }
-    const language = settings.get("language") ?? "jq";
-    const mode = settings.get("mode") ?? "strict";
+    // Defaults only for a missing key: an explicit null is no setting.
+    const language = settings.has("language") ? settings.get("language") : "jq";
+    const mode = settings.has("mode") ? settings.get("mode") : "strict";
     return language === "jq" && mode === "strict" ? profileEvaluate : undefined;
   } catch {
     // An object that throws while read (a getter, a proxy) isn't JSON.

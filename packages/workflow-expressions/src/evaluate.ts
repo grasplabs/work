@@ -108,6 +108,61 @@ const fail = (
   throw expressionError(code, site, { remedy, ...more });
 };
 
+/**
+ * Runs `read` over caller data (objects the caller built: options, scopes,
+ * contracts). Anything it throws that isn't an expression error, such as a
+ * getter or proxy that throws, fails as `code` at `site`, and what it threw
+ * is never passed on.
+ */
+const readCallerData = <T>(
+  site: ExpressionSite,
+  code: Parameters<typeof expressionError>[0],
+  remedy: string,
+  read: () => T
+): T => {
+  try {
+    return read();
+  } catch (error) {
+    if (expressionErrors.codeOf(error) !== undefined) {
+      throw error;
+    }
+    return fail(site, code, remedy);
+  }
+};
+
+/** The expressions compileExpression made: evaluation trusts no other. */
+const compiledExpressions = new WeakSet<object>();
+
+const isStage = (value: unknown): value is Stage =>
+  typeof value === "string" && Object.hasOwn(stageVariables, value);
+
+/** The compile options, copied into plain data; throws on anything else. */
+const readOptions = <S extends Stage>(
+  options: CompileOptions<S>
+): {
+  stage: S;
+  scope: string[];
+  pointer: string;
+  loopVariables: unknown[];
+} => {
+  const { stage, pointer } = options;
+  const scope: unknown[] = [...options.scope];
+  const loopVariables: unknown[] = [...(options.loopVariables ?? [])];
+  if (
+    !isStage(stage) ||
+    typeof pointer !== "string" ||
+    !scope.every((taskId) => typeof taskId === "string")
+  ) {
+    throw new TypeError("Compile options aren't plain data");
+  }
+  return {
+    stage,
+    scope: scope.filter((taskId) => typeof taskId === "string"),
+    pointer,
+    loopVariables,
+  };
+};
+
 // jq's compile errors name the source position and the construct, never
 // a value; the position is that of the generated program, so drop it.
 const compileMessage = (stderr: string): string => {
@@ -145,20 +200,26 @@ export const compileExpression = async <S extends Stage>(
   source: string,
   options: CompileOptions<S>
 ): Promise<CompiledExpression<S>> => {
-  const site: ExpressionSite = { pointer: options.pointer };
-  const taskId = options.scope.at(-1);
+  const read = readCallerData(
+    { pointer: "" },
+    "expression.invalid",
+    "Pass the compile options as plain data.",
+    () => readOptions(options)
+  );
+  const site: ExpressionSite = { pointer: read.pointer };
+  const taskId = read.scope.at(-1);
   if (taskId !== undefined) {
     site.taskId = taskId;
   }
-  if (options.scope.length > evaluatorLimits.maxTaskScopes) {
+  if (read.scope.length > evaluatorLimits.maxTaskScopes) {
     fail(
       site,
       "expression.scope_too_deep",
       "Move the task up, or split the workflow."
     );
   }
-  const loopVariables = options.loopVariables ?? [];
-  if (loopVariables.length > 0 && !taskStages.has(options.stage)) {
+  const { loopVariables } = read;
+  if (loopVariables.length > 0 && !taskStages.has(read.stage)) {
     fail(
       site,
       "expression.unavailable_variable",
@@ -195,12 +256,17 @@ export const compileExpression = async <S extends Stage>(
       reason: checked.problem.reason,
     });
   }
-  const expression: CompiledExpression<S> = {
+  if (typeof source !== "string") {
+    fail(site, "expression.invalid", "Pass the expression as text.");
+  }
+  const expression: CompiledExpression<S> = Object.freeze({
     source,
-    stage: options.stage,
-    loopVariables: [...loopVariables],
-    site,
-  };
+    stage: read.stage,
+    loopVariables: Object.freeze(
+      loopVariables.filter((name) => typeof name === "string")
+    ),
+    site: Object.freeze(site),
+  });
   const available = new Set(variableNamesOf(expression));
   if (checked.ok) {
     for (const name of checked.source.freeVariables) {
@@ -225,6 +291,7 @@ export const compileExpression = async <S extends Stage>(
       reason: compileMessage(run.stderr),
     });
   }
+  compiledExpressions.add(expression);
   return expression;
 };
 
@@ -256,8 +323,58 @@ const contractNames = {
   json: "one JSON value",
 } as const;
 
-const contractName = (contract: ResultContract): string =>
-  contract.kind === "schema" ? contract.expected : contractNames[contract.kind];
+const contractKinds = new Set(["boolean", "duration", "json", "schema"]);
+
+/** The contract, copied into plain data; throws on anything else. */
+const readContract = (
+  contract: ResultContract
+): {
+  kind: ResultContract["kind"];
+  name: string;
+  validate: (value: unknown) => unknown;
+} => {
+  const { kind } = contract;
+  if (!contractKinds.has(kind)) {
+    throw new TypeError("Not a result contract");
+  }
+  if (kind !== "schema") {
+    return {
+      kind,
+      name: contractNames[kind],
+      validate: () => ({ issues: [] }),
+    };
+  }
+  const { expected, schema } = contract;
+  const standard: unknown = schema["~standard"];
+  const validate: unknown =
+    typeof standard === "object" && standard !== null
+      ? Reflect.get(standard, "validate")
+      : undefined;
+  if (typeof expected !== "string" || typeof validate !== "function") {
+    throw new TypeError("Not a Standard Schema contract");
+  }
+  return {
+    kind,
+    name: expected.slice(0, 200),
+    validate: (value) => {
+      const answer: unknown = Reflect.apply(validate, standard, [value]);
+      return answer;
+    },
+  };
+};
+
+/** A schema's answer, if it accepted the value: its value, else nothing. */
+const acceptedValue = (validated: unknown): { value: unknown } | undefined => {
+  if (typeof validated !== "object" || validated === null) {
+    return undefined;
+  }
+  const issues: unknown = Reflect.get(validated, "issues");
+  if (issues !== undefined) {
+    return undefined;
+  }
+  const value: unknown = Reflect.get(validated, "value");
+  return { value };
+};
 
 const isPlainObject = (value: object): boolean => {
   const prototype: unknown = Object.getPrototypeOf(value);
@@ -352,22 +469,28 @@ const checkContract = async (
   result: Json,
   contract: ResultContract
 ): Promise<Json> => {
+  const read = readCallerData(
+    expression.site,
+    "expression.type_mismatch",
+    "Pass a boolean, duration, json or Standard Schema contract.",
+    () => readContract(contract)
+  );
   const mismatch = (): never =>
     fail(
       expression.site,
       "expression.type_mismatch",
       "Make the expression return exactly the required type.",
-      { expected: contractName(contract) }
+      { expected: read.name }
     );
-  if (contract.kind === "boolean") {
+  if (read.kind === "boolean") {
     return typeof result === "boolean" ? result : mismatch();
   }
-  if (contract.kind === "duration") {
+  if (read.kind === "duration") {
     const isDuration =
       typeof result === "number" && Number.isSafeInteger(result) && result > 0;
     return isDuration ? result : mismatch();
   }
-  if (contract.kind === "json") {
+  if (read.kind === "json") {
     return result;
   }
   // Exactly the contract: a schema that would transform, coerce or fill in
@@ -378,13 +501,10 @@ const checkContract = async (
   const snapshot = canonicalJson(result);
   let same: boolean;
   try {
-    const validated = await contract.schema["~standard"].validate(
-      JSON.parse(snapshot)
-    );
-    const value: unknown =
-      validated.issues === undefined ? validated.value : undefined;
+    const accepted = acceptedValue(await read.validate(JSON.parse(snapshot)));
+    const value: unknown = accepted?.value;
     same =
-      validated.issues === undefined &&
+      accepted !== undefined &&
       isAcceptedJson(value, 0, true) &&
       canonicalJson(value) === snapshot;
   } catch {
@@ -395,8 +515,13 @@ const checkContract = async (
   return same && isAcceptedJson(accepted, 0, true) ? accepted : mismatch();
 };
 
-/** contextText's reading; anything it throws that isn't ours is caught there. */
-const readContext = <S extends Stage>(
+/**
+ * The JSON text jq reads: `[input, ...variables]`, in the order the
+ * program binds them, once it is plain JSON within the limits. It reads
+ * the caller's scope throughout, so it only ever runs inside
+ * readCallerData.
+ */
+const contextText = <S extends Stage>(
   expression: CompiledExpression<S>,
   scope: EvaluationScope<S>
 ): string => {
@@ -469,32 +594,6 @@ const readContext = <S extends Stage>(
 };
 
 /**
- * The JSON text jq reads: `[input, ...variables]`, in the order the
- * program binds them, once it is plain JSON within the limits.
- */
-const contextText = <S extends Stage>(
-  expression: CompiledExpression<S>,
-  scope: EvaluationScope<S>
-): string => {
-  const { site } = expression;
-  try {
-    return readContext(expression, scope);
-  } catch (error) {
-    if (expressionErrors.codeOf(error) !== undefined) {
-      throw error;
-    }
-    // The scope is caller data: a getter or proxy that throws, or answers
-    // differently from one read to the next, makes it not JSON. What it
-    // threw isn't passed on.
-    return fail(
-      site,
-      "expression.context_invalid",
-      "Pass plain JSON values, without getters or proxies."
-    );
-  }
-};
-
-/**
  * Evaluates a compiled expression on `scope` and checks its one result
  * against `contract`. Fails with an expression error, which never carries
  * the values: when the context is over its limits or not plain JSON, when
@@ -506,8 +605,20 @@ export const evaluateExpression = async <S extends Stage>(
   scope: EvaluationScope<S>,
   contract: ResultContract
 ): Promise<Json> => {
+  if (!compiledExpressions.has(expression)) {
+    throw expressionError(
+      "expression.invalid",
+      { pointer: "" },
+      { remedy: "Evaluate only what compileExpression returned." }
+    );
+  }
   const { site } = expression;
-  const stdin = contextText(expression, scope);
+  const stdin = readCallerData(
+    site,
+    "expression.context_invalid",
+    "Pass plain JSON values, without getters or proxies.",
+    () => contextText(expression, scope)
+  );
 
   const run = await runJq(
     programFor(expression.source, variableNamesOf(expression)),

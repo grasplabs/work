@@ -49,6 +49,15 @@ const shifting = (later: unknown): unknown => {
   };
 };
 
+/** The expression error code `promise` fails with, if any. */
+const codeOf = async (promise: Promise<unknown>) =>
+  expressionErrors.codeOf(
+    await promise.then(
+      () => {},
+      (error: unknown) => error
+    )
+  );
+
 describe("source outside the profile", () => {
   it("refuses definitions, modules, error handling and other grammar", async () => {
     const refused = {
@@ -208,10 +217,16 @@ describe("source outside the profile", () => {
         },
       }),
       array: resolveEvaluate([]),
+      nullLanguage: resolveEvaluate({ language: null }),
+      nullMode: resolveEvaluate({ mode: null }),
+      nullModeWithJq: resolveEvaluate({ language: "jq", mode: null }),
     }).toStrictEqual({
       inherited: undefined,
       throwing: undefined,
       array: undefined,
+      nullLanguage: undefined,
+      nullMode: undefined,
+      nullModeWithJq: undefined,
     });
   });
 
@@ -370,6 +385,109 @@ describe("hostile values", () => {
       },
       scope: "expression.context_invalid",
       leaks: false,
+    });
+  });
+
+  it("refuses a throwing getter deep in any value it inspects", async () => {
+    const deepGetter = {
+      outer: {
+        inner: [
+          {
+            get value(): unknown {
+              throw new Error("deep getter");
+            },
+          },
+        ],
+      },
+    };
+    expect({
+      input: await run(".", { input: unchecked(deepGetter) }),
+      variable: await run("1", {
+        variables: { params: unchecked(deepGetter) },
+      }),
+      loop: await run("$item", { loop: { item: unchecked(deepGetter) } }),
+    }).toStrictEqual({
+      input: { error: "expression.context_invalid" },
+      variable: { error: "expression.context_invalid" },
+      loop: { error: "expression.context_invalid" },
+    });
+  });
+
+  it("evaluates only what it compiled, and reads options and contracts as data", async () => {
+    const compiled = await compileExpression(".", {
+      stage: "taskDefinition",
+      scope: ["task"],
+      pointer: "/do/0/task",
+    });
+    const scope = {
+      input: null,
+      variables: {
+        context: null,
+        input: null,
+        task: null,
+        workflow: null,
+        params: null,
+      },
+    };
+    const throwingOptions = Object.defineProperty(
+      { scope: [], pointer: "/do/0/task" },
+      "stage",
+      {
+        get: (): unknown => {
+          throw new Error("options getter");
+        },
+      }
+    );
+    const throwingContract = Object.defineProperty({}, "kind", {
+      get: (): unknown => {
+        throw new Error("contract getter");
+      },
+    });
+    expect({
+      // An expression made by hand never passed the profile check.
+      forged: await codeOf(
+        evaluateExpression(
+          unchecked({
+            source: "$ENV",
+            stage: "taskDefinition",
+            loopVariables: [],
+            site: { pointer: "/do/0/task" },
+          }),
+          unchecked(scope),
+          json
+        )
+      ),
+      frozen: Object.isFrozen(compiled) && Object.isFrozen(compiled.site),
+      throwingOptions: await codeOf(
+        compileExpression(".", unchecked(throwingOptions))
+      ),
+      unknownStage: await codeOf(
+        compileExpression(
+          ".",
+          unchecked({ stage: "anywhere", scope: [], pointer: "" })
+        )
+      ),
+      throwingContract: await codeOf(
+        evaluateExpression(
+          compiled,
+          unchecked(scope),
+          unchecked(throwingContract)
+        )
+      ),
+      unknownContract: await codeOf(
+        evaluateExpression(
+          compiled,
+          unchecked(scope),
+          unchecked({ kind: "truthy" })
+        )
+      ),
+    }).toStrictEqual({
+      forged: "expression.invalid",
+      frozen: true,
+      throwingOptions: "expression.invalid",
+      unknownStage: "expression.invalid",
+      throwingContract: "expression.type_mismatch",
+      unknownContract: "expression.type_mismatch",
     });
   });
 
