@@ -92,6 +92,9 @@ catalog:
   "@lingui/vite-plugin": 6.8.0
   "@messageformat/parser": 5.1.1
   "@rolldown/plugin-babel": 0.2.4
+  # The kit's chat components (message-scroller, questionnaire): shadcn's
+  # own headless primitives.
+  "@shadcn/react": 0.3.1
   "@tailwindcss/vite": 4.3.3
   "@tanstack/react-router": 1.170.38
   "@tanstack/react-start": 1.168.56
@@ -108,12 +111,26 @@ catalog:
   babel-plugin-react-compiler: 1.0.0
   class-variance-authority: 0.7.1
   clsx: 2.1.1
+  # The kit's command palette (components/command), as shadcn builds it.
+  cmdk: 1.1.1
+  # The kit's carousel.
+  embla-carousel-react: 8.6.0
   eslint: 10.11.0
+  # The kit's one-time-code input.
+  input-otp: 1.5.0
   lucide-react: 1.47.0
   react: 19.3.0
+  # The kit's calendar.
+  react-day-picker: 10.0.2
   react-dom: 19.3.0
+  # recharts' peer; same release as react.
+  react-is: 19.3.0
   # Knowledge documents, rendered in the frontend: no raw HTML.
   react-markdown: 10.1.0
+  # The kit's resizable panels.
+  react-resizable-panels: 4.14.2
+  # The kit's charts.
+  recharts: 3.10.1
   remark-gfm: 4.0.1
   shadcn: 4.21.0
   tailwind-merge: 3.7.0
