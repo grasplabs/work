@@ -321,6 +321,8 @@ export const packageInspectionSchema = z.strictObject({
       dependencies: z.record(z.string(), z.string()),
       optionalDependencies: z.record(z.string(), z.string()),
       peerDependencies: z.record(z.string(), z.string()),
+      /** Peers its package.json marks optional (`peerDependenciesMeta`). */
+      optionalPeers: z.array(z.string()).max(256),
     })
     .nullable(),
   /** Why it can't be used: empty when nothing was found. */

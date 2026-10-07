@@ -10,7 +10,7 @@ import type { NpmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { admitDependencies } from "../src/dependencies/requests.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
-import { npmPublishUrl } from "./connect-providers.ts";
+import { npmAskedUrl, npmPublishUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
@@ -47,6 +47,16 @@ const publish = async (published: Published): Promise<string> => {
   });
   return z.object({ integrity: z.string() }).parse(await response.json())
     .integrity;
+};
+
+/** The paths the fake registry was asked for so far, in order. */
+const askedPaths = async (): Promise<string[]> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+  }
+  const response = await providers.fetch(npmAskedUrl);
+  return z.array(z.string()).parse(await response.json());
 };
 
 /** A package name no other test publishes. */
@@ -480,6 +490,60 @@ describe("the platform's own packages", () => {
     ).resolves.toMatchObject({ code: "package.peer_conflict" });
   });
 
+  it("takes a dependency on React itself as the platform's, shown in the review", async () => {
+    const { builder, app } = await builderWithApp();
+    const hooks = named("react-hooks");
+    await publish(
+      plain(hooks, "1.0.0", {
+        dependencies: { react: "^19.0.0", "react-dom": ">=18" },
+      })
+    );
+    const { request, lock } = await builder.api.dependencies.resolve(
+      intentFor(app, { [hooks]: "1" })
+    );
+    const review = await builder.api.dependencies.get(request.id);
+    expect({
+      locked: lock.packages[`${hooks}@1.0.0`]?.dependencies,
+      reviewed: review.graph.packages.find(({ name }) => name === hooks)
+        ?.dependencies,
+      packages: review.graph.packages.map(({ name }) => name),
+    }).toStrictEqual({
+      locked: {
+        react: platformPeers.react,
+        "react-dom": platformPeers["react-dom"],
+      },
+      // In the graph's canonical order, by `name@version`.
+      reviewed: [
+        { name: "react-dom", version: platformPeers["react-dom"] },
+        { name: "react", version: platformPeers.react },
+      ],
+      packages: [hooks],
+    });
+  });
+
+  it("asks the registry nothing for peers it leaves out", async () => {
+    const { builder, app } = await builderWithApp();
+    const host = named("plugin-host");
+    const optional = Array.from({ length: 20 }, (_, index) =>
+      named(`optional-${index}`)
+    );
+    await publish(
+      plain(host, "1.0.0", {
+        peerDependencies: Object.fromEntries(
+          optional.map((peer) => [peer, "^1.0.0"])
+        ),
+        peerDependenciesMeta: Object.fromEntries(
+          optional.map((peer) => [peer, { optional: true }])
+        ),
+      })
+    );
+    await builder.api.dependencies.resolve(intentFor(app, { [host]: "1" }));
+    const asked = await askedPaths();
+    expect(
+      asked.filter((path) => optional.some((peer) => path.includes(peer)))
+    ).toStrictEqual([]);
+  });
+
   it("refuses a peer the graph already has at a version that doesn't meet it, as npm does", async () => {
     const { builder, app } = await builderWithApp();
     const core = named("chart-core");
@@ -793,6 +857,67 @@ describe("a package's tarball", () => {
       ],
       // The metadata's and the tarball's say the same: said once.
       [`${declared}@1.0.0: it has install scripts: install`],
+    ]);
+  });
+
+  it("is refused when its tarball requires a peer the registry calls optional", async () => {
+    const { builder, app } = await builderWithApp();
+    const name = named("peer-confused");
+    const peer = named("peer");
+    await publish({
+      name,
+      version: "1.0.0",
+      manifest: {
+        peerDependencies: { [peer]: "^1.0.0" },
+        peerDependenciesMeta: { [peer]: { optional: true } },
+      },
+      entries: [
+        manifestEntry(name, { peerDependencies: { [peer]: "^1.0.0" } }),
+      ],
+    });
+    await expect(
+      refusalsOf(
+        builder.api.dependencies.resolve(intentFor(app, { [name]: "1" }))
+      )
+    ).resolves.toStrictEqual([
+      `${name}@1.0.0: its package.json states other dependencies than the registry's metadata`,
+    ]);
+  });
+
+  it("is refused for what its own package.json says, field by field, whatever else is in it", async () => {
+    const { builder, app } = await builderWithApp();
+    const scripted = await crafted((own) => [
+      manifestEntry(own, {
+        scripts: { postinstall: "node steal.js", other: null },
+      }),
+    ]);
+    const prepared = await crafted((own) => [
+      manifestEntry(own, { scripts: { prepare: "node build.js" } }),
+    ]);
+    const darwin = await crafted((own) => [
+      manifestEntry(own, { os: ["darwin"], cpu: ["arm64"] }),
+    ]);
+    const bundling = await crafted((own) => [
+      manifestEntry(own, { bundleDependencies: ["hidden"] }),
+    ]);
+    const malformed = await crafted((own) => [
+      manifestEntry(own, { scripts: ["postinstall"] }),
+    ]);
+    await expect(
+      Promise.all(
+        [scripted, prepared, darwin, bundling, malformed].map(
+          async (name) =>
+            await refusalsOf(
+              builder.api.dependencies.resolve(intentFor(app, { [name]: "1" }))
+            )
+        )
+      )
+    ).resolves.toStrictEqual([
+      [`${scripted}@1.0.0: it has install scripts: postinstall`],
+      [`${prepared}@1.0.0: it has install scripts: prepare`],
+      [`${darwin}@1.0.0: it runs only on some operating systems or processors`],
+      [`${bundling}@1.0.0: it bundles packages the graph doesn't name`],
+      [`${malformed}@1.0.0: its package.json can't be read`],
     ]);
   });
 

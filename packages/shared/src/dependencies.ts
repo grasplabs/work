@@ -129,6 +129,26 @@ const repeated = (refs: readonly DependencyPackageRef[]): string[] => {
 };
 
 /**
+ * The packages of the graph a package leads to: its dependencies and the
+ * peers a package of the graph meets. One on a package the platform
+ * provides, at the platform's own version, is an edge the review shows
+ * but never a copy in the graph.
+ */
+const graphEdges = (
+  node: DependencyPackage | undefined,
+  platformPeers: Readonly<Record<string, string>>
+): DependencyPackageRef[] => [
+  ...(node?.dependencies ?? []).filter(
+    (ref) => platformPeers[ref.name] !== ref.version
+  ),
+  ...(node?.peers ?? []).flatMap(({ name, resolved }) =>
+    resolved !== null && platformPeers[name] !== resolved
+      ? [{ name, version: resolved }]
+      : []
+  ),
+];
+
+/**
  * One resolved graph: the packages the source asks for (`direct`), every
  * package that brings (`packages`, the direct ones included) with its
  * edges, and the exact versions the platform provides as peers. Whole and
@@ -188,14 +208,8 @@ export const dependencyGraphSchema = z
     }
     for (let key = queue.pop(); key !== undefined; key = queue.pop()) {
       const node = byKey.get(key);
-      for (const ref of node?.dependencies ?? []) {
+      for (const ref of graphEdges(node, platformPeers)) {
         follow("packages", ref);
-      }
-      for (const { name, resolved } of node?.peers ?? []) {
-        // The platform's own version meets it, or a package of the graph.
-        if (resolved !== null && platformPeers[name] !== resolved) {
-          follow("packages", { name, version: resolved });
-        }
       }
     }
     for (const key of byKey.keys()) {

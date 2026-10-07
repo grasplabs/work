@@ -30,8 +30,11 @@ import type {
 import { TarballRefusedError } from "./refused.ts";
 import { extractTarball } from "./tarball.ts";
 
-/** The install scripts npm runs when installing a package. */
-const installScripts = ["preinstall", "install", "postinstall"];
+/**
+ * The scripts npm can run when installing a package (`prepare` for
+ * packages it builds from source).
+ */
+const installScripts = ["preinstall", "install", "postinstall", "prepare"];
 
 /** The most refusals one package reports, and how long each may be. */
 const maxRefusals = 16;
@@ -53,6 +56,50 @@ const stringRecord = (value: unknown): Record<string, string> | undefined => {
     : undefined;
 };
 
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** A record of any values, absent as empty; undefined for another shape. */
+const plainRecord = (value: unknown): Record<string, unknown> | undefined => {
+  if (value === undefined) {
+    return {};
+  }
+  return isPlainRecord(value) ? value : undefined;
+};
+
+/** A list of strings (`os`, `cpu`), absent as empty; undefined otherwise. */
+const stringList = (value: unknown): string[] | undefined => {
+  if (value === undefined) {
+    return [];
+  }
+  return Array.isArray(value) &&
+    value.every((item): item is string => typeof item === "string")
+    ? value
+    : undefined;
+};
+
+/** The peers `peerDependenciesMeta` marks optional; undefined if malformed. */
+const optionalPeersOf = (value: unknown): string[] | undefined => {
+  const meta = plainRecord(value);
+  if (meta === undefined) {
+    return undefined;
+  }
+  const optional: string[] = [];
+  for (const [peer, entry] of Object.entries(meta)) {
+    if (!isPlainRecord(entry)) {
+      return undefined;
+    }
+    if (entry.optional === true) {
+      optional.push(peer);
+    }
+  }
+  return optional.toSorted();
+};
+
+/** Whether `bundleDependencies` says the tarball carries packages. */
+const bundles = (value: unknown): boolean =>
+  value === true || (Array.isArray(value) && value.length > 0);
+
 /** A refusal, cut to what a review shows. */
 const refusal = (text: string): string =>
   text.length > maxRefusalLength
@@ -69,6 +116,62 @@ const readManifest = (bytes: Uint8Array | undefined): unknown => {
   } catch {
     return undefined;
   }
+};
+
+/** What a package.json says that installing it depends on. */
+type ManifestFields = NonNullable<PackageInspection["manifest"]> & {
+  scripts: Record<string, unknown>;
+  platforms: boolean;
+  bundlesPackages: boolean;
+  gypfile: boolean;
+};
+
+/**
+ * What a package.json says about installing the package, every field npm
+ * reads to install it read whole or not at all: a value of another shape
+ * refuses the package (null) rather than hiding the rest.
+ */
+const manifestFields = (manifest: object): ManifestFields | null => {
+  const field = (fieldName: string): unknown =>
+    Object.hasOwn(manifest, fieldName)
+      ? Reflect.get(manifest, fieldName)
+      : undefined;
+  const dependencies = stringRecord(field("dependencies"));
+  const optionalDependencies = stringRecord(field("optionalDependencies"));
+  const peerDependencies = stringRecord(field("peerDependencies"));
+  const scripts = plainRecord(field("scripts"));
+  const optionalPeers = optionalPeersOf(field("peerDependenciesMeta"));
+  const os = stringList(field("os"));
+  const cpu = stringList(field("cpu"));
+  const named = field("name");
+  const versioned = field("version");
+  if (
+    dependencies === undefined ||
+    optionalDependencies === undefined ||
+    peerDependencies === undefined ||
+    scripts === undefined ||
+    optionalPeers === undefined ||
+    os === undefined ||
+    cpu === undefined ||
+    typeof named !== "string" ||
+    typeof versioned !== "string"
+  ) {
+    return null;
+  }
+  return {
+    name: named,
+    version: versioned,
+    dependencies,
+    optionalDependencies,
+    peerDependencies,
+    optionalPeers,
+    scripts,
+    platforms: os.length > 0 || cpu.length > 0,
+    bundlesPackages:
+      bundles(field("bundleDependencies")) ||
+      bundles(field("bundledDependencies")),
+    gypfile: field("gypfile") === true,
+  };
 };
 
 /** Inspects one tarball: unpacks it with `limits` and reads what it needs. */
@@ -117,59 +220,45 @@ export const inspectPackage = async (
   if (typeof manifest !== "object" || manifest === null) {
     return { ...refused(["its package.json can't be read"]), bytes, entries };
   }
-  const field = (fieldName: string): unknown =>
-    Object.hasOwn(manifest, fieldName)
-      ? Reflect.get(manifest, fieldName)
-      : undefined;
-  const dependencies = stringRecord(field("dependencies"));
-  const optionalDependencies = stringRecord(field("optionalDependencies"));
-  const peerDependencies = stringRecord(field("peerDependencies"));
-  const scripts = stringRecord(field("scripts")) ?? {};
-  const named = field("name");
-  const versioned = field("version");
-  if (
-    dependencies === undefined ||
-    optionalDependencies === undefined ||
-    peerDependencies === undefined ||
-    typeof named !== "string" ||
-    typeof versioned !== "string"
-  ) {
+  const fields = manifestFields(manifest);
+  if (fields === null) {
     return { ...refused(["its package.json can't be read"]), bytes, entries };
   }
+  const { scripts, platforms, bundlesPackages, gypfile, ...stated } = fields;
   const reasons: string[] = [];
-  if (named !== name || versioned !== version) {
+  if (stated.name !== name || stated.version !== version) {
     reasons.push(
-      `its package.json says it is ${named}@${versioned}, not ${name}@${version}`
+      `its package.json says it is ${stated.name}@${stated.version}, not ${name}@${version}`
     );
   }
+  // Each install script by name, whatever its value or the others'.
   const scripted = installScripts.filter((script) =>
     Object.hasOwn(scripts, script)
   );
   if (scripted.length > 0) {
     reasons.push(`it has install scripts: ${scripted.join(", ")}`);
   }
-  if (gyp || field("gypfile") === true) {
+  if (gyp || gypfile) {
     reasons.push("it builds native code (binding.gyp)");
   }
   if (native.length > 0) {
     reasons.push(`it ships native binaries: ${native.join(", ")}`);
   }
+  if (platforms) {
+    reasons.push("it runs only on some operating systems or processors");
+  }
   if (bundled.length > 0) {
     reasons.push(
       `it bundles packages the graph doesn't name: ${bundled.join(", ")}`
     );
+  } else if (bundlesPackages) {
+    reasons.push("it bundles packages the graph doesn't name");
   }
   return {
     key,
     bytes,
     entries,
-    manifest: {
-      name: named,
-      version: versioned,
-      dependencies,
-      optionalDependencies,
-      peerDependencies,
-    },
+    manifest: stated,
     refusals: reasons.slice(0, maxRefusals).map(refusal),
   };
 };

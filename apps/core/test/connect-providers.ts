@@ -39,6 +39,9 @@ export const graphControlUrl = "https://graph-control.test/receive";
  */
 export const npmPublishUrl = "https://npm-control.test/publish";
 
+/** Where tests read the paths the fake npm registry was asked for, in order. */
+export const npmAskedUrl = "https://npm-control.test/asked";
+
 /** The tokens the fake issues for `subject`, to look for where they mustn't be. */
 export const tokensFor = (subject: string): string[] => [
   `access.${subject}`,
@@ -70,6 +73,9 @@ export default {
     }
     if (url.hostname === "registry.npmjs.org") {
       return await npm.answer(request);
+    }
+    if (url.href === ${JSON.stringify(npmAskedUrl)}) {
+      return Response.json(npm.asked.map(({ path }) => path));
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(npmPublishUrl)}) {
       const published = await request.json();

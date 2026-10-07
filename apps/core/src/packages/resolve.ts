@@ -437,6 +437,32 @@ class Resolution {
     }
   }
 
+  /**
+   * Whether resolving `edge` reads its package's metadata: not for the
+   * platform's packages, an optional peer (never added), a range the
+   * graph already meets, a range that isn't one, or past the depth limit,
+   * so no lookup is made for what is skipped or refused anyway.
+   */
+  needsMetadata({ name, range, from, kind, depth }: Edge): boolean {
+    if (
+      Object.hasOwn(platformPeers, name) ||
+      name.startsWith(platformScope) ||
+      validRange(range) === null ||
+      depth > this.#limits.graphDepth
+    ) {
+      return false;
+    }
+    if (kind === "peer" && (from?.meta.optionalPeers.includes(name) ?? false)) {
+      return false;
+    }
+    return this.#inGraph(name, range) === undefined;
+  }
+
+  /** How many more packages the graph may take. */
+  room(): number {
+    return Math.max(this.#limits.graphPackages - this.nodes.size, 0);
+  }
+
   /** Optional peers the graph happens to meet; the rest left unmet. */
   completeOptionalPeers(): void {
     for (const node of this.nodes.values()) {
@@ -474,13 +500,15 @@ const resolveGraph = async (
     }));
   while (level.length > 0) {
     // Every package of the level is asked of connect before it is needed.
+    // Only what is resolved, and no more than the graph has room for:
+    // past that the package quota refuses before any more lookups.
     const names = [
       ...new Set(
         level
-          .filter(({ name }) => !Object.hasOwn(platformPeers, name))
+          .filter((edge) => resolution.needsMetadata(edge))
           .map(({ name }) => name)
       ),
-    ];
+    ].slice(0, resolution.room());
     // oxlint-disable-next-line no-await-in-loop
     await limited(names, metadataConcurrency, async (name) => {
       try {
@@ -562,11 +590,15 @@ const statedRanges = (meta: {
   dependencies: Record<string, string>;
   optionalDependencies: Record<string, string>;
   peerDependencies: Record<string, string>;
+  optionalPeers: readonly string[];
 }): string =>
   canonicalJson({
     dependencies: requiredDependencies(meta),
     optionalDependencies: meta.optionalDependencies,
     peerDependencies: meta.peerDependencies,
+    // Which peers may be left out: a peer the registry calls optional
+    // that the tarball requires would be resolved as one it doesn't.
+    optionalPeers: meta.optionalPeers.toSorted(),
   });
 
 /** What the builder answered, checked as any input is. */
