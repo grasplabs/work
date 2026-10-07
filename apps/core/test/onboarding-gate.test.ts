@@ -1,8 +1,10 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import type { OnboardingView, Roster } from "@grasp-os/shared/onboarding";
 import type { GateThreshold } from "@grasp-os/shared/onboarding-gate";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { gateView } from "../src/onboarding/gate.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
@@ -34,6 +36,10 @@ const theAdmin = entraPerson(acmeTenant, "acme.test", {
   email: "ada@acme.test",
 });
 const configuredAdmin = () => theAdmin;
+
+/** The ISO day `offset` days from today. */
+const day = (offset: number) =>
+  new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
 
 /** Grasp's staff, on a connection of their own. */
 const asStaff = async () => {
@@ -144,27 +150,64 @@ describe("Grasp's go", () => {
     );
   });
 
-  it("is ready once Grasp knows as much as staff set, from what the onboarding holds", async () => {
+  it("is ready once Grasp knows as much as staff set, or once the interviews are over, and not on their last day", async () => {
+    const now = new Date().toISOString();
+    const roster: Roster = {
+      teams: [
+        { id: "sales", name: "Sales", lead: "lea", does: "", off: false },
+        { id: "ops", name: "Ops", lead: "oli", does: "", off: false },
+      ],
+      people: [],
+    };
+    const view = (plan: OnboardingView["plan"]): OnboardingView => ({
+      roster,
+      plan,
+      agreed: true,
+      paused: false,
+      progress: {
+        teams: [],
+        // Both leads talked; half of the others did.
+        leadsTalked: 2,
+        leads: 2,
+        talked: 5,
+        asked: 10,
+        asOf: day(0),
+      },
+    });
+    // The people list (15), every team led (10), the conversations: the
+    // leads' half whole and the others' half at a half (30 × 0.75).
+    const lastDay = await gateView(
+      env,
+      view({ start: day(-13), days: 14 }),
+      now
+    );
+    const over = await gateView(env, view({ start: day(-14), days: 14 }), now);
+    expect({
+      known: lastDay.known,
+      parts: lastDay.parts.map(({ source, known }) => [source, known]),
+      lastDay: lastDay.ready,
+      over: over.ready,
+    }).toStrictEqual({
+      known: 48,
+      parts: [
+        ["kickoff", 0],
+        ["people", 1],
+        ["sources", 0],
+        ["documents", 0],
+        ["tools", 0],
+        ["leads", 1],
+        ["conversations", 0.75],
+        ["review", 0],
+      ],
+      lastDay: false,
+      over: true,
+    });
+  });
+
+  it("takes only the thresholds there are, from staff", async () => {
     const staff = await asStaff();
     const view = await staff.onboardingGate.setThreshold(70);
-    expect({
-      threshold: view.threshold,
-      ready: view.ready,
-      parts: view.parts.map(({ source }) => source),
-    }).toStrictEqual({
-      threshold: 70,
-      ready: view.known >= 70,
-      parts: [
-        "kickoff",
-        "people",
-        "sources",
-        "documents",
-        "tools",
-        "leads",
-        "conversations",
-        "review",
-      ],
-    });
+    expect(view.threshold).toBe(70);
     // Only the thresholds there are.
     // SAFETY: a threshold the type refuses, as a client could still send it.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY

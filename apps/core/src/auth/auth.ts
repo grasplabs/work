@@ -511,6 +511,15 @@ const createAuth = (
                 target: { type: "session", id: session.id },
                 detail: { expiresAt: session.expiresAt.toISOString() },
               });
+              return;
+            }
+            // The gate again, now the session is stored: one the gate
+            // closed on after `startSession` looked is gone either way, by
+            // this or by the close, which ends every stored session.
+            if (!(await gateLetsIn(env, config, session.userId))) {
+              await drizzle(env.DB)
+                .delete(sessions)
+                .where(eq(sessions.id, session.id));
             }
           },
         },
