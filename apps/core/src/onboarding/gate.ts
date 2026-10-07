@@ -42,7 +42,11 @@ const gateRow = "gate";
 /** The gate as stored: closed since when, and the threshold. */
 const stored = async (
   env: Pick<Env, "DB">
-): Promise<{ closedAt: Date | null; threshold: GateThreshold }> => {
+): Promise<{
+  closedAt: Date | null;
+  openedAt: Date | null;
+  threshold: GateThreshold;
+}> => {
   const [row] = await drizzle(env.DB)
     .select()
     .from(onboardingGate)
@@ -50,6 +54,7 @@ const stored = async (
   const threshold = gateThresholds.find((each) => each === row?.threshold);
   return {
     closedAt: row?.closedAt ?? null,
+    openedAt: row?.openedAt ?? null,
     threshold: threshold ?? gateThresholdDefault,
   };
 };
@@ -111,7 +116,8 @@ export const staffAfterGoMs = 7 * 24 * 60 * 60 * 1000;
  * Whether Grasp's staff may be in now, by what the company decided: not
  * when its admin ended staff access after the console opened this window
  * (`windowOpened`), and, for the onboarding scope, not past 7 days after
- * Grasp's go.
+ * Grasp's go. The go counts once given, whether or not the gate was closed
+ * again since: closing it never gives staff back access the go ended.
  */
 export const staffMayStay = async (
   env: Pick<Env, "DB">,
@@ -122,7 +128,6 @@ export const staffMayStay = async (
   const [row] = await drizzle(env.DB)
     .select({
       openedAt: onboardingGate.openedAt,
-      closedAt: onboardingGate.closedAt,
       staffEndedAt: onboardingGate.staffEndedAt,
     })
     .from(onboardingGate)
@@ -131,12 +136,29 @@ export const staffMayStay = async (
   if (ended !== undefined && ended >= Date.parse(windowOpened)) {
     return false;
   }
-  const opened = row?.closedAt === null ? row.openedAt?.getTime() : undefined;
+  const opened = row?.openedAt?.getTime();
   return !(
     scope === "onboarding" &&
     opened !== undefined &&
     now > opened + staffAfterGoMs
   );
+};
+
+/**
+ * When staff access ends: the console's window, or, for the onboarding
+ * scope, 7 days after Grasp's go when that comes first.
+ */
+const staffUntil = (
+  staff: { until: string; scope: "full" | "onboarding" },
+  openedAt: Date | null
+): string => {
+  if (staff.scope !== "onboarding" || openedAt === null) {
+    return staff.until;
+  }
+  const afterGo = openedAt.getTime() + staffAfterGoMs;
+  return afterGo < Date.parse(staff.until)
+    ? new Date(afterGo).toISOString()
+    : staff.until;
 };
 
 /** The gate, with how much Grasp knows by `view` of the onboarding. */
@@ -145,7 +167,7 @@ export const gateView = async (
   view: OnboardingView,
   now: string = new Date().toISOString()
 ): Promise<GateView> => {
-  const { closedAt, threshold } = await stored(env);
+  const { closedAt, openedAt, threshold } = await stored(env);
   const parts = knownParts(view);
   let sum = 0;
   for (const { weight, known } of parts) {
@@ -175,7 +197,7 @@ export const gateView = async (
                 Date.parse(now)
               )),
             scope: staff.scope,
-            until: staff.until,
+            until: staffUntil(staff, openedAt),
           },
   };
 };
