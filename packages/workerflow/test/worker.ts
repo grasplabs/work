@@ -358,6 +358,28 @@ export const definitions: Record<string, WorkflowDefinition> = {
         : await Promise.all([work(), nap()]);
     },
   },
+  // A step, and a sleep the definition reaches while that step is still
+  // on its way back (the test decides when, by the checkpoint).
+  "step-then-sleep": {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      const doing = (async (): Promise<string> => {
+        try {
+          const receipt = await step.do(
+            "work",
+            async (context) => await effect(instanceId, "work", context)
+          );
+          witness(instanceId, "continued");
+          return receipt;
+        } finally {
+          witness(instanceId, "finally");
+        }
+      })();
+      await checkpoint(instanceId, "nap");
+      await step.sleep("nap", "1 hour");
+      return await doing;
+    },
+  },
   // A wait raced against a sleep, inside the author's own handlers.
   races: {
     run: async (event, step) => {

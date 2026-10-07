@@ -667,6 +667,82 @@ describe("waits raced against each other", () => {
   );
 });
 
+/** `promise`, or a failure if it hasn't settled by the deadline. */
+const within = async <T>(promise: Promise<T>, what: string): Promise<T> => {
+  const timer = new AbortController();
+  const timedOut = async (): Promise<never> => {
+    await scheduler.wait(5000, { signal: timer.signal });
+    throw new Error(`timed out waiting for ${what}`);
+  };
+  try {
+    return await Promise.race([promise, timedOut()]);
+  } finally {
+    timer.abort();
+  }
+};
+
+describe("a step on its way back when its activation ends", () => {
+  it("never hands the definition its outcome: no continuation or finally runs after the run suspended", async () => {
+    const id = newId();
+    const work = hold(id, "work");
+    const nap = hold(id, "nap");
+    await workflow("step-then-sleep").create({ id });
+    await work.held;
+    await nap.held;
+    // The next alarm write, the watchdog renewal after "work" commits, is
+    // issued in its real order, but its answer waits for the gate.
+    const renewing = Promise.withResolvers<true>();
+    const gate = Promise.withResolvers<true>();
+    const patched = await runInDurableObject(
+      runObject("step-then-sleep", id),
+      (_, state) => {
+        const { storage } = state;
+        const setAlarm: unknown = Reflect.get(storage, "setAlarm");
+        if (typeof setAlarm !== "function") {
+          throw new TypeError("storage has no setAlarm");
+        }
+        const hadOwn = Object.hasOwn(storage, "setAlarm");
+        let first = true;
+        Reflect.set(storage, "setAlarm", async (time: number) => {
+          const written: unknown = Reflect.apply(setAlarm, storage, [time]);
+          if (first) {
+            first = false;
+            renewing.resolve(true);
+            await gate.promise;
+          }
+          return await written;
+        });
+        return { hadOwn, setAlarm };
+      }
+    );
+
+    // "work" commits; its renewal is out. Then the sleep is reached, and
+    // suspends the run.
+    work.release();
+    await within(renewing.promise, "the renewal after the commit");
+    nap.release();
+    const { journal } = await suspendedOn("step-then-sleep", id, "nap");
+    // The renewal answers; "work" would be handed back now.
+    gate.resolve(true);
+    const after = await journalOf("step-then-sleep", id);
+    await runInDurableObject(runObject("step-then-sleep", id), (_, state) => {
+      if (patched.hadOwn) {
+        Reflect.set(state.storage, "setAlarm", patched.setAlarm);
+      } else {
+        Reflect.deleteProperty(state.storage, "setAlarm");
+      }
+    });
+
+    expect(journal.steps).toMatchObject([
+      { name: "work", state: "succeeded", attempt: 1 },
+      { name: "nap", state: "waiting" },
+    ]);
+    expect(after.activations).toMatchObject([{ ended: "suspended" }]);
+    expect(witnessed(id)).toStrictEqual([]);
+    expect(labels(id)).toStrictEqual(["work"]);
+  });
+});
+
 describe("a run waiting", () => {
   it.each([
     ["catch and finally around a sleep", "sleep"],

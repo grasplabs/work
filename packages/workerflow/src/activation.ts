@@ -234,30 +234,68 @@ export class Activation {
     const { promise, resolve } = Promise.withResolvers<Stop>();
     this.stopped = promise;
     this.#stop = resolve;
+    // Every call goes through #toAuthor, the one place an outcome is
+    // handed back to the definition.
     this.step = {
       do: async <T>(
         name: string,
         work: StepWork<T>,
         ...rest: unknown[]
-      ): Promise<T> => await this.#do(name, work, rest),
+      ): Promise<T> =>
+        await this.#toAuthor(async () => await this.#do(name, work, rest)),
       sleep: async (
         name: string,
         duration: WorkflowDuration
       ): Promise<void> => {
-        await this.#sleep(name, duration);
+        await this.#toAuthor(async () => {
+          await this.#sleep(name, duration);
+        });
       },
       sleepUntil: async (
         name: string,
         timestamp: Date | number
       ): Promise<void> => {
-        await this.#sleepUntil(name, timestamp);
+        await this.#toAuthor(async () => {
+          await this.#sleepUntil(name, timestamp);
+        });
       },
       waitForEvent: async <Payload>(
         name: string,
         options: { type: string; timeout?: WorkflowDuration }
       ): Promise<WorkflowStepEvent<Payload>> =>
-        await this.#waitForEvent<Payload>(name, options),
+        await this.#toAuthor(
+          async () => await this.#waitForEvent<Payload>(name, options)
+        ),
     };
+  }
+
+  /**
+   * Hands a call's outcome to the definition, its value or its error, only
+   * if this activation is still current once the call is done. Every await
+   * inside a call (the journal's writes, the alarm's) lets other calls of
+   * the definition run, and one of them may have ended the activation: a
+   * halt, a suspension, a later generation. Then the outcome is held back
+   * and the call never settles, so no continuation, catch or finally of
+   * the author's runs after the stop.
+   */
+  async #toAuthor<T>(call: () => Promise<T>): Promise<T> {
+    let settled: { ok: true; value: T } | { ok: false; error: unknown };
+    try {
+      settled = { ok: true, value: await call() };
+    } catch (error) {
+      settled = { ok: false, error };
+    }
+    const current = this.#write(() => this.#current());
+    if (current === failed) {
+      return await never();
+    }
+    if (!current) {
+      return await this.#refuse();
+    }
+    if (!settled.ok) {
+      throw settled.error;
+    }
+    return settled.value;
   }
 
   /** Whether this activation may still act: not over, not superseded. */
@@ -466,7 +504,8 @@ export class Activation {
   async #attempt<T>(
     identity: StepIdentity,
     journaled: StepRow | undefined,
-    work: StepWork<T>
+    work: StepWork<T>,
+    land: () => void
   ): Promise<T> {
     const claim = this.#write(() => this.#claim(identity, journaled));
     if (claim === failed) {
@@ -505,6 +544,7 @@ export class Activation {
     if (!committed) {
       return await this.#refuse();
     }
+    land();
     await this.#renewWatchdog();
     if (!outcome.ok) {
       throw rebuild(outcome.error);
@@ -528,18 +568,28 @@ export class Activation {
       return await this.#halt(parallelWait("step", name));
     }
     this.#stepsInFlight += 1;
+    let inFlight = true;
+    // Out of flight once its outcome is journaled: a wait started after
+    // that can't cost the step its effect. Once, whichever way it lands.
+    const land = (): void => {
+      if (inFlight) {
+        inFlight = false;
+        this.#stepsInFlight -= 1;
+      }
+    };
     try {
-      return await this.#doAlone(name, work, rest);
+      return await this.#doAlone(name, work, rest, land);
     } finally {
       // Never reached by a step whose call never settles.
-      this.#stepsInFlight -= 1;
+      land();
     }
   }
 
   async #doAlone<T>(
     name: string,
     work: StepWork<T>,
-    rest: unknown[]
+    rest: unknown[],
+    land: () => void
   ): Promise<T> {
     const current = this.#write(() => this.#current());
     if (current === failed) {
@@ -562,15 +612,17 @@ export class Activation {
       return await never();
     }
     if (journaled?.state === "succeeded" && journaled.value !== null) {
+      land();
       // SAFETY: what this step's work returned, through the codec, as the
       // attempt that journaled it returned it.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion
       return decode(journaled.value) as T;
     }
     if (journaled?.state === "failed" && journaled.error !== null) {
+      land();
       throw rebuild(journaled.error);
     }
-    return await this.#attempt(identity, journaled, work);
+    return await this.#attempt(identity, journaled, work, land);
   }
 
   /**
@@ -688,15 +740,26 @@ export class Activation {
       return await this.#halt(parallelWait(plan.type, plan.name));
     }
     this.#waitPending = true;
+    let pending = true;
+    // No longer pending once its outcome is journaled. Once.
+    const land = (): void => {
+      if (pending) {
+        pending = false;
+        this.#waitPending = false;
+      }
+    };
     try {
-      return await this.#waitAlone(plan);
+      return await this.#waitAlone(plan, land);
     } finally {
       // Never reached by a wait that suspended: its call never settles.
-      this.#waitPending = false;
+      land();
     }
   }
 
-  async #waitAlone(plan: WaitPlan): Promise<EventRow | undefined> {
+  async #waitAlone(
+    plan: WaitPlan,
+    land: () => void
+  ): Promise<EventRow | undefined> {
     const current = this.#write(() => this.#current());
     if (current === failed) {
       return await never();
@@ -722,6 +785,7 @@ export class Activation {
       this.#stop(suspended);
       return await never();
     }
+    land();
     await this.#renewWatchdog();
     if (!outcome.ok) {
       throw rebuild(outcome.error);
