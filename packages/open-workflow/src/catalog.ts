@@ -84,7 +84,10 @@ const refuse = (message: string): never => {
 
 /**
  * One own data property of a caller object, read once through its
- * descriptor: a getter or proxy trap never runs as a value is read.
+ * descriptor. A getter is refused, never called. A proxy's traps
+ * (getOwnPropertyDescriptor, ownKeys, getPrototypeOf) do run, but each
+ * value is read once, so what was checked is what is used, and whatever a
+ * trap throws is caught by resolveContract.
  */
 const ownData = (value: unknown, key: string): unknown => {
   if (typeof value !== "object" || value === null) {
@@ -225,6 +228,34 @@ const readWorkflow = (value: unknown): ResolvedContract["workflow"] => {
 const isBindingKind = (value: unknown): value is BindingKind =>
   bindingKinds.some((kind) => kind === value);
 
+/**
+ * The fields each kind can't do without. A contract missing one would
+ * allow anything where it should allow its list (any operation, event
+ * type or child): it is refused instead.
+ */
+const requiredFields: Readonly<
+  Record<BindingKind, readonly (keyof ResolvedContract)[]>
+> = {
+  operation: ["input", "output"],
+  compute: ["input", "output"],
+  connector: ["operations"],
+  model: [],
+  workflow: ["workflow", "input", "output"],
+  decision: ["input", "response"],
+  event: ["eventTypes"],
+};
+
+const checkComplete = (contract: ResolvedContract): void => {
+  for (const field of requiredFields[contract.kind]) {
+    if (contract[field] === undefined) {
+      refuse(`a ${contract.kind} contract without ${field}`);
+    }
+  }
+  if (contract.operations?.size === 0 || contract.eventTypes?.size === 0) {
+    refuse("an empty list of operations or event types");
+  }
+};
+
 const readContract = (
   contract: unknown,
   budget: CatalogBudget
@@ -258,6 +289,7 @@ const readContract = (
   if (workflow !== undefined) {
     resolved.workflow = workflow;
   }
+  checkComplete(resolved);
   return resolved;
 };
 
@@ -284,9 +316,16 @@ export const resolveContract = (
       return { found: false, reason: "no such contract" };
     }
     return { found: true, contract: readContract(contract, budget) };
-  } catch {
-    // What the catalog threw stays with the host.
-    return { found: false, reason: "the catalog's entry couldn't be read" };
+  } catch (error) {
+    // Our own refusals say what is missing; what the catalog itself threw
+    // stays with the host.
+    return {
+      found: false,
+      reason:
+        error instanceof CatalogError
+          ? `the catalog's entry is unusable: ${error.message}`
+          : "the catalog's entry couldn't be read",
+    };
   }
 };
 

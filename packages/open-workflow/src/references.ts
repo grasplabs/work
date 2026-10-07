@@ -109,9 +109,6 @@ const fitsExpectation = (
   expects: Expectation
 ): boolean => typesOf(descriptor).has(expects);
 
-const pathText = (variable: string, fields: readonly string[]): string =>
-  `$${[variable, ...fields].join(".")}`.slice(0, 128);
-
 /**
  * Where a path's fields after the first are read from: a descriptor, when
  * the variable's shape is declared; nothing when the first field doesn't
@@ -167,7 +164,7 @@ export const checkReferences = (
         "expression.unknown_reference",
         where,
         "Read only parameters and fields the definition declares.",
-        { reason: pathText(path.variable, path.fields.slice(0, depth + 1)) }
+        { reason: `field ${depth + 1} of the path` }
       );
     };
     const { start, unknown: firstUnknown } = startOf(
@@ -200,7 +197,7 @@ export const checkReferences = (
         "expression.type_mismatch",
         where,
         `Use a value that is a ${expects} here.`,
-        { expected: expects, reason: pathText(path.variable, path.fields) }
+        { expected: expects }
       );
     }
   }

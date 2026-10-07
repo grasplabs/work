@@ -694,6 +694,43 @@ describe("tasks and calls", () => {
       },
     ],
     [
+      "a raised error built from data",
+      probe([
+        {
+          deny: {
+            raise: {
+              error: {
+                type: "urn:grasp:error:denied",
+                status: 409,
+                title: "${ $workflow.input.noteId }",
+              },
+            },
+          },
+        },
+      ]),
+      {
+        code: "profile.invalid_value",
+        pointer: "/do/0/deny/raise/error/title",
+        taskId: "deny",
+      },
+    ],
+    [
+      "a nested loop whose default variables the outer loop has",
+      probe([
+        {
+          outer: {
+            for: { in: "${ [1] }" },
+            do: [{ inner: { for: { in: "${ [2] }" }, do: [done] } }],
+          },
+        },
+      ]),
+      {
+        code: "profile.invalid_value",
+        pointer: "/do/0/outer/do/0/inner/for",
+        taskId: "inner",
+      },
+    ],
+    [
       "a raised host error type",
       probe([
         {
@@ -946,6 +983,96 @@ describe("control flow", () => {
       },
     ],
     [
+      "a switch case that continues into another case's branch",
+      probe([
+        {
+          route: {
+            switch: [
+              {
+                large: {
+                  when: "${ $workflow.input.flag }",
+                  then: "large-body",
+                },
+              },
+              { small: { then: "continue" } },
+            ],
+          },
+        },
+        { "small-body": { set: { size: "small" } } },
+        { "large-body": { set: { size: "large" } } },
+      ]),
+      {
+        code: "flow.switch_fallthrough",
+        pointer: "/do/0/route/switch/1/small/then",
+        taskId: "route",
+      },
+    ],
+    [
+      "a branch whose catch continues into another branch",
+      probe([
+        {
+          route: {
+            switch: [
+              { risky: { when: "${ $workflow.input.flag }", then: "attempt" } },
+              { safe: { then: "safe-body" } },
+            ],
+          },
+        },
+        {
+          attempt: {
+            try: [{ "attempt-step": { set: { a: 1 } } }],
+            catch: { then: "continue" },
+            then: "end",
+          },
+        },
+        { "safe-body": { set: { size: "safe" } } },
+      ]),
+      {
+        code: "flow.switch_fallthrough",
+        pointer: "/do/0/route/switch/1/safe/then",
+        taskId: "route",
+      },
+    ],
+    [
+      "a switch with a condition of its own",
+      probe([
+        {
+          route: {
+            if: "${ $workflow.input.flag }",
+            switch: [{ otherwise: { then: "finish" } }],
+          },
+        },
+        done,
+      ]),
+      { code: "flow.not_allowed", pointer: "/do/0/route/if", taskId: "route" },
+    ],
+    [
+      "a chain of function calls deeper than 16 scopes",
+      probe([{ start: { call: "f-0" } }], {
+        functions: Object.fromEntries(
+          Array.from({ length: 6 }, (_, index) => [
+            `f-${index}`,
+            index === 5
+              ? { set: { last: true } }
+              : {
+                  do: [
+                    {
+                      [`f-${index}-a`]: {
+                        do: [{ [`f-${index}-b`]: { call: `f-${index + 1}` } }],
+                      },
+                    },
+                  ],
+                },
+          ])
+        ),
+      }),
+      {
+        code: "task.scope_too_deep",
+        pointer: "/do/0/start/call",
+        taskId: "start",
+      },
+    ],
+    [
       "a reusable function that branches to a task it can't see",
       probe([{ start: { call: "route" } }, done], {
         functions: {
@@ -1152,8 +1279,8 @@ describe("expressions", () => {
     expect(compiled).toStrictEqual(["/do/0/dynamic/if", "/do/0/dynamic/set/a"]);
   });
 
-  it("never repeats a submitted value in a diagnostic", async () => {
-    const marker = "do-not-echo-7f3a";
+  it("never repeats a submitted key, name or value in a diagnostic's text", async () => {
+    const marker = "echo7f3a";
     const diagnostics = await diagnose(
       probe([
         {
@@ -1162,16 +1289,29 @@ describe("expressions", () => {
             with: { binding: "loadNote", arguments: { id: marker } },
           },
         },
+        { size: { set: { words: `\${ $params.${marker} }` } } },
+        { field: { set: { id: `\${ $workflow.input.${marker} }` } } },
+        { variable: { set: { a: `\${ $${marker} }` } } },
+        { syntax: { set: { a: `\${ ${marker}( }` } } },
+        { pause: { wait: `P${marker}` } },
+        { extra: { set: { a: 1 }, [marker]: true } },
         {
-          size: {
-            set: { words: `\${ $params.${marker.replaceAll("-", "_")} }` },
+          typed: {
+            input: {
+              schema: {
+                format: "json",
+                document: { type: "string", [marker]: 1 },
+              },
+            },
+            set: { a: 1 },
           },
         },
-        { pause: { wait: `P${marker}` } },
       ])
     );
-    expect(diagnostics.length).toBeGreaterThan(2);
-    expect(JSON.stringify(diagnostics)).not.toContain(marker);
+    expect(diagnostics.length).toBeGreaterThan(7);
+    // The pointer says where; nothing else repeats the definition.
+    const texts = diagnostics.map(({ pointer: _pointer, ...text }) => text);
+    expect(JSON.stringify(texts)).not.toContain(marker);
   });
 });
 
@@ -1303,6 +1443,38 @@ describe("inline data schemas", () => {
         pointer: `/input/schema/document/properties/value${at}`,
       })
     );
+  });
+
+  it("accepts a const beside its own type, and refuses one beside another", async () => {
+    const { schema } = await schemaOf({ type: "string", const: "fixed" });
+    expect(schema?.["~standard"].validate({ value: "fixed" })).toStrictEqual({
+      value: { value: "fixed" },
+    });
+    const { diagnostics } = await schemaOf({ type: "integer", const: "fixed" });
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "schema.invalid",
+        pointer: "/input/schema/document/properties/value/type",
+      })
+    );
+  });
+
+  it("refuses schemas nested past the SDK's depth, anyOf included", async () => {
+    let arrays: unknown = { type: "string" };
+    for (let level = 0; level < 40; level += 1) {
+      arrays = { type: "array", items: arrays };
+    }
+    let wrappers: unknown = { type: "string" };
+    for (let level = 0; level < 70; level += 1) {
+      wrappers = { anyOf: [wrappers, { type: "null" }] };
+    }
+    for (const document of [arrays, wrappers]) {
+      // oxlint-disable-next-line no-await-in-loop -- two cases, in order
+      const { diagnostics } = await schemaOf(document);
+      expect(diagnostics?.map(({ code }) => code)).toContain(
+        "schema.too_large"
+      );
+    }
   });
 
   it("accepts an anyOf told apart by a required constant", async () => {

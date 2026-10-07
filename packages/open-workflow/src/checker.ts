@@ -16,7 +16,10 @@ import type {
 } from "./diagnostics.ts";
 import type { JsonObject, JsonValue } from "./json-text.ts";
 
-/** Thrown once the report holds `maxDiagnostics`: validation stops there. */
+/**
+ * Thrown once the report holds `maxDiagnostics` errors, or by a fatal
+ * error: validation stops there, and a stopped validation never passes.
+ */
 export class ReportFullError extends Error {
   constructor() {
     super("The diagnostics are at their limit");
@@ -71,6 +74,7 @@ export interface Report {
 export const createReport = (): Report => {
   const diagnostics: Diagnostic[] = [];
   let errors = 0;
+  let warnings = 0;
   const add: Report["add"] = (
     severity,
     code,
@@ -89,11 +93,18 @@ export const createReport = (): Report => {
       ...(details.expected === undefined ? {} : { expected: details.expected }),
       ...(details.reason === undefined ? {} : { reason: details.reason }),
     };
-    diagnostics.push(Object.freeze(diagnostic));
-    if (severity === "error") {
-      errors += 1;
+    if (severity === "warning") {
+      // Advice never stops validation: past the cap it is dropped, so
+      // warnings can't crowd out the checks that still have to run.
+      if (warnings < maxDiagnostics) {
+        warnings += 1;
+        diagnostics.push(Object.freeze(diagnostic));
+      }
+      return;
     }
-    if (diagnostics.length >= maxDiagnostics) {
+    diagnostics.push(Object.freeze(diagnostic));
+    errors += 1;
+    if (errors >= maxDiagnostics) {
       throw new ReportFullError();
     }
   };
@@ -176,6 +187,8 @@ export interface FunctionCall {
   to: string;
   pointer: string;
   taskId: string;
+  /** Scopes at the call: the calling task's, counted from its own root. */
+  depth: number;
 }
 
 /** Where in the definition a walk is: the task and what is in scope. */

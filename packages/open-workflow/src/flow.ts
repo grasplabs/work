@@ -5,6 +5,7 @@ import type {
   TaskRecord,
   Transition,
 } from "./checker.ts";
+import { profileLimits } from "./limits.ts";
 
 /**
  * Control flow, checked over the whole definition once the walk has
@@ -26,8 +27,21 @@ const fallsThrough = (task: TaskRecord): boolean => {
   if (task.kind === "raise" && !task.hasIf) {
     return false;
   }
+  // A catch whose then is continue moves on to the next sibling on the
+  // error path, whatever the try's own then; without one, the error path
+  // follows the try's then.
+  if (task.catchNext?.target === "continue") {
+    return true;
+  }
   return task.next === undefined || task.next.target === "continue";
 };
+
+/** Where `continue` leads from `position`: the next sibling, if any. */
+const continueTarget = (
+  list: ListRecord,
+  position: number
+): number | undefined =>
+  position + 1 < list.tasks.length ? position + 1 : undefined;
 
 const checkList = (checker: Checker, list: ListRecord): void => {
   const positions = new Map<string, number>();
@@ -103,7 +117,12 @@ const checkList = (checker: Checker, list: ListRecord): void => {
     // falls through into the later instead of joining explicitly.
     const branchByRun = new Map<number, number>();
     for (const switchCase of task.cases) {
-      const target = resolve(task, position, switchCase.next);
+      // `continue` enters the next sibling like any named target; `exit`
+      // and `end` leave the list.
+      const target =
+        switchCase.next.target === "continue"
+          ? continueTarget(list, position)
+          : resolve(task, position, switchCase.next);
       if (target === undefined) {
         continue;
       }
@@ -170,9 +189,62 @@ const checkFunctionCycles = (checker: Checker): void => {
   }
 };
 
+/**
+ * Scopes across calls: a reusable function's body runs inside the task
+ * that calls it, so a chain of calls nests as deep as its bodies together.
+ * Each function's reach (its own deepest task, or a call in it plus its
+ * callee's reach) is computed once, so the pass is linear in calls; a
+ * call that would take its body past 16 scopes is refused where it is.
+ */
+const checkCallDepth = (checker: Checker): void => {
+  const own = new Map<string, number>();
+  for (const task of checker.tasks) {
+    const [root] = task.scope;
+    if (root !== undefined && checker.functions.has(root)) {
+      own.set(root, Math.max(own.get(root) ?? 0, task.scope.length));
+    }
+  }
+  const callsFrom = new Map<string, FunctionCall[]>();
+  for (const call of checker.functionCalls) {
+    if (call.from !== undefined) {
+      callsFrom.set(call.from, [...(callsFrom.get(call.from) ?? []), call]);
+    }
+  }
+  const reach = new Map<string, number>();
+  // A cycle is refused by checkFunctionCycles; here it just ends the walk.
+  const visiting = new Set<string>();
+  const reachOf = (name: string): number => {
+    const known = reach.get(name);
+    if (known !== undefined) {
+      return known;
+    }
+    if (visiting.has(name)) {
+      return 0;
+    }
+    visiting.add(name);
+    let deepest = own.get(name) ?? 1;
+    for (const call of callsFrom.get(name) ?? []) {
+      deepest = Math.max(deepest, call.depth + reachOf(call.to));
+    }
+    visiting.delete(name);
+    reach.set(name, deepest);
+    return deepest;
+  };
+  for (const call of checker.functionCalls) {
+    if (call.depth + reachOf(call.to) > profileLimits.maxScopes) {
+      checker.report.error(
+        "task.scope_too_deep",
+        { pointer: call.pointer, taskId: call.taskId },
+        "Calls nest the called function's tasks: keep them within 16 scopes, or use a child workflow."
+      );
+    }
+  }
+};
+
 export const checkFlow = (checker: Checker): void => {
   for (const list of checker.lists) {
     checkList(checker, list);
   }
   checkFunctionCycles(checker);
+  checkCallDepth(checker);
 };

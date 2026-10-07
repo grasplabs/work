@@ -299,13 +299,16 @@ const checkLimits = (
       );
       continue;
     }
+    // Without the host's ceilings, nothing proves the limit lowers them.
     const ceiling = checker.options.ceilings?.[key];
-    if (ceiling !== undefined && limit > ceiling) {
+    if (ceiling === undefined || limit > ceiling) {
       checker.report.error(
         "profile.limit_above_ceiling",
         at(site, limitPointer),
         "A definition's limits can only lower the host's.",
-        { expected: `at most ${ceiling}` }
+        ceiling === undefined
+          ? { reason: "the host gave no ceilings to compare with" }
+          : { expected: `at most ${ceiling}` }
       );
     }
   }
@@ -581,8 +584,7 @@ const checkUse = (
       checker,
       error,
       pointerJoin("/use/errors", name),
-      site,
-      true
+      site
     );
   }
   for (const [name, retry] of named("retries", profileLimits.maxReusable)) {

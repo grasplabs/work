@@ -278,8 +278,18 @@ const variableAt = (
   fallback: string,
   pointer: string,
   site: Site,
-  taken: readonly string[]
+  taken: readonly string[],
+  owner: { pointer: string; keys: string }
 ): string => {
+  if (value === undefined && taken.includes(fallback)) {
+    // The default clashes: point at the loop or catch, where the name goes.
+    checker.report.error(
+      "profile.invalid_value",
+      at(site, owner.pointer),
+      `Name this one's variables with ${owner.keys}: the default ${fallback} is already used by an enclosing loop or catch.`
+    );
+    return fallback;
+  }
   const name = value === undefined ? fallback : value;
   const valid =
     typeof name === "string" &&
@@ -653,6 +663,7 @@ const checkCall = (
       to: call,
       pointer: callPointer,
       taskId: taskIdOf(site) ?? "",
+      depth: site.scope.length,
     });
     return;
   }
@@ -670,13 +681,12 @@ const checkCall = (
   callWith(checker, task, call, pointer, site);
 };
 
-/** A reusable or raised error: literal type and status, host types refused. */
+/** A reusable or raised error: literal throughout, host types refused. */
 export const checkErrorDefinition = (
   checker: Checker,
   value: JsonValue | undefined,
   pointer: string,
-  site: Site,
-  reusable: boolean
+  site: Site
 ): void => {
   const error = objectAt(checker, value, pointer, site, "the error");
   if (error === undefined) {
@@ -751,11 +761,8 @@ export const checkErrorDefinition = (
     if (text === undefined) {
       continue;
     }
-    if (reusable) {
-      literalText(checker, text, pointerJoin(pointer, key), site, 2000);
-    } else {
-      textOrExpression(checker, text, pointerJoin(pointer, key), site, 2000);
-    }
+    // Literal, inline or reusable: an error is never built from data.
+    literalText(checker, text, pointerJoin(pointer, key), site, 2000);
   }
 };
 
@@ -1523,6 +1530,15 @@ const checkSwitch = (
 ): void => {
   const switchPointer = pointerJoin(pointer, "switch");
   const cases = task.switch;
+  // A skipped switch would fall into its next sibling, usually one of its
+  // own branches: the condition belongs in a case.
+  if (Object.hasOwn(task, "if")) {
+    checker.report.error(
+      "flow.not_allowed",
+      at(site, pointerJoin(pointer, "if")),
+      "Put the condition in a case's when; a switch has no if."
+    );
+  }
   if (Object.hasOwn(task, "then")) {
     checker.report.error(
       "flow.not_allowed",
@@ -1642,7 +1658,8 @@ const checkFor = (
       "item",
       pointerJoin(forPointer, "each"),
       site,
-      taken
+      taken,
+      { pointer: forPointer, keys: "for.each and for.at" }
     );
     index = variableAt(
       checker,
@@ -1650,7 +1667,8 @@ const checkFor = (
       "index",
       pointerJoin(forPointer, "at"),
       site,
-      [...taken, each]
+      [...taken, each],
+      { pointer: forPointer, keys: "for.each and for.at" }
     );
     const inPointer = pointerJoin(forPointer, "in");
     if (requireKey(checker, loop, "in", forPointer, site)) {
@@ -1786,7 +1804,8 @@ const checkTry = (
     "error",
     pointerJoin(catchPointer, "as"),
     site,
-    [...site.loopVariables, ...site.errorVariables]
+    [...site.loopVariables, ...site.errorVariables],
+    { pointer: catchPointer, keys: "catch.as" }
   );
   const inner: Site = {
     ...site,
@@ -1915,7 +1934,7 @@ const checkRaise = (
     }
     return;
   }
-  checkErrorDefinition(checker, error, errorPointer, site, false);
+  checkErrorDefinition(checker, error, errorPointer, site);
 };
 
 const kindOf = (task: JsonObject): string[] => {

@@ -93,17 +93,15 @@ const compileSlot = async (
         ? textOf(Reflect.get(details, key))
         : undefined;
     const expected = read("expected");
-    const reason = read("reason");
+    // The expression package's reasons can quote the source (a variable's
+    // name, jq's syntax message); the pointer already says where it is.
     checker.report.add(
       "error",
       code,
       error instanceof Error ? error.message : code,
       { pointer: slot.pointer, taskId: slot.scope.at(-1) },
       read("remedy") ?? "Fix the expression.",
-      {
-        ...(expected === undefined ? {} : { expected }),
-        ...(reason === undefined ? {} : { reason }),
-      }
+      expected === undefined ? {} : { expected }
     );
     return undefined;
   }
@@ -158,18 +156,10 @@ export const validateWorkflow = async (
   }
   const checker = createChecker(read);
   const expressions = new Map<string, CompiledExpression>();
+  let stopped = false;
   try {
     checkDocument(checker, parsed.value);
     checkFlow(checker);
-    for (const binding of checker.bindings.values()) {
-      if (!binding.referenced) {
-        checker.report.warning(
-          "binding.unreferenced",
-          { pointer: binding.pointer },
-          "Remove the binding, or use it: only referenced bindings are sealed."
-        );
-      }
-    }
     // One at a time: each compile is a fresh jq instance, and the count is
     // bounded by maxExpressions.
     for (const slot of checker.slots) {
@@ -180,14 +170,26 @@ export const validateWorkflow = async (
         checkReferences(checker, slot);
       }
     }
+    // Advice last, once every check has run.
+    for (const binding of checker.bindings.values()) {
+      if (!binding.referenced) {
+        checker.report.warning(
+          "binding.unreferenced",
+          { pointer: binding.pointer },
+          "Remove the binding, or use it: only referenced bindings are sealed."
+        );
+      }
+    }
   } catch (error) {
     if (!(error instanceof ReportFullError)) {
       throw error;
     }
+    // Validation that stopped early didn't check everything: it fails.
+    stopped = true;
   }
   const { diagnostics } = checker.report;
   const { identity } = checker;
-  if (checker.report.errors() > 0 || identity === undefined) {
+  if (stopped || checker.report.errors() > 0 || identity === undefined) {
     return { ok: false, diagnostics: Object.freeze([...diagnostics]) };
   }
   const bindings = new Map<string, { kind: BindingKind; contract: string }>();

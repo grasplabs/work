@@ -166,8 +166,7 @@ export const allowKeys = (
       checker.report.error(
         "profile.unknown_property",
         at(site, pointerJoin(pointer, key)),
-        `Remove it; allowed here: ${allowed.join(", ")}.`,
-        { reason: `property ${key.slice(0, 64)}` }
+        `Remove it; allowed here: ${allowed.join(", ")}.`
       );
     } else {
       checker.report.error(

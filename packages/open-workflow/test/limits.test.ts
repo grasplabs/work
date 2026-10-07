@@ -34,6 +34,9 @@ const plain = (tasks: unknown[]) =>
     )
   );
 
+/** The descriptor of an empty object, as a catalog states one. */
+const emptyObject = JSON.stringify(v.object({}).descriptor);
+
 /** The fixture catalog, with `contract` as notes.get. */
 const withContract = (contract: CatalogContract): ValidateOptions => ({
   catalog: (key) => (key === "notes.get" ? contract : options.catalog(key)),
@@ -119,6 +122,39 @@ describe("the definition's structure", () => {
     await expect(codesOf(definition)).resolves.toContain("flow.cycle");
   });
 
+  it("never passes a definition because warnings filled the report", async () => {
+    const bindings: Record<string, unknown> = {
+      ...noteSummary.document.metadata.grasp.bindings,
+    };
+    for (let index = 0; index < 55; index += 1) {
+      bindings[`unused${index}`] = { kind: "operation", contract: "notes.get" };
+    }
+    const withUnused = (tasks: unknown[]) =>
+      JSON.stringify({
+        ...noteSummary,
+        document: {
+          ...noteSummary.document,
+          metadata: {
+            grasp: { ...noteSummary.document.metadata.grasp, bindings },
+          },
+        },
+        do: tasks,
+      });
+    const broken = await validateWorkflow(
+      withUnused([
+        ...noteSummary.do,
+        { leak: { set: { a: "${ $secrets.key }" } } },
+      ]),
+      options
+    );
+    expect(broken.ok).toBeFalsy();
+    expect(
+      broken.ok ? [] : broken.diagnostics.map(({ code }) => code)
+    ).toContain("expression.unavailable_variable");
+    const fine = await validateWorkflow(withUnused(noteSummary.do), options);
+    expect(fine.ok ? fine.warnings.length : 0).toBe(maxDiagnostics);
+  });
+
   it("reports at most the diagnostic limit", async () => {
     const tasks = tasksOf(200, () => ({ set: { a: 1 }, bogus: true }));
     const result = await validateWorkflow(plain(tasks), options);
@@ -197,6 +233,47 @@ describe("the host's catalog", () => {
     // Two descriptors a contract: the ninth runs out, and every one after it.
     expect(unknown[0]).toBe("/document/metadata/grasp/bindings/big8/contract");
     expect(unknown).toHaveLength(9);
+  });
+
+  it.each<[string, CatalogContract]>([
+    ["operation", { kind: "operation", input: emptyObject }],
+    ["compute", { kind: "compute", output: emptyObject }],
+    ["connector", { kind: "connector" }],
+    ["connector with no operations", { kind: "connector", operations: {} }],
+    ["event", { kind: "event" }],
+    ["event with no types", { kind: "event", eventTypes: [] }],
+    ["workflow", { kind: "workflow", input: emptyObject, output: emptyObject }],
+    ["decision", { kind: "decision", input: emptyObject }],
+  ])(
+    "refuses a %s contract without its required fields",
+    async (_name, contract) => {
+      const result = await validateWorkflow(
+        JSON.stringify(noteSummary),
+        withContract(contract)
+      );
+      expect(
+        result.ok
+          ? []
+          : result.diagnostics.map(({ code, pointer }) => ({ code, pointer }))
+      ).toContainEqual({
+        code: "binding.unknown_contract",
+        pointer: "/document/metadata/grasp/bindings/loadNote/contract",
+      });
+    }
+  );
+
+  it("refuses a definition's limits when the host gave no ceilings", async () => {
+    const result = await validateWorkflow(JSON.stringify(noteSummary), {
+      catalog: options.catalog,
+    });
+    expect(
+      result.ok
+        ? []
+        : result.diagnostics.map(({ code, pointer }) => ({ code, pointer }))
+    ).toContainEqual({
+      code: "profile.limit_above_ceiling",
+      pointer: "/document/metadata/grasp/limits/maxSteps",
+    });
   });
 
   it("refuses oversized descriptors and too many event types", async () => {

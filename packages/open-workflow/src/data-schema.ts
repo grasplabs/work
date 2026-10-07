@@ -25,7 +25,14 @@ import type { JsonObject, JsonValue } from "./json-text.ts";
 
 /** The descriptor limits of @grasp-os/sdk, checked here to point at the node. */
 const schemaLimits = {
+  /** Descriptor levels, as the SDK counts them. */
   depth: 32,
+  /**
+   * Schema objects inside one another, anyOf members included: a member
+   * that is only a nullable wrapper adds a schema level but no descriptor
+   * level, so this is twice the descriptor depth.
+   */
+  nesting: 64,
   nodes: 10_000,
   anyOfMembers: 64,
   nameLength: 256,
@@ -65,6 +72,8 @@ interface Draft {
 
 interface Context {
   nodes: number;
+  /** Descriptor levels from each draft down, as drafts are made. */
+  heights: WeakMap<Draft, number>;
   /** Drafts with a default, to point at the one the SDK refuses. */
   defaults: { pointer: string; draft: Draft }[];
 }
@@ -125,7 +134,7 @@ const annotationKeywords = new Set(["title", "description", "default"]);
 const formKeywords: Readonly<Record<string, readonly string[]>> = {
   semantic: ["type", "x-grasp-value"],
   anyOf: ["anyOf"],
-  const: ["const"],
+  const: ["const", "type"],
   enum: ["enum", "type"],
   string: ["type", "minLength", "maxLength", "format"],
   number: ["type", "minimum", "maximum"],
@@ -579,6 +588,21 @@ const jsonTypes = (draft: Draft): Set<string> => {
 const sharedTypes = (first: Set<string>, second: Set<string>): string[] =>
   [...first].filter((type) => second.has(type));
 
+/**
+ * Descriptor levels from `draft` down. Children are drafted first, so
+ * their heights are known: one step per draft, never a walk.
+ */
+const heightOf = (draft: Draft, heights: WeakMap<Draft, number>): number => {
+  let deepest = 0;
+  // oxlint-disable-next-line no-use-before-define -- defined with the walks below
+  for (const child of childrenOf(draft)) {
+    deepest = Math.max(deepest, heights.get(child) ?? 1);
+  }
+  const height = deepest + 1;
+  heights.set(draft, height);
+  return height;
+};
+
 /** Children of a draft, for the walk below. */
 const childrenOf = (draft: Draft): Draft[] => {
   const children = [
@@ -707,9 +731,7 @@ const anyOfDraft = (
   let nullable = false;
   for (const [index, schema] of anyOf.entries()) {
     const memberPointer = pointerJoin(at, index);
-    // At the same depth: a member is one descriptor level down only inside
-    // a union, which the SDK's own depth check bounds when it seals.
-    const member = compile(schema, memberPointer, depth, context, "member");
+    const member = compile(schema, memberPointer, depth + 1, context, "member");
     // A null member is the one nullable convention: it makes the rest
     // nullable rather than standing as a member of its own.
     if (member.nullable || member.kind === "null") {
@@ -765,8 +787,7 @@ const checkKeywords = (node: JsonObject, pointer: string): void => {
     refuse(
       "schema.unsupported_keyword",
       pointerJoin(pointer, key),
-      "Use only the profile's keywords, or a shared contract or compute module for anything else.",
-      { reason: `keyword ${key.slice(0, 64)}` }
+      "Use only the profile's keywords, or a shared contract or compute module for anything else."
     );
   }
   for (const [key, limit] of [
@@ -804,7 +825,15 @@ const formDraft = (
     }
     case "const": {
       const { const: value } = node;
-      return literalDraft(value ?? null, pointerJoin(pointer, "const"));
+      const constant = value ?? null;
+      if (Object.hasOwn(node, "type") && !matchesType(constant, node.type)) {
+        return refuse(
+          "schema.invalid",
+          pointerJoin(pointer, "type"),
+          "Make the constant have the declared type."
+        );
+      }
+      return literalDraft(constant, pointerJoin(pointer, "const"));
     }
     case "enum": {
       return enumDraft(node, pointer, context);
@@ -830,7 +859,7 @@ const formDraft = (
 
 const compileNode: CompileNode = (node, pointer, depth, context, role) => {
   context.nodes += 1;
-  if (depth > schemaLimits.depth || context.nodes > schemaLimits.nodes) {
+  if (depth > schemaLimits.nesting || context.nodes > schemaLimits.nodes) {
     return refuse(
       "schema.too_large",
       pointer,
@@ -871,6 +900,15 @@ const compileNode: CompileNode = (node, pointer, depth, context, role) => {
     );
   }
   const draft = formDraft(form, node, pointer, depth, context, compileNode);
+  // The descriptor's own depth, from here down: refused at the first node
+  // that would take it past the SDK's limit.
+  if (heightOf(draft, context.heights) > schemaLimits.depth) {
+    return refuse(
+      "schema.too_large",
+      pointer,
+      "Nest the schema at most 32 values deep."
+    );
+  }
   // The parser never yields undefined for a key that is there: an explicit
   // null default is a default like any other value.
   const { default: defaultValue } = node;
@@ -910,7 +948,7 @@ export const compileDataSchema = (
   pointer: string,
   rootDefault?: { value: JsonValue; pointer: string }
 ): SchemaCompilation => {
-  const context: Context = { nodes: 0, defaults: [] };
+  const context: Context = { nodes: 0, defaults: [], heights: new WeakMap() };
   let draft: Draft;
   try {
     draft = compileNode(document, pointer, 1, context, "root");
