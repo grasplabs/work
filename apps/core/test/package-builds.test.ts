@@ -391,6 +391,67 @@ describe("what a package's code may reach", () => {
     expect(module).toContain("browser");
   });
 
+  it("resolves an imports target that names a package through the package's own dependencies", async () => {
+    const helper = named("helper");
+    const user = named("uses-helper");
+    const sneaky = named("sneaky-helper");
+    await publish(esm(helper, { "index.js": "export const h = 'helped';" }));
+    await publish(
+      esm(
+        user,
+        { "index.js": 'export { h } from "#helper";' },
+        { imports: { "#helper": helper }, dependencies: { [helper]: "1" } }
+      )
+    );
+    await publish(
+      esm(
+        sneaky,
+        { "index.js": 'export { h } from "#helper";' },
+        { imports: { "#helper": helper } }
+      )
+    );
+    const ok = await approvedApp({ [user]: "1" });
+    const built = await buildOf(ok, "browser");
+    const module = await artifactText(built.hash, `${user}.js`);
+    // The helper is in the graph, but not one of the package's own.
+    const refused = await approvedApp({ [helper]: "1", [sneaky]: "1" });
+    expect({
+      helped: module.includes("helped"),
+      refusals: await refusalsOf(buildOf(refused, "browser")),
+    }).toStrictEqual({
+      helped: true,
+      refusals: [
+        `${sneaky}@1.0.0 imports ${helper}, which it doesn't depend on`,
+      ],
+    });
+  });
+
+  it("picks the exports pattern Node picks: the longer prefix, then the longer key", async () => {
+    const patterns = named("patterns");
+    await publish(
+      esm(
+        patterns,
+        {
+          "lib/a.js": "export const from = 'lib';",
+          "raw/b.js": "export const from = 'raw';",
+        },
+        { exports: { "./*": "./lib/*.js", "./*.js": "./raw/*.js" } }
+      )
+    );
+    const app = await approvedApp(
+      { [patterns]: "1" },
+      { entries: [`${patterns}/a`, `${patterns}/b.js`] }
+    );
+    const built = await buildOf(app, "browser");
+    expect([
+      built.artifact.entries[`${patterns}/a`]?.resolved,
+      built.artifact.entries[`${patterns}/b.js`]?.resolved,
+    ]).toStrictEqual([
+      `${patterns}@1.0.0/lib/a.js`,
+      `${patterns}@1.0.0/raw/b.js`,
+    ]);
+  });
+
   it("refuses an import of a package it doesn't depend on, even one in the graph", async () => {
     const shared = named("shared");
     const phantom = named("phantom");
@@ -836,10 +897,9 @@ describe("what a build names and keeps", () => {
     );
   });
 
-  it("refuses local image-set strings, SVGs that load from outside, and modules that load files by URL or start workers", async () => {
+  it("refuses local image-set strings and SVGs that load from outside", async () => {
     const photos = named("photos");
     const sprite = named("sprite");
-    const wasm = named("wasm-loader");
     await publish(
       esm(photos, {
         "index.js": 'import "./photos.css"; export {};',
@@ -854,66 +914,33 @@ describe("what a build names and keeps", () => {
           '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://cdn.example/a.png"/></svg>',
       })
     );
-    await publish(
-      esm(wasm, {
-        "index.js":
-          'export const url = new URL("./engine.wasm", import.meta.url); export const start = () => new Worker("./w.js");',
-      })
-    );
     const app = await approvedApp({ [photos]: "1", [sprite]: "1" });
-    const loader = await approvedApp({ [wasm]: "1" });
+    const css = await approvedApp({ [photos]: "1" });
     expect({
       assets: await refusalsOf(buildOf(app, "browser")),
-      loader: await refusalsOf(buildOf(loader, "browser")),
+      css: await refusalsOf(buildOf(css, "browser")),
     }).toStrictEqual({
       assets: [
         `${sprite}@1.0.0's icon.svg is an SVG that loads something from outside itself`,
       ],
-      loader: [
-        `the module ${wasm}.js loads a file next to itself at run time (import.meta.url)`,
-        `the module ${wasm}.js starts a worker`,
+      css: [
+        `the stylesheet ${photos}.css names ./photo.png as a string, which isn't bundled: use url()`,
       ],
     });
-    const css = await approvedApp({ [photos]: "1" });
-    await expect(refusalsOf(buildOf(css, "browser"))).resolves.toStrictEqual([
-      `the stylesheet ${photos}.css names ./photo.png in image-set() as a string, which isn't bundled: use url()`,
-    ]);
   });
 
-  it("tells code that loads at run time from text that only mentions it", async () => {
-    const mentions = named("mentions");
-    const worker = named("self-worker");
+  it("takes a stylesheet's text that only looks like a URL", async () => {
+    const quoted = named("quoted");
     await publish(
-      esm(mentions, {
-        "index.js": `// new Worker(example) and importScripts("x.js") in a comment
-/* import.meta.url */
-export const docs = "new Worker(example) or new URL('./a.wasm', import.meta.url)";
-export const template = \`self.importScripts("x") \${"new SharedWorker(s)"}\`;
-export const pattern = /new Worker\\(/u;
-export const supported = typeof Worker !== "undefined";`,
+      esm(quoted, {
+        "index.js": 'import "./note.css"; export {};',
+        "note.css": `/* background: url(https://cdn.example/a.png) */
+.n::before { content: "https://cdn.example/a.png"; font-family: "url(https://x)"; }`,
       })
     );
-    await publish(
-      esm(worker, {
-        "index.js": "export const start = () => new self.Worker('./w.js');",
-      })
-    );
-    const harmless = await approvedApp({ [mentions]: "1" });
-    const built = await buildOf(harmless, "browser");
-    const shipped = await artifactText(built.hash, `${mentions}.js`);
-    const loader = await approvedApp({ [worker]: "1" });
-    expect({
-      built: built.artifact.entries[mentions]?.module,
-      // What ships tests the real global; the check's markers never ship.
-      realWorker: /typeof Worker/u.test(shipped),
-      markers: shipped.includes("__grasp_refused"),
-      refused: await refusalsOf(buildOf(loader, "browser")),
-    }).toStrictEqual({
-      built: `${mentions}.js`,
-      realWorker: true,
-      markers: false,
-      refused: [`the module ${worker}.js starts a worker`],
-    });
+    const app = await approvedApp({ [quoted]: "1" });
+    const built = await buildOf(app, "browser");
+    expect(built.artifact.entries[quoted]?.css).toBe(`${quoted}.css`);
   });
 
   it("builds again when a kept artifact's description can't be read, to the same pin", async () => {
@@ -1013,5 +1040,89 @@ export const supported = typeof Worker !== "undefined";`,
       "dependency.stale",
       undefined,
     ]);
+  });
+
+  it("returns a kept artifact only while its pin holds: a resolve while it is read makes the build stale", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    await buildOf(app, "browser");
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    // As the kept artifact's description is read, a resolve sets other
+    // entries for the target.
+    let raced = false;
+    const files = new Proxy(env.FILES, {
+      get: (target, property): unknown =>
+        property === "get"
+          ? async (key: string) => {
+              if (!raced && key.endsWith(".json")) {
+                raced = true;
+                await app.builder.api.dependencies.resolve(
+                  intentFor(
+                    app.app,
+                    { [ui]: "^1.0.0" },
+                    { entries: [ui, `${ui}/extra`] }
+                  )
+                );
+              }
+              return await target.get(key);
+            }
+          : bound(target, property),
+    });
+    const { code } = await failure(
+      buildDependencies({ ...env, FILES: files }, identity, {
+        app: app.app,
+        graphHash: app.request.graphHash,
+        target: "browser",
+        policyGeneration,
+      })
+    );
+    expect([raced, code]).toStrictEqual([true, "dependency.stale"]);
+  });
+
+  it("returns an artifact built again under a pin only while the pin holds: a resolve while it builds makes the build stale", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const first = await buildOf(app, "browser");
+    // The kept artifact can't be read, so the build makes it again.
+    await env.FILES.put(`package-builds/${first.hash}.json`, "{not json");
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    let raced = false;
+    const files = new Proxy(env.FILES, {
+      get: (target, property): unknown =>
+        property === "put"
+          ? async (
+              key: string,
+              value: Parameters<R2Bucket["put"]>[1],
+              options?: R2PutOptions
+            ): Promise<R2Object | null> => {
+              if (!raced && key.endsWith(".json")) {
+                raced = true;
+                await app.builder.api.dependencies.resolve(
+                  intentFor(
+                    app.app,
+                    { [ui]: "^1.0.0" },
+                    { entries: [ui, `${ui}/extra`] }
+                  )
+                );
+              }
+              return await target.put(key, value, options);
+            }
+          : bound(target, property),
+    });
+    const { code } = await failure(
+      buildDependencies({ ...env, FILES: files }, identity, {
+        app: app.app,
+        graphHash: app.request.graphHash,
+        target: "browser",
+        policyGeneration,
+      })
+    );
+    expect([raced, code]).toStrictEqual([true, "dependency.stale"]);
   });
 });

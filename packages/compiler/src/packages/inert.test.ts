@@ -185,4 +185,39 @@ describe("a stylesheet an artifact carries", () => {
     ].join("\n");
     expect(remoteInCss(css)).toStrictEqual([]);
   });
+
+  it("reads CSS as a browser does: escapes name a URL, comments split one", () => {
+    const css = [
+      ".a{background:\\75 rl(https://cdn.example/a.png)}",
+      ".b{background:URL( 'https://cdn.example/b.png' )}",
+      '.c{background:image("https://cdn.example/c.png")}',
+      '.d{background:cross-fade("https://cdn.example/d.png" 50%, red)}',
+      '@font-face{src:src("https://cdn.example/e.woff")}',
+      '@import url("https://cdn.example/f.css") supports(display:grid);',
+      ".g{background:u/**/rl(https://cdn.example/g.png)}",
+    ].join("\n");
+    expect(remoteInCss(css).toSorted()).toStrictEqual(
+      [
+        "https://cdn.example/a.png",
+        "https://cdn.example/b.png",
+        "https://cdn.example/c.png",
+        "https://cdn.example/d.png",
+        "https://cdn.example/e.woff",
+        "https://cdn.example/f.css",
+      ].toSorted()
+    );
+  });
+
+  it("leaves text that only looks like a URL, where nothing is fetched", () => {
+    const css = [
+      '.a::before{content:"https://cdn.example/a.png"}',
+      ".b{font-family:'//cdn.example/b'}",
+      "/* @import 'https://cdn.example/c.css'; url(https://cdn.example/c) */",
+      '@namespace svg "https://cdn.example/svg";',
+      '.d{grid-template-areas:"https" "x"}',
+      '.e{background:image-set(url(./assets/e-HASH.png) type("https://x/y") 1x)}',
+      '@supports (content:"url(https://cdn.example/f)"){.f{color:red}}',
+    ].join("\n");
+    expect([remoteInCss(css), unbundledInCss(css)]).toStrictEqual([[], []]);
+  });
 });

@@ -146,6 +146,35 @@ const lockOf = async (
   return { lock, stored: row.lock };
 };
 
+/** What a target is built for: its conditions and entries, as one text. */
+const targetOf = (lock: GraspLock, target: PackageArtifact["target"]): string =>
+  JSON.stringify(lock.targets[target] ?? null);
+
+/**
+ * Stops a build that returns an existing pin's artifact unless the pin
+ * still holds as it returns: the lock read again has the target's entries
+ * and conditions as they were read, and the same pin. A resolve may have
+ * changed the target (and its pin) while the artifact was read or built;
+ * then the artifact is for a target that no longer exists, and the build
+ * is stale (`dependency.stale`), never returned.
+ */
+const checkPinHolds = async (
+  env: Env,
+  app: string,
+  graphHash: string,
+  read: GraspLock,
+  target: PackageArtifact["target"],
+  hash: string
+): Promise<void> => {
+  const now = await lockOf(env, app, graphHash);
+  if (
+    targetOf(now.lock, target) !== targetOf(read, target) ||
+    now.lock.artifacts?.[compilerVersion]?.[target]?.hash !== hash
+  ) {
+    throw dependencyErrors.create("dependency.stale");
+  }
+};
+
 /** What a build was admitted under: re-checked in the write that pins. */
 interface Admitted {
   approval: string;
@@ -158,10 +187,6 @@ interface Admitted {
  */
 const stillAdmitted = ({ approval, policyGeneration }: Admitted): SQL =>
   sql`EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.id} = ${approval} AND ${dependencyRequests.status} = 'approved') AND ${policyGenerationSql} = ${policyGeneration}`;
-
-/** What a target is built for: its conditions and entries, as one text. */
-const targetOf = (lock: GraspLock, target: PackageArtifact["target"]): string =>
-  JSON.stringify(lock.targets[target] ?? null);
 
 /**
  * Pins `hash` as what `compilerVersion` builds `target` of the lock to,
@@ -399,8 +424,17 @@ export const buildDependencies = async (
   if (pinned) {
     const kept = await keptArtifact(env, pinned.hash);
     if (kept) {
-      // Reading it took time: what decides now wins.
+      // Reading it took time: what decides now wins, and the pin must
+      // still be the target's.
       await admit();
+      await checkPinHolds(
+        env,
+        asked.app,
+        asked.graphHash,
+        lock,
+        asked.target,
+        pinned.hash
+      );
       await recordUse(env, by, {
         app: asked.app,
         graphHash: asked.graphHash,
@@ -430,7 +464,23 @@ export const buildDependencies = async (
     throw packageErrors.create("package.artifact_mismatch");
   }
   // The files first and the description last: a description there means
-  // every file is too.
+  // every file is too. Each keeps its type, the one it is served with.
+  //
+  // What an artifact's code does at run time is not checked here: no check
+  // of text can be complete (a worker or a fetch can be built from any
+  // string). The build refuses only what it can decide whole (Node's
+  // built-ins, remote imports, imports computed at run time, CSS that
+  // fetches from outside, SVGs that aren't only drawing). Run time is
+  // bounded where the artifact is served, by this Content-Security-Policy
+  // on every one of its files:
+  //
+  //   default-src 'none'; script-src <the artifact's own origin>;
+  //   worker-src 'none'; connect-src <the host's origin>;
+  //   img-src 'self' data:; font-src 'self' data:; style-src 'self'
+  //
+  // with `sandbox` on SVGs (so one opened as a document runs nothing) and
+  // `X-Content-Type-Options: nosniff` on all, so a file is only ever read
+  // as the type stored here.
   await Promise.all(
     Object.entries(files).map(
       async ([path, bytes]) =>
@@ -440,6 +490,18 @@ export const buildDependencies = async (
     )
   );
   await env.FILES.put(artifactKey(hash), canonicalJson(artifact));
+  if (pinned) {
+    // Built again under an existing pin: returned only while the pin
+    // still holds for the target as it was read.
+    await checkPinHolds(
+      env,
+      asked.app,
+      asked.graphHash,
+      lock,
+      asked.target,
+      pinned.hash
+    );
+  }
   const holds = pinned
     ? pinned.hash
     : await pin(

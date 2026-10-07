@@ -23,6 +23,12 @@
  *   (images, fonts) as files of the artifact under hashed names, which
  *   resolve only within it. SVGs that could script, HTML and anything else
  *   are refused.
+ *
+ * What the code does at run time (start a worker, fetch, load a file by
+ * URL) isn't checked: no check of text can be complete. The build refuses
+ * only what it can decide whole, above; run time is bounded by the
+ * Content-Security-Policy the artifact is served with (core's
+ * packages/build.ts names it).
  */
 import type { DependencyTarget } from "@grasp-os/shared/dependencies";
 import { entryPackage } from "@grasp-os/shared/packages";
@@ -45,13 +51,7 @@ import {
   withinPackage,
 } from "./exports.ts";
 import type { PackageFiles } from "./exports.ts";
-import {
-  inertDataUrl,
-  remoteInCss,
-  runtimeLoadMarkers,
-  runtimeLoadsInJs,
-  unbundledInCss,
-} from "./inert.ts";
+import { inertDataUrl, remoteInCss, unbundledInCss } from "./inert.ts";
 import { platformModules, platformPeers } from "./platform.ts";
 import { svgRefusal } from "./svg.ts";
 
@@ -375,12 +375,17 @@ class Resolver {
   /** An import from within a package: `#name`, relative or bare. */
   #within(path: string, from: Located, pkg: PackageFiles): OnResolveResult {
     if (path.startsWith("#")) {
-      const file = resolveImports(pkg, path, this.#conditions);
-      return file === undefined
-        ? refuse(
-            `${from.key} imports ${path}, which its package.json doesn't map`
-          )
-        : this.#remapped(from.key, pkg, file);
+      const target = resolveImports(pkg, path, this.#conditions);
+      if (target === undefined) {
+        return refuse(
+          `${from.key} imports ${path}, which its package.json doesn't map`
+        );
+      }
+      // A bare target is the package's own import of it: through its own
+      // dependencies, with every refusal any import has.
+      return target.kind === "bare"
+        ? this.#bare(target.specifier, from, false)
+        : this.#remapped(from.key, pkg, target.path);
     }
     if (path.startsWith("/")) {
       return refuse(`${from.key} imports an absolute path, ${path}`);
@@ -534,9 +539,9 @@ const refusalsOf = (error: unknown): string[] => {
 };
 
 /**
- * What an output file of the build would load from outside the artifact,
- * which esbuild's plugin never saw: strings `image-set()` takes (remote
- * or local), and modules that load files by URL or start workers.
+ * What a stylesheet the build wrote would load from outside the artifact,
+ * which esbuild's plugin never saw: strings in image functions and
+ * `src()`, remote or local.
  */
 const leavingOutput = (
   path: string,
@@ -554,7 +559,7 @@ const leavingOutput = (
       ),
       ...unbundledInCss(text, limit).map(
         (name) =>
-          `the stylesheet ${path} names ${name} in image-set() as a string, which isn't bundled: use url()`
+          `the stylesheet ${path} names ${name} as a string, which isn't bundled: use url()`
       ),
     ].slice(0, limit);
   }
@@ -566,16 +571,10 @@ type Outputs =
   | { ok: true; outputs: { path: string; contents: Uint8Array }[] }
   | { ok: false; refusals: string[] };
 
-/**
- * One esbuild run over the entries, through `resolver`. With `marked`,
- * the globals that load at run time are replaced by markers
- * (`runtimeLoadMarkers`): a check build, never shipped. Everything else
- * is the same, so the check covers exactly what ships.
- */
+/** One esbuild run over the entries, through `resolver`. */
 const run = async (
   entries: readonly string[],
-  resolver: Resolver,
-  marked: boolean
+  resolver: Resolver
 ): Promise<Outputs> => {
   try {
     const result = await build({
@@ -600,52 +599,13 @@ const run = async (
         "unsupported-dynamic-import": "error",
         "unsupported-require-call": "error",
       },
-      define: {
-        "process.env.NODE_ENV": '"production"',
-        ...(marked ? runtimeLoadMarkers : {}),
-      },
+      define: { "process.env.NODE_ENV": '"production"' },
       plugins: [resolver.plugin()],
     });
     return { ok: true, outputs: result.outputFiles ?? [] };
   } catch (error) {
     return { ok: false, refusals: refusalsOf(error) };
   }
-};
-
-/** Whether shipped code could use a global that loads at run time. */
-const mentionsRuntimeLoads = /Worker|importScripts|import\.meta/u;
-
-/**
- * Why the modules would load code or files at run time from outside the
- * artifact. Only when the shipped code names such a global at all (a
- * real use can't be minified away): then a check build with markers in
- * their place tells real uses from text that only mentions them.
- */
-const runtimeLoadRefusals = async (
-  input: BundleInput,
-  entries: readonly string[],
-  shipped: { path: string; contents: Uint8Array }[]
-): Promise<string[]> => {
-  const named = shipped.some(
-    ({ path, contents }) =>
-      path.endsWith(".js") &&
-      mentionsRuntimeLoads.test(decoder.decode(contents))
-  );
-  if (!named) {
-    return [];
-  }
-  const checked = await run(entries, new Resolver(input), true);
-  if (!checked.ok) {
-    return checked.refusals;
-  }
-  return checked.outputs.flatMap(({ path, contents }) => {
-    const name = path.replace(/^\/artifact\//u, "");
-    return name.endsWith(".js")
-      ? runtimeLoadsInJs(decoder.decode(contents)).map(
-          (why) => `the module ${name} ${why}`
-        )
-      : [];
-  });
 };
 
 /**
@@ -671,7 +631,7 @@ export const bundle = async (input: BundleInput): Promise<Bundled> => {
     names.set(name, entry);
   }
   const resolver = new Resolver(input);
-  const shipped = await run(entries, resolver, false);
+  const shipped = await run(entries, resolver);
   if (!shipped.ok) {
     return shipped;
   }
@@ -685,7 +645,6 @@ export const bundle = async (input: BundleInput): Promise<Bundled> => {
       ...leavingOutput(path, output.contents, maxRefusals - leaving.length)
     );
   }
-  leaving.push(...(await runtimeLoadRefusals(input, entries, outputs)));
   if (leaving.length > 0) {
     return { ok: false, refusals: leaving.slice(0, maxRefusals) };
   }

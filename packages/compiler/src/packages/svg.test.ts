@@ -8,7 +8,8 @@ import { svgRefusal } from "./svg.ts";
 // denylist (`style` with `\\75 rl(`, `image-set`, `-webkit-image-set`,
 // comments splitting `url(` and `@import`, CSS comments inside `url`, a
 // CSS-escaped `@import`, and an external DOCTYPE), which is why this is now
-// an allowlist.
+// an allowlist. CSS is read by CSS's own tokenizer, so a comment splits
+// what it is in (`u/**/rl(` is no URL), as a browser reads it.
 
 const svg = (inner: string, head = ""): Uint8Array =>
   new TextEncoder().encode(
@@ -47,8 +48,11 @@ describe("an SVG's references", () => {
       xmlCommentImport: [
         '<style>@im<!-- -->port "https://x.example/a.css";</style>',
       ],
-      cssCommentSplit: [
-        "<style>rect{fill:u/**/rl(https://x.example/a)}</style>",
+      srcFunction: [
+        '<style>@font-face{src:src("https://x.example/f.woff")}</style>',
+      ],
+      crossFade: [
+        '<style>rect{fill:cross-fade("https://x.example/a.png" 50%, red)}</style>',
       ],
       cssEscapedImport: [
         '<style>@\\69mport "https://x.example/a.css";</style>',
@@ -169,6 +173,52 @@ describe("an SVG's text and values, second probe", () => {
       unknownEntityInStyle: "is an SVG Grasp can't read",
       quotedGt: "taken",
       ltInText: "taken",
+    });
+  });
+});
+
+describe("an SVG's style sheets, read as CSS", () => {
+  it("is refused for any element inside a style sheet, whose text would join it", () => {
+    expect({
+      group: refusalOf(
+        '<style><g>@import "https://x.example/a.css";</g></style>'
+      ),
+      nestedStyle: refusalOf(
+        '<style><style>@import "https://x.example/a.css";</style></style>'
+      ),
+      emptyElement: refusalOf(
+        '<style>@im<rect/>port "https://x.example/a.css";</style>'
+      ),
+    }).toStrictEqual({
+      group: "is an SVG with an element inside a style sheet",
+      nestedStyle: "is an SVG with an element inside a style sheet",
+      emptyElement: "is an SVG with an element inside a style sheet",
+    });
+  });
+
+  it("takes text that only looks like a URL, where nothing is fetched", () => {
+    expect({
+      content: refusalOf(
+        '<style>text::after{content:"https://x.example/a"}</style>'
+      ),
+      commentSplit: refusalOf(
+        "<style>rect{fill:u/**/rl(https://x.example/a)}</style>"
+      ),
+      inComment: refusalOf(
+        "<style>/* url(https://x.example/a) @import 'b' */rect{fill:red}</style>"
+      ),
+      fontFamily: refusalOf(
+        "<text font-family=\"'https://x.example/a'\">x</text>"
+      ),
+      typeString: refusalOf(
+        '<style>rect{fill:image-set(url(#g) type("image/png") 1x)}</style>'
+      ),
+    }).toStrictEqual({
+      content: "taken",
+      commentSplit: "taken",
+      inComment: "taken",
+      fontFamily: "taken",
+      typeString: "taken",
     });
   });
 });

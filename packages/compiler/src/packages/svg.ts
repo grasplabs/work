@@ -9,12 +9,16 @@
  * What it takes care of: event handlers and script, embedding elements
  * under any prefix, external `href`/`src` on any element under any prefix
  * or in any case, `xml:base`, `<a>` to elsewhere, character references
- * hiding a scheme, CSS `url()`/`@import`/`image-set()` in `<style>` (CDATA
- * or not, split by XML or CSS comments, written with CSS escapes) or in
+ * hiding a scheme, CSS `url()`/`@import`/`image-set()`/`src()` in `<style>`
+ * (CDATA or not, split by XML comments, written with CSS escapes) or in
  * attributes, document type declarations and their entities, processing
  * instructions such as `xml-stylesheet`, and anything not plain UTF-8.
+ * CSS is read with CSS's own tokenizer (css.ts), so only what a browser
+ * would fetch counts, and a `<style>` holds text only: an element inside
+ * one would add its text to the stylesheet, so it is refused.
  */
-import { cssUnescape, inertDataUrl, replaced } from "./inert.ts";
+import { cssFetches } from "./css.ts";
+import { inertDataUrl, replaced } from "./inert.ts";
 
 const strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
@@ -182,24 +186,12 @@ const checkReference = (value: string, image: boolean): void => {
 };
 
 /**
- * Checks CSS from a `<style>` or an attribute, read as a browser would:
- * escapes decoded and comments taken out. No `@import`, no `image-set()`,
- * and every `url()` a fragment or an inline image.
+ * Checks CSS from a `<style>` or an attribute: everything it would fetch
+ * (`cssFetches`) is a fragment or an inline image.
  */
 const checkCss = (css: string): void => {
-  const read = squeezed(cssUnescape(css.replaceAll(/\/\*[\s\S]*?\*\//gu, "")));
-  if (/@import|image-set\(|expression\(/iu.test(read)) {
-    refuse(loadsOutside);
-  }
-  if (scriptUrl.test(read)) {
-    refuse("is an SVG that links to script");
-  }
-  for (const match of read.matchAll(/url\((?<value>[^)]*)\)/giu)) {
-    const value = (match.groups?.value ?? "").replaceAll(/^["']|["']$/gu, "");
-    checkReference(value, true);
-  }
-  if (/url\(/iu.test(read.replaceAll(/url\([^)]*\)/giu, ""))) {
-    refuse(unreadable);
+  for (const { url } of cssFetches(css)) {
+    checkReference(url, true);
   }
 };
 
@@ -224,15 +216,8 @@ const checkAttribute = (element: string, name: string, raw: string): void => {
     checkReference(value, local === "href" && imageElements.has(element));
     return;
   }
-  if (
-    local === "style" ||
-    /url\(|@import|image-set/iu.test(cssUnescape(value))
-  ) {
-    checkCss(value);
-  }
-  if (scriptUrl.test(squeezed(value))) {
-    refuse("is an SVG that links to script");
-  }
+  // Presentation attributes (`fill`, `mask`, …) and `style` are CSS.
+  checkCss(value);
 };
 
 const attributePattern =
@@ -352,11 +337,15 @@ const checkMarkup = (text: string): void => {
       );
     } else {
       const tag = readTag(text, open);
-      if (tag.name === "style" && !tag.closing && !tag.empty) {
-        style = "";
-      } else if (tag.name === "style" && tag.closing) {
-        checkCss(style ?? "");
+      if (style !== undefined) {
+        // A `<style>` is text only: its own end tag is all it may hold.
+        if (!(tag.name === "style" && tag.closing)) {
+          refuse("is an SVG with an element inside a style sheet");
+        }
+        checkCss(style);
         style = undefined;
+      } else if (tag.name === "style" && !tag.closing && !tag.empty) {
+        style = "";
       }
       at = tag.end;
     }
