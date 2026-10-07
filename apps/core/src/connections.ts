@@ -38,7 +38,7 @@ import {
   outboxedIfChanged,
 } from "./audit-outbox.ts";
 import { providerIds, signInConfig } from "./auth/config.ts";
-import { identify } from "./auth/identity.ts";
+import { identifyFull } from "./auth/identity.ts";
 import { accounts, hiddenConnectors, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { withPerson } from "./session-check.ts";
@@ -586,7 +586,7 @@ export const handleConnectionCallback = async (
   if (state === null || state === "") {
     return failed("connection.flow_invalid");
   }
-  const identity = await identify(env, request.headers);
+  const identity = await identifyFull(env, request.headers);
   if (identity === undefined) {
     // Spent, so the code in this URL can't be brought back to finish it.
     await env.CONNECT.abandonFlow(state);

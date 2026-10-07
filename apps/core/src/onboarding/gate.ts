@@ -1,4 +1,5 @@
 import type { AuditActor } from "@grasp-os/shared/audit";
+import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import {
@@ -14,7 +15,8 @@ import type {
 import { and, eq, inArray, isNotNull, isNull, not, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
+import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
+import { signInConfig } from "../auth/config.ts";
 import { onboardingGate, sessions, users } from "../db/core/schema.ts";
 import { closesOn, dayOf } from "./rules.ts";
 
@@ -102,9 +104,44 @@ export const knownParts = (view: OnboardingView): KnownPart[] => {
   ];
 };
 
+/** How long staff with the onboarding scope keep access after Grasp's go. */
+export const staffAfterGoMs = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Whether Grasp's staff may be in now, by what the company decided: not
+ * when its admin ended staff access after the console opened this window
+ * (`windowOpened`), and, for the onboarding scope, not past 7 days after
+ * Grasp's go.
+ */
+export const staffMayStay = async (
+  env: Pick<Env, "DB">,
+  windowOpened: string,
+  scope: "full" | "onboarding",
+  now = Date.now()
+): Promise<boolean> => {
+  const [row] = await drizzle(env.DB)
+    .select({
+      openedAt: onboardingGate.openedAt,
+      closedAt: onboardingGate.closedAt,
+      staffEndedAt: onboardingGate.staffEndedAt,
+    })
+    .from(onboardingGate)
+    .where(eq(onboardingGate.id, gateRow));
+  const ended = row?.staffEndedAt?.getTime();
+  if (ended !== undefined && ended >= Date.parse(windowOpened)) {
+    return false;
+  }
+  const opened = row?.closedAt === null ? row.openedAt?.getTime() : undefined;
+  return !(
+    scope === "onboarding" &&
+    opened !== undefined &&
+    now > opened + staffAfterGoMs
+  );
+};
+
 /** The gate, with how much Grasp knows by `view` of the onboarding. */
 export const gateView = async (
-  env: Pick<Env, "DB">,
+  env: Env,
   view: OnboardingView,
   now: string = new Date().toISOString()
 ): Promise<GateView> => {
@@ -116,6 +153,8 @@ export const gateView = async (
   }
   const known = Math.round(sum);
   const over = view.plan !== null && dayOf(now) > closesOn(view.plan);
+  const config = signInConfig(env);
+  const staff = config?.staff;
   return {
     open: closedAt === null,
     closedSince: closedAt?.toISOString() ?? null,
@@ -123,6 +162,21 @@ export const gateView = async (
     known,
     parts,
     ready: known >= threshold || over,
+    staff:
+      staff === undefined || config === undefined
+        ? null
+        : {
+            open:
+              staffWindowOpen(config, Date.parse(now)) &&
+              (await staffMayStay(
+                env,
+                staff.opened,
+                staff.scope,
+                Date.parse(now)
+              )),
+            scope: staff.scope,
+            until: staff.until,
+          },
   };
 };
 
@@ -170,13 +224,44 @@ export const closeGate = async (
   ]);
 };
 
+/**
+ * Ends Grasp's staff access, as the company's admin: every staff session
+ * goes now, and the window the console opened lets nobody in again; only
+ * a window the console opens afterwards does. In one batch, audited as
+ * the admin.
+ */
+export const endStaffAccess = async (
+  env: Env,
+  by: AuditActor
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const now = new Date();
+  const { threshold } = await stored(env);
+  await auditedBatch(env, db, [
+    db
+      .insert(onboardingGate)
+      .values({ id: gateRow, closedAt: null, threshold, staffEndedAt: now })
+      .onConflictDoUpdate({
+        target: onboardingGate.id,
+        set: { staffEndedAt: now },
+      }),
+    db.delete(sessions).where(eq(sessions.staff, true)),
+    outboxed(db, {
+      actor: by,
+      action: "onboarding.staff_access.ended",
+      target: { type: "deployment", id: gateRow },
+      detail: {},
+    }),
+  ]);
+};
+
 /** Grasp's go: opens the gate to everyone in the company. */
 export const openGate = async (env: Env, by: AuditActor): Promise<void> => {
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db
       .update(onboardingGate)
-      .set({ closedAt: null })
+      .set({ closedAt: null, openedAt: new Date() })
       .where(
         and(eq(onboardingGate.id, gateRow), isNotNull(onboardingGate.closedAt))
       ),
