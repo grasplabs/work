@@ -33,10 +33,18 @@ function ComboboxTrigger({
   );
 }
 
-function ComboboxClear({ className, ...props }: ComboboxPrimitive.Clear.Props) {
+function ComboboxClear({
+  className,
+  label = "Clear",
+  ...props
+}: ComboboxPrimitive.Clear.Props & {
+  /** The button's name, read out by screen readers. */
+  label?: string;
+}) {
   return (
     <ComboboxPrimitive.Clear
       data-slot="combobox-clear"
+      aria-label={label}
       render={<InputGroupButton variant="ghost" size="icon-xs" />}
       className={cn(className)}
       {...props}
@@ -52,10 +60,15 @@ function ComboboxInput({
   disabled = false,
   showTrigger = true,
   showClear = false,
+  triggerLabel = "Show options",
+  clearLabel = "Clear",
   ...props
 }: ComboboxPrimitive.Input.Props & {
   showTrigger?: boolean;
   showClear?: boolean;
+  /** The names of the trigger and clear buttons, read out by screen readers. */
+  triggerLabel?: string;
+  clearLabel?: string;
 }) {
   return (
     <InputGroup className={cn("w-auto", className)}>
@@ -69,12 +82,13 @@ function ComboboxInput({
             size="icon-xs"
             variant="ghost"
             render={<ComboboxTrigger />}
+            aria-label={triggerLabel}
             data-slot="input-group-button"
             className="group-has-data-[slot=combobox-clear]/input-group:hidden data-pressed:bg-transparent"
             disabled={disabled}
           />
         )}
-        {showClear && <ComboboxClear disabled={disabled} />}
+        {showClear && <ComboboxClear disabled={disabled} label={clearLabel} />}
       </InputGroupAddon>
       {children}
     </InputGroup>

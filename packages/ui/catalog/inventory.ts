@@ -83,6 +83,8 @@ export const shadcnComponents = {
       "AlertDialogTitle",
       "AlertDialogTrigger",
     ],
+    changes:
+      "The overlay dims the page with the theme's `scrim` token instead of raw black.",
   },
   "aspect-ratio": {
     status: "supported",
@@ -186,6 +188,8 @@ export const shadcnComponents = {
       "ComboboxValue",
       "useComboboxAnchor",
     ],
+    changes:
+      "`triggerLabel` and `clearLabel` name the input's trigger and clear buttons, which upstream leaves without a name.",
   },
   command: { status: "planned" },
   "context-menu": {
@@ -224,7 +228,8 @@ export const shadcnComponents = {
       "DialogTitle",
       "DialogTrigger",
     ],
-    changes: "`closeLabel` names the close button, for translations.",
+    changes:
+      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `scrim` token instead of raw black.",
   },
   direction: {
     status: "supported",
@@ -247,6 +252,8 @@ export const shadcnComponents = {
       "DrawerTitle",
       "DrawerTrigger",
     ],
+    changes:
+      "The overlay dims the page with the theme's `scrim` token instead of raw black.",
   },
   "dropdown-menu": {
     status: "supported",
@@ -375,6 +382,8 @@ export const shadcnComponents = {
       "MenubarSubTrigger",
       "MenubarTrigger",
     ],
+    changes:
+      "Its triggers show a focus ring from the keyboard; upstream hides the outline and shows nothing.",
   },
   message: { status: "planned" },
   "message-scroller": { status: "planned" },
@@ -482,7 +491,8 @@ export const shadcnComponents = {
       "SheetTitle",
       "SheetTrigger",
     ],
-    changes: "`closeLabel` names the close button, for translations.",
+    changes:
+      "`closeLabel` names the close button, for translations. The overlay dims the page with the theme's `scrim` token instead of raw black.",
   },
   sidebar: {
     status: "supported",
@@ -514,6 +524,8 @@ export const shadcnComponents = {
       "SidebarTrigger",
       "useSidebar",
     ],
+    changes:
+      "The inset's dark shadow uses the theme's `scrim` token instead of raw black.",
   },
   skeleton: {
     status: "supported",
@@ -524,6 +536,8 @@ export const shadcnComponents = {
     status: "supported",
     summary: "A handle dragged along a track to pick a value or a range.",
     exports: ["Slider"],
+    changes:
+      "The thumb is filled with the theme's `background` instead of raw white, so it follows dark mode.",
   },
   sonner: {
     status: "unsupported",
