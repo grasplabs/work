@@ -337,6 +337,13 @@
       "when": 1791371662080,
       "tag": "0047_app_version_workflow_calls",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1791379264494,
+      "tag": "0048_onboarding_gate",
+      "breakpoints": true
     }
   ]
 }

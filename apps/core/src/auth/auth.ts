@@ -41,6 +41,7 @@ import {
   verifications,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
+import { mayComeIn } from "../onboarding/gate.ts";
 import { checkClaims } from "./claims.ts";
 import { devIdpOrigin, oidcProviders, providerIds } from "./config.ts";
 import type { OidcProvider } from "./config.ts";
@@ -254,6 +255,22 @@ const ensureMember = async (
 };
 
 /**
+ * Whether the gate lets `userId` in: checked again as their session is
+ * made, beside the check of their claims (`validateUserInfo`).
+ */
+const gateLetsIn = async (
+  env: Env,
+  config: SignInConfig,
+  userId: string
+): Promise<boolean> => {
+  const [user] = await drizzle(env.DB)
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, userId));
+  return await mayComeIn(env, config, user?.email);
+};
+
+/**
  * The session a sign-in through `providerId` gets, or `false` for none.
  * Staff sessions are marked and cut short; everyone else's opens in the
  * deployment's organization, as a member.
@@ -279,7 +296,13 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
   }
   const fromClient =
     providerId === providerIds.entra || providerId === providerIds.google;
-  if (!(fromClient && (await ensureMember(env, config, session.userId)))) {
+  if (
+    !(
+      fromClient &&
+      (await gateLetsIn(env, config, session.userId)) &&
+      (await ensureMember(env, config, session.userId))
+    )
+  ) {
     // Sessions come only from an SSO callback, for members.
     return false;
   }
@@ -431,9 +454,9 @@ const createAuth = (
     user: {
       // Runs with the verified ID token's claims before a user or account
       // is created or linked, and again on every sign-in.
-      validateUserInfo: ({ source }) => {
+      validateUserInfo: async ({ user, source }) => {
         const provider = source.sso?.providerId;
-        const refusal: SignInRefusal | undefined =
+        let refusal: SignInRefusal | undefined =
           source.method === "sso-oidc" && provider !== undefined
             ? checkClaims(
                 config,
@@ -442,6 +465,15 @@ const createAuth = (
                 Date.now()
               )
             : "method_not_allowed";
+        // While the company is onboarding, only its admins come in through
+        // its IdP, before any user or membership is made (onboarding/gate.ts).
+        if (
+          refusal === undefined &&
+          provider !== providerIds.staff &&
+          !(await mayComeIn(env, config, user.email))
+        ) {
+          refusal = "not_open_yet";
+        }
         if (refusal !== undefined) {
           log.warn("auth.refused", { provider, refusal });
         }

@@ -1495,6 +1495,10 @@ msgstr "Grasp retiene cada cambio en un sistema externo hasta que lo confirmes."
 msgid "Grasp in your language. Numbers, dates and amounts follow it too."
 msgstr "Grasp en tu idioma. Los números, las fechas y los importes también lo siguen."
 
+#: src/sign-in-errors.ts
+msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
+msgstr "Grasp abre pronto para todos, en cuanto Stephen haya hablado con los equipos. Si tienes un enlace de entrevista, está en tu correo."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Grasp sets these for your organization, as agreed with you. To change them, contact Grasp."
 msgstr "Grasp los configura para tu organización, según lo acordado contigo. Para cambiarlos, contacta con Grasp."
