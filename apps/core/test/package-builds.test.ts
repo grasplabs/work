@@ -1,0 +1,518 @@
+import { compilerVersion } from "@grasp-os/compiler";
+import type { DependencyIntent, PackageBuild } from "@grasp-os/shared/packages";
+import { graspLockSchema } from "@grasp-os/shared/packages";
+import type { Role } from "@grasp-os/shared/roles";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import { mockIdp } from "./idp.ts";
+import {
+  failure,
+  intentFor,
+  named,
+  noise,
+  plain,
+  publish,
+  refusalsOf,
+} from "./npm.ts";
+import type { Published } from "./npm.ts";
+import { signedInApi, unique } from "./sign-in.ts";
+
+// Building an App's approved packages (src/packages/build.ts) with
+// esbuild-wasm in the package builder's isolate, from its threat model:
+// building what nobody approved, Node.js APIs and the platform's React
+// where they don't exist, imports a package doesn't declare, remote
+// scripts and stylesheets, computed imports, files that could script,
+// paths out of a package, artifacts too large, and bytes that change
+// under a lock. Packages come from connect's strict fake of the npm
+// registry, through the real resolver; the limits are the tests' own
+// (vite.config.ts, `PACKAGE_LIMITS`).
+
+const idp = mockIdp();
+
+type Person = Awaited<ReturnType<typeof signedInApi>>;
+
+const personApi = async (role: Role): Promise<Person> =>
+  await signedInApi(idp, role);
+
+/** An App whose package.json resolved to a pending request. */
+const resolvedApp = async (
+  dependencies: Record<string, string>,
+  more: Partial<DependencyIntent> = {}
+) => {
+  const builder = await personApi("builder");
+  const { id: app } = await builder.api.apps.create({
+    name: `App ${unique()}`,
+  });
+  const { request, lock } = await builder.api.dependencies.resolve(
+    intentFor(app, dependencies, more)
+  );
+  return { builder, app, request, lock };
+};
+
+/** An App whose package.json resolved, and an admin approved its graph. */
+const approvedApp = async (
+  dependencies: Record<string, string>,
+  more: Partial<DependencyIntent> = {}
+) => {
+  const admin = await personApi("admin");
+  await admin.api.dependencies.grantApprover({
+    type: "person",
+    userId: admin.userId,
+  });
+  const resolved = await resolvedApp(dependencies, more);
+  const { policyGeneration } = await admin.api.dependencies.waiting();
+  await admin.api.dependencies.decide(resolved.request.id, {
+    approved: true,
+    reviewed: { graphHash: resolved.request.graphHash, policyGeneration },
+  });
+  return resolved;
+};
+
+type Resolved = Awaited<ReturnType<typeof resolvedApp>>;
+
+/** Builds `target` of the App's graph, under the policy generation now. */
+const buildOf = async (
+  { builder, app, request }: Resolved,
+  target: PackageBuild["artifact"]["target"]
+): Promise<PackageBuild> => {
+  const { policyGeneration } = await builder.api.dependencies.status(app);
+  return await builder.api.dependencies.build({
+    app,
+    graphHash: request.graphHash,
+    target,
+    policyGeneration,
+  });
+};
+
+/** A file of a kept artifact, as text. */
+const artifactText = async (hash: string, path: string): Promise<string> => {
+  const file = await env.FILES.get(`package-builds/${hash}/${path}`);
+  return (await file?.text()) ?? "";
+};
+
+/** A package of ES modules, with `files` beside its package.json. */
+const esm = (
+  name: string,
+  files: Record<string, string>,
+  manifest: Record<string, unknown> = {}
+): Published => ({
+  ...plain(name, "1.0.0", manifest),
+  files,
+});
+
+/**
+ * A badge component: an ES module for the browser that imports the
+ * platform's React, a CommonJS helper and a stylesheet with a font and an
+ * image; another for Workers; and a Node one neither target reads.
+ */
+const badgeLibrary = async () => {
+  const fmt = named("fmt");
+  const ui = named("ui");
+  await publish({
+    name: fmt,
+    version: "1.0.0",
+    manifest: { main: "index.js", license: "MIT" },
+    files: {
+      "index.js":
+        "module.exports = { pad: (n) => String(n).padStart(2, '0') };",
+    },
+  });
+  await publish(
+    esm(
+      ui,
+      {
+        "browser.js": `import { createElement } from "react";
+import fmt from "${fmt}";
+import "./styles.css";
+export const Badge = ({ n }) => createElement("span", { className: "badge" }, fmt.pad(n));`,
+        "worker.js": `import fmt from "${fmt}";
+export const badge = (n) => fmt.pad(n);`,
+        "node.js": `import { readFileSync } from "fs";
+export const badge = () => readFileSync("/etc/hostname", "utf8");`,
+        "styles.css": `@font-face { font-family: Badge; src: url("./badge.woff2") format("woff2"); }
+.badge { font-family: Badge; background: url(./logo.png) no-repeat; }`,
+        "badge.woff2": "wOF2 font bytes",
+        "logo.png": "PNG image bytes",
+      },
+      {
+        exports: {
+          ".": {
+            browser: "./browser.js",
+            workerd: "./worker.js",
+            default: "./node.js",
+          },
+        },
+        dependencies: { [fmt]: "^1.0.0" },
+        peerDependencies: { react: "^19.0.0" },
+      }
+    )
+  );
+  return { fmt, ui };
+};
+
+describe("building an App's approved packages", () => {
+  it("builds the browser target into an ES module, its stylesheet and its assets, importing the platform's React", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp(
+      { [ui]: "^1.0.0" },
+      { targets: ["browser", "server"] }
+    );
+
+    const built = await buildOf(app, "browser");
+
+    const assets = Object.entries(built.artifact.files)
+      .filter(([path]) => path.startsWith("assets/"))
+      .map(([path, { type }]) => [path.replace(/-[A-Z0-9]+\./u, "."), type]);
+    expect({
+      entries: built.artifact.entries,
+      imports: built.artifact.imports,
+      assets: assets.toSorted(([a], [b]) => (String(a) < String(b) ? -1 : 1)),
+    }).toStrictEqual({
+      entries: {
+        [ui]: {
+          module: `${ui}.js`,
+          css: `${ui}.css`,
+          resolved: `${ui}@1.0.0/browser.js`,
+        },
+      },
+      imports: ["react"],
+      assets: [
+        ["assets/badge.woff2", "font/woff2"],
+        ["assets/logo.png", "image/png"],
+      ],
+    });
+    const module = await artifactText(built.hash, `${ui}.js`);
+    const css = await artifactText(built.hash, `${ui}.css`);
+    // React from the platform, the CommonJS helper bundled in, nothing
+    // required at run time, and assets by their place in the artifact.
+    expect({
+      importsReact: /from\s*"react"/u.test(module),
+      requires: /\brequire\(/u.test(module),
+      readsFiles: module.includes("readFileSync"),
+      cssAssets: [...css.matchAll(/url\((?<url>[^)]+)\)/gu)].map(({ groups }) =>
+        groups?.url?.replaceAll('"', "").replace(/-[A-Z0-9]+\./u, ".")
+      ),
+    }).toStrictEqual({
+      importsReact: true,
+      requires: false,
+      readsFiles: false,
+      cssAssets: ["./assets/badge.woff2", "./assets/logo.png"],
+    });
+  });
+
+  it("resolves each target by its own conditions", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp(
+      { [ui]: "^1.0.0" },
+      { targets: ["browser", "server"] }
+    );
+    const browser = await buildOf(app, "browser");
+    const server = await buildOf(app, "server");
+    expect([
+      browser.artifact.entries[ui]?.resolved,
+      server.artifact.entries[ui]?.resolved,
+      server.artifact.imports,
+      server.artifact.entries[ui]?.css,
+    ]).toStrictEqual([
+      `${ui}@1.0.0/browser.js`,
+      `${ui}@1.0.0/worker.js`,
+      [],
+      null,
+    ]);
+  });
+
+  it("pins each target's artifact in the lock, and builds the same bytes again from it", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const first = await buildOf(app, "browser");
+    const again = await buildOf(app, "browser");
+    const row = await env.DB.prepare(
+      "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+    )
+      .bind(app.app, app.request.graphHash)
+      .first<{ lock: string }>();
+    const lock = graspLockSchema.parse(JSON.parse(row?.lock ?? "null"));
+    // A kept file no longer what was built: built again, to the pin.
+    const [path] = Object.keys(first.artifact.files);
+    await env.FILES.put(`package-builds/${first.hash}/${path}`, "tampered");
+    const rebuilt = await buildOf(app, "browser");
+    expect({
+      pinned: lock.artifacts?.[compilerVersion]?.browser,
+      again: [again.hash, again.stats],
+      rebuilt: rebuilt.hash,
+    }).toStrictEqual({
+      pinned: {
+        hash: first.hash,
+        exports: { [ui]: `${ui}@1.0.0/browser.js` },
+      },
+      again: [first.hash, null],
+      rebuilt: first.hash,
+    });
+  });
+
+  it("measures what the build took", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const { stats } = await buildOf(app, "browser");
+    expect({
+      measuredMemory: (stats?.wasmMemoryBytes ?? 0) > 0,
+      inputFiles: stats?.inputFiles,
+    }).toStrictEqual({ measuredMemory: true, inputFiles: 9 });
+  });
+});
+
+describe("what a build may use", () => {
+  it("builds nothing a person didn't approve, nor for a target they didn't", async () => {
+    const { ui } = await badgeLibrary();
+    const pending = await resolvedApp({ [ui]: "^1.0.0" });
+    const approved = await approvedApp({ [ui]: "^1.0.0" });
+    const unapproved = await failure(buildOf(pending, "browser"));
+    const otherTarget = await failure(buildOf(approved, "server"));
+    expect([unapproved.code, otherTarget.code]).toStrictEqual([
+      "dependency.approval_required",
+      "dependency.approval_required",
+    ]);
+  });
+
+  it("refuses a lock that no longer is the approved graph", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const lock = { ...app.lock };
+    const key = Object.keys(lock.packages)[0] ?? "";
+    const changed = {
+      ...lock,
+      packages: {
+        ...lock.packages,
+        [key]: { ...lock.packages[key], license: "Proprietary" },
+      },
+    };
+    await env.DB.prepare(
+      "UPDATE dependency_locks SET lock = ? WHERE app_id = ? AND graph_hash = ?"
+    )
+      .bind(JSON.stringify(changed), app.app, app.request.graphHash)
+      .run();
+    const { code } = await failure(buildOf(app, "browser"));
+    expect(code).toBe("dependency.approval_required");
+  });
+});
+
+describe("what a package's code may reach", () => {
+  it("refuses Node.js's built-ins, React on the server and the platform's other entry points, each by name", async () => {
+    const fsUser = named("reads-files");
+    const cryptoUser = named("hashes");
+    const reactUser = named("server-react");
+    await publish(
+      esm(fsUser, {
+        "index.js": 'import { readFile } from "fs"; export { readFile };',
+      })
+    );
+    await publish(
+      esm(cryptoUser, {
+        "index.js":
+          'import { createHash } from "node:crypto"; export { createHash };',
+      })
+    );
+    await publish(
+      esm(
+        reactUser,
+        {
+          "index.js":
+            'import { renderToString } from "react-dom/server"; export { renderToString };',
+        },
+        { peerDependencies: { "react-dom": "^19.0.0" } }
+      )
+    );
+    const browser = await approvedApp({
+      [fsUser]: "1",
+      [cryptoUser]: "1",
+      [reactUser]: "1",
+    });
+    const server = await approvedApp(
+      { [reactUser]: "1" },
+      { targets: ["server"] }
+    );
+    const inBrowser = await refusalsOf(buildOf(browser, "browser"));
+    expect({
+      browser: inBrowser.toSorted(),
+      server: await refusalsOf(buildOf(server, "server")),
+    }).toStrictEqual({
+      browser: [
+        `${cryptoUser}@1.0.0 uses Node.js's node:crypto, which isn't available on the browser target`,
+        `${fsUser}@1.0.0 uses Node.js's fs, which isn't available on the browser target`,
+        `${reactUser}@1.0.0 imports react-dom/server, which the platform doesn't provide`,
+      ].toSorted(),
+      server: [
+        `${reactUser}@1.0.0 imports react-dom/server, which the platform provides only in the browser`,
+      ],
+    });
+  });
+
+  it("takes an npm package named like a built-in when the package depends on it", async () => {
+    const polyfill = `buffer-${unique()}`;
+    const user = named("uses-buffer");
+    await publish(esm(polyfill, { "index.js": "export const Buffer = {};" }));
+    await publish(
+      esm(
+        user,
+        { "index.js": `export { Buffer } from "${polyfill}";` },
+        { dependencies: { [polyfill]: "1" } }
+      )
+    );
+    const app = await approvedApp({ [user]: "1" });
+    const built = await buildOf(app, "browser");
+    expect(built.artifact.entries[user]?.module).toBe(`${user}.js`);
+  });
+
+  it("takes a package's own browser shim for a built-in, and nothing for one it maps away", async () => {
+    const shimmed = named("shimmed");
+    await publish(
+      esm(
+        shimmed,
+        {
+          "index.js":
+            'import { digest } from "crypto"; import "os"; export { digest };',
+          "crypto-browser.js": "export const digest = () => 'browser';",
+        },
+        { browser: { crypto: "./crypto-browser.js", os: false } }
+      )
+    );
+    const app = await approvedApp({ [shimmed]: "1" });
+    const built = await buildOf(app, "browser");
+    const module = await artifactText(built.hash, `${shimmed}.js`);
+    expect(module).toContain("browser");
+  });
+
+  it("refuses an import of a package it doesn't depend on, even one in the graph", async () => {
+    const shared = named("shared");
+    const phantom = named("phantom");
+    await publish(esm(shared, { "index.js": "export const x = 1;" }));
+    await publish(
+      esm(phantom, { "index.js": `export { x } from "${shared}";` })
+    );
+    const app = await approvedApp({ [shared]: "1", [phantom]: "1" });
+    await expect(refusalsOf(buildOf(app, "browser"))).resolves.toStrictEqual([
+      `${phantom}@1.0.0 imports ${shared}, which it doesn't depend on`,
+    ]);
+  });
+
+  it("refuses remote scripts and stylesheets, computed imports, paths out of the package and files that could script", async () => {
+    const remoteScript = named("cdn-script");
+    const remoteCss = named("cdn-css");
+    const computed = named("computed");
+    const escapes = named("escapes");
+    const svg = named("svg");
+    const html = named("html");
+    const credentials = ["https://user", "secret@cdn.example/x.js"].join(":");
+    await publish(
+      esm(remoteScript, {
+        "index.js": `import "https://cdn.example/tracker.js"; import "${credentials}"; export {};`,
+      })
+    );
+    await publish(
+      esm(remoteCss, {
+        "index.js": 'import "./theme.css"; export {};',
+        "theme.css":
+          '@import "https://fonts.example/font.css"; .x { background: url(https://cdn.example/x.png); }',
+      })
+    );
+    await publish(
+      esm(computed, {
+        "index.js": "export const load = (name) => import(name);",
+      })
+    );
+    await publish(
+      esm(escapes, { "index.js": 'export * from "../../outside/index.js";' })
+    );
+    await publish(
+      esm(svg, {
+        "index.js": 'import icon from "./icon.svg"; export { icon };',
+        "icon.svg":
+          '<svg xmlns="http://www.w3.org/2000/svg" onload="fetch(1)"></svg>',
+      })
+    );
+    await publish(
+      esm(html, {
+        "index.js": 'import page from "./page.html"; export { page };',
+        "page.html": "<script>alert(1)</script>",
+      })
+    );
+    const app = await approvedApp({
+      [remoteScript]: "1",
+      [remoteCss]: "1",
+      [computed]: "1",
+      [escapes]: "1",
+      [svg]: "1",
+      [html]: "1",
+    });
+    const refusals = await refusalsOf(buildOf(app, "browser"));
+    const about = (name: string) =>
+      refusals.filter((refusal) => refusal.includes(name)).length;
+    expect({
+      remoteScript: about(`${remoteScript}@1.0.0 imports a remote script`),
+      remoteCss: about(`${remoteCss}@1.0.0 imports a remote file`),
+      computed: about(
+        `${computed}@1.0.0/index.js: This "import" expression will not be bundled because the argument is not a string literal`
+      ),
+      escapes: about(
+        `${escapes}@1.0.0 imports ../../outside/index.js, outside itself`
+      ),
+      svg: about(`${svg}@1.0.0's icon.svg is an SVG that can run script`),
+      html: about(
+        `${html}@1.0.0 imports page.html, a kind of file an artifact doesn't carry`
+      ),
+    }).toStrictEqual({
+      remoteScript: 2,
+      remoteCss: 2,
+      computed: 1,
+      escapes: 1,
+      svg: 1,
+      html: 1,
+    });
+  });
+
+  it("bundles a literal dynamic import into the artifact, so nothing is loaded at run time", async () => {
+    const lazy = named("lazy");
+    await publish(
+      esm(lazy, {
+        "index.js": 'export const load = () => import("./heavy.js");',
+        "heavy.js": "export const heavy = 42;",
+      })
+    );
+    const app = await approvedApp({ [lazy]: "1" });
+    const built = await buildOf(app, "browser");
+    const module = await artifactText(built.hash, `${lazy}.js`);
+    expect([module.includes("import("), module.includes("42")]).toStrictEqual([
+      false,
+      true,
+    ]);
+  });
+
+  it("refuses a package that exports nothing for the target", async () => {
+    const cjsOnly = named("cjs-only");
+    await publish(
+      esm(
+        cjsOnly,
+        { "index.cjs": "module.exports = 1;" },
+        { exports: { ".": { require: "./index.cjs" } } }
+      )
+    );
+    const app = await approvedApp({ [cjsOnly]: "1" });
+    await expect(refusalsOf(buildOf(app, "browser"))).resolves.toStrictEqual([
+      `${cjsOnly}@1.0.0 doesn't export . for the browser target`,
+    ]);
+  });
+
+  it("refuses an artifact larger than the limit", async () => {
+    const big = named("big");
+    await publish(
+      esm(big, { "index.js": `export const data = "${noise(300 * 1024)}";` })
+    );
+    const app = await approvedApp({ [big]: "1" });
+    const refusals = await refusalsOf(buildOf(app, "browser"));
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatch(
+      /^the browser artifact is \d+ bytes, more than the 262144 an artifact may be$/u
+    );
+  });
+});

@@ -103,6 +103,7 @@ const releaseFiles = [
   compilerAssets.kitModules,
   compilerAssets.sdkModules,
   compilerAssets.packageBuilder,
+  compilerAssets.esbuildWasm,
 ].toSorted();
 
 /**
@@ -156,6 +157,7 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
         compilerAssets.kitModules,
         compilerAssets.sdkModules,
         compilerAssets.packageBuilder,
+        compilerAssets.esbuildWasm,
       ].toSorted()
     );
     // The same sources are the same release, under any NODE_ENV.

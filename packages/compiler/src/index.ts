@@ -20,7 +20,7 @@ import type ScreenCompiler from "./worker.ts";
 
 export type { Diagnostic } from "./diagnostic.ts";
 export type { KitModules } from "./kit.ts";
-export type { InspectRequest } from "./packages/worker.ts";
+export type { BuildRequest, InspectRequest } from "./packages/worker.ts";
 export type { ScreenBuild, ServerBuild, WorkflowBuild } from "./worker.ts";
 export {
   buildFiles,
@@ -54,6 +54,23 @@ const readCompilerFile = async (
     );
   }
   return await response.text();
+};
+
+/** One of this release's compiler files as bytes, as `readCompilerFile` reads text. */
+const readCompilerBytes = async (
+  assets: Fetcher,
+  file: string,
+  type: string
+): Promise<ArrayBuffer> => {
+  const url = `https://assets${compilerAssets.directory(version)}/${file}`;
+  const response = await assets.fetch(url);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!(response.ok && contentType.includes(type))) {
+    throw new Error(
+      `The screen compiler's ${file} is not among the static assets: build the compiler into them (packages/compiler/build.ts).`
+    );
+  }
+  return await response.arrayBuffer();
 };
 
 const isKitModules = (value: unknown): value is KitModules =>
@@ -180,16 +197,19 @@ export const startPackageBuilder = async (
   loader: WorkerLoader,
   assets: Fetcher
 ): Promise<Service<PackageBuilder>> => {
-  const source = await readCompilerFile(
-    assets,
-    compilerAssets.packageBuilder,
-    "javascript"
-  );
+  const [source, wasm] = await Promise.all([
+    readCompilerFile(assets, compilerAssets.packageBuilder, "javascript"),
+    readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm"),
+  ]);
   return loader
     .load({
       ...packageBuilderSettings,
       mainModule: "package-builder.js",
-      modules: { "package-builder.js": source },
+      modules: {
+        "package-builder.js": source,
+        // Compiled as the isolate loads; the isolate itself can't.
+        "esbuild.wasm": { wasm },
+      },
     })
     .getEntrypoint<PackageBuilder>();
 };
