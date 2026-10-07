@@ -111,6 +111,19 @@ describe("a stylesheet an artifact carries", () => {
     );
   });
 
+  it("stops at as many as it reports", () => {
+    const css = Array.from(
+      { length: 500 },
+      (_, index) =>
+        `.a${index}{background:url(https://cdn.example/${index}.png)}`
+    ).join("");
+    expect(remoteInCss(css, 3)).toStrictEqual([
+      "https://cdn.example/0.png",
+      "https://cdn.example/1.png",
+      "https://cdn.example/2.png",
+    ]);
+  });
+
   it("leaves what stays within the artifact", () => {
     const css = [
       ".a{background:url(./assets/a-HASH.png)}",

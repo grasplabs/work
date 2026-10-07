@@ -153,7 +153,7 @@ const quoted = /^(?<quote>["'])(?<inner>.*)\k<quote>$/u;
  * (`@import "…"`, `image-set("…")`). Inline image and font data URLs and
  * fragment-only references (`url(#id)`) stay.
  */
-export const remoteInCss = (css: string): string[] => {
+export const remoteInCss = (css: string, limit = 50): string[] => {
   const found = new Set<string>();
   const flag = (value: string, fetched: RegExp): void => {
     const url = cssUnescape(value).trim();
@@ -161,11 +161,18 @@ export const remoteInCss = (css: string): string[] => {
       found.add(url.slice(0, 120));
     }
   };
+  // Scanning stops once `limit` are found: never every one a stylesheet has.
   for (const match of css.matchAll(cssUrl)) {
+    if (found.size >= limit) {
+      return [...found];
+    }
     const value = match.groups?.value ?? "";
     flag(quoted.exec(value)?.groups?.inner ?? value, outside);
   }
   for (const match of css.matchAll(cssString)) {
+    if (found.size >= limit) {
+      return [...found];
+    }
     flag(match.groups?.value ?? "", fetchedString);
   }
   return [...found];

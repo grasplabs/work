@@ -226,6 +226,9 @@ const urlImport = (
 
 const pluginName = "grasp-packages";
 
+/** Most refusals one build reports (build.ts caps them too). */
+const maxRefusals = 50;
+
 /** Resolves and loads every module of one build. */
 class Resolver {
   readonly #lock: GraspLock;
@@ -494,7 +497,8 @@ const refusalsOf = (error: unknown): string[] => {
     throw error;
   }
   const errors: unknown[] = error.errors;
-  return errors.map((message) => {
+  // Only as many as a build reports are worded.
+  return errors.slice(0, maxRefusals).map((message) => {
     if (
       typeof message !== "object" ||
       message === null ||
@@ -572,7 +576,8 @@ export const bundle = async (input: BundleInput): Promise<Bundled> => {
     files.set(path, output.contents);
     if (path.endsWith(".css")) {
       // What esbuild's plugin never saw: strings `image-set()` takes.
-      for (const url of remoteInCss(decoder.decode(output.contents))) {
+      const left = maxRefusals - remoteUrls.length;
+      for (const url of remoteInCss(decoder.decode(output.contents), left)) {
         remoteUrls.push(
           `the stylesheet ${path} loads ${url}, outside the artifact`
         );
