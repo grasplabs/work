@@ -1,0 +1,22 @@
+{
+  "name": "@grasp-os/workerflow",
+  "private": true,
+  "description": "Workerflow: durable workflow runs on Durable Objects, one SQLite object per run, with nothing of Grasp's domain in it",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./binding": "./src/binding.ts",
+    "./codec": "./src/codec.ts",
+    "./contracts": "./src/contracts.ts",
+    "./instance": "./src/instance.ts",
+    "./run": "./src/run.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "@types/node": "catalog:",
+    "workerd": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

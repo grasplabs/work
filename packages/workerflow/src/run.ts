@@ -1,0 +1,267 @@
+// The run object: one SQLite-backed Durable Object per workflow run. It is
+// the only authority on the run: its creation, its status, its steps'
+// outcomes. Register it privately (no route reaches it); callers go through
+// the binding (binding.ts), the host by subclassing it to resolve
+// definitions.
+//
+// Executing a run is always an alarm's job: creating it arms the alarm, and
+// each alarm is one activation that replays the definition from the start.
+// Alarms are at least once, on Cloudflare and on plain workerd alike: an
+// alarm whose handler was cut off (the process killed, the object evicted)
+// runs again, and one may run while another is still out. So:
+//
+// - Every activation takes a new generation, journaled before it runs any
+//   of the definition. A call from an older generation, and an answer that
+//   arrives for one, is refused: the fence.
+// - A refused call is answered with a promise that never settles, never an
+//   error. Definition code can catch errors (its own try/catch/finally, or
+//   a transport that turns errors into values); a promise that never
+//   settles just leaves it where it stopped, so no handler of the author's
+//   runs in an activation that is over.
+// - Before executing, an activation arms the alarm as a watchdog, a lease
+//   away, and renews it at every step. If the activation dies, the watchdog
+//   is the run's way back; when it settles, it removes the alarm in the
+//   same write as its outcome. An object gets no alarm while its alarm
+//   handler still runs, so a live activation is not raced by its own
+//   watchdog, however long a step takes (test/process shows it on workerd).
+//
+// A step's outcome is journaled before the definition sees it. A step cut
+// off after its effect left but before that write runs again, with the
+// same idempotency key (contracts.ts): at least once, not exactly once.
+import { DurableObject } from "cloudflare:workers";
+
+import { Activation, superseded } from "./activation.ts";
+import type { Settlement } from "./activation.ts";
+import { decode } from "./codec.ts";
+import type {
+  DefinitionIdentity,
+  InstanceStatus,
+  WorkflowDefinition,
+} from "./contracts.ts";
+import { errorRecord, namedError, parseError } from "./errors.ts";
+import {
+  createJournal,
+  hasJournal,
+  journalSchemaVersion,
+  readJournal,
+  readRun,
+} from "./journal.ts";
+import type { Journal, RunRow } from "./journal.ts";
+
+/** How long an activation may go without journaling before it's recovered. */
+export const defaultLeaseMs = 60_000;
+
+/** What the binding asks the run object to create. */
+export interface StartCommand {
+  definition: string;
+  version: string | null;
+  instanceId: string;
+  /** The params, already encoded (codec.ts): nothing live crosses. */
+  params: string;
+  /** Says which start this is: the same key again is the same start. */
+  key: string;
+}
+
+/**
+ * `created`: this command created the run. `existing`: the run was created
+ * by an earlier delivery of this same start. `collision`: another start
+ * created a run under this ID. `conflict`: the same start key came with
+ * other params, so it isn't the same start.
+ */
+export type StartOutcome = "created" | "existing" | "collision" | "conflict";
+
+const statusOf = (run: RunRow): InstanceStatus => {
+  switch (run.status) {
+    case "complete": {
+      return {
+        status: "complete",
+        output: run.output === null ? undefined : decode(run.output),
+      };
+    }
+    case "errored": {
+      return {
+        status: "errored",
+        error:
+          run.error === null
+            ? { name: "Error", message: "" }
+            : parseError(run.error),
+      };
+    }
+    case "queued":
+    case "running": {
+      return { status: run.status };
+    }
+    default: {
+      throw new Error(
+        `The journal holds an unknown status: ${String(run.status)}`
+      );
+    }
+  }
+};
+
+const hasEnded = (run: RunRow): boolean =>
+  run.status === "complete" || run.status === "errored";
+
+/**
+ * A workflow run. Subclass it to say which definition a run executes, and
+ * register the subclass as a SQLite-backed Durable Object class with no
+ * route to it. Its RPC methods are for the binding (binding.ts).
+ */
+export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
+  /** How long an activation may go quiet before the alarm recovers the run. */
+  protected readonly leaseMs: number = defaultLeaseMs;
+
+  /**
+   * The definition a run executes, built afresh for every activation:
+   * nothing of it is kept between them. `undefined` when there is no such
+   * definition, which ends the run as errored.
+   */
+  protected abstract definition(
+    identity: DefinitionIdentity
+  ): WorkflowDefinition | undefined;
+
+  #run(): RunRow | undefined {
+    const { sql } = this.ctx.storage;
+    return hasJournal(sql) ? readRun(sql) : undefined;
+  }
+
+  /**
+   * Creates the run, or finds the one this same start created before. The
+   * run and its alarm are written together, before the answer: once a
+   * caller hears `created` or `existing`, the run will execute.
+   */
+  async start(command: StartCommand): Promise<StartOutcome> {
+    const existing = this.#run();
+    if (existing !== undefined) {
+      const sameStart =
+        existing.start_key === command.key &&
+        existing.definition === command.definition &&
+        existing.instance_id === command.instanceId;
+      if (!sameStart) {
+        return "collision";
+      }
+      if (
+        existing.params !== command.params ||
+        existing.version !== command.version
+      ) {
+        return "conflict";
+      }
+      await this.#ensureWake(existing);
+      return "existing";
+    }
+    const { storage } = this.ctx;
+    const now = Date.now();
+    createJournal(storage.sql);
+    storage.sql.exec(
+      "INSERT INTO run (singleton, schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0)",
+      journalSchemaVersion,
+      crypto.randomUUID(),
+      command.definition,
+      command.version,
+      command.instanceId,
+      command.key,
+      command.params,
+      now
+    );
+    // No await between the insert and this: one write.
+    await storage.setAlarm(now);
+    return "created";
+  }
+
+  /**
+   * A run that hasn't ended always has an alarm; a repeated start re-arms
+   * one that has gone missing, so asking again is a way to repair it. The
+   * input gate holds other events while getAlarm is out; at worst this
+   * brings an alarm forward, and an extra activation is fenced.
+   */
+  async #ensureWake(run: RunRow): Promise<void> {
+    if (hasEnded(run)) {
+      return;
+    }
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(Date.now());
+    }
+  }
+
+  status(): InstanceStatus | undefined {
+    const run = this.#run();
+    return run === undefined ? undefined : statusOf(run);
+  }
+
+  /** The run's whole journal, as plain data. */
+  journal(): Journal | undefined {
+    return hasJournal(this.ctx.storage.sql)
+      ? readJournal(this.ctx.storage.sql)
+      : undefined;
+  }
+
+  /** The definition, or why there is none, as the run's end. */
+  #resolve(run: RunRow): WorkflowDefinition | Settlement {
+    const identity = {
+      definition: run.definition,
+      version: run.version ?? undefined,
+    };
+    try {
+      const definition = this.definition(identity);
+      if (definition !== undefined) {
+        return definition;
+      }
+    } catch (error) {
+      const { name, message } = errorRecord(error);
+      return { ok: false, error: namedError(name, message) };
+    }
+    const version =
+      identity.version === undefined
+        ? ""
+        : ` at version ${JSON.stringify(identity.version)}`;
+    return {
+      ok: false,
+      error: namedError(
+        "WorkflowDefinitionNotFound",
+        `There is no workflow definition ${JSON.stringify(identity.definition)}${version}`
+      ),
+    };
+  }
+
+  /** One activation: replays the definition under a new generation. */
+  override async alarm(): Promise<void> {
+    const run = this.#run();
+    if (run === undefined || hasEnded(run)) {
+      // A duplicate or late alarm: what it would do is journaled already.
+      return;
+    }
+    const { storage } = this.ctx;
+    const generation = run.generation + 1;
+    const now = Date.now();
+    storage.transactionSync(() => {
+      storage.sql.exec(
+        "UPDATE run SET generation = ?, status = 'running', lease_until = ?",
+        generation,
+        now + this.leaseMs
+      );
+      storage.sql.exec(
+        "INSERT INTO activations (generation, started_at) VALUES (?, ?)",
+        generation,
+        now
+      );
+    });
+    // The watchdog, in the same write as the new generation.
+    await storage.setAlarm(now + this.leaseMs);
+
+    const activation = new Activation(storage, run, generation, this.leaseMs);
+    const resolved = this.#resolve(run);
+    if (!("run" in resolved)) {
+      await activation.settle(resolved);
+      return;
+    }
+    const settlement = await Promise.race([
+      activation.execute(resolved),
+      activation.stopped,
+    ]);
+    if (settlement === superseded) {
+      // The later activation owns the run and its alarm.
+      return;
+    }
+    await activation.settle(settlement);
+  }
+}
