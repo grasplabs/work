@@ -468,10 +468,14 @@ export class App extends DurableObject<Env> {
    * Answers plain data only.
    *
    * A call that isn't answered in time gets `app.timed_out`, and its
-   * caller stops working at once. Once its method was handed to the
-   * App's code, that code is stopped too (`#overran`), so it can't go on
-   * writing the App's data after the call ended: it is one facet, shared
-   * by all the App's calls, so calls running in it alongside fail with it.
+   * caller stops working at once. A call that ran past the App's own time
+   * for a call, once its method was handed to the App's code, stops that
+   * code too (`#overran`), so it can't go on writing the App's data after
+   * the call ended: it is one facet, shared by all the App's calls, so
+   * calls running in it alongside fail with it. A call cut short by the
+   * deadline of the call it came from (`via`) stops only its caller:
+   * another App could otherwise stop this one at will, by calling it just
+   * before its own deadline.
    *
    * A call from another App's code through an export (`via`, from
    * app-calls.ts) runs only on the version core checked it against, ends
@@ -485,10 +489,13 @@ export class App extends DurableObject<Env> {
     via?: ExportCall
   ): Promise<AppAnswer> {
     requireAppMethod(method);
+    const ownMs = callTimeoutMs(this.env);
     const ms = Math.min(
-      callTimeoutMs(this.env),
+      ownMs,
       (via?.deadline ?? Number.POSITIVE_INFINITY) - Date.now()
     );
+    /** Whether the call has the App's own time, not less (see above). */
+    const ownBudget = ms === ownMs;
     if (ms <= 0) {
       throw appErrors.create("app.timed_out", { version: null, method });
     }
@@ -515,7 +522,7 @@ export class App extends DurableObject<Env> {
       const running = await this.#facet(current, read);
       ({ version } = running);
       if (via !== undefined) {
-        await this.#pinned(running.version, via);
+        await this.#pinned(running.server, via);
       }
       // Timed out while the code started: its caller already has the
       // answer, so the method mustn't run (and write) after all.
@@ -524,7 +531,7 @@ export class App extends DurableObject<Env> {
       }
       // What the App's stub calls in this call are audited with.
       this.#calls.set(token, { ...call, version });
-      ranOn = this.#server;
+      ranOn = running.server;
       return await invokeServer(
         running.facet,
         { ...shown, token } satisfies AppCaller,
@@ -549,8 +556,8 @@ export class App extends DurableObject<Env> {
     try {
       outcome = await Promise.race([settled(), whenAborted(limit.signal)]);
     } catch {
-      if (ranOn !== undefined) {
-        await this.#overran(ranOn);
+      if (ownBudget && ranOn !== undefined) {
+        await this.#overran(ranOn, method);
       }
       throw appErrors.create("app.timed_out", {
         version: version ?? null,
@@ -570,18 +577,21 @@ export class App extends DurableObject<Env> {
    * Pins a call from another App's export to the version core checked it
    * against (`via.version`): the facet `#facet` handed back must run it,
    * then the caller hears it is about to run (`via.onPinned`, which
-   * records the call), and the facet must still be that version's after:
-   * a call that made another version current meanwhile, and started it,
-   * would otherwise have this call run code nobody checked it against.
+   * records the call), and the code `#facet` handed back must still be
+   * the code that runs after: a call that made another version current
+   * meanwhile, and started it, would otherwise have this call run code
+   * nobody checked it against.
    * Nothing awaits between this and invoking the method, so no other call
    * can replace the facet in between. `app.conflict` otherwise.
    */
-  async #pinned(running: number, via: ExportCall): Promise<void> {
-    if (running !== via.version) {
+  async #pinned(running: ServerCode, via: ExportCall): Promise<void> {
+    if (running.version !== via.version) {
       throw appErrors.create("app.conflict");
     }
     await via.onPinned();
-    if (this.#server?.version !== via.version) {
+    // The same code, not only the same version: code restarted meanwhile
+    // runs in a facet the call wasn't handed.
+    if (this.#server !== running) {
       throw appErrors.create("app.conflict");
     }
   }
@@ -921,11 +931,25 @@ export class App extends DurableObject<Env> {
    * generation, so the next call starts a new isolate, with none of the
    * module state the method left behind.
    */
-  async #overran(ranOn: ServerCode): Promise<void> {
+  async #overran(ranOn: ServerCode, method: string): Promise<void> {
     if (this.#server !== ranOn) {
       return;
     }
-    this.#stop("A call to the App ran past its time.");
+    log.warn("app.overran", {
+      appId: this.#app,
+      version: ranOn.version,
+      method,
+    });
+    try {
+      this.#stop("A call to the App ran past its time.");
+    } catch (error) {
+      // Forgotten all the same (`#stop` does that first), so the next
+      // call starts its code afresh.
+      log.error("app.stop_failed", {
+        appId: this.#app,
+        errorName: errorNameOf(error),
+      });
+    }
     try {
       await this.ctx.storage.put(generationKey, (await this.#generation()) + 1);
     } catch (error) {
@@ -981,7 +1005,7 @@ export class App extends DurableObject<Env> {
   async #facet(
     version: number,
     read: number
-  ): Promise<{ facet: Fetcher; version: number }> {
+  ): Promise<{ facet: Fetcher; version: number; server: ServerCode }> {
     let server = this.#server;
     // Unknown after this object started, so the facet is restarted then
     // too: aborting one that isn't running changes nothing.
@@ -1010,7 +1034,7 @@ export class App extends DurableObject<Env> {
       class: loaded,
       id: facetName,
     }));
-    return { facet, version: server.version };
+    return { facet, version: server.version, server };
   }
 }
 

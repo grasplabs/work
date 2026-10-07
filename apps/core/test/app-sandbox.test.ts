@@ -314,6 +314,10 @@ const warningsFor = async (
 /** A side effect from a person using an App: held for them to confirm. */
 const heldWrite = "ok";
 
+/** The refusal of an import of `specifier`, as the build words it. */
+const outsideKit = (specifier: string): string =>
+  `"${specifier}" can't be imported here. Server code can import its own files in app/ and cloudflare:workers.`;
+
 /** A Worker Loader that fails any load: proof that nothing was built. */
 const noLoader: WorkerLoader = {
   get: () => {
@@ -376,8 +380,9 @@ describe("App server code", { timeout: 60_000 }, () => {
         ipv6: true,
         localhost: true,
       },
-      // The default cache and one it names: neither is there to keep or
-      // read anything, so nothing one App caches reaches another.
+      // The default cache and one it names: workerd gives the sandbox
+      // neither. This shows only that; what the platform's caches do for
+      // a loaded Worker needs a real account to show.
       caches: [true, true, true, true],
     });
   });
@@ -729,15 +734,50 @@ describe("App server code", { timeout: 60_000 }, () => {
     const afterAnswer = await afterCall;
     expect({
       timedOut,
-      alongsideAnswered: (await alongsideCall) === reached,
+      alongside: await alongsideCall,
       afterAnswer,
       notes: await callApp(env, app, caller, "notes"),
     }).toStrictEqual({
       timedOut: "app.timed_out",
-      alongsideAnswered: false,
+      alongside: "app.failed",
       afterAnswer: reached,
       notes: ["after"],
     });
+  });
+
+  it("can't be stopped by another App calling it just before its own call ends", async () => {
+    const admin = await personApi("admin");
+    const app = await sampleApp(admin);
+    await requestGranted(idp, admin, outlook(app));
+    const caller = as(admin.userId);
+    await callApp(env, app, caller, "label");
+
+    const running = gate();
+    const runningCall = outcome(
+      callApp(env, app, caller, "writeLater", [running.wait, "running"])
+    );
+    await running.entered;
+    // A call through an export, as app-calls.ts makes it, from a call that
+    // has a moment left: it ends at that call's deadline, long before the
+    // App's own time for a call.
+    const cutShort = gate();
+    const cutShortCall = outcome(
+      appHost(env, app).call(caller, "writeLater", [cutShort.wait, "short"], {
+        version: 1,
+        chain: [],
+        deadline: Date.now() + 1000,
+        readOnly: false,
+        onPinned: async () => {},
+      })
+    );
+    await cutShort.entered;
+    const cutShortEnded = await cutShortCall;
+    running.release();
+    cutShort.release();
+    expect({
+      cutShort: cutShortEnded,
+      running: await runningCall,
+    }).toStrictEqual({ cutShort: "app.timed_out", running: "ok" });
   });
 
   it("reports its errors with the version, and logs none of their text", async () => {
@@ -902,9 +942,20 @@ export default class extends WorkerEntrypoint {
     );
     expect(
       builds.map((build) =>
-        build.ok ? "built" : build.diagnostics.map(({ file }) => file)
+        build.ok
+          ? "built"
+          : build.diagnostics.map(({ file, message }) => ({ file, message }))
       )
-    ).toStrictEqual(builds.map(() => ["app/probe.ts"]));
+    ).toStrictEqual(
+      [
+        outsideKit("cloudflare:sockets"),
+        outsideKit("node:net"),
+        outsideKit("node:child_process"),
+        outsideKit("cloudflare:email"),
+        "import() must name a module in quotes.",
+        "require() isn't available in server code: use import.",
+      ].map((message) => [{ file: "app/probe.ts", message }])
+    );
   });
 
   it("is inspected without running any of its code in core, or reaching out as it is", async () => {
@@ -943,8 +994,8 @@ export default workflowTests(definition, [{ name: "runs", mocks: { one: 1 }, exp
     const params = await builder.api.workflows.params.list(id, "probe");
     expect({
       inCore: Object.hasOwn(globalThis, "graspInspected"),
-      // It ran, in an isolate of its own: no I/O as a module loads, and
-      // no network after.
+      // It ran, in an isolate of its own, and was refused I/O as its
+      // module loaded.
       reached: params.map(({ label }) =>
         label.includes("Disallowed operation called within global scope")
       ),
