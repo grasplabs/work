@@ -9,6 +9,7 @@ import {
   identifierSchema,
   workspaceIdSchema,
 } from "./ids.ts";
+import type { PackageRegistryApi } from "./packages.ts";
 import { permissionActionSchema } from "./permissions.ts";
 import type { PermissionSubject, WorkContext } from "./permissions.ts";
 import { roleSchema } from "./roles.ts";
@@ -704,8 +705,11 @@ export const connectorEventsAckSchema = z
   );
 export type ConnectorEventsAck = z.input<typeof connectorEventsAckSchema>;
 
-/** What core reaches in connect, over the `CONNECT` service binding. */
-export interface ConnectApi {
+/**
+ * What core reaches in connect, over the `CONNECT` service binding: the
+ * npm registry among the rest (`PackageRegistryApi`).
+ */
+export interface ConnectApi extends PackageRegistryApi {
   call: (call: ConnectCall) => Promise<ConnectResult>;
   /** The provider URL to send the person's browser to. */
   startConnection: (request: StartConnection) => Promise<{ url: string }>;

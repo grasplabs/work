@@ -31,6 +31,27 @@ export const sha256Hex = async (text: string): Promise<string> =>
     )
   );
 
+/** Bytes as standard, padded base64 (RFC 4648 §4), for any length. */
+export const toBase64 = (bytes: Uint8Array): string => {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCodePoint(byte);
+  }
+  return btoa(binary);
+};
+
+/**
+ * The integrity hash of `bytes` as npm writes one (Subresource
+ * Integrity): `sha512-` and the SHA-512 digest in base64.
+ */
+export const sha512Integrity = async (bytes: Uint8Array): Promise<string> =>
+  `sha512-${toBase64(
+    new Uint8Array(
+      // A copy whose buffer is an ArrayBuffer, as `digest` takes it.
+      await crypto.subtle.digest("SHA-512", new Uint8Array(bytes))
+    )
+  )}`;
+
 /** `bytes` random bytes from the platform's CSPRNG, as base64url. */
 export const randomToken = (bytes = 32): string =>
   toBase64Url(crypto.getRandomValues(new Uint8Array(bytes)));
