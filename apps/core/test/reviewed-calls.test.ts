@@ -63,15 +63,16 @@ const storedCalls = async (app: string): Promise<unknown> => {
   return row === null ? null : JSON.parse(row.workflow_calls);
 };
 
-/** Keeps `calls` as what version 1 of `app`'s review showed. */
+/** Keeps `calls` as what version `version` (1 by default) of `app`'s review showed. */
 const describedAs = async (
   app: string,
-  calls: Record<string, WorkflowCalls>
+  calls: Record<string, WorkflowCalls>,
+  version = 1
 ): Promise<void> => {
   await env.DB.prepare(
-    "UPDATE app_versions SET workflow_calls = ? WHERE app_id = ? AND version = 1"
+    "UPDATE app_versions SET workflow_calls = ? WHERE app_id = ? AND version = ?"
   )
-    .bind(JSON.stringify(calls), app)
+    .bind(JSON.stringify(calls), app, version)
     .run();
 };
 
@@ -121,15 +122,19 @@ const step: RunStep = {
 /**
  * A host for a run of a new App held to `calls`, whose App method calls
  * are counted in `appCalls`, with a permission on another App's exports
- * as `CRM`.
+ * as `CRM`; what it says fails the run as tampering is in `tampered`.
  */
 const hostHeldTo = async (calls: WorkflowCalls) => {
   const { userId } = await personApi("builder");
   const app = appIdSchema.parse(crypto.randomUUID());
   const runId = runIdSchema.parse(crypto.randomUUID());
   const appCalls: string[] = [];
+  const tampered: string[] = [];
   const hooks: HostHooks = {
     stepFailed: () => {},
+    tampered: (error) => {
+      tampered.push(error.code ?? error.message);
+    },
     engineStopped: () => false,
     waiting: async () => {
       await Promise.resolve();
@@ -165,7 +170,7 @@ const hostHeldTo = async (calls: WorkflowCalls) => {
     },
     hooks
   );
-  return { host, runId, appCalls };
+  return { host, runId, appCalls, tampered, userId };
 };
 
 /** A settled call's error code, or `ok`. */
@@ -411,17 +416,12 @@ queueMicrotask(() => {
     });
   });
 
-  it("refuse a step whose name the review doesn't show, and a call from one step's code made while another runs", async () => {
+  it("refuse a call from one step's code made while another runs, and a step whose name the review doesn't show", async () => {
     const { host } = await hostHeldTo({
       steps: { arm: [], send: ["APP"] },
       all: ["APP"],
     });
     let armed = "";
-    const unnamed = await host.do(
-      "evil",
-      {},
-      async () => await Promise.resolve({ ok: true, value: null })
-    );
     await host.do("arm", {}, async (attempt) => {
       armed = attempt;
       return await Promise.resolve({ ok: true, value: null });
@@ -432,15 +432,21 @@ queueMicrotask(() => {
       leftBehind = await host.callApp("hit", ["armed"], armed);
       return { ok: true, value: null };
     });
+    // Last: a step the review doesn't show ends the run.
+    const unnamed = await host.do(
+      "evil",
+      {},
+      async () => await Promise.resolve({ ok: true, value: null })
+    );
 
     expect({
-      unnamed: codeOf(unnamed),
       leftBehind: codeOf(leftBehind),
       sent: codeOf(sent),
+      unnamed: codeOf(unnamed),
     }).toStrictEqual({
-      unnamed: "workflow.step_not_reviewed",
       leftBehind: "workflow.call_not_reviewed",
       sent: "workflow.call_not_reviewed",
+      unnamed: "workflow.step_not_reviewed",
     });
   });
 
@@ -477,6 +483,266 @@ queueMicrotask(() => {
       audited: [
         { step: "tidy", call: "CRM", errorCode: "workflow.call_not_reviewed" },
       ],
+    });
+  });
+
+  it("review each step's calls, and whether its steps can be read, as the version's row keeps them, not as its source reads now", async () => {
+    const admin = await personApi("admin");
+    const { id: app } = await admin.api.apps.create({ name: "Invoices" });
+    const { version } = await admin.api.apps.files.commit(
+      app,
+      { "app/server.ts": server, ...mailer("") },
+      "Mailer"
+    );
+    // Its source reads as one step, `send`, calling MAIL.
+    const reviewedAs = async (calls: Record<string, WorkflowCalls>) => {
+      await describedAs(app, calls);
+      const { workflows } = await admin.api.apps.versions.review(app, version);
+      return workflows.map((workflow) => ({
+        id: workflow.id,
+        steps:
+          workflow.steps?.map(({ name, calls: stepCalls }) => ({
+            name,
+            calls: stepCalls,
+          })) ?? null,
+        calls: workflow.calls,
+        sideEffect: workflow.sideEffect,
+      }));
+    };
+
+    expect({
+      // Kept as steps that can't be read, as an earlier describer may
+      // have: every step may call MAIL, whatever the source reads as now.
+      unread: await reviewedAs({ mailer: { steps: null, all: ["MAIL"] } }),
+      // Kept as more than the source reads, a step it doesn't show too.
+      more: await reviewedAs({
+        mailer: {
+          steps: { send: ["MAIL", "CRM"], notify: ["APP"] },
+          all: ["APP", "CRM", "MAIL"],
+        },
+      }),
+      // Kept as calling nothing: its runs may call nothing.
+      none: await reviewedAs({ mailer: { steps: { send: [] }, all: [] } }),
+    }).toStrictEqual({
+      unread: [
+        { id: "mailer", steps: null, calls: ["MAIL"], sideEffect: true },
+      ],
+      more: [
+        {
+          id: "mailer",
+          steps: [
+            { name: "notify", calls: ["APP"] },
+            { name: "send", calls: ["MAIL", "CRM"] },
+          ],
+          calls: ["APP", "CRM", "MAIL"],
+          sideEffect: true,
+        },
+      ],
+      none: [
+        {
+          id: "mailer",
+          steps: [{ name: "send", calls: [] }],
+          calls: [],
+          sideEffect: true,
+        },
+      ],
+    });
+  });
+
+  it("show a workflow's change when its source changed in a way the outline can't attribute to the steps its row keeps, and say its steps can't be read when its source can't be read", async () => {
+    const admin = await personApi("admin");
+    const { id: app } = await admin.api.apps.create({ name: "Invoices" });
+    const files: Record<string, string> = {
+      "app/server.ts": server,
+      ...mailer(""),
+    };
+    const { version: first } = await admin.api.apps.files.commit(
+      app,
+      files,
+      "Mailer"
+    );
+    await admin.api.apps.versions.setCurrent(app, first);
+    // Code outside any step the outline reads changes.
+    const edited = `// Mails the invoice.\n${files["workflows/mailer.ts"] ?? ""}`;
+    const { version: second } = await admin.api.apps.files.commit(
+      app,
+      { ...files, "workflows/mailer.ts": edited },
+      "Mailer, noted"
+    );
+    // Both rows keep the same steps and calls, one of them a step the
+    // outline doesn't show.
+    const kept: Record<string, WorkflowCalls> = {
+      mailer: {
+        steps: { send: ["MAIL"], notify: ["APP"] },
+        all: ["APP", "MAIL"],
+      },
+    };
+    await describedAs(app, kept, first);
+    await describedAs(app, kept, second);
+    const attributed = await admin.api.apps.versions.review(app, second);
+    // Its source can't be read as steps (one sits in a `try`), though the
+    // row keeps them.
+    const guarded = edited
+      .replace("  return await step.do(", "  try {\n    return await step.do(")
+      .replace(
+        "\n  );\n});",
+        "\n  );\n  } catch (error) {\n    throw error;\n  }\n});"
+      );
+    const { version: third } = await admin.api.apps.files.commit(
+      app,
+      { ...files, "workflows/mailer.ts": guarded },
+      "Mailer, guarded"
+    );
+    await describedAs(app, kept, third);
+    const unread = await admin.api.apps.versions.review(app, third);
+
+    expect({
+      attributed: attributed.workflows.map(({ id, change, steps }) => ({
+        id,
+        change,
+        steps: steps?.map(({ name, change: stepChange }) => ({
+          name,
+          change: stepChange,
+        })),
+      })),
+      unread: unread.workflows.map(({ id, steps }) => ({ id, steps })),
+    }).toStrictEqual({
+      attributed: [
+        {
+          id: "mailer",
+          change: "modified",
+          // `send` reads the same; `notify`, which the outline doesn't
+          // show, may be anywhere in the file that changed.
+          steps: [{ name: "notify", change: "modified" }],
+        },
+      ],
+      unread: [{ id: "mailer", steps: null }],
+    });
+  });
+
+  it("fail a run whose code catches the refusal of a step its review doesn't show, audit it once, and refuse every later step", async () => {
+    const admin = await personApi("admin");
+    const files = workflowFiles(
+      "tidy",
+      `  for (let tries = 0; tries < 2; tries += 1) {
+    try {
+      await step.do("evil", { description: "Evil" }, async () => "evil");
+    } catch {}
+  }
+  let later = "carried on";
+  try {
+    later = await step.do("tidy", { description: "Tidy" }, async () => {
+      await appServer(env).hit("tidied");
+      return "tidied";
+    });
+  } catch (error) {
+    later = String((error as { code?: string }).code);
+  }
+  return later;`,
+      { evil: "evil", tidy: "tidied" }
+    );
+    const source = (files["workflows/tidy.ts"] ?? "").replace(
+      "import { workflow, z }",
+      "import { appServer, workflow, z }"
+    );
+    const app = await appWith(admin, { ...files, "workflows/tidy.ts": source });
+    // Its review shows `tidy` alone, as a describer that missed `evil`
+    // would have kept it.
+    await describedAs(app, {
+      tidy: { steps: { tidy: ["APP"] }, all: ["APP"] },
+    });
+
+    const run = await admin.api.workflows.start(app, "tidy");
+    await finished(run.id);
+
+    expect({
+      run: await outcomeOf(admin, run.id),
+      audited: await refusals(run.id),
+      tidied: await hitsOf(app, admin.userId, "tidied"),
+    }).toMatchObject({
+      run: { status: "failed", code: "workflow.step_not_reviewed" },
+      audited: [
+        { step: "evil", call: null, errorCode: "workflow.step_not_reviewed" },
+      ],
+      tidied: 0,
+    });
+  });
+
+  it("fail a run whose code catches the refusal of an attempt ID the host never gave, audit it once, and refuse every later call and step", async () => {
+    const { host, runId, appCalls, tampered } = await hostHeldTo({
+      steps: { tidy: ["APP"], after: ["APP"] },
+      all: ["APP"],
+    });
+    const codes: string[] = [];
+    const done = await host.do("tidy", {}, async () => {
+      // Never given: an ID of its own making, and one that's no ID at all.
+      const forged = await host.callApp("hit", ["forged"], crypto.randomUUID());
+      const malformed = await host.callApp("hit", ["forged"], "not-an-id");
+      const own = await host.callApp("hit", ["tidied"]);
+      codes.push(codeOf(forged), codeOf(malformed), codeOf(own));
+      // The code carries on as if nothing was refused.
+      return { ok: true, value: "tidied" };
+    });
+    const after = await host.do(
+      "after",
+      {},
+      async () => await Promise.resolve({ ok: true, value: null })
+    );
+
+    expect({
+      codes,
+      done: codeOf(done),
+      after: codeOf(after),
+      appCalls,
+      tampered,
+      audited: await refusals(runId),
+    }).toStrictEqual({
+      codes: ["workflow.invalid", "workflow.invalid", "workflow.invalid"],
+      done: "workflow.invalid",
+      after: "workflow.invalid",
+      appCalls: [],
+      // What fails the run, whatever its code returns.
+      tampered: ["workflow.invalid"],
+      audited: [{ step: "tidy", call: "APP", errorCode: "workflow.invalid" }],
+    });
+  });
+
+  it("refuse an attempt's model, attachment and decision calls once it had a call refused", async () => {
+    const { host, userId } = await hostHeldTo({ steps: { tidy: [] }, all: [] });
+    const codes: string[] = [];
+    const done = await host.do("tidy", {}, async () => {
+      const refused = await host.callApp("hit", ["tidied"]);
+      const model = await host.callModel({
+        step: "tidy",
+        model: "default",
+        instructions: "Summarise the invoice",
+        input: "Invoice INV-7",
+        outputSchema: { type: "string" },
+      });
+      const attachment = await host.readAttachment(crypto.randomUUID(), 0);
+      const decision = await host.openDecision({
+        step: "tidy",
+        from: `person:${userId}`,
+        description: "Approve the invoice",
+        timeout: 60_000,
+      });
+      codes.push(
+        codeOf(refused),
+        codeOf(model),
+        codeOf(attachment),
+        codeOf(decision)
+      );
+      return { ok: true, value: null };
+    });
+
+    expect({ codes, done: codeOf(done) }).toStrictEqual({
+      codes: [
+        "workflow.call_not_reviewed",
+        "workflow.call_not_reviewed",
+        "workflow.call_not_reviewed",
+        "workflow.call_not_reviewed",
+      ],
+      done: "workflow.call_not_reviewed",
     });
   });
 });

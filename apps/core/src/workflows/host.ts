@@ -565,6 +565,16 @@ const toStepError = (error: StepError): Error => {
 };
 
 /**
+ * Fails a call of an attempt that had a call refused, with that refusal:
+ * every later call of a refused attempt fails at once, whatever it calls.
+ */
+const requireUnrefused = (attempt: StepAttempt): void => {
+  if (attempt.refused !== undefined) {
+    throw attempt.refused;
+  }
+};
+
+/**
  * Runs `call` for the step attempt `attempt`, noting when it answered that
  * a side effect was held, whatever the workflow code does with the error.
  */
@@ -649,6 +659,13 @@ export interface HostHooks {
   /** Whether the engine has stopped this execution (`watchedStep`). */
   engineStopped: () => boolean;
   /**
+   * Hears, once, that the run's isolate asked for what only code that
+   * gets past the SDK could (a step its review doesn't show, an attempt
+   * ID the host never gave): the run fails with `error`, whatever its
+   * code makes of the refusal.
+   */
+  tampered: (error: StepError) => void;
+  /**
    * Records that the run waits while a side effect of a step is held for
    * the person it acts for.
    */
@@ -678,6 +695,12 @@ export class RunHost extends RpcTarget {
   #running: StepAttempt | undefined;
   /** Every attempt of a step this execution started, by its ID. */
   readonly #attempts = new Map<string, StepAttempt>();
+  /**
+   * The refusal that caught the run's isolate tampering
+   * (`#refuseTampering`): once set, every later call of this execution
+   * fails with it at once.
+   */
+  #tampered: Error | undefined;
 
   constructor(env: Env, step: RunStep, run: HostedRun, hooks: HostHooks) {
     super();
@@ -856,13 +879,15 @@ export class RunHost extends RpcTarget {
     let sideEffect = false;
     let input: InputShape | null = null;
     try {
+      this.#requireUntampered();
       step = checked(stepNameSchema, name);
       // The step's name is the isolate's to say: one its review doesn't
       // show can't run, so no code runs under a name of its own making.
+      // Caught or not, it ends the run (`#refuseTampering`).
       if (!stepReviewed(this.#run.calls, step)) {
         const error = workflowErrors.create("workflow.step_not_reviewed");
         error.message = `Step "${step}" isn't one the review of this version shows: run steps only as the workflow's function writes them.`;
-        throw error;
+        await this.#refuseTampering(error, { step, call: null });
       }
       const parsed = checked(doOptionsSchema, options);
       sideEffect = parsed.sideEffect === true;
@@ -994,6 +1019,7 @@ export class RunHost extends RpcTarget {
 
   async sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
     return await settle(async () => {
+      this.#requireUntampered();
       const step = checked(stepNameSchema, name);
       const ms = checked(milliseconds, duration);
       await this.#step.sleep(step, ms);
@@ -1009,9 +1035,11 @@ export class RunHost extends RpcTarget {
    */
   async callModel(request: unknown): Promise<Settled<unknown>> {
     return await settle(async () => {
+      this.#requireUntampered();
       if (this.#running === undefined) {
         throw workflowErrors.create("workflow.invalid");
       }
+      requireUnrefused(this.#running);
       await this.#requirePerson();
       const { model, instructions, input, outputSchema } = checked(
         modelRequestSchema,
@@ -1081,16 +1109,95 @@ export class RunHost extends RpcTarget {
    * call of an abandoned attempt never counts with the attempt that
    * replaced it, and its step's review must show the call too.
    */
-  #attemptOf(from: unknown): StepAttempt {
-    const id = checked(z.uuid().optional(), from);
-    if (id === undefined) {
+  async #attemptOf(from: unknown, binding: string): Promise<StepAttempt> {
+    if (from === undefined) {
       return this.#requireStep();
     }
-    const attempt = this.#attempts.get(id);
+    // The isolate's bindings only ever send an ID the host gave: any other
+    // is the isolate's own, and ends the run (`#refuseTampering`).
+    const id = z.uuid().safeParse(from);
+    const attempt = id.success ? this.#attempts.get(id.data) : undefined;
     if (attempt === undefined) {
-      throw workflowErrors.create("workflow.invalid");
+      return await this.#refuseTampering(
+        workflowErrors.create("workflow.invalid"),
+        { step: this.#running?.step ?? null, call: binding }
+      );
     }
     return attempt;
+  }
+
+  /**
+   * Fails every call once the run's isolate was caught tampering
+   * (`#refuseTampering`).
+   */
+  #requireUntampered(): void {
+    if (this.#tampered !== undefined) {
+      throw this.#tampered;
+    }
+  }
+
+  /**
+   * Refuses what only code that gets past the SDK in the run's isolate
+   * asks for: a step its review doesn't show, an attempt ID the host
+   * never gave. The SDK sends neither for a workflow whose review reads
+   * its steps (one whose steps can't be read runs any step name, held to
+   * all its calls), so code that does has got past it, or past what the
+   * review read, and may catch the refusal and carry on. So it ends the run, whatever its code makes of it: the
+   * step running now fails, as a refused call fails it, every later call
+   * of this execution fails at once (`#requireUntampered`), and the run
+   * fails with it (`tampered`). Audited once per execution, which the
+   * run's failure ends.
+   */
+  async #refuseTampering(
+    error: Error,
+    { step, call }: { step: string | null; call: string | null }
+  ): Promise<never> {
+    if (this.#running !== undefined) {
+      this.#running.refused ??= error;
+    }
+    if (this.#tampered === undefined) {
+      this.#tampered = error;
+      const refusal = forIsolate(error);
+      this.#hooks.tampered(refusal);
+      await this.#auditRefusal({
+        step,
+        call,
+        errorCode: refusal.code ?? "workflow.invalid",
+      });
+    }
+    throw error;
+  }
+
+  /**
+   * Records a refusal of a run's call, or of its step, through the outbox.
+   * One that can't be recorded is logged: refused all the same, and the
+   * step or run fails with it, which is audited.
+   */
+  async #auditRefusal(refusal: {
+    step: string | null;
+    call: string | null;
+    errorCode: string;
+  }): Promise<void> {
+    const { app, workflow, version, runId } = this.#run;
+    const db = drizzle(this.#env.DB);
+    try {
+      await auditedBatch(this.#env, db, [
+        outboxed(db, {
+          actor: this.#actor,
+          action: "workflow.call.refused",
+          target: { type: "workflow_run", id: runId },
+          detail: { app, workflow, version, ...refusal },
+        }),
+      ]);
+    } catch (auditError) {
+      log.error("workflow.call.audit_failed", {
+        runId,
+        step: refusal.step ?? undefined,
+        call: refusal.call ?? undefined,
+        errorCode: refusal.errorCode,
+        ...errorFields(auditError),
+      });
+    }
   }
 
   /**
@@ -1111,10 +1218,8 @@ export class RunHost extends RpcTarget {
     // Once an attempt had a call refused, every later call of it fails
     // at once, allowed or not, and none is audited again: a loop of
     // refused calls can't flood the audit log.
-    const refused = running.refused ?? from.refused;
-    if (refused !== undefined) {
-      throw refused;
-    }
+    requireUnrefused(running);
+    requireUnrefused(from);
     const unreviewed = [running, from].find(
       ({ step }) => !callReviewed(this.#run.calls, step, binding)
     );
@@ -1125,33 +1230,11 @@ export class RunHost extends RpcTarget {
     error.message = `Step "${unreviewed.step}" called ${binding}, which the review of this version doesn't show it calling: call each binding only in the step's own function, where the review shows it.`;
     running.refused = error;
     from.refused = error;
-    const { app, workflow, version, runId } = this.#run;
-    const db = drizzle(this.#env.DB);
-    try {
-      await auditedBatch(this.#env, db, [
-        outboxed(db, {
-          actor: this.#actor,
-          action: "workflow.call.refused",
-          target: { type: "workflow_run", id: runId },
-          detail: {
-            app,
-            workflow,
-            version,
-            step: unreviewed.step,
-            call: binding,
-            errorCode: "workflow.call_not_reviewed",
-          },
-        }),
-      ]);
-    } catch (auditError) {
-      // Refused all the same; the step fails with it, which is audited.
-      log.error("workflow.call.audit_failed", {
-        runId,
-        step: unreviewed.step,
-        call: binding,
-        ...errorFields(auditError),
-      });
-    }
+    await this.#auditRefusal({
+      step: unreviewed.step,
+      call: binding,
+      errorCode: "workflow.call_not_reviewed",
+    });
     throw error;
   }
 
@@ -1177,6 +1260,7 @@ export class RunHost extends RpcTarget {
     from?: unknown
   ): Promise<Settled<unknown>> {
     return await settle(async () => {
+      this.#requireUntampered();
       const attempt = this.#requireStep();
       const { collections } = this.#run;
       const name = checked(z.string(), binding);
@@ -1188,7 +1272,11 @@ export class RunHost extends RpcTarget {
       }
       const read = checked(collectionMethodSchema, method);
       const [first, second] = checked(z.array(z.unknown()).max(2), args);
-      await this.#requireReviewed(attempt, this.#attemptOf(from), name);
+      await this.#requireReviewed(
+        attempt,
+        await this.#attemptOf(from, name),
+        name
+      );
       // The stub checks every argument, as it does one from an App.
       switch (read) {
         case "listDocuments": {
@@ -1232,6 +1320,7 @@ export class RunHost extends RpcTarget {
     from?: unknown
   ): Promise<Settled<unknown>> {
     return await settle(async () => {
+      this.#requireUntampered();
       const attempt = this.#requireStep();
       const stepKey = this.#stepKey();
       const { connections, authority } = this.#run;
@@ -1242,7 +1331,11 @@ export class RunHost extends RpcTarget {
       if (grant === undefined) {
         throw workflowErrors.create("workflow.invalid");
       }
-      await this.#requireReviewed(attempt, this.#attemptOf(from), name);
+      await this.#requireReviewed(
+        attempt,
+        await this.#attemptOf(from, name),
+        name
+      );
       return await heldNoted(
         attempt,
         async () =>
@@ -1278,8 +1371,9 @@ export class RunHost extends RpcTarget {
     from?: unknown
   ): Promise<Settled<unknown>> {
     return await settle(async () => {
+      this.#requireUntampered();
       const attempt = this.#requireStep();
-      const calling = this.#attemptOf(from);
+      const calling = await this.#attemptOf(from, "APP");
       await this.#requireReviewed(attempt, calling, "APP");
       attempt.calledApp = true;
       const idempotencyKey = this.#stepKey();
@@ -1321,6 +1415,7 @@ export class RunHost extends RpcTarget {
     calling?: unknown
   ): Promise<Settled<unknown>> {
     return await settle(async () => {
+      this.#requireUntampered();
       const attempt = this.#requireStep();
       const idempotencyKey = this.#stepKey();
       const { apps, authority, app } = this.#run;
@@ -1329,7 +1424,7 @@ export class RunHost extends RpcTarget {
       if (grant === undefined) {
         throw workflowErrors.create("workflow.invalid");
       }
-      const from = this.#attemptOf(calling);
+      const from = await this.#attemptOf(calling, name);
       await this.#requireReviewed(attempt, from, name);
       attempt.calledApp = true;
       return await heldNoted(
@@ -1366,7 +1461,8 @@ export class RunHost extends RpcTarget {
     request: unknown
   ): Promise<Settled<{ decision: string; deadline: number }>> {
     return await settle(async () => {
-      this.#requireStep();
+      this.#requireUntampered();
+      requireUnrefused(this.#requireStep());
       const { step, from, description, timeout } = checked(
         decisionSchema,
         request
@@ -1389,7 +1485,8 @@ export class RunHost extends RpcTarget {
     reminder: unknown
   ): Promise<Settled<DecisionRecipient[]>> {
     return await settle(async () => {
-      this.#requireStep();
+      this.#requireUntampered();
+      requireUnrefused(this.#requireStep());
       return await decisionRecipients(
         this.#env,
         this.#run,
@@ -1411,6 +1508,7 @@ export class RunHost extends RpcTarget {
     options: unknown
   ): Promise<Settled<DecisionOutcome>> {
     return await settle(async () => {
+      this.#requireUntampered();
       const step = checked(stepNameSchema, name);
       const { decision, timeout, last } = checked(decisionWaitSchema, options);
       const before = await decisionOutcome(
@@ -1479,7 +1577,9 @@ export class RunHost extends RpcTarget {
       };
       let content: Uint8Array;
       try {
+        this.#requireUntampered();
         const attempt = this.#requireStep();
+        requireUnrefused(attempt);
         await this.#requirePerson();
         // A message that isn't kept names nothing to read.
         if (stored === null) {

@@ -185,6 +185,9 @@ const runWorkflow = async (
   const stepFailed = (failure: FailedStep): void => {
     lastFailed = failure;
   };
+  // The refusal that caught the run's isolate tampering (host.ts), if any:
+  // the run fails with it, whatever its code made of the refusal.
+  let tampered: StepError | undefined;
   const result = await settledRun(async () => {
     const authority = await authorityOf(env, row);
     const { bindings, connections, apps } = await runBindingsFor(
@@ -218,6 +221,9 @@ const runWorkflow = async (
     const host = new RunHost(env, step, run, {
       stepFailed,
       engineStopped: () => engineError !== undefined,
+      tampered: (error) => {
+        tampered ??= error;
+      },
       waiting: async (why) => {
         await recordWaiting(env, row, why);
       },
@@ -233,7 +239,7 @@ const runWorkflow = async (
       apps: Object.keys(apps),
     });
   });
-  const failed = result.ok ? undefined : result.error;
+  const failed = tampered ?? (result.ok ? undefined : result.error);
   if (failed && engineError) {
     // The engine stopped this execution, to resume or end it itself: the
     // run didn't fail, and the engine hears its own error back. Whether
