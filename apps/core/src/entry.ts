@@ -6,6 +6,7 @@ import { guestApiPath } from "@grasp-os/shared/guests";
 import { requestIdHeader } from "@grasp-os/shared/http";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
+import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
@@ -18,6 +19,7 @@ import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
+import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import { platformUpdateResponse } from "./platform-updates.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
@@ -76,6 +78,9 @@ const route = async (
   }
   if (pathname === errorReportPath) {
     return await errorReportResponse(request, env, requestId);
+  }
+  if (pathname === onboardingSummaryPath) {
+    return await onboardingSummaryResponse(request, env, requestId);
   }
   if (pathname === platformUpdatePath) {
     return await platformUpdateResponse(request, env, requestId);
