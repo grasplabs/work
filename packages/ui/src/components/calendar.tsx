@@ -42,19 +42,14 @@ function CalendarRoot({
   );
 }
 
-function CalendarChevron({
-  className,
-  orientation,
-  size: _size,
-  disabled: _disabled,
-}: ChevronProps) {
+function CalendarChevron({ className, orientation, ...props }: ChevronProps) {
   if (orientation === "left") {
-    return <ChevronLeftIcon className={cn("size-4", className)} />;
+    return <ChevronLeftIcon className={cn("size-4", className)} {...props} />;
   }
   if (orientation === "right") {
-    return <ChevronRightIcon className={cn("size-4", className)} />;
+    return <ChevronRightIcon className={cn("size-4", className)} {...props} />;
   }
-  return <ChevronDownIcon className={cn("size-4", className)} />;
+  return <ChevronDownIcon className={cn("size-4", className)} {...props} />;
 }
 
 function CalendarWeekNumber({

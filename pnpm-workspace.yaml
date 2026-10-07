@@ -129,9 +129,9 @@ catalog:
   react-markdown: 10.1.0
   # The kit's resizable panels.
   react-resizable-panels: 4.14.2
-  remark-gfm: 4.0.1
   # The kit's charts.
   recharts: 3.10.1
+  remark-gfm: 4.0.1
   shadcn: 4.21.0
   tailwind-merge: 3.7.0
   tailwindcss: 4.3.3

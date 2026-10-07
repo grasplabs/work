@@ -194,7 +194,7 @@ function CarouselPrevious({
       onClick={scrollPrev}
       {...props}
     >
-      <ChevronLeftIcon />
+      <ChevronLeftIcon className="rtl:rotate-180" />
       <span className="sr-only">{label}</span>
     </Button>
   );
@@ -228,7 +228,7 @@ function CarouselNext({
       onClick={scrollNext}
       {...props}
     >
-      <ChevronRightIcon />
+      <ChevronRightIcon className="rtl:rotate-180" />
       <span className="sr-only">{label}</span>
     </Button>
   );
