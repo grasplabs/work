@@ -283,7 +283,12 @@ export const openGate = async (env: Env, by: AuditActor): Promise<void> => {
   await auditedBatch(env, db, [
     db
       .update(onboardingGate)
-      .set({ closedAt: null, openedAt: new Date() })
+      // Grasp's go is given once: opening again keeps its time, so closing
+      // and opening never moves the onboarding scope's cutoff.
+      .set({
+        closedAt: null,
+        openedAt: sql`coalesce(${onboardingGate.openedAt}, ${Date.now()})`,
+      })
       .where(
         and(eq(onboardingGate.id, gateRow), isNotNull(onboardingGate.closedAt))
       ),
