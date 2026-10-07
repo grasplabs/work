@@ -227,3 +227,15 @@
 [data-input-otp] + * {
   pointer-events: all !important;
 }
+
+/* input-otp's rule for iOS Safari, as it adds it (input-otp 1.5.0). */
+@supports (-webkit-touch-callout: none) {
+  [data-input-otp] {
+    letter-spacing: -0.6em !important;
+    font-weight: 100 !important;
+    font-stretch: ultra-condensed;
+    font-optical-sizing: none !important;
+    left: -1px !important;
+    right: 1px !important;
+  }
+}

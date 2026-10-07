@@ -842,6 +842,17 @@ export type KitComponent =
     }[ShadcnComponent]
   | GraspComponent;
 
+const kitComponents = new Set<string>([
+  ...Object.entries(shadcnComponents).flatMap(([name, entry]) =>
+    entry.status === "supported" ? [name] : []
+  ),
+  ...Object.keys(graspComponents),
+]);
+
+/** Whether `name` is a component in the kit. */
+export const isKitComponent = (name: string): name is KitComponent =>
+  kitComponents.has(name);
+
 /** The specifier screens import a component's module by. */
 export const componentImport = (name: KitComponent): string =>
   `@grasp-os/ui/components/${name}`;

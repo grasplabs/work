@@ -38,21 +38,88 @@ const pages = [
 ];
 
 /**
- * The overlays the demos open from a trigger named "Open <component>", the
- * key that opens each, and the role of what opens.
+ * How each demo's overlay opens: from its trigger with a key, on focus (a
+ * tooltip), on hover (a preview card) or on right click (a context menu),
+ * and what then shows. Each closes with Escape; the ones opened from the
+ * keyboard give focus back to their trigger. The command demo is inline,
+ * not an overlay, so it isn't here.
  */
 interface Overlay {
-  key: string;
-  role: "dialog" | "alertdialog" | "menu" | "listbox";
+  trigger: (page: Page) => Locator;
+  open: "Enter" | "ArrowDown" | "focus" | "hover" | "right click";
+  opened: (page: Page) => Locator;
 }
 
+const openButton = (name: string) => (page: Page) =>
+  page.getByRole("button", { name: `Open ${name}`, exact: true });
+
 const overlays: Record<string, Overlay> = {
-  "alert-dialog": { key: "Enter", role: "alertdialog" },
-  dialog: { key: "Enter", role: "dialog" },
-  drawer: { key: "Enter", role: "dialog" },
-  "dropdown-menu": { key: "Enter", role: "menu" },
-  popover: { key: "Enter", role: "dialog" },
-  sheet: { key: "Enter", role: "dialog" },
+  "alert-dialog": {
+    trigger: openButton("alert dialog"),
+    open: "Enter",
+    opened: (page) => page.getByRole("alertdialog"),
+  },
+  combobox: {
+    trigger: (page) => page.getByRole("combobox", { name: "Framework" }),
+    open: "ArrowDown",
+    opened: (page) => page.getByRole("listbox"),
+  },
+  "context-menu": {
+    trigger: (page) => page.getByText("Right-click here"),
+    open: "right click",
+    opened: (page) => page.getByRole("menu"),
+  },
+  dialog: {
+    trigger: openButton("dialog"),
+    open: "Enter",
+    opened: (page) => page.getByRole("dialog"),
+  },
+  drawer: {
+    trigger: openButton("drawer"),
+    open: "Enter",
+    opened: (page) => page.getByRole("dialog"),
+  },
+  "dropdown-menu": {
+    trigger: openButton("dropdown menu"),
+    open: "Enter",
+    opened: (page) => page.getByRole("menu"),
+  },
+  "hover-card": {
+    trigger: (page) => page.getByRole("link", { name: "Maya Jansen" }),
+    open: "hover",
+    opened: (page) => page.getByText("Account manager for Benelux."),
+  },
+  menubar: {
+    trigger: (page) => page.getByRole("menuitem", { name: "File" }),
+    open: "Enter",
+    opened: (page) => page.getByRole("menu"),
+  },
+  "navigation-menu": {
+    trigger: openButton("navigation menu"),
+    open: "Enter",
+    opened: (page) => page.getByRole("link", { name: "Guides" }),
+  },
+  popover: {
+    trigger: openButton("popover"),
+    open: "Enter",
+    opened: (page) => page.getByRole("dialog"),
+  },
+  select: {
+    trigger: (page) => page.getByRole("combobox", { name: "Model" }),
+    open: "Enter",
+    opened: (page) => page.getByRole("listbox"),
+  },
+  sheet: {
+    trigger: openButton("sheet"),
+    open: "Enter",
+    opened: (page) => page.getByRole("dialog"),
+  },
+  tooltip: {
+    trigger: openButton("tooltip"),
+    open: "focus",
+    // Base UI gives the popup no role; it describes the trigger.
+    opened: (page) => page.getByText("Add to the library"),
+  },
 };
 
 /** The roles of controls, each of which needs a name. */
@@ -179,22 +246,42 @@ const expectVisibleKeyboardFocus = async (
   expect(await lookOf(element)).not.toBe(withFocus);
 };
 
-const expectOverlayFromKeyboard = async (
+const openOverlay = async (
   page: Page,
-  name: string,
+  trigger: Locator,
+  open: Overlay["open"]
+): Promise<void> => {
+  if (open === "hover") {
+    await trigger.hover();
+  } else if (open === "right click") {
+    await trigger.click({ button: "right" });
+  } else {
+    await trigger.focus();
+    if (open === "focus") {
+      // Focus from the keyboard, which is what opens a tooltip: away and back.
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+    } else {
+      await page.keyboard.press(open);
+    }
+  }
+};
+
+const expectOverlayOpensAndCloses = async (
+  page: Page,
   overlay: Overlay
 ): Promise<void> => {
-  const trigger = page.getByRole("button", {
-    name: `Open ${name.replaceAll("-", " ")}`,
-  });
-  await trigger.focus();
-  await page.keyboard.press(overlay.key);
-  const opened = page.getByRole(overlay.role);
+  const trigger = overlay.trigger(page);
+  await openOverlay(page, trigger, overlay.open);
+  const opened = overlay.opened(page);
   await expect(opened).toBeVisible();
   await expectNamedControls(opened);
   await page.keyboard.press("Escape");
   await expect(opened).toBeHidden();
-  await expect(trigger).toBeFocused();
+  // Opened from the keyboard, focus goes back where it was.
+  if (overlay.open !== "hover" && overlay.open !== "right click") {
+    await expect(trigger).toBeFocused();
+  }
 };
 
 /**
@@ -204,9 +291,29 @@ const expectOverlayFromKeyboard = async (
  * its rules instead (styles.css). Screens allow inline styles, so there it
  * works as upstream.
  */
-const knownViolations: Record<string, RegExp> = {
-  "input-otp":
-    /^style-src-elem blocked inline at |'sha256-47DEQpj8HBSa\+\/TImW\+5JCeuQeRkm5NMpJWZG3hSuFU='/u,
+const knownViolations: Record<string, readonly RegExp[]> = {
+  // Exactly the one empty element: the event for it, and the console's
+  // report with the hash of the empty string.
+  "input-otp": [
+    /^style-src-elem blocked inline at http:\/\/localhost:\d+\/assets\/[\w.-]+\.js:\d+:\d+$/u,
+    /^Applying inline style violates the following Content Security Policy directive 'style-src 'self''\. Either the 'unsafe-inline' keyword, a hash \('sha256-47DEQpj8HBSa\+\/TImW\+5JCeuQeRkm5NMpJWZG3hSuFU='\), or a nonce \('nonce-\.\.\.'\) is required to enable inline execution\. The action has been blocked\.$/u,
+  ],
+};
+
+/** The violations left once each known one is matched once, in order. */
+const unexpectedViolations = (
+  violations: readonly string[],
+  known: readonly RegExp[]
+): string[] => {
+  const left = [...known];
+  return violations.filter((violation) => {
+    const at = left.findIndex((pattern) => pattern.test(violation));
+    if (at === -1) {
+      return true;
+    }
+    left.splice(at, 1);
+    return false;
+  });
 };
 
 const bodyBackground = async (page: Page): Promise<string> =>
@@ -234,7 +341,7 @@ for (const { name, heading, path } of pages) {
     await expectVisibleKeyboardFocus(page, main);
     const overlay = overlays[name];
     if (overlay !== undefined) {
-      await expectOverlayFromKeyboard(page, name, overlay);
+      await expectOverlayOpensAndCloses(page, overlay);
     }
 
     const light = await bodyBackground(page);
@@ -244,9 +351,8 @@ for (const { name, heading, path } of pages) {
     await page.setViewportSize(phone);
     await expectNoSidewaysScroll(page);
 
-    const known = knownViolations[name];
     expect(
-      violations.filter((violation) => known?.test(violation) !== true)
+      unexpectedViolations(violations, knownViolations[name] ?? [])
     ).toStrictEqual([]);
   });
 }

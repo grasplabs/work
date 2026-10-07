@@ -121,7 +121,7 @@ describe("the kit's examples", () => {
     }
   });
 
-  it("loads and renders each example by its name", async () => {
+  it("loads each example by its name, and it renders (a smoke test)", async () => {
     for (const [name, load] of Object.entries(loadExample)) {
       // oxlint-disable-next-line no-await-in-loop -- one example at a time keeps a failure readable
       const Example = await load();
@@ -134,7 +134,7 @@ describe("the kit's examples", () => {
 });
 
 describe("the kit's demos", () => {
-  it("renders a demo of every component in the kit", () => {
+  it("has a demo of every component in the kit, and each renders (a smoke test)", () => {
     const names = supported.map(({ name }) => name).toSorted();
     expect(Object.keys(demos).toSorted()).toStrictEqual(names);
     for (const [name, Demo] of Object.entries(demos)) {
