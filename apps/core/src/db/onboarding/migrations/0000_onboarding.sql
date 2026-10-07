@@ -4,6 +4,12 @@ CREATE TABLE `audit_outbox` (
 	`created_at` integer NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE `counted` (
+	`person` text PRIMARY KEY NOT NULL,
+	`team` text NOT NULL,
+	`talked` integer NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE `events` (
 	`seq` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`at` text NOT NULL,
@@ -23,7 +29,6 @@ CREATE TABLE `interview_states` (
 CREATE TABLE `links` (
 	`person` text PRIMARY KEY NOT NULL,
 	`sent_at` text NOT NULL,
-	`counted_in` text,
 	`opened_at` text,
 	`reminded_at` text
 );

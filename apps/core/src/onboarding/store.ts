@@ -16,6 +16,7 @@ import { migrateOnWake } from "../db/migrate.ts";
 import migrations from "../db/onboarding/migrations/migrations.js";
 import {
   auditOutbox,
+  countedPeople,
   events,
   interviewStates,
   links,
@@ -244,11 +245,6 @@ export class Onboarding extends DurableObject<Env> {
   }): void {
     const updatedAt = new Date().toISOString();
     this.ctx.storage.transactionSync(() => {
-      const [was] = this.#db
-        .select({ completedAt: interviewStates.completedAt })
-        .from(interviewStates)
-        .where(eq(interviewStates.person, state.person))
-        .all();
       this.#db
         .insert(interviewStates)
         .values({ ...state, updatedAt })
@@ -262,17 +258,20 @@ export class Onboarding extends DurableObject<Env> {
           },
         })
         .run();
-      // Their first agreement counts once, in the team they were asked in.
-      const [link] = this.#db
-        .select({ countedIn: links.countedIn })
-        .from(links)
-        .where(eq(links.person, state.person))
+      // Their agreement counts once ever, in the team they were asked in.
+      const [asked] = this.#db
+        .select()
+        .from(countedPeople)
+        .where(eq(countedPeople.person, state.person))
         .all();
       const { completedAt } = state;
-      const countedIn = link?.countedIn ?? null;
-      const firstAgreed = (was?.completedAt ?? null) === null;
-      if (firstAgreed && completedAt !== null && countedIn !== null) {
-        this.#count(countedIn, completedAt, { talked: 1 });
+      if (asked !== undefined && !asked.talked && completedAt !== null) {
+        this.#db
+          .update(countedPeople)
+          .set({ talked: true })
+          .where(eq(countedPeople.person, state.person))
+          .run();
+        this.#count(asked.team, completedAt, { talked: 1 });
       }
     });
   }
@@ -345,12 +344,20 @@ export class Onboarding extends DurableObject<Env> {
     }
     this.ctx.storage.transactionSync(() => {
       for (const person of due) {
+        this.#db.insert(links).values({ person, sentAt: now }).run();
         const team = roster.people.find(({ id }) => id === person)?.team;
         const lead = roster.teams.some(({ lead: led }) => led === person);
-        const countedIn = team === undefined || lead ? null : team;
-        this.#db.insert(links).values({ person, sentAt: now, countedIn }).run();
-        if (countedIn !== null) {
-          this.#count(countedIn, now, { asked: 1 });
+        if (team !== undefined && !lead) {
+          // Asked once ever: a person taken off and on again isn't asked twice.
+          const added = this.#db
+            .insert(countedPeople)
+            .values({ person, team, talked: false })
+            .onConflictDoNothing()
+            .returning()
+            .all();
+          if (added.length > 0) {
+            this.#count(team, now, { asked: 1 });
+          }
         }
       }
       this.#changed({ type: "system" }, "onboarding.links.sent", {

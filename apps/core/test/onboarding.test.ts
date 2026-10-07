@@ -223,6 +223,33 @@ describe("the admin's numbers", () => {
     expect(after.progress?.talked).toBe(before.progress?.talked);
   });
 
+  it("count each person once, however often they are taken off the list and put back", async () => {
+    const store = await storeWithLinksOut();
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString();
+    const { roster: full } = await store.view();
+    if (full === null) {
+      throw new Error("No roster");
+    }
+    const without = {
+      ...full,
+      people: full.people.filter(({ id }) => id !== "o1"),
+    };
+    for (let round = 0; round < 5; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one edit after another
+      await store.saveRoster(without, { type: "system" });
+      // oxlint-disable-next-line no-await-in-loop -- one edit after another
+      await store.saveRoster(full, { type: "system" });
+      // oxlint-disable-next-line no-await-in-loop -- one edit after another
+      await store.releaseDue(yesterday);
+    }
+    const { progress } = await store.view();
+    expect(progress?.teams[1]).toMatchObject({
+      id: "ops",
+      talked: null,
+      asked: null,
+    });
+  });
+
   it("keep agreements saved first on a store that is new", async () => {
     const store = env.ONBOARDING.getByName(`fresh-${crypto.randomUUID()}`);
     const view = await store.setAgreements(

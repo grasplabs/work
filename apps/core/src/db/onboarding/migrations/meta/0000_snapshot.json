@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "38f7534e-f31f-4e22-ba89-842b3e6bba1a",
+  "id": "dee84a8f-8607-41b4-965d-38391475db76",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "audit_outbox": {
@@ -23,6 +23,37 @@
         },
         "created_at": {
           "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "counted": {
+      "name": "counted",
+      "columns": {
+        "person": {
+          "name": "person",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "team": {
+          "name": "team",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "talked": {
+          "name": "talked",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -140,13 +171,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "counted_in": {
-          "name": "counted_in",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "opened_at": {
