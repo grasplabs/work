@@ -75,6 +75,12 @@ export const links = sqliteTable("links", {
   keyMark: text("key_mark"),
   /** When they deleted their interview: a copy left open can't save it back. */
   deletedAt: text("deleted_at"),
+  /**
+   * The version of what their interview holds: a save goes up by one, and
+   * so does a delete or a new start, so no copy from before either ever
+   * matches again. A save from a copy of another version is refused.
+   */
+  version: integer().notNull().default(0),
 });
 
 /**
@@ -91,13 +97,12 @@ export const linkCodes = sqliteTable("link_codes", {
 });
 
 /**
- * What was said in each interview, as the person's page last saved it,
- * and the version it was saved as. Only the device the link opened on
+ * What was said in each interview, as the person's page last saved it
+ * (its version is the link's). Only the device the link opened on
  * reads it back, and Grasp's staff.
  */
 export const interviews = sqliteTable("interviews", {
   person: text().primaryKey(),
-  version: integer().notNull(),
   progress: text().notNull(),
   updatedAt: text("updated_at").notNull(),
 });

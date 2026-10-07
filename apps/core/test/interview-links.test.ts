@@ -234,7 +234,10 @@ describe("a made-up link", () => {
     });
     expect(JSON.stringify(warned.mock.calls)).not.toContain(made);
     const page = await routed("/interview");
-    expect(page.headers.get("referrer-policy")).toBe("no-referrer");
+    expect([
+      page.headers.get("referrer-policy"),
+      page.headers.get("cache-control"),
+    ]).toStrictEqual(["no-referrer", "no-store"]);
     const kept = await storeText();
     expect([kept.includes(secrets.oli), kept.includes(key)]).toStrictEqual([
       false,
@@ -428,27 +431,60 @@ describe("when a link opens", () => {
 });
 
 describe("deleting and starting again", () => {
-  it("deletes at once, and a copy left open can't save it back (D3)", async () => {
+  it("deletes at once, and no copy from before, saved or not, can save it back after a new start (D3)", async () => {
     const { secrets } = await running();
     const { key } = await opened(secrets.oli);
     await save(secrets.oli, key, 0);
     const deleted = await remove(secrets.oli, key);
-    const after = await session(secrets.oli, key);
-    const empty = await sessionOf(after);
+    const empty = await sessionOf(await session(secrets.oli, key));
+    // A tab that saved before the delete, and one that never saved.
     const back = await save(secrets.oli, key, 1);
-    const fresh = await save(secrets.oli, key, 0, progress("A new start"));
+    const unsaved = await save(secrets.oli, key, 0);
+    const fresh = await save(
+      secrets.oli,
+      key,
+      empty.version,
+      progress("A new start")
+    );
+    // Once the new start is saved, the old copies still can't overwrite it.
+    const stale = await savedOf(await save(secrets.oli, key, 1));
+    const kept = await sessionOf(await session(secrets.oli, key));
     expect({
       deleted: await deleted.json(),
       progress: empty.progress,
       back: await codeOf(back),
+      unsaved: await codeOf(unsaved),
       fresh: fresh.status,
+      stale: stale.saved,
+      kept: kept.progress?.lines[1]?.text,
     }).toStrictEqual({
       deleted: { deleted: true },
       progress: null,
       back: "interview.deleted",
+      unsaved: "interview.deleted",
       fresh: 200,
+      stale: false,
+      kept: "A new start",
     });
     await expect(storeText()).resolves.not.toContain(sentinel);
+  });
+
+  it("gives a link to someone on the roster from before links were made", async () => {
+    const { store, ids } = await running();
+    await runInDurableObject(onboardingStore(env), (_instance, state) => {
+      state.storage.sql.exec(
+        "DELETE FROM link_codes WHERE person = ?",
+        ids.ona
+      );
+    });
+    const link = await store.linkOf(ids.ona);
+    const secret = link?.split("#")[1] ?? "";
+    const { session: first } = await opened(secret);
+    expect({ state: first.state, name: first.name }).toStrictEqual({
+      state: "open",
+      name: "Ona",
+    });
+    await expect(store.linkOf("nobody")).resolves.toBeNull();
   });
 
   it("gives someone who lost their device a new start, by staff only (L9)", async () => {

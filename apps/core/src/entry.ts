@@ -107,9 +107,10 @@ const route = async (
     return page;
   }
   // The interview's page carries its link's secret: no referrer, whatever
-  // it links to.
+  // it links to, and no copy kept.
   const kept = new Response(page.body, page);
   kept.headers.set("referrer-policy", "no-referrer");
+  kept.headers.set("cache-control", "no-store");
   return kept;
 };
 

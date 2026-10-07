@@ -326,17 +326,40 @@ export class Onboarding extends DurableObject<Env> {
     });
   }
 
-  /** The path of someone's link, its secret after the `#`; none for anyone not on the roster. */
+  /**
+   * The path of someone's link, its secret after the `#`; none for anyone
+   * not on the roster. Someone on it without a code yet (on the roster
+   * before links were, or added by a save that raced another) gets one now.
+   */
   async linkOf(person: string): Promise<string | null> {
-    const [code] = this.#db
-      .select({ linkId: linkCodes.linkId })
-      .from(linkCodes)
-      .where(eq(linkCodes.person, person))
-      .all();
-    if (code === undefined) {
+    if (!this.#onRoster(person)) {
       return null;
     }
-    return `${interviewPagePath}#${await linkSecretOf(this.env, code.linkId)}`;
+    const codeOf = () =>
+      this.#db
+        .select({ linkId: linkCodes.linkId })
+        .from(linkCodes)
+        .where(eq(linkCodes.person, person))
+        .all()[0];
+    let code = codeOf();
+    if (code === undefined) {
+      const linkId = randomToken();
+      const mark = await sha256Hex(await linkSecretOf(this.env, linkId));
+      // Unless someone made one meanwhile, or they left the roster.
+      this.ctx.storage.transactionSync(() => {
+        if (this.#onRoster(person)) {
+          this.#db
+            .insert(linkCodes)
+            .values({ person, linkId, mark })
+            .onConflictDoNothing()
+            .run();
+        }
+      });
+      code = codeOf();
+    }
+    return code === undefined
+      ? null
+      : `${interviewPagePath}#${await linkSecretOf(this.env, code.linkId)}`;
   }
 
   /**
@@ -381,7 +404,6 @@ export class Onboarding extends DurableObject<Env> {
     const lead = roster.people.find(
       ({ id }) => id === team?.lead && id !== person.id
     );
-    const held = this.#held(person.id);
     const closes = closesOn(plan);
     return answered({
       state: "open",
@@ -392,16 +414,16 @@ export class Onboarding extends DurableObject<Env> {
       kind: leads(roster, person.id) ? "lead" : "own",
       closes,
       closed: dayOf(now) > closes,
-      progress: held?.progress ?? null,
-      version: held?.version ?? 0,
+      progress: this.#held(person.id),
+      version: link.version,
     });
   }
 
   /**
    * Keeps where someone's interview is, from the device it is on. A save
    * from an older copy than the one kept is refused with the one kept, so
-   * two tabs never quietly overwrite each other; after they deleted it,
-   * only a new start (version 0) is taken.
+   * two tabs never quietly overwrite each other. Deleting moves the version
+   * on too: only a copy opened since the delete saves again.
    */
   saveInterview(
     secretMark: string,
@@ -418,18 +440,14 @@ export class Onboarding extends DurableObject<Env> {
     if (link.keyMark === null || link.keyMark !== keyMark) {
       return refused("interview.elsewhere");
     }
-    const held = this.#held(person.id);
-    if (held !== null && held.version !== version) {
-      return answered({
-        saved: false,
-        version: held.version,
-        progress: held.progress,
-      });
+    if (version !== link.version) {
+      const held = this.#held(person.id);
+      if (held === null && link.deletedAt !== null) {
+        return refused("interview.deleted");
+      }
+      return answered({ saved: false, version: link.version, progress: held });
     }
-    if (held === null && version > 0 && link.deletedAt !== null) {
-      return refused("interview.deleted");
-    }
-    const next = (held?.version ?? 0) + 1;
+    const next = link.version + 1;
     const [state] = this.#db
       .select()
       .from(interviewStates)
@@ -441,20 +459,20 @@ export class Onboarding extends DurableObject<Env> {
       state?.completedAt ?? (progress.person === "completed" ? now : null);
     this.ctx.storage.transactionSync(() => {
       this.#db
+        .update(links)
+        .set({ version: next })
+        .where(eq(links.person, person.id))
+        .run();
+      this.#db
         .insert(interviews)
         .values({
           person: person.id,
-          version: next,
           progress: JSON.stringify(progress),
           updatedAt: now,
         })
         .onConflictDoUpdate({
           target: interviews.person,
-          set: {
-            version: next,
-            progress: JSON.stringify(progress),
-            updatedAt: now,
-          },
+          set: { progress: JSON.stringify(progress), updatedAt: now },
         })
         .run();
       this.#noteState(
@@ -499,7 +517,7 @@ export class Onboarding extends DurableObject<Env> {
       this.#forget(person.id, now, "interview.deleted");
       this.#db
         .update(links)
-        .set({ deletedAt: now })
+        .set({ deletedAt: now, version: link.version + 1 })
         .where(eq(links.person, person.id))
         .run();
     });
@@ -525,7 +543,7 @@ export class Onboarding extends DurableObject<Env> {
       this.#forget(person, now, "interview.new_start");
       this.#db
         .update(links)
-        .set({ keyMark: null, deletedAt: null })
+        .set({ keyMark: null, deletedAt: null, version: link.version + 1 })
         .where(eq(links.person, person))
         .run();
       this.#changed(by, "onboarding.interview.restarted", {});
@@ -743,21 +761,25 @@ export class Onboarding extends DurableObject<Env> {
     return count <= linkCallsPerMinute;
   }
 
-  /** What someone's interview holds now, and its version. */
-  #held(
-    person: string
-  ): { version: number; progress: InterviewProgress } | null {
+  /** What someone's interview holds now; none before a save. */
+  #held(person: string): InterviewProgress | null {
     const [row] = this.#db
-      .select()
+      .select({ progress: interviews.progress })
       .from(interviews)
       .where(eq(interviews.person, person))
       .all();
     return row === undefined
       ? null
-      : {
-          version: row.version,
-          progress: interviewProgressSchema.parse(JSON.parse(row.progress)),
-        };
+      : interviewProgressSchema.parse(JSON.parse(row.progress));
+  }
+
+  #onRoster(person: string): boolean {
+    return this.#db
+      .select({ id: people.id })
+      .from(people)
+      .where(eq(people.id, person))
+      .all()
+      .some(({ id }) => id === person);
   }
 
   /** Removes what someone said and where their interview stood, and notes why. */

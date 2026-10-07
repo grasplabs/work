@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "92b95ffb-6c91-4d57-a038-8309893c3379",
+  "id": "bbff9398-b060-476d-8b7a-92a16e749aa3",
   "prevId": "dee84a8f-8607-41b4-965d-38391475db76",
   "tables": {
     "audit_outbox": {
@@ -166,13 +166,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "progress": {
           "name": "progress",
           "type": "text",
@@ -277,6 +270,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         }
       },
       "indexes": {},
