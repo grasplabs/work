@@ -1,5 +1,6 @@
 import { v } from "@grasp-os/sdk";
 import type { Json } from "@grasp-os/shared/json";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { describe, expect, it } from "vite-plus/test";
 
 import { expressionErrors } from "../src/errors.ts";
@@ -8,6 +9,7 @@ import {
   evaluateExpression,
   evaluatorLimits,
 } from "../src/evaluate.ts";
+import type { ResultContract } from "../src/evaluate.ts";
 import { builtinAllowlist } from "../src/source.ts";
 import { compileError, json, run } from "./run.ts";
 
@@ -78,6 +80,12 @@ const exhaust = async (
       : undefined;
   return { code: expressionErrors.codeOf(failure), reason, ms };
 };
+
+/** Whether `value` is an object whose status is pending. */
+const isPending = (value: unknown): boolean =>
+  typeof value === "object" &&
+  value !== null &&
+  Reflect.get(value, "status") === "pending";
 
 describe("the builtin allowlist", () => {
   it.each(
@@ -317,6 +325,46 @@ describe("result contracts, with no truthiness or coercion", () => {
       fraction: { error: "expression.type_mismatch" },
       unsafe: { error: "expression.result_invalid" },
       string: { error: "expression.type_mismatch" },
+    });
+  });
+
+  it("waits for an asynchronous schema, and can't be fooled by one that changes the value", async () => {
+    const expected = "status";
+    const schema = (
+      validate: StandardSchemaV1["~standard"]["validate"]
+    ): ResultContract => ({
+      kind: "schema",
+      expected,
+      schema: { "~standard": { version: 1, vendor: "test", validate } },
+    });
+    const asynchronous = schema(async (value) => {
+      await Promise.resolve();
+      return isPending(value)
+        ? { value }
+        : { issues: [{ message: "not pending" }] };
+    });
+    // Approves anything by rewriting it in place, then returns it.
+    const rewriting = schema((value) => {
+      if (typeof value === "object" && value !== null) {
+        Reflect.set(value, "status", "approved");
+      }
+      return { value };
+    });
+    const throwing = schema(() => {
+      throw new Error("schema exploded with secret-7f2a");
+    });
+    expect({
+      asyncAccepts: await run('{status: "pending"}', {}, asynchronous),
+      asyncRefuses: await run('{status: "done"}', {}, asynchronous),
+      inPlace: await run('{status: "pending"}', {}, rewriting),
+      unchanged: await run('{status: "approved"}', {}, rewriting),
+      throws: await run('{status: "pending"}', {}, throwing),
+    }).toStrictEqual({
+      asyncAccepts: { result: { status: "pending" } },
+      asyncRefuses: { error: "expression.type_mismatch" },
+      inPlace: { error: "expression.type_mismatch" },
+      unchanged: { result: { status: "approved" } },
+      throws: { error: "expression.type_mismatch" },
     });
   });
 

@@ -27,22 +27,27 @@ export const resolveEvaluate = (
   if (evaluate === undefined) {
     return profileEvaluate;
   }
-  if (
-    typeof evaluate !== "object" ||
-    evaluate === null ||
-    Array.isArray(evaluate)
-  ) {
+  if (typeof evaluate !== "object" || evaluate === null) {
     return undefined;
   }
-  const allowedKeys = new Set(["language", "mode"]);
-  for (const key of Object.keys(evaluate)) {
-    if (!allowedKeys.has(key)) {
+  try {
+    // Parsed JSON: a plain object, read by its own keys only.
+    const prototype: unknown = Object.getPrototypeOf(evaluate);
+    if (prototype !== Object.prototype && prototype !== null) {
       return undefined;
     }
+    const settings = new Map<string, unknown>(Object.entries(evaluate));
+    const allowedKeys = new Set(["language", "mode"]);
+    if ([...settings.keys()].some((key) => !allowedKeys.has(key))) {
+      return undefined;
+    }
+    const language = settings.get("language") ?? "jq";
+    const mode = settings.get("mode") ?? "strict";
+    return language === "jq" && mode === "strict" ? profileEvaluate : undefined;
+  } catch {
+    // An object that throws while read (a getter, a proxy) isn't JSON.
+    return undefined;
   }
-  const language = "language" in evaluate ? evaluate.language : "jq";
-  const mode = "mode" in evaluate ? evaluate.mode : "strict";
-  return language === "jq" && mode === "strict" ? profileEvaluate : undefined;
 };
 
 // Strict mode: the whole string is `${ ... }`, or it is a literal.
@@ -448,33 +453,46 @@ const checkDateFormat = (tokens: readonly Token[], index: number): void => {
   }
 };
 
-/** The variables bound by `as` patterns anywhere in the source. */
-const boundVariables = (tokens: readonly Token[]): Set<string> => {
+/**
+ * The variables bound by `as` patterns anywhere in the source. `words`
+ * holds the positions of identifiers that aren't object keys (from
+ * checkStructure), so a key named `as`, as in `{as: $x}`, binds nothing.
+ * A pattern runs to the `|` of `… as $x | …`, or the `(` of reduce; inside
+ * it, a computed key `(…)` reads variables rather than binding them.
+ */
+const boundVariables = (
+  tokens: readonly Token[],
+  words: ReadonlySet<number>
+): Set<string> => {
   const bound = new Set<string>();
   for (const [index, token] of tokens.entries()) {
-    if (token.kind !== "ident" || token.text !== "as") {
+    if (token.text !== "as" || !words.has(index)) {
       continue;
     }
-    // A pattern runs to the `|` of `… as $x | …`, or the `(` of reduce.
-    let depth = 0;
+    let brackets = 0;
+    let parentheses = 0;
     for (const patternToken of tokens.slice(index + 1)) {
       if (patternToken.kind === "variable") {
-        bound.add(patternToken.text);
+        if (parentheses === 0) {
+          bound.add(patternToken.text);
+        }
         continue;
       }
       if (patternToken.kind !== "punct") {
         continue;
       }
-      if (
-        depth === 0 &&
-        (patternToken.text === "|" || patternToken.text === "(")
-      ) {
+      const atTop = brackets === 0 && parentheses === 0;
+      if (atTop && (patternToken.text === "|" || patternToken.text === "(")) {
         break;
       }
-      if (["[", "{"].includes(patternToken.text)) {
-        depth += 1;
-      } else if (["]", "}"].includes(patternToken.text)) {
-        depth -= 1;
+      if (patternToken.text === "[" || patternToken.text === "{") {
+        brackets += 1;
+      } else if (patternToken.text === "]" || patternToken.text === "}") {
+        brackets -= 1;
+      } else if (patternToken.text === "(") {
+        parentheses += 1;
+      } else if (patternToken.text === ")") {
+        parentheses -= 1;
       }
     }
   }
@@ -539,14 +557,17 @@ const closing: Readonly<Record<string, string>> = {
  * `if … end` must balance within the nesting limit, and every identifier
  * that isn't an object key must be an allowed keyword or builtin. Both
  * checks share the one view of the structure, so no construct can make an
- * identifier look like a key to one and a call to jq.
+ * identifier look like a key to one and a call to jq. Returns the positions
+ * of the identifiers that aren't keys, for the other checks to share too.
  */
-const checkStructure = (tokens: readonly Token[]): void => {
+const checkStructure = (tokens: readonly Token[]): Set<number> => {
   const scopes: string[] = [];
+  const words = new Set<number>();
   for (const [index, token] of tokens.entries()) {
     const isWord =
       token.kind === "ident" && !isObjectKey(tokens, index, scopes);
     if (isWord) {
+      words.add(index);
       checkIdentifier(tokens, index);
     }
     const opens =
@@ -567,6 +588,7 @@ const checkStructure = (tokens: readonly Token[]): void => {
   if (scopes.length > 0) {
     throw new SourceError("invalid", "unbalanced brackets or if … end");
   }
+  return words;
 };
 
 /**
@@ -586,8 +608,8 @@ export const checkSource = (
     if (tokens.length === 0) {
       throw new SourceError("invalid", "an empty expression");
     }
-    checkStructure(tokens);
-    const bound = boundVariables(tokens);
+    const words = checkStructure(tokens);
+    const bound = boundVariables(tokens, words);
     const free = new Set<string>();
     for (const token of tokens) {
       if (token.kind === "variable" && !bound.has(token.text)) {

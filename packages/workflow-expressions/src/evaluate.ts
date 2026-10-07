@@ -2,7 +2,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
-import { expressionError } from "./errors.ts";
+import { expressionError, expressionErrors } from "./errors.ts";
 import type { ExpressionSite } from "./errors.ts";
 import { runJq } from "./jq.ts";
 import { checkSource } from "./source.ts";
@@ -166,13 +166,22 @@ export const compileExpression = async <S extends Stage>(
     );
   }
   for (const name of loopVariables) {
-    const reserved = reservedNames.has(name) || name.startsWith("__");
-    if (!variableName.test(name) || reserved) {
+    const valid =
+      typeof name === "string" &&
+      variableName.test(name) &&
+      !reservedNames.has(name) &&
+      !name.startsWith("__");
+    if (!valid) {
       fail(
         site,
         "expression.unavailable_variable",
         "Name the loop variable as a plain identifier that isn't a workflow variable.",
-        { reason: `loop variable ${name.slice(0, 64)}` }
+        {
+          reason:
+            typeof name === "string"
+              ? `loop variable ${name.slice(0, 64)}`
+              : "a loop variable that isn't text",
+        }
       );
     }
   }
@@ -338,11 +347,11 @@ const jsonTextDepth = (text: string): number => {
   return deepest;
 };
 
-const checkContract = (
+const checkContract = async (
   expression: CompiledExpression,
   result: Json,
   contract: ResultContract
-): Json => {
+): Promise<Json> => {
   const mismatch = (): never =>
     fail(
       expression.site,
@@ -361,24 +370,33 @@ const checkContract = (
   if (contract.kind === "json") {
     return result;
   }
-  const validated = contract.schema["~standard"].validate(result);
-  if (validated instanceof Promise || validated.issues !== undefined) {
-    return mismatch();
-  }
   // Exactly the contract: a schema that would transform, coerce or fill in
-  // the value doesn't make a different value acceptable.
-  const value: unknown = validated.value;
-  const same =
-    isAcceptedJson(value, 0, true) &&
-    canonicalJson(value) === canonicalJson(result);
-  return same ? result : mismatch();
+  // the value doesn't make a different value acceptable. The schema is
+  // caller code: it gets a copy, its answer is compared with the text taken
+  // before it ran (so changing the copy in place doesn't pass), and what is
+  // returned is parsed from that text, never an object the schema held.
+  const snapshot = canonicalJson(result);
+  let same: boolean;
+  try {
+    const validated = await contract.schema["~standard"].validate(
+      JSON.parse(snapshot)
+    );
+    const value: unknown =
+      validated.issues === undefined ? validated.value : undefined;
+    same =
+      validated.issues === undefined &&
+      isAcceptedJson(value, 0, true) &&
+      canonicalJson(value) === snapshot;
+  } catch {
+    // A schema that throws accepts nothing; its message isn't passed on.
+    same = false;
+  }
+  const accepted: unknown = JSON.parse(snapshot);
+  return same && isAcceptedJson(accepted, 0, true) ? accepted : mismatch();
 };
 
-/**
- * The JSON text jq reads: `[input, ...variables]`, in the order the
- * program binds them, once it is plain JSON within the limits.
- */
-const contextText = <S extends Stage>(
+/** contextText's reading; anything it throws that isn't ours is caught there. */
+const readContext = <S extends Stage>(
   expression: CompiledExpression<S>,
   scope: EvaluationScope<S>
 ): string => {
@@ -448,6 +466,32 @@ const contextText = <S extends Stage>(
     invalidContext();
   }
   return stdin;
+};
+
+/**
+ * The JSON text jq reads: `[input, ...variables]`, in the order the
+ * program binds them, once it is plain JSON within the limits.
+ */
+const contextText = <S extends Stage>(
+  expression: CompiledExpression<S>,
+  scope: EvaluationScope<S>
+): string => {
+  const { site } = expression;
+  try {
+    return readContext(expression, scope);
+  } catch (error) {
+    if (expressionErrors.codeOf(error) !== undefined) {
+      throw error;
+    }
+    // The scope is caller data: a getter or proxy that throws, or answers
+    // differently from one read to the next, makes it not JSON. What it
+    // threw isn't passed on.
+    return fail(
+      site,
+      "expression.context_invalid",
+      "Pass plain JSON values, without getters or proxies."
+    );
+  }
 };
 
 /**
@@ -525,5 +569,5 @@ export const evaluateExpression = async <S extends Stage>(
       "Return finite, safe numbers and no __proto__ keys."
     );
   }
-  return checkContract(expression, result, contract);
+  return await checkContract(expression, result, contract);
 };

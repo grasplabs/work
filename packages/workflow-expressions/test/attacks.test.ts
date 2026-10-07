@@ -25,6 +25,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { expressionErrors } from "../src/errors.ts";
 import { compileExpression, evaluateExpression } from "../src/evaluate.ts";
 import jqModule from "../src/jq.wasm";
+import { resolveEvaluate } from "../src/source.ts";
 import { compileError, json, run } from "./run.ts";
 
 /**
@@ -180,17 +181,53 @@ describe("source outside the profile", () => {
     });
   });
 
+  it("counts only real as bindings when it checks variables", async () => {
+    expect({
+      keyNamedAs: await compileError("{as: $missing}"),
+      keyNamedAsInAPattern: await run(". as {as: $x} | $x", {
+        input: { as: 7 },
+      }),
+      computedPatternKey: await compileError(". as {($missing): $v} | $v"),
+      reduceKeyNamedAs: await compileError(
+        "reduce .[] as $x (0; {as: $missing})"
+      ),
+    }).toStrictEqual({
+      keyNamedAs: "expression.unavailable_variable",
+      keyNamedAsInAPattern: { result: 7 },
+      computedPatternKey: "expression.unavailable_variable",
+      reduceKeyNamedAs: "expression.unavailable_variable",
+    });
+  });
+
+  it("refuses evaluate settings that aren't plain JSON", () => {
+    expect({
+      inherited: resolveEvaluate(Object.create({ mode: "loose" })),
+      throwing: resolveEvaluate({
+        get mode(): unknown {
+          throw new Error("x");
+        },
+      }),
+      array: resolveEvaluate([]),
+    }).toStrictEqual({
+      inherited: undefined,
+      throwing: undefined,
+      array: undefined,
+    });
+  });
+
   it("refuses loop variable names that aren't plain identifiers", async () => {
     expect({
       injected: await compileError(".", { loopVariables: ["x | $ENV"] }),
       environment: await compileError(".", { loopVariables: ["ENV"] }),
       secrets: await compileError(".", { loopVariables: ["secrets"] }),
       jqInternal: await compileError(".", { loopVariables: ["__loc__"] }),
+      notText: await compileError(".", { loopVariables: unchecked([1]) }),
     }).toStrictEqual({
       injected: "expression.unavailable_variable",
       environment: "expression.unavailable_variable",
       secrets: "expression.unavailable_variable",
       jqInternal: "expression.unavailable_variable",
+      notText: "expression.unavailable_variable",
     });
   });
 });
@@ -269,6 +306,70 @@ describe("hostile values", () => {
     }).toStrictEqual({
       deepLater: { error: "expression.context_invalid" },
       protoLater: { error: "expression.context_invalid" },
+    });
+  });
+
+  it("refuses a context that throws or changes while it is read, without its message", async () => {
+    const secret = "getter-secret-51c9";
+    const throwing = {
+      get value(): unknown {
+        throw new Error(secret);
+      },
+    };
+    let reads = 0;
+    const throwingLater = {
+      get value(): unknown {
+        reads += 1;
+        if (reads > 1) {
+          throw new Error(secret);
+        }
+        return 1;
+      },
+    };
+    const proxy = new Proxy(
+      {},
+      {
+        ownKeys: () => {
+          throw new Error(secret);
+        },
+      }
+    );
+    const throwingScope = Object.defineProperty({ input: null }, "variables", {
+      get: (): unknown => {
+        throw new Error(secret);
+      },
+    });
+    const outcomes = {
+      throwing: await run(".", { input: unchecked(throwing) }),
+      throwingWhenSerialised: await run(".", {
+        input: unchecked(throwingLater),
+      }),
+      proxy: await run(".", { input: unchecked(proxy) }),
+      inAVariable: await run("1", { variables: { context: unchecked(proxy) } }),
+    };
+    const expression = await compileExpression(".", {
+      stage: "taskDefinition",
+      scope: ["task"],
+      pointer: "/do/0/task",
+    });
+    const scopeError: unknown = await evaluateExpression(
+      expression,
+      unchecked(throwingScope),
+      json
+    ).catch((error: unknown) => error);
+    expect({
+      outcomes,
+      scope: expressionErrors.codeOf(scopeError),
+      leaks: JSON.stringify(scopeError).includes(secret),
+    }).toStrictEqual({
+      outcomes: {
+        throwing: { error: "expression.context_invalid" },
+        throwingWhenSerialised: { error: "expression.context_invalid" },
+        proxy: { error: "expression.context_invalid" },
+        inAVariable: { error: "expression.context_invalid" },
+      },
+      scope: "expression.context_invalid",
+      leaks: false,
     });
   });
 
