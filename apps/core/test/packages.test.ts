@@ -233,6 +233,42 @@ describe("resolving an App's packages", () => {
     ).rejects.toMatchObject({ code: "dependency.approval_required" });
   });
 
+  it("keeps one lock per graph, with the targets and entries each resolve asks for", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    await publish(
+      plain(dates, "1.0.0", {
+        exports: { ".": "./index.js", "./format": "./index.js" },
+      })
+    );
+    const browser = await builder.api.dependencies.resolve(
+      intentFor(app, { [dates]: "^1.0.0" })
+    );
+    const both = await builder.api.dependencies.resolve(
+      intentFor(
+        app,
+        { [dates]: "^1.0.0" },
+        { targets: ["browser", "server"], entries: [`${dates}/format`] }
+      )
+    );
+    expect({
+      sameGraph: both.request.graphHash === browser.request.graphHash,
+      targets: both.lock.targets,
+    }).toStrictEqual({
+      sameGraph: true,
+      targets: {
+        browser: {
+          conditions: ["browser", "import", "module", "default"],
+          entries: [`${dates}/format`],
+        },
+        server: {
+          conditions: ["workerd", "worker", "import", "module", "default"],
+          entries: [`${dates}/format`],
+        },
+      },
+    });
+  });
+
   it("resolves the same package.json to the same request", async () => {
     const { builder, app } = await builderWithApp();
     const dates = named("dates");
@@ -442,6 +478,32 @@ describe("the platform's own packages", () => {
         builder.api.dependencies.resolve(intentFor(app, { react: "^18.0.0" }))
       )
     ).resolves.toMatchObject({ code: "package.peer_conflict" });
+  });
+
+  it("refuses a peer the graph already has at a version that doesn't meet it, as npm does", async () => {
+    const { builder, app } = await builderWithApp();
+    const core = named("chart-core");
+    const plugin = named("chart-plugin");
+    await publish(plain(core, "1.0.0"));
+    await publish(plain(core, "2.0.0"));
+    await publish(
+      plain(plugin, "1.0.0", { peerDependencies: { [core]: "^1.0.0" } })
+    );
+    await expect(
+      failure(
+        builder.api.dependencies.resolve(
+          intentFor(app, { [core]: "^2.0.0", [plugin]: "1" })
+        )
+      )
+    ).resolves.toStrictEqual({
+      code: "package.peer_conflict",
+      details: {
+        package: `${plugin}@1.0.0`,
+        peer: core,
+        range: "^1.0.0",
+        graph: "2.0.0",
+      },
+    });
   });
 
   it("refuses a registry package in the platform's own scope", async () => {

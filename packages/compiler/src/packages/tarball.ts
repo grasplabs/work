@@ -9,11 +9,15 @@
  *
  * - Climbing out of the package (`../`, an absolute path, a backslash or a
  *   drive letter, a PAX or GNU long name that says either): every path is
- *   checked after every header that could set it, and refused.
- * - Links (symbolic or hard), devices, FIFOs, sparse files and entry
- *   types this doesn't know: refused, never followed or skipped.
+ *   checked after every header that could set it, and refused, as are
+ *   control characters and bidirectional overrides that make a path read
+ *   as another.
+ * - Links (symbolic or hard), devices, FIFOs, sparse files (the `S` type
+ *   and GNU's `GNU.sparse.*` PAX records) and entry types this doesn't
+ *   know: refused, never followed or skipped.
  * - Two entries for one path, the later one hiding the first from whoever
- *   looked: refused.
+ *   looked, compared as a case-insensitive, normalizing file system would
+ *   (NFC, lower case): refused.
  * - An archive bomb: bytes are counted as gzip produces them, never taken
  *   from a header's size, and unpacking stops past the limit; entries are
  *   counted too, and PAX records are bounded.
@@ -55,15 +59,29 @@ const maxMetaBytes = 64 * 1024;
 
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
+/** Cancels a stream, whatever state it is in: an errored one rejects. */
+const cancelQuietly = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>
+): Promise<void> => {
+  try {
+    await reader.cancel();
+  } catch {
+    // Already errored or closed: the reason the caller has stands.
+  }
+};
+
 /**
  * Reads exact amounts from the unpacked stream, counting every byte gzip
- * produces against the limit as it arrives.
+ * produces against the limit as it arrives. The chunks are kept as they
+ * came and copied out once, so reading is linear in the bytes read.
  */
 class Unpacked {
   readonly #reader: ReadableStreamDefaultReader<Uint8Array>;
   readonly #limit: number;
-  #buffer = new Uint8Array();
+  /** Chunks not read yet; the first from `#offset`. */
+  readonly #chunks: Uint8Array[] = [];
   #offset = 0;
+  #available = 0;
   bytes = 0;
 
   constructor(stream: ReadableStream<Uint8Array>, limit: number) {
@@ -71,7 +89,7 @@ class Unpacked {
     this.#limit = limit;
   }
 
-  /** Reads one more chunk into the buffer; false at the end. */
+  /** Reads one more chunk; false at the end. */
   async #fill(): Promise<boolean> {
     let chunk: ReadableStreamReadResult<Uint8Array>;
     try {
@@ -84,31 +102,55 @@ class Unpacked {
     }
     this.bytes += chunk.value.byteLength;
     if (this.bytes > this.#limit) {
-      await this.#reader.cancel();
+      await cancelQuietly(this.#reader);
       throw new TarballRefusedError(
         `it unpacks to more than ${this.#limit} bytes`
       );
     }
-    const left = this.#buffer.subarray(this.#offset);
-    const next = new Uint8Array(left.byteLength + chunk.value.byteLength);
-    next.set(left);
-    next.set(chunk.value, left.byteLength);
-    this.#buffer = next;
-    this.#offset = 0;
+    this.#chunks.push(chunk.value);
+    this.#available += chunk.value.byteLength;
     return true;
+  }
+
+  /** Has `length` bytes ready, or returns false if the stream ends first. */
+  async #ready(length: number): Promise<boolean> {
+    while (this.#available < length) {
+      // Each chunk decides whether there is enough yet.
+      // oxlint-disable-next-line no-await-in-loop
+      if (!(await this.#fill())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Moves past `length` ready bytes, copying them into `into` if given. */
+  #consume(length: number, into?: Uint8Array): void {
+    let done = 0;
+    while (done < length) {
+      const [first] = this.#chunks;
+      if (first === undefined) {
+        return;
+      }
+      const step = Math.min(first.byteLength - this.#offset, length - done);
+      into?.set(first.subarray(this.#offset, this.#offset + step), done);
+      done += step;
+      this.#offset += step;
+      if (this.#offset === first.byteLength) {
+        this.#chunks.shift();
+        this.#offset = 0;
+      }
+    }
+    this.#available -= length;
   }
 
   /** Exactly `length` bytes, or undefined if the stream ended first. */
   async take(length: number): Promise<Uint8Array | undefined> {
-    while (this.#buffer.byteLength - this.#offset < length) {
-      // Each chunk decides whether there is enough yet.
-      // oxlint-disable-next-line no-await-in-loop
-      if (!(await this.#fill())) {
-        return undefined;
-      }
+    if (!(await this.#ready(length))) {
+      return undefined;
     }
-    const taken = this.#buffer.slice(this.#offset, this.#offset + length);
-    this.#offset += length;
+    const taken = new Uint8Array(length);
+    this.#consume(length, taken);
     return taken;
   }
 
@@ -116,22 +158,18 @@ class Unpacked {
   async skip(length: number): Promise<void> {
     let left = length;
     while (left > 0) {
-      const available = this.#buffer.byteLength - this.#offset;
-      if (available === 0) {
-        // oxlint-disable-next-line no-await-in-loop
-        if (!(await this.#fill())) {
-          throw new TarballRefusedError("an entry ends before its size");
-        }
-        continue;
+      // oxlint-disable-next-line no-await-in-loop
+      if (this.#available === 0 && !(await this.#fill())) {
+        throw new TarballRefusedError("an entry ends before its size");
       }
-      const step = Math.min(available, left);
-      this.#offset += step;
+      const step = Math.min(this.#available, left);
+      this.#consume(step);
       left -= step;
     }
   }
 
   async close(): Promise<void> {
-    await this.#reader.cancel();
+    await cancelQuietly(this.#reader);
   }
 }
 
@@ -197,7 +235,14 @@ const readHeader = (header: Uint8Array): Header => {
   };
 };
 
-/** PAX extended header records: `<length> <key>=<value>\n` each. */
+/** A PAX record's length: decimal digits only. */
+const paxLength = /^\d+$/u;
+
+/**
+ * PAX extended header records: `<length> <key>=<value>\n` each. GNU's
+ * sparse-file records (`GNU.sparse.*`) are refused: a sparse file's bytes
+ * aren't the entry's.
+ */
 const paxRecords = (content: Uint8Array): Map<string, string> => {
   let text: string;
   try {
@@ -210,8 +255,9 @@ const paxRecords = (content: Uint8Array): Map<string, string> => {
   let at = 0;
   while (at < bytes.byteLength) {
     const space = bytes.indexOf(0x20, at);
-    const length = Number(utf8.decode(bytes.subarray(at, space)));
-    if (space === -1 || !Number.isInteger(length) || length <= 0) {
+    const digits = space === -1 ? "" : utf8.decode(bytes.subarray(at, space));
+    const length = Number(digits);
+    if (!paxLength.test(digits) || length <= space - at + 1) {
       throw new TarballRefusedError("a PAX header can't be read");
     }
     const record = utf8.decode(bytes.subarray(space + 1, at + length));
@@ -219,7 +265,11 @@ const paxRecords = (content: Uint8Array): Map<string, string> => {
     if (equals === -1 || !record.endsWith("\n")) {
       throw new TarballRefusedError("a PAX header can't be read");
     }
-    records.set(record.slice(0, equals), record.slice(equals + 1, -1));
+    const key = record.slice(0, equals);
+    if (key.startsWith("GNU.sparse.")) {
+      throw new TarballRefusedError("it has a sparse file");
+    }
+    records.set(key, record.slice(equals + 1, -1));
     at += length;
   }
   return records;
@@ -241,16 +291,32 @@ const refusedTypes: Readonly<Record<string, string>> = {
 
 const driveLetter = /^[A-Za-z]:/u;
 
-/** Whether `text` has a control character (C0 or DEL), by UTF-16 unit. */
+/**
+ * Whether `text` has a character that can make a path read as another:
+ * a control character (C0, DEL or C1), or a bidirectional override or
+ * isolate (U+202A–202E, U+2066–2069).
+ */
 const hasControl = (text: string): boolean => {
   for (let index = 0; index < text.length; index += 1) {
     const code = text.codePointAt(index) ?? 0;
-    if (code < 0x20 || code === 0x7f) {
+    if (
+      code < 0x20 ||
+      (code >= 0x7f && code <= 0x9f) ||
+      (code >= 0x20_2a && code <= 0x20_2e) ||
+      (code >= 0x20_66 && code <= 0x20_69)
+    ) {
       return true;
     }
   }
   return false;
 };
+
+/**
+ * What two paths are the same file as on a case-insensitive file system
+ * that normalizes Unicode (macOS's): compared so, no two entries may be.
+ */
+const sameFileKey = (path: string): string =>
+  path.normalize("NFC").toLowerCase();
 
 /**
  * The path of an entry within the package: its archive path without the
@@ -265,7 +331,9 @@ const packagePath = (
     throw new TarballRefusedError(`an entry's path leaves the package: ${raw}`);
   }
   if (hasControl(raw)) {
-    throw new TarballRefusedError("an entry's path has control characters");
+    throw new TarballRefusedError(
+      "an entry's path has control or bidirectional characters"
+    );
   }
   const segments = raw.replace(/\/+$/u, "").split("/");
   const [, ...inside] = segments;
@@ -397,10 +465,10 @@ export const extractTarball = async (
         await unpacked.skip(paddedSize(size));
         continue;
       }
-      if (seen.has(path)) {
+      if (seen.has(sameFileKey(path))) {
         throw new TarballRefusedError(`it has two entries for ${path}`);
       }
-      seen.add(path);
+      seen.add(sameFileKey(path));
       if (keep(path)) {
         const content = await unpacked.take(paddedSize(size));
         if (content === undefined) {

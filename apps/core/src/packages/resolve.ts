@@ -361,6 +361,20 @@ class Resolution {
       this.#record(edge, existing.version, "graph");
       return [];
     }
+    if (kind === "peer") {
+      // A peer is shared with whoever else uses the package, as npm
+      // resolves it: a version the graph has that doesn't meet the range
+      // is a conflict (npm's ERESOLVE), never a second copy for the peer.
+      const other = [...this.nodes.values()].find((node) => node.name === name);
+      if (other) {
+        throw packageErrors.create("package.peer_conflict", {
+          package: asking,
+          peer: name,
+          range: range.slice(0, 128),
+          graph: other.version,
+        });
+      }
+    }
     if (edge.depth > this.#limits.graphDepth) {
       throw packageErrors.create("package.quota", {
         quota: "graphDepth",
@@ -586,7 +600,17 @@ const inspectGraph = async (
       throw error;
     }
     const inspected: PackageInspection[] = inspectionsSchema.parse(answer);
+    const asked = batch.map(({ key }) => key).toSorted();
+    const answered = inspected.map(({ key }) => key).toSorted();
+    if (canonicalJson(asked) !== canonicalJson(answered)) {
+      throw new Error(
+        "The package builder didn't inspect the packages it was handed"
+      );
+    }
     for (const inspection of inspected) {
+      // The builder's count of what it unpacked: its code is Grasp's and
+      // the count is gzip's output as it read it, so a package can't
+      // understate it; the builder's own per-package limit bounds it too.
       extractedBytes += inspection.bytes;
       const node = nodes.find((each) => packageKey(each) === inspection.key);
       const reasons = [...inspection.refusals];
@@ -649,6 +673,88 @@ const lockOf = (
       ])
   ),
 });
+
+/** How often storing a lock starts over when another resolve wrote first. */
+const lockTries = 3;
+
+/**
+ * The lock kept for a graph once `fresh` is added to it. The packages are
+ * the graph's, the same whichever resolve named them (the graph's hash
+ * covers every version, integrity and edge): the first lock's ranges and
+ * times stay as its provenance. Targets aren't part of the graph's hash,
+ * so each resolve sets the targets it asks for, with their conditions and
+ * entries; the others stay as they were.
+ */
+export const mergedLock = (
+  existing: GraspLock,
+  fresh: GraspLock
+): GraspLock => ({
+  ...existing,
+  targets: { ...existing.targets, ...fresh.targets },
+});
+
+/**
+ * Stores `fresh` as the lock of an App's graph, or adds its targets to
+ * the one stored, and returns the lock that holds. One conditional write
+ * on the lock as it was read; a resolve that loses the race starts over.
+ */
+const storeLock = async (
+  env: Env,
+  app: string,
+  graphHash: string,
+  fresh: GraspLock,
+  limits: PackageLimits
+): Promise<GraspLock> => {
+  const db = drizzle(env.DB);
+  const where = and(
+    eq(dependencyLocks.appId, app),
+    eq(dependencyLocks.graphHash, graphHash)
+  );
+  for (let attempt = 0; attempt < lockTries; attempt += 1) {
+    // Each attempt reads the lock as it is now.
+    // oxlint-disable-next-line no-await-in-loop
+    const row = await db
+      .select({ lock: dependencyLocks.lock })
+      .from(dependencyLocks)
+      .where(where)
+      .get();
+    const next = row
+      ? mergedLock(graspLockSchema.parse(JSON.parse(row.lock)), fresh)
+      : fresh;
+    const stored = canonicalJson(graspLockSchema.parse(next));
+    if (new TextEncoder().encode(stored).byteLength > limits.lockBytes) {
+      throw packageErrors.create("package.quota", {
+        quota: "lockBytes",
+        limit: limits.lockBytes,
+      });
+    }
+    if (row?.lock === stored) {
+      return next;
+    }
+    const write = row
+      ? db
+          .update(dependencyLocks)
+          .set({ lock: stored })
+          .where(and(where, eq(dependencyLocks.lock, row.lock)))
+          .returning({ lock: dependencyLocks.lock })
+      : db
+          .insert(dependencyLocks)
+          .values({
+            appId: app,
+            graphHash,
+            lock: stored,
+            createdAt: new Date(),
+          })
+          .onConflictDoNothing()
+          .returning({ lock: dependencyLocks.lock });
+    // oxlint-disable-next-line no-await-in-loop
+    const written = await write;
+    if (written.length > 0) {
+      return next;
+    }
+  }
+  throw dependencyErrors.create("dependency.stale");
+};
 
 /** What a resolve gives back: the request it proposed, and its lock. */
 export interface Resolved {
@@ -729,39 +835,10 @@ export const resolveDependencies = async (
       ])
     )
   );
-  const stored = canonicalJson(graspLockSchema.parse(lock));
-  if (new TextEncoder().encode(stored).byteLength > limits.lockBytes) {
-    throw packageErrors.create("package.quota", {
-      quota: "lockBytes",
-      limit: limits.lockBytes,
-    });
-  }
   const graph = graphOfLock(lock);
   const graphHash = await dependencyGraphHash(graph);
   // The lock first: a request is never without the lock its graph names.
-  // The same graph again keeps its first lock, whose ranges and times
-  // are its provenance.
-  const db = drizzle(env.DB);
-  const [, [kept]] = await db.batch([
-    db
-      .insert(dependencyLocks)
-      .values({
-        appId: intent.app,
-        graphHash,
-        lock: stored,
-        createdAt: new Date(),
-      })
-      .onConflictDoNothing(),
-    db
-      .select({ lock: dependencyLocks.lock })
-      .from(dependencyLocks)
-      .where(
-        and(
-          eq(dependencyLocks.appId, intent.app),
-          eq(dependencyLocks.graphHash, graphHash)
-        )
-      ),
-  ]);
+  const kept = await storeLock(env, intent.app, graphHash, lock, limits);
   const request = await proposeDependencies(env, by, {
     app: intent.app,
     sourceRevision: intent.sourceRevision,
@@ -771,8 +848,5 @@ export const resolveDependencies = async (
     findings: [],
     refused: [],
   });
-  return {
-    request,
-    lock: kept ? graspLockSchema.parse(JSON.parse(kept.lock)) : lock,
-  };
+  return { request, lock: kept };
 };

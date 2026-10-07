@@ -905,10 +905,11 @@ export const dependencyApprovers = sqliteTable(
  * The exact lock (`grasp.lock.json`) the resolver produced for one of an
  * App's dependency graphs (src/packages/resolve.ts), by the graph's hash:
  * what a build of an approved graph unpacks, by integrity, and with which
- * export conditions per target. Written once per App and graph and never
- * changed: the same graph resolved again is the same packages, and the
- * first lock's ranges stay its provenance. At most a few hundred KiB
- * (`packageLimits.lockBytes`).
+ * export conditions per target. One per App and graph. Its packages never
+ * change (the graph's hash covers them; the first lock's ranges and times
+ * stay its provenance); a later resolve of the same graph sets the
+ * targets it asks for (`mergedLock`), each write conditional on the lock
+ * as it was read. At most `packageLimits.lockBytes`.
  */
 export const dependencyLocks = sqliteTable(
   "dependency_locks",
