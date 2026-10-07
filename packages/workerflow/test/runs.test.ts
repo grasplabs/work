@@ -181,10 +181,14 @@ describe("a workflow run", () => {
   it("ignores a step that answers after the run ended, and the definition never hears of it", async () => {
     const id = newId();
     const late = hold(id, "late");
+    const end = hold(id, "end");
     await workflow("stray").create({ id });
+    // The step's effect is out; only then does the definition return.
+    await late.held;
+    await end.held;
+    end.release();
 
     const status = await ended("stray", id);
-    await late.held;
     late.release();
 
     const journal = await until("the late answer to be refused", async () => {

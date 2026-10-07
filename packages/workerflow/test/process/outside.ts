@@ -54,6 +54,8 @@ export interface Effect {
   key: string;
   attempt: number;
   receipt: string;
+  /** When it arrived, by this process's clock. */
+  at: number;
 }
 
 interface Arrival {
@@ -67,7 +69,7 @@ interface Hold {
   arrived: boolean;
 }
 
-const isArrival = (value: unknown): value is Omit<Effect, "receipt"> =>
+const isArrival = (value: unknown): value is Omit<Effect, "receipt" | "at"> =>
   typeof value === "object" &&
   value !== null &&
   "run" in value &&
@@ -158,7 +160,7 @@ export class Outside {
       return;
     }
     const receipt = `${sent.label}#${this.effects.length + 1}`;
-    this.effects.push({ ...sent, receipt });
+    this.effects.push({ ...sent, receipt, at: Date.now() });
     if (!this.#withhold(sent, response, receipt)) {
       response.end(receipt);
     }

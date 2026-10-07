@@ -9,6 +9,22 @@ export const maxStepNameLength = 256;
 /** The longest start key `admit` takes. */
 export const maxStartKeyLength = 256;
 
+/** The longest delivery key `deliverEvent` takes. */
+export const maxEventKeyLength = 256;
+
+/**
+ * An event type follows the instance ID's rule. Cloudflare's own rule for
+ * event types isn't pinned yet; this is the narrower guess until it is.
+ */
+export const assertEventType = (type: unknown): string => {
+  if (typeof type !== "string" || !instanceIdPattern.test(type)) {
+    throw new TypeError(
+      `An event type is 1 to 100 letters, digits, - and _, not starting with -: ${JSON.stringify(type)}`
+    );
+  }
+  return type;
+};
+
 export const assertInstanceId = (id: unknown): string => {
   if (typeof id !== "string" || !instanceIdPattern.test(id)) {
     throw new TypeError(

@@ -24,13 +24,22 @@
 //   same write as its outcome. An object gets no alarm while its alarm
 //   handler still runs, so a live activation is not raced by its own
 //   watchdog, however long a step takes (test/process shows it on workerd).
+// - A sleep or an event wait that isn't due suspends the run: in one write,
+//   its deadline, the status `waiting` and the nearest deadline of all its
+//   waits as the run's wake; then the alarm is set to that wake, and the
+//   activation ends (activation.ts). Nothing of the run stays in memory.
+//   Every alarm and event replays to the wait, which reads its deadline
+//   back from the journal, so no duplicate, early or late alarm moves it.
+// - Each alarm write follows the journal write it goes with in the same
+//   synchronous turn, so the alarm always says what the latest write
+//   meant, whichever path wrote last.
 //
 // A step's outcome is journaled before the definition sees it. A step cut
 // off after its effect left but before that write runs again, with the
 // same idempotency key (contracts.ts): at least once, not exactly once.
 import { DurableObject } from "cloudflare:workers";
 
-import { Activation, superseded } from "./activation.ts";
+import { Activation, superseded, suspended } from "./activation.ts";
 import type { Settlement } from "./activation.ts";
 import { canonical, decode } from "./codec.ts";
 import type {
@@ -44,6 +53,9 @@ import {
   hasJournal,
   journalSchemaVersion,
   readJournal,
+  maxEventPayloadBytes,
+  maxInboxBytes,
+  maxInboxEvents,
   readRun,
 } from "./journal.ts";
 import type { Journal, RunRow } from "./journal.ts";
@@ -60,6 +72,37 @@ export interface StartCommand {
   params: string;
   /** Says which start this is: the same key again is the same start. */
   key: string;
+}
+
+/** What the instance asks the run object to accept into its inbox. */
+export interface EventCommand {
+  type: string;
+  /** The payload, already encoded (codec.ts). */
+  payload: string;
+  /** The sender's delivery key, or null for an event with none. */
+  key: string | null;
+}
+
+/**
+ * `accepted`: the event is in the run's inbox. `duplicate`: an event with
+ * this key and this content was accepted before. `conflict`: the key came
+ * with another type or payload. `too_large`: the payload is over
+ * `maxEventPayloadBytes`. `full`: the inbox is at one of its limits.
+ * `ended`: the run has ended and takes no events. `missing`: there is no
+ * such run.
+ */
+export type EventOutcome =
+  | "accepted"
+  | "duplicate"
+  | "conflict"
+  | "too_large"
+  | "full"
+  | "ended"
+  | "missing";
+
+interface EventDecision {
+  outcome: EventOutcome;
+  wake: boolean;
 }
 
 /**
@@ -88,7 +131,8 @@ const statusOf = (run: RunRow): InstanceStatus => {
       };
     }
     case "queued":
-    case "running": {
+    case "running":
+    case "waiting": {
       return { status: run.status };
     }
     default: {
@@ -236,7 +280,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     const now = Date.now();
     storage.transactionSync(() => {
       storage.sql.exec(
-        "UPDATE run SET generation = ?, status = 'running', lease_until = ?",
+        "UPDATE run SET generation = ?, status = 'running', lease_until = ?, wake_at = NULL",
         generation,
         now + this.leaseMs
       );
@@ -259,10 +303,144 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       activation.execute(resolved),
       activation.stopped,
     ]);
-    if (settlement === superseded) {
-      // The later activation owns the run and its alarm.
+    if (settlement === superseded || settlement === suspended) {
+      // A later activation owns the run, or the run waits for the alarm
+      // its suspension set. Either way this handler is done: a waiting run
+      // holds no compute.
+      return;
+    }
+    if ("halt" in settlement) {
+      // Replaying would only reach the same thing again: the run ends,
+      // with the reason as its error.
+      await activation.settle({ ok: false, error: settlement.halt }, true);
+      return;
+    }
+    if ("fault" in settlement) {
+      // The journal write failed; the activation journaled that, if it
+      // could. Returning leaves the alarm as it was, the watchdog or the
+      // wake, to bring the run back with its deadlines as journaled.
+      // Throwing would hand recovery to the host's alarm retries instead,
+      // whose count is finite and whose timing isn't ours.
       return;
     }
     await activation.settle(settlement);
+  }
+
+  /**
+   * Accepts an event into the run's inbox: journaled, in order, with the
+   * time it was accepted, before the answer. A run that waits for an event
+   * of this type, and is still before that wait's deadline, is woken in
+   * the same write. A key the run has seen is the same event delivered
+   * again, and accepted once.
+   */
+  async sendEvent(command: EventCommand): Promise<EventOutcome> {
+    const { storage } = this.ctx;
+    if (!hasJournal(storage.sql)) {
+      return "missing";
+    }
+    const now = Date.now();
+    const decision = storage.transactionSync((): EventDecision => {
+      const run = readRun(storage.sql);
+      if (run === undefined) {
+        return { outcome: "missing", wake: false };
+      }
+      // A delivery's key is looked up first: one sent again after the run
+      // ended is still the event it was.
+      if (command.key !== null) {
+        const [sent] = storage.sql
+          .exec<{
+            type: string;
+            payload: string;
+            accepted_at: number;
+            consumed_by: number | null;
+          }>(
+            "SELECT type, payload, accepted_at, consumed_by FROM events WHERE key = ?",
+            command.key
+          )
+          .toArray();
+        if (sent !== undefined) {
+          const same =
+            sent.type === command.type &&
+            // The same payload, whatever order a retry put its keys in.
+            canonical(sent.payload) === canonical(command.payload);
+          if (!same) {
+            return { outcome: "conflict", wake: false };
+          }
+          // The first delivery's wake may not have been written (its alarm
+          // write failed after the event was): a retry that finds the
+          // event still untaken, by a wait still in time for it, wakes
+          // the run again.
+          const wake =
+            sent.consumed_by === null &&
+            this.#wakeFor(run, sent.type, sent.accepted_at, now);
+          return { outcome: "duplicate", wake };
+        }
+      }
+      if (hasEnded(run)) {
+        return { outcome: "ended", wake: false };
+      }
+      // Measured on the encoded text the journal keeps, here as well as
+      // in the binding: this method is the run's boundary.
+      const bytes = new TextEncoder().encode(command.payload).byteLength;
+      if (bytes > maxEventPayloadBytes) {
+        return { outcome: "too_large", wake: false };
+      }
+      if (
+        run.event_count >= maxInboxEvents ||
+        run.event_bytes + bytes > maxInboxBytes
+      ) {
+        return { outcome: "full", wake: false };
+      }
+      storage.sql.exec(
+        "INSERT INTO events (type, payload, key, accepted_at) VALUES (?, ?, ?, ?)",
+        command.type,
+        command.payload,
+        command.key,
+        now
+      );
+      storage.sql.exec(
+        "UPDATE run SET event_count = event_count + 1, event_bytes = event_bytes + ?",
+        bytes
+      );
+      return {
+        outcome: "accepted",
+        wake: this.#wakeFor(run, command.type, now, now),
+      };
+    });
+    if (decision.wake) {
+      // With the write that accepted the event: no await between.
+      await storage.setAlarm(now);
+    }
+    return decision.outcome;
+  }
+
+  /**
+   * Whether an event of `type` accepted at `acceptedAt` should wake the
+   * run now, journaling the wake if so. Only a suspended run needs waking:
+   * a live activation reaches the wait itself, and a dead one has its
+   * watchdog. The wait must be in time for the event and not yet over.
+   * Called inside the transaction that accepted (or found) the event.
+   */
+  #wakeFor(
+    run: RunRow,
+    type: string,
+    acceptedAt: number,
+    now: number
+  ): boolean {
+    const { sql } = this.ctx.storage;
+    const wake =
+      run.status === "waiting" &&
+      sql
+        .exec(
+          "SELECT 1 FROM steps WHERE state = 'waiting' AND type = 'waitForEvent' AND event_type = ? AND deadline > ? AND deadline > ?",
+          type,
+          now,
+          acceptedAt
+        )
+        .toArray().length > 0;
+    if (wake) {
+      sql.exec("UPDATE run SET wake_at = ?", now);
+    }
+    return wake;
   }
 }

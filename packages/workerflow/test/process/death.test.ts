@@ -1,6 +1,7 @@
 // Runs that live through process death: plain workerd on disk-backed
 // storage, killed with SIGKILL at each durable commit and started again on
-// the same directory. Every wait polls with a deadline; the journal each
+// the same directory, and runs that sleep or wait for an event through it
+// with no process alive. Every wait polls with a deadline; the journal each
 // test reads back is what recovery had to go on.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -80,6 +81,60 @@ const leaseOf = (journal: unknown): number => {
   }
   return lease;
 };
+
+interface StepView {
+  name: string;
+  state: string;
+  deadline: number | null;
+}
+
+const isStepView = (value: unknown): value is StepView =>
+  typeof value === "object" &&
+  value !== null &&
+  "name" in value &&
+  typeof value.name === "string" &&
+  "state" in value &&
+  typeof value.state === "string" &&
+  "deadline" in value;
+
+/** The journal's steps, as far as these tests read them. */
+const stepsOf = (journal: unknown): StepView[] =>
+  typeof journal === "object" &&
+  journal !== null &&
+  "steps" in journal &&
+  Array.isArray(journal.steps)
+    ? journal.steps.filter((step) => isStepView(step))
+    : [];
+
+const runStatusIn = (journal: unknown): unknown =>
+  typeof journal === "object" &&
+  journal !== null &&
+  "run" in journal &&
+  typeof journal.run === "object" &&
+  journal.run !== null &&
+  "status" in journal.run
+    ? journal.run.status
+    : undefined;
+
+/**
+ * Waits until the run has suspended at `step`, with no activation alive,
+ * and returns the deadline its journal holds.
+ */
+const asleepAt = async (
+  definition: string,
+  id: string,
+  step: string
+): Promise<number> =>
+  await until(`run ${id} to wait at ${step}`, async () => {
+    const journal = await journalOf(definition, id);
+    const { deadline, state } =
+      stepsOf(journal).find((row) => row.name === step) ?? {};
+    return runStatusIn(journal) === "waiting" &&
+      state === "waiting" &&
+      typeof deadline === "number"
+      ? deadline
+      : undefined;
+  });
 
 /** Each effect of the run, as label and attempt, in the order received. */
 const timeline = (id: string): [string, number][] =>
@@ -365,6 +420,167 @@ describe("a run on disk-backed workerd", () => {
         { generation: 2, ended: null },
         { generation: 3, ended: "settled" },
       ],
+    });
+  });
+
+  it("wakes a sleep on time after the process died, with no request reaching it, its deadline as journaled", async () => {
+    const id = "asleep-when-killed";
+    await workerd.request("/start", startOf("napper", id));
+    const deadline = await asleepAt("napper", id, "nap");
+    await workerd.kill();
+
+    // No process at all until the deadline is well past.
+    await until("the deadline to pass", () =>
+      Date.now() > deadline + leaseMargin ? true : undefined
+    );
+    await workerd.start();
+    const after = await until(
+      "after to go out",
+      () => outside.of(id, "after")[0]
+    );
+    const status = await ended("napper", id);
+
+    expect(after.at).toBeGreaterThanOrEqual(deadline);
+    expect(timeline(id)).toStrictEqual([
+      ["before", 1],
+      ["after", 1],
+    ]);
+    expect(status).toMatchObject({ status: "complete" });
+    await expect(journalOf("napper", id)).resolves.toMatchObject({
+      activations: [
+        { generation: 1, ended: "suspended" },
+        { generation: 2, ended: "settled" },
+      ],
+      steps: [
+        { name: "before", attempt: 1 },
+        { name: "nap", state: "succeeded", deadline },
+        { name: "after", attempt: 1 },
+      ],
+    });
+  });
+
+  it("neither brings a sleep forward nor puts it back when the process restarts before its deadline", async () => {
+    const id = "restarted-before-the-deadline";
+    // Long enough that a restart, however slow the machine, lands before
+    // the deadline.
+    await workerd.request(
+      "/start",
+      startOf("napper", id, { params: { order: id, nap: 10_000 } })
+    );
+    const deadline = await asleepAt("napper", id, "nap");
+
+    await workerd.restart();
+    const restarted = Date.now();
+    const after = await until(
+      "after to go out",
+      () => outside.of(id, "after")[0]
+    );
+    await ended("napper", id);
+
+    expect(restarted).toBeLessThan(deadline);
+    expect(after.at).toBeGreaterThanOrEqual(deadline);
+    expect(stepsOf(await journalOf("napper", id))).toMatchObject([
+      { name: "before" },
+      { name: "nap", deadline },
+      { name: "after" },
+    ]);
+  });
+
+  it("wakes a sleep on time after its object was evicted", async () => {
+    const id = "asleep-when-evicted";
+    await workerd.request("/start", startOf("napper", id));
+    const deadline = await asleepAt("napper", id, "nap");
+
+    await workerd.request(`/evict?definition=napper&id=${id}`, {});
+    const after = await until(
+      "after to go out",
+      () => outside.of(id, "after")[0]
+    );
+    const status = await ended("napper", id);
+
+    expect(after.at).toBeGreaterThanOrEqual(deadline);
+    expect(status).toMatchObject({ status: "complete" });
+    expect(timeline(id)).toStrictEqual([
+      ["before", 1],
+      ["after", 1],
+    ]);
+  });
+
+  it("takes an event sent after the process died while the run waited, once however often it is delivered", async () => {
+    const id = "waiting-when-killed";
+    const delivery = {
+      definition: "approval",
+      id,
+      type: "approved",
+      payload: { by: "ann" },
+      key: `delivery-${id}`,
+    };
+    await workerd.request("/start", startOf("approval", id));
+    await asleepAt("approval", id, "approval");
+    await workerd.restart();
+
+    const sent = await workerd.request("/event", delivery);
+    const status = await ended("approval", id);
+    const again = await workerd.request("/event", delivery);
+    const unkeyed = await workerd.request("/event", {
+      definition: "approval",
+      id,
+      type: "approved",
+    });
+
+    expect({ sent, again }).toStrictEqual({
+      sent: { status: 200, body: { accepted: true } },
+      again: { status: 200, body: { accepted: false } },
+    });
+    expect(unkeyed.status).toBe(409);
+    expect(JSON.stringify(unkeyed.body)).toMatch(/instance\.not_running/u);
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: {
+        approved: { by: "ann" },
+        after: outside.of(id, "after")[0]?.receipt,
+      },
+    });
+    expect(timeline(id)).toStrictEqual([
+      ["before", 1],
+      ["after", 1],
+    ]);
+  });
+
+  it("replays the event a wait took after the process died, though another of its type arrived before the kill", async () => {
+    const id = "event-taken-before-the-kill";
+    const afterHeld = outside.hold(id, "after", 1);
+    const event = (payload: string) => ({
+      definition: "approval",
+      id,
+      type: "approved",
+      payload,
+    });
+    await workerd.request("/start", startOf("approval", id));
+    await asleepAt("approval", id, "approval");
+    await workerd.request("/event", event("first"));
+    await afterHeld;
+    await workerd.request("/event", event("second"));
+
+    await workerd.restart();
+    const status = await ended("approval", id);
+
+    expect(status).toMatchObject({
+      status: "complete",
+      output: { approved: "first" },
+    });
+    expect(timeline(id)).toStrictEqual([
+      ["before", 1],
+      ["after", 1],
+      ["after", 2],
+    ]);
+    await expect(journalOf("approval", id)).resolves.toMatchObject({
+      steps: [
+        { ordinal: 1, name: "before" },
+        { ordinal: 2, name: "approval", state: "succeeded" },
+        { ordinal: 3, name: "after", attempt: 2 },
+      ],
+      events: [{ consumed_by: 2 }, { consumed_by: null }],
     });
   });
 });
