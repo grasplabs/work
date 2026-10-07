@@ -1,6 +1,13 @@
 import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
+import type {
+  LogFilter,
+  StaffLogEntry,
+  StaffNote,
+  StaffOverview,
+  StaffTranscript,
+} from "./onboarding-staff.ts";
 
 // The onboarding's interviews: Stephen, or Claire if the person prefers,
 // talks with every team lead and then with everyone else, in the language
@@ -249,6 +256,13 @@ export interface OnboardingStaffApi {
    * what they said goes, and their link opens on the next device.
    */
   newStart: (person: string) => Promise<void>;
+  /** Where the onboarding stands: its stages, what needs Grasp, Grasp's notes. */
+  overview: () => Promise<StaffOverview>;
+  /** What happened, the newest first, narrowed by `filter`. */
+  log: (filter?: LogFilter) => Promise<StaffLogEntry[]>;
+  addNote: (text: string) => Promise<StaffNote>;
+  /** Someone's interview; every read is in the audit log, without its words. */
+  transcript: (person: string) => Promise<StaffTranscript>;
 }
 
 /** Why the onboarding refused something. */
@@ -258,4 +272,5 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.no_roster": "Add who works where first.",
   "onboarding.past": "The interviews can't start in the past.",
   "onboarding.no_link": "That person has no link out yet.",
+  "onboarding.not_found": "Nobody on the list by that id.",
 });

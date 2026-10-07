@@ -18,8 +18,16 @@ import type {
   Plan,
   Roster,
 } from "@grasp-os/shared/onboarding";
+import { logPageMax } from "@grasp-os/shared/onboarding-staff";
+import type {
+  LogActor,
+  LogFilter,
+  StaffLogEntry,
+  StaffNote,
+  StaffTranscript,
+} from "@grasp-os/shared/onboarding-staff";
 import { DurableObject } from "cloudflare:workers";
-import { asc, eq, isNotNull, sql } from "drizzle-orm";
+import { asc, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 
 import { drainObjectOutbox } from "../audit-outbox.ts";
@@ -33,6 +41,7 @@ import {
   interviews,
   linkCodes,
   links,
+  notes,
   onboarding,
   people,
   teamCounts,
@@ -135,6 +144,26 @@ const whoIs = (by: AuditActor): string => {
   }
   return by.type === "system" ? "grasp" : by.type;
 };
+
+/** Who did what the log holds, as the staff's log names them. */
+const logActorOf = (by: string): LogActor => {
+  if (by.startsWith("staff:")) {
+    return "staff";
+  }
+  if (by.startsWith("person:")) {
+    return "company";
+  }
+  return by === "interviewee" ? "person" : "grasp";
+};
+
+/** Whether `entry` is one `filter` keeps. */
+const matches = (entry: StaffLogEntry, filter: LogFilter): boolean =>
+  (filter.actor === undefined || entry.actor === filter.actor) &&
+  (filter.what === undefined ||
+    entry.what === filter.what ||
+    entry.what.startsWith(`${filter.what}.`)) &&
+  (filter.team === undefined || entry.team === filter.team) &&
+  (filter.day === undefined || entry.at.slice(0, 10) === filter.day);
 
 /** A count as given, when it is one: a number from nothing up. */
 const counted = (value: number | undefined): number =>
@@ -594,6 +623,110 @@ export class Onboarding extends DurableObject<Env> {
       .from(usage)
       .orderBy(asc(usage.day), asc(usage.purpose), asc(usage.model))
       .all();
+  }
+
+  /** Where the agreements stand, as staff last said; none before they did. */
+  agreements(): Agreements | null {
+    return this.#row().agreements;
+  }
+
+  /** Grasp's notes, the newest first. */
+  notes(): StaffNote[] {
+    return this.#db.select().from(notes).orderBy(desc(notes.id)).all();
+  }
+
+  /** Keeps a note of Grasp's staff, in the log too (without its words). */
+  addNote(text: string, by: AuditActor): StaffNote {
+    const at = new Date().toISOString();
+    const byId = by.type === "staff" ? by.userId : whoIs(by);
+    return this.ctx.storage.transactionSync(() => {
+      const [note] = this.#db
+        .insert(notes)
+        .values({ at, by: byId, text })
+        .returning()
+        .all();
+      this.#db
+        .insert(events)
+        .values({ at, by: whoIs(by), what: "onboarding.note.added" })
+        .run();
+      if (note === undefined) {
+        throw new Error("A note was kept but not returned");
+      }
+      return note;
+    });
+  }
+
+  /**
+   * What happened, the newest first, at most `logPageMax`: everything the
+   * onboarding's own log holds, with the person it is about while they
+   * are on the roster. For Grasp's staff only.
+   */
+  staffLog(filter: LogFilter = {}): StaffLogEntry[] {
+    const roster = this.#roster();
+    const byId = new Map(
+      (roster?.people ?? []).map((one) => [one.id, one] as const)
+    );
+    const entries: StaffLogEntry[] = [];
+    const rows = this.#db.select().from(events).orderBy(desc(events.seq)).all();
+    for (const row of rows) {
+      if (entries.length >= logPageMax) {
+        break;
+      }
+      const person = row.about === null ? undefined : byId.get(row.about);
+      const entry: StaffLogEntry = {
+        seq: row.seq,
+        at: row.at,
+        actor: logActorOf(row.by),
+        what: row.what,
+        person:
+          person === undefined ? null : { id: person.id, name: person.name },
+        team: person?.team ?? null,
+      };
+      if (matches(entry, filter)) {
+        entries.push(entry);
+      }
+    }
+    return entries;
+  }
+
+  /** Someone's interview for Grasp's staff, with the link's random id to audit its read by. */
+  transcriptOf(
+    person: string
+  ): (StaffTranscript & { interviewId: string }) | null {
+    const roster = this.#roster();
+    const one = roster?.people.find(({ id }) => id === person);
+    const [code] = this.#db
+      .select({ linkId: linkCodes.linkId })
+      .from(linkCodes)
+      .where(eq(linkCodes.person, person))
+      .all();
+    if (one === undefined || code === undefined) {
+      return null;
+    }
+    const state = this.#interviews().get(person);
+    return {
+      person,
+      name: one.name,
+      team: roster?.teams.find(({ id }) => id === one.team)?.name ?? "",
+      startedAt: state?.startedAt ?? null,
+      completedAt: state?.completedAt ?? null,
+      progress: this.#held(person),
+      interviewId: code.linkId,
+    };
+  }
+
+  /** What Grasp's staff see of where the interviews stand: exact, by person. */
+  staffFacts(): {
+    sent: { person: string; sentAt: string }[];
+    interviews: InterviewState[];
+  } {
+    return {
+      sent: this.#db
+        .select({ person: links.person, sentAt: links.sentAt })
+        .from(links)
+        .all(),
+      interviews: [...this.#interviews().values()],
+    };
   }
 
   /**
