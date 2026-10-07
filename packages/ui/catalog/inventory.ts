@@ -6,6 +6,10 @@
  * components directory exports, so it can't claim more than is there.
  *
  * Every module is imported as `@grasp-os/ui/components/<name>`.
+ *
+ * It lives outside `src` on purpose: every source in `src` is built into
+ * the kit's modules that screens load (packages/compiler/build.ts), and the
+ * inventory is for agents, not for screens.
  */
 
 /**

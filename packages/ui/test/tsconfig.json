@@ -4,5 +4,5 @@
     // The tests read the components directory from disk.
     "types": ["node"]
   },
-  "include": [".", "../src"]
+  "include": [".", "../src", "../catalog"]
 }

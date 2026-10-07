@@ -3,8 +3,8 @@ import path from "node:path";
 
 import { describe, expect, it } from "vite-plus/test";
 
-import { graspComponents, shadcnComponents } from "../src/catalog.ts";
-import type { CatalogEntry } from "../src/catalog.ts";
+import { graspComponents, shadcnComponents } from "../catalog/inventory.ts";
+import type { CatalogEntry } from "../catalog/inventory.ts";
 
 // The inventory against what the kit really exports: screens import
 // `@grasp-os/ui/components/<name>`, one module per file of the components
