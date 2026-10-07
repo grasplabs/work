@@ -171,6 +171,16 @@ const production = {
   "process.env.NODE_ENV": JSON.stringify("production"),
 };
 
+/**
+ * The export conditions the kit's packages resolve by, the production ones
+ * whatever `NODE_ENV` is (see `production`). Vite picks `development` or
+ * `production` by `NODE_ENV`, and some packages (Radix, under cmdk) ship
+ * a build for each.
+ */
+const kitResolve = {
+  conditions: ["module", "browser", "production"],
+};
+
 /** A CommonJS package as it loads in production (see `production`). */
 const requireProduction = (specifier: string): unknown => {
   const { NODE_ENV: before } = process.env;
@@ -337,6 +347,7 @@ const buildKitModules = async (entries: Entry[]): Promise<FlatModules> => {
     logLevel: "warn",
     mode: "production",
     define: production,
+    resolve: kitResolve,
     // Babel compiles TypeScript here, with the React Compiler.
     oxc: false,
     plugins: [reactEntries, reactCompiler],
