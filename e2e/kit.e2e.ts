@@ -130,3 +130,44 @@ test("a page sidebar folds from the keyboard and stays folded over a reload", as
     documents.getByRole("button", { name: "Pricing" })
   ).toContainText("Pricing");
 });
+
+test("the dot brain prints every figure, and on a phone too", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/kit");
+  const card = page
+    .locator('[data-slot="card"]')
+    .filter({ has: page.getByText("Dot brain", { exact: true }) });
+  const figures = card.locator("figure");
+  await expect(figures).toHaveCount(11);
+  // Each figure's dots are on its canvas: the fewest any of them printed.
+  await expect
+    .poll(
+      async () =>
+        await figures.locator("canvas").evaluateAll((canvases) =>
+          Math.min(
+            ...canvases.map((canvas) => {
+              if (!(canvas instanceof HTMLCanvasElement)) {
+                return 0;
+              }
+              const pixels =
+                canvas
+                  .getContext("2d")
+                  ?.getImageData(0, 0, canvas.width, canvas.height).data ?? [];
+              let printed = 0;
+              for (let at = 3; at < pixels.length; at += 4) {
+                printed += (pixels[at] ?? 0) > 0 ? 1 : 0;
+              }
+              return printed;
+            })
+          )
+        )
+    )
+    .toBeGreaterThan(500);
+  // None runs off a phone's screen.
+  const rights = await figures.evaluateAll((all) =>
+    all.map((figure) => figure.getBoundingClientRect().right)
+  );
+  expect(Math.max(...rights)).toBeLessThanOrEqual(390);
+});
