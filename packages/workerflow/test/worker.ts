@@ -3,6 +3,7 @@
 import type {
   DefinitionIdentity,
   WorkflowDefinition,
+  WorkflowDuration,
 } from "../src/contracts.ts";
 import { namedError } from "../src/errors.ts";
 import { WorkflowRun } from "../src/run.ts";
@@ -15,6 +16,38 @@ const errorOf = (error: unknown): { name: string; message: string } =>
 
 const declinedCard = (): Error =>
   namedError("PaymentError", "The card was declined");
+
+/** A field of a run's params, as the test passed it. */
+const paramOf = (params: unknown, field: string): unknown =>
+  typeof params === "object" && params !== null && field in params
+    ? Reflect.get(params, field)
+    : undefined;
+
+/** The `duration` in a run's params, or `fallback`. */
+const durationIn = (
+  params: unknown,
+  fallback: WorkflowDuration
+): WorkflowDuration => {
+  const duration = paramOf(params, "duration");
+  if (typeof duration !== "number" && typeof duration !== "string") {
+    return fallback;
+  }
+  // SAFETY: whatever the test passed, unchecked here: the engine is what
+  // checks it.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return duration as WorkflowDuration;
+};
+
+/** Grasp's transport shape: a call's rejection, turned into a value. */
+const settled = async (
+  call: () => Promise<unknown>
+): Promise<{ ok: true; value: unknown } | { ok: false; error: unknown }> => {
+  try {
+    return { ok: true, value: await call() };
+  } catch (error) {
+    return { ok: false, error };
+  }
+};
 
 /** An object with no prototype: `String()` of it throws. */
 const unprintableValue = (): unknown => {
@@ -213,6 +246,118 @@ export const definitions: Record<string, WorkflowDefinition> = {
       };
       void late();
       return await Promise.resolve("done");
+    },
+  },
+  // A step, a sleep of the duration in the params, another step.
+  napper: {
+    run: async (event, step) => {
+      const before = await step.do(
+        "before",
+        async (context) => await effect(event.instanceId, "before", context)
+      );
+      await step.sleep("nap", durationIn(event.payload, "1 hour"));
+      const after = await step.do(
+        "after",
+        async (context) => await effect(event.instanceId, "after", context)
+      );
+      return { before, after };
+    },
+  },
+  // A sleep until the time in the params.
+  "sleeps-until": {
+    run: async (event, step) => {
+      const at: unknown = paramOf(event.payload, "at");
+      // As an author passing whatever they were given would.
+      await Reflect.apply(step.sleepUntil, step, ["until", at]);
+      return "woke";
+    },
+  },
+  // A step, a wait for an "approved" event, another step.
+  approval: {
+    run: async (event, step) => {
+      await step.do(
+        "before",
+        async (context) => await effect(event.instanceId, "before", context)
+      );
+      const approved = await step.waitForEvent("approval", {
+        type: "approved",
+        timeout: durationIn(event.payload, "1 hour"),
+      });
+      const after = await step.do(
+        "after",
+        async (context) => await effect(event.instanceId, "after", context)
+      );
+      return { approved, after };
+    },
+  },
+  // Two waits for the same event type.
+  votes: {
+    run: async (event, step) => {
+      await step.do(
+        "before",
+        async (context) => await effect(event.instanceId, "before", context)
+      );
+      const first = await step.waitForEvent("first", { type: "vote" });
+      const second = await step.waitForEvent("second", { type: "vote" });
+      return [first.payload, second.payload];
+    },
+  },
+  // A wait with the timeout in the params; when it runs out, the author
+  // catches that and waits again for the same type.
+  deadline: {
+    run: async (event, step) => {
+      try {
+        const reply = await step.waitForEvent("reply", {
+          type: "reply",
+          timeout: durationIn(event.payload, "1 hour"),
+        });
+        return { reply: reply.payload };
+      } catch (error) {
+        const later = await step.waitForEvent("later", { type: "reply" });
+        return { timedOut: errorOf(error), later: later.payload };
+      }
+    },
+  },
+  // An author who tries every way there is to hear of a wait that hasn't
+  // ended: catch and finally, a transport that turns rejections into
+  // values, and a sibling that rejects under Promise.allSettled.
+  guarded: {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      const how: unknown = paramOf(event.payload, "how");
+      await step.do(
+        "before",
+        async (context) => await effect(instanceId, "before", context)
+      );
+      const wait = async (): Promise<unknown> => {
+        if (how === "sleep") {
+          await step.sleep("held", "1 hour");
+          return undefined;
+        }
+        return await step.waitForEvent("held", { type: "go" });
+      };
+      if (how === "settled") {
+        const outcome = await settled(wait);
+        witness(instanceId, outcome.ok ? "settled-ok" : "settled-error");
+        return outcome.ok;
+      }
+      if (how === "children") {
+        const results = await Promise.allSettled([
+          wait(),
+          Promise.reject(namedError("ChildError", "a child failed")),
+        ]);
+        witness(instanceId, "all-settled");
+        return results.map((result) => result.status);
+      }
+      try {
+        await wait();
+        witness(instanceId, "returned");
+      } catch {
+        witness(instanceId, "caught");
+      } finally {
+        witness(instanceId, "finally");
+      }
+      return "done";
     },
   },
 };

@@ -5,6 +5,7 @@ import { Workflow } from "../src/binding.ts";
 import type { InstanceStatus } from "../src/contracts.ts";
 import { runObjectName } from "../src/identity.ts";
 import type { Journal } from "../src/journal.ts";
+import { WorkflowRun } from "../src/run.ts";
 import type { TestRuns } from "./worker.ts";
 
 const pollMs = 10;
@@ -74,6 +75,53 @@ export const alarmOf = async (
     runObject(definition, id),
     async (_, state) => await state.storage.getAlarm()
   );
+
+/** Waits until the run is suspended, and returns its journal then. */
+export const suspendedOn = async (
+  definition: string,
+  id: string,
+  step: string
+): Promise<{ journal: Journal; deadline: number }> =>
+  await until(`run ${id} to wait at ${step}`, async () => {
+    const journal = await journalOf(definition, id);
+    const waiting = journal.steps.find(
+      (row) => row.name === step && row.state === "waiting"
+    );
+    return journal.run.status === "waiting" &&
+      typeof waiting?.deadline === "number"
+      ? { journal, deadline: waiting.deadline }
+      : undefined;
+  });
+
+/** Waits until the clock is past `time`. */
+export const pastTime = async (time: number): Promise<void> => {
+  await until(`the clock to pass ${time}`, () =>
+    Date.now() > time ? true : undefined
+  );
+};
+
+/**
+ * Holds back the run's alarm until `time`, as a host that delivers it late
+ * would; `before` runs first, with no event of the object in between.
+ */
+export const holdAlarmUntil = async (
+  definition: string,
+  id: string,
+  time: number,
+  before: (run: WorkflowRun) => Promise<unknown> = async () => {
+    await Promise.resolve();
+  }
+): Promise<void> => {
+  await runInDurableObject(runObject(definition, id), async (run, state) => {
+    if (!(run instanceof WorkflowRun)) {
+      throw new TypeError("the object isn't a run object");
+    }
+    await state.blockConcurrencyWhile(async () => {
+      await before(run);
+      await state.storage.setAlarm(time);
+    });
+  });
+};
 
 /** Sends the run an alarm of its own, as a duplicate delivery would. */
 export const deliverAlarm = async (

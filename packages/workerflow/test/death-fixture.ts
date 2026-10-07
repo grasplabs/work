@@ -30,6 +30,12 @@ const reportCommitPrefix = "report-commit-";
 /** Short, so recovery after a kill takes about a second, not a minute. */
 const testLeaseMs = 1000;
 
+/**
+ * Long enough for a test to see the run asleep and kill or evict it, short
+ * enough to wait out.
+ */
+const napMs = 3000;
+
 const effect = async (
   env: FixtureEnv,
   run: string,
@@ -86,6 +92,41 @@ const definitionsFor = (
           await effect(env, event.instanceId, "notify", context)
       );
       return { declined, notified };
+    },
+  },
+  // A step, a sleep of a few seconds, another step.
+  napper: {
+    run: async (event, step) => {
+      const before = await step.do(
+        "before",
+        async (context) =>
+          await effect(env, event.instanceId, "before", context)
+      );
+      await step.sleep("nap", napMs);
+      const after = await step.do(
+        "after",
+        async (context) => await effect(env, event.instanceId, "after", context)
+      );
+      return { before, after };
+    },
+  },
+  // A step, a wait for an "approved" event, another step.
+  approval: {
+    run: async (event, step) => {
+      await step.do(
+        "before",
+        async (context) =>
+          await effect(env, event.instanceId, "before", context)
+      );
+      const approved = await step.waitForEvent("approval", {
+        type: "approved",
+        timeout: "1 minute",
+      });
+      const after = await step.do(
+        "after",
+        async (context) => await effect(env, event.instanceId, "after", context)
+      );
+      return { approved: approved.payload, after };
     },
   },
 });
@@ -155,6 +196,31 @@ const start = async (env: FixtureEnv, body: StartBody): Promise<Response> => {
   }
 };
 
+interface EventBody {
+  definition: string;
+  id: string;
+  type: string;
+  payload?: unknown;
+  key?: string;
+}
+
+const sendEvent = async (
+  env: FixtureEnv,
+  body: EventBody
+): Promise<Response> => {
+  try {
+    const instance = await new Workflow(env.RUNS, body.definition).get(body.id);
+    const event = { type: body.type, payload: body.payload };
+    if (body.key === undefined) {
+      await instance.sendEvent(event);
+      return json({ accepted: true });
+    }
+    return json(await instance.deliverEvent({ ...event, key: body.key }));
+  } catch (error) {
+    return json({ error: errorText(error) }, 409);
+  }
+};
+
 export default {
   fetch: async (request: Request, env: FixtureEnv): Promise<Response> => {
     const url = new URL(request.url);
@@ -165,6 +231,10 @@ export default {
     if (url.pathname === "/start") {
       // The test harness sends this shape.
       return await start(env, await request.json<StartBody>());
+    }
+    if (url.pathname === "/event") {
+      // The test harness sends this shape.
+      return await sendEvent(env, await request.json<EventBody>());
     }
     const definition = url.searchParams.get("definition") ?? "";
     const id = url.searchParams.get("id") ?? "";
