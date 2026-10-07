@@ -56,6 +56,7 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
+import { Input } from "@grasp-os/ui/components/input";
 import {
   Item,
   ItemContent,
@@ -153,25 +154,50 @@ const CardDemo = () => (
 const slides = ["First", "Second", "Third"];
 
 const CarouselDemo = () => (
-  // Room for the buttons, which sit outside the slides.
-  <div className="px-12">
-    <Carousel>
-      <CarouselContent>
-        {slides.map((slide) => (
-          <CarouselItem key={slide}>
-            <Card>
-              <CardContent>
-                <p className="flex h-32 items-center justify-center text-lg">
-                  {slide} slide
-                </p>
-              </CardContent>
-            </Card>
-          </CarouselItem>
-        ))}
-      </CarouselContent>
-      <CarouselPrevious />
-      <CarouselNext />
-    </Carousel>
+  <div className="flex flex-col gap-6">
+    {/* Room for the buttons, which sit outside the slides. */}
+    <div className="px-12">
+      <Carousel>
+        <CarouselContent>
+          {slides.map((slide) => (
+            <CarouselItem key={slide}>
+              <Card>
+                <CardContent>
+                  <div className="flex h-32 flex-col items-center justify-center gap-2">
+                    <p className="text-lg">{slide} slide</p>
+                    {/* The arrow keys move the cursor here, not the slide. */}
+                    <Input
+                      aria-label={`${slide} slide note`}
+                      defaultValue="Note"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            </CarouselItem>
+          ))}
+        </CarouselContent>
+        <CarouselPrevious />
+        <CarouselNext />
+      </Carousel>
+    </div>
+    {/* Vertical: up and down move between the slides. */}
+    <div className="py-12">
+      <Carousel orientation="vertical" opts={{ align: "start" }}>
+        <CarouselContent className="h-40">
+          {slides.map((slide) => (
+            <CarouselItem key={slide} className="basis-1/2">
+              <Card>
+                <CardContent>
+                  <p className="text-sm">{slide} card</p>
+                </CardContent>
+              </Card>
+            </CarouselItem>
+          ))}
+        </CarouselContent>
+        <CarouselPrevious label="Previous card" />
+        <CarouselNext label="Next card" />
+      </Carousel>
+    </div>
   </div>
 );
 

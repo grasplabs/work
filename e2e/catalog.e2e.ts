@@ -328,6 +328,32 @@ const keyboardChecks: Record<string, (page: Page) => Promise<void>> = {
       alignment.getByRole("button", { name: "Center" })
     ).toBeFocused();
   },
+  // Arrow keys in a field inside a slide move the cursor, not the slide;
+  // a vertical carousel moves with ArrowDown.
+  carousel: async (page) => {
+    const note = page.getByRole("textbox", { name: "First slide note" });
+    await note.focus();
+    await page.keyboard.press("End");
+    await page.keyboard.press("ArrowLeft");
+    expect(
+      await note.evaluate(
+        (input) => input instanceof HTMLInputElement && input.selectionStart
+      )
+    ).toBe(3);
+    await expect(
+      page.getByRole("button", { name: "Previous slide" })
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Next slide" })
+    ).toBeEnabled();
+
+    const next = page.getByRole("button", { name: "Next card" });
+    await next.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(
+      page.getByRole("button", { name: "Previous card" })
+    ).toBeEnabled();
+  },
   // A single value is one thumb.
   slider: async (page) => {
     await expect(page.getByRole("main").getByRole("slider")).toHaveCount(1);
