@@ -15,6 +15,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { asClaire } from "../src/onboarding/claire.ts";
 import { interviewerText } from "../src/onboarding/interviewer-text.ts";
 import type { InterviewerText } from "../src/onboarding/interviewer-text.ts";
+import { labMarks } from "../src/onboarding/lab-marks.ts";
 
 // What the model that holds an interview is told (src/onboarding/): the
 // same text the Stephen Lab measures, in five languages, for Stephen and
@@ -27,6 +28,8 @@ import type { InterviewerText } from "../src/onboarding/interviewer-text.ts";
 //   wrong form of address.
 // - A mark that doesn't name its text: two texts with one mark, or a mark
 //   the lab can't work out from the text alone.
+// - A word changed here and not in the lab: a text whose mark the lab
+//   never measured.
 
 interface Which {
   interviewer: Interviewer;
@@ -209,6 +212,15 @@ describe("the interview", () => {
 });
 
 describe("the mark", () => {
+  it.each(everyText)(
+    "is one the lab measured, so no word changes outside the lab ($interviewer, $kind, $locale)",
+    (which) => {
+      expect(textOf(which).mark).toBe(
+        labMarks[which.interviewer][which.kind][which.locale]
+      );
+    }
+  );
+
   it.each(everyText)(
     "is the SHA-256 of the text the model gets ($interviewer, $kind, $locale)",
     async (which) => {
