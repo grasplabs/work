@@ -3,6 +3,8 @@
 @import "@fontsource-variable/geist";
 
 @source "../";
+/* The kit's demos and examples, shown on the local kit pages (routes/kit_.*). */
+@source "../../../packages/ui/catalog";
 
 /*
  * Base UI hides native scrollbars (a Select's list) with this class and an

@@ -6,6 +6,8 @@
   "type": "module",
   "exports": {
     "./catalog": "./catalog/inventory.ts",
+    "./catalog/demos": "./catalog/demos.ts",
+    "./catalog/examples": "./catalog/examples.ts",
     "./components/*": "./src/components/*.tsx",
     "./lib/*": "./src/lib/*.ts",
     "./hooks/*": "./src/hooks/*.ts",
