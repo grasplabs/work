@@ -54,5 +54,15 @@
       "namespace_id": "1002",
       "simple": { "limit": 30, "period": 60 },
     },
+    // An interview link's endpoint (/api/interview), per hostname and
+    // client address: 300 a minute, as for sign-in, since a whole office
+    // behind one address may be in their interviews at once, each saving
+    // after every answer; a flood of guessed links is cut to five a
+    // second. Core counts calls per link as well.
+    {
+      "name": "INTERVIEW_RATE_LIMIT",
+      "namespace_id": "1003",
+      "simple": { "limit": 300, "period": 60 },
+    },
   ],
 }
