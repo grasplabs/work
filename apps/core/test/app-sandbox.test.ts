@@ -702,7 +702,8 @@ describe("App server code", { timeout: 60_000 }, () => {
     const app = await sampleApp(admin);
     await requestGranted(idp, admin, outlook(app));
     const caller = as(admin.userId);
-    await callApp(env, app, caller, "label");
+    // Module state the code holds before: none of it is there after.
+    const countBefore = await callApp(env, app, caller, "count");
 
     // A busy loop ends at the CPU limit, which the platform enforces and
     // workerd doesn't; a call that waits too long is given up on, and the
@@ -737,12 +738,41 @@ describe("App server code", { timeout: 60_000 }, () => {
       alongside: await alongsideCall,
       afterAnswer,
       notes: await callApp(env, app, caller, "notes"),
+      counts: [countBefore, await callApp(env, app, caller, "count")],
     }).toStrictEqual({
       timedOut: "app.timed_out",
       alongside: "app.failed",
       afterAnswer: reached,
       notes: ["after"],
+      // A new isolate: the count starts again.
+      counts: [1, 1],
     });
+  });
+
+  it("runs a call through an export only on the code it was pinned to, not the same version restarted", async () => {
+    const admin = await personApi("admin");
+    const app = await sampleApp(admin);
+    const caller = as(admin.userId);
+    await callApp(env, app, caller, "label");
+
+    // As the call is recorded, the App's code is restarted, on the same
+    // version, and started again by another call.
+    const pinned = await outcome(
+      appHost(env, app).call(caller, "remember", ["pinned"], {
+        version: 1,
+        chain: [],
+        deadline: Date.now() + 10_000,
+        readOnly: false,
+        onPinned: async () => {
+          await appHost(env, app).restart("A test restarts it.");
+          await callApp(env, app, caller, "label");
+        },
+      })
+    );
+    expect({
+      pinned,
+      notes: await callApp(env, app, caller, "notes"),
+    }).toStrictEqual({ pinned: "app.conflict", notes: [] });
   });
 
   it("can't be stopped by another App calling it just before its own call ends", async () => {
