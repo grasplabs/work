@@ -648,22 +648,32 @@ describe("model gateway", { timeout: 30_000 }, () => {
 
   it("leaves no timer behind once a call has answered", async () => {
     const { gatewayEnv } = withGateway([answer("Hello.")]);
-    // Only the timers: everything else, the gateway's stream included,
-    // runs as it would.
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // The call's own deadline, told apart from any other timer the isolate
+    // sets meanwhile (an outbox drain, say) by a timeout nothing else uses.
+    const timeoutMs = 47_123;
+    const set = vi.spyOn(globalThis, "setTimeout");
+    const cleared = vi.spyOn(globalThis, "clearTimeout");
     try {
       await models(gatewayEnv).call({
         model: anthropic,
         input: "Hello.",
+        timeoutMs,
         purpose: "chat.turn",
         trigger: newPerson(),
         work: work(),
       });
 
       // A timer left would keep a Durable Object awake for the timeout.
-      expect(vi.getTimerCount()).toBe(0);
+      const ours = set.mock.calls.flatMap(([, delay], index): unknown[] =>
+        delay === timeoutMs ? [set.mock.results[index]?.value] : []
+      );
+      expect(ours).toHaveLength(1);
+      expect(cleared.mock.calls.map(([handle]) => handle)).toStrictEqual(
+        expect.arrayContaining(ours)
+      );
     } finally {
-      vi.useRealTimers();
+      set.mockRestore();
+      cleared.mockRestore();
     }
   });
 
