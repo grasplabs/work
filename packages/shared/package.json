@@ -34,6 +34,7 @@
     "./memory": "./src/memory.ts",
     "./models": "./src/models.ts",
     "./notifications": "./src/notifications.ts",
+    "./onboarding": "./src/onboarding.ts",
     "./permissions": "./src/permissions.ts",
     "./platform-change": "./src/platform-change.ts",
     "./release": "./src/release.ts",
