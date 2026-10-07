@@ -7,7 +7,11 @@ import {
   dueLinks,
   progressOf,
 } from "../src/onboarding/rules.ts";
-import type { InterviewState, LinkFacts } from "../src/onboarding/rules.ts";
+import type {
+  InterviewState,
+  LinkFacts,
+  TeamCount,
+} from "../src/onboarding/rules.ts";
 
 // The onboarding's rules (src/onboarding/rules.ts): whose links are due,
 // and what the company's admin may see. Pure logic, so tested on its own.
@@ -141,41 +145,81 @@ describe("whose links are due", () => {
   });
 });
 
+const counts = (
+  ...rows: [team: string, day: string, asked: number, talked: number][]
+): TeamCount[] =>
+  rows.map(([team, day, asked, talked]) => ({ team, day, asked, talked }));
+
 describe("what the company's admin sees", () => {
-  it("shows a team of five or more its numbers, and a smaller team none", () => {
+  it("shows a team its numbers once five were asked, and none before", () => {
     const progress = progressOf(
       roster,
-      completed(["sam", at("2026-10-13")]),
+      new Map(),
+      counts(["sales", "2026-10-12", 5, 2], ["ops", "2026-10-12", 2, 1]),
       at("2026-10-14")
     );
     const [sales, ops] = progress.teams;
-    expect(sales).toMatchObject({ people: 6, talked: 1, asked: 4 });
+    expect(sales).toMatchObject({ people: 6, talked: 2, asked: 5 });
     expect(ops).toMatchObject({ people: 2, talked: null, asked: null });
     // Together, only the teams that are shown count.
-    expect(progress).toMatchObject({ talked: 1, asked: 4 });
+    expect(progress).toMatchObject({ talked: 2, asked: 5 });
+  });
+
+  it("shows nothing of a team of five where fewer than five were asked: its lead and those away aren't asked", () => {
+    const progress = progressOf(
+      roster,
+      new Map(),
+      counts(["sales", "2026-10-12", 1, 1]),
+      at("2026-10-14")
+    );
+    expect(progress.teams[0]).toMatchObject({ talked: null, asked: null });
   });
 
   it("moves its numbers once a day, so two looks can't tell who just talked", () => {
-    const interviews = completed(
-      ["sam", at("2026-10-13")],
-      ["sid", at("2026-10-14", "08:00:00")]
+    const tallies = counts(
+      ["sales", "2026-10-12", 5, 1],
+      ["sales", "2026-10-14", 0, 1]
     );
     const morning = progressOf(
       roster,
-      interviews,
+      new Map(),
+      tallies,
       at("2026-10-14", "07:00:00")
     );
-    const noon = progressOf(roster, interviews, at("2026-10-14", "12:00:00"));
-    const tomorrow = progressOf(roster, interviews, at("2026-10-15"));
+    const noon = progressOf(
+      roster,
+      new Map(),
+      tallies,
+      at("2026-10-14", "12:00:00")
+    );
+    const tomorrow = progressOf(roster, new Map(), tallies, at("2026-10-15"));
     expect(noon.talked).toBe(morning.talked);
     expect(noon.asOf).toBe("2026-10-14");
     expect(tomorrow.talked).toBe(morning.talked + 1);
+  });
+
+  it("moves no number when the roster changes: someone marked away or gone", () => {
+    const tallies = counts(["sales", "2026-10-12", 5, 3]);
+    const edited: Roster = {
+      ...roster,
+      people: roster.people
+        .filter(({ id }) => id !== "sid")
+        .map((one) => (one.id === "sam" ? { ...one, away: true } : one)),
+    };
+    const before = progressOf(roster, new Map(), tallies, at("2026-10-14"));
+    const after = progressOf(edited, new Map(), tallies, at("2026-10-14"));
+    expect(after.teams[0]).toMatchObject({
+      talked: before.teams[0]?.talked,
+      asked: before.teams[0]?.asked,
+    });
+    expect(after.talked).toBe(before.talked);
   });
 
   it("says whether each lead talked, and counts the leads apart", () => {
     const progress = progressOf(
       roster,
       completed(["lea", at("2026-10-12")]),
+      [],
       at("2026-10-13")
     );
     expect(progress.teams[0]?.leadTalked).toBeTruthy();

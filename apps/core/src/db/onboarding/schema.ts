@@ -65,6 +65,11 @@ export const people = sqliteTable("people", {
 export const links = sqliteTable("links", {
   person: text().primaryKey(),
   sentAt: text("sent_at").notNull(),
+  /**
+   * The team the person was counted as asked in when their link went out
+   * (`teamCounts`); `null` for a lead, who is counted apart.
+   */
+  countedIn: text("counted_in"),
   openedAt: text("opened_at"),
   remindedAt: text("reminded_at"),
 });
@@ -82,6 +87,24 @@ export const interviewStates = sqliteTable("interview_states", {
   completedAt: text("completed_at"),
   updatedAt: text("updated_at").notNull(),
 });
+
+/**
+ * How many were asked and how many talked, by team and by the day it
+ * happened: what the company's admin reads, as numbers that only ever grow.
+ * A person is counted in the team they were in when their link went out,
+ * and stays counted whatever the roster says later, so editing it (someone
+ * marked away, moved or removed) can't tell the admin whether they talked.
+ */
+export const teamCounts = sqliteTable(
+  "team_counts",
+  {
+    team: text().notNull(),
+    day: text().notNull(),
+    asked: integer().notNull(),
+    talked: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.team, table.day] })]
+);
 
 /**
  * What happened in the onboarding, and who did it: Grasp's staff, the

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "efbb9712-4b99-4717-8d28-423b8c5ddae5",
+  "id": "38f7534e-f31f-4e22-ba89-842b3e6bba1a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "audit_outbox": {
@@ -142,6 +142,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "counted_in": {
+          "name": "counted_in",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "opened_at": {
           "name": "opened_at",
           "type": "text",
@@ -262,6 +269,52 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "team_counts": {
+      "name": "team_counts",
+      "columns": {
+        "team": {
+          "name": "team",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "day": {
+          "name": "day",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "asked": {
+          "name": "asked",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "talked": {
+          "name": "talked",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "team_counts_team_day_pk": {
+          "columns": [
+            "team",
+            "day"
+          ],
+          "name": "team_counts_team_day_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

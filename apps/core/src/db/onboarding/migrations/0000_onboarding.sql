@@ -23,6 +23,7 @@ CREATE TABLE `interview_states` (
 CREATE TABLE `links` (
 	`person` text PRIMARY KEY NOT NULL,
 	`sent_at` text NOT NULL,
+	`counted_in` text,
 	`opened_at` text,
 	`reminded_at` text
 );
@@ -43,6 +44,14 @@ CREATE TABLE `people` (
 	`team` text NOT NULL,
 	`title` text NOT NULL,
 	`away` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE `team_counts` (
+	`team` text NOT NULL,
+	`day` text NOT NULL,
+	`asked` integer NOT NULL,
+	`talked` integer NOT NULL,
+	PRIMARY KEY(`team`, `day`)
 );
 --> statement-breakpoint
 CREATE TABLE `teams` (

@@ -142,55 +142,65 @@ export const dueLinks = (
         .filter((person) => isDue(roster, plan, facts, person, now))
         .map((person) => person.id);
 
+/** How many were asked and talked in a team on one day. */
+export interface TeamCount {
+  team: string;
+  day: string;
+  asked: number;
+  talked: number;
+}
+
 /**
  * Where the interviews stand, as the company's admin may see it: how many
- * talked, never who; numbers only for teams of `minTeamShown` or more; and
- * only interviews agreed to before today, so the numbers move once a day
- * and two looks can't tell who just talked.
+ * were asked and how many talked, never who. The counts are tallies that
+ * only grow, kept by the team someone was in when their link went out, so
+ * editing the roster afterwards (someone marked away, moved, removed)
+ * moves no number. They count only what happened before today, so they
+ * move once a day and two looks can't tell who just talked. A team shows
+ * its numbers only once `minTeamShown` people in it were asked.
  */
 export const progressOf = (
   roster: Roster,
   interviews: ReadonlyMap<string, InterviewState>,
+  counts: readonly TeamCount[],
   now: string
 ): OnboardingProgress => {
   const asOf = dayOf(now);
-  const done = (person: string | null): boolean => {
+  const before = counts.filter(({ day }) => day < asOf);
+  const tally = (team: string) => {
+    const sum = { asked: 0, talked: 0 };
+    for (const count of before) {
+      if (count.team === team) {
+        sum.asked += count.asked;
+        sum.talked += count.talked;
+      }
+    }
+    return sum;
+  };
+  const leadDone = (lead: string | null): boolean => {
     const completed =
-      person === null ? null : (interviews.get(person)?.completedAt ?? null);
+      lead === null ? null : (interviews.get(lead)?.completedAt ?? null);
     return completed !== null && dayOf(completed) < asOf;
   };
-  const shownTeams = new Set<string>();
   const teams = roster.teams.map((team): TeamProgress => {
-    const members = roster.people.filter((person) => person.team === team.id);
-    const asked = members.filter(
-      (person) => !person.away && person.id !== team.lead
-    );
-    const shown = members.length >= minTeamShown && !team.off;
-    if (shown) {
-      shownTeams.add(team.id);
-    }
+    const { asked, talked } = tally(team.id);
+    const shown = !team.off && asked >= minTeamShown;
     return {
       id: team.id,
       name: team.name,
-      people: members.length,
+      people: roster.people.filter((person) => person.team === team.id).length,
       off: team.off,
-      leadTalked: done(team.lead),
-      talked: shown ? asked.filter((person) => done(person.id)).length : null,
-      asked: shown ? asked.length : null,
+      leadTalked: leadDone(team.lead),
+      talked: shown ? talked : null,
+      asked: shown ? asked : null,
     };
   });
-  const askedAll = roster.people.filter(
-    (person) =>
-      shownTeams.has(person.team) &&
-      takingPart(roster, person) &&
-      !leads(roster, person.id)
-  );
   const taking = roster.teams.filter((team) => !team.off && team.lead !== null);
   return {
     teams,
-    talked: askedAll.filter((person) => done(person.id)).length,
-    asked: askedAll.length,
-    leadsTalked: taking.filter((team) => done(team.lead)).length,
+    talked: teams.reduce((sum, team) => sum + (team.talked ?? 0), 0),
+    asked: teams.reduce((sum, team) => sum + (team.asked ?? 0), 0),
+    leadsTalked: taking.filter((team) => leadDone(team.lead)).length,
     leads: taking.length,
     asOf,
   };

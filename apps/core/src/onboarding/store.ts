@@ -21,6 +21,7 @@ import {
   links,
   onboarding,
   people,
+  teamCounts,
   teams,
   usage,
 } from "../db/onboarding/schema.ts";
@@ -32,7 +33,7 @@ import {
   sendsFrom,
   takingPart,
 } from "./rules.ts";
-import type { InterviewState } from "./rules.ts";
+import type { InterviewState, TeamCount } from "./rules.ts";
 
 // The onboarding's store: one Durable Object per deployment holds who works
 // where, the plan, everyone's link and where each interview stands, the log
@@ -45,8 +46,8 @@ import type { InterviewState } from "./rules.ts";
 //   or before the agreements are in: the alarm releases links, and only
 //   while `isOpen()`, by the plan's moments (`dueLinks`).
 // - The admin's numbers singling someone out: `view()` returns numbers
-//   only, none for a team under five, and moves them once a day
-//   (`progressOf`).
+//   only, none for a team until five were asked, moving once a day, from
+//   tallies that editing the roster doesn't move (`progressOf`).
 // - A roster past its limits: refused by `rosterSchema` before it reaches
 //   here (rpc.ts).
 // - A change without a trace: every change by the admin or staff is in the
@@ -98,6 +99,8 @@ export class Onboarding extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     migrateOnWake(ctx, migrations);
+    // The one row everything else updates, there before anything asks.
+    this.#db.insert(onboarding).values({ id: 1 }).onConflictDoNothing().run();
   }
 
   /** The onboarding as its admin sees it. */
@@ -108,7 +111,9 @@ export class Onboarding extends DurableObject<Env> {
       roster,
       plan: row.plan,
       progress:
-        roster === null ? null : progressOf(roster, this.#interviews(), now),
+        roster === null
+          ? null
+          : progressOf(roster, this.#interviews(), this.#counts(), now),
       agreed: agreementsIn(row.agreements),
       paused: row.pausedAt !== null,
     };
@@ -238,19 +243,38 @@ export class Onboarding extends DurableObject<Env> {
     completedAt: string | null;
   }): void {
     const updatedAt = new Date().toISOString();
-    this.#db
-      .insert(interviewStates)
-      .values({ ...state, updatedAt })
-      .onConflictDoUpdate({
-        target: interviewStates.person,
-        set: {
-          kind: state.kind,
-          startedAt: state.startedAt,
-          completedAt: state.completedAt,
-          updatedAt,
-        },
-      })
-      .run();
+    this.ctx.storage.transactionSync(() => {
+      const [was] = this.#db
+        .select({ completedAt: interviewStates.completedAt })
+        .from(interviewStates)
+        .where(eq(interviewStates.person, state.person))
+        .all();
+      this.#db
+        .insert(interviewStates)
+        .values({ ...state, updatedAt })
+        .onConflictDoUpdate({
+          target: interviewStates.person,
+          set: {
+            kind: state.kind,
+            startedAt: state.startedAt,
+            completedAt: state.completedAt,
+            updatedAt,
+          },
+        })
+        .run();
+      // Their first agreement counts once, in the team they were asked in.
+      const [link] = this.#db
+        .select({ countedIn: links.countedIn })
+        .from(links)
+        .where(eq(links.person, state.person))
+        .all();
+      const { completedAt } = state;
+      const countedIn = link?.countedIn ?? null;
+      const firstAgreed = (was?.completedAt ?? null) === null;
+      if (firstAgreed && completedAt !== null && countedIn !== null) {
+        this.#count(countedIn, completedAt, { talked: 1 });
+      }
+    });
   }
 
   /** People whose link went out, and when: for the links themselves (GRA-287) and the admin's list. */
@@ -321,7 +345,13 @@ export class Onboarding extends DurableObject<Env> {
     }
     this.ctx.storage.transactionSync(() => {
       for (const person of due) {
-        this.#db.insert(links).values({ person, sentAt: now }).run();
+        const team = roster.people.find(({ id }) => id === person)?.team;
+        const lead = roster.teams.some(({ lead: led }) => led === person);
+        const countedIn = team === undefined || lead ? null : team;
+        this.#db.insert(links).values({ person, sentAt: now, countedIn }).run();
+        if (countedIn !== null) {
+          this.#count(countedIn, now, { asked: 1 });
+        }
       }
       this.#changed({ type: "system" }, "onboarding.links.sent", {
         count: due.length,
@@ -392,7 +422,6 @@ export class Onboarding extends DurableObject<Env> {
     agreements: Agreements | null;
     pausedAt: string | null;
   } {
-    this.#db.insert(onboarding).values({ id: 1 }).onConflictDoNothing().run();
     const [row] = this.#db
       .select()
       .from(onboarding)
@@ -441,6 +470,31 @@ export class Onboarding extends DurableObject<Env> {
           away,
         })),
     };
+  }
+
+  /** Adds to a team's tally for the day `at` falls on. */
+  #count(
+    team: string,
+    at: string,
+    add: { asked?: number; talked?: number }
+  ): void {
+    const asked = add.asked ?? 0;
+    const talked = add.talked ?? 0;
+    this.#db
+      .insert(teamCounts)
+      .values({ team, day: at.slice(0, 10), asked, talked })
+      .onConflictDoUpdate({
+        target: [teamCounts.team, teamCounts.day],
+        set: {
+          asked: sql`${teamCounts.asked} + ${asked}`,
+          talked: sql`${teamCounts.talked} + ${talked}`,
+        },
+      })
+      .run();
+  }
+
+  #counts(): TeamCount[] {
+    return this.#db.select().from(teamCounts).all();
   }
 
   #interviews(): Map<string, InterviewState> {

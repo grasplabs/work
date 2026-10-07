@@ -1,5 +1,5 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
-import type { RosterInput } from "@grasp-os/shared/onboarding";
+import type { OnboardingView, RosterInput } from "@grasp-os/shared/onboarding";
 import { onboardingPeopleMax } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -68,6 +68,12 @@ const asStaff = async () => {
   const { core } = await openRpc(session);
   return await core.authenticate();
 };
+
+/** The first team's numbers, as the admin reads them. */
+const numbers = (view: OnboardingView) => ({
+  talked: view.progress?.teams[0]?.talked,
+  asked: view.progress?.teams[0]?.asked,
+});
 
 /** Every value in the events, as text: what the audit log keeps. */
 const textOf = (events: AuditEvent[]): string => JSON.stringify(events);
@@ -142,13 +148,39 @@ describe("the admin's onboarding", () => {
       outcome(api.onboarding.savePlan({ start: today(), days: 99 }))
     ).resolves.toBe("onboarding.invalid");
   });
+});
 
-  it("shows numbers for a team of five or more, never for a smaller one, and never a name", async () => {
-    const { api } = await signedInApi(idp, "admin");
-    await api.onboarding.saveRoster(roster);
-    const store = onboardingStore(env);
+describe("the admin's numbers", () => {
+  /** A store of its own, apart from the deployment's, with links out yesterday. */
+  const storeWithLinksOut = async () => {
+    const store = env.ONBOARDING.getByName(`numbers-${crypto.randomUUID()}`);
+    const by = { type: "system" } as const;
     const yesterday = new Date(Date.now() - 86_400_000).toISOString();
-    for (const id of ["sam", "oli"]) {
+    // Support has no lead, so all five of its links go out at once.
+    await store.saveRoster(
+      {
+        teams: [
+          { id: "support", name: "Support", lead: null, does: "", off: false },
+          { id: "ops", name: "Ops", lead: null, does: "", off: false },
+        ],
+        people: [
+          ...["s1", "s2", "s3", "s4", "s5"].map((id) => ({
+            ...person(id, "support"),
+            title: "",
+            away: false,
+          })),
+          { ...person("o1", "ops", sentinel), title: "", away: false },
+        ],
+      },
+      by
+    );
+    await store.savePlan({ start: yesterday.slice(0, 10), days: 14 }, by);
+    await store.setAgreements(
+      { processing: true, assessment: true, council: "none" },
+      by
+    );
+    await store.releaseDue(yesterday);
+    for (const id of ["s1", "s2", "o1"]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       await store.noteInterview({
         person: id,
@@ -157,12 +189,47 @@ describe("the admin's onboarding", () => {
         completedAt: yesterday,
       });
     }
-    const { progress } = await api.onboarding.view();
+    return store;
+  };
+
+  it("are shown for a team once five were asked, never for one with fewer, and never with a name", async () => {
+    const store = await storeWithLinksOut();
+    const { progress } = await store.view();
     expect(progress?.teams).toStrictEqual([
-      expect.objectContaining({ id: "sales", talked: 1, asked: 4 }),
+      expect.objectContaining({ id: "support", talked: 2, asked: 5 }),
       expect.objectContaining({ id: "ops", talked: null, asked: null }),
     ]);
     expect(JSON.stringify(progress)).not.toContain(sentinel);
+  });
+
+  it("don't move when the admin marks someone away or takes them off the list", async () => {
+    const store = await storeWithLinksOut();
+    const before = await store.view();
+    const { roster: kept } = before;
+    if (kept === null) {
+      throw new Error("No roster");
+    }
+    await store.saveRoster(
+      {
+        ...kept,
+        people: kept.people
+          .filter(({ id }) => id !== "s2")
+          .map((one) => (one.id === "s1" ? { ...one, away: true } : one)),
+      },
+      { type: "system" }
+    );
+    const after = await store.view();
+    expect(numbers(after)).toStrictEqual(numbers(before));
+    expect(after.progress?.talked).toBe(before.progress?.talked);
+  });
+
+  it("keep agreements saved first on a store that is new", async () => {
+    const store = env.ONBOARDING.getByName(`fresh-${crypto.randomUUID()}`);
+    const view = await store.setAgreements(
+      { processing: true, assessment: true, council: "agreed" },
+      { type: "system" }
+    );
+    expect(view.agreed).toBeTruthy();
   });
 });
 
