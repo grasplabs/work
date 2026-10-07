@@ -266,7 +266,13 @@ const Theme = () => (
 
 // The dot brain's figures (brain/dot-shapes.ts), one per onboarding step and
 // interview: each beside the others, then one that flows from figure to figure.
-const figures: { name: string; shape: ShapeKey; fill: number }[] = [
+// `teams` is how far each team, or each connection, is: its share inked.
+const figures: {
+  name: string;
+  shape: ShapeKey;
+  fill: number;
+  teams?: number[];
+}[] = [
   { name: "Head", shape: { kind: "head" }, fill: 0.2 },
   { name: "Stephen listening", shape: { kind: "listen" }, fill: 0.4 },
   {
@@ -278,6 +284,7 @@ const figures: { name: string; shape: ShapeKey; fill: number }[] = [
     name: "Teams",
     shape: { kind: "org", teams: [42, 38, 30, 18, 14, 0, 0, 0], leads: true },
     fill: 0.35,
+    teams: [0.8, 0.5, 0.25, 0.1, 0, 0, 0, 0],
   },
   {
     name: "Where documents live",
@@ -290,7 +297,12 @@ const figures: { name: string; shape: ShapeKey; fill: number }[] = [
   },
   { name: "Documents", shape: { kind: "sheets" }, fill: 0.5 },
   { name: "Laptop", shape: { kind: "laptop" }, fill: 0.55 },
-  { name: "Connections", shape: { kind: "spokes", count: 5 }, fill: 0.6 },
+  {
+    name: "Connections",
+    shape: { kind: "spokes", count: 5 },
+    fill: 0.6,
+    teams: [1, 1, 0.6, 0, 0],
+  },
   { name: "The team", shape: { kind: "crowd" }, fill: 0.65 },
   { name: "Two people", shape: { kind: "pair" }, fill: 0.75 },
   { name: "Brain", shape: { kind: "brain" }, fill: 0.9 },
@@ -320,7 +332,12 @@ const DotBrains = () => {
                   apart={{ leaves: false }}
                   className="w-full"
                   label={figure.name}
-                  scene={{ shape: figure.shape, fill: figure.fill, clear: 1 }}
+                  scene={{
+                    shape: figure.shape,
+                    fill: figure.fill,
+                    teams: figure.teams,
+                    clear: 1,
+                  }}
                 />
                 <figcaption className="text-muted-foreground text-xs">
                   {figure.name}
@@ -333,7 +350,11 @@ const DotBrains = () => {
               <DotBrain
                 className="w-72"
                 label={`Flowing: ${current.name}`}
-                scene={{ shape: current.shape, fill: current.fill }}
+                scene={{
+                  shape: current.shape,
+                  fill: current.fill,
+                  teams: current.teams,
+                }}
               />
               <Button
                 onClick={() => {

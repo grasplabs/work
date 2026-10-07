@@ -171,3 +171,42 @@ test("the dot brain prints every figure, and on a phone too", async ({
   );
   expect(Math.max(...rights)).toBeLessThanOrEqual(390);
 });
+
+test("the dot brain holds still for people who ask for less motion", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/kit");
+  const card = page
+    .locator('[data-slot="card"]')
+    .filter({ has: page.getByText("Dot brain", { exact: true }) });
+  // The figures that move most: the laptop's sweep and two people taking turns.
+  const drawn = async (): Promise<string[]> =>
+    await card
+      .locator("figure")
+      .filter({
+        has: page.locator("figcaption", {
+          hasText: /^(?:Laptop|Two people)$/u,
+        }),
+      })
+      .locator("canvas")
+      .evaluateAll((canvases) =>
+        canvases.map((canvas) =>
+          canvas instanceof HTMLCanvasElement ? canvas.toDataURL() : ""
+        )
+      );
+  await card
+    .locator("figcaption", { hasText: "Two people" })
+    .scrollIntoViewIfNeeded();
+  // Settled once its first frames are drawn; then it stays as it is.
+  await expect
+    .poll(async () => {
+      const urls = await drawn();
+      return urls.length === 2 && urls.every((url) => url.length > 1000);
+    })
+    .toBe(true);
+  const first = await drawn();
+  // Longer than a turn of two voices (2.4 s) and a sweep's step.
+  await page.waitForTimeout(3000);
+  expect(await drawn()).toEqual(first);
+});

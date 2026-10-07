@@ -644,7 +644,9 @@ const pulseOf = (
       return Math.exp(-(((x - frame.band) / 0.2) ** 2));
     }
     case "steady": {
-      return 0.72 + 0.25 * Math.sin(frame.now * 1.3 + seed * 3);
+      return frame.still
+        ? 0.72
+        : 0.72 + 0.25 * Math.sin(frame.now * 1.3 + seed * 3);
     }
     case "none": {
       return 0;
@@ -1070,7 +1072,8 @@ const frameOf = (
   callRings(brain, scene, now, still, talking);
   // Asking someone, the voice is Grasp's, not theirs: their mouth stays still. So does the mouth of whoever stands beside the one speaking.
   const mouth = scene.call === true || scene.quiet === true ? 0 : talking;
-  const turn = Math.floor(now / 2.4) % 2;
+  // With less motion, two voices do not take turns and nothing sweeps: the figure holds still.
+  const turn = still ? 0 : Math.floor(now / 2.4) % 2;
   // Where the voice comes from moves with the figure: from the last one's mouth to this one's.
   const channel = shape.activity === "alternate" ? turn : 0;
   const toVoiceX = shape.voice[channel * 2] ?? 0;
@@ -1102,7 +1105,7 @@ const frameOf = (
     turn,
     voiceX,
     voiceY,
-    band: ((now * 0.42) % 2.8) - 1.4,
+    band: still ? 0 : ((now * 0.42) % 2.8) - 1.4,
     wave: still ? -1 : (now - brain.waveAt) * 240,
     waveLeft: 1 - (now - brain.waveAt) / 1.8,
     spot: brain.spot,
