@@ -245,7 +245,10 @@ export const definitions: Record<string, WorkflowDefinition> = {
         }
       };
       void late();
-      return await Promise.resolve("done");
+      // Held by the test until the step's effect is out: the run ends
+      // while it is.
+      await checkpoint(event.instanceId, "end");
+      return "done";
     },
   },
   // A step, a sleep of the duration in the params, another step.
@@ -337,6 +340,22 @@ export const definitions: Record<string, WorkflowDefinition> = {
         type: "x",
         timeout: first ? "1 hour" : "2 hours",
       });
+    },
+  },
+  // A step and a sleep at once, in the order the params say.
+  mixes: {
+    run: async (event, step) => {
+      const work = async (): Promise<string> =>
+        await step.do(
+          "work",
+          async (context) => await effect(event.instanceId, "work", context)
+        );
+      const nap = async (): Promise<void> => {
+        await step.sleep("nap", "1 hour");
+      };
+      return paramOf(event.payload, "first") === "sleep"
+        ? await Promise.all([nap(), work()])
+        : await Promise.all([work(), nap()]);
     },
   },
   // A wait raced against a sleep, inside the author's own handlers.

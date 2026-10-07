@@ -348,8 +348,13 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       // ended is still the event it was.
       if (command.key !== null) {
         const [sent] = storage.sql
-          .exec<{ type: string; payload: string }>(
-            "SELECT type, payload FROM events WHERE key = ?",
+          .exec<{
+            type: string;
+            payload: string;
+            accepted_at: number;
+            consumed_by: number | null;
+          }>(
+            "SELECT type, payload, accepted_at, consumed_by FROM events WHERE key = ?",
             command.key
           )
           .toArray();
@@ -358,7 +363,17 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
             sent.type === command.type &&
             // The same payload, whatever order a retry put its keys in.
             canonical(sent.payload) === canonical(command.payload);
-          return { outcome: same ? "duplicate" : "conflict", wake: false };
+          if (!same) {
+            return { outcome: "conflict", wake: false };
+          }
+          // The first delivery's wake may not have been written (its alarm
+          // write failed after the event was): a retry that finds the
+          // event still untaken, by a wait still in time for it, wakes
+          // the run again.
+          const wake =
+            sent.consumed_by === null &&
+            this.#wakeFor(run, sent.type, sent.accepted_at, now);
+          return { outcome: "duplicate", wake };
         }
       }
       if (hasEnded(run)) {
@@ -370,14 +385,9 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       if (bytes > maxEventPayloadBytes) {
         return { outcome: "too_large", wake: false };
       }
-      const inbox = storage.sql
-        .exec<{ events: number; bytes: number }>(
-          "SELECT COUNT(*) AS events, COALESCE(SUM(LENGTH(CAST(payload AS BLOB))), 0) AS bytes FROM events"
-        )
-        .one();
       if (
-        inbox.events >= maxInboxEvents ||
-        inbox.bytes + bytes > maxInboxBytes
+        run.event_count >= maxInboxEvents ||
+        run.event_bytes + bytes > maxInboxBytes
       ) {
         return { outcome: "full", wake: false };
       }
@@ -388,26 +398,49 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         command.key,
         now
       );
-      // Only a suspended run needs waking: a live activation reaches the
-      // wait itself, and a dead one has its watchdog.
-      const wake =
-        run.status === "waiting" &&
-        storage.sql
-          .exec(
-            "SELECT 1 FROM steps WHERE state = 'waiting' AND type = 'waitForEvent' AND event_type = ? AND deadline > ?",
-            command.type,
-            now
-          )
-          .toArray().length > 0;
-      if (wake) {
-        storage.sql.exec("UPDATE run SET wake_at = ?", now);
-      }
-      return { outcome: "accepted", wake };
+      storage.sql.exec(
+        "UPDATE run SET event_count = event_count + 1, event_bytes = event_bytes + ?",
+        bytes
+      );
+      return {
+        outcome: "accepted",
+        wake: this.#wakeFor(run, command.type, now, now),
+      };
     });
     if (decision.wake) {
       // With the write that accepted the event: no await between.
       await storage.setAlarm(now);
     }
     return decision.outcome;
+  }
+
+  /**
+   * Whether an event of `type` accepted at `acceptedAt` should wake the
+   * run now, journaling the wake if so. Only a suspended run needs waking:
+   * a live activation reaches the wait itself, and a dead one has its
+   * watchdog. The wait must be in time for the event and not yet over.
+   * Called inside the transaction that accepted (or found) the event.
+   */
+  #wakeFor(
+    run: RunRow,
+    type: string,
+    acceptedAt: number,
+    now: number
+  ): boolean {
+    const { sql } = this.ctx.storage;
+    const wake =
+      run.status === "waiting" &&
+      sql
+        .exec(
+          "SELECT 1 FROM steps WHERE state = 'waiting' AND type = 'waitForEvent' AND event_type = ? AND deadline > ? AND deadline > ?",
+          type,
+          now,
+          acceptedAt
+        )
+        .toArray().length > 0;
+    if (wake) {
+      sql.exec("UPDATE run SET wake_at = ?", now);
+    }
+    return wake;
   }
 }

@@ -69,6 +69,13 @@ export interface Halt {
 /** Why an activation stopped short of settling the run. */
 export type Stop = typeof superseded | typeof suspended | Fault | Halt;
 
+/** A step, sleep or wait reached beside a sleep or wait still pending. */
+const parallelWait = (kind: string, name: string): Error =>
+  namedError(
+    "WorkflowParallelWaitError",
+    `The ${kind} ${JSON.stringify(name)} was reached while a sleep or wait of the run was pending, or a wait beside a step still out; parallel waits aren't supported yet`
+  );
+
 /** A replay that reaches what the journal doesn't hold. */
 const replayMismatch = (detail: string): Error =>
   namedError(
@@ -208,6 +215,8 @@ export class Activation {
    * suspended never does, so this stays set once the activation let go.
    */
   #waitPending = false;
+  /** `do` steps of this activation whose calls haven't settled. */
+  #stepsInFlight = 0;
 
   /** What the definition is handed as `step`. */
   readonly step: WorkflowStep;
@@ -467,6 +476,16 @@ export class Activation {
       return await this.#refuse();
     }
     await this.#renewWatchdog();
+    // The await above lets other calls of the definition run; one of them
+    // may have ended this activation (a halt, a suspension). The callback
+    // is the effect: it never runs for an activation that is over.
+    const stillCurrent = this.#write(() => this.#current());
+    if (stillCurrent === failed) {
+      return await never();
+    }
+    if (!stillCurrent) {
+      return await this.#refuse();
+    }
     let outcome: StepOutcome;
     try {
       const value = await work({
@@ -505,6 +524,23 @@ export class Activation {
   }
 
   async #do<T>(name: string, work: StepWork<T>, rest: unknown[]): Promise<T> {
+    if (this.#waitPending) {
+      return await this.#halt(parallelWait("step", name));
+    }
+    this.#stepsInFlight += 1;
+    try {
+      return await this.#doAlone(name, work, rest);
+    } finally {
+      // Never reached by a step whose call never settles.
+      this.#stepsInFlight -= 1;
+    }
+  }
+
+  async #doAlone<T>(
+    name: string,
+    work: StepWork<T>,
+    rest: unknown[]
+  ): Promise<T> {
     const current = this.#write(() => this.#current());
     if (current === failed) {
       return await never();
@@ -643,16 +679,13 @@ export class Activation {
 
   /** A sleep or an event wait, from the definition's call to its outcome. */
   async #wait(plan: WaitPlan): Promise<EventRow | undefined> {
-    if (this.#waitPending) {
+    if (this.#waitPending || this.#stepsInFlight > 0) {
       // Racing a wait against a sleep would quietly lose the sleep: the
-      // first suspends the activation, and the second is never reached.
-      // Until parallel waits are built, the run ends saying so.
-      return await this.#halt(
-        namedError(
-          "WorkflowParallelWaitError",
-          `The ${plan.type} ${JSON.stringify(plan.name)} was reached while another sleep or wait of the run was pending; parallel waits aren't supported yet`
-        )
-      );
+      // first suspends the activation, and the second is never reached. A
+      // wait beside a step out at its effect would suspend under it, and
+      // the effect would go out again on replay. Until parallel waits are
+      // built, the run ends saying so.
+      return await this.#halt(parallelWait(plan.type, plan.name));
     }
     this.#waitPending = true;
     try {

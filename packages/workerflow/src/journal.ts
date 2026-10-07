@@ -69,6 +69,13 @@ export interface RunRow extends Record<string, SqlStorageValue> {
    * alarm it sets, like `lease_until`, and like it read by nothing.
    */
   wake_at: number | null;
+  /**
+   * How many events the inbox holds, and their encoded payload bytes:
+   * kept with each acceptance, in its write, so checking the limits costs
+   * the same however many events there are.
+   */
+  event_count: number;
+  event_bytes: number;
   output: string | null;
   error: string | null;
   ended_at: number | null;
@@ -171,6 +178,8 @@ export const createJournal = (sql: SqlStorage): void => {
       generation INTEGER NOT NULL,
       lease_until INTEGER,
       wake_at INTEGER,
+      event_count INTEGER NOT NULL DEFAULT 0,
+      event_bytes INTEGER NOT NULL DEFAULT 0,
       output TEXT,
       error TEXT,
       ended_at INTEGER
@@ -215,6 +224,10 @@ export const createJournal = (sql: SqlStorage): void => {
     );
     CREATE INDEX IF NOT EXISTS events_unconsumed
       ON events (type, seq) WHERE consumed_by IS NULL;
+    -- At most one wait waits at a time: the lookups by state stay one row
+    -- deep however long the run's history grows.
+    CREATE INDEX IF NOT EXISTS steps_waiting
+      ON steps (type, event_type) WHERE state = 'waiting';
   `);
 };
 
@@ -230,7 +243,7 @@ export const hasJournal = (sql: SqlStorage): boolean =>
 export const readRun = (sql: SqlStorage): RunRow | undefined =>
   sql
     .exec<RunRow>(
-      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, lease_until, wake_at, output, error, ended_at FROM run"
+      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, lease_until, wake_at, event_count, event_bytes, output, error, ended_at FROM run"
     )
     .toArray()[0];
 
@@ -265,21 +278,27 @@ export const readConsumedEvent = (
     .toArray()[0];
 
 /**
- * The oldest event of `type` no wait has taken that the run accepted
- * before `deadline`: the one a wait with that deadline takes.
+ * The oldest event of `type` no wait has taken, if the run accepted it
+ * before `deadline`: the one a wait with that deadline takes. Events are
+ * taken in the order they were accepted, so when the oldest came too late
+ * none can be on time; reading just that one keeps the lookup one index
+ * row deep, however many events wait behind it.
  */
 export const readNextEvent = (
   sql: SqlStorage,
   type: string,
   deadline: number
-): EventRow | undefined =>
-  sql
+): EventRow | undefined => {
+  const [oldest] = sql
     .exec<EventRow>(
-      `SELECT ${eventColumns} FROM events WHERE type = ? AND consumed_by IS NULL AND accepted_at < ? ORDER BY seq LIMIT 1`,
-      type,
-      deadline
+      `SELECT ${eventColumns} FROM events WHERE type = ? AND consumed_by IS NULL ORDER BY seq LIMIT 1`,
+      type
     )
-    .toArray()[0];
+    .toArray();
+  return oldest !== undefined && oldest.accepted_at < deadline
+    ? oldest
+    : undefined;
+};
 
 export const readJournal = (sql: SqlStorage): Journal | undefined => {
   const run = readRun(sql);

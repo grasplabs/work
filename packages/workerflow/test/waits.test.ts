@@ -285,6 +285,63 @@ describe("an event wait", () => {
     ]);
   });
 
+  it("wakes the run when a delivery comes again after the first one's wake failed to be written", async () => {
+    const id = newId();
+    await workflow("approval").create({ id });
+    const { deadline } = await suspendedOn("approval", id, "approval");
+    const delivery = {
+      type: "approved",
+      payload: "retried",
+      key: `delivery-${newId()}`,
+    };
+
+    // The event is journaled; the alarm write after it fails.
+    const failed = await runInDurableObject(
+      runObject("approval", id),
+      async (run, state) => {
+        if (!(run instanceof WorkflowRun)) {
+          throw new TypeError("the object isn't a run object");
+        }
+        const { storage } = state;
+        // The object's own storage, failing its next alarm write, then
+        // put back as it was (an own property or the prototype's).
+        const hadOwn = Object.hasOwn(storage, "setAlarm");
+        const original: unknown = Reflect.get(storage, "setAlarm");
+        Reflect.set(storage, "setAlarm", async () => {
+          await Promise.resolve();
+          throw new Error("injected alarm write failure");
+        });
+        try {
+          await run.sendEvent({
+            ...delivery,
+            payload: encode(delivery.payload),
+          });
+          return false;
+        } catch {
+          return true;
+        } finally {
+          if (hadOwn) {
+            Reflect.set(storage, "setAlarm", original);
+          } else {
+            Reflect.deleteProperty(storage, "setAlarm");
+          }
+        }
+      }
+    );
+    const alarmAfterFailure = await alarmOf("approval", id);
+    const run = await instance("approval", id);
+    const retry = await run.deliverEvent(delivery);
+    const status = await ended("approval", id);
+
+    expect(failed).toBeTruthy();
+    expect(alarmAfterFailure).toBe(deadline);
+    expect(retry).toStrictEqual({ accepted: false });
+    expect(status).toMatchObject({
+      status: "complete",
+      output: { approved: { payload: "retried" } },
+    });
+  });
+
   it("accepts a delivery sent again under its key once, whatever order its payload's keys are in", async () => {
     const id = newId();
     await workflow("approval").create({ id });
@@ -520,6 +577,12 @@ describe("an inbox", () => {
       fit
     );
     expect(outcomes.at(-1)).toBe("full");
+    // The counters the limits are checked against, kept with each event.
+    const { run } = await journalOf("approval", id);
+    expect([run.event_count, run.event_bytes]).toStrictEqual([
+      fit,
+      fit * bytes,
+    ]);
     // Through the binding: one more payload of that size doesn't fit.
     await expect(
       send("approval", id, { type: "spam", payload: "x".repeat(bytes) })
@@ -585,6 +648,23 @@ describe("waits raced against each other", () => {
     expect(witnessed(id)).toStrictEqual([]);
     await expect(alarmOf("races", id)).resolves.toBeNull();
   });
+
+  it.each(["step", "sleep"])(
+    "end the run with a WorkflowParallelWaitError when a step and a sleep start together (%s first), and the step's callback never runs",
+    async (first) => {
+      const id = newId();
+      await workflow("mixes").create({ id, params: { first } });
+
+      const status = await ended("mixes", id);
+
+      expect(status).toMatchObject({
+        status: "errored",
+        error: { name: "WorkflowParallelWaitError" },
+      });
+      expect(effectsOf(id, "work")).toStrictEqual([]);
+      await expect(alarmOf("mixes", id)).resolves.toBeNull();
+    }
+  );
 });
 
 describe("a run waiting", () => {
