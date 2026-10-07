@@ -4,7 +4,9 @@ import { graspLockSchema } from "@grasp-os/shared/packages";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
+import { buildDependencies } from "../src/packages/build.ts";
 import { mockIdp } from "./idp.ts";
 import {
   failure,
@@ -16,7 +18,7 @@ import {
   refusalsOf,
 } from "./npm.ts";
 import type { Published } from "./npm.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
 // Building an App's approved packages (src/packages/build.ts) with
 // esbuild-wasm in the package builder's isolate, from its threat model:
@@ -457,7 +459,7 @@ describe("what a package's code may reach", () => {
       escapes: about(
         `${escapes}@1.0.0 imports ../../outside/index.js, outside itself`
       ),
-      svg: about(`${svg}@1.0.0's icon.svg is an SVG that can run script`),
+      svg: about(`${svg}@1.0.0's icon.svg is an SVG with an event handler`),
       html: about(
         `${html}@1.0.0 imports page.html, a kind of file an artifact doesn't carry`
       ),
@@ -514,5 +516,217 @@ describe("what a package's code may reach", () => {
     expect(refusals[0]).toMatch(
       /^the browser artifact is \d+ bytes, more than the 262144 an artifact may be$/u
     );
+  });
+});
+
+describe("what an artifact may carry", () => {
+  it("refuses a stylesheet whose image-set strings load from outside the artifact", async () => {
+    const sets = named("image-sets");
+    await publish(
+      esm(sets, {
+        "index.js": 'import "./theme.css"; export {};',
+        "theme.css": `.a { background: image-set("https://cdn.example/a.png" 1x); }
+.b { background: -webkit-image-set('https://cdn.example/b.png' 2x); }`,
+      })
+    );
+    const app = await approvedApp({ [sets]: "1" });
+    const refusals = await refusalsOf(buildOf(app, "browser"));
+    expect(refusals.toSorted()).toStrictEqual(
+      [
+        `the stylesheet ${sets}.css loads https://cdn.example/a.png, outside the artifact`,
+        `the stylesheet ${sets}.css loads https://cdn.example/b.png, outside the artifact`,
+      ].toSorted()
+    );
+  });
+
+  it("keeps a stylesheet's references to its own document, and refuses an SVG that hides a script under a prefix", async () => {
+    const masked = named("masked");
+    const sneaky = named("sneaky-svg");
+    await publish(
+      esm(masked, {
+        "index.js": 'import "./mask.css"; export {};',
+        "mask.css": ".m { mask: url(#clip); }",
+      })
+    );
+    await publish(
+      esm(sneaky, {
+        "index.js": 'import icon from "./icon.svg"; export { icon };',
+        "icon.svg":
+          '<svg xmlns="http://www.w3.org/2000/svg" xmlns:x="http://www.w3.org/2000/svg"><x:script>fetch(1)</x:script></svg>',
+      })
+    );
+    const ok = await approvedApp({ [masked]: "1" });
+    const built = await buildOf(ok, "browser");
+    const css = await artifactText(built.hash, `${masked}.css`);
+    const refused = await approvedApp({ [sneaky]: "1" });
+    expect({
+      css: css.includes("url(#clip)"),
+      refusals: await refusalsOf(buildOf(refused, "browser")),
+    }).toStrictEqual({
+      css: true,
+      refusals: [
+        `${sneaky}@1.0.0's icon.svg is an SVG with an element that can run or embed something`,
+      ],
+    });
+  });
+
+  it("refuses entries that would be the same module", async () => {
+    const theme = named("theme");
+    await publish(
+      esm(
+        theme,
+        { "style.css": ".t{color:red}", "style.js": "export const t = 1;" },
+        { exports: { "./style.css": "./style.css", "./style": "./style.js" } }
+      )
+    );
+    const app = await approvedApp(
+      { [theme]: "1" },
+      { entries: [`${theme}/style.css`, `${theme}/style`] }
+    );
+    await expect(refusalsOf(buildOf(app, "browser"))).resolves.toStrictEqual([
+      `the entries ${theme}/style.css and ${theme}/style would both be the module ${theme}~style`,
+    ]);
+  });
+});
+
+describe("a build's durability", () => {
+  it("keeps nothing when the approval stops holding while it builds", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const admin = await personApi("admin");
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    // As the builder starts, who approves dependencies changes: the
+    // policy the build was admitted under is no longer the one in force.
+    let changed = false;
+    const assets = new Proxy(env.ASSETS, {
+      get: (target, property): unknown =>
+        property === "fetch"
+          ? async (input: RequestInfo, init?: RequestInit) => {
+              if (!changed) {
+                changed = true;
+                await admin.api.dependencies.grantApprover({
+                  type: "person",
+                  userId: identity.userId,
+                });
+              }
+              return await target.fetch(input, init);
+            }
+          : Reflect.get(target, property),
+    });
+    const outcome = await failure(
+      buildDependencies({ ...env, ASSETS: assets }, identity, {
+        app: app.app,
+        graphHash: app.request.graphHash,
+        target: "browser",
+        policyGeneration,
+      })
+    );
+    const row = await env.DB.prepare(
+      "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+    )
+      .bind(app.app, app.request.graphHash)
+      .first<{ lock: string }>();
+    const lock = graspLockSchema.parse(JSON.parse(row?.lock ?? "null"));
+    expect([outcome.code, lock.artifacts]).toStrictEqual([
+      "dependency.policy_changed",
+      undefined,
+    ]);
+  });
+
+  it("builds a target again once a resolve changes its entries", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    await buildOf(app, "browser");
+    const { lock } = await app.builder.api.dependencies.resolve(
+      intentFor(app.app, { [ui]: "^1.0.0" }, { entries: [ui, `${ui}/extra`] })
+    );
+    expect(lock.artifacts?.[compilerVersion]?.browser).toBeUndefined();
+  });
+
+  it("pins one artifact when two builds race to pin it", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const [first, second] = await Promise.all([
+      buildOf(app, "browser"),
+      buildOf(app, "browser"),
+    ]);
+    const row = await env.DB.prepare(
+      "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+    )
+      .bind(app.app, app.request.graphHash)
+      .first<{ lock: string }>();
+    const lock = graspLockSchema.parse(JSON.parse(row?.lock ?? "null"));
+    expect({
+      same: first.hash === second.hash,
+      pinned: lock.artifacts?.[compilerVersion]?.browser?.hash,
+      versions: Object.keys(lock.artifacts ?? {}),
+    }).toStrictEqual({
+      same: true,
+      pinned: first.hash,
+      versions: [compilerVersion],
+    });
+  });
+
+  it("refuses a build that makes other bytes than the lock pinned", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    await buildOf(app, "browser");
+    const row = await env.DB.prepare(
+      "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+    )
+      .bind(app.app, app.request.graphHash)
+      .first<{ lock: string }>();
+    const lock = graspLockSchema.parse(JSON.parse(row?.lock ?? "null"));
+    const pinned = lock.artifacts?.[compilerVersion]?.browser;
+    const forged = {
+      ...lock,
+      artifacts: {
+        [compilerVersion]: {
+          browser: { exports: pinned?.exports ?? {}, hash: "0".repeat(64) },
+        },
+      },
+    };
+    await env.DB.prepare(
+      "UPDATE dependency_locks SET lock = ? WHERE app_id = ? AND graph_hash = ?"
+    )
+      .bind(JSON.stringify(forged), app.app, app.request.graphHash)
+      .run();
+    const { code } = await failure(buildOf(app, "browser"));
+    expect(code).toBe("package.artifact_mismatch");
+  });
+
+  it("records in the audit trail the approval each build relied on, kept or built", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const events = await auditedDuring(async () => {
+      await buildOf(app, "browser");
+      await buildOf(app, "browser");
+    });
+    const built = events
+      .filter(({ action }) => action === "dependency.built")
+      .map(({ detail }) =>
+        z
+          .object({
+            approval: z.string(),
+            kept: z.boolean(),
+            graphHash: z.string(),
+          })
+          .parse(detail)
+      );
+    expect(built).toStrictEqual([
+      {
+        approval: app.request.id,
+        kept: false,
+        graphHash: app.request.graphHash,
+      },
+      {
+        approval: app.request.id,
+        kept: true,
+        graphHash: app.request.graphHash,
+      },
+    ]);
   });
 });

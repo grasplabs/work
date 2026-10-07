@@ -45,6 +45,7 @@ import {
   withinPackage,
 } from "./exports.ts";
 import type { PackageFiles } from "./exports.ts";
+import { inertDataUrl, remoteInCss, svgRefusal } from "./inert.ts";
 import { platformModules, platformPeers } from "./platform.ts";
 
 /** Node.js's built-in modules: never available to an App's packages. */
@@ -133,13 +134,6 @@ export const isBuildable = (path: string): boolean =>
   !path.endsWith(".map") &&
   !path.endsWith(".md") &&
   !path.endsWith(".ts");
-
-/** What makes an SVG able to run script when opened. */
-const scriptingSvg = /<script|<foreignObject|\son[a-z]+\s*=|javascript:/iu;
-
-/** Data URLs CSS may carry as they are: images and fonts. */
-const inertDataUrl =
-  /^data:(?:image\/(?:png|jpeg|gif|webp|avif)|font\/[a-z0-9]+|application\/font-woff2?)[;,]/iu;
 
 /**
  * Every path, as esbuild filters take it: a Go regular expression, which
@@ -397,6 +391,10 @@ class Resolver {
     if (kind === "entry-point") {
       return this.#bare(path, undefined, true);
     }
+    // `url(#id)` names something in the document itself.
+    if (kind === "url-token" && path.startsWith("#")) {
+      return { path, external: true };
+    }
     // `node:` is a built-in's scheme, refused by name as one.
     if (remote.test(path) && !path.startsWith("node:")) {
       return urlImport(path, from, kind);
@@ -442,10 +440,9 @@ class Resolver {
         ],
       };
     }
-    if (extension === ".svg" && scriptingSvg.test(decoder.decode(contents))) {
-      return {
-        errors: [{ text: `${key}'s ${file} is an SVG that can run script` }],
-      };
+    const svg = extension === ".svg" ? svgRefusal(contents) : undefined;
+    if (svg !== undefined) {
+      return { errors: [{ text: `${key}'s ${file} ${svg}` }] };
     }
     return { contents, loader: "file" };
   };
@@ -522,6 +519,20 @@ const refusalsOf = (error: unknown): string[] => {
 export const bundle = async (input: BundleInput): Promise<Bundled> => {
   const { lock, target } = input;
   const entries = lock.targets[target]?.entries ?? [];
+  const names = new Map<string, string>();
+  for (const entry of entries) {
+    const name = entryModuleName(entry);
+    const other = names.get(name);
+    if (other !== undefined) {
+      return {
+        ok: false,
+        refusals: [
+          `the entries ${other} and ${entry} would both be the module ${name}`,
+        ],
+      };
+    }
+    names.set(name, entry);
+  }
   const resolver = new Resolver(input);
   let outputs: { path: string; contents: Uint8Array }[];
   try {
@@ -555,8 +566,21 @@ export const bundle = async (input: BundleInput): Promise<Bundled> => {
     return { ok: false, refusals: refusalsOf(error) };
   }
   const files = new Map<string, Uint8Array>();
+  const remoteUrls: string[] = [];
   for (const output of outputs) {
-    files.set(output.path.replace(/^\/artifact\//u, ""), output.contents);
+    const path = output.path.replace(/^\/artifact\//u, "");
+    files.set(path, output.contents);
+    if (path.endsWith(".css")) {
+      // What esbuild's plugin never saw: strings `image-set()` takes.
+      for (const url of remoteInCss(decoder.decode(output.contents))) {
+        remoteUrls.push(
+          `the stylesheet ${path} loads ${url}, outside the artifact`
+        );
+      }
+    }
+  }
+  if (remoteUrls.length > 0) {
+    return { ok: false, refusals: remoteUrls };
   }
   return {
     ok: true,

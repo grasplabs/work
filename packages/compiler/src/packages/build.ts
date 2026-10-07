@@ -148,8 +148,8 @@ const unpackAll = async ({
   return { ok: true, unpacked, files, bytes };
 };
 
-/** Builds one target of an approved lock: the artifact, or why not. */
-export const buildTarget = async (
+/** One target's build, its refusals as they came. */
+const buildUncapped = async (
   request: BuildRequest,
   wasmModule: WebAssembly.Module
 ): Promise<PackageBuildAnswer> => {
@@ -215,4 +215,30 @@ export const buildTarget = async (
       inputBytes: unpacked.bytes,
     },
   };
+};
+
+/** Most refusals one build reports, and how long each may be. */
+const maxRefusals = 50;
+const maxRefusalLength = 500;
+
+const capped = (text: string): string =>
+  text.length > maxRefusalLength
+    ? `${text.slice(0, maxRefusalLength - 1)}…`
+    : text;
+
+/**
+ * Builds one target of an approved lock: the artifact, or why not, every
+ * reason cut to what core takes (esbuild's own messages can be long).
+ */
+export const buildTarget = async (
+  request: BuildRequest,
+  wasmModule: WebAssembly.Module
+): Promise<PackageBuildAnswer> => {
+  const answer = await buildUncapped(request, wasmModule);
+  return answer.ok
+    ? answer
+    : {
+        ok: false,
+        refusals: answer.refusals.slice(0, maxRefusals).map(capped),
+      };
 };

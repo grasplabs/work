@@ -27,6 +27,7 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { appFor } from "../apps.ts";
+import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import { dependencyLocks } from "../db/core/schema.ts";
 import { admitDependencies } from "../dependencies/requests.ts";
@@ -147,20 +148,31 @@ const pin = async (
   graphHash: string,
   read: { lock: GraspLock; stored: string },
   target: PackageArtifact["target"],
-  pinned: { hash: string; exports: Record<string, string> }
+  pinned: { hash: string; exports: Record<string, string> },
+  limits: PackageLimits
 ): Promise<string> => {
-  const artifacts = read.lock.artifacts ?? {};
+  // Only this compiler's pins are kept: another compiler's artifacts are
+  // another release's, which builds its own.
   const next: GraspLock = {
     ...read.lock,
     artifacts: {
-      ...artifacts,
-      [compilerVersion]: { ...artifacts[compilerVersion], [target]: pinned },
+      [compilerVersion]: {
+        ...read.lock.artifacts?.[compilerVersion],
+        [target]: pinned,
+      },
     },
   };
+  const stored = canonicalJson(next);
+  if (new TextEncoder().encode(stored).byteLength > limits.lockBytes) {
+    throw packageErrors.create("package.quota", {
+      quota: "lockBytes",
+      limit: limits.lockBytes,
+    });
+  }
   const db = drizzle(env.DB);
   const updated = await db
     .update(dependencyLocks)
-    .set({ lock: canonicalJson(next) })
+    .set({ lock: stored })
     .where(
       and(
         eq(dependencyLocks.appId, app),
@@ -176,8 +188,36 @@ const pin = async (
   const now = await lockOf(env, app, graphHash);
   return (
     now.lock.artifacts?.[compilerVersion]?.[target]?.hash ??
-    (await pin(env, app, graphHash, now, target, pinned))
+    (await pin(env, app, graphHash, now, target, pinned, limits))
   );
+};
+
+/**
+ * Records in the audit trail that a build used an approval: which App,
+ * graph, target and artifact, and whether it was built now or kept from
+ * before. Each use, so what relied on which approval can be found.
+ */
+const recordUse = async (
+  env: Env,
+  by: Acting,
+  used: {
+    app: string;
+    graphHash: string;
+    target: PackageArtifact["target"];
+    approval: string;
+    hash: string;
+    kept: boolean;
+  }
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxed(db, {
+      actor: by.actor ?? actorOf(by),
+      action: "dependency.built",
+      target: { type: "app", id: used.app },
+      detail: { ...used },
+    }),
+  ]);
 };
 
 /** Every tarball of the lock, checked, counting bytes as they come. */
@@ -298,6 +338,14 @@ export const buildDependencies = async (
   if (pinned) {
     const kept = await keptArtifact(env, pinned.hash);
     if (kept) {
+      await recordUse(env, by, {
+        app: asked.app,
+        graphHash: asked.graphHash,
+        target: asked.target,
+        approval,
+        hash: pinned.hash,
+        kept: true,
+      });
       return { hash: pinned.hash, artifact: kept, approval, stats: null };
     }
   }
@@ -305,6 +353,14 @@ export const buildDependencies = async (
   const packages = await lockedTarballs(env, lock, limits);
   const { artifact, stats, artifactBytes, builtMs, files } =
     await builtArtifact(env, { limits, lock, target: asked.target, packages });
+  // The approval may have gone while the build ran: what decides now
+  // wins, and nothing is kept or pinned for a graph no longer approved.
+  await admitDependencies(env, by.actor ?? actorOf(by), {
+    app: asked.app,
+    graphHash: asked.graphHash,
+    targets: [asked.target],
+    policyGeneration: asked.policyGeneration,
+  });
   const hash = await artifactHash(artifact);
   if (pinned && pinned.hash !== hash) {
     log.error("packages.artifact_mismatch", {
@@ -327,18 +383,34 @@ export const buildDependencies = async (
   await env.FILES.put(artifactKey(hash), canonicalJson(artifact));
   const holds = pinned
     ? pinned.hash
-    : await pin(env, asked.app, asked.graphHash, read, asked.target, {
-        hash,
-        exports: Object.fromEntries(
-          Object.entries(artifact.entries).map(([entry, { resolved }]) => [
-            entry,
-            resolved,
-          ])
-        ),
-      });
+    : await pin(
+        env,
+        asked.app,
+        asked.graphHash,
+        read,
+        asked.target,
+        {
+          hash,
+          exports: Object.fromEntries(
+            Object.entries(artifact.entries).map(([entry, { resolved }]) => [
+              entry,
+              resolved,
+            ])
+          ),
+        },
+        limits
+      );
   if (holds !== hash) {
     throw packageErrors.create("package.artifact_mismatch");
   }
+  await recordUse(env, by, {
+    app: asked.app,
+    graphHash: asked.graphHash,
+    target: asked.target,
+    approval,
+    hash,
+    kept: false,
+  });
   log.info("packages.built", {
     app: asked.app,
     approval,
