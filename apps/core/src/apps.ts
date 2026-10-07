@@ -21,11 +21,13 @@ import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, BlueprintId } from "@grasp-os/shared/ids";
+import type { AppId, BlueprintId, WorkflowId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { screenPath } from "@grasp-os/shared/screens";
+import { workflowErrors } from "@grasp-os/shared/workflows";
+import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
 import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -50,7 +52,7 @@ import { requireOwnTypes } from "./knowledge/record-types.ts";
 import { madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
 import { recordVersionBuilds } from "./screen-builds.ts";
-import { requireWorkflowTestsPass } from "./workflows/code.ts";
+import { requireWorkflowTestsPass, workflowCallsIn } from "./workflows/code.ts";
 import {
   registerTriggers,
   registrationHolds,
@@ -510,6 +512,40 @@ export const screensIn = (files: ReadonlyMap<string, string>): string[] =>
     (path) => screenPath.exec(path)?.groups?.name
   );
 
+/**
+ * What a version's workflow calls of the App's bindings, as its row keeps
+ * it (`app_versions.workflow_calls`, written from `workflowCallsIn` as the
+ * version is committed): what its review shows (version-review.ts) and
+ * what its runs are held to (workflows/host.ts). `undefined` when the row
+ * keeps no entry for the workflow: nothing is read from its files instead.
+ */
+export const keptCallsOf = (
+  workflowCalls: Record<string, WorkflowCalls>,
+  workflow: WorkflowId
+): WorkflowCalls | undefined =>
+  Object.hasOwn(workflowCalls, workflow) ? workflowCalls[workflow] : undefined;
+
+/**
+ * What a run of `workflow` in version `version` of `app` is held to
+ * (`keptCallsOf`). A version whose row keeps no entry for it doesn't run:
+ * the run fails with `workflow.calls_not_kept`.
+ */
+export const callsFor = async (
+  env: Env,
+  {
+    app,
+    version,
+    workflow,
+  }: { app: AppId; version: number; workflow: WorkflowId }
+): Promise<WorkflowCalls> => {
+  const { workflowCalls } = await findVersion(env, app, version);
+  const kept = keptCallsOf(workflowCalls, workflow);
+  if (kept === undefined) {
+    throw workflowErrors.create("workflow.calls_not_kept");
+  }
+  return kept;
+};
+
 /** The screens and workflows of an App's current version. */
 export const appContents = async (
   env: Env,
@@ -622,6 +658,7 @@ export const commitFiles = async (
     throw appErrors.create("app.nothing_to_commit");
   }
   const exported = exportsIn(files);
+  const workflowCalls = workflowCallsIn(Object.fromEntries(files));
   const records = recordTypesIn(files);
   // None another App already has where this one may write.
   await requireOwnTypes(env, appId, records);
@@ -638,6 +675,7 @@ export const commitFiles = async (
     createdAt: new Date(),
     approved: null,
     workflows: workflowsIn(files),
+    workflowCalls,
     exports: exported,
     proposedBy: null,
     records,
@@ -787,6 +825,7 @@ export const proposeDraft = async (
     throw appErrors.create("app.nothing_to_commit");
   }
   const exported = exportsIn(files);
+  const workflowCalls = workflowCallsIn(Object.fromEntries(files));
   const records = recordTypesIn(files);
   // None another App already has where this one may write.
   await requireOwnTypes(env, appId, records);
@@ -802,6 +841,7 @@ export const proposeDraft = async (
     createdAt: new Date(),
     approved: null,
     workflows: workflowsIn(files),
+    workflowCalls,
     exports: exported,
     proposedBy: by.via ?? null,
     records,

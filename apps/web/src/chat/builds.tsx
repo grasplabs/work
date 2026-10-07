@@ -343,10 +343,9 @@ const ReviewDetails = ({
                 )}
                 {workflow.steps === null ? (
                   <span className="text-muted-foreground">
-                    <Trans>
-                      Its steps can&apos;t be read from its code, so it may do
-                      anything its code does.
-                    </Trans>
+                    {workflow.calls.length === 0
+                      ? t`Its steps can't be read from its code, so any step may do anything its code does, calling none of the App's bindings.`
+                      : t`Its steps can't be read from its code, so any step may do anything its code does, calling ${ph({ tools: formatList(workflow.calls) })}.`}
                   </span>
                 ) : (
                   workflow.steps.map((step) => (
@@ -359,7 +358,7 @@ const ReviewDetails = ({
                       ) : null}
                       {step.calls.length === 0 ? null : (
                         <Badge variant="outline">
-                          {t`Calls ${ph({ tools: formatList(step.calls) })}: may change things`}
+                          {t`Calls ${ph({ tools: formatList(step.calls) })} (any of their methods): may change things`}
                         </Badge>
                       )}
                       {step.sharedCode ? (
