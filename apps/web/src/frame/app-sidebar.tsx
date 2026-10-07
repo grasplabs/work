@@ -19,6 +19,7 @@ import {
   BookOpenIcon,
   CogIcon,
   BlocksIcon,
+  ClipboardCheckIcon,
   MessagesSquareIcon,
   WorkflowIcon,
 } from "lucide-react";
@@ -31,10 +32,17 @@ import { GraspMark } from "../grasp-mark.tsx";
 import { PersonMenu } from "./person-menu.tsx";
 
 // The product's sections, down the left beside every signed-in page. What
-// only admins use is in the person menu at its foot.
+// only admins use is in the person menu at its foot. Grasp's staff also
+// have the onboarding area; staff who reach the onboarding alone, only it.
 
 interface Section {
-  to: "/" | "/knowledge" | "/engines" | "/workflows" | "/integrations";
+  to:
+    | "/"
+    | "/knowledge"
+    | "/engines"
+    | "/workflows"
+    | "/integrations"
+    | "/onboarding";
   label: MessageDescriptor;
   icon: LucideIcon;
 }
@@ -46,6 +54,13 @@ const sections: readonly Section[] = [
   { to: "/workflows", label: msg`Workflows`, icon: WorkflowIcon },
   { to: "/integrations", label: msg`Integrations`, icon: BlocksIcon },
 ];
+
+/** Grasp's onboarding area, for Grasp's staff alone. */
+const onboarding: Section = {
+  to: "/onboarding",
+  label: msg`Onboarding`,
+  icon: ClipboardCheckIcon,
+};
 
 /** A section's entry: Chat is only itself; any other holds the pages under it. */
 const SectionItem = ({ section }: { section: Section }) => {
@@ -104,13 +119,18 @@ export const AppSidebar = ({
           <SidebarGroupContent>
             <nav aria-label={t`Main`}>
               <SidebarMenu>
-                {sections.slice(0, 1).map((section) => (
-                  <SectionItem key={section.to} section={section} />
-                ))}
-                <DashboardItem identity={identity} />
-                {sections.slice(1).map((section) => (
-                  <SectionItem key={section.to} section={section} />
-                ))}
+                {identity.onboardingOnly === true ? null : (
+                  <>
+                    {sections.slice(0, 1).map((section) => (
+                      <SectionItem key={section.to} section={section} />
+                    ))}
+                    <DashboardItem identity={identity} />
+                    {sections.slice(1).map((section) => (
+                      <SectionItem key={section.to} section={section} />
+                    ))}
+                  </>
+                )}
+                {identity.staff ? <SectionItem section={onboarding} /> : null}
               </SidebarMenu>
             </nav>
           </SidebarGroupContent>

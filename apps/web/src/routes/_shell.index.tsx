@@ -367,7 +367,12 @@ export const Route = createFileRoute("/_shell/")({
   }),
   // Chat opens on the open chat, the one the dock carries on, whatever led
   // here (the sidebar, the logo); only "New chat" lets go of it first.
-  beforeLoad: ({ search }) => {
+  // Staff who reach the onboarding alone have no chat: home is the area.
+  beforeLoad: ({ search, context: { identity } }) => {
+    if (identity.onboardingOnly === true) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({ to: "/onboarding", replace: true });
+    }
     const active = activeChat();
     if (search.chat === undefined && active !== undefined) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect

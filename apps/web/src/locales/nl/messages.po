@@ -96,6 +96,10 @@ msgstr "{connection}, {resource}"
 msgid "{connection}, {resource} ({tool})"
 msgstr "{connection}, {resource} ({tool})"
 
+#: src/routes/_shell.onboarding.log.tsx
+msgid "{count, plural, one {{date}: # entry} other {{date}: # entries}}"
+msgstr "{count, plural, one {{date}: # item} other {{date}: # items}}"
+
 #: src/dashboard/to-do.tsx
 msgid "{count, plural, one {{name} has # app whose code nobody approved} other {{name} has # apps whose code nobody approved}}"
 msgstr "{count, plural, one {{name} heeft # app waarvan niemand de code heeft goedgekeurd} other {{name} heeft # apps waarvan niemand de code heeft goedgekeurd}}"
@@ -276,6 +280,10 @@ msgstr "{subject}: {actions} op {object}"
 msgid "{team} (team)"
 msgstr "{team} (team)"
 
+#: src/onboarding/staff-words.ts
+msgid "{teamName}'s lead hasn't talked yet: the team waits"
+msgstr "De lead van {teamName} heeft nog niet gesproken: het team wacht"
+
 #: src/chat/held-writes.tsx
 msgid "{title} on {connection}"
 msgstr "{title} op {connection}"
@@ -422,6 +430,10 @@ msgstr "Activiteit"
 msgid "Actor ID"
 msgstr "Actor-ID"
 
+#: src/routes/_shell.onboarding.notes.tsx
+msgid "Add note"
+msgstr "Notitie toevoegen"
+
 #: src/chat/builds.tsx
 msgid "Added"
 msgstr "Toegevoegd"
@@ -471,6 +483,11 @@ msgstr "Agent {agent}"
 #: src/activity/audit-log.tsx
 msgid "Agent {agentId} for {person}"
 msgstr "Agent {agentId} voor {person}"
+
+#: src/onboarding/staff-words.ts
+msgctxt "onboarding stage"
+msgid "Agreements"
+msgstr "Afspraken"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
@@ -549,9 +566,24 @@ msgstr "Een andere engine houdt hier al records van het type {type} bij: die van
 msgid "Another version of this engine was made current since this list was read. The list now shows it: review that version, then approve again."
 msgstr "Sinds deze lijst is gelezen, is een andere versie van deze engine actueel gemaakt. De lijst toont die nu: beoordeel die versie en keur daarna opnieuw goed."
 
+#: src/routes/_shell.onboarding.log.tsx
+msgctxt "log filter: team"
+msgid "Any team"
+msgstr "Elk team"
+
 #: src/activity/audit-log.tsx
 msgid "Any type"
 msgstr "Elk type"
+
+#: src/routes/_shell.onboarding.log.tsx
+msgctxt "log filter: who"
+msgid "Anyone"
+msgstr "Iedereen"
+
+#: src/routes/_shell.onboarding.log.tsx
+msgctxt "log filter: what"
+msgid "Anything"
+msgstr "Alles"
 
 #: src/engines/screen-approval.tsx
 msgid "App"
@@ -1087,9 +1119,18 @@ msgstr "Kritiek"
 msgid "Dashboard"
 msgstr "Dashboard"
 
+#: src/onboarding/staff-words.ts
+msgid "Data processing agreement signed"
+msgstr "Verwerkersovereenkomst getekend"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Data rules"
 msgstr "Gegevensregels"
+
+#: src/routes/_shell.onboarding.log.tsx
+msgctxt "log filter"
+msgid "Day"
+msgstr "Dag"
 
 #: src/workflows/runs.tsx
 msgid "Decide"
@@ -1212,6 +1253,11 @@ msgstr "Documenten die hier worden geschreven en bestanden die je uploadt, versc
 msgid "Doesn't build now"
 msgstr "Bouwt nu niet"
 
+#: src/routes/_shell.onboarding.index.tsx
+msgctxt "onboarding stage status"
+msgid "done"
+msgstr "klaar"
+
 #: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "Done"
@@ -1294,6 +1340,10 @@ msgstr "Engines"
 msgid "Engines and agents with a permission"
 msgstr "Engines en agents met een toestemming"
 
+#: src/onboarding/staff-words.ts
+msgid "Enough is known ({known}% of {threshold}%): the company waits for Grasp's go"
+msgstr "Er is genoeg bekend ({known}% van {threshold}%): het bedrijf wacht op het startsein van Grasp"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Enter a number."
 msgstr "Voer een getal in."
@@ -1322,6 +1372,10 @@ msgstr "Elke aanroep blijft in de EU: nee."
 msgid "Every call stays in the EU: yes."
 msgstr "Elke aanroep blijft in de EU: ja."
 
+#: src/onboarding/staff-words.ts
+msgid "Every team has its lead"
+msgstr "Elk team heeft zijn lead"
+
 #: src/knowledge/collection-markers.tsx
 msgid "Everyone"
 msgstr "Iedereen"
@@ -1346,11 +1400,16 @@ msgstr "Filters uitklappen"
 msgid "Expand the navigation"
 msgstr "Navigatie uitklappen"
 
+#: src/routes/_shell.onboarding.tsx
+msgid "Expand the sections"
+msgstr "Onderdelen uitklappen"
+
 #: src/export/export-menu.tsx
 msgid "Export"
 msgstr "Exporteren"
 
 #: src/activity/audit-log.tsx
+#: src/routes/_shell.onboarding.log.tsx
 msgid "Export CSV"
 msgstr "CSV exporteren"
 
@@ -1447,6 +1506,10 @@ msgstr "Filters inklappen"
 msgid "Fold the navigation"
 msgstr "Navigatie inklappen"
 
+#: src/routes/_shell.onboarding.tsx
+msgid "Fold the sections"
+msgstr "Onderdelen inklappen"
+
 #: src/activity/pending.tsx
 msgid "For"
 msgstr "Voor"
@@ -1455,6 +1518,10 @@ msgstr "Voor"
 #: src/connections/integration-row.tsx
 msgid "For everyone"
 msgstr "Voor iedereen"
+
+#: src/routes/_shell.onboarding.notes.tsx
+msgid "For Grasp's staff on this onboarding alone; the company doesn't see them."
+msgstr "Alleen voor Grasp-medewerkers bij deze onboarding; het bedrijf ziet ze niet."
 
 #: src/activity/audit-log.tsx
 msgid "From"
@@ -1487,6 +1554,10 @@ msgstr "Een toestemming verleend"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp is nu niet bereikbaar. Probeer het zo opnieuw."
 
+#: src/onboarding/staff-words.ts
+msgid "Grasp gave its go"
+msgstr "Grasp gaf het startsein"
+
 #: src/routes/_shell.index.tsx
 msgid "Grasp holds every change to an outside system until you confirm it."
 msgstr "Grasp houdt elke wijziging aan een extern systeem vast tot je die bevestigt."
@@ -1494,6 +1565,11 @@ msgstr "Grasp houdt elke wijziging aan een extern systeem vast tot je die bevest
 #: src/routes/_shell.settings.profile.tsx
 msgid "Grasp in your language. Numbers, dates and amounts follow it too."
 msgstr "Grasp in jouw taal. Getallen, datums en bedragen volgen die ook."
+
+#: src/onboarding/staff-words.ts
+msgctxt "who did it, in the log"
+msgid "Grasp itself"
+msgstr "Grasp zelf"
 
 #: src/sign-in-errors.ts
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
@@ -1519,6 +1595,11 @@ msgstr "Grasp-medewerkers hebben zich aangemeld"
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp won't run what {about} needs: {requirement}"
 msgstr "Grasp voert niet uit wat {about} nodig heeft: {requirement}"
+
+#: src/onboarding/staff-words.ts
+msgctxt "who did it, in the log"
+msgid "Grasp's staff"
+msgstr "Grasp-medewerkers"
 
 #: src/sign-in-errors.ts
 msgid "Guest accounts can't sign in. Use your organization's own account."
@@ -1587,6 +1668,16 @@ msgstr "Integratie niet gevonden"
 #: src/routes/_shell.integrations.index.tsx
 msgid "Integrations"
 msgstr "Integraties"
+
+#: src/routes/_shell.onboarding.log.tsx
+msgctxt "log filter: what"
+msgid "Interviews"
+msgstr "Interviews"
+
+#: src/onboarding/staff-words.ts
+msgctxt "onboarding stage"
+msgid "Interviews"
+msgstr "Interviews"
 
 #: src/activity/audit-words.ts
 msgid "Invited a guest"
@@ -1688,6 +1779,11 @@ msgstr "Alleen voor jou"
 msgid "Keeps failing"
 msgstr "Mislukt steeds"
 
+#: src/onboarding/staff-words.ts
+msgctxt "onboarding stage"
+msgid "Kickoff"
+msgstr "Kick-off"
+
 #: src/frame/app-sidebar.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
@@ -1695,6 +1791,10 @@ msgstr "Mislukt steeds"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Knowledge"
 msgstr "Kennis"
+
+#: src/onboarding/staff-words.ts
+msgid "Known: {known}% of the {threshold}% to open"
+msgstr "Bekend: {known}% van de {threshold}% om te openen"
 
 #: src/language-picker.tsx
 #: src/routes/_shell.settings.profile.tsx
@@ -1722,9 +1822,23 @@ msgstr "Laatste run"
 msgid "Lately the trail only records its own searches: older events are in the full audit trail."
 msgstr "De audittrail legt de laatste tijd alleen zijn eigen zoekopdrachten vast: oudere gebeurtenissen vind je in de volledige audittrail."
 
+#: src/routes/_shell.onboarding.index.tsx
+msgctxt "onboarding stage status"
+msgid "later"
+msgstr "later"
+
 #: src/dashboard/activity.tsx
 msgid "Latest activity"
 msgstr "Recente activiteit"
+
+#: src/onboarding/staff-words.ts
+msgctxt "onboarding stage"
+msgid "Leads"
+msgstr "Leads"
+
+#: src/onboarding/staff-words.ts
+msgid "Leads talked: {count} of {of}"
+msgstr "Leads gesproken: {count} van {of}"
 
 #: src/knowledge/uploads.tsx
 msgid "Let go to add them"
@@ -1738,6 +1852,10 @@ msgstr "Licentie"
 msgctxt "kind of finding"
 msgid "Licence"
 msgstr "Licentie"
+
+#: src/onboarding/staff-words.ts
+msgid "Links out: {count} of {of}"
+msgstr "Links verstuurd: {count} van {of}"
 
 #: src/knowledge/document.tsx
 msgid "Links to"
@@ -1761,6 +1879,15 @@ msgstr "Servercode opnieuw laden"
 #: src/knowledge/nav.tsx
 msgid "Loading…"
 msgstr "Laden…"
+
+#: src/routes/_shell.onboarding.log.tsx
+msgid "Log"
+msgstr "Logboek"
+
+#: src/routes/_shell.onboarding.tsx
+msgctxt "onboarding area section"
+msgid "Log"
+msgstr "Logboek"
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
@@ -1902,6 +2029,10 @@ msgstr "Nooit"
 #: src/routes/_shell.index.tsx
 msgid "New chat"
 msgstr "Nieuwe chat"
+
+#: src/routes/_shell.onboarding.notes.tsx
+msgid "New note"
+msgstr "Nieuwe notitie"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "New since the last approval: {added}"
@@ -2094,9 +2225,22 @@ msgctxt "severity of a finding"
 msgid "Note"
 msgstr "Opmerking"
 
+#: src/routes/_shell.onboarding.notes.tsx
+msgid "Notes"
+msgstr "Notities"
+
+#: src/routes/_shell.onboarding.tsx
+msgctxt "onboarding area section"
+msgid "Notes"
+msgstr "Notities"
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing connected yet."
 msgstr "Nog niets gekoppeld."
+
+#: src/routes/_shell.onboarding.log.tsx
+msgid "Nothing happened that matches."
+msgstr "Er is niets gebeurd dat overeenkomt."
 
 #: src/dashboard/activity.tsx
 msgid "Nothing has happened yet."
@@ -2122,6 +2266,10 @@ msgstr "Niets gevonden."
 msgid "Nothing needs attention."
 msgstr "Niets vraagt aandacht."
 
+#: src/routes/_shell.onboarding.index.tsx
+msgid "Nothing needs Grasp right now."
+msgstr "Er is nu niets dat Grasp nodig heeft."
+
 #: src/chat/builds.tsx
 msgid "Nothing runs yet: this would be the engine's first current version."
 msgstr "Er draait nog niets: dit zou de eerste actuele versie van de engine zijn."
@@ -2133,6 +2281,11 @@ msgstr "Nog niets uitgegeven."
 #: src/dashboard/to-do.tsx
 msgid "Nothing waits on you."
 msgstr "Er wacht niets op je."
+
+#: src/routes/_shell.onboarding.index.tsx
+msgctxt "onboarding stage status"
+msgid "now"
+msgstr "nu"
 
 #: src/chat/builds-state.ts
 msgid "Now runs {how}"
@@ -2186,6 +2339,15 @@ msgstr "bij mail aan {address}@"
 msgid "on the event {event}, filtered"
 msgstr "bij de gebeurtenis {event}, gefilterd"
 
+#: src/frame/app-sidebar.tsx
+#: src/routes/_shell.onboarding.tsx
+msgid "Onboarding"
+msgstr "Onboarding"
+
+#: src/routes/_shell.onboarding.tsx
+msgid "Onboarding sections"
+msgstr "Onderdelen van de onboarding"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, engine or run that read one."
 msgstr "Alleen de modellen die gemarkeerd zijn voor gevoelige gegevens mogen gegevens krijgen uit een gevoelige collectie (gemarkeerd in Kennis) of een gevoelige koppeling, of uit een chat, engine of run die er een heeft gelezen."
@@ -2218,6 +2380,11 @@ msgstr "Alleen jij kunt het gebruiken."
 msgctxt "column: a link that opens the workflow"
 msgid "Open"
 msgstr "Openen"
+
+#: src/onboarding/staff-words.ts
+msgctxt "onboarding stage"
+msgid "Open"
+msgstr "Open"
 
 #: src/chat/builds.tsx
 #: src/knowledge/nav.tsx
@@ -2280,6 +2447,11 @@ msgstr "Anders:"
 msgid "Overview"
 msgstr "Overzicht"
 
+#: src/routes/_shell.onboarding.tsx
+msgctxt "onboarding area section"
+msgid "Overview"
+msgstr "Overzicht"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Owned by {owner}"
 msgstr "Eigenaar: {owner}"
@@ -2325,9 +2497,18 @@ msgstr "PDF"
 msgid "Pending"
 msgstr "In afwachting"
 
+#: src/onboarding/staff-words.ts
+msgctxt "onboarding stage"
+msgid "People"
+msgstr "Mensen"
+
 #: src/dashboard/signals.tsx
 msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "Mensen wezen {days, plural, one {de afgelopen dag} other {de afgelopen # dagen}} {rejected} van {answered, plural, one {# antwoord} other {# antwoorden}} af bij stap {step} van {about}."
+
+#: src/routes/_shell.onboarding.log.tsx
+msgid "Per day"
+msgstr "Per dag"
 
 #: src/activity/audit-log.tsx
 msgid "Permission"
@@ -2641,6 +2822,10 @@ msgstr "Toestemming van {holder} intrekken"
 msgid "Revoked a permission"
 msgstr "Een toestemming ingetrokken"
 
+#: src/onboarding/staff-words.ts
+msgid "Risk assessment done"
+msgstr "Risicobeoordeling gedaan"
+
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Role"
@@ -2921,6 +3106,11 @@ msgstr "Aanmelden gebeurt bij {app}. Het duurt ongeveer een minuut."
 msgid "Skill"
 msgstr "Skill"
 
+#: src/onboarding/staff-words.ts
+msgctxt "who did it, in the log"
+msgid "Someone at the company"
+msgstr "Iemand bij het bedrijf"
+
 #: src/workflows/runs.tsx
 msgid "Someone else"
 msgstr "Iemand anders"
@@ -2956,6 +3146,10 @@ msgstr "Uitgegeven door"
 #: src/sign-in-errors.ts
 msgid "Staff access to this organization isn't open."
 msgstr "Toegang voor Grasp-medewerkers tot deze organisatie is niet open."
+
+#: src/routes/_shell.onboarding.index.tsx
+msgid "Stages"
+msgstr "Fasen"
 
 #: src/knowledge/document.tsx
 msgid "Start again from version {newerVersion}"
@@ -3036,9 +3230,18 @@ msgstr "De goedkeuring van {screen} intrekken"
 msgid "Takes sensitive data"
 msgstr "Neemt gevoelige gegevens aan"
 
+#: src/onboarding/staff-words.ts
+msgid "Talked: {count} of {of}"
+msgstr "Gesproken: {count} van {of}"
+
 #: src/activity/audit-log.tsx
 msgid "Target ID"
 msgstr "Doel-ID"
+
+#: src/routes/_shell.onboarding.log.tsx
+msgctxt "log filter"
+msgid "Team"
+msgstr "Team"
 
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.settings.profile.tsx
@@ -3134,6 +3337,15 @@ msgstr "De catalogus van integraties kon niet worden gelezen, dus deze pagina to
 msgid "The code of version {version}"
 msgstr "De code van versie {version}"
 
+#: src/onboarding/staff-words.ts
+msgctxt "who did it, in the log"
+msgid "The company"
+msgstr "Het bedrijf"
+
+#: src/onboarding/staff-words.ts
+msgid "The data processing agreement isn't signed"
+msgstr "De verwerkersovereenkomst is niet getekend"
+
 #: src/chat/composer.tsx
 msgid "The default, {each}"
 msgstr "Standaard, {each}"
@@ -3146,6 +3358,22 @@ msgstr "Het exporteren is niet gelukt. Probeer het opnieuw."
 msgid "The full audit trail"
 msgstr "De volledige audittrail"
 
+#: src/onboarding/staff-words.ts
+msgid "The interview days are set"
+msgstr "De interviewdagen staan vast"
+
+#: src/onboarding/staff-words.ts
+msgid "The interviews are over with {known}% known, short of {threshold}%: Grasp decides"
+msgstr "De interviews zijn voorbij met {known}% bekend, minder dan {threshold}%: Grasp beslist"
+
+#: src/onboarding/staff-words.ts
+msgid "The interviews are paused"
+msgstr "De interviews zijn gepauzeerd"
+
+#: src/onboarding/staff-words.ts
+msgid "The kickoff with the company"
+msgstr "De kick-off met het bedrijf"
+
 #: src/routes/guest.tsx
 msgid "The link works until {until}."
 msgstr "De link werkt tot {until}."
@@ -3155,9 +3383,22 @@ msgstr "De link werkt tot {until}."
 msgid "The model call failed."
 msgstr "De modelaanroep is mislukt."
 
+#: src/routes/_shell.onboarding.index.tsx
+msgid "The most pressing first."
+msgstr "Het dringendste eerst."
+
+#: src/routes/_shell.onboarding.log.tsx
+msgctxt "log filter: what"
+msgid "The onboarding"
+msgstr "De onboarding"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "The packages, their licences and the findings are as reported by {requester}. Grasp hasn't checked them against the registry."
 msgstr "De pakketten, hun licenties en de bevindingen zijn zoals {requester} ze heeft opgegeven. Grasp heeft ze niet met de registry vergeleken."
+
+#: src/onboarding/staff-words.ts
+msgid "The risk assessment isn't done"
+msgstr "De risicobeoordeling is niet gedaan"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."
@@ -3174,6 +3415,10 @@ msgstr "de hele koppeling"
 #: src/routes/decisions.$decision.tsx
 msgid "The workflow run that asked this has ended, so this decision has closed."
 msgstr "De workflowrun die dit vroeg, is afgelopen, dus deze beslissing is gesloten."
+
+#: src/onboarding/staff-words.ts
+msgid "The works council hasn't been heard"
+msgstr "De ondernemingsraad is niet gehoord"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "There are no collections you can read yet."
@@ -3458,6 +3703,11 @@ msgstr "Mocht geen lid aan een engine toevoegen"
 msgid "Was refused packages nobody approved"
 msgstr "Kreeg pakketten geweigerd die niemand had goedgekeurd"
 
+#: src/routes/_shell.onboarding.log.tsx
+msgctxt "log filter"
+msgid "What"
+msgstr "Wat"
+
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
@@ -3476,6 +3726,10 @@ msgstr "Wat Grasp mag doen"
 msgid "What Grasp refuses to run"
 msgstr "Wat Grasp weigert uit te voeren"
 
+#: src/routes/_shell.onboarding.log.tsx
+msgid "What happened at the company and what Grasp's staff did, the newest first."
+msgstr "Wat er bij het bedrijf gebeurde en wat Grasp-medewerkers deden, het nieuwste eerst."
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
 msgstr "Wat de tools doen, zoals de aanbieder ze opgeeft. Engines en agents gebruiken alleen wat ze mogen, en een tool die iets verandert wacht tot de persoon het bevestigt."
@@ -3484,9 +3738,17 @@ msgstr "Wat de tools doen, zoals de aanbieder ze opgeeft. Engines en agents gebr
 msgid "What makes it run on its own can't be read from its code."
 msgstr "Wat hem vanzelf laat draaien, kan niet uit de code worden gelezen."
 
+#: src/routes/_shell.onboarding.index.tsx
+msgid "What needs Grasp"
+msgstr "Wat Grasp nodig heeft"
+
 #: src/chat/builds.tsx
 msgid "What other engines may call"
 msgstr "Wat andere engines mogen aanroepen"
+
+#: src/routes/_shell.onboarding.notes.tsx
+msgid "What should the next person at Grasp know?"
+msgstr "Wat moet de volgende persoon bij Grasp weten?"
 
 #: src/routes/_shell.index.tsx
 msgid "What should we look at today?"
@@ -3509,13 +3771,26 @@ msgstr "Wanneer"
 msgid "when someone starts it"
 msgstr "als iemand hem start"
 
+#: src/routes/_shell.onboarding.index.tsx
+msgid "Where the onboarding stands, stage by stage."
+msgstr "Waar de onboarding staat, fase voor fase."
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which engines and agents hold permissions: {why}"
 msgstr "Welke engines en agents toestemmingen hebben: {why}"
 
+#: src/routes/_shell.onboarding.log.tsx
+msgctxt "log filter"
+msgid "Who"
+msgstr "Wie"
+
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
 msgstr "Wie het gebruikt"
+
+#: src/onboarding/staff-words.ts
+msgid "Who works where is in"
+msgstr "Wie waar werkt, is binnen"
 
 #: src/dashboard/signals.tsx
 msgid "Worked out daily, last on {date}"
@@ -3577,6 +3852,10 @@ msgstr "Mislukte workflows"
 #: src/routes/_shell.settings.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."
 msgstr "Workflows waarvan de AI-stappen in de EU blijven: {workflows}."
+
+#: src/onboarding/staff-words.ts
+msgid "Works council heard, where there is one"
+msgstr "Ondernemingsraad gehoord, waar die er is"
 
 #: src/routes/_shell.settings.tsx
 msgctxt "settings group"
