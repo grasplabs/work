@@ -9,6 +9,9 @@ export default defineProject({
     // Fails the suite when it isn't running in workerd.
     setupFiles: ["../../scripts/assert-workerd.ts"],
     exclude: [...defaultExclude, "test/process/**"],
+    // Sleeps and waits in the tests last seconds by design, so no margin
+    // depends on how fast the machine is; the polls fail at 10 s first.
+    testTimeout: 20_000,
   },
   plugins: [
     cloudflareTest({
