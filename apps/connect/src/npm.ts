@@ -267,15 +267,22 @@ const installScriptsOf = (
     : named;
 };
 
+/**
+ * A version's publication time as the registry's `time` gives it: an ISO
+ * 8601 time, or null for anything else (missing, or not a time). The one
+ * check both passing a time on and ranking versions by it use.
+ */
+const publicationTime = (value: unknown): string | null =>
+  typeof value === "string" && z.iso.datetime().safeParse(value).success
+    ? value
+    : null;
+
 const toVersion = (
   entry: z.infer<typeof registryVersionSchema>,
-  publishedAt: string | undefined
+  publishedAt: string | null
 ): NpmVersion => ({
   version: entry.version,
-  publishedAt:
-    publishedAt !== undefined && z.iso.datetime().safeParse(publishedAt).success
-      ? publishedAt
-      : null,
+  publishedAt: publicationTime(publishedAt),
   integrity:
     entry.dist.integrity !== undefined &&
     integrityPattern.test(entry.dist.integrity)
@@ -310,21 +317,21 @@ const packumentSchema = z.looseObject({
 });
 
 /**
- * The `registryLimits.versions` keys newest by `published` (an ISO time;
- * "" for none, the oldest), chosen in one pass with a min-heap of at most
- * that many: never the whole list sorted.
+ * The `registryLimits.versions` keys ranked highest by `rank` (newest
+ * first), chosen in one pass with a min-heap of at most that many: never
+ * the whole list sorted.
  */
 const newestKeys = (
   keys: readonly string[],
-  published: (key: string) => string
+  rank: (key: string) => number
 ): Set<string> => {
   const limit = registryLimits.versions;
   if (keys.length <= limit) {
     return new Set(keys);
   }
-  const heap: { key: string; at: string }[] = [];
+  const heap: { key: string; at: number }[] = [];
   const less = (a: number, b: number): boolean =>
-    (heap[a]?.at ?? "") < (heap[b]?.at ?? "");
+    (heap[a]?.at ?? 0) < (heap[b]?.at ?? 0);
   const swap = (a: number, b: number): void => {
     const first = heap[a];
     const second = heap[b];
@@ -353,7 +360,7 @@ const newestKeys = (
     }
   };
   for (const key of keys) {
-    const at = published(key);
+    const at = rank(key);
     if (heap.length < limit) {
       heap.push({ key, at });
       for (let child = heap.length - 1; child > 0;) {
@@ -364,7 +371,7 @@ const newestKeys = (
         swap(child, parent);
         child = parent;
       }
-    } else if (at > (heap[0]?.at ?? "")) {
+    } else if (at > (heap[0]?.at ?? Number.NEGATIVE_INFINITY)) {
       heap[0] = { key, at };
       down(0);
     }
@@ -401,14 +408,18 @@ export const npmMetadata = async (input: unknown): Promise<NpmMetadata> => {
     throw packageErrors.create("package.registry_unavailable");
   }
   const { versions, time } = packument.data;
-  const published = (key: string): string => {
-    const at = time?.[key];
-    return typeof at === "string" ? at : "";
+  const published = (key: string): string | null =>
+    publicationTime(time?.[key]);
+  // Ranked by the instant a valid time names; a version without one ranks
+  // last, so it never takes the place of one the registry dates.
+  const rank = (key: string): number => {
+    const at = published(key);
+    return at === null ? Number.NEGATIVE_INFINITY : Date.parse(at);
   };
   // Only the newest versions by publication are read at all: chosen while
   // scanning the keys, in a heap of at most that many, before any version
   // is parsed. The registry's order is kept for those passed on.
-  const chosen = newestKeys(Object.keys(versions), published);
+  const chosen = newestKeys(Object.keys(versions), rank);
   const kept: NpmVersion[] = [];
   let dropped = 0;
   for (const [key, value] of Object.entries(versions)) {
@@ -421,7 +432,7 @@ export const npmMetadata = async (input: unknown): Promise<NpmMetadata> => {
       entry.data.name === name &&
       entry.data.version === key
     ) {
-      kept.push(toVersion(entry.data, published(key) || undefined));
+      kept.push(toVersion(entry.data, published(key)));
     } else {
       dropped += 1;
     }

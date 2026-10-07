@@ -354,6 +354,13 @@ describe("a package's metadata", () => {
       };
       time[version] = new Date(start + index * day).toISOString();
     }
+    // One more, whose time isn't one: it ranks last, not first.
+    versions["2.0.0"] = {
+      name: "many",
+      version: "2.0.0",
+      dist: { integrity: `sha512-${"A".repeat(86)}==` },
+    };
+    time["2.0.0"] = "zzz";
     const body = JSON.stringify({ name: "many", versions, time });
     expect(new TextEncoder().encode(body).byteLength).toBeLessThan(
       registryLimits.metadataBytes
@@ -365,10 +372,12 @@ describe("a package's metadata", () => {
       count: kept.length,
       oldestKept: kept.includes("1.0.25"),
       newestDropped: kept.includes("1.0.24"),
+      undated: kept.includes("2.0.0"),
     }).toStrictEqual({
       count: registryLimits.versions,
       oldestKept: true,
       newestDropped: false,
+      undated: false,
     });
   });
 
