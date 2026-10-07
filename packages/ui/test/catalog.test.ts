@@ -1,9 +1,17 @@
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { graspComponents, shadcnComponents } from "../catalog/inventory.ts";
+import { demos } from "../catalog/demos.ts";
+import { loadExample } from "../catalog/examples.ts";
+import {
+  examples,
+  graspComponents,
+  shadcnComponents,
+} from "../catalog/inventory.ts";
 import type { CatalogEntry } from "../catalog/inventory.ts";
 
 // The inventory against what the kit really exports: screens import
@@ -80,5 +88,60 @@ describe("the kit's inventory", () => {
         .filter(({ instead }) => instead !== undefined && !shipped.has(instead))
         .map(({ name }) => name)
     ).toStrictEqual([]);
+  });
+});
+
+const examplesDir = path.join(import.meta.dirname, "../catalog/examples");
+const componentImport =
+  /from "@grasp-os\/ui\/components\/(?<component>[a-z-]+)"/gu;
+
+describe("the kit's examples", () => {
+  it("has an entry for every example file", () => {
+    const files = readdirSync(examplesDir).map((file) =>
+      file.slice(0, -".tsx".length)
+    );
+    expect(files.toSorted()).toStrictEqual(Object.keys(examples).toSorted());
+  });
+
+  it("lists exactly the components each example imports", () => {
+    for (const [name, example] of Object.entries(examples)) {
+      const source = readFileSync(
+        path.join(examplesDir, `${name}.tsx`),
+        "utf-8"
+      );
+      const imported = new Set(
+        [...source.matchAll(componentImport)].flatMap((match) =>
+          match.groups?.component === undefined ? [] : [match.groups.component]
+        )
+      );
+      expect({ name, uses: [...imported].toSorted() }).toStrictEqual({
+        name,
+        uses: [...example.uses].toSorted(),
+      });
+    }
+  });
+
+  it("loads each example by its name, and it renders (a smoke test)", async () => {
+    for (const [name, load] of Object.entries(loadExample)) {
+      // oxlint-disable-next-line no-await-in-loop -- one example at a time keeps a failure readable
+      const Example = await load();
+      expect({
+        name,
+        rendered: renderToStaticMarkup(createElement(Example)).length > 0,
+      }).toStrictEqual({ name, rendered: true });
+    }
+  });
+});
+
+describe("the kit's demos", () => {
+  it("has a demo of every component in the kit, and each renders (a smoke test)", () => {
+    const names = supported.map(({ name }) => name).toSorted();
+    expect(Object.keys(demos).toSorted()).toStrictEqual(names);
+    for (const [name, Demo] of Object.entries(demos)) {
+      expect({
+        name,
+        rendered: renderToStaticMarkup(createElement(Demo)).length > 0,
+      }).toStrictEqual({ name, rendered: true });
+    }
   });
 });

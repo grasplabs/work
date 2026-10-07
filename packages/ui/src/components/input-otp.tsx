@@ -14,7 +14,7 @@ function InputOTP({
     <OTPInput
       data-slot="input-otp"
       containerClassName={cn(
-        "flex items-center has-disabled:opacity-50",
+        "flex w-fit items-center has-disabled:opacity-50",
         containerClassName
       )}
       spellCheck={false}
