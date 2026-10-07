@@ -93,7 +93,22 @@ export const shadcnComponents = {
     changes:
       "`ratio` is one of a set of named ratios, each a static class, instead of any number in an inline style.",
   },
-  attachment: { status: "planned" },
+  attachment: {
+    status: "supported",
+    summary:
+      "A file attached to a message or a form, with its name and actions.",
+    exports: [
+      "Attachment",
+      "AttachmentAction",
+      "AttachmentActions",
+      "AttachmentContent",
+      "AttachmentDescription",
+      "AttachmentGroup",
+      "AttachmentMedia",
+      "AttachmentTitle",
+      "AttachmentTrigger",
+    ],
+  },
   avatar: {
     status: "supported",
     summary: "A person's picture, or their initials when there is none.",
@@ -124,7 +139,11 @@ export const shadcnComponents = {
       "BreadcrumbSeparator",
     ],
   },
-  bubble: { status: "planned" },
+  bubble: {
+    status: "supported",
+    summary: "A chat message's bubble, with reactions.",
+    exports: ["Bubble", "BubbleContent", "BubbleGroup", "BubbleReactions"],
+  },
   button: {
     status: "supported",
     summary: "A button, or a link that looks like one.",
@@ -141,7 +160,13 @@ export const shadcnComponents = {
       "buttonGroupVariants",
     ],
   },
-  calendar: { status: "planned" },
+  calendar: {
+    status: "supported",
+    summary: "A month grid to pick a date or a range.",
+    exports: ["Calendar", "CalendarDayButton"],
+    changes:
+      "The day picker's parts are components of their own instead of defined during render, and a focused day takes keyboard focus (upstream never attached the ref).",
+  },
   card: {
     status: "supported",
     summary: "A bordered box with a header, content and footer.",
@@ -155,8 +180,36 @@ export const shadcnComponents = {
       "CardTitle",
     ],
   },
-  carousel: { status: "planned" },
-  chart: { status: "planned" },
+  carousel: {
+    status: "supported",
+    summary: "Slides that scroll one by one, with previous and next buttons.",
+    exports: [
+      "Carousel",
+      "CarouselContent",
+      "CarouselItem",
+      "CarouselNext",
+      "CarouselPrevious",
+      "useCarousel",
+    ],
+    changes:
+      "Reads whether it can scroll from the carousel as it changes, instead of copying it into state from an effect; `label` names the previous and next buttons, for translations.",
+  },
+  chart: {
+    status: "supported",
+    summary:
+      "Charts on recharts, coloured with the theme's chart tokens, with a tooltip and a legend.",
+    exports: [
+      "ChartContainer",
+      "ChartLegend",
+      "ChartLegendContent",
+      "ChartTooltip",
+      "ChartTooltipContent",
+      "chartColor",
+      "chartColors",
+    ],
+    changes:
+      "A series' colour is a chart token (`chart-1` to `chart-5`): marks take `chartColor(token)`, markers use the token's class. No `<style>` element, no inline styles, no ChartStyle, and no per-theme colours: the tokens have their own dark values.",
+  },
   checkbox: {
     status: "supported",
     summary: "A box to tick, on or off.",
@@ -191,7 +244,21 @@ export const shadcnComponents = {
     changes:
       "`triggerLabel` and `clearLabel` name the input's trigger and clear buttons, which upstream leaves without a name.",
   },
-  command: { status: "planned" },
+  command: {
+    status: "supported",
+    summary: "A searchable list of commands, on its own or in a dialog.",
+    exports: [
+      "Command",
+      "CommandDialog",
+      "CommandEmpty",
+      "CommandGroup",
+      "CommandInput",
+      "CommandItem",
+      "CommandList",
+      "CommandSeparator",
+      "CommandShortcut",
+    ],
+  },
   "context-menu": {
     status: "supported",
     summary: "A menu that opens on right click or long press.",
@@ -333,7 +400,11 @@ export const shadcnComponents = {
       "InputGroupTextarea",
     ],
   },
-  "input-otp": { status: "planned" },
+  "input-otp": {
+    status: "supported",
+    summary: "A one-time code input, one box per character.",
+    exports: ["InputOTP", "InputOTPGroup", "InputOTPSeparator", "InputOTPSlot"],
+  },
   item: {
     status: "supported",
     summary: "A row with media, a title, a description and actions.",
@@ -360,7 +431,11 @@ export const shadcnComponents = {
     summary: "A label for a control.",
     exports: ["Label"],
   },
-  marker: { status: "planned" },
+  marker: {
+    status: "supported",
+    summary: "A line of context in a conversation, such as a date or an event.",
+    exports: ["Marker", "MarkerContent", "MarkerIcon", "markerVariants"],
+  },
   menubar: {
     status: "supported",
     summary: "A row of menus, as in a desktop app.",
@@ -385,8 +460,34 @@ export const shadcnComponents = {
     changes:
       "Its triggers show a focus ring from the keyboard; upstream hides the outline and shows nothing.",
   },
-  message: { status: "planned" },
-  "message-scroller": { status: "planned" },
+  message: {
+    status: "supported",
+    summary: "A chat message: who sent it, its content and its footer.",
+    exports: [
+      "Message",
+      "MessageAvatar",
+      "MessageContent",
+      "MessageFooter",
+      "MessageGroup",
+      "MessageHeader",
+    ],
+  },
+  "message-scroller": {
+    status: "supported",
+    summary:
+      "A conversation's scrolling area that keeps to the newest message.",
+    exports: [
+      "MessageScroller",
+      "MessageScrollerButton",
+      "MessageScrollerContent",
+      "MessageScrollerItem",
+      "MessageScrollerProvider",
+      "MessageScrollerViewport",
+      "useMessageScroller",
+      "useMessageScrollerScrollable",
+      "useMessageScrollerVisibility",
+    ],
+  },
   "native-select": {
     status: "supported",
     summary: "The browser's own select, styled.",
@@ -445,13 +546,38 @@ export const shadcnComponents = {
       "ProgressValue",
     ],
   },
-  questionnaire: { status: "planned" },
+  questionnaire: {
+    status: "supported",
+    summary:
+      "Questions asked one at a time, with choices, progress and a submit.",
+    exports: [
+      "Questionnaire",
+      "QuestionnaireActions",
+      "QuestionnaireChoice",
+      "QuestionnaireChoiceDescription",
+      "QuestionnaireChoices",
+      "QuestionnaireDescription",
+      "QuestionnaireError",
+      "QuestionnaireInput",
+      "QuestionnaireItem",
+      "QuestionnaireNext",
+      "QuestionnairePrevious",
+      "QuestionnaireProgress",
+      "QuestionnaireSkip",
+      "QuestionnaireSubmit",
+      "QuestionnaireTitle",
+    ],
+  },
   "radio-group": {
     status: "supported",
     summary: "A set of options, one of which is picked.",
     exports: ["RadioGroup", "RadioGroupItem"],
   },
-  resizable: { status: "planned" },
+  resizable: {
+    status: "supported",
+    summary: "Panels with handles to drag their sizes.",
+    exports: ["ResizableHandle", "ResizablePanel", "ResizablePanelGroup"],
+  },
   "scroll-area": {
     status: "supported",
     summary: "A region that scrolls, with a thin scrollbar.",
