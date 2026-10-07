@@ -3,7 +3,7 @@ import { z } from "zod";
 import { defineErrorFamily } from "./errors.ts";
 import type {
   LogFilter,
-  StaffLogEntry,
+  StaffLog,
   StaffNote,
   StaffOverview,
   StaffTranscript,
@@ -259,7 +259,7 @@ export interface OnboardingStaffApi {
   /** Where the onboarding stands: its stages, what needs Grasp, Grasp's notes. */
   overview: () => Promise<StaffOverview>;
   /** What happened, the newest first, narrowed by `filter`. */
-  log: (filter?: LogFilter) => Promise<StaffLogEntry[]>;
+  log: (filter?: LogFilter) => Promise<StaffLog>;
   addNote: (text: string) => Promise<StaffNote>;
   /** Someone's interview; every read is in the audit log, without its words. */
   transcript: (person: string) => Promise<StaffTranscript>;

@@ -54,7 +54,10 @@ export interface StageView {
 export type StaffNeed =
   | { kind: "agreement"; what: "processing" | "assessment" | "council" }
   | { kind: "paused" }
-  /** A lead hasn't talked days after their link went out: their team waits. */
+  /**
+   * A lead hasn't talked days after their link went out: their team's
+   * interviews go ahead without the lead's map of its work.
+   */
   | { kind: "lead"; team: string; teamName: string; lead: string }
   /** Enough is known: the company comes in once Grasp gives its go. */
   | { kind: "go"; known: number; threshold: number }
@@ -86,6 +89,13 @@ export interface StaffLogEntry {
   /** The person it is about, and their team, while they are on the roster. */
   person: { id: string; name: string } | null;
   team: string | null;
+}
+
+/** The log as one read gives it: its entries, and the teams to narrow it by. */
+export interface StaffLog {
+  entries: StaffLogEntry[];
+  /** The roster's teams, by id and name. */
+  teams: { id: string; name: string }[];
 }
 
 /** What the log can be narrowed to. */

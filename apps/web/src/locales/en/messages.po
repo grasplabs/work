@@ -281,8 +281,8 @@ msgid "{team} (team)"
 msgstr "{team} (team)"
 
 #: src/onboarding/staff-words.ts
-msgid "{teamName}'s lead hasn't talked yet: the team waits"
-msgstr "{teamName}'s lead hasn't talked yet: the team waits"
+msgid "{teamName}'s lead hasn't talked yet: the team goes ahead without their map of its work"
+msgstr "{teamName}'s lead hasn't talked yet: the team goes ahead without their map of its work"
 
 #: src/chat/held-writes.tsx
 msgid "{title} on {connection}"

@@ -81,7 +81,9 @@ export const needText = (i18n: I18n, need: StaffNeed): string => {
   }
   if (need.kind === "lead") {
     const { teamName } = need;
-    return i18n._(msg`${teamName}'s lead hasn't talked yet: the team waits`);
+    return i18n._(
+      msg`${teamName}'s lead hasn't talked yet: the team goes ahead without their map of its work`
+    );
   }
   const { known, threshold } = need;
   return need.kind === "go"

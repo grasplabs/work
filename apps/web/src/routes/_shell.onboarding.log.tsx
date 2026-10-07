@@ -1,6 +1,7 @@
 import { logActors } from "@grasp-os/shared/onboarding-staff";
 import type {
   LogFilter,
+  StaffLog,
   StaffLogEntry,
 } from "@grasp-os/shared/onboarding-staff";
 import { Button } from "@grasp-os/ui/components/button";
@@ -35,12 +36,6 @@ import {
 /** What the log can be narrowed to by what happened. */
 const whatChoices = ["interview", "onboarding"] as const;
 
-interface LogData {
-  entries: StaffLogEntry[];
-  /** The teams by id, as the roster names them. */
-  teams: { id: string; name: string }[];
-}
-
 /** One filter: its label above its control. */
 const Filter = ({
   label,
@@ -60,7 +55,7 @@ const Filters = ({
   teams,
 }: {
   filter: LogFilter;
-  teams: LogData["teams"];
+  teams: StaffLog["teams"];
 }) => {
   const { t, i18n } = useLingui();
   const navigate = useNavigate({ from: "/onboarding/log" });
@@ -201,7 +196,7 @@ const LogExport = ({ entries }: { entries: StaffLogEntry[] }) => (
   </Button>
 );
 
-const Entries = ({ data }: { data: LogData }) => {
+const Entries = ({ data }: { data: StaffLog }) => {
   const { i18n } = useLingui();
   const teamName = new Map(data.teams.map(({ id, name }) => [id, name]));
   if (data.entries.length === 0) {
@@ -276,16 +271,11 @@ export const Route = createFileRoute("/_shell/onboarding/log")({
     logSearchOf(search),
   loaderDeps: ({ search }) => search,
   loader: async ({ context: { core }, deps }) =>
-    await loadFromCore(core, async (session): Promise<LogData> => {
-      const [entries, view] = await Promise.all([
-        session.onboardingStaff.log(deps),
-        session.onboarding.view(),
-      ]);
-      return {
-        entries,
-        teams: (view.roster?.teams ?? []).map(({ id, name }) => ({ id, name })),
-      };
-    }),
+    await loadFromCore(
+      core,
+      async (session): Promise<StaffLog> =>
+        await session.onboardingStaff.log(deps)
+    ),
   errorComponent: SettingsError,
   component: Log,
 });

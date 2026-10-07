@@ -160,16 +160,31 @@ describe("Grasp's onboarding area", () => {
     });
   });
 
-  it("keeps staff's notes, and narrows the log by who, what and day", async () => {
+  it("keeps staff's notes, and narrows the log by who, what, team and day, naming who did what", async () => {
     const { ids } = await running();
     const staff = await asStaff();
     const note = await staff.onboardingStaff.addNote("  Call Ops on Monday  ");
     const empty = await outcome(staff.onboardingStaff.addNote("   "));
     const { notes } = await staff.onboardingStaff.overview();
-    const interviews = await staff.onboardingStaff.log({ what: "interview" });
-    const byPeople = await staff.onboardingStaff.log({ actor: "person" });
+    // Oli loses their device: staff give them a new start.
+    await staff.onboardingStaff.newStart(ids.oli);
+    const { entries: interviews, teams } = await staff.onboardingStaff.log({
+      what: "interview",
+    });
+    const { entries: byPeople } = await staff.onboardingStaff.log({
+      actor: "person",
+    });
+    const { entries: byStaff } = await staff.onboardingStaff.log({
+      actor: "staff",
+      team: "ops",
+    });
     const today = new Date().toISOString().slice(0, 10);
-    const none = await staff.onboardingStaff.log({ day: "2001-01-01" });
+    const { entries: none } = await staff.onboardingStaff.log({
+      day: "2001-01-01",
+    });
+    const { entries: noTeam } = await staff.onboardingStaff.log({
+      team: "nobody",
+    });
     expect({
       note: note.text,
       empty,
@@ -179,8 +194,13 @@ describe("Grasp's onboarding area", () => {
         .map(({ what }) => what)
         .toReversed(),
       onlyPeople: byPeople.every(({ actor }) => actor === "person"),
+      staffInOps: byStaff
+        .filter(({ person }) => person?.id === ids.oli)
+        .map(({ what }) => what),
+      teams,
       today: interviews.every(({ at }) => at.startsWith(today)),
       none,
+      noTeam,
     }).toStrictEqual({
       note: "Call Ops on Monday",
       empty: "onboarding.invalid",
@@ -189,10 +209,14 @@ describe("Grasp's onboarding area", () => {
         "interview.opened",
         "interview.started",
         "interview.completed",
+        "interview.new_start",
       ],
       onlyPeople: true,
+      staffInOps: ["interview.new_start"],
+      teams: [{ id: "ops", name: "Ops" }],
       today: true,
       none: [],
+      noTeam: [],
     });
   });
 });

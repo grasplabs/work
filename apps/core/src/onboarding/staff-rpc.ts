@@ -15,7 +15,7 @@ import {
 } from "@grasp-os/shared/onboarding-staff";
 import type {
   LogFilter,
-  StaffLogEntry,
+  StaffLog,
   StaffNote,
   StaffOverview,
   StaffTranscript,
@@ -123,7 +123,7 @@ export class OnboardingStaffRpc
     });
   }
 
-  async log(filter: LogFilter = {}): Promise<StaffLogEntry[]> {
+  async log(filter: LogFilter = {}): Promise<StaffLog> {
     return await withPerson(this.#check, async (person) => {
       requireStaff(person);
       const parsed = onboardingErrors.parse(
