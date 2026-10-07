@@ -18,6 +18,7 @@ import type {
   OutlineNode,
   StepOutline,
   TriggerDeclaration,
+  WorkflowCalls,
 } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
@@ -49,7 +50,9 @@ import {
 // code outside screens changed, which it may import; a step that calls
 // the App's bindings may change things whether it says so or not, a step
 // counts as changed when its code as written does, and every step when
-// shared code changed), what
+// shared code changed; which steps there are, what each calls and
+// whether they can be read at all as the version's row keeps them, the
+// reading its runs are held to, `stepsOf`), what
 // the App asks for that no admin granted yet, what it holds and which of
 // that making it current would ask an admin for again, and its workflows'
 // tests, kept per version's files so they run once.
@@ -116,18 +119,72 @@ const sameJson = (one: unknown, other: unknown): boolean =>
 const stepsIn = (nodes: readonly OutlineNode[]): Map<string, StepOutline> =>
   new Map(outlineSteps(nodes).map((step) => [step.name, step]));
 
-/** A workflow's steps as its code reads; null when it can't be read. */
+/** A version's number, its files, and what its row keeps its workflows call. */
+interface VersionAt {
+  version: number;
+  files: AppFiles;
+  calls: Record<string, WorkflowCalls>;
+}
+
+/**
+ * A step its version's row keeps that its source's outline doesn't show:
+ * named, and nothing more is known of it.
+ */
+const keptOnly = (name: string): StepOutline => ({
+  type: "step",
+  name,
+  kind: "exact",
+  description: "",
+  sideEffect: false,
+  locked: false,
+  params: [],
+  options: {},
+  code: "",
+  line: 0,
+});
+
+/**
+ * A workflow's steps at a version, each with the bindings it calls: which
+ * steps there are, what each calls, and whether they can be read at all
+ * come from the version's row (`keptCallsOf`), the reading its runs are
+ * held to, never from reading its source again, which a later describer
+ * may read otherwise. The source's outline gives each step's layout and
+ * options only. None where the version has no such workflow; null when
+ * its row keeps its steps as unread, or keeps nothing for it (its runs
+ * then fail with `workflow.calls_not_kept`).
+ */
 const stepsOf = (
-  files: AppFiles | undefined,
-  id: string
+  at: VersionAt | undefined,
+  id: WorkflowId
 ): Map<string, StepOutline> | null => {
-  const source = files?.[workflowPaths(id).workflow];
-  if (source === undefined) {
+  const source = at?.files[workflowPaths(id).workflow];
+  if (at === undefined || source === undefined) {
     return new Map();
   }
+  const kept = keptCallsOf(at.calls, id)?.steps ?? null;
+  if (kept === null) {
+    return null;
+  }
   const outline = readOutline(source);
-  return outline === null ? null : stepsIn(outline.steps);
+  const read =
+    outline === null ? new Map<string, StepOutline>() : stepsIn(outline.steps);
+  return new Map(
+    Object.entries(kept).map(([name, calls]) => [
+      name,
+      { ...(read.get(name) ?? keptOnly(name)), env: [...calls] },
+    ])
+  );
 };
+
+/**
+ * Every binding a workflow calls at a version, as its row keeps it
+ * (`keptCallsOf`): what each step is held to when its steps can't be read;
+ * none once it's removed, or when its row keeps nothing for it.
+ */
+const allCallsOf = (at: VersionAt, id: WorkflowId): string[] =>
+  workflowIdsIn(at.files).includes(id)
+    ? (keptCallsOf(at.calls, id)?.all ?? [])
+    : [];
 
 /** A step without where it is written, to compare. */
 const withoutLine = ({ line: _line, ...step }: StepOutline) => step;
@@ -376,12 +433,6 @@ const stepChanges = (
   });
 };
 
-/** A version's files, and its number. */
-interface VersionAt {
-  version: number;
-  files: AppFiles;
-}
-
 /** A version's workflows that differ from the current version's. */
 const workflowsOf = async (
   env: Env,
@@ -389,16 +440,10 @@ const workflowsOf = async (
   {
     before,
     proposed,
-    callsOf,
     changedPaths,
   }: {
     before: VersionAt | undefined;
     proposed: VersionAt;
-    /**
-     * Every binding a workflow of the proposed version calls, as its row
-     * keeps it (`keptCallsOf`); none if the row keeps no entry for it.
-     */
-    callsOf: (id: WorkflowId) => string[];
     changedPaths: ReadonlySet<string>;
   }
 ): Promise<VersionReview["workflows"]> => {
@@ -429,8 +474,8 @@ const workflowsOf = async (
     if (change === undefined) {
       continue;
     }
-    const stepsBefore = stepsOf(before?.files, id);
-    const stepsNow = stepsOf(proposed.files, id);
+    const stepsBefore = stepsOf(before, id);
+    const stepsNow = stepsOf(proposed, id);
     // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
     const paramsBefore = await paramsOf(env, app, before, id);
     // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
@@ -443,10 +488,7 @@ const workflowsOf = async (
       stepsBefore === null || stepsNow === null
         ? null
         : stepChanges(stepsBefore, stepsNow, shared.length > 0);
-    // What its runs are held to, as its row keeps it (`keptCallsOf`):
-    // each step to its own when its steps can be read, every step to all
-    // of them when they can't; none once it's removed or not kept.
-    const heldTo = callsOf(id);
+    const heldTo = allCallsOf(proposed, id);
     workflows.push({
       id,
       change,
@@ -488,11 +530,19 @@ export const reviewVersion = async (
   const row = await findVersion(env, found.id, version);
   const files = await versionFiles(env, found.id, row.version);
   const { currentVersion: current } = found;
-  // The current version itself changes nothing against itself.
+  // What the current version's row keeps, its exports and what its
+  // workflows call; the current version itself changes nothing against
+  // itself.
+  const currentRow =
+    current === null ? undefined : await findVersion(env, found.id, current);
   const before =
-    current === null
+    currentRow === undefined
       ? undefined
-      : { version: current, files: await versionFiles(env, found.id, current) };
+      : {
+          version: currentRow.version,
+          files: await versionFiles(env, found.id, currentRow.version),
+          calls: currentRow.workflowCalls,
+        };
   const fileChanges = differences(
     new Map(Object.entries(before?.files ?? {})),
     new Map(Object.entries(files)),
@@ -501,11 +551,7 @@ export const reviewVersion = async (
   const changedPaths = new Set(fileChanges.map(({ name }) => name));
   const workflows = await workflowsOf(env, found.id, {
     before,
-    proposed: { version: row.version, files },
-    callsOf: (workflow) =>
-      workflowIdsIn(files).includes(workflow)
-        ? (keptCallsOf(row.workflowCalls, workflow)?.all ?? [])
-        : [],
+    proposed: { version: row.version, files, calls: row.workflowCalls },
     changedPaths,
   });
   const serverChanges = differences(
@@ -517,10 +563,6 @@ export const reviewVersion = async (
   // first version copied from a blueprint, made current for the first time.
   const keep = current === null && row.approved === 1;
   // What other Apps may call of the current version, from its row.
-  const currentRow =
-    before === undefined
-      ? undefined
-      : await findVersion(env, found.id, before.version);
   const exportsBefore = currentRow?.exports ?? {};
   // What the App holds, as the permissions API shows it to this reviewer.
   const held = await permissionsOpenTo(
