@@ -56,6 +56,13 @@ const toBase64 = (bytes: Uint8Array): string => {
 const fromBase64 = (text: string): Uint8Array =>
   Uint8Array.from(atob(text), (char) => char.codePointAt(0) ?? 0);
 
+/**
+ * Whether `value` is exactly of the built-in kind, not a subclass of it: a
+ * subclass's own behaviour would not come back after a decode.
+ */
+const isExactly = (value: object, prototype: object): boolean =>
+  Object.getPrototypeOf(value) === prototype;
+
 const isPlainObject = (value: object): boolean => {
   const prototype: unknown = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
@@ -93,24 +100,30 @@ const encodeObject = (
     // oxlint-disable-next-line no-use-before-define -- the two recurse into each other
     encodeNode(item, at, ancestors);
   let node: Node;
-  if (Array.isArray(value)) {
+  if (Array.isArray(value) && isExactly(value, Array.prototype)) {
     node = [
       "A",
       ...Array.from(value, (item, index) => inner(item, `${path}[${index}]`)),
     ];
-  } else if (value instanceof Date) {
+  } else if (value instanceof Date && isExactly(value, Date.prototype)) {
     const time = value.getTime();
     node = ["D", Number.isNaN(time) ? null : time];
-  } else if (value instanceof Uint8Array && value.constructor === Uint8Array) {
+  } else if (
+    value instanceof Uint8Array &&
+    isExactly(value, Uint8Array.prototype)
+  ) {
     node = ["B", toBase64(value)];
-  } else if (value instanceof ArrayBuffer) {
+  } else if (
+    value instanceof ArrayBuffer &&
+    isExactly(value, ArrayBuffer.prototype)
+  ) {
     node = ["R", toBase64(new Uint8Array(value))];
-  } else if (value instanceof Map) {
+  } else if (value instanceof Map && isExactly(value, Map.prototype)) {
     node = ["M"];
     for (const [key, item] of value) {
       node.push(inner(key, `${path} key`), inner(item, `${path} value`));
     }
-  } else if (value instanceof Set) {
+  } else if (value instanceof Set && isExactly(value, Set.prototype)) {
     node = ["S", ...Array.from(value, (item) => inner(item, `${path} item`))];
   } else if (isPlainObject(value)) {
     node = ["O"];

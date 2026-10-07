@@ -65,6 +65,16 @@ export const ended = async (
 
 export const newId = (): string => crypto.randomUUID();
 
+/** When the run's alarm is due, or null when it has none. */
+export const alarmOf = async (
+  definition: string,
+  id: string
+): Promise<number | null> =>
+  await runInDurableObject(
+    runObject(definition, id),
+    async (_, state) => await state.storage.getAlarm()
+  );
+
 /** Sends the run an alarm of its own, as a duplicate delivery would. */
 export const deliverAlarm = async (
   definition: string,

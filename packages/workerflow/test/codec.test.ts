@@ -1,3 +1,4 @@
+// oxlint-disable max-classes-per-file -- the refused values include classes and subclasses of built-ins
 import { describe, expect, test } from "vite-plus/test";
 
 import {
@@ -91,6 +92,11 @@ describe("values the journal can't keep are refused", () => {
     ["a URL", new URL("https://example.com")],
     ["a promise", Promise.resolve(1)],
     ["another typed array", new Uint16Array(1)],
+    // Subclasses: their own behaviour wouldn't come back from a decode.
+    ["a Map subclass", new (class Ledger extends Map<string, number> {})()],
+    ["a Set subclass", new (class Tags extends Set<string> {})()],
+    ["a Date subclass", new (class Deadline extends Date {})(0)],
+    ["an Array subclass", new (class Rows extends Array<number> {})()],
     ["a function inside an object", { nested: [{ fn: () => 1 }] }],
   ])("%s", (_, value) => {
     expect(() => encode(value)).toThrow(SerializationError);

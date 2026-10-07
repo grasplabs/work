@@ -4,7 +4,9 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
 
 import { SerializationError } from "../src/codec.ts";
+import { maxErrorMessageBytes } from "../src/errors.ts";
 import {
+  alarmOf,
   ended,
   journalOf,
   newId,
@@ -286,4 +288,39 @@ describe("creating a run", () => {
       )
     ).resolves.toStrictEqual([]);
   });
+});
+
+describe("a thrown value the journal can't keep as it is", () => {
+  it.each(["bare-in-step", "bare-in-body"])(
+    "ends the run cleanly when it can't be printed (%s)",
+    async (definition) => {
+      const id = newId();
+      await workflow(definition).create({ id });
+
+      const status = await ended(definition, id);
+
+      expect(status).toStrictEqual({
+        status: "errored",
+        error: { name: "Error", message: "unprintable thrown value" },
+      });
+      await expect(alarmOf(definition, id)).resolves.toBeNull();
+    }
+  );
+
+  it.each(["huge-in-step", "huge-in-body"])(
+    "ends the run cleanly with the message cut to size (%s)",
+    async (definition) => {
+      const id = newId();
+      await workflow(definition).create({ id });
+
+      const status = await ended(definition, id);
+
+      const error = status.status === "errored" ? status.error : undefined;
+      const bytes = new TextEncoder().encode(error?.message).byteLength;
+      expect(error?.name).toBe("7");
+      expect(bytes).toBeGreaterThan(maxErrorMessageBytes - 4);
+      expect(bytes).toBeLessThanOrEqual(maxErrorMessageBytes);
+      await expect(alarmOf(definition, id)).resolves.toBeNull();
+    }
+  );
 });

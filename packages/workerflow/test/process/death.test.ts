@@ -21,7 +21,7 @@ import { bundleFixture, Workerd } from "./workerd.ts";
 
 const bundleDirectory = mkdtempSync(path.join(tmpdir(), "workerflow-bundle-"));
 let fixture: string;
-let outside: Outside;
+const outside = new Outside();
 let effectsPort: number;
 let workerd: Workerd;
 
@@ -91,7 +91,6 @@ const keysOf = (id: string, label: string): Set<string> =>
 describe("a run on disk-backed workerd", () => {
   beforeAll(async () => {
     fixture = bundleFixture(bundleDirectory);
-    outside = new Outside();
     effectsPort = await outside.listen();
   });
 
@@ -105,8 +104,11 @@ describe("a run on disk-backed workerd", () => {
   });
 
   afterAll(async () => {
-    await outside.close();
-    rmSync(bundleDirectory, { recursive: true, force: true });
+    try {
+      await outside.close();
+    } finally {
+      rmSync(bundleDirectory, { recursive: true, force: true });
+    }
   });
 
   it("doesn't run a completed step again after the process dies; the step cut off mid-effect runs again under its key", async () => {
@@ -189,8 +191,8 @@ describe("a run on disk-backed workerd", () => {
     });
   });
 
-  it("has no run when the process dies before the start commits; the start delivered again creates it once", async () => {
-    const id = "before-the-start-commit";
+  it("has no run when the process dies before the start reaches the run object; the start delivered again creates it once", async () => {
+    const id = "before-the-start-arrives";
     const announced = outside.hold(id, "announce");
     const lost = workerd
       .request("/start", startOf("orders", id, { announce: true }))
@@ -217,6 +219,38 @@ describe("a run on disk-backed workerd", () => {
       ["charge", 1],
       ["ship", 1],
     ]);
+  });
+
+  it("keeps the run when the process dies after the start commits and before its answer; the start delivered again finds it", async () => {
+    const id = "report-commit-before-the-answer";
+    const committed = outside.hold(id, "committed");
+    const lost = workerd
+      .request("/start", startOf("orders", id))
+      .catch(() => "lost");
+    await committed;
+    await workerd.kill();
+    const answer = await lost;
+    await workerd.start();
+
+    const again = await workerd.request("/start", startOf("orders", id));
+    const status = await ended("orders", id);
+
+    // One run: every effect went out under the keys of one run ID.
+    const runIds = new Set(
+      outside.of(id).map((effect) => effect.key.split(":")[0])
+    );
+    expect({ answer, again, status }).toMatchObject({
+      answer: "lost",
+      again: { status: 200, body: { created: false } },
+      status: { status: "complete" },
+    });
+    expect(runIds.size).toBe(1);
+    await expect(journalOf("orders", id)).resolves.toMatchObject({
+      steps: [
+        { name: "charge", state: "succeeded" },
+        { name: "ship", state: "succeeded" },
+      ],
+    });
   });
 
   it("still runs the run, once, when the process dies after the start commits; the start delivered again finds it", async () => {

@@ -5,9 +5,10 @@
 // opaque name and version, a run knows nothing of who started it or why.
 //
 // This profile is partial. It has named `do` steps, persisted and replayed.
-// Retries, step configuration, sleeps, events, pause, terminate, restart,
-// rollbacks and retention come in later slices; until then they are absent
-// or refused, never silently ignored.
+// Retries, step configuration (and with it the step context's resolved
+// `config`), timeouts, sleeps, events, pause, terminate, restart, rollbacks
+// and retention come in later slices; until then they are absent or
+// refused, never silently ignored.
 
 /** What a run's definition is given when it runs. */
 export interface WorkflowEvent<Params = unknown> {

@@ -135,6 +135,15 @@ export class Workerd {
       stdio: ["ignore", "pipe", "pipe"],
     });
     this.#process = child;
+    // If the test process exits without disposing (a crash, a timeout),
+    // workerd goes with it rather than outlive it.
+    const killOnExit = (): void => {
+      child.kill("SIGKILL");
+    };
+    process.once("exit", killOnExit);
+    child.once("exit", () => {
+      process.off("exit", killOnExit);
+    });
     for (const stream of [child.stdout, child.stderr]) {
       stream.on("data", (chunk: Buffer) => {
         this.#log += chunk.toString();

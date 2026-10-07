@@ -45,7 +45,7 @@ interface Arrival {
 
 interface Hold {
   matches: (arrival: Arrival) => boolean;
-  held: PromiseWithResolvers<true>;
+  arrived: boolean;
 }
 
 const isArrival = (value: unknown): value is Omit<Effect, "receipt"> =>
@@ -78,20 +78,24 @@ export class Outside {
 
   /**
    * Withholds the answer to the effect `label` of `run` (at `attempt`, if
-   * given), or to the announcement of `run`'s start (label "announce").
+   * given), or to a report about `run` (labels "announce", before its start
+   * is sent, and "committed", after its start committed).
    * Resolves once it arrived: the effect happened, its step hasn't heard
-   * back. Registered when called, so call it before the effect can arrive.
+   * back. Registered when called, so call it before the effect can arrive;
+   * fails at the deadline if it never does.
    */
   async hold(run: string, label: string, attempt?: number): Promise<void> {
-    const held = Promise.withResolvers<true>();
-    this.#holds.push({
+    const hold: Hold = {
       matches: (arrival) =>
         arrival.run === run &&
         arrival.label === label &&
         (attempt === undefined || arrival.attempt === attempt),
-      held,
-    });
-    await held.promise;
+      arrived: false,
+    };
+    this.#holds.push(hold);
+    await until(`${label} of ${run} to arrive`, () =>
+      hold.arrived ? true : undefined
+    );
   }
 
   /** Sends the answer withheld from `label` of `run`, late. */
@@ -127,10 +131,9 @@ export class Outside {
       response.end();
       return;
     }
-    if (request.url === "/announce") {
-      if (
-        !this.#withhold({ run: sent.run, label: "announce" }, response, "{}")
-      ) {
+    if (request.url !== "/effect") {
+      const label = request.url?.slice(1) ?? "";
+      if (!this.#withhold({ run: sent.run, label }, response, "{}")) {
         response.end("{}");
       }
       return;
@@ -153,11 +156,16 @@ export class Outside {
     }
     const [hold] = this.#holds.splice(index, 1);
     this.#withheld.push({ arrival, response, answer });
-    hold?.held.resolve(true);
+    if (hold !== undefined) {
+      hold.arrived = true;
+    }
     return true;
   }
 
   async close(): Promise<void> {
+    if (!this.#server.listening) {
+      return;
+    }
     for (const { response } of this.#withheld) {
       response.destroy();
     }

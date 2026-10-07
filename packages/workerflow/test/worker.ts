@@ -16,6 +16,20 @@ const errorOf = (error: unknown): { name: string; message: string } =>
 const declinedCard = (): Error =>
   namedError("PaymentError", "The card was declined");
 
+/** An object with no prototype: `String()` of it throws. */
+const unprintableValue = (): unknown => {
+  const value: unknown = Object.create(null);
+  return value;
+};
+
+/** Larger than a SQLite value, with a name that isn't a string. */
+export const oversizedMessageBytes = 3 * 1024 * 1024;
+const oversizedError = (): Error => {
+  const error = new Error("é".repeat(oversizedMessageBytes / 2));
+  Reflect.set(error, "name", 7);
+  return error;
+};
+
 export const definitions: Record<string, WorkflowDefinition> = {
   // Two steps, each an outside effect; the run returns both receipts.
   orders: {
@@ -131,6 +145,32 @@ export const definitions: Record<string, WorkflowDefinition> = {
         async (context) => await effect(event.instanceId, "only", context)
       );
       return await checkpoint(event.instanceId, "end");
+    },
+  },
+  // Thrown values that can't be printed, or are far too long to keep, in
+  // a step and in the definition's own body.
+  "bare-in-step": {
+    run: async (_event, step) =>
+      await step.do("bare", () => {
+        throw unprintableValue();
+      }),
+  },
+  "bare-in-body": {
+    run: async () => {
+      await Promise.resolve();
+      throw unprintableValue();
+    },
+  },
+  "huge-in-step": {
+    run: async (_event, step) =>
+      await step.do("huge", () => {
+        throw oversizedError();
+      }),
+  },
+  "huge-in-body": {
+    run: async () => {
+      await Promise.resolve();
+      throw oversizedError();
     },
   },
   // What the definition is given, as it saw it.

@@ -29,7 +29,14 @@ export interface RunRow extends Record<string, SqlStorageValue> {
   status: RunState;
   /** Bumped by every activation: the fence against stale ones. */
   generation: number;
-  /** When the current activation is overdue for a sign of life. */
+  /**
+   * When the watchdog alarm is due: the current activation's lease, renewed
+   * at every step. Nothing reads it to decide anything; it records when
+   * recovery would start. An object gets no alarm while its alarm handler
+   * still runs, so a step that hangs hangs its run: until step timeouts
+   * are built, only the host ending the handler (Cloudflare's alarm wall
+   * time; on workerd, nothing) recovers it.
+   */
   lease_until: number | null;
   output: string | null;
   error: string | null;

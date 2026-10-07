@@ -2,10 +2,67 @@
 // any process. Anything else an error carries does not cross.
 import type { WorkflowError } from "./contracts.ts";
 
-export const errorRecord = (thrown: unknown): WorkflowError =>
-  thrown instanceof Error
-    ? { name: thrown.name, message: thrown.message }
-    : { name: "Error", message: String(thrown) };
+/** How much of a message is kept: well inside a SQLite value. */
+export const maxErrorMessageBytes = 4096;
+const maxErrorNameBytes = 256;
+
+/** What is kept of a thrown value that can't even be turned into text. */
+export const unprintable: WorkflowError = {
+  name: "Error",
+  message: "unprintable thrown value",
+};
+
+/** `value` as text, or undefined when it can't be (a null-prototype object). */
+const printable = (value: unknown): string | undefined => {
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return String(value);
+  } catch {
+    return undefined;
+  }
+};
+
+/** Cuts `text` to `maxBytes` of UTF-8, whole characters only. */
+const bounded = (text: string, maxBytes: number): string => {
+  const bytes = new TextEncoder().encode(text);
+  if (bytes.byteLength <= maxBytes) {
+    return text;
+  }
+  // `fatal: false` turns a character cut in half into U+FFFD; drop it.
+  const cut = new TextDecoder().decode(bytes.subarray(0, maxBytes));
+  return cut.endsWith("�") ? cut.slice(0, -1) : cut;
+};
+
+/**
+ * The record of anything thrown. Total: whatever was thrown (a value with
+ * no `toString`, getters that throw, a name that isn't a string, a message
+ * of megabytes), this returns a name and a message the journal can keep
+ * and read back.
+ */
+export const errorRecord = (thrown: unknown): WorkflowError => {
+  let name: string | undefined;
+  let message: string | undefined;
+  try {
+    if (thrown instanceof Error) {
+      name = printable(thrown.name);
+      message = printable(thrown.message);
+    } else {
+      name = "Error";
+      message = printable(thrown);
+    }
+  } catch {
+    // A getter that throws: as unprintable as it gets.
+  }
+  if (name === undefined || message === undefined) {
+    return unprintable;
+  }
+  return {
+    name: bounded(name, maxErrorNameBytes) || "Error",
+    message: bounded(message, maxErrorMessageBytes),
+  };
+};
 
 export const parseError = (text: string): WorkflowError => {
   const parsed: unknown = JSON.parse(text);

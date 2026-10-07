@@ -12,12 +12,20 @@ import type {
 import { namedError } from "../src/errors.ts";
 import { runObjectName } from "../src/identity.ts";
 import { WorkflowRun } from "../src/run.ts";
+import type { StartCommand, StartOutcome } from "../src/run.ts";
 
 interface FixtureEnv {
   RUNS: DurableObjectNamespace<Runs>;
   /** The outside world: the test's own HTTP server. */
   EFFECTS: Fetcher;
 }
+
+/**
+ * Runs whose ID starts with this tell the outside world after their start
+ * committed and before its answer leaves, so a test can kill workerd in
+ * that window.
+ */
+const reportCommitPrefix = "report-commit-";
 
 /** Short, so recovery after a kill takes about a second, not a minute. */
 const testLeaseMs = 1000;
@@ -89,6 +97,17 @@ export class Runs extends WorkflowRun<FixtureEnv> {
     definition,
   }: DefinitionIdentity): WorkflowDefinition | undefined {
     return definitionsFor(this.env)[definition];
+  }
+
+  override async start(command: StartCommand): Promise<StartOutcome> {
+    const outcome = await super.start(command);
+    if (command.instanceId.startsWith(reportCommitPrefix)) {
+      await this.env.EFFECTS.fetch("http://effects/committed", {
+        method: "POST",
+        body: JSON.stringify({ run: command.instanceId }),
+      });
+    }
+    return outcome;
   }
 
   /** Test-only: resets the object as an eviction does; storage stays. */
