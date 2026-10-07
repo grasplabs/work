@@ -45,7 +45,13 @@ import {
   withinPackage,
 } from "./exports.ts";
 import type { PackageFiles } from "./exports.ts";
-import { inertDataUrl, remoteInCss, svgRefusal } from "./inert.ts";
+import {
+  inertDataUrl,
+  remoteInCss,
+  runtimeLoadsInJs,
+  svgRefusal,
+  unbundledInCss,
+} from "./inert.ts";
 import { platformModules, platformPeers } from "./platform.ts";
 
 /** Node.js's built-in modules: never available to an App's packages. */
@@ -302,7 +308,11 @@ class Resolver {
     entry: boolean
   ): OnResolveResult {
     const name = entryPackage(specifier);
-    const key = this.#keyFor(from, name);
+    // A package may import itself by its own name, through its `exports`
+    // only, as Node allows: never past what it exports.
+    const self =
+      from !== undefined && this.#lock.packages[from.key]?.name === name;
+    const key = self ? from?.key : this.#keyFor(from, name);
     if (
       specifier.startsWith("node:") ||
       (nodeBuiltins.has(name) && key === undefined)
@@ -322,6 +332,11 @@ class Resolver {
     const subpath =
       specifier === name ? "." : `./${specifier.slice(name.length + 1)}`;
     const pkg = this.#packages.get(key);
+    if (self && pkg?.manifest.exports === undefined) {
+      return refuse(
+        `${key} imports itself by name, which only a package with exports may`
+      );
+    }
     const file =
       pkg === undefined
         ? undefined
@@ -331,10 +346,12 @@ class Resolver {
         `${key} doesn't export ${subpath} for the ${this.#target} target`
       );
     }
-    if (entry) {
-      this.entries.set(specifier, `${key}/${file}`);
+    const result = this.#remapped(key, pkg, file);
+    // The file built: after the browser field's remap, if it has one.
+    if (entry && result.namespace === "pkg" && result.path !== undefined) {
+      this.entries.set(specifier, result.path);
     }
-    return this.#remapped(key, pkg, file);
+    return result;
   }
 
   /** A path relative to the importing file, within its package. */
@@ -516,6 +533,37 @@ const refusalsOf = (error: unknown): string[] => {
 };
 
 /**
+ * What an output file of the build would load from outside the artifact,
+ * which esbuild's plugin never saw: strings `image-set()` takes (remote
+ * or local), and modules that load files by URL or start workers.
+ */
+const leavingOutput = (
+  path: string,
+  contents: Uint8Array,
+  limit: number
+): string[] => {
+  if (limit <= 0) {
+    return [];
+  }
+  const text = decoder.decode(contents);
+  if (path.endsWith(".css")) {
+    return [
+      ...remoteInCss(text, limit).map(
+        (url) => `the stylesheet ${path} loads ${url}, outside the artifact`
+      ),
+      ...unbundledInCss(text, limit).map(
+        (name) =>
+          `the stylesheet ${path} names ${name} in image-set() as a string, which isn't bundled: use url()`
+      ),
+    ].slice(0, limit);
+  }
+  if (path.endsWith(".js")) {
+    return runtimeLoadsInJs(text).map((why) => `the module ${path} ${why}`);
+  }
+  return [];
+};
+
+/**
  * Builds each entry of the lock's target into one ES module (and its
  * stylesheet, if it imports CSS), with the assets it imports. No code
  * splitting: each entry is whole, and nothing loads more at run time.
@@ -570,22 +618,16 @@ export const bundle = async (input: BundleInput): Promise<Bundled> => {
     return { ok: false, refusals: refusalsOf(error) };
   }
   const files = new Map<string, Uint8Array>();
-  const remoteUrls: string[] = [];
+  const leaving: string[] = [];
   for (const output of outputs) {
     const path = output.path.replace(/^\/artifact\//u, "");
     files.set(path, output.contents);
-    if (path.endsWith(".css")) {
-      // What esbuild's plugin never saw: strings `image-set()` takes.
-      const left = maxRefusals - remoteUrls.length;
-      for (const url of remoteInCss(decoder.decode(output.contents), left)) {
-        remoteUrls.push(
-          `the stylesheet ${path} loads ${url}, outside the artifact`
-        );
-      }
-    }
+    leaving.push(
+      ...leavingOutput(path, output.contents, maxRefusals - leaving.length)
+    );
   }
-  if (remoteUrls.length > 0) {
-    return { ok: false, refusals: remoteUrls };
+  if (leaving.length > 0) {
+    return { ok: false, refusals: leaving };
   }
   return {
     ok: true,

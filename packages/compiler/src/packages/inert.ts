@@ -100,6 +100,27 @@ const plainText = (bytes: Uint8Array): string | undefined => {
   }
 };
 
+/** An SVG's references: `href`/`xlink:href`/`src` values and CSS `url()`s. */
+const svgReferences = (text: string): string[] => [
+  ...[
+    ...text.matchAll(
+      /[\s/"'](?:[\w.-]+:)?(?:href|src)\s*=\s*(?<quote>["']?)(?<value>.*?)\k<quote>(?=[\s/>])/giu
+    ),
+  ].map((match) => match.groups?.value ?? ""),
+  ...[
+    ...text.matchAll(/url\(\s*(?<quote>["']?)(?<value>.*?)\k<quote>\s*\)/giu),
+  ].map((match) => match.groups?.value ?? ""),
+];
+
+/**
+ * Whether a reference leaves the SVG: anything but a same-document
+ * fragment (`#id`) or an inline image or font data URL.
+ */
+const leaves = (reference: string): boolean => {
+  const value = squeezed(reference);
+  return !(value.startsWith("#") || inertDataUrl.test(value));
+};
+
 /**
  * Why an SVG could run script when opened as a document, or undefined if
  * nothing in it can. Anything that isn't plain UTF-8 (a byte-order mark,
@@ -119,8 +140,12 @@ export const svgRefusal = (bytes: Uint8Array): string | undefined => {
   if (eventAttribute.test(text)) {
     return "is an SVG with an event handler";
   }
-  if (scriptUrl.test(squeezed(decodeEntities(text)))) {
+  const decoded = decodeEntities(text);
+  if (scriptUrl.test(squeezed(decoded))) {
     return "is an SVG that links to script";
+  }
+  if (/@import/iu.test(decoded) || svgReferences(decoded).some(leaves)) {
+    return "is an SVG that loads something from outside itself";
   }
   return undefined;
 };
@@ -144,8 +169,51 @@ const cssUnescape = (text: string): string =>
   );
 
 const cssUrl = /url\(\s*(?<value>[^)]*?)\s*\)/giu;
+const imageSet = /(?:-webkit-)?image-set\((?<args>(?:[^()]|\([^()]*\))*)\)/giu;
 const cssString = /(?<quote>["'])(?<value>(?:\\.|(?!\k<quote>).)*)\k<quote>/gu;
 const quoted = /^(?<quote>["'])(?<inner>.*)\k<quote>$/u;
+
+/**
+ * Strings `image-set()` names a local file by: esbuild resolves `url()`s
+ * in it but leaves strings as they are, so they would name paths the
+ * artifact doesn't have. Up to `limit`.
+ */
+export const unbundledInCss = (css: string, limit = 50): string[] => {
+  const found = new Set<string>();
+  for (const set of css.matchAll(imageSet)) {
+    // `url()`s in it are esbuild's to resolve, and were.
+    const strings = (set.groups?.args ?? "").replaceAll(cssUrl, "");
+    for (const match of strings.matchAll(cssString)) {
+      const value = cssUnescape(match.groups?.value ?? "").trim();
+      if (
+        found.size < limit &&
+        !fetchedString.test(value) &&
+        !inertDataUrl.test(value)
+      ) {
+        found.add(value.slice(0, 120));
+      }
+    }
+  }
+  return [...found];
+};
+
+/** What a module would load at run time that isn't in the artifact. */
+const runtimeLoads: readonly [RegExp, string][] = [
+  [
+    /new\s+URL\s*\([^)]*import\.meta\.url/u,
+    "loads a file next to itself at run time (new URL(…, import.meta.url))",
+  ],
+  [/\bnew\s+(?:Shared)?Worker\s*\(/u, "starts a worker"],
+  [/\bimportScripts\s*\(/u, "loads scripts into a worker"],
+];
+
+/**
+ * Why a module esbuild wrote would load code or files at run time that
+ * aren't part of the artifact: files next to it by URL, and workers
+ * (not in the first package release).
+ */
+export const runtimeLoadsInJs = (code: string): string[] =>
+  runtimeLoads.filter(([pattern]) => pattern.test(code)).map(([, why]) => why);
 
 /**
  * Every place a stylesheet esbuild wrote names a URL that would load

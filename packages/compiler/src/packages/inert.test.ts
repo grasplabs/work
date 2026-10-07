@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { remoteInCss, svgRefusal } from "./inert.ts";
+import {
+  remoteInCss,
+  runtimeLoadsInJs,
+  svgRefusal,
+  unbundledInCss,
+} from "./inert.ts";
 
 // The checks on what an artifact carries, on their own: pure, so tested in
 // isolation, each with the ways around a naive check (the builds that use
@@ -72,6 +77,34 @@ describe("an SVG an artifact carries", () => {
     ).toStrictEqual(new Set(["is an SVG that links to script"]));
   });
 
+  it("is refused for anything it would load from outside itself", () => {
+    const references = [
+      '<image href="https://cdn.example/a.png"/>',
+      '<image xlink:href="//cdn.example/a.png"/>',
+      '<use href="https://cdn.example/sprite.svg#icon"/>',
+      "<style>rect { fill: url(https://cdn.example/p.svg#g); }</style>",
+      "<rect style=\"fill: url('http://cdn.example/p')\"/>",
+      '<style>@import "https://cdn.example/a.css";</style>',
+      '<image href="sprite.png"/>',
+    ];
+    expect(
+      new Set(references.map((reference) => svgRefusal(utf8(svg(reference)))))
+    ).toStrictEqual(
+      new Set(["is an SVG that loads something from outside itself"])
+    );
+  });
+
+  it("takes references within itself and inline images", () => {
+    const references = [
+      '<use href="#icon"/><symbol id="icon"/>',
+      '<rect fill="url(#gradient)"/>',
+      '<image href="data:image/png;base64,iVBORw0KGgo="/>',
+    ];
+    expect(
+      references.map((reference) => svgRefusal(utf8(svg(reference))))
+    ).toStrictEqual([undefined, undefined, undefined]);
+  });
+
   it("is refused when it isn't plain UTF-8, or declares entities", () => {
     expect([
       svgRefusal(utf16(svg("<script>alert(1)</script>"))),
@@ -85,6 +118,27 @@ describe("an SVG an artifact carries", () => {
       "is an SVG that isn't plain UTF-8",
       "is an SVG that isn't plain UTF-8",
       "is an SVG that declares its own entities",
+    ]);
+  });
+});
+
+describe("a module an artifact carries", () => {
+  it("is refused for loading files by URL or starting workers", () => {
+    expect([
+      runtimeLoadsInJs('const w=new URL("./a.wasm",import.meta.url);'),
+      runtimeLoadsInJs(
+        'const w=new Worker(new URL("./w.js",import.meta.url));'
+      ),
+      runtimeLoadsInJs("self.importScripts('x.js')"),
+      runtimeLoadsInJs("export const a = typeof Worker;"),
+    ]).toStrictEqual([
+      ["loads a file next to itself at run time (new URL(…, import.meta.url))"],
+      [
+        "loads a file next to itself at run time (new URL(…, import.meta.url))",
+        "starts a worker",
+      ],
+      ["loads scripts into a worker"],
+      [],
     ]);
   });
 });
@@ -122,6 +176,12 @@ describe("a stylesheet an artifact carries", () => {
       "https://cdn.example/1.png",
       "https://cdn.example/2.png",
     ]);
+  });
+
+  it("names local files image-set() takes as strings, which aren't bundled", () => {
+    const css =
+      '.p{background:image-set("./photo.png" 1x, url(./assets/x-HASH.png) 2x, "data:image/png;base64,AAAA" 3x)}';
+    expect(unbundledInCss(css)).toStrictEqual(["./photo.png"]);
   });
 
   it("leaves what stays within the artifact", () => {

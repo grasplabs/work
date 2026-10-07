@@ -87,6 +87,12 @@ const buildOf = async (
   });
 };
 
+/** A property of a binding, its methods bound to it, for a proxy to pass on. */
+const bound = (target: object, property: string | symbol): unknown => {
+  const value: unknown = Reflect.get(target, property);
+  return typeof value === "function" ? value.bind(target) : value;
+};
+
 /** A file of a kept artifact, as text. */
 const artifactText = async (hash: string, path: string): Promise<string> => {
   const file = await env.FILES.get(`package-builds/${hash}/${path}`);
@@ -649,7 +655,7 @@ describe("a build's durability", () => {
               }
               return await target.fetch(input, init);
             }
-          : Reflect.get(target, property),
+          : bound(target, property),
     });
     const outcome = await failure(
       buildDependencies({ ...env, ASSETS: assets }, identity, {
@@ -762,6 +768,214 @@ describe("a build's durability", () => {
         kept: true,
         graphHash: app.request.graphHash,
       },
+    ]);
+  });
+});
+
+describe("what a build names and keeps", () => {
+  it("lets a package import itself through its exports, and no further", async () => {
+    const widgets = named("widgets");
+    const leaky = named("leaky");
+    const bare = named("bare");
+    await publish(
+      esm(
+        widgets,
+        {
+          "index.js": `export { helper } from "${widgets}/helper";`,
+          "helper.js": "export const helper = 'self';",
+        },
+        { exports: { ".": "./index.js", "./helper": "./helper.js" } }
+      )
+    );
+    await publish(
+      esm(
+        leaky,
+        {
+          "index.js": `export { secret } from "${leaky}/secret.js";`,
+          "secret.js": "export const secret = 1;",
+        },
+        { exports: { ".": "./index.js" } }
+      )
+    );
+    await publish(
+      esm(bare, { "index.js": `export * from "${bare}/index.js";` })
+    );
+    const ok = await approvedApp({ [widgets]: "1" });
+    const built = await buildOf(ok, "browser");
+    const module = await artifactText(built.hash, `${widgets}.js`);
+    const refused = await approvedApp({ [leaky]: "1", [bare]: "1" });
+    const refusals = await refusalsOf(buildOf(refused, "browser"));
+    expect({
+      self: module.includes("self"),
+      refusals: refusals.toSorted(),
+    }).toStrictEqual({
+      self: true,
+      refusals: [
+        `${bare}@1.0.0 imports itself by name, which only a package with exports may`,
+        `${leaky}@1.0.0 doesn't export ./secret.js for the browser target`,
+      ].toSorted(),
+    });
+  });
+
+  it("names the file built for an entry, after the browser field's remap", async () => {
+    const remapped = named("remapped");
+    await publish(
+      esm(
+        remapped,
+        {
+          "index.js": "export const where = 'node';",
+          "browser.js": "export const where = 'browser';",
+        },
+        { browser: { "./index.js": "./browser.js" } }
+      )
+    );
+    const app = await approvedApp({ [remapped]: "1" });
+    const built = await buildOf(app, "browser");
+    expect(built.artifact.entries[remapped]?.resolved).toBe(
+      `${remapped}@1.0.0/browser.js`
+    );
+  });
+
+  it("refuses local image-set strings, SVGs that load from outside, and modules that load files by URL or start workers", async () => {
+    const photos = named("photos");
+    const sprite = named("sprite");
+    const wasm = named("wasm-loader");
+    await publish(
+      esm(photos, {
+        "index.js": 'import "./photos.css"; export {};',
+        "photos.css": '.p { background: image-set("./photo.png" 1x); }',
+        "photo.png": "PNG",
+      })
+    );
+    await publish(
+      esm(sprite, {
+        "index.js": 'import icon from "./icon.svg"; export { icon };',
+        "icon.svg":
+          '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://cdn.example/a.png"/></svg>',
+      })
+    );
+    await publish(
+      esm(wasm, {
+        "index.js":
+          'export const url = new URL("./engine.wasm", import.meta.url); export const start = () => new Worker("./w.js");',
+      })
+    );
+    const app = await approvedApp({ [photos]: "1", [sprite]: "1" });
+    const loader = await approvedApp({ [wasm]: "1" });
+    expect({
+      assets: await refusalsOf(buildOf(app, "browser")),
+      loader: await refusalsOf(buildOf(loader, "browser")),
+    }).toStrictEqual({
+      assets: [
+        `${sprite}@1.0.0's icon.svg is an SVG that loads something from outside itself`,
+      ],
+      loader: [
+        `the module ${wasm}.js loads a file next to itself at run time (new URL(…, import.meta.url))`,
+        `the module ${wasm}.js starts a worker`,
+      ],
+    });
+    const css = await approvedApp({ [photos]: "1" });
+    await expect(refusalsOf(buildOf(css, "browser"))).resolves.toStrictEqual([
+      `the stylesheet ${photos}.css names ./photo.png in image-set() as a string, which isn't bundled: use url()`,
+    ]);
+  });
+
+  it("builds again when a kept artifact's description can't be read, to the same pin", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const first = await buildOf(app, "browser");
+    await env.FILES.put(`package-builds/${first.hash}.json`, "{not json");
+    const again = await buildOf(app, "browser");
+    expect([again.hash, again.stats === null]).toStrictEqual([
+      first.hash,
+      false,
+    ]);
+  });
+
+  it("re-admits after reading a kept artifact: a change while it was read wins", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    await buildOf(app, "browser");
+    const admin = await personApi("admin");
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    let changed = false;
+    const files = new Proxy(env.FILES, {
+      get: (target, property): unknown =>
+        property === "get"
+          ? async (key: string) => {
+              if (!changed && key.endsWith(".json")) {
+                changed = true;
+                await admin.api.dependencies.grantApprover({
+                  type: "person",
+                  userId: identity.userId,
+                });
+              }
+              return await target.get(key);
+            }
+          : bound(target, property),
+    });
+    const { code } = await failure(
+      buildDependencies({ ...env, FILES: files }, identity, {
+        app: app.app,
+        graphHash: app.request.graphHash,
+        target: "browser",
+        policyGeneration,
+      })
+    );
+    expect(code).toBe("dependency.policy_changed");
+  });
+
+  it("never pins a build onto a target a resolve changed while it built", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    // Just before the build pins, a resolve sets other entries.
+    let raced = false;
+    const files = new Proxy(env.FILES, {
+      get: (target, property): unknown =>
+        property === "put"
+          ? async (
+              key: string,
+              value: Parameters<R2Bucket["put"]>[1],
+              options?: R2PutOptions
+            ): Promise<R2Object | null> => {
+              if (!raced && key.endsWith(".json")) {
+                raced = true;
+                await app.builder.api.dependencies.resolve(
+                  intentFor(
+                    app.app,
+                    { [ui]: "^1.0.0" },
+                    { entries: [ui, `${ui}/extra`] }
+                  )
+                );
+              }
+              return await target.put(key, value, options);
+            }
+          : bound(target, property),
+    });
+    const { code } = await failure(
+      buildDependencies({ ...env, FILES: files }, identity, {
+        app: app.app,
+        graphHash: app.request.graphHash,
+        target: "browser",
+        policyGeneration,
+      })
+    );
+    const row = await env.DB.prepare(
+      "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+    )
+      .bind(app.app, app.request.graphHash)
+      .first<{ lock: string }>();
+    const lock = graspLockSchema.parse(JSON.parse(row?.lock ?? "null"));
+    expect([code, lock.artifacts?.[compilerVersion]?.browser]).toStrictEqual([
+      "dependency.stale",
+      undefined,
     ]);
   });
 });

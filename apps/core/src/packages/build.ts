@@ -23,13 +23,15 @@ import type {
   PackageLimits,
   PackageTarball,
 } from "@grasp-os/shared/packages";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { appFor } from "../apps.ts";
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
-import { dependencyLocks } from "../db/core/schema.ts";
+import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
+import { policyGenerationSql } from "../dependencies/policy.ts";
 import { admitDependencies } from "../dependencies/requests.ts";
 import { graphOfLock } from "./resolve.ts";
 import { verifiedTarball } from "./tarballs.ts";
@@ -85,7 +87,14 @@ const keptArtifact = async (
   if (!stored) {
     return undefined;
   }
-  const parsed = packageArtifactSchema.safeParse(await stored.json());
+  let description: unknown;
+  try {
+    description = JSON.parse(await stored.text());
+  } catch {
+    log.warn("packages.artifact_corrupt", { hash, path: "description" });
+    return undefined;
+  }
+  const parsed = packageArtifactSchema.safeParse(description);
   if (!parsed.success || (await artifactHash(parsed.data)) !== hash) {
     return undefined;
   }
@@ -137,20 +146,46 @@ const lockOf = async (
   return { lock, stored: row.lock };
 };
 
+/** What a build was admitted under: re-checked in the write that pins. */
+interface Admitted {
+  approval: string;
+  policyGeneration: number;
+}
+
+/**
+ * Whether `admitted` still holds as a statement runs: its approval still
+ * approved, under the same policy generation.
+ */
+const stillAdmitted = ({ approval, policyGeneration }: Admitted): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.id} = ${approval} AND ${dependencyRequests.status} = 'approved') AND ${policyGenerationSql} = ${policyGeneration}`;
+
+/** What a target is built for: its conditions and entries, as one text. */
+const targetOf = (lock: GraspLock, target: PackageArtifact["target"]): string =>
+  JSON.stringify(lock.targets[target] ?? null);
+
 /**
  * Pins `hash` as what `compilerVersion` builds `target` of the lock to,
  * unless a build pinned something first; returns the pin that holds. One
- * conditional update on the lock as it was read.
+ * conditional update on the lock as it was read, which lands only while
+ * the build's approval holds. A retry after another write re-reads the
+ * lock and stops if the target is no longer the one built (a resolve set
+ * other entries or conditions): that build is stale, never pinned.
  */
 const pin = async (
   env: Env,
   app: string,
   graphHash: string,
   read: { lock: GraspLock; stored: string },
-  target: PackageArtifact["target"],
+  built: { target: PackageArtifact["target"]; for: string },
   pinned: { hash: string; exports: Record<string, string> },
-  limits: PackageLimits
+  limits: PackageLimits,
+  admitted: Admitted,
+  admit: () => Promise<unknown>
 ): Promise<string> => {
+  const { target } = built;
+  if (targetOf(read.lock, target) !== built.for) {
+    throw dependencyErrors.create("dependency.stale");
+  }
   // Only this compiler's pins are kept: another compiler's artifacts are
   // another release's, which builds its own.
   const next: GraspLock = {
@@ -177,18 +212,34 @@ const pin = async (
       and(
         eq(dependencyLocks.appId, app),
         eq(dependencyLocks.graphHash, graphHash),
-        eq(dependencyLocks.lock, read.stored)
+        eq(dependencyLocks.lock, read.stored),
+        stillAdmitted(admitted)
       )
     )
     .returning({ lock: dependencyLocks.lock });
   if (updated.length > 0) {
     return pinned.hash;
   }
-  // Another build changed the lock first: whatever it pinned holds.
+  // The approval no longer holds (this throws, audited), or another write
+  // changed the lock first.
+  await admit();
   const now = await lockOf(env, app, graphHash);
+  if (targetOf(now.lock, target) !== built.for) {
+    throw dependencyErrors.create("dependency.stale");
+  }
   return (
     now.lock.artifacts?.[compilerVersion]?.[target]?.hash ??
-    (await pin(env, app, graphHash, now, target, pinned, limits))
+    (await pin(
+      env,
+      app,
+      graphHash,
+      now,
+      built,
+      pinned,
+      limits,
+      admitted,
+      admit
+    ))
   );
 };
 
@@ -328,12 +379,15 @@ export const buildDependencies = async (
     throw dependencyErrors.create("dependency.forbidden");
   }
   await appFor(env, by, asked.app, "builder");
-  const { approval } = await admitDependencies(env, by.actor ?? actorOf(by), {
-    app: asked.app,
-    graphHash: asked.graphHash,
-    targets: [asked.target],
-    policyGeneration: asked.policyGeneration,
-  });
+  const admit = async () =>
+    await admitDependencies(env, by.actor ?? actorOf(by), {
+      app: asked.app,
+      graphHash: asked.graphHash,
+      targets: [asked.target],
+      policyGeneration: asked.policyGeneration,
+    });
+  const admitted = await admit();
+  const { approval } = admitted;
   const read = await lockOf(env, asked.app, asked.graphHash);
   const { lock } = read;
   if (lock.targets[asked.target] === undefined) {
@@ -345,6 +399,8 @@ export const buildDependencies = async (
   if (pinned) {
     const kept = await keptArtifact(env, pinned.hash);
     if (kept) {
+      // Reading it took time: what decides now wins.
+      await admit();
       await recordUse(env, by, {
         app: asked.app,
         graphHash: asked.graphHash,
@@ -362,12 +418,8 @@ export const buildDependencies = async (
     await builtArtifact(env, { limits, lock, target: asked.target, packages });
   // The approval may have gone while the build ran: what decides now
   // wins, and nothing is kept or pinned for a graph no longer approved.
-  await admitDependencies(env, by.actor ?? actorOf(by), {
-    app: asked.app,
-    graphHash: asked.graphHash,
-    targets: [asked.target],
-    policyGeneration: asked.policyGeneration,
-  });
+  // The pin's own write checks it again as it lands.
+  await admit();
   const hash = await artifactHash(artifact);
   if (pinned && pinned.hash !== hash) {
     log.error("packages.artifact_mismatch", {
@@ -395,7 +447,7 @@ export const buildDependencies = async (
         asked.app,
         asked.graphHash,
         read,
-        asked.target,
+        { target: asked.target, for: targetOf(lock, asked.target) },
         {
           hash,
           exports: Object.fromEntries(
@@ -405,7 +457,9 @@ export const buildDependencies = async (
             ])
           ),
         },
-        limits
+        limits,
+        admitted,
+        admit
       );
   if (holds !== hash) {
     throw packageErrors.create("package.artifact_mismatch");
