@@ -14,6 +14,11 @@ interface __BaseEnv_Env {
   /** Memory files' size limits, in tokens (src/knowledge/memory-files.ts): JSON. */
   MEMORY_LIMITS?: unknown;
   /**
+   * Lower limits on an App's npm packages than the defaults
+   * (`packageLimits` in @grasp-os/shared/packages): JSON, partial.
+   */
+  PACKAGE_LIMITS?: unknown;
+  /**
    * The change that made this version (src/platform-updates.ts): JSON,
    * `{by, what, release, at}`, set by the console on every version it
    * deploys.

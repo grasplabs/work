@@ -209,7 +209,13 @@ export const npmRegistryFake = () => {
       })),
     ];
 
-  const publish = async (published: Published): Promise<void> => {
+  const publish = async (version: Published): Promise<void> => {
+    // When it was published is fixed as it is, as on the registry.
+    const published = {
+      ...version,
+      publishedAt:
+        version.publishedAt ?? new Date(Date.now() - 30 * day).toISOString(),
+    };
     const tarball = await collect(
       tarStream(entriesOf(published)).pipeThrough(new CompressionStream("gzip"))
     );

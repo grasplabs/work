@@ -9,8 +9,11 @@ import type {
   DependencyReview,
   DependencyStatus,
 } from "@grasp-os/shared/dependencies";
+import type { DependencyIntent } from "@grasp-os/shared/packages";
 import { RpcTarget } from "capnweb";
 
+import { resolveDependencies } from "../packages/resolve.ts";
+import type { Resolved } from "../packages/resolve.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { grantApprover, listApprovers, revokeApprover } from "./approvers.ts";
@@ -43,6 +46,13 @@ export class DependenciesRpc extends RpcTarget implements DependenciesApi {
     return await withPerson(
       this.#check,
       async (by) => await proposeDependencies(this.#env, by, proposal)
+    );
+  }
+
+  async resolve(intent: DependencyIntent): Promise<Resolved> {
+    return await withPerson(
+      this.#check,
+      async (by) => await resolveDependencies(this.#env, by, intent)
     );
   }
 

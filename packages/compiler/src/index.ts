@@ -15,10 +15,12 @@ import { version } from "#version";
 
 import { compilerAssets, kitModule } from "./kit.ts";
 import type { KitModules } from "./kit.ts";
+import type PackageBuilder from "./packages/worker.ts";
 import type ScreenCompiler from "./worker.ts";
 
 export type { Diagnostic } from "./diagnostic.ts";
 export type { KitModules } from "./kit.ts";
+export type { InspectRequest } from "./packages/worker.ts";
 export type { ScreenBuild, ServerBuild, WorkflowBuild } from "./worker.ts";
 export {
   buildFiles,
@@ -29,6 +31,7 @@ export {
   workflowPaths,
 } from "./inputs.ts";
 export { appModuleName, kitModuleName, screenRuntime } from "./kit.ts";
+export { platformPeers, platformScope } from "./packages/platform.ts";
 /** Part of every build's cache key: a new compiler or kit builds again. */
 export { version as compilerVersion } from "#version";
 
@@ -153,3 +156,40 @@ export const startScreenCompiler = (
       };
     })
     .getEntrypoint<ScreenCompiler>();
+
+/**
+ * How the package builder's isolate runs: no bindings, no importable env,
+ * no network (`globalOutbound: null` and no subrequests), no Node.js
+ * compatibility, and at most 30 s of CPU per call.
+ */
+export const packageBuilderSettings = {
+  ...isolateBase,
+  env: {},
+  globalOutbound: null,
+  limits: { cpuMs: 30_000, subRequests: 0 },
+} satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
+
+/**
+ * The package builder (src/packages/worker.ts) in a fresh isolate of its
+ * own, with its code read from core's static assets: one per resolve or
+ * build, so nothing one App's packages leave in memory is there for the
+ * next. It reads and bundles the bytes it is handed and runs none of
+ * them.
+ */
+export const startPackageBuilder = async (
+  loader: WorkerLoader,
+  assets: Fetcher
+): Promise<Service<PackageBuilder>> => {
+  const source = await readCompilerFile(
+    assets,
+    compilerAssets.packageBuilder,
+    "javascript"
+  );
+  return loader
+    .load({
+      ...packageBuilderSettings,
+      mainModule: "package-builder.js",
+      modules: { "package-builder.js": source },
+    })
+    .getEntrypoint<PackageBuilder>();
+};

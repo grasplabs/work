@@ -44,6 +44,8 @@ import type { Acting, Member } from "./auth/identity.ts";
 import { proposeDependencies } from "./dependencies/requests.ts";
 import { workspace } from "./durable-objects.ts";
 import { appsCollectionId } from "./knowledge/app-entries.ts";
+import { resolveDependencies } from "./packages/resolve.ts";
+import type { Resolved } from "./packages/resolve.ts";
 import { requestPermission } from "./permissions.ts";
 import { serverProblem } from "./preview-reports.ts";
 import { isRestricted } from "./restricted.ts";
@@ -837,6 +839,35 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       (requested) => ({
         app: typeof app === "string" ? app : null,
         request: requested.id,
+      })
+    );
+  }
+
+  /**
+   * Resolves what `app`'s package.json asks for (`intent`: its
+   * dependencies, the targets they run on, the entries the App imports)
+   * into an exact graph from the npm registry, checks every package's
+   * bytes without running them, and proposes the graph as a request
+   * that waits for a person who holds `dependencies.approve`
+   * (packages/resolve.ts). The agent gets the request and the lock; no
+   * registry credentials, package manager or shell are involved.
+   */
+  async resolveDependencies(app: unknown, intent: unknown): Promise<Resolved> {
+    return await this.#build(
+      "build.resolveDependencies",
+      async (by) => {
+        const id = await this.#buildable(by, app);
+        return await resolveDependencies(
+          this.env,
+          by,
+          typeof intent === "object" && intent !== null
+            ? { ...intent, app: id }
+            : intent
+        );
+      },
+      (resolved) => ({
+        app: typeof app === "string" ? app : null,
+        request: resolved.request.id,
       })
     );
   }
