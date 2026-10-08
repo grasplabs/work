@@ -5,6 +5,7 @@ import {
   requestIdHeader,
   strictTransportSecurity,
 } from "@grasp-os/shared/http";
+import { interviewApiPath } from "@grasp-os/shared/interview-links";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   deriveRouterSecret,
@@ -75,8 +76,8 @@ const routeFor = async (host: string, env: Env): Promise<Route | null> => {
 const authBasePath = "/api/auth";
 
 /**
- * The limits' window, as `AUTH_RATE_LIMIT` and `GUEST_RATE_LIMIT` both
- * have it in wrangler.jsonc.
+ * The limits' window, as `AUTH_RATE_LIMIT`, `GUEST_RATE_LIMIT` and
+ * `INTERVIEW_RATE_LIMIT` all have it in wrangler.jsonc.
  */
 const limitPeriodS = 60;
 
@@ -84,8 +85,8 @@ const limitPeriodS = 60;
  * Whether a request is within `limiter`'s limit for its hostname and
  * client address: core's sign-in routes (Better Auth's own limiter is off
  * in core, as behind the router every request comes from the router's
- * address), and a guest chat's endpoint, which has no session to limit
- * by. Keyed by the client's IPv4 address or IPv6 /64 (`clientAddress`),
+ * address), and the endpoints of a guest chat and of an interview link,
+ * which have no session to limit by. Keyed by the client's IPv4 address or IPv6 /64 (`clientAddress`),
  * so rotating through a /64 buys no fresh budget, and by hostname too, so
  * one office behind one address counts separately for each client. When
  * the limiter itself fails, the request goes through (and is logged):
@@ -172,6 +173,14 @@ export default {
     if (
       pathname === guestApiPath &&
       !(await withinLimit(env.GUEST_RATE_LIMIT, request, host))
+    ) {
+      return rateLimited(url, host);
+    }
+    // An interview link's endpoint (core's src/onboarding/links.ts), the
+    // same; core counts per link too.
+    if (
+      pathname === interviewApiPath &&
+      !(await withinLimit(env.INTERVIEW_RATE_LIMIT, request, host))
     ) {
       return rateLimited(url, host);
     }

@@ -24,6 +24,7 @@
     "./error-reports": "./src/error-reports.ts",
     "./errors": "./src/errors.ts",
     "./guests": "./src/guests.ts",
+    "./interview-links": "./src/interview-links.ts",
     "./http": "./src/http.ts",
     "./ids": "./src/ids.ts",
     "./json": "./src/json.ts",

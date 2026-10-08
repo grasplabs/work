@@ -244,6 +244,11 @@ export interface OnboardingStaffApi {
   pause: () => Promise<OnboardingView>;
   resume: () => Promise<OnboardingView>;
   setAgreements: (agreements: Agreements) => Promise<OnboardingView>;
+  /**
+   * A new start for someone who lost the device their interview was on:
+   * what they said goes, and their link opens on the next device.
+   */
+  newStart: (person: string) => Promise<void>;
 }
 
 /** Why the onboarding refused something. */
@@ -252,4 +257,5 @@ export const onboardingErrors = defineErrorFamily({
   "onboarding.staff_only": "Only Grasp's staff do that.",
   "onboarding.no_roster": "Add who works where first.",
   "onboarding.past": "The interviews can't start in the past.",
+  "onboarding.no_link": "That person has no link out yet.",
 });

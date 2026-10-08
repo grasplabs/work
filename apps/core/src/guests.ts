@@ -54,6 +54,7 @@ import { errorResponse } from "./errors.ts";
 import { graspSkills } from "./knowledge/grasp-skills.ts";
 import { gatewaySettings, models } from "./models.ts";
 import { authorize } from "./permissions.ts";
+import { boundedText, jsonOf } from "./request-body.ts";
 
 // Guest chats (`@grasp-os/shared/guests`): an App, under a permission an
 // admin grants it (`{ type: "platform" }`, `guests`), invites someone who
@@ -724,52 +725,6 @@ const statusFor: Record<string, number> = {
   "guest.no_turns_left": 409,
   "guest.invalid": 400,
   "guest.unavailable": 503,
-};
-
-/**
- * A request's body as text, read no further than `max` bytes: undefined
- * past them, whatever its `content-length` said, or didn't.
- */
-const boundedText = async (
-  body: ReadableStream<Uint8Array> | null,
-  max: number
-): Promise<string | undefined> => {
-  if (body === null) {
-    return "";
-  }
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- chunk by chunk, in order
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    size += value.byteLength;
-    if (size > max) {
-      // oxlint-disable-next-line no-await-in-loop -- once, as it stops reading
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(value);
-  }
-  const whole = new Uint8Array(size);
-  let at = 0;
-  for (const chunk of chunks) {
-    whole.set(chunk, at);
-    at += chunk.byteLength;
-  }
-  return new TextDecoder().decode(whole);
-};
-
-/** `text` as JSON, or undefined when it isn't. */
-const jsonOf = (text: string): unknown => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
 };
 
 /**
