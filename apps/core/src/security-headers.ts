@@ -1,6 +1,6 @@
 import { strictTransportSecurity } from "@grasp-os/shared/http";
 import { isPackageArtifactPath } from "@grasp-os/shared/packages";
-import { screenFramePath } from "@grasp-os/shared/screens";
+import { screenFramePath, screenModulePath } from "@grasp-os/shared/screens";
 
 const policy = (directives: Record<string, string>): string =>
   Object.entries(directives)
@@ -8,31 +8,81 @@ const policy = (directives: Record<string, string>): string =>
     .join("; ");
 
 /**
+ * Where the frontend's build puts every script and stylesheet it loads,
+ * lazy chunks and modulepreloads included (Vite's `assets` directory), and
+ * its one script outside it (apps/web/public/theme.js). Nothing else this
+ * origin serves is the frontend's own code.
+ */
+const frontendAssets = "/assets/";
+const frontendTheme = "/theme.js";
+
+/**
  * The Content Security Policy of everything core serves but the screen
- * frame. It matters for the frontend's HTML, where it keeps an injected
- * script from running or sending the person's data elsewhere; on API
- * responses it does nothing.
+ * frame, on a deployment people reach at `origin`. It matters for the
+ * frontend's HTML, where it keeps an injected script from running or
+ * sending the person's data elsewhere; on API responses it does nothing.
  *
- * - Scripts, styles and connections come only from this origin: no inline
- *   script, no eval. `'self'` covers the same-origin WebSocket to `/rpc`.
+ * - Scripts and styles only from the frontend's own files: no inline
+ *   script, no eval, and none of the code this origin serves that we
+ *   didn't write. Screens' modules and Apps' npm packages are served here
+ *   for screens' frames, which have an opaque origin; run in this page,
+ *   with its origin and the person's session, they would turn any HTML
+ *   injection into script, through a `<script src>` or a `srcdoc` frame
+ *   (which inherits this policy). A source ending in `/` matches its path
+ *   as a prefix, any other exactly; browsers stop matching paths after a
+ *   redirect, and nothing on the frontend's paths redirects elsewhere.
+ *   Core also refuses those paths to this page's own requests
+ *   (`isRefusedToProductPage`), in case a browser lets one through.
+ * - No workers: the frontend starts none.
+ * - Connections only to this origin. `'self'` covers the same-origin
+ *   WebSocket to `/rpc`.
  * - Sign-in leaves for the IdP by top-level navigation, which the policy
  *   doesn't govern, so form-action needs no IdP hosts.
  * - Screens (App UIs) run in sandboxed frames of a document from this
  *   origin (screen-frame.ts), which has a policy of its own. A `srcdoc` or
  *   `data:` frame would inherit this one and couldn't run its screen.
+ *
+ * Paths are named with `origin` as people reach it (`SIGN_IN.origin`,
+ * behind the router): a policy can name a path only with its host.
  */
-const contentSecurityPolicy = policy({
-  "default-src": "'self'",
-  "script-src": "'self'",
-  "style-src": "'self'",
-  "img-src": "'self' data:",
-  "connect-src": "'self'",
-  "object-src": "'none'",
-  "base-uri": "'none'",
-  "form-action": "'self'",
-  "frame-src": "'self'",
-  "frame-ancestors": "'none'",
-});
+const contentSecurityPolicy = (origin: string): string =>
+  policy({
+    "default-src": "'self'",
+    "script-src": `${origin}${frontendAssets} ${origin}${frontendTheme}`,
+    "style-src": `${origin}${frontendAssets}`,
+    "worker-src": "'none'",
+    "img-src": "'self' data:",
+    "connect-src": "'self'",
+    "object-src": "'none'",
+    "base-uri": "'none'",
+    "form-action": "'self'",
+    "frame-src": "'self'",
+    "frame-ancestors": "'none'",
+  });
+
+/**
+ * Whether `pathname` is where core serves code we didn't write: a
+ * screen's modules or the files of an App's npm packages.
+ */
+const isThirdPartyCodePath = (pathname: string): boolean =>
+  pathname === screenModulePath ||
+  pathname.startsWith(`${screenModulePath}/`) ||
+  isPackageArtifactPath(pathname);
+
+/**
+ * Whether core refuses `request`: one the product page itself makes for
+ * code we didn't write. Only screens' frames load it, and a frame's
+ * origin is opaque (`sandbox allow-scripts`), so a browser never calls
+ * their requests same-origin; one that is comes from the product page or
+ * a frame of its origin, which the page's policy should already have
+ * stopped. A request without `Sec-Fetch-Site` (an older browser, a tool)
+ * is let through: the policy and the address's token still hold. The
+ * answers vary on the header (`setSecurityHeaders`), so a copy a frame's
+ * load left in the browser's cache never answers the page.
+ */
+export const isRefusedToProductPage = (request: Request): boolean =>
+  isThirdPartyCodePath(new URL(request.url).pathname) &&
+  request.headers.get("sec-fetch-site") === "same-origin";
 
 /**
  * The policy of the document screens run in (screen-frame.ts), for one
@@ -140,7 +190,9 @@ export const packageArtifactPolicy = (origin: string): string =>
  * URL carries a secret; it is kept. So is the screen frame's policy,
  * which names its build's scripts; a frame response without one runs no
  * script at all. Everything on the path of packages' artifacts gets their
- * policy and `no-referrer`, whatever the route sent.
+ * policy and `no-referrer`, whatever the route sent. Answers on the paths
+ * of code we didn't write vary on `Sec-Fetch-Site`, as core refuses them
+ * to the product page (`isRefusedToProductPage`).
  */
 export const setSecurityHeaders = (
   headers: Headers,
@@ -152,13 +204,16 @@ export const setSecurityHeaders = (
     headers.set("content-security-policy", packageArtifactPolicy(origin));
     headers.set("referrer-policy", "no-referrer");
   } else if (url.pathname !== screenFramePath) {
-    headers.set("content-security-policy", contentSecurityPolicy);
+    headers.set("content-security-policy", contentSecurityPolicy(origin));
   } else if (!headers.has("content-security-policy")) {
     headers.set("content-security-policy", screenFramePolicy([]));
   }
   headers.set("x-content-type-options", "nosniff");
   if (!artifact && headers.get("referrer-policy") !== "no-referrer") {
     headers.set("referrer-policy", "strict-origin-when-cross-origin");
+  }
+  if (isThirdPartyCodePath(url.pathname)) {
+    headers.append("vary", "sec-fetch-site");
   }
   if (url.protocol === "https:") {
     headers.set("strict-transport-security", strictTransportSecurity);

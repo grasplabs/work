@@ -34,7 +34,10 @@ import { platformUpdateResponse } from "./platform-updates.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
 import { screenFrameResponse, screenModuleResponse } from "./screen-frame.ts";
-import { setSecurityHeaders } from "./security-headers.ts";
+import {
+  isRefusedToProductPage,
+  setSecurityHeaders,
+} from "./security-headers.ts";
 
 const isUnder = (pathname: string, base: string): boolean =>
   pathname === base || pathname.startsWith(`${base}/`);
@@ -102,6 +105,13 @@ const route = async (
   }
   if (pathname === screenFramePath) {
     return await screenFrameResponse(env, url);
+  }
+  if (isRefusedToProductPage(request)) {
+    return errorResponse(
+      403,
+      requestErrors.create("request.forbidden"),
+      requestId
+    );
   }
   const screenModule = await screenModuleResponse(env, url);
   if (screenModule !== null) {

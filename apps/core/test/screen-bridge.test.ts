@@ -502,6 +502,41 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 
+  it("serves a module to its frame, never to the product page's own request for it", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const bundle = await builder.api.screens.open(app, "notes");
+    const frame = await loadFrame(bundle);
+    const [address] = Object.values(frame?.addresses ?? {});
+    if (address === undefined) {
+      throw new Error("The screen loads modules");
+    }
+    const asked = async (site?: string) => {
+      const response = await routed(
+        pathOf(address),
+        site === undefined ? {} : { "sec-fetch-site": site }
+      );
+      return [response.status, response.headers.get("vary")];
+    };
+
+    // The frame's origin is opaque, so a browser calls its requests
+    // cross-site; the product page's own are same-origin, valid token or
+    // not. A request that says nothing (an older browser) still has its
+    // token checked. Each answer varies on the header, so the copy the
+    // frame's load left in the browser's cache never answers the page.
+    expect({
+      frame: await asked("cross-site"),
+      productPage: await asked("same-origin"),
+      sameSite: await asked("same-site"),
+      unsaid: await asked(),
+    }).toStrictEqual({
+      frame: [200, "sec-fetch-site"],
+      productPage: [403, "sec-fetch-site"],
+      sameSite: [200, "sec-fetch-site"],
+      unsaid: [200, "sec-fetch-site"],
+    });
+  });
+
   it("keeps what a frame is handed inside its own script elements, whatever the CSS holds", async () => {
     const builder = await personApi("builder");
     const { id: app } = await builder.api.apps.create({ name: "Closing" });
