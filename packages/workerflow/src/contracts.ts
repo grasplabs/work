@@ -7,10 +7,10 @@
 // This profile is partial. It has named `do` steps with retries and
 // timeouts, sleeps and event waits, persisted and replayed; step results
 // are structured values (codec.ts) or byte streams (streams.ts), and a
-// step may be `sensitive`. Pause, terminate, restart, rollbacks and
-// retention come in
-// later slices; until then they are absent or refused, never silently
-// ignored.
+// step may be `sensitive`. An instance can be paused, resumed, terminated,
+// restarted (from a step, too) and deleted (instance.ts). Rollbacks and
+// retention come in later slices; until then they are absent or refused,
+// never silently ignored.
 
 /** What a run's definition is given when it runs. */
 export interface WorkflowEvent<Params = unknown> {
@@ -211,5 +211,23 @@ export type InstanceStatus =
    * fresh activation to run an attempt), with no activation alive.
    */
   | { readonly status: "waiting" }
+  /**
+   * Asked to pause while an activation ran: it finishes the steps it has
+   * out, and starts nothing new.
+   */
+  | { readonly status: "waitingForPause" }
+  /** Paused: nothing runs, and no deadline of its comes due, until resumed. */
+  | { readonly status: "paused" }
   | { readonly status: "complete"; readonly output: unknown }
-  | { readonly status: "errored"; readonly error: WorkflowError };
+  | { readonly status: "errored"; readonly error: WorkflowError }
+  /** Ended by `terminate`. */
+  | { readonly status: "terminated" };
+
+/** Where `restart` starts the run again from: a step it has started. */
+export interface RestartFrom {
+  readonly name: string;
+  /** Which occurrence of the name, from 1; 1 when left out. */
+  readonly count?: number;
+  /** The step's type, when names are shared across types; `do` when left out. */
+  readonly type?: "do" | "sleep" | "waitForEvent";
+}

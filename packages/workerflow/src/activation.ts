@@ -44,6 +44,15 @@
 // ends it with a WorkflowReplayMismatchError: a `Halt`, through the same
 // typed outcome, never a loop of activations.
 //
+// A pause asked for while the activation runs (the run is
+// `waitingForPause`, run.ts) is taken at the safe boundaries: no attempt is
+// claimed and no wait reached once it is asked for. A step that would
+// claim one parks, as for a retry; a wait pauses the run where it is.
+// Steps already out run to their outcome, journaled as ever. Once nothing
+// is out but parked steps, the activation lets go of the run as `paused`,
+// with no alarm, where it would otherwise suspend; should the pause be
+// called off before that, the parked steps come due at once.
+//
 // A step's result is kept as codec text, or as a stream's chunks
 // (streams.ts), within the attempt: a stream's upload runs inside the
 // attempt's deadline and its async scope, and only the attempt that still
@@ -348,6 +357,7 @@ type WaitOutcome =
   | { ok: true; event: EventRow | undefined }
   | { ok: false; error: string }
   | { suspend: number }
+  | { pause: true }
   | { mismatch: string }
   | null;
 
@@ -656,9 +666,31 @@ export class Activation {
     return !this.#over && this.#holdsGeneration();
   }
 
-  /** Whether no later activation has taken the run over. */
+  /**
+   * Whether no later activation, and no command, has taken the run over:
+   * the generation is this activation's, of this very run (one deleted
+   * and created again under the same ID counts its generations afresh).
+   */
   #holdsGeneration(): boolean {
-    return readRun(this.#storage.sql)?.generation === this.#generation;
+    const run = readRun(this.#storage.sql);
+    return (
+      run?.generation === this.#generation && run.run_uid === this.#run.run_uid
+    );
+  }
+
+  /**
+   * Whether the run is still the one this activation was started for: not
+   * deleted, nor deleted and created again. What a stale activation
+   * records of itself is written only then, so it never lands on another
+   * run's rows.
+   */
+  #ownsRun(): boolean {
+    return readRun(this.#storage.sql)?.run_uid === this.#run.run_uid;
+  }
+
+  /** Whether a pause was asked for: the run is `waitingForPause`. */
+  #pausing(): boolean {
+    return readRun(this.#storage.sql)?.status === "waitingForPause";
   }
 
   /**
@@ -678,6 +710,9 @@ export class Activation {
 
   /** Records how this activation ended, if nothing has yet. */
   #recordEnd(ended: "superseded" | "faulted"): void {
+    if (!this.#ownsRun()) {
+      return;
+    }
     this.#storage.sql.exec(
       "UPDATE activations SET ended_at = ?, ended = ? WHERE generation = ? AND ended_at IS NULL",
       Date.now(),
@@ -857,10 +892,17 @@ export class Activation {
       }
       const { sql } = this.#storage;
       const now = Date.now();
+      // The safe boundary: no attempt is claimed once a pause is asked
+      // for, but by a step called from an attempt still out, which is
+      // part of the work already out. Parked, due at once should the
+      // pause be called off.
+      if (attempts.getStore()?.live !== true && this.#pausing()) {
+        return { park: now };
+      }
       const step = readStep(sql, identity);
       let ordinal: number;
       let attempt = 1;
-      let key = stepKey(this.#run.run_uid, identity);
+      let key = stepKey(this.#run.execution_uid, identity);
       if (step === undefined) {
         if (!this.#fits(now, config)) {
           return { park: now };
@@ -1037,6 +1079,11 @@ export class Activation {
 
   /** Records that the attempt's answer was ignored, and drops its upload. */
   #ignore(claim: Claim, now: number): void {
+    if (!this.#ownsRun()) {
+      // The run was deleted: its rows went with it, and what holds this
+      // ordinal now is another run's.
+      return;
+    }
     this.#storage.sql.exec(
       "UPDATE attempts SET ended_at = ?, ended = 'superseded' WHERE ordinal = ? AND attempt = ? AND ended_at IS NULL",
       now,
@@ -1493,19 +1540,24 @@ export class Activation {
       return;
     }
     const wake = this.#parkedWake;
-    const suspendedNow = this.#write(() =>
-      this.#storage.transactionSync(() => {
+    const letGo = this.#write(() =>
+      this.#storage.transactionSync((): "suspended" | "paused" | null => {
         if (!this.#current()) {
-          return false;
+          return null;
         }
-        this.#suspendIn(this.#storage.sql, Date.now(), wake);
-        return true;
+        const now = Date.now();
+        if (this.#pausing()) {
+          this.#pauseIn(this.#storage.sql, now);
+          return "paused";
+        }
+        this.#suspendIn(this.#storage.sql, now, wake);
+        return "suspended";
       })
     );
-    if (suspendedNow === failed) {
+    if (letGo === failed) {
       return;
     }
-    if (!suspendedNow) {
+    if (letGo === null) {
       this.#letGo();
       return;
     }
@@ -1513,7 +1565,7 @@ export class Activation {
     // Issued now, in the turn of the write it goes with; `stopped` reports
     // the suspension once it is set, or the fault if it couldn't be.
     void (async (): Promise<void> => {
-      await this.#arm(wake);
+      await (letGo === "paused" ? this.#disarm() : this.#arm(wake));
       this.#stop(suspended);
     })();
   }
@@ -1688,6 +1740,37 @@ export class Activation {
   }
 
   /**
+   * Lets go of the run as paused: nothing of this activation is out but
+   * parked steps, and a pause was asked for. Called in the transaction
+   * that found it so; the alarm is removed after it (#disarm).
+   */
+  #pauseIn(sql: SqlStorage, now: number): void {
+    sql.exec(
+      "UPDATE run SET status = 'paused', paused_at = ?, lease_until = NULL, wake_at = NULL",
+      now
+    );
+    sql.exec(
+      "UPDATE activations SET ended_at = ?, ended = 'paused' WHERE generation = ?",
+      now,
+      this.#generation
+    );
+  }
+
+  /**
+   * Removes the alarm, right after the write that paused the run: a paused
+   * run has none. A failure faults the activation; the watchdog left
+   * behind finds the run paused, and does nothing.
+   */
+  async #disarm(): Promise<void> {
+    try {
+      await this.#storage.deleteAlarm();
+    } catch (error) {
+      this.#fault(error);
+      await never();
+    }
+  }
+
+  /**
    * Brings the wait `plan` describes to its outcome if it's due, or
    * suspends the activation on it: one transaction. The deadline is
    * journaled the first time the wait is reached and read back after; an
@@ -1701,6 +1784,13 @@ export class Activation {
       }
       const { sql } = this.#storage;
       const now = Date.now();
+      if (this.#pausing()) {
+        // The safe boundary, before the wait is journaled or takes an
+        // event. Waits come with no step out (#wait), so nothing of this
+        // activation is out: the run is paused here.
+        this.#pauseIn(sql, now);
+        return { pause: true };
+      }
       let step = readStep(sql, identity);
       // Checked before anything is written: a replay that strayed leaves
       // the journal as it found it.
@@ -1714,7 +1804,7 @@ export class Activation {
           identity.type,
           identity.name,
           identity.occurrence,
-          stepKey(this.#run.run_uid, identity),
+          stepKey(this.#run.execution_uid, identity),
           plan.deadline(now),
           plan.eventType,
           plan.durationMs
@@ -1826,6 +1916,12 @@ export class Activation {
       this.#over = true;
       // The wake goes with the write that suspended the run.
       await this.#arm(outcome.suspend);
+      this.#stop(suspended);
+      return await never();
+    }
+    if ("pause" in outcome) {
+      this.#over = true;
+      await this.#disarm();
       this.#stop(suspended);
       return await never();
     }
