@@ -5,7 +5,9 @@ import type {
   DefinitionIdentity,
   WorkflowDefinition,
   WorkflowDuration,
+  WorkflowStep,
   WorkflowStepContext,
+  WorkflowStepRollbackOptions,
 } from "../src/contracts.ts";
 import { NonRetryableError, namedError } from "../src/errors.ts";
 import { WorkflowRun } from "../src/run.ts";
@@ -15,6 +17,7 @@ import {
   effect,
   handled,
   measuredClock,
+  undone,
   witness,
 } from "./outside.ts";
 import {
@@ -84,7 +87,190 @@ const oversizedError = (): Error => {
   return error;
 };
 
+/**
+ * A step's rollback that undoes it outside, as the params say: `undo`
+ * names the one whose every attempt fails, `flaky` the one whose first
+ * attempt fails (it gets one retry, at once, or an hour later with
+ * `undoDelay: "1 hour"`), `nested` the one that calls the step API.
+ */
+const undoing = (
+  instanceId: string,
+  payload: unknown,
+  label: string,
+  step: WorkflowStep
+): WorkflowStepRollbackOptions => ({
+  rollback: async (context) => {
+    await undone(instanceId, label, context);
+    if (paramOf(payload, "undo") === label) {
+      throw new NonRetryableError(`${label} can't be undone`);
+    }
+    if (paramOf(payload, "flaky") === label && context.attempt === 1) {
+      throw namedError("FlakyError", `undoing ${label} failed once`);
+    }
+    if (paramOf(payload, "nested") === label) {
+      await step.do("inside", () => "never");
+    }
+  },
+  rollbackConfig: {
+    retries: {
+      limit: 1,
+      delay: paramOf(payload, "undoDelay") === "1 hour" ? "1 hour" : 0,
+    },
+  },
+});
+
+/** Rollback options a definition passes, as the params' `shape` names. */
+const rollbackShapes: Record<string, unknown> = {
+  null: null,
+  text: "undo",
+  "no rollback": { rollbackConfig: {} },
+  "rollback not a function": { rollback: "undo" },
+  "unknown setting": { rollback: () => "undone", undo: true },
+  "sensitive rollback": {
+    rollback: () => "undone",
+    rollbackConfig: { sensitive: "output" },
+  },
+  "zero timeout": { rollback: () => "undone", rollbackConfig: { timeout: 0 } },
+  "config not an object": { rollback: () => "undone", rollbackConfig: 5 },
+};
+
 export const definitions: Record<string, WorkflowDefinition> = {
+  // Steps that register rollbacks, and one that doesn't. With `wait`, the
+  // run then waits for a "confirm" event; with `fail`, a last step fails,
+  // uncaught, after its effect. Each rollback undoes its step outside.
+  compensated: {
+    run: async (event, step) => {
+      const { instanceId, payload } = event;
+      const undo = (label: string): WorkflowStepRollbackOptions =>
+        undoing(instanceId, payload, label, step);
+      const reserve = await step.do(
+        "reserve",
+        async (context) => await effect(instanceId, "reserve", context),
+        undo("reserve")
+      );
+      const charge = await step.do(
+        "charge",
+        once,
+        async (context) => await effect(instanceId, "charge", context),
+        undo("charge")
+      );
+      await step.do(
+        "notify",
+        async (context) => await effect(instanceId, "notify", context)
+      );
+      if (paramOf(payload, "wait") === true) {
+        await step.waitForEvent("confirm", { type: "confirm" });
+      }
+      if (paramOf(payload, "fatal") === true) {
+        // A result no journal can keep: the run ends at once, as on
+        // Cloudflare, rolling back nothing.
+        await step.do("fatal", () => Symbol("unkeepable"));
+      }
+      if (paramOf(payload, "fail") === true) {
+        await step.do(
+          "ship",
+          once,
+          async (context) => {
+            await effect(instanceId, "ship", context);
+            throw namedError("ShippingError", "No courier came");
+          },
+          undo("ship")
+        );
+      }
+      return { reserve, charge };
+    },
+  },
+  // A step with a rollback called from inside another step's callback,
+  // then a step that fails, uncaught: a replay returns the outer step's
+  // result without calling its callback, so it never gets that rollback
+  // back.
+  "nested-rollback": {
+    run: async (event, step) => {
+      const { instanceId, payload } = event;
+      await step.do(
+        "outer",
+        async () =>
+          await step.do(
+            "inner",
+            async (context) => await effect(instanceId, "inner", context),
+            undoing(instanceId, payload, "inner", step)
+          )
+      );
+      await step.do("fail", once, () => {
+        throw namedError("ShippingError", "No courier came");
+      });
+    },
+  },
+  // Two steps with rollbacks, a wait outside any step between them that the
+  // test can hold, then a step that fails, uncaught: a replay held there
+  // hasn't got the second's rollback back. With `throwOnReplay`, the wait
+  // throws the second time it is reached: the first replay's. With
+  // `plainSecond`, the second registers none, so a replay held there has
+  // every rollback back.
+  "gated-rollback": {
+    run: async (event, step) => {
+      const { instanceId, payload } = event;
+      await step.do(
+        "first",
+        async (context) => await effect(instanceId, "first", context),
+        undoing(instanceId, payload, "first", step)
+      );
+      const reached = await checkpoint(instanceId, "gate");
+      if (paramOf(payload, "throwOnReplay") === true && reached === 2) {
+        // Code outside any step that fails this once: a fetch, say.
+        throw new Error("The gate failed this time");
+      }
+      const second = async (context: WorkflowStepContext): Promise<string> =>
+        await effect(instanceId, "second", context);
+      await (paramOf(payload, "plainSecond") === true
+        ? step.do("second", second)
+        : step.do(
+            "second",
+            second,
+            undoing(instanceId, payload, "second", step)
+          ));
+      await step.do("fail", once, () => {
+        throw namedError("ShippingError", "No courier came");
+      });
+    },
+  },
+  // A wait outside any step the test can hold (a replay can't get the
+  // rollback back before it), a step with a rollback, then a step that
+  // fails, uncaught; both steps time out in 100 ms, so each fits in a
+  // short handler budget beside the other.
+  "quick-gated": {
+    run: async (event, step) => {
+      const { instanceId, payload } = event;
+      const quick = { retries: { limit: 0, delay: 0 }, timeout: 100 };
+      await checkpoint(instanceId, "gate");
+      await step.do(
+        "first",
+        quick,
+        async (context) => await effect(instanceId, "first", context),
+        undoing(instanceId, payload, "first", step)
+      );
+      await step.do("fail", quick, () => {
+        throw namedError("ShippingError", "No courier came");
+      });
+    },
+  },
+  // A step whose rollback options are the params' `shape`; the author
+  // catches what the call throws.
+  "rollback-shapes": {
+    run: async (event, step) => {
+      const shape = paramOf(event.payload, "shape");
+      try {
+        const result: unknown = await Reflect.apply(step.do, step, [
+          "shaped",
+          () => "ran",
+          rollbackShapes[String(shape)],
+        ]);
+        return result;
+      } catch (error) {
+        return { caught: errorOf(error) };
+      }
+    },
+  },
   // Two steps, each an outside effect; the run returns both receipts.
   orders: {
     run: async (event, step) => {
@@ -780,9 +966,18 @@ export const definitions: Record<string, WorkflowDefinition> = {
   },
 };
 
+/** How long a test run's compensating replay may take. */
+export const testRollbackReplayMs = 200;
+/** How many test replays in a row may end without the rollbacks. */
+export const testRollbackReplays = 3;
+
 export class TestRuns extends WorkflowRun {
   protected override readonly maxStreamOutputBytes = testMaxStreamBytes;
   protected override readonly maxRunStreamBytes = testMaxRunStreamBytes;
+  /** Short, so a replay held outside any step is tried again soon. */
+  protected override readonly rollbackReplayMs = testRollbackReplayMs;
+  /** Few, so replays that never get the rollbacks back end soon. */
+  protected override readonly rollbackReplays = testRollbackReplays;
 
   // oxlint-disable-next-line class-methods-use-this -- the host's hook; this host needs nothing of its own
   protected definition({
@@ -810,9 +1005,15 @@ export class TestRuns extends WorkflowRun {
  * an activation's first attempt still runs, and any later one with the
  * default timeout is left for a fresh activation.
  */
+/** The wall time BudgetedRuns give attempts. */
+export const budgetedHandlerMs = 1000;
+
 export class BudgetedRuns extends TestRuns {
-  protected override readonly handlerBudgetMs = 1000;
+  protected override readonly handlerBudgetMs = budgetedHandlerMs;
 }
+
+// The run object of a host that misconfigured it, bound as MISCONFIGURED.
+export { MisconfiguredRuns } from "./misconfigured.ts";
 
 export default {
   fetch: (): Response => new Response(null, { status: 404 }),

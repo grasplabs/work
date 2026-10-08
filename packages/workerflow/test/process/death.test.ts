@@ -228,6 +228,94 @@ describe("a run on disk-backed workerd", () => {
     }
   });
 
+  it("resumes rolling back after the process dies mid-rollback: no step runs again, nor a rollback that succeeded", async () => {
+    const id = "mid-rollback";
+    const undoReserveHeld = outside.hold(id, "undo-reserve", 1);
+    await workerd.request("/start", startOf("compensated", id));
+    // Killed while the second rollback is out, after the first's commit.
+    await undoReserveHeld;
+    const cutOff = await journalOf("compensated", id);
+    await workerd.kill();
+    await workerd.start();
+
+    const status = await ended("compensated", id);
+
+    expect({ status, cutOff }).toMatchObject({
+      status: {
+        status: "errored",
+        error: { name: "ShippingError", message: "No courier came" },
+        rollback: { status: "complete" },
+      },
+      cutOff: {
+        run: { status: "rollingBack" },
+        steps: [
+          { type: "do", name: "charge", state: "succeeded" },
+          { type: "do", name: "reserve", state: "succeeded" },
+          { type: "do", name: "ship", state: "failed" },
+          { type: "rollback", name: "ship", state: "succeeded" },
+          { type: "rollback", name: "reserve", state: "running" },
+        ],
+      },
+    });
+    // Each forward effect once; the rollback cut off went out again under
+    // its one key, which isn't its step's; the others once each.
+    expect(timeline(id)).toStrictEqual([
+      ["charge", 1],
+      ["reserve", 1],
+      ["ship", 1],
+      ["undo-ship", 1],
+      ["undo-reserve", 1],
+      ["undo-reserve", 2],
+      ["undo-charge", 1],
+    ]);
+    expect(keysOf(id, "undo-reserve").size).toBe(1);
+    expect(keysOf(id, "undo-reserve")).not.toStrictEqual(keysOf(id, "reserve"));
+  });
+
+  it("counts a replay the process died in, so replays cut off can't go on for ever", async () => {
+    const id = "killed-replay";
+    const replaysOf = async (): Promise<unknown> => {
+      const journal = await journalOf("gated", id);
+      return typeof journal === "object" &&
+        journal !== null &&
+        "run" in journal &&
+        typeof journal.run === "object" &&
+        journal.run !== null &&
+        "rollback_replays" in journal.run
+        ? journal.run.rollback_replays
+        : undefined;
+    };
+    const forward = outside.hold(id, "gate");
+    await workerd.request("/start", startOf("gated", id));
+    await forward;
+    // The replay's call outside any step is withheld next: the run fails,
+    // rolls back, and its replay waits there.
+    const replay = outside.hold(id, "gate");
+    outside.release(id, "gate");
+    await replay;
+    const counted = await replaysOf();
+    await workerd.kill();
+
+    const again = outside.hold(id, "gate");
+    await workerd.start();
+    await again;
+    const recounted = await replaysOf();
+    // The killed replay's answer goes to no one; the live one's is let go.
+    outside.release(id, "gate");
+    outside.release(id, "gate");
+    const status = await ended("gated", id);
+
+    expect({ counted, recounted }).toStrictEqual({ counted: 1, recounted: 2 });
+    expect(status).toMatchObject({
+      status: "errored",
+      rollback: { status: "complete" },
+    });
+    expect(timeline(id)).toStrictEqual([
+      ["first", 1],
+      ["undo-first", 1],
+    ]);
+  });
+
   it("doesn't run a completed step again after the process dies; the step cut off mid-effect runs again under its key", async () => {
     const id = "after-a-step-commit";
     const shipHeld = outside.hold(id, "ship", 1);
