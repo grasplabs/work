@@ -52,9 +52,10 @@ const todosOf = (
   const { roster, plan } = view;
   const taking = roster?.people.filter((one) => takingPart(roster, one)) ?? [];
   const teams = roster?.teams.filter((team) => !team.off) ?? [];
-  const leads = teams.flatMap((team) =>
-    team.lead === null ? [] : [team.lead]
-  );
+  // Only leads taking part get a link: one away can't talk.
+  const leads = taking
+    .filter((one) => teams.some((team) => team.lead === one.id))
+    .map(({ id }) => id);
   const talked = (person: string) =>
     (facts.interviews.get(person)?.completedAt ?? null) !== null;
   return {
@@ -71,7 +72,7 @@ const todosOf = (
       },
       {
         kind: "leadsTalked",
-        done: leads.length > 0 && leads.every(talked),
+        done: leads.every(talked),
         count: leads.filter(talked).length,
         of: leads.length,
       },
