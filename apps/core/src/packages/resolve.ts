@@ -747,10 +747,34 @@ const lockTries = 3;
 export const mergedLock = (
   existing: GraspLock,
   fresh: GraspLock
-): GraspLock => ({
-  ...existing,
-  targets: { ...existing.targets, ...fresh.targets },
-});
+): GraspLock => {
+  const before = new Map<string, unknown>(Object.entries(existing.targets));
+  const changed = new Set(
+    Object.entries(fresh.targets)
+      .filter(
+        ([target, now]) =>
+          JSON.stringify(before.get(target) ?? null) !== JSON.stringify(now)
+      )
+      .map(([target]) => target)
+  );
+  // A target built for other conditions or entries is built again: its
+  // pinned artifacts no longer describe it.
+  const artifacts = existing.artifacts
+    ? Object.fromEntries(
+        Object.entries(existing.artifacts).map(([version, pins]) => [
+          version,
+          Object.fromEntries(
+            Object.entries(pins).filter(([target]) => !changed.has(target))
+          ),
+        ])
+      )
+    : undefined;
+  return {
+    ...existing,
+    targets: { ...existing.targets, ...fresh.targets },
+    ...(artifacts === undefined ? {} : { artifacts }),
+  };
+};
 
 /**
  * Stores `fresh` as the lock of an App's graph, or adds its targets to

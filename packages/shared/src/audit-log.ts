@@ -122,6 +122,8 @@ const typeRules: readonly {
   { action: "dependency.requested", type: "action" },
   { action: "dependency.admission_refused", type: "action" },
   { action: "dependency.superseded", type: "action" },
+  // A build of an approved graph, and the approval it relied on.
+  { action: "dependency.built", type: "action" },
   { action: "dependency", type: "decision" },
   // A run reading an attachment of a message its email trigger kept.
   { action: "workflow.email.read", type: "read" },

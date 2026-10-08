@@ -136,6 +136,7 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
               extractedBytes: 1024 * 1024,
               extractedEntries: 64,
               graphExtractedBytes: 2 * 1024 * 1024,
+              artifactBytes: 256 * 1024,
             },
             // The gateway runs call the model through; tests fake the AI binding.
             MODEL_GATEWAY: {

@@ -6,7 +6,12 @@ import { defineErrorFamily } from "./errors.ts";
 import { appIdSchema, identifierMaxLength } from "./ids.ts";
 import type { AppId } from "./ids.ts";
 import { canonicalJson } from "./json.ts";
-import type { DependencyIntent, GraspLock } from "./packages.ts";
+import type {
+  DependencyIntent,
+  GraspLock,
+  PackageBuild,
+  PackageBuildRequest,
+} from "./packages.ts";
 
 // npm packages an App wants to use, and a person's approval of them. An
 // agent or a builder proposes one exact graph: every package it would
@@ -506,6 +511,12 @@ export interface DependenciesApi {
     request: DependencyRequest;
     lock: GraspLock;
   }>;
+  /**
+   * Builds one target of an App's approved graph into an artifact (or
+   * returns the one built before), for one of its builders: only what
+   * was approved, under the policy generation the caller read.
+   */
+  build: (request: PackageBuildRequest) => Promise<PackageBuild>;
   /** How an App's dependencies stand, for its builders. */
   status: (app: string) => Promise<DependencyStatus>;
   /**

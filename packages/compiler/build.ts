@@ -40,6 +40,7 @@ import {
   screenRuntime,
 } from "./src/kit.ts";
 import type { Kit, KitModules } from "./src/kit.ts";
+import { platformModules } from "./src/packages/platform.ts";
 import { compilerOptions } from "./src/type-check.ts";
 
 const root = import.meta.dirname;
@@ -49,14 +50,8 @@ const ui = realpathSync(path.join(modules, "@grasp-os/ui"));
 const sdk = realpathSync(path.join(modules, "@grasp-os/sdk"));
 const require = createRequire(path.join(root, "package.json"));
 
-/** React as the kit's modules and App modules import it. */
-const reactSpecifiers = [
-  "react",
-  "react/jsx-runtime",
-  "react/compiler-runtime",
-  "react-dom",
-  "react-dom/client",
-];
+/** React as the kit's modules, App modules and packages import it. */
+const reactSpecifiers = platformModules;
 /** What App code may import besides `@grasp-os/ui` and lucide-react icons. */
 const reactImports = ["react", "react/jsx-runtime"];
 
@@ -724,7 +719,8 @@ const buildPackageBuilder = async (): Promise<string> => {
       minify: true,
       target: "es2022",
       rolldownOptions: {
-        external: ["cloudflare:workers"],
+        // esbuild's WebAssembly is a module of the isolate of its own.
+        external: ["cloudflare:workers", "./esbuild.wasm"],
         output: { format: "es", codeSplitting: false },
       },
     },
@@ -765,7 +761,7 @@ const versionIn = (file: string): string | undefined =>
 const writeRelease = (
   assets: string,
   version: string,
-  files: Record<string, string>
+  files: Record<string, string | Uint8Array>
 ): void => {
   const release = path.join(assets, compilerAssets.directory(version));
   if (
@@ -877,6 +873,10 @@ const buildScreenCompiler = async (
   const kitJson = JSON.stringify(kit);
   const compiler = await buildCompiler();
   const packageBuilder = await buildPackageBuilder();
+  // The WebAssembly the builder's esbuild runs, as the package ships it.
+  const esbuildWasm = readFileSync(
+    require.resolve("esbuild-wasm/esbuild.wasm")
+  );
   const kitModules = modulesOf(kitCode);
   const sdkModules = modulesOf(await buildSdkModules());
   // Everything a build depends on: the compiler, what it knows of the kit,
@@ -887,6 +887,7 @@ const buildScreenCompiler = async (
     .update(kitModules.version)
     .update(sdkModules.version)
     .update(packageBuilder)
+    .update(esbuildWasm)
     .digest("hex")
     .slice(0, 16);
   writeRelease(assets, version, {
@@ -895,6 +896,7 @@ const buildScreenCompiler = async (
     [compilerAssets.kitModules]: JSON.stringify(kitModules),
     [compilerAssets.sdkModules]: JSON.stringify(sdkModules),
     [compilerAssets.packageBuilder]: packageBuilder,
+    [compilerAssets.esbuildWasm]: esbuildWasm,
   });
   // Core imports only the version; the rest it reads from its static
   // assets when it starts a build, so it never loads them otherwise. The

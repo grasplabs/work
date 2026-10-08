@@ -125,6 +125,8 @@ export const packageErrors = defineErrorFamily({
   "package.quota": "The dependencies are larger than Grasp takes.",
   "package.refused":
     "A package needs something Grasp doesn't run: install scripts, native code, links or files outside itself.",
+  "package.artifact_mismatch":
+    "Building the packages made other files than the lock pinned for them.",
 });
 
 /**
@@ -145,8 +147,11 @@ export const packageLimits = {
   graphDepth: 32,
   /** Packages in one graph. */
   graphPackages: dependencyMaxPackages,
-  /** Tarballs of one graph together, as fetched. */
-  graphArchiveBytes: 48 * 1024 * 1024,
+  /**
+   * Tarballs of one graph together, as fetched: all of them go to the
+   * builder in one call, under the 32 MiB a Worker RPC message may be.
+   */
+  graphArchiveBytes: 24 * 1024 * 1024,
   /** What one package's tarball unpacks to (gzip's output). */
   extractedBytes: 64 * 1024 * 1024,
   /** Entries in one package's tarball. */
@@ -158,6 +163,8 @@ export const packageLimits = {
   pathDepth: 64,
   /** The lock as core stores it. */
   lockBytes: 1024 * 1024,
+  /** What one target's build makes, every file of it together. */
+  artifactBytes: 16 * 1024 * 1024,
 } as const;
 export type PackageLimits = Record<keyof typeof packageLimits, number>;
 
@@ -300,6 +307,24 @@ export const graspLockSchema = z.strictObject({
     })
   ),
   packages: z.record(z.string(), lockedPackageSchema),
+  /**
+   * What each target was built to, by the compiler version that built it:
+   * the artifact's hash, and the file each entry resolved to. Pinned the
+   * first time a compiler builds the target, and checked on every build
+   * after: the same lock and compiler never make other bytes silently.
+   */
+  artifacts: z
+    .record(
+      z.string().max(64),
+      z.partialRecord(
+        dependencyTargetSchema,
+        z.strictObject({
+          hash: z.string().regex(/^[0-9a-f]{64}$/u),
+          exports: z.record(packageEntrySchema, z.string().max(1024)),
+        })
+      )
+    )
+    .optional(),
 });
 export type GraspLock = z.infer<typeof graspLockSchema>;
 
@@ -337,4 +362,86 @@ export interface PackageTarball {
   version: string;
   integrity: string;
   tarball: Uint8Array;
+}
+
+const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * What a build of one target made, as the builder describes it: each
+ * entry's module and stylesheet, the platform modules it imports, and
+ * every file with its SHA-256, size and type. Core checks every hash
+ * against the bytes before it keeps any.
+ */
+export const packageArtifactSchema = z.strictObject({
+  target: dependencyTargetSchema,
+  conditions: z.array(z.string().max(32)).max(16),
+  entries: z.record(
+    packageEntrySchema,
+    z.strictObject({
+      module: z.string().max(300).nullable(),
+      css: z.string().max(300).nullable(),
+      /** The file of the package it resolved to: `name@version/path`. */
+      resolved: z.string().max(1024),
+    })
+  ),
+  imports: z.array(z.string().max(64)).max(16),
+  files: z.record(
+    z.string().max(300),
+    z.strictObject({
+      sha256: sha256Schema,
+      bytes: z.int().nonnegative(),
+      type: z.string().max(64),
+    })
+  ),
+});
+export type PackageArtifact = z.infer<typeof packageArtifactSchema>;
+
+/** How long a build took and how much it held, as the builder measured it. */
+export const packageBuildStatsSchema = z.strictObject({
+  /** The time esbuild took to start, and to build, in ms. */
+  initializeMs: z.number().nonnegative(),
+  buildMs: z.number().nonnegative(),
+  /** esbuild's WebAssembly memory after the build, in bytes. */
+  wasmMemoryBytes: z.int().nonnegative(),
+  /** Files and bytes the build read from the packages. */
+  inputFiles: z.int().nonnegative(),
+  inputBytes: z.int().nonnegative(),
+});
+export type PackageBuildStats = z.infer<typeof packageBuildStatsSchema>;
+
+/** What the builder answers a build with. */
+export const packageBuildAnswerSchema = z.discriminatedUnion("ok", [
+  z.strictObject({
+    ok: z.literal(true),
+    artifact: packageArtifactSchema,
+    files: z.record(
+      z.string(),
+      z.custom<Uint8Array>((value) => value instanceof Uint8Array)
+    ),
+    stats: packageBuildStatsSchema,
+  }),
+  z.strictObject({
+    ok: z.literal(false),
+    refusals: z.array(z.string().max(500)).min(1).max(50),
+  }),
+]);
+export type PackageBuildAnswer = z.infer<typeof packageBuildAnswerSchema>;
+
+/** What a build of an approved graph asks for. */
+export const packageBuildRequestSchema = z.strictObject({
+  app: appIdSchema,
+  graphHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  target: dependencyTargetSchema,
+  /** The dependency policy generation the caller read. */
+  policyGeneration: z.int().nonnegative(),
+});
+export type PackageBuildRequest = z.input<typeof packageBuildRequestSchema>;
+
+/** A built target, as core keeps it: the artifact, by its hash. */
+export interface PackageBuild {
+  hash: string;
+  artifact: PackageArtifact;
+  /** The approval the build relied on. */
+  approval: string;
+  stats: PackageBuildStats | null;
 }

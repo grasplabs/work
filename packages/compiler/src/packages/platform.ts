@@ -13,6 +13,18 @@ export const platformPeers: Readonly<Record<string, string>> = {
 };
 
 /**
+ * The modules of React and React DOM the kit provides, by specifier: all
+ * an App's code and packages may import of them.
+ */
+export const platformModules = [
+  "react",
+  "react/jsx-runtime",
+  "react/compiler-runtime",
+  "react-dom",
+  "react-dom/client",
+];
+
+/**
  * The platform's own scope: its SDK and UI kit are never npm packages.
  * One by that name on the registry is someone else's, and refused.
  */
