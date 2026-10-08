@@ -1,11 +1,13 @@
+import { runInDurableObject } from "cloudflare:test";
 // Lifecycle commands through the instance's real boundary: pause and
 // resume, terminate, restart (from a step, too) and delete, alone and
 // against each other, and what each leaves of a step still out.
 import { describe, expect, it } from "vite-plus/test";
 
-import { decode } from "../src/codec.ts";
+import { decode, encode } from "../src/codec.ts";
 import type { InstanceStatus } from "../src/contracts.ts";
 import type { WorkflowInstance } from "../src/instance.ts";
+import { WorkflowRun } from "../src/run.ts";
 import {
   alarmOf,
   deliverAlarm,
@@ -13,11 +15,18 @@ import {
   journalOf,
   newId,
   pastTime,
+  runObject,
   suspendedOn,
   until,
   workflow,
 } from "./helpers.ts";
-import { effectsOf, hold } from "./outside.ts";
+import {
+  effectsOf,
+  eventOf,
+  handled,
+  hold,
+  warningsDuring,
+} from "./outside.ts";
 
 const instance = async (
   definition: string,
@@ -289,19 +298,118 @@ describe("pause", () => {
 
   it("is kept by a start delivered again: a paused run gets no alarm from it", async () => {
     const id = newId();
-    const admission = { id, key: `start-${id}` };
-    await workflow("napper").admit(admission);
+    const key = `start-${id}`;
+    await workflow("napper").admit({ id, key });
     await suspendedOn("napper", id, "nap");
     const run = await instance("napper", id);
     await run.pause();
 
-    await expect(workflow("napper").admit(admission)).resolves.toMatchObject({
-      created: false,
+    const noParams: unknown = undefined;
+    // The start again, and the alarm read, with no other event between:
+    // an alarm it set can't have fired and gone first.
+    const after = await runInDurableObject(
+      runObject("napper", id),
+      async (object, state) =>
+        await state.blockConcurrencyWhile(async () => {
+          if (!(object instanceof WorkflowRun)) {
+            throw new TypeError("the object isn't a run object");
+          }
+          const outcome = await object.start({
+            definition: "napper",
+            version: null,
+            instanceId: id,
+            params: encode(noParams),
+            key,
+          });
+          return { outcome, alarm: await state.storage.getAlarm() };
+        })
+    );
+    expect(after).toStrictEqual({ outcome: "existing", alarm: null });
+    await expect(run.status()).resolves.toStrictEqual({ status: "paused" });
+  });
+
+  it("moves a parked retry on by the time it was paused", async () => {
+    const id = newId();
+    await workflow("retrying").create({
+      id,
+      params: {
+        fails: 1,
+        config: { retries: { limit: 1, delay: "1 hour", backoff: "constant" } },
+      },
     });
-    expect({
-      status: await run.status(),
-      alarm: await alarmOf("napper", id),
-    }).toStrictEqual({ status: { status: "paused" }, alarm: null });
+    const retryAt = async (): Promise<number | null | undefined> => {
+      const { attempts } = await journalOf("retrying", id);
+      return attempts[0]?.retry_at;
+    };
+    const due = await until("the retry to be parked", async () => {
+      const { run } = await journalOf("retrying", id);
+      const at = await retryAt();
+      return run.status === "waiting" && typeof at === "number"
+        ? at
+        : undefined;
+    });
+    const run = await instance("retrying", id);
+    await run.pause();
+    const { run: paused } = await journalOf("retrying", id);
+    const pausedAt = paused.paused_at ?? Number.NaN;
+    const pauseMs = 20;
+    await pastTime(pausedAt + pauseMs);
+    await run.resume();
+    const resumedBy = Date.now();
+    await reaches("retrying", id, "waiting");
+    const moved = (await retryAt()) ?? Number.NaN;
+
+    expect(moved - due).toBeGreaterThanOrEqual(pauseMs);
+    expect(moved - due).toBeLessThanOrEqual(resumedBy - pausedAt);
+    await expect(alarmOf("retrying", id)).resolves.toBe(moved);
+  });
+
+  it("moves on the deadline of an attempt left open by the activation it took for dead", async () => {
+    const id = newId();
+    const charge = hold(id, "charge");
+    await workflow("orders").create({ id });
+    await charge.held;
+    const run = await instance("orders", id);
+    await run.pause();
+    // The pausing activation is taken for dead: its attempt stays open.
+    await deliverAlarm("orders", id);
+    const before = await journalOf("orders", id);
+    const deadline = before.attempts[0]?.deadline ?? Number.NaN;
+    const pausedAt = before.run.paused_at ?? Number.NaN;
+    const pauseMs = 20;
+    await pastTime(pausedAt + pauseMs);
+
+    await run.resume();
+    const resumedBy = Date.now();
+    // Read before the held answer comes: the attempt is still open, and
+    // the resumed run's alarm waits for the held handler.
+    const { attempts } = await journalOf("orders", id);
+    const [open] = attempts;
+    charge.release();
+    const moved = open?.deadline ?? Number.NaN;
+
+    expect(open?.ended).toBeNull();
+    expect(moved - deadline).toBeGreaterThanOrEqual(pauseMs);
+    expect(moved - deadline).toBeLessThanOrEqual(resumedBy - pausedAt);
+    await expect(ended("orders", id)).resolves.toMatchObject({
+      status: "complete",
+    });
+  });
+
+  it("is ignored by a resume of a run that isn't paused, which repairs an alarm it lost", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    const { deadline } = await suspendedOn("napper", id, "nap");
+    await runInDurableObject(runObject("napper", id), async (_, state) => {
+      await state.storage.deleteAlarm();
+    });
+
+    const run = await instance("napper", id);
+    await run.resume();
+    await until("the alarm to be set again", async () =>
+      (await alarmOf("napper", id)) === deadline ? true : undefined
+    );
+    await expect(run.status()).resolves.toStrictEqual({ status: "waiting" });
   });
 });
 
@@ -668,6 +776,37 @@ describe("delete", () => {
       steps: [{ name: "late", state: "succeeded", attempt: 1 }],
       attempts: [{ attempt: 1, generation: 1, ended: "succeeded" }],
     });
+  });
+});
+
+describe("a run deleted", () => {
+  it("fences its activation still out, which faults on nothing when its step answers", async () => {
+    const id = newId();
+    const charge = hold(id, "charge");
+    await workflow("orders").create({ id });
+    await charge.held;
+    const run = await instance("orders", id);
+    const object = runObject("orders", id).id.toString();
+
+    const warnings = await warningsDuring(async () => {
+      await run.delete();
+      charge.release();
+      // Its alarm handler returns once what came of the answer is decided.
+      await until("the deleted run's activation to end", () =>
+        handled.includes(object) ? true : undefined
+      );
+    });
+
+    expect({
+      faults: warnings
+        .map((warning) => eventOf(warning))
+        .filter((event) => event === "workflow_activation_faulted"),
+      ship: effectsOf(id, "ship").length,
+      alarm: await alarmOf("orders", id),
+    }).toStrictEqual({ faults: [], ship: 0, alarm: null });
+    await expect(workflow("orders").get(id)).rejects.toThrow(
+      /instance\.not_found/u
+    );
   });
 });
 

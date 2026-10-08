@@ -13,6 +13,7 @@ import {
   busyFor,
   checkpoint,
   effect,
+  handled,
   measuredClock,
   witness,
 } from "./outside.ts";
@@ -774,6 +775,14 @@ export class TestRuns extends WorkflowRun {
   // oxlint-disable-next-line class-methods-use-this -- the test's clock, shared by every run
   protected override clock(): number {
     return measuredClock();
+  }
+
+  override async alarm(): Promise<void> {
+    try {
+      await super.alarm();
+    } finally {
+      handled.push(this.ctx.id.toString());
+    }
   }
 }
 

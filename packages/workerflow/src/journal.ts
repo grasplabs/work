@@ -167,7 +167,8 @@ export interface StepRow extends Record<string, SqlStorageValue> {
   error: string | null;
   /**
    * A sleep's or a wait's absolute deadline, journaled when the step was
-   * first reached and never moved after.
+   * first reached. Nothing a replay, an alarm or an event does moves it;
+   * only `resume` does, by the time the run was paused (run.ts).
    */
   deadline: number | null;
   /** The event type a wait takes. */
@@ -355,6 +356,11 @@ export const hasJournal = (sql: SqlStorage): boolean =>
     .toArray().length > 0;
 
 export const readRun = (sql: SqlStorage): RunRow | undefined => {
+  // A run deleted (its tables with it) is no run: a stale activation of it
+  // reads that, and is fenced, rather than fail on a missing table.
+  if (!hasJournal(sql)) {
+    return undefined;
+  }
   // The version first, on its own: another layout's columns may not be
   // the ones read below.
   const [stored] = sql

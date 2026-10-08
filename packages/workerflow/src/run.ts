@@ -61,7 +61,10 @@
 //   go of the run, `paused`, with no alarm. A run asleep or waiting has no
 //   activation, and is `paused` at once. A paused run's deadlines don't
 //   come due: `resume` moves each one on by as long as the run was paused,
-//   as the reference engine does, and sets the alarm to run it now.
+//   as the reference engine does, and sets the alarm to run it now. That
+//   counts for an attempt left open by an activation that died before the
+//   pause, too: its deadline moves on, so paused time doesn't make it a
+//   timed-out attempt, and it is retried at once, as one cut off in time.
 // - `terminate` ends the run as `terminated` and takes a new generation in
 //   the same write: an activation still out is fenced, so whatever its
 //   steps answer later is ignored, and it starts nothing more.
@@ -747,26 +750,37 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    */
   async resume(): Promise<ResumeOutcome> {
     const { sql } = this.ctx.storage;
-    return await this.#command((run, now): CommandDecision<ResumeOutcome> => {
-      if (run.status === "waitingForPause") {
-        // Its activation goes on; what it parked for the pause comes due
-        // at once when it suspends (activation.ts).
-        sql.exec("UPDATE run SET status = 'running'");
-        return { outcome: "resumed" };
+    const outcome = await this.#command(
+      (run, now): CommandDecision<ResumeOutcome> => {
+        if (run.status === "waitingForPause") {
+          // Its activation goes on; what it parked for the pause comes due
+          // at once when it suspends (activation.ts).
+          sql.exec("UPDATE run SET status = 'running'");
+          return { outcome: "resumed" };
+        }
+        if (run.status !== "paused") {
+          return { outcome: "ignored" };
+        }
+        if (run.paused_at === null) {
+          throw new Error("The journal holds a paused run with no pause time");
+        }
+        shiftDeadlinesIn(sql, Math.max(0, now - run.paused_at));
+        sql.exec(
+          "UPDATE run SET status = 'running', paused_at = NULL, wake_at = ?",
+          now
+        );
+        return { outcome: "resumed", alarm: now };
       }
-      if (run.status !== "paused") {
-        return { outcome: "ignored" };
+    );
+    if (outcome === "ignored") {
+      // A resume sent again, after an answer that never came, repairs an
+      // alarm a run still to end has lost, as a repeated start does.
+      const run = this.#run();
+      if (run !== undefined) {
+        await this.#ensureWake(run);
       }
-      if (run.paused_at === null) {
-        throw new Error("The journal holds a paused run with no pause time");
-      }
-      shiftDeadlinesIn(sql, Math.max(0, now - run.paused_at));
-      sql.exec(
-        "UPDATE run SET status = 'running', paused_at = NULL, wake_at = ?",
-        now
-      );
-      return { outcome: "resumed", alarm: now };
-    });
+    }
+    return outcome;
   }
 
   /** Ends the run as terminated, fencing any activation still out. */
