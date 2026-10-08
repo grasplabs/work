@@ -216,8 +216,15 @@ export type ResumeOutcome = "resumed" | "ignored" | "missing";
 /** `ended`: the run has ended already, and can't be terminated. */
 export type TerminateOutcome = "terminated" | "ended" | "missing";
 
-/** `no_such_step`: the run has started no step `from` names. */
-export type RestartOutcome = "restarted" | "no_such_step" | "missing";
+/**
+ * `no_such_step`: the run has started no step `from` names.
+ * `nested_step`: the step was called from inside another step's callback.
+ */
+export type RestartOutcome =
+  | "restarted"
+  | "no_such_step"
+  | "nested_step"
+  | "missing";
 
 export type DeleteOutcome = "deleted" | "missing";
 
@@ -835,6 +842,15 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         });
         if (target === undefined) {
           return { outcome: "no_such_step" };
+        }
+        if (target.nested === 1) {
+          // Its enclosing step, started before it, keeps its outcome, which
+          // replay returns without calling its callback: the target would
+          // never run again. The reference engine has no such guard (it
+          // wipes from the target's start on, as here); refusing is the
+          // narrower choice, and restarting from the enclosing step reruns
+          // both.
+          return { outcome: "nested_step" };
         }
         // The target and every step started after it run again, and so
         // does any started before it that hadn't come to its outcome: the

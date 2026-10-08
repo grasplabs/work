@@ -909,12 +909,13 @@ export class Activation {
         }
         ({ ordinal } = sql
           .exec<{ ordinal: number }>(
-            "INSERT INTO steps (type, name, occurrence, idempotency_key, state, attempt, config) VALUES (?, ?, ?, ?, 'running', 1, ?) RETURNING ordinal",
+            "INSERT INTO steps (type, name, occurrence, idempotency_key, state, attempt, config, nested) VALUES (?, ?, ?, ?, 'running', 1, ?, ?) RETURNING ordinal",
             identity.type,
             identity.name,
             identity.occurrence,
             key,
-            config.journal
+            config.journal,
+            attempts.getStore()?.live === true ? 1 : 0
           )
           .one());
       } else {
@@ -1213,6 +1214,7 @@ export class Activation {
         ordinal: claim.ordinal,
         attempt: claim.attempt,
         holds: () => this.#holds(claim),
+        owns: () => this.#ownsRun(),
         stopped: Promise.race([this.stopped, attemptEnded]),
         maxBytes: this.#limits.maxStreamBytes,
         maxRunBytes: this.#limits.maxRunStreamBytes,

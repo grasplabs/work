@@ -560,6 +560,25 @@ export const definitions: Record<string, WorkflowDefinition> = {
       return "done";
     },
   },
+  // A step whose callback calls another step, then a last step.
+  nesting: {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      const outer = await step.do(
+        "outer",
+        async () =>
+          await step.do(
+            "inner",
+            async (context) => await effect(instanceId, "inner", context)
+          )
+      );
+      const last = await step.do(
+        "last",
+        async (context) => await effect(instanceId, "last", context)
+      );
+      return { outer, last };
+    },
+  },
   // A step, a sleep of the duration in the params, another step.
   napper: {
     run: async (event, step) => {

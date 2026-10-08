@@ -184,6 +184,12 @@ export interface StepRow extends Record<string, SqlStorageValue> {
    * sleep or a wait.
    */
   config: string | null;
+  /**
+   * 1 when the step was called from inside another step's attempt: a
+   * replay that returns that step's outcome never calls it again, so a
+   * restart can't start from it (run.ts).
+   */
+  nested: number;
 }
 
 /**
@@ -310,6 +316,7 @@ export const createJournal = (sql: SqlStorage): void => {
       event_type TEXT,
       duration_ms INTEGER,
       config TEXT,
+      nested INTEGER NOT NULL DEFAULT 0,
       UNIQUE (type, name, occurrence)
     );
     CREATE TABLE IF NOT EXISTS attempts (
@@ -383,7 +390,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
 };
 
 const stepColumns =
-  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, duration_ms, config";
+  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, duration_ms, config, nested";
 
 export const readStep = (
   sql: SqlStorage,

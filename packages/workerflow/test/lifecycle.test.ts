@@ -27,6 +27,7 @@ import {
   hold,
   warningsDuring,
 } from "./outside.ts";
+import { slowStreamFirst, slowStreamRest } from "./result-definitions.ts";
 
 const instance = async (
   definition: string,
@@ -690,6 +691,25 @@ describe("restart", () => {
     });
   });
 
+  it("refuses a step called from inside another, whose outcome replay would return without calling it", async () => {
+    const id = newId();
+    await workflow("nesting").create({ id });
+    const complete = await ended("nesting", id);
+    const run = await instance("nesting", id);
+
+    await expect(run.restart({ from: { name: "inner" } })).rejects.toThrow(
+      /^instance\.cannot_restart: .*inside/u
+    );
+    await expect(run.status()).resolves.toStrictEqual(complete);
+    // From the step it is called from, it runs again, with what it calls.
+    await run.restart({ from: { name: "outer" } });
+    await seenTimes(id, "last", 2);
+    expect([seen(id, "inner"), seen(id, "last")]).toMatchObject([
+      { times: 2, keys: 2 },
+      { times: 2, keys: 2 },
+    ]);
+  });
+
   it("refuses a step the run hasn't started: a name, count or type it has none of", async () => {
     const id = newId();
     await workflow("orders").create({ id });
@@ -886,6 +906,47 @@ describe("a run deleted", () => {
 });
 
 describe("a run deleted and created again", () => {
+  it("keeps its stream result whole when the first run's upload, still out, ends after it", async () => {
+    const id = newId();
+    const first = hold(id, "stream", 1);
+    await workflow("held-stream").create({ id });
+    await first.held;
+    const object = runObject("held-stream", id).id.toString();
+    const old = await instance("held-stream", id);
+    await old.delete();
+
+    // Created again: its own upload of the same step runs and commits, in
+    // an alarm delivered beside the first run's handler, still out (alarms
+    // are at least once: one may come while another runs).
+    await workflow("held-stream").create({ id });
+    await deliverAlarm("held-stream", id);
+    const status = await ended("held-stream", id);
+    const handledBefore = handled.filter((entry) => entry === object).length;
+    // The first run's upload ends now, for no one.
+    first.release();
+    await until("the first run's activation to end", () =>
+      handled.filter((entry) => entry === object).length > handledBefore
+        ? true
+        : undefined
+    );
+
+    const stored = await runInDurableObject(
+      runObject("held-stream", id),
+      (_, state) =>
+        state.storage.sql
+          .exec<{ chunks: number; bytes: number; counted: number }>(
+            "SELECT COUNT(*) AS chunks, COALESCE(SUM(LENGTH(bytes)), 0) AS bytes, (SELECT stream_bytes FROM run) AS counted FROM stream_chunks"
+          )
+          .one()
+    );
+    expect(status).toMatchObject({ status: "complete" });
+    expect(stored).toStrictEqual({
+      chunks: 2,
+      bytes: slowStreamFirst + slowStreamRest,
+      counted: slowStreamFirst + slowStreamRest,
+    });
+  });
+
   it("can't be acted on by the first run's activation, though it holds the same generation", async () => {
     const id = newId();
     const charge = hold(id, "charge");

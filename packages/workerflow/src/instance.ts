@@ -179,6 +179,11 @@ export class WorkflowInstance {
     if (outcome === "missing") {
       throw notFound(this.id);
     }
+    if (outcome === "nested_step") {
+      throw new Error(
+        `instance.cannot_restart: step ${JSON.stringify(command.from?.name)} of workflow instance ${JSON.stringify(this.id)} was called from inside another step; restart from that step instead`
+      );
+    }
     if (outcome === "no_such_step") {
       throw new Error(
         `instance.cannot_restart: step ${JSON.stringify(command.from?.name)} not found in the execution history of workflow instance ${JSON.stringify(this.id)}`
