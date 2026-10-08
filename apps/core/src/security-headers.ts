@@ -104,11 +104,17 @@ export const screenFramePolicy = (scripts: readonly string[]): string =>
  * - Script only from `origin`, the deployment's own, as people reach it
  *   (the artifact's origin, where screens' modules are served too); no
  *   inline script, eval, `data:` or `blob:`. No workers at all.
- * - Connections only to `origin`, the host's; images and fonts only from
- *   this origin and `data:`; styles only from this origin, none inline.
+ * - No connections at all. Nothing that legitimately runs under this
+ *   policy needs one: documents are sandboxed and run no script, and
+ *   browser code never runs as a worker; allowing `origin` would only let
+ *   a worker started on this origin call its APIs with the person's
+ *   cookies.
+ * - Images and fonts only from this origin and `data:`; styles only from
+ *   this origin, none inline.
  * - `sandbox` on every file, not only SVGs: whatever a browser opens as a
  *   document runs nothing and has an opaque origin, whichever type it was
  *   sent with.
+ * - No Referer, as each address carries a token (packages/serve.ts).
  *
  * A policy sent with a script or a stylesheet says nothing about the page
  * that loads it: inside a screen's frame, the frame's policy (above)
@@ -120,7 +126,7 @@ export const packageArtifactPolicy = (origin: string): string =>
     "default-src": "'none'",
     "script-src": origin,
     "worker-src": "'none'",
-    "connect-src": origin,
+    "connect-src": "'none'",
     "img-src": "'self' data:",
     "font-src": "'self' data:",
     "style-src": "'self'",
@@ -134,22 +140,24 @@ export const packageArtifactPolicy = (origin: string): string =>
  * URL carries a secret; it is kept. So is the screen frame's policy,
  * which names its build's scripts; a frame response without one runs no
  * script at all. Everything on the path of packages' artifacts gets their
- * policy, whatever the route sent.
+ * policy and `no-referrer`, whatever the route sent.
  */
 export const setSecurityHeaders = (
   headers: Headers,
   url: URL,
   origin: string
 ): void => {
-  if (isPackageArtifactPath(url.pathname)) {
+  const artifact = isPackageArtifactPath(url.pathname);
+  if (artifact) {
     headers.set("content-security-policy", packageArtifactPolicy(origin));
+    headers.set("referrer-policy", "no-referrer");
   } else if (url.pathname !== screenFramePath) {
     headers.set("content-security-policy", contentSecurityPolicy);
   } else if (!headers.has("content-security-policy")) {
     headers.set("content-security-policy", screenFramePolicy([]));
   }
   headers.set("x-content-type-options", "nosniff");
-  if (headers.get("referrer-policy") !== "no-referrer") {
+  if (!artifact && headers.get("referrer-policy") !== "no-referrer") {
     headers.set("referrer-policy", "strict-origin-when-cross-origin");
   }
   if (url.protocol === "https:") {

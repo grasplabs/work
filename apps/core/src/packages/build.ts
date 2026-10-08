@@ -532,7 +532,7 @@ export const buildDependencies = async (
   // (`packageArtifactPolicy`, security-headers.ts):
   //
   //   default-src 'none'; script-src <the artifact's own origin>;
-  //   worker-src 'none'; connect-src <the host's origin>;
+  //   worker-src 'none'; connect-src 'none';
   //   img-src 'self' data:; font-src 'self' data:; style-src 'self'
   //
   // with `sandbox` (so a file opened as a document, an SVG say, runs

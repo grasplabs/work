@@ -9,7 +9,7 @@ import {
 import { drizzle } from "drizzle-orm/d1";
 
 import { policyGeneration } from "../dependencies/policy.ts";
-import { admitDependencies } from "../dependencies/requests.ts";
+import { admissionOf } from "../dependencies/requests.ts";
 import { accessTokenPattern, hasFrameAccess } from "../screen-frame.ts";
 import { artifactSubject } from "./address.ts";
 import type { ArtifactRef } from "./address.ts";
@@ -29,13 +29,14 @@ import { keptDescription, keptFile, lockOf } from "./build.ts";
 // what stops it:
 //
 // - Serving what is no longer approved, or other bytes than were built.
-//   Each request asks `admitDependencies` again, for this App, graph and
-//   the browser target under the policy generation now (it audits a
-//   refusal); the App's lock must still pin this artifact as this
-//   compiler's browser build; the artifact's description must hash to its
-//   address; and the file's bytes to the SHA-256 the description names.
-//   Answers are never cached, so an approval taken back holds from the
-//   next load.
+//   Each request makes the admission check again (`admissionOf`, the one
+//   `admitDependencies` makes), for this App, graph and the browser target
+//   under the policy generation now; a refusal is logged, not audited, so
+//   a page asking for many files can't flood the audit trail. The App's
+//   lock must still pin this artifact as this compiler's browser build;
+//   the artifact's description must hash to its address; and the file's
+//   bytes to the SHA-256 the description names. Answers are never cached,
+//   so an approval taken back holds from the next load.
 // - A file taken for another type. Each is sent with the exact type the
 //   build recorded for it, one of the few the builder writes, and
 //   `nosniff`: script is never read as a stylesheet, an image never as a
@@ -43,10 +44,19 @@ import { keptDescription, keptFile, lockOf } from "./build.ts";
 // - Reading an artifact by its hashes alone (from an audit entry, say).
 //   Each address carries a token core made for exactly that App, graph and
 //   artifact, which expires (address.ts). It is a path segment, not a
-//   query, so a file's relative imports and `url()`s keep it; the request
-//   log leaves it out (`withoutArtifactToken`).
+//   query, so a file's relative imports and `url()`s keep it. The cost:
+//   core's own request log leaves it out (`withoutArtifactToken`), and
+//   every answer says `Referrer-Policy: no-referrer` so it never travels
+//   as a Referer, but Cloudflare's traces of core and the router redact
+//   only query strings, so they keep the whole path, token included. We
+//   accept that: a token holds for at most about 12 hours, it opens only
+//   bytes built from public npm code, and admission and the lock are
+//   checked again on every request, so it never serves anything no longer
+//   approved.
 // - Code for Workers sent to a browser. Only the browser target is
-//   served; server, workflow and computation artifacts never leave core.
+//   served: the lock's browser pin is the guard, as an artifact's hash
+//   covers its target, so no other target's artifact is ever pinned as the
+//   browser's.
 
 const artifactPattern = new RegExp(
   `^${packageArtifactPath}/(?<app>[\\w-]{1,128})/(?<graphHash>[0-9a-f]{64})/(?<hash>[0-9a-f]{64})/(?<token>[^/]{1,96})/(?<file>.{1,1024})$`,
@@ -99,26 +109,28 @@ const refused = (status: 403 | 404 | 405): Response =>
     },
   });
 
-/** Whether the App's graph is approved for the browser, now. */
+/**
+ * Whether the App's graph is approved for the browser, now. A refusal is
+ * logged, not audited: a page asks for many files, and each refused one
+ * would otherwise be a row in the audit trail.
+ */
 const admitted = async (env: Env, ref: ArtifactRef): Promise<boolean> => {
-  try {
-    await admitDependencies(
-      env,
-      { type: "app", appId: ref.app, part: "screen" },
-      {
-        app: ref.app,
-        graphHash: ref.graphHash,
-        targets: ["browser"],
-        policyGeneration: await policyGeneration(drizzle(env.DB)),
-      }
-    );
-    return true;
-  } catch (error) {
-    if (isExpectedError(error)) {
-      return false;
-    }
-    throw error;
+  const db = drizzle(env.DB);
+  const admission = await admissionOf(db, {
+    app: ref.app,
+    graphHash: ref.graphHash,
+    targets: ["browser"],
+    policyGeneration: await policyGeneration(db),
+  });
+  if (!admission.admitted) {
+    log.warn("packages.serve_refused", {
+      app: ref.app,
+      graphHash: ref.graphHash,
+      hash: ref.hash,
+      reason: admission.reason,
+    });
   }
+  return admission.admitted;
 };
 
 /** Whether the App's lock still pins `ref` as this compiler's browser build. */
@@ -169,7 +181,10 @@ const addressed = (pathname: string): Addressed | undefined => {
   };
 };
 
-/** File `file` of the kept browser artifact `hash`, as built, or a refusal. */
+/**
+ * File `file` of the kept artifact `hash`, as built, or a refusal. The
+ * caller has checked the lock pins it as the browser's build.
+ */
 const keptResponse = async (
   env: Env,
   hash: string,
@@ -180,7 +195,7 @@ const keptResponse = async (
     description !== undefined && Object.hasOwn(description.files, file)
       ? description.files[file]
       : undefined;
-  if (description?.target !== "browser" || entry === undefined) {
+  if (entry === undefined) {
     return refused(404);
   }
   const type = servedTypes.get(entry.type);

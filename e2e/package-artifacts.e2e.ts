@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { z } from "zod";
 
 import { recordCspViolations } from "./csp.ts";
 import { hostileName, seedHostileArtifact } from "./package-artifact.ts";
@@ -126,6 +127,15 @@ export default function Widget() {
 }
 `;
 
+/** What the hostile worker posts (package-artifact.ts), or its error. */
+const workerReports = z.array(
+  z.object({
+    outcomes: z.record(z.string(), z.string()).optional(),
+    violation: z.string().optional(),
+    error: z.string().optional(),
+  })
+);
+
 test("a package's code started as a worker can't start another, import scripts or fetch elsewhere", async ({
   browser,
 }) => {
@@ -133,22 +143,39 @@ test("a package's code started as a worker can't start another, import scripts o
   // A page of the deployment's origin, whose own policy lets it start a
   // worker from that origin: the worker then runs under the artifact's.
   await page.goto("/");
-  const reported: unknown = await page.evaluate(
-    async (url) =>
-      // oxlint-disable-next-line promise/avoid-new -- a worker's events have no promise form
-      await new Promise((resolve) => {
-        const worker = new Worker(url);
-        worker.addEventListener("message", (event: MessageEvent) => {
-          resolve(event.data);
-        });
-        worker.addEventListener("error", (event) => {
-          resolve({ error: event.message });
-        });
-      }),
-    `${seeded.address}${hostileName}.js`
-  );
+  // Everything the worker posts, and any error starting it, kept on the
+  // page as it comes.
+  await page.evaluate((url) => {
+    const reports: unknown[] = [];
+    Reflect.set(globalThis, "workerReports", reports);
+    const worker = new Worker(url);
+    worker.addEventListener("message", (event: MessageEvent) => {
+      reports.push(event.data);
+    });
+    worker.addEventListener("error", (event) => {
+      reports.push({ error: event.message });
+    });
+  }, `${seeded.address}${hostileName}.js`);
+  // The worker's outcomes and the violations the browser reported to it,
+  // whichever order they come in: polled until all are there.
+  const reported = async () => {
+    const all = workerReports.parse(
+      await page.evaluate((): unknown =>
+        Reflect.get(globalThis, "workerReports")
+      )
+    );
+    return {
+      outcomes: all.find((report) => report.outcomes !== undefined)?.outcomes,
+      violations: all
+        .flatMap(({ violation }) =>
+          violation === undefined ? [] : [violation]
+        )
+        .toSorted(),
+      errors: all.filter((report) => report.error !== undefined),
+    };
+  };
 
-  expect(reported).toStrictEqual({
+  await expect.poll(reported).toStrictEqual({
     outcomes: {
       importScripts: "refused: NetworkError",
       worker: "refused: SecurityError",
@@ -156,9 +183,10 @@ test("a package's code started as a worker can't start another, import scripts o
     },
     // Chromium refuses the nested worker by throwing, without an event.
     violations: [
-      `script-src-elem ${attacker.url}/imported.js`,
       `connect-src ${attacker.url}/fetched`,
+      `script-src-elem ${attacker.url}/imported.js`,
     ],
+    errors: [],
   });
   // A worker's requests aren't the page's: the receiver says nothing
   // reached it.

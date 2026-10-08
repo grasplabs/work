@@ -26,7 +26,7 @@ const idp = mockIdp();
 const personApi = async (role: Role) => await signedInApi(idp, role);
 
 /** The policy every answer on the artifact path carries, exactly. */
-const artifactPolicy = `default-src 'none'; script-src ${clientOrigin}; worker-src 'none'; connect-src ${clientOrigin}; img-src 'self' data:; font-src 'self' data:; style-src 'self'; sandbox`;
+const artifactPolicy = `default-src 'none'; script-src ${clientOrigin}; worker-src 'none'; connect-src 'none'; img-src 'self' data:; font-src 'self' data:; style-src 'self'; sandbox`;
 
 /**
  * A package that does at run time what no build can see: a worker from a
@@ -118,11 +118,12 @@ const keptBytes = async (hash: string, path: string): Promise<string> => {
   return (await file?.text()) ?? "";
 };
 
-/** What a browser holds of an answer: its policy, sniffing, and body. */
+/** What a browser holds of an answer: its policy, sniffing, referrer and body. */
 const seen = async (response: Response) => ({
   status: response.status,
   policy: response.headers.get("content-security-policy"),
   sniffing: response.headers.get("x-content-type-options"),
+  referrer: response.headers.get("referrer-policy"),
   body: await response.text(),
 });
 
@@ -139,6 +140,7 @@ describe("serving an App's built packages", () => {
           type: response.headers.get("content-type"),
           policy: response.headers.get("content-security-policy"),
           sniffing: response.headers.get("x-content-type-options"),
+          referrer: response.headers.get("referrer-policy"),
           cache: response.headers.get("cache-control"),
           matches: (await sha256(await response.arrayBuffer())) === file.sha256,
         };
@@ -159,6 +161,8 @@ describe("serving an App's built packages", () => {
         type: typeOf[path.slice(path.lastIndexOf(".") + 1)],
         policy: artifactPolicy,
         sniffing: "nosniff",
+        // Its address carries a token: never sent on as a Referer.
+        referrer: "no-referrer",
         cache: "no-store",
         matches: true,
       }))
@@ -200,9 +204,17 @@ describe("serving an App's built packages", () => {
     ]);
     const seenAll = await Promise.all(answers.map(seen));
     expect(
-      seenAll.map(({ policy, sniffing }) => ({ policy, sniffing }))
+      seenAll.map(({ policy, sniffing, referrer }) => ({
+        policy,
+        sniffing,
+        referrer,
+      }))
     ).toStrictEqual(
-      seenAll.map(() => ({ policy: artifactPolicy, sniffing: "nosniff" }))
+      seenAll.map(() => ({
+        policy: artifactPolicy,
+        sniffing: "nosniff",
+        referrer: "no-referrer",
+      }))
     );
     const [served, ...rest] = seenAll;
     expect(served?.body).toBe(code);
@@ -232,7 +244,7 @@ describe("serving an App's built packages", () => {
     expect([borrowed.status, moved.status]).toStrictEqual([403, 403]);
   });
 
-  it("serves nothing once the graph is no longer approved, and audits the refusal", async () => {
+  it("serves nothing once the graph is no longer approved, and logs each refusal without filling the audit trail", async () => {
     const { app, request, address, name } = await servedBuild();
     // An approval taken back: nothing in the product does it yet, so the
     // test does what such a decision would leave behind.
@@ -242,25 +254,38 @@ describe("serving an App's built packages", () => {
       .bind(request.id)
       .run();
 
-    let response: Response | undefined;
-    const events = await auditedDuring(async () => {
-      response = await routed(`${address}${name}.js`);
-    });
+    const warn = vi.spyOn(console, "warn").mockReturnValue();
+    let statuses: number[] = [];
+    let warned: unknown[] = [];
+    let events: Awaited<ReturnType<typeof auditedDuring>> = [];
+    try {
+      events = await auditedDuring(async () => {
+        // A page asking for its files again and again.
+        const responses = await Promise.all(
+          Array.from(
+            { length: 5 },
+            async () => await routed(`${address}${name}.js`)
+          )
+        );
+        statuses = responses.map(({ status }) => status);
+      });
+      warned = warn.mock.calls.map(([fields]: unknown[]) => fields);
+    } finally {
+      warn.mockRestore();
+    }
 
-    expect(response?.status).toBe(403);
+    expect(statuses).toStrictEqual([403, 403, 403, 403, 403]);
+    expect(events).toStrictEqual([]);
     expect(
-      events.map(({ action, actor, detail }) => ({
-        action,
-        actor,
-        reason: detail.reason,
-      }))
-    ).toStrictEqual([
-      {
-        action: "dependency.admission_refused",
-        actor: { type: "app", appId: app, part: "screen" },
-        reason: "not_approved",
-      },
-    ]);
+      warned.filter(
+        (fields) =>
+          typeof fields === "object" &&
+          fields !== null &&
+          Reflect.get(fields, "event") === "packages.serve_refused" &&
+          Reflect.get(fields, "app") === app &&
+          Reflect.get(fields, "reason") === "not_approved"
+      )
+    ).toHaveLength(5);
   });
 
   it("serves nothing the lock no longer pins", async () => {
@@ -290,21 +315,29 @@ describe("serving an App's built packages", () => {
     expect(response.body).not.toContain("attacker");
   });
 
-  it("serves no target but the browser's, even with a token for it", async () => {
+  it("serves no target but the browser's, even with a token for it: the lock pins only the browser build as the browser's", async () => {
     const name = await hostilePackage();
     const approved = await approvedApp(
       { [name]: "1.0.0" },
       { targets: ["browser", "server"] }
     );
-    const built = await buildOf(approved, "server");
+    const browserBuild = await buildOf(approved, "browser");
+    const serverBuild = await buildOf(approved, "server");
+    // A token core made for the server build, as if it had handed one out.
     const address = await packageArtifactAddress(env, {
       app: approved.app,
       graphHash: approved.graphHash,
-      hash: built.hash,
+      hash: serverBuild.hash,
     });
 
     const response = await routed(`${address}${name}.js`);
-    expect([built.address, response.status]).toStrictEqual([null, 404]);
+    // The same App and graph, whose browser build is served.
+    const browser = await routed(`${browserBuild.address ?? ""}${name}.js`);
+    expect({
+      address: serverBuild.address,
+      status: response.status,
+      browser: browser.status,
+    }).toStrictEqual({ address: null, status: 404, browser: 200 });
   });
 
   it("is the only way to an artifact's files", async () => {

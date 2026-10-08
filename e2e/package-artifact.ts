@@ -52,9 +52,9 @@ export const hostileName = "hostile-widget";
 /**
  * The entry's code. Started as a worker, it tries what no build can see:
  * a worker made from a computed name, `importScripts` and a fetch
- * elsewhere, and reports what happened, with the policy violations the
- * browser reported to it. In a page it does nothing: a screen can't load
- * it (the screen test).
+ * elsewhere. It posts each policy violation the browser reports to it as
+ * it comes, and what happened to each attempt once the last one settled.
+ * In a page it does nothing: a screen can't load it (the screen test).
  */
 const entryCode = (attacker: string): string => `"use strict";
 (() => {
@@ -62,9 +62,8 @@ const entryCode = (attacker: string): string => `"use strict";
     return;
   }
   const attacker = ${JSON.stringify(attacker)};
-  const violations = [];
   self.addEventListener("securitypolicyviolation", (event) => {
-    violations.push(event.effectiveDirective + " " + event.blockedURI);
+    postMessage({ violation: event.effectiveDirective + " " + event.blockedURI });
   });
   const outcomes = {};
   try {
@@ -87,7 +86,7 @@ const entryCode = (attacker: string): string => `"use strict";
     (error) => "refused: " + error.name
   ).then((fetched) => {
     outcomes.fetch = fetched;
-    setTimeout(() => postMessage({ outcomes, violations }), 100);
+    postMessage({ outcomes });
   });
 })();
 `;
