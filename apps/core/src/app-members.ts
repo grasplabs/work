@@ -256,7 +256,7 @@ const checkedPeople = async (
     if (!known.success || isAdmin(known.data)) {
       return [];
     }
-    return [{ userId, teamIds: teamsByPerson.get(userId) ?? [] }];
+    return [{ userId, teamIds: teamsByPerson.get(userId) ?? [], admin: false }];
   });
 };
 
@@ -279,9 +279,9 @@ const requireReadable = async (
   }
   const people = await checkedPeople(env, app, member);
   const refused = people
-    .map(({ userId, teamIds }) => ({
-      userId,
-      sources: unreadableBy(sources, { userId, teamIds }),
+    .map((person) => ({
+      userId: person.userId,
+      sources: unreadableBy(sources, person),
     }))
     .filter(({ sources: ids }) => ids.length > 0);
   if (refused.length === 0) {

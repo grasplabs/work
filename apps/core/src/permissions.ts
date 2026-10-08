@@ -482,6 +482,13 @@ const requireCollection = async (
       ],
     });
   }
+  if (found.access === "admins") {
+    throw permissionErrors.create("permission.invalid", {
+      issues: [
+        "object.collectionId: A collection for admins can't be given to an App or agent.",
+      ],
+    });
+  }
   if (found.source === "apps" && subject.type === "app") {
     throw permissionErrors.create("permission.invalid", {
       issues: [

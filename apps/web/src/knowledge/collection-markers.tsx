@@ -19,6 +19,7 @@ const accessLabels: Readonly<Record<CollectionAccess, MessageDescriptor>> = {
   everyone: msg`Everyone`,
   teams: msg`Teams`,
   me: msg`Only the owner`,
+  admins: msg`Admins`,
 };
 
 /** Whether nobody may change `collection` here: Grasp or an App writes it. */
@@ -50,6 +51,7 @@ const accessIcons: Readonly<Record<CollectionAccess, LucideIcon>> = {
   everyone: BookIcon,
   teams: UsersIcon,
   me: LockIcon,
+  admins: LockKeyholeIcon,
 };
 
 /** A collection's icon in the navigation, by who may read it. */

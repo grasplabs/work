@@ -116,6 +116,7 @@ export const requireAppRole = async (
     const unreadable = unreadableBy(await sourcesOf(env, app.id), {
       userId: by.userId,
       teamIds: by.teams.map(({ id }) => id),
+      admin: isAdmin(by.role),
     });
     if (unreadable.length > 0) {
       throw appErrors.create("app.unreadable");
@@ -181,6 +182,7 @@ export const appsReadableBy = async (
   const reader = {
     userId: by.userId,
     teamIds: by.teams.map(({ id }) => id),
+    admin: false,
   };
   const own = rows.filter(({ owner }) => owner === by.userId);
   const shared = rows

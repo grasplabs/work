@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
 import type { KickoffApi } from "./kickoff.ts";
+import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
 import type {
   LogFilter,
   StaffLog,
@@ -238,7 +239,7 @@ export interface OnboardingView {
 }
 
 /** The onboarding, for the client's admin (Grasp staff included). */
-export interface OnboardingApi {
+export interface OnboardingApi extends OnboardingDocumentsApi {
   view: () => Promise<OnboardingView>;
   /** Replaces who works where. */
   saveRoster: (roster: RosterInput) => Promise<OnboardingView>;

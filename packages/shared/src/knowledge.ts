@@ -19,7 +19,17 @@ import type { CollectionId, DocumentId } from "./ids.ts";
  * Who may read a collection: everyone in the organization, the members of
  * its teams, or only its owner.
  */
-export const collectionAccessSchema = z.enum(["everyone", "teams", "me"]);
+/**
+ * Who may read a collection: everyone, its teams, its owner alone, or the
+ * admins (Grasp staff included), which only the platform gives one: the
+ * onboarding's documents.
+ */
+export const collectionAccessSchema = z.enum([
+  "everyone",
+  "teams",
+  "me",
+  "admins",
+]);
 export type CollectionAccess = z.infer<typeof collectionAccessSchema>;
 
 /**
@@ -69,6 +79,13 @@ export const collectionInputSchema = z
         code: "custom",
         path: ["teams"],
         message: "A team collection needs at least one team",
+      });
+    }
+    if (access === "admins") {
+      context.addIssue({
+        code: "custom",
+        path: ["access"],
+        message: "Only the platform makes a collection for admins",
       });
     }
     if (access !== "teams" && teams.length > 0) {
