@@ -262,6 +262,47 @@ export const heldOutcome = async (
 };
 
 /**
+ * Where a side effect's result is kept under its idempotency key, for a
+ * call that has one. Work that may only read (`readOnly`) has no side
+ * effects, so it has no stored results of one either: none is replayed to
+ * it, whatever key it names.
+ */
+const storeOf = (
+  env: Env,
+  { authority, resource, idempotencyKey, readOnly }: CapabilityClaims,
+  call: Omit<ConnectCall, "capability">,
+  inputHash: string
+) =>
+  idempotencyKey === null || readOnly
+    ? undefined
+    : idempotencyStore(
+        env.DB,
+        {
+          subject: authority.subject,
+          onBehalfOf: authority.onBehalfOf,
+          connectionId: call.connectionId,
+          action: call.action,
+          idempotencyKey,
+          resource,
+        },
+        inputHash
+      );
+
+/**
+ * Refuses a side effect of work that may only read (`readOnly`), before it
+ * is held or run: a read can't turn into a change further on, whatever
+ * the code that called it asks.
+ */
+const requireAllowedEffect = (
+  { readOnly }: CapabilityClaims,
+  sideEffect: boolean
+): void => {
+  if (sideEffect && readOnly) {
+    throw connectErrors.create("connect.read_only");
+  }
+};
+
+/**
  * Carries out one call whose capability is verified: `claims` say exactly
  * this connection, resource, action and idempotency key, for this subject
  * and person. A side effect a person is there for, or of a restricted
@@ -292,21 +333,7 @@ export const carryOut = async (
   // A repeat of a side effect gets its stored result before anything goes
   // out, not even a look at the server's tools.
   const inputHash = await hashCall(resource, input);
-  const store =
-    idempotencyKey === null
-      ? undefined
-      : idempotencyStore(
-          env.DB,
-          {
-            subject: authority.subject,
-            onBehalfOf: authority.onBehalfOf,
-            connectionId: call.connectionId,
-            action: call.action,
-            idempotencyKey,
-            resource,
-          },
-          inputHash
-        );
+  const store = storeOf(env, claims, call, inputHash);
   const stored = await store?.replay();
   if (stored !== undefined) {
     progress.sideEffect = true;
@@ -320,6 +347,7 @@ export const carryOut = async (
     claims.restricted
   );
   progress.sideEffect = sideEffect;
+  requireAllowedEffect(claims, sideEffect);
   checkResourceScope(resource, tool, input);
   if (sideEffect && mustHold(claims, held)) {
     // A workflow run's key is its step's and never made by connect:

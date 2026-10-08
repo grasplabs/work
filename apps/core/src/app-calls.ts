@@ -443,7 +443,7 @@ export class AppExportBinding extends WorkerEntrypoint<
     try {
       let known: Awaited<ReturnType<typeof callerOf>>;
       try {
-        known = await callerOf(this.env, app, caller);
+        known = await callerOf(this.env, app, caller, "read");
       } catch (error) {
         // A caller this App isn't running a call of: made up, ended, or
         // another App's. Recorded by the App the stub is its, as nobody

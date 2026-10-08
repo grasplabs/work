@@ -1343,7 +1343,7 @@ export class RunHost extends RpcTarget {
             this.#env,
             async (key) => {
               requireStepKey(key, stepKey);
-              return await Promise.resolve(authority);
+              return await Promise.resolve({ authority });
             },
             grant,
             checked(z.array(z.unknown()), call)

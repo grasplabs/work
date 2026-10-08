@@ -9,6 +9,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { callerOf } from "./app-bindings.ts";
+import type { InvocationKind } from "./app.ts";
 import { forSandbox } from "./bindings.ts";
 import { inviteGuest, listGuests, readGuest, revokeGuest } from "./guests.ts";
 
@@ -31,6 +32,7 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   async invite(caller: unknown, input: unknown): Promise<GuestInvitation> {
     return await this.#run(
       caller,
+      "write",
       async (authority, permissionId) =>
         await inviteGuest(this.env, authority, permissionId, input),
       { personOnly: true }
@@ -41,6 +43,7 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   async list(caller: unknown): Promise<GuestChat[]> {
     return await this.#run(
       caller,
+      "read",
       async (authority, permissionId) =>
         await listGuests(this.env, authority, permissionId)
     );
@@ -50,6 +53,7 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   async read(caller: unknown, id: unknown): Promise<GuestTranscript> {
     return await this.#run(
       caller,
+      "read",
       async (authority, permissionId) =>
         await readGuest(this.env, authority, permissionId, id)
     );
@@ -59,20 +63,25 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   async revoke(caller: unknown, id: unknown): Promise<GuestChat> {
     return await this.#run(
       caller,
+      "write",
       async (authority, permissionId) =>
         await revokeGuest(this.env, authority, permissionId, id)
     );
   }
 
-  /** Runs `run` for `caller`, with errors as the sandbox sees them. */
+  /**
+   * Runs `run` for `caller`, admitted for `use` (a change, or a read:
+   * `callerOf`), with errors as the sandbox sees them.
+   */
   async #run<T>(
     caller: unknown,
+    use: InvocationKind,
     run: (authority: Authority, permissionId: PermissionId) => Promise<T>,
     { personOnly = false }: { personOnly?: boolean } = {}
   ): Promise<T> {
     const { app, permissionId } = this.ctx.props;
     try {
-      const { authority, path } = await callerOf(this.env, app, caller);
+      const { authority, path } = await callerOf(this.env, app, caller, use);
       const person =
         authority.mode === "interactive" && path.chain.length === 1;
       if (personOnly && !person) {
