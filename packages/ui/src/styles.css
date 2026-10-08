@@ -64,6 +64,8 @@
   --tile-foreground: #1a1a19;
   --status-agreed: #1f8a5b;
   --status-attention: #d0561c;
+  /* Behind modals, at an opacity, in both themes: dims the page. */
+  --scrim: #000000;
 }
 
 @media screen {
@@ -149,6 +151,7 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-scrim: var(--scrim);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -190,5 +193,49 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/*
+ * input-otp's own rules for its hidden input. It adds them in a <style>
+ * element at runtime, which a strict style-src (Grasp's own pages) blocks.
+ */
+[data-input-otp]::selection {
+  background: transparent !important;
+  color: transparent !important;
+}
+
+/* Apart: a browser drops a whole rule over one selector it doesn't know. */
+[data-input-otp]:autofill {
+  background: transparent !important;
+  color: transparent !important;
+  border-color: transparent !important;
+  opacity: 0 !important;
+  box-shadow: none !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+[data-input-otp]:-webkit-autofill {
+  background: transparent !important;
+  color: transparent !important;
+  border-color: transparent !important;
+  opacity: 0 !important;
+  box-shadow: none !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+[data-input-otp] + * {
+  pointer-events: all !important;
+}
+
+/* input-otp's rule for iOS Safari, as it adds it (input-otp 1.5.0). */
+@supports (-webkit-touch-callout: none) {
+  [data-input-otp] {
+    letter-spacing: -0.6em !important;
+    font-weight: 100 !important;
+    font-stretch: ultra-condensed;
+    font-optical-sizing: none !important;
+    left: -1px !important;
+    right: 1px !important;
   }
 }

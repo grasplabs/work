@@ -902,6 +902,29 @@ export const dependencyApprovers = sqliteTable(
 );
 
 /**
+ * The exact lock (`grasp.lock.json`) the resolver produced for one of an
+ * App's dependency graphs (src/packages/resolve.ts), by the graph's hash:
+ * what a build of an approved graph unpacks, by integrity, and with which
+ * export conditions per target. One per App and graph. Its packages never
+ * change (the graph's hash covers them; the first lock's ranges and times
+ * stay its provenance); a later resolve of the same graph sets the
+ * targets it asks for (`mergedLock`), each write conditional on the lock
+ * as it was read. At most `packageLimits.lockBytes`.
+ */
+export const dependencyLocks = sqliteTable(
+  "dependency_locks",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    graphHash: text("graph_hash").notNull(),
+    lock: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.graphHash] })]
+);
+
+/**
  * The values people set for workflows' parameters, one per App, workflow
  * and parameter; a parameter without one has its code's default. `set_by`
  * set it directly.

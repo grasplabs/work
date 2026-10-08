@@ -27,6 +27,8 @@ const generated = [
   "**/src/db/**/migrations/**",
   // Release fixtures and the golden manifest the release test writes.
   "scripts/release/testdata/**",
+  // Third-party files vendored byte for byte, pinned by their hashes.
+  "packages/*/vendor/**",
 ];
 
 export default defineConfig({
@@ -90,6 +92,27 @@ export default defineConfig({
         rules: { "grasp/no-scrollbars": "error" },
       },
       {
+        // Workerflow is a generic engine: nothing of Grasp's domain (users,
+        // Apps, connect, permissions) may reach it. Grasp imports it, never
+        // the other way round.
+        files: ["packages/workerflow/**"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                {
+                  // Other workspace packages, by name or by path.
+                  group: ["@grasp-os/**", "**/apps/**", "../../*/**"],
+                  message:
+                    "Workerflow imports nothing of Grasp: core maps Grasp onto it.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
         // Schema files start as comment-only placeholders until their first table.
         files: ["apps/*/src/db/**/schema.ts"],
         rules: { "unicorn/no-empty-file": "off" },
@@ -123,6 +146,7 @@ export default defineConfig({
       "apps/console/vite.test.config.ts",
       "apps/core/vite.screens.config.ts",
       "packages/*",
+      "packages/workerflow/vite.process.config.ts",
       "packages/connectors/*",
       // Repo tooling's pure logic, and core's build step, in Node.
       {

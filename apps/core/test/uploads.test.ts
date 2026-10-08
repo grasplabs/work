@@ -12,7 +12,9 @@ import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
+import { localExtractor } from "../src/knowledge/extract.ts";
 import { extractorAsset } from "../src/knowledge/extractor/asset.ts";
 import {
   extractUpload,
@@ -648,6 +650,82 @@ describe("uploads", { timeout: 60_000 }, () => {
       malformed: "upload.unreadable",
       oversized: "knowledge.too_large",
       unknownReason: "upload.unreadable",
+    });
+  });
+
+  it("keep an extractor that a file took over from reaching out of its sandbox", async () => {
+    // What a document that took over pdf.js could run: loaded as core
+    // loads the extractor, its own module in place of the extractor's.
+    const takenOver = `import { WorkerEntrypoint } from "cloudflare:workers";
+import { connect as tcp } from "cloudflare:sockets";
+import { connect } from "node:net";
+
+const outcome = async (run) => {
+  try {
+    await run();
+    return "ok";
+  } catch (error) {
+    return String(error);
+  }
+};
+
+export default class extends WorkerEntrypoint {
+  async extract() {
+    const tries = {
+      fetch: await outcome(() => fetch("http://169.254.169.254/latest/meta-data/")),
+      host: await outcome(() => fetch("http://127.0.0.1:8787/")),
+      socket: await outcome(() => tcp("example.com:443").opened),
+      net: await outcome(
+        () =>
+          new Promise((resolve, reject) => {
+            const socket = connect(443, "example.com");
+            socket.once("connect", resolve);
+            socket.once("error", reject);
+          })
+      ),
+    };
+    return {
+      ok: true,
+      markdown: JSON.stringify({ tries, env: Object.keys(this.env), processEnv: Object.keys(process.env) }),
+    };
+  }
+}
+`;
+    const load = env.LOADER.load.bind(env.LOADER);
+    const loading = vi
+      .spyOn(env.LOADER, "load")
+      .mockImplementation((code) =>
+        load({ ...code, modules: { "extractor.js": takenOver } })
+      );
+    let markdown: string;
+    try {
+      markdown = await localExtractor(env)({
+        name: "policy.pdf",
+        mediaType: "application/pdf",
+        bytes: new Uint8Array([1]),
+      });
+    } finally {
+      loading.mockRestore();
+    }
+    const reached = z
+      .object({
+        tries: z.record(z.string(), z.string()),
+        env: z.array(z.string()),
+        processEnv: z.array(z.string()),
+      })
+      .parse(JSON.parse(markdown));
+    expect({
+      ...reached,
+      tries: Object.fromEntries(
+        Object.entries(reached.tries).map(([name, result]) => [
+          name,
+          result.includes("not permitted to access the internet"),
+        ])
+      ),
+    }).toStrictEqual({
+      tries: { fetch: true, host: true, socket: true, net: true },
+      env: [],
+      processEnv: [],
     });
   });
 

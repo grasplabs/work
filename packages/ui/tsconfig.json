@@ -7,5 +7,5 @@
       "@grasp-os/ui/*": ["./src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "catalog"]
 }

@@ -15,6 +15,7 @@ import { screenFramePath } from "@grasp-os/shared/screens";
 
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
+import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
 import { handleConnectionCallback } from "./connections.ts";
@@ -23,6 +24,10 @@ import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { interviewResponse } from "./onboarding/links.ts";
+import {
+  packageArtifactResponse,
+  withoutArtifactToken,
+} from "./packages/serve.ts";
 import { platformUpdateResponse } from "./platform-updates.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
@@ -61,6 +66,10 @@ const route = async (
   const screenModule = await screenModuleResponse(env, url);
   if (screenModule !== null) {
     return screenModule;
+  }
+  const packageArtifact = await packageArtifactResponse(env, request);
+  if (packageArtifact !== null) {
+    return packageArtifact;
   }
   if (isUnder(pathname, authBasePath)) {
     return await handleAuthRequest(request, env, requestId);
@@ -179,11 +188,12 @@ export const handleRequest = async (
     ctx,
     requestId
   );
-  // One line per request. Only the path: query strings can carry tokens.
+  // One line per request. Only the path: query strings can carry tokens,
+  // and so can an artifact's path, without it.
   log[level]("request", {
     requestId,
     method: request.method,
-    path: url.pathname,
+    path: withoutArtifactToken(url.pathname),
     status: response.status,
     durationMs: Date.now() - startedAt,
     ...fields,
@@ -191,6 +201,10 @@ export const handleRequest = async (
   const tagged = withRequestId(response, requestId);
   // On every response, not only the frontend's: a route added later that
   // serves HTML is covered too.
-  setSecurityHeaders(tagged.headers, url);
+  setSecurityHeaders(
+    tagged.headers,
+    url,
+    signInConfig(env)?.origin ?? url.origin
+  );
   return tagged;
 };

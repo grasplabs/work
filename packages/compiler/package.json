@@ -27,6 +27,7 @@
     "@shadcn/lint": "catalog:",
     "@typescript-eslint/parser": "catalog:",
     "babel-plugin-react-compiler": "catalog:",
+    "esbuild-wasm": "catalog:",
     "eslint": "catalog:",
     "lucide-react": "catalog:",
     "react": "catalog:",
