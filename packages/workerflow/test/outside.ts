@@ -1,4 +1,7 @@
-import type { WorkflowStepContext } from "../src/contracts.ts";
+import type {
+  WorkflowRollbackContext,
+  WorkflowStepContext,
+} from "../src/contracts.ts";
 
 /** One effect as the outside system received it. */
 export interface Effect {
@@ -10,6 +13,13 @@ export interface Effect {
   receipt: string;
   /** When it arrived. */
   at: number;
+  /** For an undoing: what the rollback was given of its step. */
+  undoing?: {
+    stepKey: string;
+    step: { name: string; count: number };
+    output: unknown;
+    error: { name: string; message: string };
+  };
 }
 
 /**
@@ -129,6 +139,38 @@ export const eventOf = (warning: unknown): unknown =>
     ? warning.event
     : undefined;
 
+/**
+ * A rollback's effect, undoing `label`'s: recorded under the rollback's own
+ * key and attempt, with what it was given of its step; held as an effect
+ * is, as `undo-<label>`.
+ */
+export const undone = async (
+  run: string,
+  label: string,
+  context: WorkflowRollbackContext
+): Promise<void> => {
+  const undoing = `undo-${label}`;
+  effects.push({
+    run,
+    label: undoing,
+    key: context.idempotencyKey,
+    attempt: context.attempt,
+    receipt: `${undoing}#${effects.length + 1}`,
+    at: Date.now(),
+    undoing: {
+      stepKey: context.ctx.idempotencyKey,
+      step: { ...context.ctx.step },
+      output: context.output,
+      error: { name: context.error.name, message: context.error.message },
+    },
+  });
+  const entry = holds.get(holdKey(run, undoing, context.attempt));
+  if (entry !== undefined) {
+    entry.held.resolve(true);
+    await entry.release.promise;
+  }
+};
+
 const checkpoints = new Map<string, number>();
 
 /**
@@ -136,6 +178,10 @@ const checkpoints = new Map<string, number>();
  * test can withhold like an effect's answer: `hold(run, label, n)` holds
  * the n-th time any activation of `run` reaches it.
  */
+/** How many times any activation of `run` reached the checkpoint `label`. */
+export const checkpointsReached = (run: string, label: string): number =>
+  checkpoints.get(holdKey(run, label, 0)) ?? 0;
+
 export const checkpoint = async (
   run: string,
   label: string

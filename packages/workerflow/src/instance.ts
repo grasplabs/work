@@ -12,7 +12,12 @@ import {
   maxInboxEvents,
 } from "./journal.ts";
 import type { StepType } from "./journal.ts";
-import type { EventOutcome, RestartCommand, WorkflowRun } from "./run.ts";
+import type {
+  EventOutcome,
+  RestartCommand,
+  TerminateCommand,
+  WorkflowRun,
+} from "./run.ts";
 
 export type RunStub = DurableObjectStub<WorkflowRun>;
 
@@ -78,10 +83,10 @@ const readRestart = (options: unknown): RestartCommand => {
   };
 };
 
-/** `terminate`'s options; rollbacks come in a later slice. */
-const readTerminate = (options: unknown): void => {
+/** `terminate`'s options, read once: `{ rollback? }`, false when left out. */
+const readTerminate = (options: unknown): TerminateCommand => {
   if (options === undefined) {
-    return;
+    return { rollback: false };
   }
   if (!isPlainObject(options)) {
     throw new TypeError(
@@ -96,9 +101,7 @@ const readTerminate = (options: unknown): void => {
       `A termination's rollback is true or false, not ${describe(rollback)}`
     );
   }
-  if (rollback === true) {
-    throw new TypeError("terminate: rollbacks aren't supported yet");
-  }
+  return { rollback: rollback === true };
 };
 
 /** An event as a caller sends it. */
@@ -152,11 +155,13 @@ export class WorkflowInstance {
   /**
    * Ends the run as `terminated`, as Cloudflare's `terminate`. Whatever a
    * step still out answers later is ignored, and nothing more of the run
-   * starts. A run that has ended can't be terminated.
+   * starts. With `rollback: true`, the rollbacks its steps registered run
+   * first, latest started first: the run is `rollingBack` until they have,
+   * then `terminated`, its status saying how they went. A run that has
+   * ended, or is rolling back, can't be terminated.
    */
   async terminate(options?: { rollback?: boolean }): Promise<void> {
-    readTerminate(options);
-    const outcome = await this.#stub.terminate();
+    const outcome = await this.#stub.terminate(readTerminate(options));
     if (outcome === "missing") {
       throw notFound(this.id);
     }
@@ -165,19 +170,30 @@ export class WorkflowInstance {
         `instance.cannot_terminate: workflow instance ${JSON.stringify(this.id)} has ended, and can't be terminated`
       );
     }
+    if (outcome === "rolling_back") {
+      throw new Error(
+        `instance.cannot_terminate: workflow instance ${JSON.stringify(this.id)} is rolling back, which isn't cut short`
+      );
+    }
   }
 
   /**
    * Runs the run again, as Cloudflare's `restart`, whatever state it is in:
    * from its start, or from the step `from` names, keeping the outcomes of
    * the steps started before it. Each step it runs again goes out under a
-   * new idempotency key, never a retry's.
+   * new idempotency key, never a retry's. A run rolling back can't be
+   * restarted until it has ended.
    */
   async restart(options?: { from?: RestartFrom }): Promise<void> {
     const command = readRestart(options);
     const outcome = await this.#stub.restart(command);
     if (outcome === "missing") {
       throw notFound(this.id);
+    }
+    if (outcome === "rolling_back") {
+      throw new Error(
+        `instance.cannot_restart: workflow instance ${JSON.stringify(this.id)} is rolling back, which isn't cut short`
+      );
     }
     if (outcome === "nested_step") {
       throw new Error(

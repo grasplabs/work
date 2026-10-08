@@ -8,7 +8,9 @@
 //   activations  each time the run was executed, by generation, and how
 //                that ended (no end: the process died or it was evicted)
 //   steps        each step occurrence: identity, start order, outcome; a
-//                sleep's or an event wait's absolute deadline
+//                sleep's or an event wait's absolute deadline; whether it
+//                registered a rollback. A rollback that ran is a step too,
+//                of type `rollback`, under its step's name and count
 //   attempts     each attempt at a `do` step, by generation: its timeout's
 //                absolute deadline, how it ended (no end: cut off before
 //                its outcome was journaled), and when a failed one's retry
@@ -33,11 +35,11 @@ export class JournalSchemaError extends Error {
 
 /**
  * The journal's own layout; a change to it is a new version. No journal
- * predates version 3 (nothing earlier was released), so a run of any other
+ * predates version 4 (nothing earlier was released), so a run of any other
  * version is refused when it is read; a later layout that changes it
  * brings its own upgrade.
  */
-export const journalSchemaVersion = 3;
+export const journalSchemaVersion = 4;
 
 /**
  * The largest event payload a run accepts, as the encoded text it keeps:
@@ -60,7 +62,9 @@ export const maxInboxBytes = 32 * 1024 * 1024;
  * `waitingForPause`: a pause was asked for while an activation ran; it
  * finishes the steps it has out and starts nothing new, then the run is
  * `paused`, with no activation and no alarm, until it is resumed.
- * `terminated`: ended by a command, not by its definition.
+ * `terminated`: ended by a command, not by its definition. `rollingBack`:
+ * running its steps' rollbacks, after which it ends as `rollback_end`
+ * says.
  */
 export type RunState =
   | "queued"
@@ -68,6 +72,7 @@ export type RunState =
   | "waiting"
   | "waitingForPause"
   | "paused"
+  | "rollingBack"
   | "complete"
   | "errored"
   | "terminated";
@@ -132,6 +137,20 @@ export interface RunRow extends Record<string, SqlStorageValue> {
   output: string | null;
   error: string | null;
   ended_at: number | null;
+  /**
+   * Why the run rolls back, as error text: the error its definition
+   * threw, or the termination's. Set when it starts rolling back.
+   */
+  rollback_trigger: string | null;
+  /** What a run rolling back ends as. */
+  rollback_end: "errored" | "terminated" | null;
+  /** How its rolling back ended (a RollbackOutcome, as JSON). */
+  rollback: string | null;
+  /**
+   * How many compensating replays in a row ended without getting back the
+   * rollbacks still to run; reset by one that does.
+   */
+  rollback_replays: number;
 }
 
 /**
@@ -150,8 +169,11 @@ export type StepState =
   | "failed"
   | "fatal";
 
-/** What kind of step a row is; part of its identity. */
-export type StepType = "do" | "sleep" | "waitForEvent";
+/**
+ * What kind of step a row is; part of its identity. A `rollback` row is
+ * the rollback of the `do` step of the same name and count.
+ */
+export type StepType = "do" | "sleep" | "waitForEvent" | "rollback";
 
 export interface StepRow extends Record<string, SqlStorageValue> {
   /** The order steps were first started in. */
@@ -184,6 +206,8 @@ export interface StepRow extends Record<string, SqlStorageValue> {
    * sleep or a wait.
    */
   config: string | null;
+  /** 1 when the step registered a rollback when it started. */
+  has_rollback: number;
   /**
    * 1 when the step was called from inside another step's attempt: a
    * replay that returns that step's outcome never calls it again, so a
@@ -280,7 +304,7 @@ export const createJournal = (sql: SqlStorage): void => {
       start_key TEXT NOT NULL,
       params TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'waiting', 'waitingForPause', 'paused', 'complete', 'errored', 'terminated')),
+      status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'waiting', 'waitingForPause', 'paused', 'rollingBack', 'complete', 'errored', 'terminated')),
       generation INTEGER NOT NULL,
       execution_uid TEXT NOT NULL,
       paused_at INTEGER,
@@ -291,7 +315,11 @@ export const createJournal = (sql: SqlStorage): void => {
       stream_bytes INTEGER NOT NULL DEFAULT 0,
       output TEXT,
       error TEXT,
-      ended_at INTEGER
+      ended_at INTEGER,
+      rollback_trigger TEXT,
+      rollback_end TEXT CHECK (rollback_end IN ('errored', 'terminated')),
+      rollback TEXT,
+      rollback_replays INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS activations (
       generation INTEGER PRIMARY KEY,
@@ -304,7 +332,7 @@ export const createJournal = (sql: SqlStorage): void => {
     -- reaches another step's rows.
     CREATE TABLE IF NOT EXISTS steps (
       ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
-      type TEXT NOT NULL CHECK (type IN ('do', 'sleep', 'waitForEvent')),
+      type TEXT NOT NULL CHECK (type IN ('do', 'sleep', 'waitForEvent', 'rollback')),
       name TEXT NOT NULL,
       occurrence INTEGER NOT NULL,
       idempotency_key TEXT NOT NULL,
@@ -316,6 +344,7 @@ export const createJournal = (sql: SqlStorage): void => {
       event_type TEXT,
       duration_ms INTEGER,
       config TEXT,
+      has_rollback INTEGER NOT NULL DEFAULT 0,
       nested INTEGER NOT NULL DEFAULT 0,
       UNIQUE (type, name, occurrence)
     );
@@ -384,13 +413,13 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
   }
   return sql
     .exec<RunRow>(
-      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at FROM run"
+      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays FROM run"
     )
     .toArray()[0];
 };
 
 const stepColumns =
-  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, duration_ms, config, nested";
+  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, duration_ms, config, has_rollback, nested";
 
 export const readStep = (
   sql: SqlStorage,
@@ -458,6 +487,30 @@ export const readNextEvent = (
     ? oldest
     : undefined;
 };
+
+/** A step whose rollback is still to run, or ended the rolling back. */
+export interface RollbackItem extends Record<string, SqlStorageValue> {
+  /** The step's own ordinal, name, count and key. */
+  ordinal: number;
+  name: string;
+  occurrence: number;
+  idempotency_key: string;
+  /** Its rollback's row's state; null if its rollback hasn't started. */
+  rollback_state: StepState | null;
+  rollback_error: string | null;
+}
+
+/**
+ * The rollbacks still to run, in the order they run: every `do` step that
+ * registered one when it started (whether it succeeded, failed or never
+ * answered), latest started first, but those whose rollback succeeded.
+ */
+export const readRollbackWorklist = (sql: SqlStorage): RollbackItem[] =>
+  sql
+    .exec<RollbackItem>(
+      "SELECT f.ordinal, f.name, f.occurrence, f.idempotency_key, r.state AS rollback_state, r.error AS rollback_error FROM steps AS f LEFT JOIN steps AS r ON r.type = 'rollback' AND r.name = f.name AND r.occurrence = f.occurrence WHERE f.type = 'do' AND f.has_rollback = 1 AND (r.state IS NULL OR r.state <> 'succeeded') ORDER BY f.ordinal DESC"
+    )
+    .toArray();
 
 export const readJournal = (sql: SqlStorage): Journal | undefined => {
   const run = readRun(sql);
