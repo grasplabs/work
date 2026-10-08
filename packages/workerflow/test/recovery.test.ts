@@ -1,18 +1,71 @@
-// Alarms delivered more than once, through the run object's real boundary.
-// Process death and eviction mid-step are in test/process, on plain
-// workerd: the Workers test pool runs objects in the test's own isolate,
-// where resetting one mid-request takes the pool down with it.
+// Alarms delivered more than once, and storage that fails around an
+// activation, through the run object's real boundary. Process death and
+// eviction mid-step are in test/process, on plain workerd: the Workers
+// test pool runs objects in the test's own isolate, where resetting one
+// mid-request takes the pool down with it.
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
 
+import { defaultLeaseMs } from "../src/run.ts";
 import {
+  alarmOf,
   deliverAlarm,
   ended,
   journalOf,
   newId,
+  runObject,
   until,
   workflow,
 } from "./helpers.ts";
 import { effectsOf, hold } from "./outside.ts";
+
+const exec = async (
+  definition: string,
+  id: string,
+  statement: string
+): Promise<void> => {
+  await runInDurableObject(runObject(definition, id), (_, state) => {
+    state.storage.sql.exec(statement);
+  });
+};
+
+/**
+ * Makes the run object's storage call `name` fail, as storage that fails
+ * would; the returned function puts it back.
+ */
+const failing = async (
+  definition: string,
+  id: string,
+  name: "setAlarm" | "deleteAlarm"
+): Promise<() => Promise<void>> => {
+  const original = await runInDurableObject(
+    runObject(definition, id),
+    (_, state) => {
+      const { storage } = state;
+      const hadOwn = Object.hasOwn(storage, name);
+      const call: unknown = Reflect.get(storage, name);
+      Reflect.set(storage, name, async () => {
+        await Promise.resolve();
+        throw new Error("injected storage failure");
+      });
+      return { hadOwn, call };
+    }
+  );
+  return async () => {
+    await runInDurableObject(runObject(definition, id), (_, state) => {
+      if (original.hadOwn) {
+        Reflect.set(state.storage, name, original.call);
+      } else {
+        Reflect.deleteProperty(state.storage, name);
+      }
+    });
+  };
+};
+
+const cutOff = {
+  name: "WorkflowInternalError",
+  message: "Attempt failed due to internal workflows error",
+};
 
 /** Waits until the journal shows generation 1's activation has ended. */
 const firstActivationEnded = async (definition: string, id: string) =>
@@ -127,5 +180,349 @@ describe("an alarm delivered again", () => {
 
     await expect(journalOf("orders", id)).resolves.toStrictEqual(before);
     expect(effectsOf(id)).toHaveLength(2);
+  });
+});
+
+const answerFirst = "its answer comes back first";
+const reachFirst = "the activation that took over reaches the step first";
+
+/**
+ * Runs "taken-over" with a limit of `limit` retries: its first attempt is
+ * out when another activation takes the run over, and either its answer
+ * comes back to the activation taken over first, or the one that took
+ * over reaches the step first. Returns how the run ended, its journal
+ * once both activations are done, and the step's effects.
+ */
+const takenOver = async (limit: number, order: string) => {
+  const id = newId();
+  const first = hold(id, "taken", 1);
+  const takeover = hold(id, "activation", 2);
+  await workflow("taken-over").create({
+    id,
+    params: { config: { retries: { limit, delay: 0 } } },
+  });
+  await first.held;
+  // Another activation takes the run over, held before the step.
+  const delivered = deliverAlarm("taken-over", id);
+  await takeover.held;
+
+  if (order === answerFirst) {
+    first.release();
+    await until("the late answer to be ignored", async () => {
+      const journal = await journalOf("taken-over", id);
+      return journal.attempts[0]?.ended === "superseded" ? true : undefined;
+    });
+  }
+  takeover.release();
+  await delivered;
+  first.release();
+  const journal = await firstActivationEnded("taken-over", id);
+  const status = await ended("taken-over", id);
+  return { status, journal, taken: effectsOf(id, "taken") };
+};
+
+describe("an attempt whose activation was taken over", () => {
+  it.each([answerFirst, reachFirst])(
+    "fails a step with no retry left the same whichever comes first, its answer dropped: %s",
+    async (order) => {
+      const { status, journal, taken } = await takenOver(0, order);
+
+      expect(status).toStrictEqual({
+        status: "complete",
+        output: { caught: cutOff },
+      });
+      expect(taken).toHaveLength(1);
+      expect(journal).toMatchObject({
+        activations: [
+          { generation: 1, ended: "superseded" },
+          { generation: 2, ended: "settled" },
+        ],
+        steps: [{ state: "failed", attempt: 1 }],
+        attempts: [
+          {
+            attempt: 1,
+            generation: 1,
+            ended: "failed",
+            error: JSON.stringify(cutOff),
+            retry_at: null,
+          },
+        ],
+      });
+    }
+  );
+
+  it.each([answerFirst, reachFirst])(
+    "retries a step with a retry left at once, under its key, the same whichever comes first, its answer dropped: %s",
+    async (order) => {
+      const { status, journal, taken } = await takenOver(1, order);
+
+      expect(status).toStrictEqual({
+        status: "complete",
+        output: taken[1]?.receipt,
+      });
+      expect({
+        attempts: taken.map((effect) => effect.attempt),
+        keys: new Set(taken.map((effect) => effect.key)).size,
+      }).toStrictEqual({ attempts: [1, 2], keys: 1 });
+      expect(journal).toMatchObject({
+        activations: [
+          { generation: 1, ended: "superseded" },
+          { generation: 2, ended: "settled" },
+        ],
+        steps: [{ state: "succeeded", attempt: 2 }],
+        attempts: [
+          { attempt: 1, generation: 1, ended: "superseded" },
+          { attempt: 2, generation: 2, ended: "succeeded" },
+        ],
+      });
+    }
+  );
+
+  it("counts as timed out when its timeout ran out after it was taken over, and fails a step with no retry left", async () => {
+    const id = newId();
+    const first = hold(id, "taken", 1);
+    const takeover = hold(id, "activation", 2);
+    await workflow("taken-over").create({
+      id,
+      params: {
+        config: { retries: { limit: 0, delay: 0 }, timeout: "2 seconds" },
+      },
+    });
+    await first.held;
+    const delivered = deliverAlarm("taken-over", id);
+    await takeover.held;
+    // Its timeout runs out in the activation that was taken over: ended
+    // there as superseded, not as a failure of the step's.
+    await until("the timed-out attempt to be ignored", async () => {
+      const journal = await journalOf("taken-over", id);
+      return journal.attempts[0]?.ended === "superseded" ? true : undefined;
+    });
+
+    takeover.release();
+    await delivered;
+    const status = await ended("taken-over", id);
+    first.release();
+
+    const timedOut = {
+      name: "WorkflowTimeoutError",
+      message: "Execution timed out after 2000ms",
+    };
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: { caught: timedOut },
+    });
+    expect(effectsOf(id, "taken")).toHaveLength(1);
+    await expect(journalOf("taken-over", id)).resolves.toMatchObject({
+      steps: [{ state: "failed", attempt: 1 }],
+      attempts: [
+        {
+          attempt: 1,
+          ended: "timed_out",
+          error: JSON.stringify(timedOut),
+          retry_at: null,
+        },
+      ],
+    });
+  });
+});
+
+/** How a delivered alarm's handler came out: returned, or what it threw. */
+const outcomeOf = async (delivered: Promise<void>): Promise<string> => {
+  try {
+    await delivered;
+    return "returned";
+  } catch (error) {
+    return error instanceof Error ? error.message : "not an error";
+  }
+};
+
+describe("storage that fails around an activation", () => {
+  it("leaves a run whose end can't be written to the watchdog, the activation journaled as faulted", async () => {
+    const id = newId();
+    const first = hold(id, "end", 1);
+    await workflow("tail").create({ id });
+    await first.held;
+    await exec(
+      "tail",
+      id,
+      "CREATE TRIGGER fail_end BEFORE UPDATE OF status ON run WHEN NEW.status = 'complete' BEGIN SELECT RAISE(ABORT, 'injected storage failure'); END"
+    );
+
+    // An activation that reaches the end and can't write it.
+    const outcome = await outcomeOf(deliverAlarm("tail", id));
+    const faulted = await journalOf("tail", id);
+    const watchdog = await alarmOf("tail", id);
+    await exec("tail", id, "DROP TRIGGER fail_end");
+    // The watchdog's activation, delivered now rather than a lease away.
+    await deliverAlarm("tail", id);
+    const status = await ended("tail", id);
+    first.release();
+
+    expect(outcome).toBe("returned");
+    expect(faulted).toMatchObject({
+      run: { status: "running", generation: 2 },
+      activations: [
+        { generation: 1, ended: null },
+        { generation: 2, ended: "faulted" },
+      ],
+    });
+    expect(watchdog).toBe(faulted.run.lease_until);
+    expect(status).toStrictEqual({ status: "complete", output: 3 });
+  });
+
+  it("lets an activation taken over go when even its end as superseded can't be written", async () => {
+    const id = newId();
+    const first = hold(id, "end", 1);
+    const second = hold(id, "end", 2);
+    await workflow("tail").create({ id });
+    await first.held;
+    const delivered = deliverAlarm("tail", id);
+    await second.held;
+    // A third activation ends the run.
+    await deliverAlarm("tail", id);
+    const status = await ended("tail", id);
+    await exec(
+      "tail",
+      id,
+      "CREATE TRIGGER fail_superseded BEFORE UPDATE OF ended ON activations WHEN NEW.ended = 'superseded' BEGIN SELECT RAISE(ABORT, 'injected storage failure'); END"
+    );
+
+    second.release();
+    const outcome = await outcomeOf(delivered);
+    const journal = await journalOf("tail", id);
+    await exec("tail", id, "DROP TRIGGER fail_superseded");
+    first.release();
+
+    expect(outcome).toBe("returned");
+    expect(status).toStrictEqual({ status: "complete", output: 3 });
+    expect(journal.activations).toMatchObject([
+      { generation: 1, ended: null },
+      { generation: 2, ended: null },
+      { generation: 3, ended: "settled" },
+    ]);
+    await expect(alarmOf("tail", id)).resolves.toBeNull();
+  });
+
+  it("ends the run when its alarm can't be removed, and the alarm left behind changes nothing", async () => {
+    const id = newId();
+    const first = hold(id, "end", 1);
+    await workflow("tail").create({ id });
+    await first.held;
+    const restore = await failing("tail", id, "deleteAlarm");
+
+    const outcome = await outcomeOf(deliverAlarm("tail", id));
+    const settled = await journalOf("tail", id);
+    const leftOver = await alarmOf("tail", id);
+    await restore();
+    // The alarm left behind comes.
+    await deliverAlarm("tail", id);
+    first.release();
+    const journal = await firstActivationEnded("tail", id);
+    const status = await ended("tail", id);
+
+    expect({ outcome, status, alarmLeft: leftOver !== null }).toStrictEqual({
+      outcome: "returned",
+      status: { status: "complete", output: 2 },
+      alarmLeft: true,
+    });
+    expect(settled.activations).toMatchObject([
+      { generation: 1, ended: null },
+      { generation: 2, ended: "settled" },
+    ]);
+    expect(journal).toMatchObject({
+      run: settled.run,
+      activations: [
+        { generation: 1, ended: "superseded" },
+        { generation: 2, ended: "settled" },
+      ],
+    });
+  });
+
+  it("leaves the run to a watchdog when a new generation can't be taken, and nothing of the run moves", async () => {
+    const id = newId();
+    const first = hold(id, "end", 1);
+    await workflow("tail").create({ id });
+    await first.held;
+    const before = await journalOf("tail", id);
+    await exec(
+      "tail",
+      id,
+      "CREATE TRIGGER fail_activation BEFORE INSERT ON activations BEGIN SELECT RAISE(ABORT, 'injected storage failure'); END"
+    );
+
+    const delivering = Date.now();
+    const outcome = await outcomeOf(deliverAlarm("tail", id));
+    const after = await journalOf("tail", id);
+    const watchdog = await alarmOf("tail", id);
+    await exec("tail", id, "DROP TRIGGER fail_activation");
+    first.release();
+    const status = await ended("tail", id);
+
+    expect(outcome).toBe("returned");
+    expect(after).toStrictEqual(before);
+    expect(watchdog).toBeGreaterThanOrEqual(delivering + defaultLeaseMs);
+    expect(status).toStrictEqual({ status: "complete", output: 1 });
+  });
+
+  it("leaves the run to a watchdog when it can't be read, and runs on once it can", async () => {
+    const id = newId();
+    const first = hold(id, "end", 1);
+    await workflow("tail").create({ id });
+    await first.held;
+    await exec("tail", id, "ALTER TABLE run RENAME COLUMN wake_at TO moved");
+
+    const delivering = Date.now();
+    const outcome = await outcomeOf(deliverAlarm("tail", id));
+    const watchdog = await alarmOf("tail", id);
+    await exec("tail", id, "ALTER TABLE run RENAME COLUMN moved TO wake_at");
+    first.release();
+    const status = await ended("tail", id);
+
+    expect(outcome).toBe("returned");
+    expect(watchdog).toBeGreaterThanOrEqual(delivering + defaultLeaseMs);
+    expect(status).toStrictEqual({ status: "complete", output: 1 });
+    await expect(journalOf("tail", id)).resolves.toMatchObject({
+      activations: [{ generation: 1, ended: "settled" }],
+    });
+  });
+
+  it("journals an activation whose watchdog can't be set as faulted, runs none of the definition, and hands the alarm back to the host", async () => {
+    const id = newId();
+    const first = hold(id, "end", 1);
+    await workflow("tail").create({ id });
+    await first.held;
+    const restore = await failing("tail", id, "setAlarm");
+
+    const outcome = await outcomeOf(deliverAlarm("tail", id));
+    const faulted = await journalOf("tail", id);
+    await restore();
+    // The host's retry of the alarm.
+    await deliverAlarm("tail", id);
+    const status = await ended("tail", id);
+    first.release();
+
+    expect(outcome).toBe("injected storage failure");
+    expect(faulted).toMatchObject({
+      run: { generation: 2 },
+      activations: [
+        { generation: 1, ended: null },
+        { generation: 2, ended: "faulted" },
+      ],
+    });
+    // The second activation never reached the end; the third did, second.
+    expect(status).toStrictEqual({ status: "complete", output: 2 });
+  });
+
+  it("refuses a journal of another schema without throwing, though its alarm can't be removed", async () => {
+    const id = newId();
+    await workflow("echo").create({ id });
+    await ended("echo", id);
+    await exec("echo", id, "UPDATE run SET schema = 1");
+    const restore = await failing("echo", id, "deleteAlarm");
+
+    const outcome = await outcomeOf(deliverAlarm("echo", id));
+    await restore();
+
+    expect(outcome).toBe("returned");
   });
 });

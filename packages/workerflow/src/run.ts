@@ -25,17 +25,27 @@
 //   handler still runs, so a live activation is not raced by its own
 //   watchdog, however long a step takes (test/process shows it on workerd).
 // - A sleep or an event wait that isn't due suspends the run: in one write,
-//   its deadline, the status `waiting` and the nearest deadline of all its
-//   waits as the run's wake; then the alarm is set to that wake, and the
-//   activation ends (activation.ts). Nothing of the run stays in memory.
-//   Every alarm and event replays to the wait, which reads its deadline
-//   back from the journal, so no duplicate, early or late alarm moves it.
+//   its deadline (journaled when it was first reached), the status
+//   `waiting` and that deadline as the run's wake; then the alarm is set to
+//   that wake, and the activation ends (activation.ts). Waits come one at
+//   a time, so there is one deadline to wake for. Nothing of the run stays
+//   in memory. Every alarm and event replays to the wait, which reads its
+//   deadline back from the journal, so no duplicate, early or late alarm
+//   moves it.
 // - A step's failed attempt with a retry left journals the retry's
 //   absolute time in the write that ends the attempt; a retry not yet due
-//   suspends the run the way a sleep does, and every alarm replays to the
-//   step, which reads that time back. An attempt past its timeout is ended
-//   in the journal, and only a step's latest attempt can journal its
-//   outcome, so the late answer of one that timed out is ignored.
+//   parks the step, and once every step still out is parked the run
+//   suspends the way a sleep does, its wake the earliest parked retry (or
+//   at once, for an attempt left to a fresh activation's wall time). Every
+//   alarm replays to the steps, which read their times back. An attempt
+//   past its timeout is ended in the journal, and only a step's latest
+//   attempt can journal its outcome, so the late answer of one that timed
+//   out is ignored.
+// - A storage failure the engine meets is a fault, never an error out of
+//   `alarm()`: the activation is journaled `faulted` if storage lets it,
+//   and the watchdog alarm brings the run back. Only when no alarm can be
+//   set at all does the error go to the host, whose retry of the alarm is
+//   then the run's one way back.
 // - Each alarm write follows the journal write it goes with in the same
 //   synchronous turn, so the alarm always says what the latest write
 //   meant, whichever path wrote last.
@@ -61,6 +71,7 @@ import { DurableObject } from "cloudflare:workers";
 import { Activation, superseded, suspended } from "./activation.ts";
 import type { Settlement } from "./activation.ts";
 import { decode, equivalent, streamResultOf } from "./codec.ts";
+import { handlerBudgetMs as defaultHandlerBudgetMs } from "./config.ts";
 import type {
   DefinitionIdentity,
   InstanceStatus,
@@ -87,6 +98,9 @@ import {
   defaultMaxStreamBytes,
   replayStream,
 } from "./streams.ts";
+
+/** What `WorkflowRun.journal()` returns. */
+export type { Journal } from "./journal.ts";
 
 /** How long an activation may go without journaling before it's recovered. */
 export const defaultLeaseMs = 60_000;
@@ -185,24 +199,6 @@ const statusOf = (run: RunRow): InstanceStatus => {
   }
 };
 
-/**
- * Journals the run's end; when that write fails, leaves the run to its
- * watchdog alarm, armed already, rather than throw out of the alarm
- * handler. The replay the watchdog brings reaches the same end: a step's
- * fatal outcome is journaled before it (activation.ts).
- */
-const settleOrLeave = async (
-  activation: Activation,
-  settlement: Settlement,
-  halted: boolean
-): Promise<void> => {
-  try {
-    await activation.settle(settlement, halted);
-  } catch {
-    // The watchdog brings the run back; nothing of it is lost.
-  }
-};
-
 const hasEnded = (run: RunRow): boolean =>
   run.status === "complete" || run.status === "errored";
 
@@ -220,6 +216,14 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
 
   /** The most bytes all of a run's stream results may hold together. */
   protected readonly maxRunStreamBytes: number = defaultMaxRunStreamBytes;
+
+  /**
+   * How much of an alarm handler's wall time a run's attempts may take
+   * (config.ts). A host whose handlers get less than Cloudflare's 15
+   * minutes says so here; a test, to see an attempt left for a fresh
+   * activation without waiting minutes.
+   */
+  protected readonly handlerBudgetMs: number = defaultHandlerBudgetMs;
 
   /**
    * The clock an attempt's running time, and a delay function's, is
@@ -395,6 +399,20 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     };
   }
 
+  /**
+   * Leaves the run to a watchdog a lease from now, after a storage
+   * failure before any of the definition ran. When even that alarm can't
+   * be set, `error` goes to the host: with no alarm of the run's own, the
+   * host's retry of this one is the run's only way back.
+   */
+  async #leaveToWatchdog(error: unknown): Promise<void> {
+    try {
+      await this.ctx.storage.setAlarm(Date.now() + this.leaseMs);
+    } catch {
+      throw error;
+    }
+  }
+
   /** One activation: replays the definition under a new generation. */
   override async alarm(): Promise<void> {
     let run: RunRow | undefined;
@@ -402,11 +420,17 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       run = this.#run();
     } catch (error) {
       if (!(error instanceof JournalSchemaError)) {
-        throw error;
+        // Storage failed as the run was read: nothing was written.
+        await this.#leaveToWatchdog(error);
+        return;
       }
       // A journal this engine doesn't read: nothing here can run it, and
       // retrying would only refuse it again. No alarm is left to do so.
-      await this.ctx.storage.deleteAlarm();
+      try {
+        await this.ctx.storage.deleteAlarm();
+      } catch {
+        // An alarm left behind is refused the same way when it comes.
+      }
       return;
     }
     if (run === undefined || hasEnded(run)) {
@@ -416,20 +440,43 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     const { storage } = this.ctx;
     const generation = run.generation + 1;
     const now = Date.now();
-    storage.transactionSync(() => {
-      storage.sql.exec(
-        "UPDATE run SET generation = ?, status = 'running', lease_until = ?, wake_at = NULL",
-        generation,
-        now + this.leaseMs
-      );
-      storage.sql.exec(
-        "INSERT INTO activations (generation, started_at) VALUES (?, ?)",
-        generation,
-        now
-      );
-    });
-    // The watchdog, in the same write as the new generation.
-    await storage.setAlarm(now + this.leaseMs);
+    try {
+      storage.transactionSync(() => {
+        storage.sql.exec(
+          "UPDATE run SET generation = ?, status = 'running', lease_until = ?, wake_at = NULL",
+          generation,
+          now + this.leaseMs
+        );
+        storage.sql.exec(
+          "INSERT INTO activations (generation, started_at) VALUES (?, ?)",
+          generation,
+          now
+        );
+      });
+    } catch (error) {
+      // No generation was taken, and no activation journaled.
+      await this.#leaveToWatchdog(error);
+      return;
+    }
+    try {
+      // The watchdog, in the same write as the new generation.
+      await storage.setAlarm(now + this.leaseMs);
+    } catch (error) {
+      // The generation is taken, but nothing would bring the run back if
+      // this activation died: none of the definition runs. Journaled as
+      // faulted if storage lets it; the host's retry of this alarm is the
+      // run's way back.
+      try {
+        storage.sql.exec(
+          "UPDATE activations SET ended_at = ?, ended = 'faulted' WHERE generation = ? AND ended_at IS NULL",
+          Date.now(),
+          generation
+        );
+      } catch {
+        // Its row stays open, as after a crash.
+      }
+      throw error;
+    }
 
     const activation = new Activation(
       storage,
@@ -437,6 +484,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       generation,
       {
         leaseMs: this.leaseMs,
+        handlerBudgetMs: this.handlerBudgetMs,
         maxStreamBytes: this.maxStreamOutputBytes,
         maxRunStreamBytes: this.maxRunStreamBytes,
       },
@@ -444,7 +492,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     );
     const resolved = this.#resolve(run);
     if (!("run" in resolved)) {
-      await settleOrLeave(activation, resolved, false);
+      await activation.settle(resolved);
       return;
     }
     const settlement = await Promise.race([
@@ -460,11 +508,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     if ("halt" in settlement) {
       // Replaying would only reach the same thing again: the run ends,
       // with the reason as its error.
-      await settleOrLeave(
-        activation,
-        { ok: false, error: settlement.halt },
-        true
-      );
+      await activation.settle({ ok: false, error: settlement.halt }, true);
       return;
     }
     if ("fault" in settlement) {
@@ -475,7 +519,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       // whose count is finite and whose timing isn't ours.
       return;
     }
-    await settleOrLeave(activation, settlement, false);
+    await activation.settle(settlement);
   }
 
   /**
