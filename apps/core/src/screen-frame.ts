@@ -113,27 +113,41 @@ export const frameAccess = async (
 ): Promise<string> =>
   await accessToken(env, `frame:${artifact}`, now + frameAccessMs);
 
+/**
+ * A token for `subject` that holds until the end of the next window of
+ * `moduleAccessWindowMs`: the same for everything asked in one window.
+ * The subject says what it is for (`module:…`, `package-artifact:…`), so
+ * one never passes for another.
+ */
+export const windowedAccess = async (
+  env: Env,
+  subject: string,
+  now: number
+): Promise<string> =>
+  await accessToken(
+    env,
+    subject,
+    (Math.floor(now / moduleAccessWindowMs) + 2) * moduleAccessWindowMs
+  );
+
 /** A token for the module `hash`, for a frame's import map. */
 const moduleAccess = async (
   env: Env,
   hash: string,
   now: number
-): Promise<string> =>
-  await accessToken(
-    env,
-    `module:${hash}`,
-    (Math.floor(now / moduleAccessWindowMs) + 2) * moduleAccessWindowMs
-  );
+): Promise<string> => await windowedAccess(env, `module:${hash}`, now);
 
-const tokenPattern = /^(?<expires>\d{1,16})\.(?<mac>[\w-]{1,64})$/u;
+/** What a token looks like: also the one path segment it may be. */
+export const accessTokenPattern =
+  /^(?<expires>\d{1,16})\.(?<mac>[\w-]{1,64})$/u;
 
 /** Whether `token` is core's for `subject`, and hasn't expired. */
-const hasFrameAccess = async (
+export const hasFrameAccess = async (
   env: Env,
   subject: string,
   token: string | null
 ): Promise<boolean> => {
-  const groups = tokenPattern.exec(token ?? "")?.groups;
+  const groups = accessTokenPattern.exec(token ?? "")?.groups;
   const expires = Number(groups?.expires);
   if (groups?.mac === undefined || !(expires > Date.now())) {
     return false;

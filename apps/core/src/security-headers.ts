@@ -1,4 +1,5 @@
 import { strictTransportSecurity } from "@grasp-os/shared/http";
+import { isPackageArtifactPath } from "@grasp-os/shared/packages";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
 const policy = (directives: Record<string, string>): string =>
@@ -94,21 +95,69 @@ export const screenFramePolicy = (scripts: readonly string[]): string =>
   });
 
 /**
- * Sets the security headers on a response core sends for `url`. HSTS goes
- * only on https, since browsers ignore it over http (local development). A
- * route may send a stricter referrer policy of its own, such as
- * `no-referrer` where its URL carries a secret; it is kept. So is the
- * screen frame's policy, which names its build's scripts; a frame
- * response without one runs no script at all.
+ * The policy of every response on the path of an App's built packages
+ * (packages/serve.ts), a file or an error: the one the package build
+ * relies on for what it can't check (packages/build.ts). Code nobody
+ * reviewed line by line, from npm, so wherever a browser opens a file of
+ * it on its own, as a document or a worker:
+ *
+ * - Script only from `origin`, the deployment's own, as people reach it
+ *   (the artifact's origin, where screens' modules are served too); no
+ *   inline script, eval, `data:` or `blob:`. No workers at all.
+ * - No connections at all. Nothing that legitimately runs under this
+ *   policy needs one: documents are sandboxed and run no script, and
+ *   browser code never runs as a worker; allowing `origin` would only let
+ *   a worker started on this origin call its APIs with the person's
+ *   cookies.
+ * - Images and fonts only from this origin and `data:`; styles only from
+ *   this origin, none inline.
+ * - `sandbox` on every file, not only SVGs: whatever a browser opens as a
+ *   document runs nothing and has an opaque origin, whichever type it was
+ *   sent with.
+ * - No Referer, as each address carries a token (packages/serve.ts).
+ *
+ * A policy sent with a script or a stylesheet says nothing about the page
+ * that loads it: inside a screen's frame, the frame's policy (above)
+ * governs what the code does, and it too allows no worker, no connection
+ * and no image, font or stylesheet from anywhere.
  */
-export const setSecurityHeaders = (headers: Headers, url: URL): void => {
-  if (url.pathname !== screenFramePath) {
+export const packageArtifactPolicy = (origin: string): string =>
+  `${policy({
+    "default-src": "'none'",
+    "script-src": origin,
+    "worker-src": "'none'",
+    "connect-src": "'none'",
+    "img-src": "'self' data:",
+    "font-src": "'self' data:",
+    "style-src": "'self'",
+  })}; sandbox`;
+
+/**
+ * Sets the security headers on a response core sends for `url`, on a
+ * deployment people reach at `origin`. HSTS goes only on https, since
+ * browsers ignore it over http (local development). A route may send a
+ * stricter referrer policy of its own, such as `no-referrer` where its
+ * URL carries a secret; it is kept. So is the screen frame's policy,
+ * which names its build's scripts; a frame response without one runs no
+ * script at all. Everything on the path of packages' artifacts gets their
+ * policy and `no-referrer`, whatever the route sent.
+ */
+export const setSecurityHeaders = (
+  headers: Headers,
+  url: URL,
+  origin: string
+): void => {
+  const artifact = isPackageArtifactPath(url.pathname);
+  if (artifact) {
+    headers.set("content-security-policy", packageArtifactPolicy(origin));
+    headers.set("referrer-policy", "no-referrer");
+  } else if (url.pathname !== screenFramePath) {
     headers.set("content-security-policy", contentSecurityPolicy);
   } else if (!headers.has("content-security-policy")) {
     headers.set("content-security-policy", screenFramePolicy([]));
   }
   headers.set("x-content-type-options", "nosniff");
-  if (headers.get("referrer-policy") !== "no-referrer") {
+  if (!artifact && headers.get("referrer-policy") !== "no-referrer") {
     headers.set("referrer-policy", "strict-origin-when-cross-origin");
   }
   if (url.protocol === "https:") {

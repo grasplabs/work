@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  canonicalGraph,
   dependencyMaxPackages,
   dependencyTargetSchema,
   exactVersionSchema,
@@ -8,7 +9,11 @@ import {
   npmRegistryOrigin,
   packageNameSchema,
 } from "./dependencies.ts";
-import type { DependencyTarget } from "./dependencies.ts";
+import type {
+  DependencyGraph,
+  DependencyPackage,
+  DependencyTarget,
+} from "./dependencies.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { appIdSchema } from "./ids.ts";
 
@@ -329,6 +334,37 @@ export const graspLockSchema = z.strictObject({
 export type GraspLock = z.infer<typeof graspLockSchema>;
 
 /**
+ * The graph a person approves, from a lock, with the platform peers of the
+ * release that reads it (`platformPeers`): what its hash names.
+ */
+export const lockGraph = (
+  lock: GraspLock,
+  platformPeers: Readonly<Record<string, string>>
+): DependencyGraph =>
+  canonicalGraph({
+    direct: Object.entries(lock.direct).map(([name, version]) => ({
+      name,
+      version,
+    })),
+    packages: Object.values(lock.packages).map((entry): DependencyPackage => ({
+      name: entry.name,
+      version: entry.version,
+      origin: npmRegistryOrigin,
+      integrity: entry.integrity,
+      license: entry.license,
+      dependencies: Object.entries(entry.dependencies).map(
+        ([name, version]) => ({ name, version })
+      ),
+      peers: Object.entries(entry.peers).map(([name, peer]) => ({
+        name,
+        range: peer.range,
+        resolved: peer.resolved,
+      })),
+    })),
+    platformPeers: { ...platformPeers },
+  });
+
+/**
  * What the package builder found in one tarball, unpacked in its own
  * isolate without running anything: its package.json's own say on what
  * it needs, and every reason it can't be used.
@@ -437,6 +473,17 @@ export const packageBuildRequestSchema = z.strictObject({
 });
 export type PackageBuildRequest = z.input<typeof packageBuildRequestSchema>;
 
+/**
+ * Where core serves the files of an App's browser artifacts, each under
+ * the artifact's address (`PackageBuild.address`), and nothing else.
+ */
+export const packageArtifactPath = "/package-artifacts";
+
+/** Whether `pathname` is on the artifact path, a file of one or not. */
+export const isPackageArtifactPath = (pathname: string): boolean =>
+  pathname === packageArtifactPath ||
+  pathname.startsWith(`${packageArtifactPath}/`);
+
 /** A built target, as core keeps it: the artifact, by its hash. */
 export interface PackageBuild {
   hash: string;
@@ -444,4 +491,10 @@ export interface PackageBuild {
   /** The approval the build relied on. */
   approval: string;
   stats: PackageBuildStats | null;
+  /**
+   * For the browser target, where its files are served for the next few
+   * hours: a path on this deployment ending in `/`, each file at its own
+   * path under it. Null for the other targets, which never leave core.
+   */
+  address: string | null;
 }

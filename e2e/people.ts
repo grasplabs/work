@@ -139,6 +139,7 @@ const cast = {
   screenAttacks: { builder: "builder", admin: "admin" },
   screenWorkflows: { builder: "builder", admin: "admin" },
   screenApproval: { builder: "builder", admin: "admin" },
+  packageArtifacts: { builder: "builder" },
   decisionAnswered: { builder: "builder", decider: "user", other: "admin" },
   decisionUnreachable: { decider: "user" },
   memberActions: { admin: "admin", one: "user", two: "user" },
