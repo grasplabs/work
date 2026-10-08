@@ -57,6 +57,8 @@ const BringIn = ({ replacing }: { replacing: boolean }) => {
   const read = async (
     transcript: KickoffInput["transcript"]
   ): Promise<void> => {
+    // A file too large before says nothing about this read.
+    setTooLarge(false);
     await run(async (session) => {
       await changeThenRefresh(
         async () => {
