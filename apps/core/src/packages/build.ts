@@ -31,9 +31,10 @@ import type {
   PackageLimits,
   PackageTarball,
 } from "@grasp-os/shared/packages";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { z } from "zod";
 
 import { appFor } from "../apps.ts";
 import {
@@ -43,10 +44,16 @@ import {
   storedEvent,
 } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
-import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
+import {
+  dependencyBuildLeases,
+  dependencyLocks,
+  dependencyRequests,
+  packageCleanups,
+} from "../db/core/schema.ts";
 import { policyGenerationSql } from "../dependencies/policy.ts";
 import { admitDependencies } from "../dependencies/requests.ts";
 import { packageArtifactAddress } from "./address.ts";
+import { clearCleanup, recordCleanup } from "./cleanup-records.ts";
 import { graphOfLock } from "./resolve.ts";
 import { verifiedTarball } from "./tarballs.ts";
 
@@ -94,8 +101,31 @@ import { verifiedTarball } from "./tarballs.ts";
 const overLimit = /exceeded (?:its )?(?:CPU|memory)/iu;
 
 const artifactKey = (hash: string): string => `package-builds/${hash}.json`;
+const filesPrefix = (hash: string): string => `package-builds/${hash}/`;
 const fileKey = (hash: string, path: string): string =>
-  `package-builds/${hash}/${path}`;
+  `${filesPrefix(hash)}${path}`;
+
+/**
+ * Deletes every file of artifact `hash`, its description last, so a
+ * description there still means its files are (cleanup.ts).
+ */
+export const deleteArtifact = async (env: Env, hash: string): Promise<void> => {
+  let cursor: string | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
+    const listed = await env.FILES.list({
+      prefix: filesPrefix(hash),
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    const keys = listed.objects.map(({ key }) => key);
+    if (keys.length > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      await env.FILES.delete(keys);
+    }
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor !== undefined);
+  await env.FILES.delete(artifactKey(hash));
+};
 
 const sha256 = async (bytes: Uint8Array): Promise<string> =>
   toHex(
@@ -428,8 +458,9 @@ const pin = async (
       "core"
     );
     // In turn: each attempt writes on the lock the one before read. The
-    // pin and its audit events land together or not at all: the events
-    // only if this update changed the lock, as the batch runs.
+    // pin, its audit events and the cleanup of the pins it drops land
+    // together or not at all: the events only if this update changed the
+    // lock, and the cleanup only if the lock is the one this wrote.
     // oxlint-disable-next-line no-await-in-loop
     const [updated] = await auditedBatch(env, db, [
       db
@@ -460,6 +491,15 @@ const pin = async (
           storedEvent(built.id)
         )
       ),
+      db
+        .insert(packageCleanups)
+        .select(
+          sql`SELECT value, 'build', ${Date.now()} FROM json_each(${JSON.stringify(dropped)}) WHERE EXISTS (SELECT 1 FROM ${dependencyLocks} WHERE ${dependencyLocks.appId} = ${app} AND ${dependencyLocks.graphHash} = ${graphHash} AND ${dependencyLocks.lock} = ${stored})`
+        )
+        .onConflictDoUpdate({
+          target: packageCleanups.key,
+          set: { createdAt: sql`excluded.created_at` },
+        }),
     ]);
     if (updated.length > 0) {
       return pinning.hash;
@@ -630,61 +670,149 @@ const addressOf = async (
     ? await packageArtifactAddress(env, { app, graphHash, hash })
     : null;
 
+/** How long a build may hold its App's lease before another may take it. */
+const leaseMs = 5 * 60 * 1000;
+
+/** How long a build waits for another of its App's to end, and how often it looks. */
+const leaseWaitMs = 60 * 1000;
+const leasePollMs = 250;
+
 /**
- * Builds one target of an App's approved graph into an artifact, or
- * returns the one built and pinned before for the target's config. For
- * one of the App's builders, or the chat's agent acting for one; never
- * Grasp staff.
+ * Takes `app`'s build lease for `holder` if no build holds it, or the one
+ * that does outlived it; whether it did. One statement: two builds never
+ * both take it.
  */
-export const buildDependencies = async (
+const takeLease = async (
   env: Env,
-  by: Acting,
-  input: unknown
-): Promise<PackageBuild> => {
-  const asked = dependencyErrors.parse(
-    "dependency.invalid",
-    packageBuildRequestSchema,
-    input
-  );
-  if (by.staff) {
-    throw dependencyErrors.create("dependency.forbidden");
+  app: string,
+  holder: string
+): Promise<boolean> => {
+  const now = Date.now();
+  const taken = await drizzle(env.DB)
+    .insert(dependencyBuildLeases)
+    .values({ appId: app, holder, expiresAt: new Date(now + leaseMs) })
+    .onConflictDoUpdate({
+      target: dependencyBuildLeases.appId,
+      set: { holder, expiresAt: new Date(now + leaseMs) },
+      setWhere: lt(dependencyBuildLeases.expiresAt, new Date(now)),
+    })
+    .returning({ holder: dependencyBuildLeases.holder });
+  return taken[0]?.holder === holder;
+};
+
+/**
+ * Gives `app`'s lease back, if `holder` still holds it. A failure is
+ * logged, never thrown: what the build answers stands, and the lease
+ * lapses on its own.
+ */
+const giveLeaseBack = async (
+  env: Env,
+  app: string,
+  holder: string
+): Promise<void> => {
+  try {
+    await drizzle(env.DB)
+      .delete(dependencyBuildLeases)
+      .where(
+        and(
+          eq(dependencyBuildLeases.appId, app),
+          eq(dependencyBuildLeases.holder, holder)
+        )
+      );
+  } catch (error) {
+    log.error("packages.lease_release_failed", { app, ...errorFields(error) });
   }
-  await appFor(env, by, asked.app, "builder");
-  const admit = async () =>
-    await admitDependencies(env, by.actor ?? actorOf(by), {
-      app: asked.app,
-      graphHash: asked.graphHash,
-      targets: [asked.target],
-      policyGeneration: asked.policyGeneration,
-    });
-  const admitted = await admit();
-  const { approval } = admitted;
+};
+
+/**
+ * Waits until `app`'s build lease is `holder`'s: at once if nobody holds
+ * it, otherwise once the build that does ends or outlives its lease.
+ * `package.build_busy` after {@link leaseWaitMs}.
+ */
+const leaseFor = async (
+  env: Env,
+  app: string,
+  holder: string
+): Promise<void> => {
+  const until = Date.now() + leaseWaitMs;
+  // oxlint-disable-next-line no-await-in-loop -- one look at a time
+  while (!(await takeLease(env, app, holder))) {
+    if (Date.now() >= until) {
+      throw packageErrors.create("package.build_busy");
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one look at a time
+    await scheduler.wait(leasePollMs);
+  }
+};
+
+/** What a build of an approved graph read before it builds. */
+interface Asked {
+  asked: z.output<typeof packageBuildRequestSchema>;
+  admitted: Admitted;
+  admit: () => Promise<Admitted>;
+}
+
+/**
+ * The artifact pinned for the target's config, as the lock is now, if
+ * its description is kept: handed out by that alone, with nothing
+ * recorded and no file read. Each file's bytes are checked as it is
+ * served (serve.ts), every time. Also the lock as read, and the config's
+ * hash, for a build to go by when it isn't.
+ */
+const pinnedNow = async (
+  env: Env,
+  { asked, admitted }: Asked
+): Promise<
+  | { kept: PackageBuild }
+  | {
+      kept: undefined;
+      read: { lock: GraspLock; stored: string };
+      configHash: string;
+      pinned: ArtifactPin | undefined;
+    }
+> => {
   const read = await lockOf(env, asked.app, asked.graphHash);
-  const { lock } = read;
-  const config = lock.targets[asked.target];
+  const config = read.lock.targets[asked.target];
   if (config === undefined) {
     throw dependencyErrors.create("dependency.invalid", {
       issues: [`target: the lock has no ${asked.target} target`],
     });
   }
   const configHash = await targetConfigHash(asked.target, config);
-  const pinned = lock.artifacts?.[compilerVersion]?.[configHash];
-  if (pinned) {
-    // Built and pinned before: handed out by its description alone, with
-    // nothing recorded and no file read. Each file's bytes are checked as
-    // it is served (serve.ts), every time.
-    const kept = await keptDescription(env, pinned.hash);
-    if (kept) {
-      await touchPin(env, asked.app, asked.graphHash, read, configHash, pinned);
-      return {
+  const pinned = read.lock.artifacts?.[compilerVersion]?.[configHash];
+  const kept = pinned ? await keptDescription(env, pinned.hash) : undefined;
+  if (pinned && kept) {
+    await touchPin(env, asked.app, asked.graphHash, read, configHash, pinned);
+    return {
+      kept: {
         hash: pinned.hash,
         artifact: kept,
-        approval,
+        approval: admitted.approval,
         stats: null,
         address: await addressOf(env, asked, pinned.hash),
-      };
-    }
+      },
+    };
   }
+  return { kept: undefined, read, configHash, pinned };
+};
+
+/** Builds and pins the artifact, holding the App's lease. */
+const buildUnderLease = async (
+  env: Env,
+  by: Acting,
+  { asked, admitted, admit }: Asked,
+  {
+    read,
+    configHash,
+    pinned,
+  }: {
+    read: { lock: GraspLock; stored: string };
+    configHash: string;
+    pinned: ArtifactPin | undefined;
+  }
+): Promise<PackageBuild> => {
+  const { lock } = read;
+  const { approval } = admitted;
   const limits = packageLimitsOf(env.PACKAGE_LIMITS);
   const packages = await lockedTarballs(env, lock, limits);
   const { artifact, stats, artifactBytes, builtMs, files } =
@@ -722,6 +850,10 @@ export const buildDependencies = async (
   // with `sandbox` (so a file opened as a document, an SVG say, runs
   // nothing) and `X-Content-Type-Options: nosniff` on all, so a file is
   // only ever read as the type stored here.
+  //
+  // Recorded for cleanup first: if this build fails before its pin holds,
+  // the cron deletes what it wrote once no lock names it (cleanup.ts).
+  await recordCleanup(env, "build", hash);
   await Promise.all(
     Object.entries(files).map(
       async ([path, bytes]) =>
@@ -759,6 +891,8 @@ export const buildDependencies = async (
   if (holds !== hash) {
     throw packageErrors.create("package.artifact_mismatch");
   }
+  // Pinned: its files are named by the lock, and need no cleanup.
+  await clearCleanup(env, hash);
   log.info("packages.built", {
     app: asked.app,
     approval,
@@ -779,4 +913,53 @@ export const buildDependencies = async (
     stats,
     address: await addressOf(env, asked, hash),
   };
+};
+
+/**
+ * Builds one target of an App's approved graph into an artifact, or
+ * returns the one built and pinned before for the target's config. For
+ * one of the App's builders, or the chat's agent acting for one; never
+ * Grasp staff.
+ *
+ * One build of an App's packages runs at a time (its lease, spec 19.2):
+ * another asked for meanwhile waits for it, then hands out what it
+ * pinned when that is what it asks for, without building again. A lease
+ * a build outlives (it died) lapses; then two builds could run, and the
+ * pin's own conditional write still keeps one artifact per config.
+ */
+export const buildDependencies = async (
+  env: Env,
+  by: Acting,
+  input: unknown
+): Promise<PackageBuild> => {
+  const asked = dependencyErrors.parse(
+    "dependency.invalid",
+    packageBuildRequestSchema,
+    input
+  );
+  if (by.staff) {
+    throw dependencyErrors.create("dependency.forbidden");
+  }
+  await appFor(env, by, asked.app, "builder");
+  const admit = async (): Promise<Admitted> =>
+    await admitDependencies(env, by.actor ?? actorOf(by), {
+      app: asked.app,
+      graphHash: asked.graphHash,
+      targets: [asked.target],
+      policyGeneration: asked.policyGeneration,
+    });
+  const building: Asked = { asked, admitted: await admit(), admit };
+  const before = await pinnedNow(env, building);
+  if (before.kept) {
+    return before.kept;
+  }
+  const holder = crypto.randomUUID();
+  await leaseFor(env, asked.app, holder);
+  try {
+    // Another build may have pinned it while this one waited.
+    const now = await pinnedNow(env, building);
+    return now.kept ?? (await buildUnderLease(env, by, building, now));
+  } finally {
+    await giveLeaseBack(env, asked.app, holder);
+  }
 };

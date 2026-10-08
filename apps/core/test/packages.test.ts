@@ -7,6 +7,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { admitDependencies } from "../src/dependencies/requests.ts";
+import { sweepPackageFiles } from "../src/packages/cleanup.ts";
+import { resolveDependencies } from "../src/packages/resolve.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -24,6 +26,7 @@ import {
   refusalsOf,
 } from "./npm.ts";
 import type { Entries } from "./npm.ts";
+import { racingDb } from "./racing-db.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // Resolving an App's npm packages (src/packages/resolve.ts) from its threat
@@ -915,5 +918,185 @@ describe("a chat's agent", () => {
     const status = await builder.api.dependencies.status(app);
     expect(status.pending?.requestedVia).not.toBeNull();
     expect(status.approved).toBeNull();
+  });
+});
+
+/** The graphs `app` holds a lock for, in no order. */
+const lockedGraphs = async (app: string): Promise<string[]> => {
+  const { results } = await env.DB.prepare(
+    "SELECT graph_hash FROM dependency_locks WHERE app_id = ?"
+  )
+    .bind(app)
+    .all<{ graph_hash: string }>();
+  return results.map(({ graph_hash: hash }) => hash).toSorted();
+};
+
+/** Whether `key` is recorded for cleanup. */
+const recordedForCleanup = async (key: string): Promise<boolean> =>
+  (await env.DB.prepare("SELECT 1 FROM package_cleanups WHERE key = ?")
+    .bind(key)
+    .first()) !== null;
+
+/** Where the deployment keeps the tarball whose integrity is `integrity`. */
+const tarballKeyOf = (integrity: string): string =>
+  `npm-tarballs/${toHex(
+    Uint8Array.from(
+      atob(integrity.slice("sha512-".length)),
+      (char) => char.codePointAt(0) ?? 0
+    )
+  )}.tgz`;
+
+/** An admin who approves dependencies, and a way to approve or deny a request. */
+const approverOf = async () => {
+  const admin = await personApi("admin");
+  await admin.api.dependencies.grantApprover({
+    type: "person",
+    userId: admin.userId,
+  });
+  return async (
+    request: { id: string; graphHash: string },
+    approved = true
+  ): Promise<void> => {
+    const { policyGeneration } = await admin.api.dependencies.waiting();
+    await admin.api.dependencies.decide(request.id, {
+      approved,
+      reviewed: { graphHash: request.graphHash, policyGeneration },
+    });
+  };
+};
+
+describe("an App's locks and the files they name", () => {
+  it("stores no lock when its request can't be stored", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    const identity = await builder.api.whoami();
+    // Just before each batch, another proposal for the App takes the
+    // place of the one read: the batch's request can't be stored.
+    const db = racingDb(async (target) => {
+      await target
+        .prepare(
+          "INSERT OR IGNORE INTO dependency_requests (id, app_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation, decided_by, decided_at, decided_generation, reason) VALUES (?, ?, 'rev-0', ?, '[\"browser\"]', 'Another', '{}', '{\"direct\":[],\"findings\":[]}', 1, 1, 0, 0, NULL, 'pending', ?, NULL, ?, 0, NULL, NULL, NULL, NULL)"
+        )
+        .bind(
+          crypto.randomUUID(),
+          app,
+          "f".repeat(64),
+          identity.userId,
+          Date.now()
+        )
+        .run();
+      await target
+        .prepare(
+          "UPDATE dependency_requests SET id = ? WHERE app_id = ? AND status = 'pending'"
+        )
+        .bind(crypto.randomUUID(), app)
+        .run();
+    });
+
+    const outcome = await failure(
+      resolveDependencies(
+        { ...env, DB: db },
+        identity,
+        intentFor(app, { [dates]: "^1.0.0" })
+      )
+    );
+    expect({
+      code: outcome.code,
+      locks: await lockedGraphs(app),
+    }).toStrictEqual({ code: "dependency.stale", locks: [] });
+  });
+
+  it("deletes a lock no pending or approved request names, records its tarballs, and the cron deletes those no lock names", async () => {
+    const decide = await approverOf();
+    const { builder, app } = await builderWithApp();
+    const [kept, replaced, denied] = [
+      named("kept"),
+      named("replaced"),
+      named("denied"),
+    ];
+    const keptIntegrity = await publish(plain(kept, "1.0.0"));
+    const replacedIntegrity = await publish(plain(replaced, "1.0.0"));
+    const deniedIntegrity = await publish(plain(denied, "1.0.0"));
+    const resolve = async (name: string) =>
+      await builder.api.dependencies.resolve(intentFor(app, { [name]: "1" }));
+
+    const approved = await resolve(kept);
+    await decide(approved.request);
+    // Replaced while it waits, then the one that replaced it denied.
+    await resolve(replaced);
+    const refused = await resolve(denied);
+    await decide(refused.request, false);
+    const locks = await lockedGraphs(app);
+    const recorded = {
+      replaced: await recordedForCleanup(replacedIntegrity),
+      denied: await recordedForCleanup(deniedIntegrity),
+    };
+
+    // An hour on, the cron deletes what no lock names, and keeps the rest.
+    const later = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    for (let run = 0; run < 20; run += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await sweepPackageFiles(env, later);
+    }
+    const stored = async (integrity: string) =>
+      (await env.FILES.head(tarballKeyOf(integrity))) !== null;
+
+    expect({
+      locks,
+      recorded,
+      after: {
+        kept: await stored(keptIntegrity),
+        replaced: await stored(replacedIntegrity),
+        denied: await stored(deniedIntegrity),
+        records: [
+          await recordedForCleanup(keptIntegrity),
+          await recordedForCleanup(replacedIntegrity),
+          await recordedForCleanup(deniedIntegrity),
+        ],
+      },
+    }).toStrictEqual({
+      locks: [approved.request.graphHash],
+      recorded: { replaced: true, denied: true },
+      after: {
+        kept: true,
+        replaced: false,
+        denied: false,
+        records: [false, false, false],
+      },
+    });
+  });
+
+  it("holds an App to its number of locks, with a clear refusal", async () => {
+    const decide = await approverOf();
+    const { builder, app } = await builderWithApp();
+    const names = [named("one"), named("two"), named("three"), named("four")];
+    for (const name of names) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await publish(plain(name, "1.0.0"));
+    }
+    // The tests' limit is three (vite.config.ts): each approved, so each
+    // lock stays.
+    for (const name of names.slice(0, 3)) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      const { request } = await builder.api.dependencies.resolve(
+        intentFor(app, { [name]: "1" })
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await decide(request);
+    }
+    const refused = await failure(
+      builder.api.dependencies.resolve(
+        intentFor(app, { [names[3] ?? ""]: "1" })
+      )
+    );
+    const locks = await lockedGraphs(app);
+    expect({ refused, locks: locks.length }).toStrictEqual({
+      refused: {
+        code: "package.quota",
+        details: { quota: "appLocks", limit: 3 },
+      },
+      locks: 3,
+    });
   });
 });

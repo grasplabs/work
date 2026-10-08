@@ -945,6 +945,36 @@ export const dependencyLocks = sqliteTable(
 );
 
 /**
+ * Files of the deployment's package store that may no longer be needed,
+ * recorded before they could be left behind (src/packages/cleanup.ts): a
+ * tarball (`kind` `tarball`, `key` its integrity) as it is stored, and the
+ * tarballs and pinned artifacts of a lock as it is deleted; an artifact
+ * (`kind` `build`, `key` its hash) as a build writes its files. The cron
+ * deletes the files of one no lock names once it is an hour old, then the
+ * row; one a lock names loses its row only. Recording one again moves its
+ * time on.
+ */
+export const packageCleanups = sqliteTable("package_cleanups", {
+  key: text().primaryKey(),
+  kind: text({ enum: ["tarball", "build"] }).notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * The one build of an App's packages under way (src/packages/build.ts): a
+ * build takes the App's lease before it builds, and gives it back when it
+ * ends; another for the App waits for it, then hands out what it pinned.
+ * A lease that outlived `expiresAt` (a build that died) may be taken.
+ */
+export const dependencyBuildLeases = sqliteTable("dependency_build_leases", {
+  appId: text("app_id")
+    .primaryKey()
+    .references(() => apps.id),
+  holder: text().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+});
+
+/**
  * Each refused admission the audit trail recorded, once per App, graph,
  * set of targets, policy generation in force and reason
  * (src/dependencies/requests.ts):

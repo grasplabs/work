@@ -11,6 +11,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { buildDependencies, withPin } from "../src/packages/build.ts";
+import { sweepPackageFiles } from "../src/packages/cleanup.ts";
 import { mockIdp } from "./idp.ts";
 import {
   failure,
@@ -1538,5 +1539,147 @@ describe("what a pin keeps and records", () => {
       dropped,
       touched: Date.now() - Date.parse(touched?.pinnedAt ?? "") < day,
     }).toStrictEqual({ dropped: [hashOf("b")], touched: true });
+  });
+});
+
+describe("one build of an App's packages at a time", () => {
+  it("has a build asked for while another runs wait for it, then hand out what it pinned without building", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    const asked = {
+      app: app.app,
+      graphHash: app.request.graphHash,
+      target: "browser" as const,
+      policyGeneration,
+    };
+    // The second build's looks at the App's lease: the second one means it
+    // found the lease held, and waits.
+    const { promise: secondWaits, resolve: waiting } =
+      Promise.withResolvers<boolean>();
+    let leaseLooks = 0;
+    const secondDb = new Proxy(env.DB, {
+      get: (target, property): unknown =>
+        property === "prepare"
+          ? (query: string) => {
+              if (query.includes("dependency_build_leases")) {
+                leaseLooks += 1;
+                if (leaseLooks === 2) {
+                  waiting(true);
+                }
+              }
+              return target.prepare(query);
+            }
+          : bound(target, property),
+    });
+    let secondStarts = 0;
+    const secondAssets = new Proxy(env.ASSETS, {
+      get: (target, property): unknown =>
+        property === "fetch"
+          ? async (input: RequestInfo, init?: RequestInit) => {
+              secondStarts += 1;
+              return await target.fetch(input, init);
+            }
+          : bound(target, property),
+    });
+    let second: Promise<PackageBuild> | undefined;
+    // The first build, holding the lease, starts its builder: the second
+    // is asked for then, and the first goes on once the second waits.
+    let started = false;
+    const firstAssets = new Proxy(env.ASSETS, {
+      get: (target, property): unknown =>
+        property === "fetch"
+          ? async (input: RequestInfo, init?: RequestInit) => {
+              if (!started) {
+                started = true;
+                second = buildDependencies(
+                  { ...env, DB: secondDb, ASSETS: secondAssets },
+                  identity,
+                  asked
+                );
+                await secondWaits;
+              }
+              return await target.fetch(input, init);
+            }
+          : bound(target, property),
+    });
+
+    const first = await buildDependencies(
+      { ...env, ASSETS: firstAssets },
+      identity,
+      asked
+    );
+    const shared = await second;
+    expect({
+      same: shared?.hash === first.hash,
+      built: [first.stats === null, shared?.stats === null],
+      secondStarts,
+    }).toStrictEqual({ same: true, built: [false, true], secondStarts: 0 });
+  });
+});
+
+describe("what a build leaves behind", () => {
+  it("deletes, from the cron, the files of a build that never pinned them", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const admin = await personApi("admin");
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    // As the build writes its description, the policy moves on: its pin
+    // is refused, and its files are left.
+    let written: string | undefined;
+    const files = new Proxy(env.FILES, {
+      get: (target, property): unknown =>
+        property === "put"
+          ? async (
+              key: string,
+              value: Parameters<R2Bucket["put"]>[1],
+              options?: R2PutOptions
+            ): Promise<R2Object | null> => {
+              const put = await target.put(key, value, options);
+              if (written === undefined && key.endsWith(".json")) {
+                written = key;
+                await admin.api.dependencies.grantApprover({
+                  type: "person",
+                  userId: identity.userId,
+                });
+              }
+              return put;
+            }
+          : bound(target, property),
+    });
+    const { code } = await failure(
+      buildDependencies({ ...env, FILES: files }, identity, {
+        app: app.app,
+        graphHash: app.request.graphHash,
+        target: "browser",
+        policyGeneration,
+      })
+    );
+    const hash = /package-builds\/(?<hash>[0-9a-f]{64})\.json$/u.exec(
+      written ?? ""
+    )?.groups?.hash;
+    const left = await env.FILES.list({ prefix: `package-builds/${hash}` });
+
+    const later = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    for (let run = 0; run < 20; run += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await sweepPackageFiles(env, later);
+    }
+    const after = await env.FILES.list({ prefix: `package-builds/${hash}` });
+    expect({
+      code,
+      left: left.objects.length > 0,
+      after: after.objects.length,
+    }).toStrictEqual({
+      code: "dependency.policy_changed",
+      left: true,
+      after: 0,
+    });
   });
 });

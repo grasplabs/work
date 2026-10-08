@@ -3,18 +3,14 @@ import {
   platformScope,
   startPackageBuilder,
 } from "@grasp-os/compiler";
-import { actorOf } from "@grasp-os/shared/audit";
 import {
   dependencyErrors,
-  dependencyGraphHash,
-  dependencyTargetSchema,
   npmRegistryOrigin,
   packageKey,
 } from "@grasp-os/shared/dependencies";
 import type {
   DependencyGraph,
   DependencyRequest,
-  DependencyTarget,
 } from "@grasp-os/shared/dependencies";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
@@ -28,7 +24,6 @@ import {
   packageLimitsOf,
   packageMaturityMs,
   targetConditions,
-  targetConfigHash,
 } from "@grasp-os/shared/packages";
 import type {
   GraspLock,
@@ -47,10 +42,9 @@ import validRange from "semver/ranges/valid";
 import { z } from "zod";
 
 import { appFor } from "../apps.ts";
-import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
-import { proposeDependencies } from "../dependencies/requests.ts";
+import { proposeResolved } from "../dependencies/requests.ts";
 import { verifiedTarball } from "./tarballs.ts";
 
 // Resolving what an App's package.json asks for into one exact graph, and
@@ -84,8 +78,13 @@ import { verifiedTarball } from "./tarballs.ts";
 //   no shell here, no credentials, and the agent gets only this function's
 //   result.
 
-/** Most metadata requests to connect at once. */
-const metadataConcurrency = 6;
+/**
+ * Most metadata requests to connect at once. A package's metadata can be
+ * tens of MiB, read whole and parsed in connect's isolate before it is cut
+ * down, so a resolve asks for two at a time: six at once could take more
+ * than the isolate's 128 MB.
+ */
+const metadataConcurrency = 2;
 
 /** Most bytes of tarballs handed to the builder in one call. */
 const inspectBatchBytes = 8 * 1024 * 1024;
@@ -216,7 +215,16 @@ class Resolution {
   readonly nodes = new Map<string, Node>();
   /** Each of package.json's dependencies the graph resolved, by name. */
   readonly direct = new Map<string, string>();
-  readonly #metadata = new Map<string, Promise<NpmMetadata>>();
+  /**
+   * The versions of each package the level being resolved may resolve to:
+   * those that meet a range one of its edges asks, by the ranges they were
+   * read for. Let go of once the level is resolved (`forgetLevel`), so a
+   * resolve never holds more than one level's.
+   */
+  readonly #versions = new Map<
+    string,
+    { ranges: ReadonlySet<string>; versions: Promise<NpmVersion[]> }
+  >();
   readonly #env: Env;
   readonly #limits: PackageLimits;
   readonly #previous: GraspLock | undefined;
@@ -232,14 +240,48 @@ class Resolution {
     this.#previous = previous;
   }
 
-  /** A package's metadata, asked of connect once per resolve. */
-  async metadataOf(name: string): Promise<NpmMetadata> {
-    let metadata = this.#metadata.get(name);
-    if (metadata === undefined) {
-      metadata = this.#env.CONNECT.npmMetadata(name);
-      this.#metadata.set(name, metadata);
+  /**
+   * The versions of `name` that meet any of `ranges`, from connect: the
+   * rest of its metadata is let go as soon as it is read.
+   */
+  async #meetingAny(
+    name: string,
+    ranges: ReadonlySet<string>
+  ): Promise<NpmVersion[]> {
+    const { versions }: NpmMetadata = await this.#env.CONNECT.npmMetadata(name);
+    return versions.filter((version) =>
+      [...ranges].some((range) => satisfies(version.version, range))
+    );
+  }
+
+  /**
+   * Asks connect for `name`'s metadata ahead of the level that needs it,
+   * keeping the versions that meet `ranges`. A failure is kept for the
+   * edge that needs the package to report, in order.
+   */
+  async prefetch(name: string, ranges: ReadonlySet<string>): Promise<void> {
+    const versions = this.#meetingAny(name, ranges);
+    this.#versions.set(name, { ranges, versions });
+    try {
+      await versions;
+    } catch {
+      // Whichever edge needs it says why, in order.
     }
-    return await metadata;
+  }
+
+  /** The versions of `name` that meet `range`: read ahead, or asked now. */
+  async #meeting(name: string, range: string): Promise<NpmVersion[]> {
+    const ahead = this.#versions.get(name);
+    const versions =
+      ahead?.ranges.has(range) === true
+        ? await ahead.versions
+        : await this.#meetingAny(name, new Set([range]));
+    return versions.filter((version) => satisfies(version.version, range));
+  }
+
+  /** Lets go of the versions read for the level just resolved. */
+  forgetLevel(): void {
+    this.#versions.clear();
   }
 
   /** The highest version of `name` in the graph that meets `range`. */
@@ -258,10 +300,8 @@ class Resolution {
     name: string,
     range: string
   ): Promise<{ version: NpmVersion; integrity: string; publishedAt: string }> {
-    const { versions } = await this.metadataOf(name);
-    const meeting = versions
-      .filter((version) => satisfies(version.version, range))
-      .toSorted((a, b) => rcompare(a.version, b.version));
+    const versions = await this.#meeting(name, range);
+    const meeting = versions.toSorted((a, b) => rcompare(a.version, b.version));
     const [locked] = Object.values(this.#previous?.packages ?? {})
       .filter((entry) => entry.name === name && satisfies(entry.version, range))
       .toSorted((a, b) => rcompare(a.version, b.version));
@@ -506,20 +546,18 @@ const resolveGraph = async (
     // Every package of the level is asked of connect before it is needed.
     // Only what is resolved, and no more than the graph has room for:
     // past that the package quota refuses before any more lookups.
-    const names = [
-      ...new Set(
-        level
-          .filter((edge) => resolution.needsMetadata(edge))
-          .map(({ name }) => name)
-      ),
-    ].slice(0, resolution.room());
+    const wanted = new Map<string, Set<string>>();
+    for (const edge of level) {
+      if (resolution.needsMetadata(edge)) {
+        const ranges = wanted.get(edge.name) ?? new Set<string>();
+        ranges.add(edge.range);
+        wanted.set(edge.name, ranges);
+      }
+    }
+    const names = [...wanted.keys()].slice(0, resolution.room());
     // oxlint-disable-next-line no-await-in-loop
     await limited(names, metadataConcurrency, async (name) => {
-      try {
-        await resolution.metadataOf(name);
-      } catch {
-        // Whichever edge needs it says why, in order.
-      }
+      await resolution.prefetch(name, wanted.get(name) ?? new Set());
     });
     const next: Edge[] = [];
     for (const edge of level) {
@@ -527,6 +565,7 @@ const resolveGraph = async (
       // oxlint-disable-next-line no-await-in-loop
       next.push(...(await resolution.resolve(edge)));
     }
+    resolution.forgetLevel();
     level = next.toSorted((a, b) =>
       `${a.from ? packageKey(a.from) : ""} ${a.name}` <
       `${b.from ? packageKey(b.from) : ""} ${b.name}`
@@ -716,191 +755,6 @@ const lockOf = (
   ),
 });
 
-/** How often storing a lock starts over when another resolve wrote first. */
-const lockTries = 3;
-
-/**
- * The lock kept for a graph once `fresh` is added to it, and the targets
- * whose config (conditions and entries) it changes. The packages are the
- * graph's, the same whichever resolve named them (the graph's hash covers
- * every version, integrity and edge): the first lock's ranges and times
- * stay as its provenance. Targets aren't part of the graph's hash, so
- * each resolve sets the targets it asks for; the others stay as they
- * were. Every pin stays too: each is keyed by the config it was built for
- * (`targetConfigHash`), so a target set to another config is built anew
- * under its own pin, and one set back gets its old pin's bytes again.
- */
-export const mergedLock = (
-  existing: GraspLock,
-  fresh: GraspLock
-): { lock: GraspLock; changed: DependencyTarget[] } => {
-  const changed = dependencyTargetSchema.options.filter((target) => {
-    const before = existing.targets[target];
-    const now = fresh.targets[target];
-    return (
-      before !== undefined &&
-      now !== undefined &&
-      canonicalJson(before) !== canonicalJson(now)
-    );
-  });
-  return {
-    lock: { ...existing, targets: { ...existing.targets, ...fresh.targets } },
-    changed,
-  };
-};
-
-/**
- * Each of `targets`' config hash in `lock`, as audit detail under
- * `<side>.<target>` (null for a target the lock has no config for): one
- * member each, so every target changing still fits.
- */
-const configsOf = async (
-  lock: GraspLock,
-  targets: readonly DependencyTarget[],
-  side: "from" | "to"
-): Promise<Record<string, string | null>> =>
-  Object.fromEntries(
-    await Promise.all(
-      targets.map(async (target) => {
-        const config = lock.targets[target];
-        return [
-          `${side}.${target}`,
-          config === undefined ? null : await targetConfigHash(target, config),
-        ] as const;
-      })
-    )
-  );
-
-/**
- * Writes a lock: inserted when none was read, otherwise updated only
- * while it is still the text read, with the targets whose config changes
- * audited in the same batch. Whether it was written.
- */
-const writeLock = async (
-  env: Env,
-  by: Acting,
-  {
-    app,
-    graphHash,
-    read,
-    before,
-    next,
-    stored,
-    changed,
-  }: {
-    app: string;
-    graphHash: string;
-    read: string | undefined;
-    before: GraspLock | undefined;
-    next: GraspLock;
-    stored: string;
-    changed: DependencyTarget[];
-  }
-): Promise<boolean> => {
-  const db = drizzle(env.DB);
-  if (read === undefined || before === undefined) {
-    const inserted = await db
-      .insert(dependencyLocks)
-      .values({ appId: app, graphHash, lock: stored, createdAt: new Date() })
-      .onConflictDoNothing()
-      .returning({ lock: dependencyLocks.lock });
-    return inserted.length > 0;
-  }
-  const update = db
-    .update(dependencyLocks)
-    .set({ lock: stored })
-    .where(
-      and(
-        eq(dependencyLocks.appId, app),
-        eq(dependencyLocks.graphHash, graphHash),
-        eq(dependencyLocks.lock, read)
-      )
-    )
-    .returning({ lock: dependencyLocks.lock });
-  if (changed.length === 0) {
-    const updated = await update;
-    return updated.length > 0;
-  }
-  const [from, to] = await Promise.all([
-    configsOf(before, changed, "from"),
-    configsOf(next, changed, "to"),
-  ]);
-  const [written] = await auditedBatch(env, db, [
-    update,
-    outboxedIfChanged(db, {
-      actor: by.actor ?? actorOf(by),
-      action: "dependency.lock_targets_changed",
-      target: { type: "app", id: app },
-      detail: { app, graphHash, targets: changed.join(" "), ...from, ...to },
-    }),
-  ]);
-  return written.length > 0;
-};
-
-/**
- * Stores `fresh` as the lock of an App's graph, or adds its targets to
- * the one stored, and returns the lock that holds. One conditional write
- * on the lock as it was read; a resolve that loses the race starts over.
- * A target whose config the write changes is recorded in the audit trail
- * (`dependency.lock_targets_changed`), in the batch that changes it: what
- * the next build of it makes is pinned under the new config, never
- * swapped in under the old one's pin.
- */
-const storeLock = async (
-  env: Env,
-  by: Acting,
-  app: string,
-  graphHash: string,
-  fresh: GraspLock,
-  limits: PackageLimits
-): Promise<GraspLock> => {
-  const db = drizzle(env.DB);
-  const where = and(
-    eq(dependencyLocks.appId, app),
-    eq(dependencyLocks.graphHash, graphHash)
-  );
-  for (let attempt = 0; attempt < lockTries; attempt += 1) {
-    // Each attempt reads the lock as it is now.
-    // oxlint-disable-next-line no-await-in-loop
-    const row = await db
-      .select({ lock: dependencyLocks.lock })
-      .from(dependencyLocks)
-      .where(where)
-      .get();
-    const before = row
-      ? graspLockSchema.parse(JSON.parse(row.lock))
-      : undefined;
-    const merged = before
-      ? mergedLock(before, fresh)
-      : { lock: fresh, changed: [] };
-    const next = merged.lock;
-    const stored = canonicalJson(graspLockSchema.parse(next));
-    if (new TextEncoder().encode(stored).byteLength > limits.lockBytes) {
-      throw packageErrors.create("package.quota", {
-        quota: "lockBytes",
-        limit: limits.lockBytes,
-      });
-    }
-    if (row?.lock === stored) {
-      return next;
-    }
-    // oxlint-disable-next-line no-await-in-loop
-    const written = await writeLock(env, by, {
-      app,
-      graphHash,
-      read: row?.lock,
-      before,
-      next,
-      stored,
-      changed: merged.changed,
-    });
-    if (written) {
-      return next;
-    }
-  }
-  throw dependencyErrors.create("dependency.stale");
-};
-
 /** What a resolve gives back: the request it proposed, and its lock. */
 export interface Resolved {
   request: DependencyRequest;
@@ -980,17 +834,21 @@ export const resolveDependencies = async (
     )
   );
   const graph = graphOfLock(lock);
-  const graphHash = await dependencyGraphHash(graph);
-  // The lock first: a request is never without the lock its graph names.
-  const kept = await storeLock(env, by, intent.app, graphHash, lock, limits);
-  const request = await proposeDependencies(env, by, {
-    app: intent.app,
-    sourceRevision: intent.sourceRevision,
-    purpose: intent.purpose,
-    targets: intent.targets,
-    graph,
-    findings: [],
-    refused: [],
-  });
+  // The lock is stored in the batch that stores the request: a request is
+  // never without the lock its graph names, nor a lock without a request.
+  const { request, lock: kept } = await proposeResolved(
+    env,
+    by,
+    {
+      app: intent.app,
+      sourceRevision: intent.sourceRevision,
+      purpose: intent.purpose,
+      targets: intent.targets,
+      graph,
+      findings: [],
+      refused: [],
+    },
+    { lock, limits }
+  );
   return { request, lock: kept };
 };

@@ -32,7 +32,11 @@ import { z } from "zod";
 //   Versions with only a SHA-1 have no integrity Grasp takes.
 // - Too much. Bodies are counted as they arrive (decompressed), never by
 //   what Content-Length says, and cut off at the limits; a slow registry
-//   is cut off by a timeout.
+//   is cut off by a timeout. A package's metadata can be tens of MiB: its
+//   chunks are let go as they arrive, its bytes once decoded and its text
+//   once parsed (`readTextCapped`), and core asks for at most two at once
+//   (`metadataConcurrency`, resolve.ts), so a resolve stays within this
+//   isolate's memory.
 // - Credentials. None is sent: the public registry needs none, and a
 //   private registry would get its own adapter with credentials held here,
 //   never in core, an agent or App code.
@@ -79,19 +83,20 @@ const locationOf = (response: Response, from: URL): URL | undefined => {
 };
 
 /**
- * The body, read up to `maxBytes`: past that, the read is cancelled and
- * the package refused as too large. Counted as it arrives.
+ * Each chunk of the body, read up to `maxBytes` and handed to `take` as it
+ * arrives: past that, the read is cancelled and the package refused as too
+ * large. Counted as it arrives, never by what Content-Length says.
  */
-const readCapped = async (
+const readEachCapped = async (
   response: Response,
-  maxBytes: number
-): Promise<Uint8Array> => {
+  maxBytes: number,
+  take: (chunk: Uint8Array) => void
+): Promise<number> => {
   const { body } = response;
   if (body === null) {
-    return new Uint8Array();
+    return 0;
   }
   const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
     let chunk: ReadableStreamReadResult<unknown>;
@@ -118,28 +123,83 @@ const readCapped = async (
       await reader.cancel();
       throw packageErrors.create("package.too_large", { limit: maxBytes });
     }
-    chunks.push(value);
+    take(value);
   }
+  return total;
+};
+
+/** The body's bytes, read up to `maxBytes`: for a tarball, hashed whole. */
+const readCapped = async (
+  response: Response,
+  maxBytes: number
+): Promise<Uint8Array> => {
+  const chunks: Uint8Array[] = [];
+  const total = await readEachCapped(response, maxBytes, (chunk) => {
+    chunks.push(chunk);
+  });
   const bytes = new Uint8Array(total);
   let at = 0;
-  for (const chunk of chunks) {
+  for (const chunk of chunks.splice(0)) {
     bytes.set(chunk, at);
     at += chunk.byteLength;
   }
   return bytes;
 };
 
+/** The first buffer a body of text is read into; it doubles as it fills. */
+const firstTextBufferBytes = 1024 * 1024;
+
+/**
+ * The body as UTF-8 text, read up to `maxBytes`. Each chunk is copied into
+ * one buffer as it arrives and let go, the buffer doubling when full, and
+ * the buffer is let go once decoded, so the text is parsed with no bytes
+ * of the body held. Measured on @types/node's metadata (10.7 MiB), this
+ * holds about two thirds of what keeping every chunk, joining them and
+ * decoding the whole did; decoding each chunk as it arrives held more, as
+ * its pieces of text and their join are both held at the end. Text that
+ * isn't UTF-8 is unreadable (`package.registry_unavailable`).
+ */
+const readTextCapped = async (
+  response: Response,
+  maxBytes: number,
+  what: string
+): Promise<string> => {
+  let buffer = new Uint8Array(Math.min(firstTextBufferBytes, maxBytes));
+  let used = 0;
+  await readEachCapped(response, maxBytes, (chunk) => {
+    if (used + chunk.byteLength > buffer.byteLength) {
+      const grown = new Uint8Array(
+        Math.min(
+          Math.max(buffer.byteLength * 2, used + chunk.byteLength),
+          maxBytes
+        )
+      );
+      grown.set(buffer.subarray(0, used));
+      buffer = grown;
+    }
+    buffer.set(chunk, used);
+    used += chunk.byteLength;
+  });
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
+      buffer.subarray(0, used)
+    );
+  } catch {
+    log.warn("npm.unreadable", { package: what });
+    throw packageErrors.create("package.registry_unavailable");
+  }
+};
+
 /**
  * One answer of the registry's at `start`, following redirects within the
- * registry only, read up to `maxBytes`. `what` names it in the logs: a
- * package name, which is public.
+ * registry only: a successful one, its body not yet read. `what` names it
+ * in the logs: a package name, which is public.
  */
 const fetchFromRegistry = async (
   start: URL,
   accept: string,
-  maxBytes: number,
   what: string
-): Promise<Uint8Array> => {
+): Promise<Response> => {
   let url = start;
   for (let hop = 0; ; hop += 1) {
     let response: Response;
@@ -183,8 +243,7 @@ const fetchFromRegistry = async (
       log.warn("npm.failed", { package: what, status: response.status });
       throw packageErrors.create("package.registry_unavailable");
     }
-    // oxlint-disable-next-line no-await-in-loop
-    return await readCapped(response, maxBytes);
+    return response;
   }
 };
 
@@ -379,29 +438,28 @@ const newestKeys = (
   return new Set(heap.map(({ key }) => key));
 };
 
-/**
- * A package's metadata, from the registry, as core resolves with it. A
- * version whose metadata can't be read as npm's (a name or range that
- * isn't one, another package's name, a key that isn't its version) is
- * left out: it can't be resolved to.
- */
-export const npmMetadata = async (input: unknown): Promise<NpmMetadata> => {
-  const name = packageErrors.parse("package.invalid", nameSchema, input);
-  const bytes = await fetchFromRegistry(
-    metadataUrl(name),
-    "application/json",
-    registryLimits.metadataBytes,
-    name
-  );
-  let parsed: unknown;
+/** `text` as JSON, or `package.registry_unavailable`. */
+const parsedJson = (text: string, name: string): unknown => {
   try {
-    parsed = JSON.parse(
-      new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes)
-    );
+    return JSON.parse(text);
   } catch {
     log.warn("npm.unreadable", { package: name });
     throw packageErrors.create("package.registry_unavailable");
   }
+};
+
+/** `name`'s metadata, read and parsed down to what is passed on. */
+const readMetadata = async (name: string): Promise<NpmMetadata> => {
+  const response = await fetchFromRegistry(
+    metadataUrl(name),
+    "application/json",
+    name
+  );
+  // The text is held only while it is parsed, never beside the result.
+  const parsed = parsedJson(
+    await readTextCapped(response, registryLimits.metadataBytes, name),
+    name
+  );
   const packument = packumentSchema.safeParse(parsed);
   if (!packument.success || packument.data.name !== name) {
     log.warn("npm.unreadable", { package: name });
@@ -444,6 +502,17 @@ export const npmMetadata = async (input: unknown): Promise<NpmMetadata> => {
 };
 
 /**
+ * A package's metadata, from the registry, as core resolves with it. A
+ * version whose metadata can't be read as npm's (a name or range that
+ * isn't one, another package's name, a key that isn't its version) is
+ * left out: it can't be resolved to.
+ */
+export const npmMetadata = async (input: unknown): Promise<NpmMetadata> => {
+  const name = packageErrors.parse("package.invalid", nameSchema, input);
+  return await readMetadata(name);
+};
+
+/**
  * One version's tarball from the registry, passed on only when its SHA-512
  * is the integrity hash asked for.
  */
@@ -453,12 +522,12 @@ export const npmTarball = async (input: unknown): Promise<Uint8Array> => {
     npmTarballRequestSchema,
     input
   );
-  const bytes = await fetchFromRegistry(
+  const response = await fetchFromRegistry(
     tarballUrl(name, version),
     "application/octet-stream",
-    registryLimits.archiveBytes,
     name
   );
+  const bytes = await readCapped(response, registryLimits.archiveBytes);
   if ((await sha512Integrity(bytes)) !== integrity) {
     log.warn("npm.integrity_mismatch", { package: name, version });
     throw packageErrors.create("package.integrity_mismatch");
