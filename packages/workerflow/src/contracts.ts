@@ -159,9 +159,20 @@ export interface WorkflowStep {
    * hours when it is missing or falsy, 0 included, as on Cloudflare). Each
    * replay returns the same event, or rejects the same way.
    *
-   * Sleeps and waits run one at a time: racing one against another (say
-   * `Promise.race([waitForEvent(…), sleep(…)])`) ends the run with a
-   * WorkflowParallelWaitError until parallel waits are built.
+   * Sleeps and waits run one at a time, and never beside a step, until
+   * parallel waits are built. The run ends with a
+   * WorkflowParallelWaitError when a definition reaches:
+   *
+   * - a sleep or a wait while another is pending (say
+   *   `Promise.race([waitForEvent(…), sleep(…)])`);
+   * - a sleep or a wait while a `do` step is out, whether at its effect or
+   *   waiting for its retry, a sleep or a wait called from inside a step's
+   *   callback included, as that step is out;
+   * - a `do` step while a sleep or a wait is pending.
+   *
+   * `do` steps may run side by side, and a step's callback may call `do`
+   * itself while its attempt is out; a call from a callback whose attempt
+   * has ended (it timed out and went on) is never answered.
    */
   waitForEvent: <Payload = unknown>(
     name: string,
@@ -195,7 +206,10 @@ export type InstanceStatus =
   | { readonly status: "queued" }
   /** An activation runs it, or one will after a crash or an eviction. */
   | { readonly status: "running" }
-  /** Asleep or waiting for an event, with no activation alive. */
+  /**
+   * Asleep, waiting for an event, or waiting for a step's retry (or for a
+   * fresh activation to run an attempt), with no activation alive.
+   */
   | { readonly status: "waiting" }
   | { readonly status: "complete"; readonly output: unknown }
   | { readonly status: "errored"; readonly error: WorkflowError };

@@ -23,6 +23,7 @@ export default defineProject({
         compatibilityFlags: ["nodejs_als"],
         durableObjects: {
           RUNS: { className: "TestRuns", useSQLite: true },
+          BUDGETED_RUNS: { className: "BudgetedRuns", useSQLite: true },
         },
       },
     }),

@@ -6,8 +6,10 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./duration": "./src/duration.ts",
     "./errors": "./src/errors.ts",
     "./evaluate": "./src/evaluate.ts",
+    "./limits": "./src/limits.ts",
     "./provenance": "./src/provenance.ts",
     "./source": "./src/source.ts"
   },

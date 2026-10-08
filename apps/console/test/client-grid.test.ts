@@ -156,6 +156,13 @@ describe("the client grid", () => {
         // $5 of Workers Paid, 2M requests past the 10M it includes at
         // $0.30 per million, 10M ms of CPU past its 30M at $0.02.
         costUsd: { workers: 5.8, ai: 1.25 },
+        onboarding: {
+          stage: "none",
+          day: null,
+          days: null,
+          known: 0,
+          needs: 0,
+        },
       },
       waiting: undefined,
       analyticsCalls: 1,
@@ -229,6 +236,7 @@ describe("the client grid", () => {
           reach: "unknown",
           day: null,
           costUsd: null,
+          onboarding: null,
         },
         { headers: { "cache-control": "max-age=60" } }
       )
@@ -295,6 +303,7 @@ describe("the client grid", () => {
           reach: "unknown",
           day: null,
           costUsd: null,
+          onboarding: null,
         },
         unread: { drift: "unknown", reach: "reachable" },
         whole: whole.map(() => "reachable"),
@@ -380,6 +389,36 @@ describe("the client grid", () => {
       reads: 1,
       acme: { drift: "in_sync", costUsd: { workers: 5, ai: 0 } },
       globex: { drift: "in_sync", costUsd: { workers: 5, ai: 0 } },
+    });
+  });
+
+  it("reads a client's onboarding from its core, signed for, numbers only, and says when its core can't be asked", async () => {
+    const release = await importedRelease("feat(core): onboarding on the grid");
+    const onboarding = await liveClient(release);
+    const older = await liveClient(release);
+    onboarding.account.onboarding = {
+      stage: "interviews",
+      day: 4,
+      days: 14,
+      known: 48,
+      needs: 1,
+    };
+    older.account.onboarding = "absent";
+
+    const live = await gridLive(env, new Date(), uncached);
+
+    expect({
+      onboarding: live[onboarding.clientId]?.onboarding,
+      older: live[older.clientId]?.onboarding,
+    }).toStrictEqual({
+      onboarding: {
+        stage: "interviews",
+        day: 4,
+        days: 14,
+        known: 48,
+        needs: 1,
+      },
+      older: "unreachable",
     });
   });
 

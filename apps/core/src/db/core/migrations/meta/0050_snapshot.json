@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a173bec3-27a1-42c2-9e41-0cc2ca8ca0b3",
+  "id": "5adc4e95-5062-494b-9605-34d59c68bc32",
   "prevId": "61a3ea08-b9d4-4c57-ba5c-6a2fb419d7ec",
   "tables": {
     "accounts": {
@@ -808,6 +808,83 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "dependency_admission_refusals": {
+      "name": "dependency_admission_refusals",
+      "columns": {
+        "app_id": {
+          "name": "app_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "graph_hash": {
+          "name": "graph_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "targets": {
+          "name": "targets",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "policy_generation": {
+          "name": "policy_generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "dependency_admission_refusals_app_id_apps_id_fk": {
+          "name": "dependency_admission_refusals_app_id_apps_id_fk",
+          "tableFrom": "dependency_admission_refusals",
+          "tableTo": "apps",
+          "columnsFrom": [
+            "app_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "dependency_admission_refusals_app_id_graph_hash_targets_policy_generation_reason_pk": {
+          "columns": [
+            "app_id",
+            "graph_hash",
+            "targets",
+            "policy_generation",
+            "reason"
+          ],
+          "name": "dependency_admission_refusals_app_id_graph_hash_targets_policy_generation_reason_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -2098,20 +2175,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "opened_at": {
-          "name": "opened_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "staff_ended_at": {
-          "name": "staff_ended_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         }
       },

@@ -1,7 +1,10 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { ValueSchema } from "@grasp-os/sdk";
 import type { Stage } from "@grasp-os/workflow-expressions/evaluate";
-import { parseSlot } from "@grasp-os/workflow-expressions/source";
+import {
+  isBindableVariable,
+  parseSlot,
+} from "@grasp-os/workflow-expressions/source";
 
 /**
  * The task kinds of the profile and the walk over a task list. Each task
@@ -79,22 +82,8 @@ const maxTaskIdLength = 64;
 /** IDs a `then` can't name: they are flow directives. */
 const directives = new Set(["continue", "exit", "end"]);
 
-/** Names a loop or a catch binds: jq identifiers, never a workflow variable. */
-const variablePattern = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/u;
-
-const reservedVariables = new Set([
-  "context",
-  "input",
-  "output",
-  "task",
-  "workflow",
-  "runtime",
-  "params",
-  "secrets",
-  "authorization",
-  "ENV",
-  "ARGS",
-]);
+/** Of a name a loop or a catch binds. */
+const maxVariableLength = 64;
 
 export const semverPattern =
   /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?:[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/u;
@@ -186,9 +175,8 @@ const variableAt = (
   const name = value === undefined ? fallback : value;
   const valid =
     typeof name === "string" &&
-    variablePattern.test(name) &&
-    !reservedVariables.has(name) &&
-    !name.startsWith("__") &&
+    name.length <= maxVariableLength &&
+    isBindableVariable(name) &&
     !taken.includes(name);
   if (!valid) {
     checker.report.error(
@@ -1156,7 +1144,7 @@ export const checkTaskList: ListWalker = (
       checker.report.error(
         "task.scope_too_deep",
         at(site, taskPointer),
-        "Nest task lists at most 16 deep: move tasks up, or into a child workflow."
+        `Nest task lists at most ${profileLimits.maxScopes} deep: move tasks up, or into a child workflow.`
       );
       return;
     }
