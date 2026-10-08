@@ -194,7 +194,7 @@ const checkFunctionCycles = (checker: Checker): void => {
  * that calls it, so a chain of calls nests as deep as its bodies together.
  * Each function's reach (its own deepest task, or a call in it plus its
  * callee's reach) is computed once, so the pass is linear in calls; a
- * call that would take its body past 16 scopes is refused where it is.
+ * call that would take its body past maxScopes is refused where it is.
  */
 const checkCallDepth = (checker: Checker): void => {
   const own = new Map<string, number>();
@@ -235,7 +235,7 @@ const checkCallDepth = (checker: Checker): void => {
       checker.report.error(
         "task.scope_too_deep",
         { pointer: call.pointer, taskId: call.taskId },
-        "Calls nest the called function's tasks: keep them within 16 scopes, or use a child workflow."
+        `Calls nest the called function's tasks: keep them within ${profileLimits.maxScopes} scopes, or use a child workflow.`
       );
     }
   }
