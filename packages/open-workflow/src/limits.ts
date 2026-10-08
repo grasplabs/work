@@ -1,3 +1,5 @@
+import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
+
 /**
  * The static bounds of grasp-open-workflow/1. They bound validation itself
  * (every walk is linear in what they allow), and sit above the host's own
@@ -14,8 +16,11 @@ export const profileLimits = {
   maxDefinitionDepth: 160,
   /** Values and object keys in the definition. */
   maxDefinitionValues: 250_000,
-  /** Literal data (arguments, `set`, event data) nests like any value. */
-  maxDataDepth: 32,
+  /**
+   * Literal data (arguments, `set`, event data) nests like any value an
+   * expression takes or returns.
+   */
+  maxDataDepth: evaluatorLimits.maxJsonDepth,
   /** Tasks, reusable function bodies included. */
   maxTasks: 500,
   /**
@@ -23,8 +28,11 @@ export const profileLimits = {
    * about a millisecond apiece in workerd.
    */
   maxExpressions: 1500,
-  /** Task lists inside one another, from the workflow's `do`. */
-  maxScopes: 16,
+  /**
+   * Task lists inside one another, from the workflow's `do`: as deep as an
+   * expression's task may sit.
+   */
+  maxScopes: evaluatorLimits.maxTaskScopes,
   maxParams: 64,
   maxBindings: 64,
   maxFunctions: 64,

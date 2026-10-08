@@ -1,6 +1,8 @@
 import { defineErrorFamily } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 
+import { evaluatorLimits, sizeText, sourceLimits } from "./limits.ts";
+
 /**
  * Why an expression was refused or failed. Every code is a real expression
  * failure (Open Workflow's expression error, status 400): there is no
@@ -11,9 +13,9 @@ import type { ErrorPayload } from "@grasp-os/shared/errors";
 export const expressionErrors = defineErrorFamily({
   "expression.unsupported_language":
     "Expressions are jq in strict mode; no other language or mode is available.",
-  "expression.too_large": "The expression is longer than 4096 bytes.",
-  "expression.too_deep": "The expression nests deeper than 32 levels.",
-  "expression.scope_too_deep": "The task nests deeper than 16 scopes.",
+  "expression.too_large": `The expression is longer than ${sizeText(sourceLimits.maxBytes)}.`,
+  "expression.too_deep": `The expression nests deeper than ${sourceLimits.maxNesting} levels.`,
+  "expression.scope_too_deep": `The task nests deeper than ${evaluatorLimits.maxTaskScopes} scopes.`,
   "expression.invalid": "The expression isn't valid jq.",
   "expression.unsupported":
     "The expression uses something outside the workflow expression profile.",
@@ -21,15 +23,13 @@ export const expressionErrors = defineErrorFamily({
     "The expression uses a variable that isn't available where it runs.",
   "expression.context_invalid":
     "The expression's input or variables aren't plain JSON within the limits.",
-  "expression.context_too_large":
-    "The expression's input and variables are over 1 MiB together.",
+  "expression.context_too_large": `The expression's input and variables are over ${sizeText(evaluatorLimits.maxContextBytes)} together.`,
   "expression.failed": "The expression failed.",
   "expression.resource_exhausted":
     "The expression ran out of its computation or memory budget.",
   "expression.result_count": "The expression must produce exactly one result.",
-  "expression.result_too_large": "The expression's result is over 1 MiB.",
-  "expression.result_invalid":
-    "The expression's result nests deeper than 32 levels, or has a number or key that isn't allowed.",
+  "expression.result_too_large": `The expression's result is over ${sizeText(evaluatorLimits.maxResultBytes)}.`,
+  "expression.result_invalid": `The expression's result nests deeper than ${evaluatorLimits.maxJsonDepth} levels, or has a number or key that isn't allowed.`,
   "expression.type_mismatch":
     "The expression's result doesn't have the type its place requires.",
 });

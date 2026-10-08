@@ -1,5 +1,5 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
-import { checkSource } from "@grasp-os/workflow-expressions/source";
+import type { CompiledExpression } from "@grasp-os/workflow-expressions/evaluate";
 
 import type { Checker, Expectation, ExpressionSlot } from "./checker.ts";
 
@@ -38,6 +38,13 @@ type Walk =
 const walk = (start: ValueDescriptor, fields: readonly string[]): Walk => {
   let descriptor = start;
   for (const [depth, field] of fields.entries()) {
+    // jq reads a field of null as null: the path stays null to its end.
+    const isNull =
+      descriptor.kind === "null" ||
+      (descriptor.kind === "literal" && descriptor.value === null);
+    if (isNull) {
+      return { kind: "known", descriptor };
+    }
     if (descriptor.kind === "object") {
       const next = Object.hasOwn(descriptor.fields, field)
         ? descriptor.fields[field]
@@ -104,10 +111,23 @@ const typesOf = (descriptor: ValueDescriptor): Set<string> => {
   ]);
 };
 
+/** The JSON types each expectation takes. */
+const expectedTypes: Readonly<Record<Expectation, readonly string[]>> = {
+  boolean: ["boolean"],
+  array: ["array"],
+  string: ["string"],
+  number: ["number"],
+  // Milliseconds, or an ISO 8601 duration (workflow-expressions/duration).
+  duration: ["number", "string"],
+};
+
 const fitsExpectation = (
   descriptor: ValueDescriptor,
   expects: Expectation
-): boolean => typesOf(descriptor).has(expects);
+): boolean => {
+  const types = typesOf(descriptor);
+  return expectedTypes[expects].some((type) => types.has(type));
+};
 
 /**
  * Where a path's fields after the first are read from: a descriptor, when
@@ -147,14 +167,11 @@ const startOf = (
 /** Checks the direct references of one compiled expression. */
 export const checkReferences = (
   checker: Checker,
-  slot: ExpressionSlot
+  slot: ExpressionSlot,
+  compiled: CompiledExpression
 ): void => {
-  const checked = checkSource(slot.source);
-  if (!checked.ok) {
-    return;
-  }
   const where = { pointer: slot.pointer, taskId: slot.scope.at(-1) };
-  for (const path of checked.source.paths) {
+  for (const path of compiled.paths) {
     const [first, ...rest] = path.fields;
     if (first === undefined) {
       continue;

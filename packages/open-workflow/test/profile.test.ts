@@ -1,6 +1,7 @@
 /* oxlint-disable unicorn/no-thenable -- `then` is Open Workflow's flow directive, not a promise */
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
+import { expressionErrors } from "@grasp-os/workflow-expressions/errors";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Diagnostic } from "../src/diagnostics.ts";
@@ -41,6 +42,24 @@ const probe = (tasks: unknown[], use?: unknown) =>
           schema: { type: "integer", minimum: 1 },
           label: "Words",
           default: 120,
+          sensitive: false,
+        },
+        nothing: {
+          schema: { type: "null" },
+          label: "Nothing",
+          required: true,
+          sensitive: false,
+        },
+        delay: {
+          schema: { type: "string" },
+          label: "Delay",
+          default: "PT1S",
+          sensitive: false,
+        },
+        enabled: {
+          schema: { type: "boolean" },
+          label: "Enabled",
+          default: true,
           sensitive: false,
         },
       },
@@ -1310,6 +1329,160 @@ describe("expressions", () => {
       },
     ],
     [
+      "a condition that is certainly null, read through a null parameter",
+      probe([{ size: { if: "${ $params.nothing.flag }", set: { a: 1 } } }]),
+      {
+        code: "expression.type_mismatch",
+        pointer: "/do/0/size/if",
+        taskId: "size",
+      },
+    ],
+    [
+      "a wait from a parameter that is neither milliseconds nor an ISO duration",
+      probe([{ pause: { wait: "${ $params.enabled }" } }]),
+      {
+        code: "expression.type_mismatch",
+        pointer: "/do/0/pause/wait",
+        taskId: "pause",
+      },
+    ],
+    [
+      "a wait that is certainly neither milliseconds nor an ISO duration",
+      probe([{ pause: { wait: "${ $workflow.input.flag }" } }]),
+      {
+        code: "expression.type_mismatch",
+        pointer: "/do/0/pause/wait",
+        taskId: "pause",
+      },
+    ],
+    [
+      "${ } with whitespace around it, which upstream reads as an expression",
+      probe([{ size: { set: { words: " ${ $params.maxWords }" } } }]),
+      {
+        code: "expression.expected",
+        pointer: "/do/0/size/set/words",
+        taskId: "size",
+      },
+    ],
+    [
+      "a padded condition",
+      probe([{ size: { if: "${ true } ", set: { a: 1 } } }]),
+      {
+        code: "expression.expected",
+        pointer: "/do/0/size/if",
+        taskId: "size",
+        remedy: "Write the expression as ${ … } with nothing around it.",
+      },
+    ],
+    [
+      "a padded event source",
+      probe([
+        {
+          announce: {
+            emit: {
+              event: {
+                with: {
+                  type: "grasp.job.timeout",
+                  source: " ${ $workflow.input.noteId }",
+                },
+              },
+            },
+            metadata: { grasp: { binding: "jobEvents" } },
+          },
+        },
+      ]),
+      {
+        code: "expression.expected",
+        pointer: "/do/0/announce/emit/event/with/source",
+        taskId: "announce",
+      },
+    ],
+    [
+      "a padded wait",
+      probe([{ pause: { wait: " ${ $params.maxWords }" } }]),
+      {
+        code: "expression.expected",
+        pointer: "/do/0/pause/wait",
+        taskId: "pause",
+      },
+    ],
+    [
+      "a rebound parameter that hides an undeclared one",
+      probe([{ size: { set: { a: "${ $params.nope as $params | 1 }" } } }]),
+      {
+        code: "expression.unsupported",
+        pointer: "/do/0/size/set/a",
+        taskId: "size",
+      },
+    ],
+    [
+      "a rebound workflow variable that hides an undeclared input field",
+      probe([
+        {
+          size: {
+            set: { a: "${ $workflow.input.noteID as $workflow | 1 }" },
+          },
+        },
+      ]),
+      {
+        code: "expression.unsupported",
+        pointer: "/do/0/size/set/a",
+        taskId: "size",
+      },
+    ],
+    [
+      "an error field a caught error doesn't have",
+      probe([
+        {
+          guard: {
+            try: [{ "guarded-step": { set: { a: 1 } } }],
+            catch: {
+              as: "failure",
+              do: [{ report: { set: { a: "${ $failure.nope }" } } }],
+            },
+          },
+        },
+      ]),
+      {
+        code: "expression.unknown_reference",
+        pointer: "/do/0/guard/catch/do/0/report/set/a",
+        taskId: "report",
+      },
+    ],
+    [
+      "an error field a caught error doesn't have, in catch.when",
+      probe([
+        {
+          guard: {
+            try: [{ "guarded-step": { set: { a: 1 } } }],
+            catch: { as: "failure", when: "${ $failure.code == 503 }" },
+          },
+        },
+      ]),
+      {
+        code: "expression.unknown_reference",
+        pointer: "/do/0/guard/catch/when",
+        taskId: "guard",
+      },
+    ],
+    [
+      "a catch variable outside its catch",
+      probe([
+        {
+          guard: {
+            try: [{ "guarded-step": { set: { a: 1 } } }],
+            catch: { as: "failure" },
+          },
+        },
+        { after: { set: { a: "${ $failure.status }" } } },
+      ]),
+      {
+        code: "expression.unavailable_variable",
+        pointer: "/do/1/after/set/a",
+        taskId: "after",
+      },
+    ],
+    [
       "a loop variable outside its loop",
       probe([
         { each: { for: { each: "item", in: "${ [1] }" }, do: [done] } },
@@ -1339,7 +1512,7 @@ describe("expressions", () => {
           },
           {
             literal: {
-              set: { text: "$ { not an expression }", note: " ${ .x } " },
+              set: { text: "$ { not an expression }", note: "${ .x } total" },
             },
           },
         ])
@@ -1349,6 +1522,66 @@ describe("expressions", () => {
     expect(result.ok).toBeTruthy();
     const compiled = result.ok ? [...result.workflow.expressions.keys()] : [];
     expect(compiled).toStrictEqual(["/do/0/dynamic/if", "/do/0/dynamic/set/a"]);
+  });
+
+  it("gives an expression error the message its family states", async () => {
+    const [refusal] = await refusals(
+      probe([{ clock: { set: { at: "${ now }" } } }])
+    );
+    expect(refusal?.message).toBe(
+      expressionErrors.create("expression.unsupported").message
+    );
+  });
+
+  it("reads a caught error's fields in catch.when and catch.do", async () => {
+    await expect(
+      refusals(
+        probe([
+          {
+            guard: {
+              try: [{ "guarded-step": { set: { a: 1 } } }],
+              catch: {
+                as: "failure",
+                when: "${ $failure.status == 503 }",
+                do: [
+                  {
+                    report: {
+                      set: {
+                        type: "${ $failure.type }",
+                        detail: "${ $failure.detail }",
+                        status: "${ $failure.status }",
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ])
+      )
+    ).resolves.toStrictEqual([]);
+  });
+
+  it("takes a duration expression of whole milliseconds or an ISO 8601 duration", async () => {
+    await expect(
+      refusals(
+        probe([
+          { "pause-ms": { wait: "${ $params.maxWords }" } },
+          { "pause-text": { wait: "${ $params.delay }" } },
+          {
+            "pause-iso": {
+              wait: '${ "PT" + ($params.maxWords | tostring) + "S" }',
+            },
+          },
+        ])
+      )
+    ).resolves.toStrictEqual([]);
+  });
+
+  it("reads a field of a null parameter as null, as jq does", async () => {
+    await expect(
+      refusals(probe([{ size: { set: { a: "${ $params.nothing.a.b }" } } }]))
+    ).resolves.toStrictEqual([]);
   });
 
   it("never repeats a submitted key, name or value in a diagnostic's text", async () => {

@@ -1,3 +1,5 @@
+import { profileLimits } from "./limits.ts";
+
 /**
  * What validation says about a definition. Every diagnostic names where it
  * is (a JSON Pointer into the definition and, inside a task, the task's
@@ -57,7 +59,7 @@ export const diagnosticMessages = {
   "task.unknown_kind": "The task isn't one of the profile's task kinds.",
   "task.ambiguous_kind": "The task has the properties of more than one kind.",
   "task.empty_list": "A task list needs at least one task.",
-  "task.scope_too_deep": "Tasks nest deeper than 16 scopes.",
+  "task.scope_too_deep": `Tasks nest deeper than ${profileLimits.maxScopes} scopes.`,
   "task.too_many": "The definition has more tasks than the profile allows.",
   "flow.unknown_target": "The transition names no task in the same scope.",
   "flow.backward_transition":

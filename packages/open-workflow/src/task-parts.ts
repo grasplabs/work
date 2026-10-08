@@ -237,7 +237,7 @@ export const textOrExpression = (
   site: Site,
   limit: number
 ): void => {
-  if (typeof value === "string" && parseSlot(value).kind === "expression") {
+  if (typeof value === "string" && parseSlot(value).kind !== "literal") {
     dataValue(checker, value, pointer, taskDefinition, site);
     return;
   }

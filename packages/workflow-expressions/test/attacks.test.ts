@@ -243,6 +243,38 @@ describe("source outside the profile", () => {
     });
   });
 
+  // A binding hides every read of its name from the checks, reads before
+  // it included, so a rebound workflow variable would hide what it reads.
+  it("refuses binding a name the workflow, jq, a loop or a catch gives the expression", async () => {
+    const inLoop = { loopVariables: ["item", "failure"] };
+    expect({
+      stageVariable: await compileError("$params.nope as $params | 1"),
+      inReduce: await compileError("reduce .[] as $workflow (0; .)"),
+      inPattern: await compileError(". as {a: $context} | $context"),
+      leftOut: await compileError(". as $secrets | $secrets"),
+      otherStages: await compileError(". as $output | 1", {
+        stage: "taskIf",
+      }),
+      loopVariable: await compileError("$item.nope as $item | 1", inLoop),
+      catchVariable: await compileError(
+        "reduce .[] as [$failure] (0; .)",
+        inLoop
+      ),
+      ownName: await run(". as $mine | $mine", { input: 3 }),
+      shadowedOwnName: await run(". as $x | (1 as $x | $x)"),
+    }).toStrictEqual({
+      stageVariable: "expression.unsupported",
+      inReduce: "expression.unsupported",
+      inPattern: "expression.unsupported",
+      leftOut: "expression.unsupported",
+      otherStages: "expression.unsupported",
+      loopVariable: "expression.unsupported",
+      catchVariable: "expression.unsupported",
+      ownName: { result: 3 },
+      shadowedOwnName: { result: 1 },
+    });
+  });
+
   it("refuses evaluate settings that aren't plain JSON", () => {
     expect({
       inherited: resolveEvaluate(Object.create({ mode: "loose" })),
@@ -278,6 +310,21 @@ describe("source outside the profile", () => {
       secrets: "expression.unavailable_variable",
       jqInternal: "expression.unavailable_variable",
       notText: "expression.unavailable_variable",
+    });
+  });
+
+  it("refuses a source that isn't text before reading it", async () => {
+    const throwing = {
+      toString: (): string => {
+        throw new Error("read");
+      },
+    };
+    expect({
+      number: await compileError(unchecked(1)),
+      object: await compileError(unchecked(throwing)),
+    }).toStrictEqual({
+      number: "expression.invalid",
+      object: "expression.invalid",
     });
   });
 });

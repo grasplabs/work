@@ -3,9 +3,14 @@ import { v } from "@grasp-os/sdk";
 import type { Json } from "@grasp-os/shared/json";
 import { describe, expect, it } from "vite-plus/test";
 
-import { runtimeDescriptor, stageVariables } from "../src/evaluate.ts";
+import { runtimeDescriptor } from "../src/evaluate.ts";
 import type { ResultContract, Stage } from "../src/evaluate.ts";
-import { parseSlot, profileEvaluate, resolveEvaluate } from "../src/source.ts";
+import {
+  parseSlot,
+  profileEvaluate,
+  resolveEvaluate,
+  stageVariables,
+} from "../src/source.ts";
 import { compileError, json, run } from "./run.ts";
 import type { Values } from "./run.ts";
 
@@ -279,6 +284,22 @@ const polling: Fixture[] = [
     expected: "PT1.5S",
   },
   {
+    name: "poll-delay: the ISO delay meets the duration contract as its milliseconds",
+    slot: '${ "PT" + (($params.pollDelayMs / 1000) | tostring) + "S" }',
+    stage: "taskDefinition",
+    values: { variables: { params }, loop: { attempt: 0 } },
+    contract: { kind: "duration" },
+    expected: 1500,
+  },
+  {
+    name: "a wait of whole milliseconds, from an integer parameter",
+    slot: "${ $params.maxWords }",
+    stage: "taskDefinition",
+    values: { variables: { params } },
+    contract: { kind: "duration" },
+    expected: 120,
+  },
+  {
     name: "exhausted: raised while still not done",
     slot: "${ $context.done == false }",
     stage: "taskIf",
@@ -393,7 +414,7 @@ describe("expression settings and slots", () => {
     });
   });
 
-  it("treats only a whole ${ … } string as an expression", () => {
+  it("treats only a whole ${ … } string as an expression, and one with whitespace around it as neither", () => {
     expect(
       [
         "${ $workflow.input.noteId }",
@@ -402,6 +423,8 @@ describe("expression settings and slots", () => {
         "Total: ${ .amount }",
         "${ .amount } in total",
         "$context.note",
+        " ${ .amount }",
+        "${ .amount }\n",
       ].map((value) => parseSlot(value))
     ).toStrictEqual([
       { kind: "expression", source: "$workflow.input.noteId" },
@@ -413,6 +436,9 @@ describe("expression settings and slots", () => {
       { kind: "literal", value: "Total: ${ .amount }" },
       { kind: "literal", value: "${ .amount } in total" },
       { kind: "literal", value: "$context.note" },
+      // Upstream reads these as expressions; strict mode can't, so neither.
+      { kind: "padded", value: " ${ .amount }" },
+      { kind: "padded", value: "${ .amount }\n" },
     ]);
   });
 });

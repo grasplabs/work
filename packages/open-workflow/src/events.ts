@@ -66,7 +66,8 @@ const attributeValue = (
   key = ""
 ): void => {
   if (uriAttributes.has(key) && typeof value === "string") {
-    const isExpression = parseSlot(value).kind === "expression";
+    // A padded ${ … } is refused as one, after the one-line check.
+    const isExpression = parseSlot(value).kind !== "literal";
     const valid = isExpression ? isOneLine(value) : isUri(value);
     if (!valid) {
       checker.report.error(

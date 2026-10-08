@@ -3,6 +3,7 @@ import { expressionErrors } from "@grasp-os/workflow-expressions/errors";
 import type { ExpressionErrorCode } from "@grasp-os/workflow-expressions/errors";
 import { compileExpression } from "@grasp-os/workflow-expressions/evaluate";
 import type { CompiledExpression } from "@grasp-os/workflow-expressions/evaluate";
+import { sizeText, sourceLimits } from "@grasp-os/workflow-expressions/limits";
 
 import { readOptions } from "./catalog.ts";
 import type { BindingKind, ValidateOptions } from "./catalog.ts";
@@ -65,37 +66,10 @@ export type ValidationResult =
     }
   | { readonly ok: false; readonly diagnostics: readonly Diagnostic[] };
 
-/** The message of each expression error, as the family states it. */
-const expressionMessages: Readonly<Record<ExpressionErrorCode, string>> = {
-  "expression.unsupported_language":
-    "Expressions are jq in strict mode; no other language or mode is available.",
-  "expression.too_large": "The expression is longer than 4096 bytes.",
-  "expression.too_deep": "The expression nests deeper than 32 levels.",
-  "expression.scope_too_deep": "The task nests deeper than 16 scopes.",
-  "expression.invalid": "The expression isn't valid jq.",
-  "expression.unsupported":
-    "The expression uses something outside the workflow expression profile.",
-  "expression.unavailable_variable":
-    "The expression uses a variable that isn't available where it runs.",
-  "expression.context_invalid":
-    "The expression's input or variables aren't plain JSON within the limits.",
-  "expression.context_too_large":
-    "The expression's input and variables are over 1 MiB together.",
-  "expression.failed": "The expression failed.",
-  "expression.resource_exhausted":
-    "The expression ran out of its computation or memory budget.",
-  "expression.result_count": "The expression must produce exactly one result.",
-  "expression.result_too_large": "The expression's result is over 1 MiB.",
-  "expression.result_invalid":
-    "The expression's result nests deeper than 32 levels, or has a number or key that isn't allowed.",
-  "expression.type_mismatch":
-    "The expression's result doesn't have the type its place requires.",
-};
-
 /** Fixed remedies for the expression errors compiling can give. */
 const expressionRemedies: Partial<Record<ExpressionErrorCode, string>> = {
-  "expression.too_large": "Shorten the expression to 4096 bytes.",
-  "expression.too_deep": "Nest the expression at most 32 levels deep.",
+  "expression.too_large": `Shorten the expression to ${sizeText(sourceLimits.maxBytes)}.`,
+  "expression.too_deep": `Nest the expression at most ${sourceLimits.maxNesting} levels deep.`,
   "expression.scope_too_deep": "Move the task up, or split the workflow.",
   "expression.invalid": "Fix the expression's jq syntax.",
   "expression.unsupported": "Use only the profile's grammar and builtins.",
@@ -117,17 +91,18 @@ const compileSlot = async (
     });
   } catch (error) {
     const code = expressionErrors.codeOf(error);
-    if (code === undefined) {
+    if (code === undefined || !(error instanceof Error)) {
       throw error;
     }
-    // Only the code is taken from the expression package: its remedies and
-    // reasons can name the source's own variables or quote jq's syntax
-    // message. The message and remedy here are fixed text per code; the
-    // pointer says where.
+    // Only the code and its message are taken from the expression package:
+    // the message is the family's fixed text per code, while its remedies
+    // and reasons can name the source's own variables or quote jq's syntax
+    // message. The remedy here is fixed text per code; the pointer says
+    // where.
     checker.report.add(
       "error",
       code,
-      expressionMessages[code],
+      error.message,
       { pointer: slot.pointer, taskId: slot.scope.at(-1) },
       expressionRemedies[code] ?? "Fix the expression."
     );
@@ -195,7 +170,7 @@ export const validateWorkflow = async (
       const compiled = await compileSlot(checker, slot);
       if (compiled !== undefined) {
         expressions.set(slot.pointer, compiled);
-        checkReferences(checker, slot);
+        checkReferences(checker, slot, compiled);
       }
     }
     // Advice last, once every check has run.
