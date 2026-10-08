@@ -308,7 +308,10 @@ describe("values the journal keeps come back equal and fresh", () => {
       if (text !== undefined) {
         kept += 1;
         try {
-          if (!equivalent(encode(decode(text)), text)) {
+          if (
+            !equivalent(encode(decode(text)), text) ||
+            !equivalent(text, text)
+          ) {
             lost.push(text);
           }
         } catch {
@@ -775,6 +778,47 @@ describe("equivalent codec text", () => {
     }
     expect(equivalent(encode(self), encode(chain))).toBeFalsy();
     expect(equivalent(encode(chain), encode(self))).toBeFalsy();
+  });
+
+  test("holds for a shared chain a sorted key reaches deeper than the encoder did", () => {
+    // `m` reaches the chain first as encoded, at depth 2; `aaa`, first in
+    // sorted order, reaches it at depth 3, a level past the limit.
+    const shared = nested(maxNestingDepth - 2);
+    const text = encode({ m: [shared], aaa: [[shared]] });
+    expect(equivalent(text, text)).toBeTruthy();
+    // A copy of the text, its keys parsed afresh: still the same value.
+    expect(equivalent(text, JSON.stringify(JSON.parse(text)))).toBeTruthy();
+  });
+
+  test("holds for every accepted value against itself, and never throws, shared deep chains under sorted-first keys too", () => {
+    const random = seeded(11);
+    const failures: string[] = [];
+    let kept = 0;
+    for (let round = 0; round < 60; round += 1) {
+      const depth = maxNestingDepth - 2 - Math.floor(random() * 20);
+      const shared = nested(depth, mixed(random, 2, []));
+      // Keys whose sorted order is the reverse of their order here.
+      const value = { z: [shared], y: { x: [[shared]] }, a: [[[shared]]] };
+      let text: string | undefined;
+      try {
+        text = encode(value);
+      } catch {
+        // Refused: deeper than the encoder takes it in this order.
+      }
+      if (text !== undefined) {
+        kept += 1;
+        try {
+          if (!equivalent(text, text)) {
+            failures.push(`not equivalent at depth ${depth}`);
+          }
+        } catch (error) {
+          failures.push(`threw at depth ${depth}: ${String(error)}`);
+        }
+      }
+    }
+    expect(failures).toStrictEqual([]);
+    // Most were kept: the property was tested, not skipped.
+    expect(kept).toBeGreaterThan(30);
   });
 
   test("doesn't hold for other content", () => {

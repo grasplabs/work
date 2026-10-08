@@ -306,8 +306,6 @@ interface Encoder {
   size: number;
   /** How deep the object being encoded sits. */
   depth: number;
-  /** Writes plain objects' keys in code-unit order (canonical text). */
-  readonly sortKeys: boolean;
 }
 
 const tooLarge = (bytes: number): SerializationError =>
@@ -493,12 +491,7 @@ const encodePlainObject = (
   inner: Inner
 ): Node => {
   const node: Node[] = ["O"];
-  const entries = Object.entries(value);
-  if (state.sortKeys) {
-    // By code unit, the same in every runtime (not locale order).
-    entries.sort(([a], [b]) => (a < b ? -1 : Number(a > b)));
-  }
-  for (const [key, item] of entries) {
+  for (const [key, item] of Object.entries(value)) {
     count(state, stringSize(key));
     node.push(key, inner(item, `${path}.${key}`));
   }
@@ -607,9 +600,9 @@ const storedText = (node: Node): string => {
   return text;
 };
 
-/** `encode`, with plain objects' keys sorted when `sortKeys`. */
-const encodeWith = (value: unknown, sortKeys: boolean): string => {
-  const state: Encoder = { seen: new Map(), size: 0, depth: 0, sortKeys };
+/** Encodes `value` for the journal; throws SerializationError if it can't. */
+export const encode = (value: unknown): string => {
+  const state: Encoder = { seen: new Map(), size: 0, depth: 0 };
   let node: Node;
   try {
     node = encodeNode(value, "the value", state);
@@ -626,9 +619,6 @@ const encodeWith = (value: unknown, sortKeys: boolean): string => {
   }
   return storedText(node);
 };
-
-/** Encodes `value` for the journal; throws SerializationError if it can't. */
-export const encode = (value: unknown): string => encodeWith(value, false);
 
 // Stream results
 
@@ -1061,13 +1051,124 @@ export const decode = (text: string): unknown => {
 // Equivalence
 
 /**
- * Codec text in one canonical form: decoded, then encoded again with every
- * plain object's keys in sorted order. References are numbered as the
- * encoder numbers them, by first visit in its one deterministic walk, so
- * the same graph always gives the same text. Linear in the text, with no
- * budget that could change an answer.
+ * Each object node of `root`, in the order the encoder numbered them: depth
+ * first, children in order, walked with a stack of its own.
  */
-const canonicalOf = (text: string): string => encodeWith(decode(text), true);
+const objectNodes = (root: Node): Node[][] => {
+  const table: Node[][] = [];
+  const pending: Node[] = [root];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (!Array.isArray(node)) {
+      continue;
+    }
+    const [tag, ...rest] = node;
+    if (typeof tag !== "string" || !objectTags.has(tag)) {
+      continue;
+    }
+    table.push(node);
+    let children: Node[] = [];
+    if (tag === "A" || tag === "M" || tag === "S") {
+      children = rest;
+    } else if (tag === "O") {
+      children = rest.filter((_, index) => index % 2 === 1);
+    } else if (tag === "T") {
+      children = rest.slice(1, 2);
+    } else if (tag === "V") {
+      children = rest.slice(0, 1);
+    }
+    // One at a time: a spread of an array's items can pass the engine's
+    // limit on arguments.
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      pending.push(children[index] ?? null);
+    }
+  }
+  return table;
+};
+
+/** A plain object node's keys and values, sorted by key's code units. */
+const sortedEntries = (rest: Node[]): Node[] => {
+  const entries: [string, Node][] = [];
+  for (let index = 0; index < rest.length; index += 2) {
+    entries.push([String(rest[index]), rest[index + 1] ?? null]);
+  }
+  entries.sort(([a], [b]) => (a < b ? -1 : Number(a > b)));
+  return entries.flat();
+};
+
+/** What the canonical walk writes next: a node, or text as it is. */
+type Emit = { node: Node } | { text: string };
+
+/**
+ * Codec text in one canonical form: every plain object's keys in sorted
+ * order, and references numbered by first visit in that walk, so the same
+ * graph always gives the same text. It walks the nodes of text the codec
+ * wrote, with a stack of its own, not the JS stack, and enforces nothing
+ * of what `encode` admits: a sorted path may reach a shared part deeper
+ * than the encoder's own did. Linear in the text, and it never throws for
+ * text `encode` made.
+ */
+const canonicalOf = (text: string): string => {
+  const root = readNode(text);
+  const table = objectNodes(root);
+  const numbered = new Map<Node[], number>();
+  const out: string[] = [`[${codecVersion},`];
+  const work: Emit[] = [{ node: root }];
+  /** Pushes `nodes` to be written in order, separated by commas. */
+  const pushAll = (nodes: Node[]): void => {
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      work.push({ node: nodes[index] ?? null });
+      if (index > 0) {
+        work.push({ text: "," });
+      }
+    }
+  };
+  while (work.length > 0) {
+    const item = work.pop();
+    if (item === undefined) {
+      break;
+    }
+    if ("text" in item) {
+      out.push(item.text);
+      continue;
+    }
+    let { node } = item;
+    if (Array.isArray(node) && node[0] === "P") {
+      const [, index] = node;
+      const target = isCount(index) ? table[index] : undefined;
+      if (target === undefined) {
+        throw corrupt(`a reference to object ${JSON.stringify(index)}`);
+      }
+      node = target;
+    }
+    if (!Array.isArray(node)) {
+      out.push(JSON.stringify(node));
+      continue;
+    }
+    const [tag, ...rest] = node;
+    if (typeof tag !== "string" || !objectTags.has(tag)) {
+      // A leaf of its own tag: undefined, a special number, a bigint, a
+      // run of holes.
+      out.push(JSON.stringify(node));
+      continue;
+    }
+    const met = numbered.get(node);
+    if (met !== undefined) {
+      out.push(JSON.stringify(["P", met]));
+      continue;
+    }
+    numbered.set(node, numbered.size);
+    out.push(`[${JSON.stringify(tag)}`);
+    work.push({ text: "]" });
+    const children = tag === "O" ? sortedEntries(rest) : rest;
+    if (children.length > 0) {
+      pushAll(children);
+      work.push({ text: "," });
+    }
+  }
+  out.push("]");
+  return out.join("");
+};
 
 /**
  * Whether two codec texts hold the same value: the same content, whatever

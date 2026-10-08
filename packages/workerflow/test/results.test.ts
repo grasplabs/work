@@ -985,6 +985,24 @@ describe("a step's config read as JavaScript reads it", () => {
   });
 });
 
+describe("params with a shared chain a sorted key reaches deeper", () => {
+  it("finds the run when the same start is delivered again", async () => {
+    const id = newId();
+    let shared: unknown = "core";
+    for (let level = 0; level < 510; level += 1) {
+      shared = [shared];
+    }
+    const params = { m: [shared], aaa: [[shared]] };
+    const key = `start-${newId()}`;
+
+    const first = await workflow("echo").admit({ id, key, params });
+    const again = await workflow("echo").admit({ id, key, params });
+    await ended("echo", id);
+
+    expect([first.created, again.created]).toStrictEqual([true, false]);
+  });
+});
+
 describe("a large array", () => {
   it("is a run's params, and the same start delivered again finds the run", async () => {
     const id = newId();
