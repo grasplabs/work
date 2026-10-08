@@ -14,7 +14,7 @@ import type {
 import type { Authority } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-import { callerOf } from "../app-bindings.ts";
+import { callerOf, stillAdmitted, tokenOf } from "../app-bindings.ts";
 import type { InvocationKind } from "../app.ts";
 import { forSandbox } from "../bindings.ts";
 import { collectionReads, readAsDelegate } from "./binding.ts";
@@ -224,14 +224,17 @@ export class AppCollectionBinding extends WorkerEntrypoint<
    * it; the kept fields its declaration gives to the method this call
    * runs in are set as `record` has them, and every other one is kept
    * (records.ts, `writeRecord`). Never from a call that may only read
-   * (`app.read_only`).
+   * (`app.read_only`), and only while the call still may write, asked
+   * again just before the write's batch: a call that ended, lost what let
+   * it in, or whose code was stopped while the save was on its way writes
+   * nothing.
    */
   async saveRecord(caller: unknown, input: unknown): Promise<DocumentSummary> {
-    const { collectionId } = this.ctx.props;
+    const { app, collectionId } = this.ctx.props;
     return await this.#run(
       caller,
       "write",
-      async ({ authority, setter }, grant) =>
+      async ({ authority, setter, token }, grant) =>
         await saveRecordAsDelegate(
           this.env,
           authority,
@@ -239,7 +242,10 @@ export class AppCollectionBinding extends WorkerEntrypoint<
           grant.permissionId,
           collectionId,
           input,
-          setter
+          setter,
+          async () => {
+            await stillAdmitted(this.env, app, token, "write");
+          }
         )
     );
   }
@@ -252,13 +258,21 @@ export class AppCollectionBinding extends WorkerEntrypoint<
     caller: unknown,
     use: InvocationKind,
     run: (
-      resolved: { authority: Authority; setter: Setter; readOnly: boolean },
+      resolved: {
+        authority: Authority;
+        setter: Setter;
+        readOnly: boolean;
+        token: string;
+      },
       grant: CollectionGrant
     ) => Promise<T>
   ): Promise<T> {
     const { app: _app, ...grant } = this.ctx.props;
     try {
-      return await run(await this.#callerOf(caller, use), grant);
+      // The caller is read once: its token is all that counts.
+      const token = tokenOf(caller);
+      const resolved = await this.#callerOf({ token }, use);
+      return await run({ ...resolved, token }, grant);
     } catch (error) {
       throw forSandbox(error);
     }

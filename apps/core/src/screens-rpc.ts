@@ -285,7 +285,16 @@ const callServer = async (
         await callApp(
           env,
           id,
-          { userId: by.userId, mode: "interactive" },
+          {
+            userId: by.userId,
+            mode: "interactive",
+            // In on the person's role in the App: each stub call of the
+            // App's code checks it again (app-bindings.ts).
+            admission: {
+              type: "role",
+              person: { userId: by.userId, role: by.role, teams: by.teams },
+            },
+          },
           method,
           passed
         )

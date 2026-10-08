@@ -248,13 +248,15 @@ const appChat = async (env: Env, app: AppId, id: unknown): Promise<ChatRow> => {
  * Invites a guest, for the member `authority` acts for: a chat guided by
  * the Grasp skill `input.skill`, with the deployment's first model, whose
  * link works for `input.days`. The link is in the answer and nowhere
- * else: core keeps only its secret's hash.
+ * else: core keeps only its secret's hash. `lastCheck`, if given, is
+ * asked just before the write: the caller's word that it may still.
  */
 export const inviteGuest = async (
   env: Env,
   authority: Authority,
   permissionId: PermissionId,
-  input: unknown
+  input: unknown,
+  lastCheck?: () => Promise<void>
 ): Promise<GuestInvitation> => {
   await requireGuests(env, authority, permissionId);
   const app = appOf(authority);
@@ -288,6 +290,7 @@ export const inviteGuest = async (
     endedAt: null,
     ended: null,
   };
+  await lastCheck?.();
   // Only while the App has fewer than 50 open, checked as it inserts, so
   // invitations at the same time can't go past it.
   const openChats = db
@@ -388,18 +391,20 @@ export const readGuest = async (
  * expired: a revoked link opens nothing, what was written neither (a
  * finished or expired one still shows it). One already revoked stays as
  * it is, and so audits nothing. Its retention counts from when it first
- * ended.
+ * ended. `lastCheck`, if given, is asked just before the write.
  */
 export const revokeGuest = async (
   env: Env,
   authority: Authority,
   permissionId: PermissionId,
-  id: unknown
+  id: unknown,
+  lastCheck?: () => Promise<void>
 ): Promise<GuestChat> => {
   await requireGuests(env, authority, permissionId);
   const row = await appChat(env, appOf(authority), id);
   const db = drizzle(env.DB);
   const now = new Date();
+  await lastCheck?.();
   await auditedBatch(env, db, [
     db
       .update(guestChats)

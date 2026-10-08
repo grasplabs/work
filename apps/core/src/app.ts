@@ -13,7 +13,7 @@ import {
   toOpaqueError,
 } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import type { AppId } from "@grasp-os/shared/ids";
+import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { screenLimits } from "@grasp-os/shared/screens";
@@ -31,6 +31,7 @@ import { TokenBuckets } from "@grasp-os/shared/token-bucket";
 import { DurableObject, exports } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 
+import type { Person } from "./app-access.ts";
 import { appBindings } from "./app-bindings.ts";
 import { ErrorLog } from "./app-error-log.ts";
 import type { ReportedProblem } from "./app-error-log.ts";
@@ -448,13 +449,43 @@ export const invokeServer = async (
 export type RunWatcher = Rpc.Stub<(change: RunChange) => Promise<void>>;
 
 /**
+ * What let a call into the App, as core checked it before the call, and
+ * checks again before each stub call the App's code makes in it
+ * (app-bindings.ts, `requireStillAdmitted`): the person's role in the App,
+ * for a screen's call (screens-rpc.ts), or the calling App's permission on
+ * this App's export, for a call from another App (app-calls.ts). Losing
+ * it stops the call acting, while its code still runs.
+ */
+export type Admission =
+  | { type: "role"; person: Person }
+  | {
+      type: "export";
+      /** The calling App, its version and the person, as core checked them. */
+      authority: Authority;
+      permissionId: PermissionId;
+      method: string;
+      access: "read" | "write";
+      /**
+       * The calling App's own running call, by its token, when App code
+       * made the call (a workflow run's call has none): admitted again
+       * with this one, so the whole chain stops with its first call, by
+       * its deadline, its code's generation and what let it in.
+       */
+      from?: { app: AppId; token: string };
+    };
+
+/**
  * Who calls the App, as core knows it; the token is the host's. For a
  * workflow run's step, also which attempt of the step the call comes from
  * (`attempt`, the run's engine's ID for it): kept by the host, for the
- * statistics points the call records (statistics.ts), and never shown to
- * the App's code.
+ * statistics points the call records (statistics.ts). What let the call
+ * in (`admission`), checked again on each stub call. Neither is ever shown
+ * to the App's code.
  */
-export type AppCallerInput = Omit<AppCaller, "token"> & { attempt?: string };
+export type AppCallerInput = Omit<AppCaller, "token"> & {
+  attempt?: string;
+  admission?: Admission;
+};
 
 /**
  * What a call from another App's code through an export carries besides
@@ -525,8 +556,17 @@ interface Invocation {
   statistics?: { point: number; read: number };
   /** The version its code runs on, once started. */
   version?: number;
+  /**
+   * The code it was handed to, once it was: the generation of the App's
+   * code its stub calls must come from. Once that code is stopped
+   * (restarted for new permissions, replaced by another version, or
+   * stopped after a call ran over), the call acts no more, even if its
+   * code went on.
+   */
+  ranOn?: ServerCode;
   /** The Apps whose calls are under way above it, outermost first. */
   above: readonly AppId[];
+  /** When it must end: past it, it acts no more, whatever its code does. */
   deadline: number;
 }
 
@@ -538,6 +578,8 @@ export interface Admitted {
   path: CallPath;
   method: string;
   kind: InvocationKind;
+  /** What let the call in, for the stub to check again (app-bindings.ts). */
+  admission: Admission | undefined;
 }
 
 /**
@@ -732,7 +774,7 @@ export class App extends DurableObject<Env> {
       throw appErrors.create("app.timed_out", { version: null, method });
     }
     const token = crypto.randomUUID();
-    const { attempt: _attempt, ...shown } = caller;
+    const { attempt: _attempt, admission: _admission, ...shown } = caller;
     const call: Invocation = {
       caller,
       method,
@@ -761,8 +803,9 @@ export class App extends DurableObject<Env> {
       if (!this.#calls.has(token)) {
         throw appErrors.create("app.timed_out", { version, method });
       }
-      // What the App's stub calls in this call are audited with.
-      this.#calls.set(token, { ...call, version });
+      // What the App's stub calls in this call are audited with, and the
+      // code they must come from (`admit`).
+      this.#calls.set(token, { ...call, version, ranOn: running.server });
       ranOn = running.server;
       return await invokeServer(
         running.facet,
@@ -1060,13 +1103,24 @@ export class App extends DurableObject<Env> {
    * is done. What the call may do is the host's, as its caller is: App
    * code passes only the token, and nothing else it puts on the caller
    * counts. A call whose code hasn't started has handed its token to no
-   * one, so no stub call can come with it. Writes to the App's own SQLite
+   * one, so no stub call can come with it; one past its deadline, or from
+   * code the host has stopped since (`Invocation.ranOn`), acts no more,
+   * even before the host has let go of it. Writes to the App's own SQLite
    * never come through here, so a read call can still make them (see
    * `InvocationKind`).
    */
   admit(token: string, use: InvocationKind): Admitted {
     const call = this.#calls.get(token);
-    if (call?.version === undefined) {
+    // The deadline is defence in depth: the host lets go of a call (and
+    // its token) when the timer for its deadline fires, but a timer can
+    // fire late, and the clock moves on only with I/O. Between the deadline
+    // and that timer, nothing a test can bring about on purpose, this
+    // still says no.
+    if (
+      call?.version === undefined ||
+      call.ranOn !== this.#server ||
+      Date.now() >= call.deadline
+    ) {
       throw appErrors.create("app.caller_invalid");
     }
     const { caller, method, kind, version, above, deadline: ends } = call;
@@ -1089,6 +1143,7 @@ export class App extends DurableObject<Env> {
       },
       method,
       kind,
+      admission: caller.admission,
     };
   }
 
