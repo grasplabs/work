@@ -9,6 +9,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { callerOf } from "./app-bindings.ts";
+import type { InvocationKind } from "./app.ts";
 import { forSandbox } from "./bindings.ts";
 import { inviteGuest, listGuests, readGuest, revokeGuest } from "./guests.ts";
 
@@ -33,7 +34,7 @@ export class AppGuestsBinding extends WorkerEntrypoint<
       caller,
       async (authority, permissionId) =>
         await inviteGuest(this.env, authority, permissionId, input),
-      { personOnly: true }
+      { personOnly: true, use: "write" }
     );
   }
 
@@ -60,19 +61,26 @@ export class AppGuestsBinding extends WorkerEntrypoint<
     return await this.#run(
       caller,
       async (authority, permissionId) =>
-        await revokeGuest(this.env, authority, permissionId, id)
+        await revokeGuest(this.env, authority, permissionId, id),
+      { use: "write" }
     );
   }
 
-  /** Runs `run` for `caller`, with errors as the sandbox sees them. */
+  /**
+   * Runs `run` for `caller`, admitted for `use` (a change, or a read:
+   * `callerOf`), with errors as the sandbox sees them.
+   */
   async #run<T>(
     caller: unknown,
     run: (authority: Authority, permissionId: PermissionId) => Promise<T>,
-    { personOnly = false }: { personOnly?: boolean } = {}
+    {
+      personOnly = false,
+      use = "read",
+    }: { personOnly?: boolean; use?: InvocationKind } = {}
   ): Promise<T> {
     const { app, permissionId } = this.ctx.props;
     try {
-      const { authority, path } = await callerOf(this.env, app, caller);
+      const { authority, path } = await callerOf(this.env, app, caller, use);
       const person =
         authority.mode === "interactive" && path.chain.length === 1;
       if (personOnly && !person) {

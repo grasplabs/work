@@ -38,20 +38,26 @@ export interface CallGrant {
   context: WorkContext;
   connection: ConnectionObject;
   permissionId: PermissionId;
+  /**
+   * The call comes from work that may only read (an App call through an
+   * export marked `read`): connect then refuses its side effects.
+   */
+  readOnly?: boolean;
 }
 
 /**
  * Checks the permission of an App or agent working in `context` for one
  * call, then signs the capability connect needs for exactly this call,
  * saying whether `context` is in restricted mode (connect then holds its
- * side effects for the person) and the permission and context to check
- * again should connect hold it for them. `confirms` is the held action a
- * person confirmed (pending-actions.ts). Core makes capabilities here and
- * nowhere else, and nothing outside core reaches this function.
+ * side effects for the person), whether the call may only read, and the
+ * permission and context to check again should connect hold it for them.
+ * `confirms` is the held action a person confirmed (pending-actions.ts).
+ * Core makes capabilities here and nowhere else, and nothing outside core
+ * reaches this function.
  */
 export const signedCall = async (
   env: Env,
-  { authority, context, connection, permissionId }: CallGrant,
+  { authority, context, connection, permissionId, readOnly }: CallGrant,
   { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
   confirms?: string
 ) => {
@@ -69,6 +75,7 @@ export const signedCall = async (
     {
       ...scope,
       restricted,
+      readOnly,
       origin: { permissionId, context },
       context,
       confirms,
@@ -147,6 +154,24 @@ export const requireStepKey = (
 };
 
 /**
+ * Who a stub call acts for, as its resolver finds them for one call: the
+ * authority, and whether the work it comes from may only read.
+ */
+export interface StubCaller {
+  authority: Authority;
+  readOnly?: boolean;
+}
+
+/**
+ * Who a stub call acts for: one authority for every call (an agent's
+ * stub), or a resolver asked on each call, given the call's idempotency
+ * key, which it may refuse.
+ */
+export type StubAuthority =
+  | Authority
+  | ((key: string | undefined) => Promise<StubCaller>);
+
+/**
  * Everything of a stub call before connect sees it: the feature, the
  * call's shape, the permission and the signed capability. What it refuses
  * connect never saw, so connect recorded nothing of it; errors as the
@@ -154,7 +179,7 @@ export const requireStepKey = (
  */
 export const signedStubCall = async (
   env: Env,
-  authority: Authority | ((key: string | undefined) => Promise<Authority>),
+  authority: StubAuthority,
   { context, permissionId, connection }: ConnectionGrant,
   call: unknown[]
 ): Promise<ConnectCall> => {
@@ -164,13 +189,15 @@ export const signedStubCall = async (
   }
   const [action, input, options] = parsed.data;
   try {
+    const caller: StubCaller =
+      typeof authority === "function"
+        ? await authority(options?.idempotencyKey)
+        : { authority };
     const { capability, scope } = await signedCall(
       env,
       {
-        authority:
-          typeof authority === "function"
-            ? await authority(options?.idempotencyKey)
-            : authority,
+        authority: caller.authority,
+        readOnly: caller.readOnly,
         context,
         connection,
         permissionId,
@@ -191,7 +218,7 @@ export const signedStubCall = async (
  */
 export const runStubCall = async (
   env: Env,
-  authority: Authority | ((key: string | undefined) => Promise<Authority>),
+  authority: StubAuthority,
   grant: ConnectionGrant,
   call: unknown[]
 ): Promise<ConnectResult> => {

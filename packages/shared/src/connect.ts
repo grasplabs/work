@@ -906,6 +906,8 @@ export const connectErrors = defineErrorFamily({
     "This call reaches beyond the one resource it may use.",
   "connect.idempotency_key_required":
     "This action has a side effect, so it needs an idempotency key.",
+  "connect.read_only":
+    "This call may only read, and this action may change something, so it wasn't run.",
   "connect.idempotency_conflict":
     "This idempotency key was already used with a different input.",
   "connect.answer_not_kept":
