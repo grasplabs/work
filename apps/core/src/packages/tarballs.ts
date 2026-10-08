@@ -7,6 +7,8 @@ import { log } from "@grasp-os/shared/log";
 import { packageErrors } from "@grasp-os/shared/packages";
 import type { NpmTarballRequest } from "@grasp-os/shared/packages";
 
+import { recordCleanup, touchCleanup } from "./cleanup-records.ts";
+
 // npm tarballs as this deployment keeps them: in its own R2 bucket (in
 // the EU), by the SHA-512 of their bytes, after connect fetched them and
 // both connect and core checked them against that hash. Public packages
@@ -15,7 +17,7 @@ import type { NpmTarballRequest } from "@grasp-os/shared/packages";
 // no longer match is dropped and fetched again, never used.
 
 /** Where a tarball is kept: by its SHA-512, in hex. */
-const tarballKey = (integrity: string): string => {
+export const tarballKey = (integrity: string): string => {
   const digest = integrity
     .slice("sha512-".length)
     .replaceAll("+", "-")
@@ -38,6 +40,9 @@ export const verifiedTarball = async (
   if (stored) {
     const bytes = new Uint8Array(await stored.arrayBuffer());
     if ((await sha512Integrity(bytes)) === request.integrity) {
+      // In use: one waiting for cleanup gets its full hour again, so the
+      // cron never deletes a tarball a resolve or build just read.
+      await touchCleanup(env, request.integrity);
       return bytes;
     }
     log.warn("packages.tarball_corrupt", {
@@ -51,6 +56,9 @@ export const verifiedTarball = async (
   if ((await sha512Integrity(fetched)) !== request.integrity) {
     throw packageErrors.create("package.integrity_mismatch");
   }
+  // Recorded for cleanup first: kept only while a lock names it
+  // (cleanup.ts), so one fetched for a resolve that then failed goes.
+  await recordCleanup(env, "tarball", request.integrity);
   await env.FILES.put(key, fetched);
   return fetched;
 };

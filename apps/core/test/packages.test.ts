@@ -1,5 +1,6 @@
 import { platformPeers } from "@grasp-os/compiler";
 import { sha512Integrity, toHex } from "@grasp-os/shared/encoding";
+import { packageErrors } from "@grasp-os/shared/packages";
 import type { GraspLock } from "@grasp-os/shared/packages";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
@@ -7,6 +8,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { admitDependencies } from "../src/dependencies/requests.ts";
+import { sweepPackageFiles } from "../src/packages/cleanup.ts";
+import { resolveDependencies } from "../src/packages/resolve.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -24,6 +27,7 @@ import {
   refusalsOf,
 } from "./npm.ts";
 import type { Entries } from "./npm.ts";
+import { racingDb } from "./racing-db.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // Resolving an App's npm packages (src/packages/resolve.ts) from its threat
@@ -915,5 +919,405 @@ describe("a chat's agent", () => {
     const status = await builder.api.dependencies.status(app);
     expect(status.pending?.requestedVia).not.toBeNull();
     expect(status.approved).toBeNull();
+  });
+});
+
+/** The graphs `app` holds a lock for, in no order. */
+const lockedGraphs = async (app: string): Promise<string[]> => {
+  const { results } = await env.DB.prepare(
+    "SELECT graph_hash FROM dependency_locks WHERE app_id = ?"
+  )
+    .bind(app)
+    .all<{ graph_hash: string }>();
+  return results.map(({ graph_hash: hash }) => hash).toSorted();
+};
+
+/** Whether `key` is recorded for cleanup. */
+const recordedForCleanup = async (key: string): Promise<boolean> =>
+  (await env.DB.prepare("SELECT 1 FROM package_cleanups WHERE key = ?")
+    .bind(key)
+    .first()) !== null;
+
+/** Where the deployment keeps the tarball whose integrity is `integrity`. */
+const tarballKeyOf = (integrity: string): string =>
+  `npm-tarballs/${toHex(
+    Uint8Array.from(
+      atob(integrity.slice("sha512-".length)),
+      (char) => char.codePointAt(0) ?? 0
+    )
+  )}.tgz`;
+
+/** An admin who approves dependencies, and a way to approve or deny a request. */
+const approverOf = async () => {
+  const admin = await personApi("admin");
+  await admin.api.dependencies.grantApprover({
+    type: "person",
+    userId: admin.userId,
+  });
+  return async (
+    request: { id: string; graphHash: string },
+    approved = true
+  ): Promise<void> => {
+    const { policyGeneration } = await admin.api.dependencies.waiting();
+    await admin.api.dependencies.decide(request.id, {
+      approved,
+      reviewed: { graphHash: request.graphHash, policyGeneration },
+    });
+  };
+};
+
+/** Connect, refusing as busy the first `times` asks for metadata. */
+const busyFor = (times: number) => {
+  const asked = { count: 0 };
+  const connect = new Proxy(env.CONNECT, {
+    get: (target, property): unknown => {
+      if (property === "npmMetadata") {
+        return async (name: string) => {
+          asked.count += 1;
+          if (asked.count <= times) {
+            throw packageErrors.create("package.registry_busy");
+          }
+          return await target.npmMetadata(name);
+        };
+      }
+      // An RPC binding's methods are called on it, never bound.
+      return property === "npmTarball"
+        ? async (request: Parameters<typeof target.npmTarball>[0]) =>
+            await target.npmTarball(request)
+        : Reflect.get(target, property);
+    },
+  });
+  return { connect, asked };
+};
+
+describe("an App's locks and the files they name", () => {
+  it("stores no lock when its request can't be stored", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    const identity = await builder.api.whoami();
+    // Just before each batch, another proposal for the App takes the
+    // place of the one read: the batch's request can't be stored.
+    const db = racingDb(async (target) => {
+      await target
+        .prepare(
+          "INSERT OR IGNORE INTO dependency_requests (id, app_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation, decided_by, decided_at, decided_generation, reason) VALUES (?, ?, 'rev-0', ?, '[\"browser\"]', 'Another', '{}', '{\"direct\":[],\"findings\":[]}', 1, 1, 0, 0, NULL, 'pending', ?, NULL, ?, 0, NULL, NULL, NULL, NULL)"
+        )
+        .bind(
+          crypto.randomUUID(),
+          app,
+          "f".repeat(64),
+          identity.userId,
+          Date.now()
+        )
+        .run();
+      await target
+        .prepare(
+          "UPDATE dependency_requests SET id = ? WHERE app_id = ? AND status = 'pending'"
+        )
+        .bind(crypto.randomUUID(), app)
+        .run();
+    });
+
+    const outcome = await failure(
+      resolveDependencies(
+        { ...env, DB: db },
+        identity,
+        intentFor(app, { [dates]: "^1.0.0" })
+      )
+    );
+    expect({
+      code: outcome.code,
+      locks: await lockedGraphs(app),
+    }).toStrictEqual({ code: "dependency.stale", locks: [] });
+  });
+
+  it("deletes a lock no pending or approved request names, records its tarballs, and the cron deletes those no lock names", async () => {
+    const decide = await approverOf();
+    const { builder, app } = await builderWithApp();
+    const [kept, replaced, denied] = [
+      named("kept"),
+      named("replaced"),
+      named("denied"),
+    ];
+    const keptIntegrity = await publish(plain(kept, "1.0.0"));
+    const replacedIntegrity = await publish(plain(replaced, "1.0.0"));
+    const deniedIntegrity = await publish(plain(denied, "1.0.0"));
+    const resolve = async (name: string) =>
+      await builder.api.dependencies.resolve(intentFor(app, { [name]: "1" }));
+
+    const approved = await resolve(kept);
+    await decide(approved.request);
+    // Replaced while it waits, then the one that replaced it denied.
+    await resolve(replaced);
+    const refused = await resolve(denied);
+    await decide(refused.request, false);
+    const locks = await lockedGraphs(app);
+    const recorded = {
+      replaced: await recordedForCleanup(replacedIntegrity),
+      denied: await recordedForCleanup(deniedIntegrity),
+    };
+
+    // An hour on, the cron deletes what no lock names, and keeps the rest.
+    const later = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    for (let run = 0; run < 20; run += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await sweepPackageFiles(env, later);
+    }
+    const stored = async (integrity: string) =>
+      (await env.FILES.head(tarballKeyOf(integrity))) !== null;
+
+    expect({
+      locks,
+      recorded,
+      after: {
+        kept: await stored(keptIntegrity),
+        replaced: await stored(replacedIntegrity),
+        denied: await stored(deniedIntegrity),
+        records: [
+          await recordedForCleanup(keptIntegrity),
+          await recordedForCleanup(replacedIntegrity),
+          await recordedForCleanup(deniedIntegrity),
+        ],
+      },
+    }).toStrictEqual({
+      locks: [approved.request.graphHash],
+      recorded: { replaced: true, denied: true },
+      after: {
+        kept: true,
+        replaced: false,
+        denied: false,
+        records: [false, false, false],
+      },
+    });
+  });
+
+  it("keeps approving an App's new graphs past its number of locks, giving up those of older approvals", async () => {
+    const decide = await approverOf();
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    const versions = Array.from({ length: 33 }, (_, index) => `1.0.${index}`);
+    for (const version of versions) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await publish(plain(dates, version));
+    }
+    // The tests' limit is three locks (vite.config.ts): each new graph,
+    // approved in turn, takes the room of the oldest approval's.
+    const statuses: string[] = [];
+    let first = "";
+    for (const version of versions) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      const { request } = await builder.api.dependencies.resolve(
+        intentFor(app, { [dates]: version })
+      );
+      first ||= request.id;
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await decide(request);
+      statuses.push(request.status);
+    }
+    const locks = await lockedGraphs(app);
+    // Back to the first graph: its approval stands, and its lock is
+    // written again.
+    const back = await builder.api.dependencies.resolve(
+      intentFor(app, { [dates]: versions[0] ?? "" })
+    );
+    const locksAfter = await lockedGraphs(app);
+    expect({
+      statuses: new Set(statuses),
+      locks: locks.length <= 3,
+      back: [back.request.id === first, back.request.status],
+      backLocked: locksAfter.includes(back.request.graphHash),
+    }).toStrictEqual({
+      statuses: new Set(["pending"]),
+      locks: true,
+      back: [true, "approved"],
+      backLocked: true,
+    });
+  });
+
+  it("lets a graph take the room of the waiting request it replaces, at the limit, new or approved before", async () => {
+    const decide = await approverOf();
+    const { builder, app } = await builderWithApp();
+    const [old, browser, server, waiting, replacing] = [
+      named("one"),
+      named("two"),
+      named("three"),
+      named("four"),
+      named("five"),
+    ];
+    const names = [old, browser, server, waiting, replacing];
+    for (const name of names) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await publish(plain(name, "1.0.0"));
+    }
+    const resolve = async (
+      name: string,
+      targets: ("browser" | "server" | "workflow")[]
+    ) =>
+      await builder.api.dependencies.resolve(
+        intentFor(app, { [name]: "1" }, { targets })
+      );
+    // An approval no longer in use, then the latest approval for each of
+    // two sets of targets: the tests' limit of three locks (vite.config.ts).
+    for (const [name, targets] of [
+      [old, ["browser"]],
+      [browser, ["browser"]],
+      [server, ["server"]],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      const { request } = await resolve(name, [...targets]);
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await decide(request);
+    }
+    // A graph waiting for a decision takes the old approval's room.
+    const first = await resolve(waiting, ["workflow"]);
+    // Two locks in use and one waiting: another graph replaces the one
+    // waiting, and takes its room.
+    const replaced = await resolve(replacing, ["workflow"]);
+    const afterReplace = await lockedGraphs(app);
+    // Back to the old approval, whose lock went: it replaces the one
+    // waiting too.
+    const back = await resolve(old, ["browser"]);
+    const afterBack = await lockedGraphs(app);
+    expect({
+      replaced: replaced.request.status,
+      replacedLocked: afterReplace.includes(replaced.request.graphHash),
+      firstGone: afterReplace.includes(first.request.graphHash),
+      locks: afterReplace.length,
+      back: back.request.status,
+      backLocked: afterBack.includes(back.request.graphHash),
+      replacedGone: afterBack.includes(replaced.request.graphHash),
+      locksAfterBack: afterBack.length,
+    }).toStrictEqual({
+      replaced: "pending",
+      replacedLocked: true,
+      firstGone: false,
+      locks: 3,
+      back: "approved",
+      backLocked: true,
+      replacedGone: false,
+      locksAfterBack: 3,
+    });
+  });
+
+  it("refuses a lock past the limit when the room goes as the batch runs, with a clear refusal", async () => {
+    const decide = await approverOf();
+    const { builder, app } = await builderWithApp();
+    const [browser, server, more] = [
+      named("one"),
+      named("two"),
+      named("three"),
+    ];
+    for (const name of [browser, server, more]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await publish(plain(name, "1.0.0"));
+    }
+    // Two locks in use, each the latest approval for its targets: one
+    // short of the tests' limit of three.
+    for (const [name, targets] of [
+      [browser, ["browser"]],
+      [server, ["server"]],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      const { request } = await builder.api.dependencies.resolve(
+        intentFor(app, { [name]: "1" }, { targets: [...targets] })
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await decide(request);
+    }
+    const identity = await builder.api.whoami();
+    // Just before the batch that stores the third, another lock in use
+    // lands: the insert's own count refuses it.
+    const db = racingDb(async (target) => {
+      await target.batch([
+        target
+          .prepare(
+            "INSERT OR IGNORE INTO dependency_requests (id, app_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation, decided_by, decided_at, decided_generation, reason) VALUES (?, ?, 'rev-0', ?, '[\"workflow\"]', 'Another', '{}', '{\"direct\":[],\"findings\":[]}', 1, 1, 0, 0, NULL, 'approved', ?, NULL, ?, 0, ?, ?, 0, NULL)"
+          )
+          .bind(
+            `raced-${app}`,
+            app,
+            "e".repeat(64),
+            identity.userId,
+            Date.now(),
+            identity.userId,
+            Date.now()
+          ),
+        target
+          .prepare(
+            "INSERT OR IGNORE INTO dependency_locks (app_id, graph_hash, lock, created_at) VALUES (?, ?, '{}', ?)"
+          )
+          .bind(app, "e".repeat(64), Date.now()),
+      ]);
+    });
+    const refused = await failure(
+      resolveDependencies(
+        { ...env, DB: db },
+        identity,
+        intentFor(app, { [more]: "1" })
+      )
+    );
+    const locks = await lockedGraphs(app);
+    expect({ refused, locks: locks.length }).toStrictEqual({
+      refused: {
+        code: "package.quota",
+        details: { quota: "appLocks", limit: 3 },
+      },
+      locks: 3,
+    });
+  });
+
+  it("starts over when another write changes the lock just before the batch, and says so after three tries", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    const intent = intentFor(app, { [dates]: "^1.0.0" });
+    await builder.api.dependencies.resolve(intent);
+    const identity = await builder.api.whoami();
+    // Just before each batch, the lock's text changes under it.
+    const db = racingDb(async (target) => {
+      await target
+        .prepare(
+          "UPDATE dependency_locks SET lock = lock || ' ' WHERE app_id = ?"
+        )
+        .bind(app)
+        .run();
+    });
+    const outcome = await failure(
+      resolveDependencies({ ...env, DB: db }, identity, intent)
+    );
+    expect(outcome.code).toBe("dependency.stale");
+  });
+
+  it("asks connect again after a pause while it is reading too much at once, and gives up after a few tries", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    const identity = await builder.api.whoami();
+    const once = busyFor(1);
+    const resolved = await resolveDependencies(
+      { ...env, CONNECT: once.connect },
+      identity,
+      intentFor(app, { [dates]: "^1.0.0" })
+    );
+    const always = busyFor(100);
+    const refused = await failure(
+      resolveDependencies(
+        { ...env, CONNECT: always.connect },
+        identity,
+        intentFor(app, { [dates]: "^1.0.0" })
+      )
+    );
+    expect({
+      resolved: resolved.lock.direct,
+      askedOnce: once.asked.count,
+      refused: refused.code,
+      askedAlways: always.asked.count,
+    }).toStrictEqual({
+      resolved: { [dates]: "1.0.0" },
+      askedOnce: 2,
+      refused: "package.registry_busy",
+      askedAlways: 4,
+    });
   });
 });
