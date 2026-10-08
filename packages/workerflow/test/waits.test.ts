@@ -632,6 +632,39 @@ describe("a replay that strays from its journal", () => {
     ]);
     await expect(alarmOf("drifts", id)).resolves.toBeNull();
   });
+
+  it("ends the run with a WorkflowReplayMismatchError: a new wait while the step it suspended on waits to retry", async () => {
+    const id = newId();
+    await workflow("drifts").create({ id, params: { what: "retry" } });
+    const before = await until("the run to wait for a retry", async () => {
+      const journal = await journalOf("drifts", id);
+      return journal.run.status === "waiting" &&
+        journal.steps[0]?.state === "retrying"
+        ? journal
+        : undefined;
+    });
+
+    // The next activation reaches a wait where the first reached the step.
+    await deliverAlarm("drifts", id);
+    const status = await ended("drifts", id);
+
+    expect(status).toStrictEqual({
+      status: "errored",
+      error: {
+        name: "WorkflowReplayMismatchError",
+        message:
+          'The run\'s definition no longer replays as its journal recorded: it reached the waitForEvent "second" while the do "flaky" it suspended on is still waiting to retry',
+      },
+    });
+    const after = await journalOf("drifts", id);
+    expect(after.steps).toStrictEqual(before.steps);
+    expect(after.attempts).toStrictEqual(before.attempts);
+    expect(after.activations).toMatchObject([
+      { ended: "suspended" },
+      { ended: "settled" },
+    ]);
+    await expect(alarmOf("drifts", id)).resolves.toBeNull();
+  });
 });
 
 describe("waits raced against each other", () => {

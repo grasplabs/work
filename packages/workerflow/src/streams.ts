@@ -176,7 +176,6 @@ export const isStoredWhole = (
   );
 };
 
-/** The bytes all of the run's stream chunks hold. */
 /**
  * The bytes all of the run's stream chunks hold: the run's count, kept in
  * the writes that add and delete chunks, not a scan of them.

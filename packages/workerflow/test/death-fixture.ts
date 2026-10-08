@@ -209,6 +209,31 @@ const definitionsFor = (
         async (context) => await effect(env, event.instanceId, "stuck", context)
       ),
   },
+  // A step with the params' retry limit and a minute's timeout, so a test
+  // can kill the process while each attempt is out, well before its
+  // deadline.
+  "cut-off": {
+    run: async (event, step) => {
+      const limit: unknown =
+        typeof event.payload === "object" &&
+        event.payload !== null &&
+        "limit" in event.payload
+          ? event.payload.limit
+          : undefined;
+      return await step.do(
+        "cut",
+        {
+          retries: {
+            limit: typeof limit === "number" ? limit : 0,
+            delay: 1000,
+            backoff: "constant",
+          },
+          timeout: "1 minute",
+        },
+        async (context) => await effect(env, event.instanceId, "cut", context)
+      );
+    },
+  },
   // A step, a wait for an "approved" event, another step.
   approval: {
     run: async (event, step) => {

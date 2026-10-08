@@ -355,9 +355,11 @@ export const resultDefinitions: Record<string, WorkflowDefinition> = {
       ),
   },
   // A stream whose upload stalls after its first part, past its attempt's
-  // timeout; the definition catches what the step fails with.
+  // timeout; the definition catches what the step fails with, and with
+  // `linger` in its params waits after that for the test to let it end.
   "stuck-stream": {
     run: async (event, step) => {
+      const { linger } = recordOf(event.payload);
       try {
         await step.do(
           "export",
@@ -376,6 +378,9 @@ export const resultDefinitions: Record<string, WorkflowDefinition> = {
         );
         return "kept";
       } catch (error) {
+        if (linger === true) {
+          await checkpoint(event.instanceId, "after");
+        }
         return errorName(error);
       }
     },

@@ -34,7 +34,8 @@ const defaultTimeout = "10 minutes";
  * reaches the step, the attempt's commit and the alarm's write. An
  * activation claims an attempt only if its deadline falls inside this,
  * counted from the handler's start; one that doesn't fit is left for a
- * fresh activation (activation.ts).
+ * fresh activation (activation.ts). The default: a host may give less
+ * (`WorkflowRun.handlerBudgetMs`).
  */
 export const handlerBudgetMs = 14 * 60 * 1000;
 

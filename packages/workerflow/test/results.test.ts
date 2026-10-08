@@ -881,6 +881,90 @@ describe("a stream upload past its attempt's timeout", () => {
     });
     await expect(chunksOf("stuck-stream", id)).resolves.toStrictEqual([]);
   });
+
+  it("stores no chunk it was still on its way to storing when the attempt timed out", async () => {
+    const id = newId();
+    const after = hold(id, "after", 1);
+    // A chunk's digest is taken before the write that stores it: the
+    // first stored chunk's is held until the attempt has timed out, and
+    // the activation goes on, still current.
+    const digesting = Promise.withResolvers<true>();
+    const digested = Promise.withResolvers<true>();
+    const gate = Promise.withResolvers<true>();
+    const { subtle } = crypto;
+    const hadOwn = Object.hasOwn(subtle, "digest");
+    const digest: unknown = Reflect.get(subtle, "digest");
+    if (typeof digest !== "function") {
+      throw new TypeError("crypto.subtle has no digest");
+    }
+    let held = false;
+    const original = async (args: unknown[]): Promise<unknown> => {
+      const result: unknown = await Reflect.apply(digest, subtle, args);
+      return result;
+    };
+    Reflect.set(subtle, "digest", async (...args: unknown[]) => {
+      const [, data] = args;
+      const isChunk = ArrayBuffer.isView(data) && data.byteLength === 256 * kib;
+      if (held || !isChunk) {
+        return await original(args);
+      }
+      held = true;
+      digesting.resolve(true);
+      await gate.promise;
+      try {
+        return await original(args);
+      } finally {
+        digested.resolve(true);
+      }
+    });
+    try {
+      await workflow("stuck-stream").create({ id, params: { linger: true } });
+      await within("the first chunk's digest", digesting.promise);
+      await exec(
+        "stuck-stream",
+        id,
+        "CREATE TABLE stored (attempt INTEGER NOT NULL)"
+      );
+      await exec(
+        "stuck-stream",
+        id,
+        "CREATE TRIGGER log_stored AFTER INSERT ON stream_chunks BEGIN INSERT INTO stored VALUES (NEW.attempt); END"
+      );
+      await after.held;
+
+      // The digest comes back: the write it was for finds the attempt over.
+      gate.resolve(true);
+      await within("the first chunk's digest to come back", digested.promise);
+      const stored = await runInDurableObject(
+        runObject("stuck-stream", id),
+        (_, state) =>
+          state.storage.sql.exec("SELECT attempt FROM stored").toArray()
+      );
+      after.release();
+      const status = await ended("stuck-stream", id);
+
+      expect(stored).toStrictEqual([]);
+      expect(status).toStrictEqual({
+        status: "complete",
+        output: "WorkflowTimeoutError",
+      });
+      await expect(journalOf("stuck-stream", id)).resolves.toMatchObject({
+        steps: [{ name: "export", state: "failed" }],
+        attempts: [{ attempt: 1, ended: "timed_out" }],
+      });
+      await expect(streamBytesOf("stuck-stream", id)).resolves.toStrictEqual({
+        counted: 0,
+        stored: 0,
+      });
+    } finally {
+      gate.resolve(true);
+      if (hadOwn) {
+        Reflect.set(subtle, "digest", digest);
+      } else {
+        Reflect.deleteProperty(subtle, "digest");
+      }
+    }
+  });
 });
 
 describe("a step's sensitivity on replay", () => {
