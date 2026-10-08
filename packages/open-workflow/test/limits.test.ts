@@ -112,7 +112,9 @@ describe("the definition's structure", () => {
     );
   });
 
-  it("stops at the expression limit", async () => {
+  // Every expression up to the limit is compiled first, at about a
+  // millisecond apiece: seconds on a busy runner.
+  it("stops at the expression limit", { timeout: 30_000 }, async () => {
     const tasks = tasksOf(profileLimits.maxExpressions / 4 + 1, () => ({
       set: { a: "${ 1 }", b: "${ 2 }", c: "${ 3 }", d: "${ 4 }" },
     }));
