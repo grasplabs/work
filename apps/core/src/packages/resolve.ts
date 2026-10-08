@@ -3,15 +3,18 @@ import {
   platformScope,
   startPackageBuilder,
 } from "@grasp-os/compiler";
+import { actorOf } from "@grasp-os/shared/audit";
 import {
   dependencyErrors,
   dependencyGraphHash,
+  dependencyTargetSchema,
   npmRegistryOrigin,
   packageKey,
 } from "@grasp-os/shared/dependencies";
 import type {
   DependencyGraph,
   DependencyRequest,
+  DependencyTarget,
 } from "@grasp-os/shared/dependencies";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
@@ -25,6 +28,7 @@ import {
   packageLimitsOf,
   packageMaturityMs,
   targetConditions,
+  targetConfigHash,
 } from "@grasp-os/shared/packages";
 import type {
   GraspLock,
@@ -43,6 +47,7 @@ import validRange from "semver/ranges/valid";
 import { z } from "zod";
 
 import { appFor } from "../apps.ts";
+import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
 import { proposeDependencies } from "../dependencies/requests.ts";
@@ -532,12 +537,9 @@ const resolveGraph = async (
   resolution.completeOptionalPeers();
 };
 
-/**
- * The graph a person approves, from the lock: what its hash names, with
- * this release's platform peers.
- */
+/** The graph a person approves, from the lock: what its hash names. */
 export const graphOfLock = (lock: GraspLock): DependencyGraph =>
-  lockGraph(lock, platformPeers);
+  lockGraph(lock);
 
 /** The App's approved lock last approved, if any: what it keeps. */
 const previousLock = async (
@@ -718,52 +720,135 @@ const lockOf = (
 const lockTries = 3;
 
 /**
- * The lock kept for a graph once `fresh` is added to it. The packages are
- * the graph's, the same whichever resolve named them (the graph's hash
- * covers every version, integrity and edge): the first lock's ranges and
- * times stay as its provenance. Targets aren't part of the graph's hash,
- * so each resolve sets the targets it asks for, with their conditions and
- * entries; the others stay as they were.
+ * The lock kept for a graph once `fresh` is added to it, and the targets
+ * whose config (conditions and entries) it changes. The packages are the
+ * graph's, the same whichever resolve named them (the graph's hash covers
+ * every version, integrity and edge): the first lock's ranges and times
+ * stay as its provenance. Targets aren't part of the graph's hash, so
+ * each resolve sets the targets it asks for; the others stay as they
+ * were. Every pin stays too: each is keyed by the config it was built for
+ * (`targetConfigHash`), so a target set to another config is built anew
+ * under its own pin, and one set back gets its old pin's bytes again.
  */
 export const mergedLock = (
   existing: GraspLock,
   fresh: GraspLock
-): GraspLock => {
-  const before = new Map<string, unknown>(Object.entries(existing.targets));
-  const changed = new Set(
-    Object.entries(fresh.targets)
-      .filter(
-        ([target, now]) =>
-          JSON.stringify(before.get(target) ?? null) !== JSON.stringify(now)
-      )
-      .map(([target]) => target)
-  );
-  // A target built for other conditions or entries is built again: its
-  // pinned artifacts no longer describe it.
-  const artifacts = existing.artifacts
-    ? Object.fromEntries(
-        Object.entries(existing.artifacts).map(([version, pins]) => [
-          version,
-          Object.fromEntries(
-            Object.entries(pins).filter(([target]) => !changed.has(target))
-          ),
-        ])
-      )
-    : undefined;
+): { lock: GraspLock; changed: DependencyTarget[] } => {
+  const changed = dependencyTargetSchema.options.filter((target) => {
+    const before = existing.targets[target];
+    const now = fresh.targets[target];
+    return (
+      before !== undefined &&
+      now !== undefined &&
+      canonicalJson(before) !== canonicalJson(now)
+    );
+  });
   return {
-    ...existing,
-    targets: { ...existing.targets, ...fresh.targets },
-    ...(artifacts === undefined ? {} : { artifacts }),
+    lock: { ...existing, targets: { ...existing.targets, ...fresh.targets } },
+    changed,
   };
+};
+
+/**
+ * Each of `targets`' config hash in `lock`, as audit detail under
+ * `<side>.<target>` (null for a target the lock has no config for): one
+ * member each, so every target changing still fits.
+ */
+const configsOf = async (
+  lock: GraspLock,
+  targets: readonly DependencyTarget[],
+  side: "from" | "to"
+): Promise<Record<string, string | null>> =>
+  Object.fromEntries(
+    await Promise.all(
+      targets.map(async (target) => {
+        const config = lock.targets[target];
+        return [
+          `${side}.${target}`,
+          config === undefined ? null : await targetConfigHash(target, config),
+        ] as const;
+      })
+    )
+  );
+
+/**
+ * Writes a lock: inserted when none was read, otherwise updated only
+ * while it is still the text read, with the targets whose config changes
+ * audited in the same batch. Whether it was written.
+ */
+const writeLock = async (
+  env: Env,
+  by: Acting,
+  {
+    app,
+    graphHash,
+    read,
+    before,
+    next,
+    stored,
+    changed,
+  }: {
+    app: string;
+    graphHash: string;
+    read: string | undefined;
+    before: GraspLock | undefined;
+    next: GraspLock;
+    stored: string;
+    changed: DependencyTarget[];
+  }
+): Promise<boolean> => {
+  const db = drizzle(env.DB);
+  if (read === undefined || before === undefined) {
+    const inserted = await db
+      .insert(dependencyLocks)
+      .values({ appId: app, graphHash, lock: stored, createdAt: new Date() })
+      .onConflictDoNothing()
+      .returning({ lock: dependencyLocks.lock });
+    return inserted.length > 0;
+  }
+  const update = db
+    .update(dependencyLocks)
+    .set({ lock: stored })
+    .where(
+      and(
+        eq(dependencyLocks.appId, app),
+        eq(dependencyLocks.graphHash, graphHash),
+        eq(dependencyLocks.lock, read)
+      )
+    )
+    .returning({ lock: dependencyLocks.lock });
+  if (changed.length === 0) {
+    const updated = await update;
+    return updated.length > 0;
+  }
+  const [from, to] = await Promise.all([
+    configsOf(before, changed, "from"),
+    configsOf(next, changed, "to"),
+  ]);
+  const [written] = await auditedBatch(env, db, [
+    update,
+    outboxedIfChanged(db, {
+      actor: by.actor ?? actorOf(by),
+      action: "dependency.lock_targets_changed",
+      target: { type: "app", id: app },
+      detail: { app, graphHash, targets: changed.join(" "), ...from, ...to },
+    }),
+  ]);
+  return written.length > 0;
 };
 
 /**
  * Stores `fresh` as the lock of an App's graph, or adds its targets to
  * the one stored, and returns the lock that holds. One conditional write
  * on the lock as it was read; a resolve that loses the race starts over.
+ * A target whose config the write changes is recorded in the audit trail
+ * (`dependency.lock_targets_changed`), in the batch that changes it: what
+ * the next build of it makes is pinned under the new config, never
+ * swapped in under the old one's pin.
  */
 const storeLock = async (
   env: Env,
+  by: Acting,
   app: string,
   graphHash: string,
   fresh: GraspLock,
@@ -782,9 +867,13 @@ const storeLock = async (
       .from(dependencyLocks)
       .where(where)
       .get();
-    const next = row
-      ? mergedLock(graspLockSchema.parse(JSON.parse(row.lock)), fresh)
-      : fresh;
+    const before = row
+      ? graspLockSchema.parse(JSON.parse(row.lock))
+      : undefined;
+    const merged = before
+      ? mergedLock(before, fresh)
+      : { lock: fresh, changed: [] };
+    const next = merged.lock;
     const stored = canonicalJson(graspLockSchema.parse(next));
     if (new TextEncoder().encode(stored).byteLength > limits.lockBytes) {
       throw packageErrors.create("package.quota", {
@@ -795,25 +884,17 @@ const storeLock = async (
     if (row?.lock === stored) {
       return next;
     }
-    const write = row
-      ? db
-          .update(dependencyLocks)
-          .set({ lock: stored })
-          .where(and(where, eq(dependencyLocks.lock, row.lock)))
-          .returning({ lock: dependencyLocks.lock })
-      : db
-          .insert(dependencyLocks)
-          .values({
-            appId: app,
-            graphHash,
-            lock: stored,
-            createdAt: new Date(),
-          })
-          .onConflictDoNothing()
-          .returning({ lock: dependencyLocks.lock });
     // oxlint-disable-next-line no-await-in-loop
-    const written = await write;
-    if (written.length > 0) {
+    const written = await writeLock(env, by, {
+      app,
+      graphHash,
+      read: row?.lock,
+      before,
+      next,
+      stored,
+      changed: merged.changed,
+    });
+    if (written) {
       return next;
     }
   }
@@ -901,7 +982,7 @@ export const resolveDependencies = async (
   const graph = graphOfLock(lock);
   const graphHash = await dependencyGraphHash(graph);
   // The lock first: a request is never without the lock its graph names.
-  const kept = await storeLock(env, intent.app, graphHash, lock, limits);
+  const kept = await storeLock(env, by, intent.app, graphHash, lock, limits);
   const request = await proposeDependencies(env, by, {
     app: intent.app,
     sourceRevision: intent.sourceRevision,

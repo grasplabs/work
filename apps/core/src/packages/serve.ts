@@ -1,4 +1,3 @@
-import { compilerVersion } from "@grasp-os/compiler";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
@@ -7,13 +6,14 @@ import {
   packageArtifactPath,
 } from "@grasp-os/shared/packages";
 import { drizzle } from "drizzle-orm/d1";
+import { ZodError } from "zod";
 
 import { policyGeneration } from "../dependencies/policy.ts";
 import { admissionOf } from "../dependencies/requests.ts";
 import { accessTokenPattern, hasFrameAccess } from "../screen-frame.ts";
 import { artifactSubject } from "./address.ts";
 import type { ArtifactRef } from "./address.ts";
-import { keptDescription, keptFile, lockOf } from "./build.ts";
+import { forgetArtifact, keptDescription, keptFile, lockOf } from "./build.ts";
 
 // Serving an App's built packages to the browser: the one route that
 // hands out an artifact's files. Every response on its path, an error
@@ -33,10 +33,13 @@ import { keptDescription, keptFile, lockOf } from "./build.ts";
 //   `admitDependencies` makes), for this App, graph and the browser target
 //   under the policy generation now; a refusal is logged, not audited, so
 //   a page asking for many files can't flood the audit trail. The App's
-//   lock must still pin this artifact as this compiler's browser build;
+//   lock must still pin this artifact as a browser build, of one of the
+//   compilers whose pins it keeps (two releases may serve side by side);
 //   the artifact's description must hash to its address; and the file's
-//   bytes to the SHA-256 the description names. Answers are never cached,
-//   so an approval taken back holds from the next load.
+//   bytes to the SHA-256 the description names. A file whose bytes don't
+//   match isn't served, and its artifact is made again by the next build.
+//   Answers are never cached, so a change of policy holds from the next
+//   load, and so will an approval taken back once that exists (GRA-359).
 // - A file taken for another type. Each is sent with the exact type the
 //   build recorded for it, one of the few the builder writes, and
 //   `nosniff`: script is never read as a stylesheet, an image never as a
@@ -54,26 +57,38 @@ import { keptDescription, keptFile, lockOf } from "./build.ts";
 //   checked again on every request, so it never serves anything no longer
 //   approved.
 // - Code for Workers sent to a browser. Only the browser target is
-//   served: the lock's browser pin is the guard, as an artifact's hash
-//   covers its target, so no other target's artifact is ever pinned as the
-//   browser's.
+//   served: a pin of the lock's for the browser target is the guard, as an
+//   artifact's hash covers its target, so no other target's artifact is
+//   ever pinned as the browser's.
 
 const artifactPattern = new RegExp(
   `^${packageArtifactPath}/(?<app>[\\w-]{1,128})/(?<graphHash>[0-9a-f]{64})/(?<hash>[0-9a-f]{64})/(?<token>[^/]{1,96})/(?<file>.{1,1024})$`,
   "u"
 );
 
-/** The token's segment of an artifact path, for the request log. */
+/**
+ * An artifact path up to its token, the token, and what follows: the
+ * segments `artifactPattern` reads, exactly, so the segment left out is
+ * the one it takes as the token.
+ */
 const tokenSegment = new RegExp(
-  `^(?<base>${packageArtifactPath}(?:/[^/]*){3}/)[^/]+(?<rest>/.*)?$`,
+  `^(?<base>${packageArtifactPath}/[\\w-]{1,128}/[0-9a-f]{64}/[0-9a-f]{64}/)[^/]{1,96}(?<rest>/.*)?$`,
   "u"
 );
 
-/** `pathname` as the request log keeps it: an artifact's token left out. */
+/**
+ * `pathname` as the request log keeps it: an artifact's token left out.
+ * A path on the artifact path that isn't shaped as an address (an empty
+ * segment, one too many) is logged without anything after the artifact
+ * path, since a token could be in any of its segments.
+ */
 export const withoutArtifactToken = (pathname: string): string => {
+  if (!isPackageArtifactPath(pathname)) {
+    return pathname;
+  }
   const groups = tokenSegment.exec(pathname)?.groups;
   return groups?.base === undefined
-    ? pathname
+    ? `${packageArtifactPath}/-`
     : `${groups.base}-${groups.rest ?? ""}`;
 };
 
@@ -133,13 +148,30 @@ const admitted = async (env: Env, ref: ArtifactRef): Promise<boolean> => {
   return admission.admitted;
 };
 
-/** Whether the App's lock still pins `ref` as this compiler's browser build. */
+/**
+ * Whether the App's lock still pins `ref` as a browser build: of any of
+ * its target configs, by any compiler whose pins it keeps (two releases
+ * may serve side by side, each the builds it pinned).
+ */
 const pinned = async (env: Env, ref: ArtifactRef): Promise<boolean> => {
   try {
     const { lock } = await lockOf(env, ref.app, ref.graphHash);
-    return lock.artifacts?.[compilerVersion]?.browser?.hash === ref.hash;
+    return Object.values(lock.artifacts ?? {}).some((pins) =>
+      Object.values(pins).some(
+        ({ target, hash }) => target === "browser" && hash === ref.hash
+      )
+    );
   } catch (error) {
     if (isExpectedError(error)) {
+      return false;
+    }
+    // A lock that doesn't read as this release's (one an older release
+    // wrote as this one deploys): nothing it pins is served.
+    if (error instanceof ZodError) {
+      log.warn("packages.lock_unreadable", {
+        app: ref.app,
+        graphHash: ref.graphHash,
+      });
       return false;
     }
     throw error;
@@ -209,6 +241,8 @@ const keptResponse = async (
   }
   const bytes = await keptFile(env, hash, file, entry.sha256);
   if (bytes === undefined) {
+    // Not the bytes built: never served, and made again by the next build.
+    await forgetArtifact(env, hash);
     return refused(404);
   }
   return new Response(bytes, {
