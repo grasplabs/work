@@ -181,6 +181,10 @@ msgstr "{kind}, {severity}, {about}: {summary}"
 msgid "{label}: {count}"
 msgstr "{label}: {count}"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{limit} a month for each, admins alerted at {alertAt}."
+msgstr "{limit} im Monat für jeden, Admins werden bei {alertAt} benachrichtigt."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "{limit} a month, admins alerted at {alertAt}. Calls stop once it's used up."
 msgstr "{limit} im Monat, Admins werden bei {alertAt} benachrichtigt. Aufrufe stoppen, sobald es aufgebraucht ist."
@@ -249,6 +253,10 @@ msgstr "{name} ändert jetzt die Daten der Engine (lesen → schreiben)"
 msgid "{name}, per {key}"
 msgstr "{name}, je {key}"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{name}: {shown} of the limit"
+msgstr "{name}: {shown} des Limits"
+
 #: src/chat/builds.tsx
 msgid "{name}: version {version} waiting for review"
 msgstr "{name}: Version {version} wartet auf Prüfung"
@@ -280,6 +288,10 @@ msgstr "{run}: fehlgeschlagen"
 #: src/screens/screen-frame.tsx
 msgid "{screen} app"
 msgstr "App {screen}"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "{share} of the {limit} budget"
+msgstr "{share} des Budgets von {limit}"
 
 #: src/activity/pending.tsx
 msgid "{subject}: {actions} on {object}"
@@ -325,7 +337,7 @@ msgstr "{who} kann später nicht mehr erteilt werden: es muss erneut angefragt w
 msgid "{who} consented to this before connecting it:"
 msgstr "{who} hat vor dem Verbinden hier zugestimmt:"
 
-#: src/routes/_shell.settings.models.tsx
+#: src/routes/_shell.settings.spend.tsx
 msgid "{workflowId} in {engine}"
 msgstr "{workflowId} in {engine}"
 
@@ -406,6 +418,10 @@ msgstr "Ein Lauf eines Workflows wartet auf diese Antwort."
 #: src/dashboard/signals.tsx
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Eine Suche in {where} hat {searches, plural, one {einmal} other {#-mal}} nichts gefunden, bei {askers, plural, one {# fragenden Person} other {# fragenden Personen}}."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "About {ending}"
+msgstr "Etwa {ending}"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -506,6 +522,11 @@ msgctxt "onboarding stage"
 msgid "Agreements"
 msgstr "Vereinbarungen"
 
+#: src/routes/_shell.settings.spend.tsx
+#: src/routes/_shell.settings.tsx
+msgid "AI spend"
+msgstr "KI-Ausgaben"
+
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
 msgstr "Alle"
@@ -515,7 +536,7 @@ msgctxt "filter: every integration"
 msgid "All"
 msgstr "Alle"
 
-#: src/routes/_shell.settings.models.tsx
+#: src/routes/_shell.settings.spend.tsx
 msgid "All calls"
 msgstr "Alle Aufrufe"
 
@@ -792,6 +813,18 @@ msgstr "Builder"
 #: src/activity/audit-words.ts
 msgid "Built approved packages"
 msgstr "Freigegebene Pakete gebaut"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "By person"
+msgstr "Nach Person"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "By the end of the month"
+msgstr "Bis Monatsende"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "By workflow"
+msgstr "Nach Workflow"
 
 #: src/activity/audit-words.ts
 msgid "Called a model"
@@ -1604,6 +1637,10 @@ msgstr "Eine Berechtigung erteilt"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp ist gerade nicht erreichbar. Versuchen Sie es gleich noch einmal."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
+msgstr "Grasp rechnet die Kosten der Modelle auf die Budgets an, die es für Sie festlegt. Es ist kein Budget festgelegt, daher gibt es nichts anzuzeigen."
+
 #: src/onboarding/staff-words.ts
 msgid "Grasp gave its go"
 msgstr "Grasp hat das Go gegeben"
@@ -1707,6 +1744,10 @@ msgstr "Wie Sie in Grasp erscheinen: bei Workflows, für die Sie verantwortlich 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "If {condition}:"
 msgstr "Wenn {condition}:"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "If the rest of the month goes like the days so far"
+msgstr "Wenn der Rest des Monats wie die bisherigen Tage verläuft"
 
 #: src/chat/builds.tsx
 msgid "In the proposer's words"
@@ -2346,7 +2387,7 @@ msgstr "Gerade braucht nichts Grasp."
 msgid "Nothing runs yet: this would be the engine's first current version."
 msgstr "Noch läuft nichts: Dies wäre die erste aktuelle Version der Engine."
 
-#: src/routes/_shell.settings.models.tsx
+#: src/routes/_shell.settings.spend.tsx
 msgid "Nothing spent yet."
 msgstr "Noch nichts ausgegeben."
 
@@ -2366,10 +2407,6 @@ msgstr "Läuft jetzt {how}"
 #: src/chat/builds-state.ts
 msgid "Now runs {how}, {times}"
 msgstr "Läuft jetzt {how}, {times}"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Of the limit"
-msgstr "Vom Limit"
 
 #: src/connections/offer-switch.tsx
 msgid "Off, nobody can connect it, admins included. Connections already made go on."
@@ -3215,22 +3252,6 @@ msgstr "Etwas ist schiefgelaufen."
 msgid "Sources"
 msgstr "Quellen"
 
-#: src/routes/_shell.settings.models.tsx
-msgid "Spend this month ({month}, UTC)."
-msgstr "Ausgaben in diesem Monat ({month}, UTC)."
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Spend: {title}"
-msgstr "Ausgaben: {title}"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Spent"
-msgstr "Ausgegeben"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Spent by"
-msgstr "Ausgegeben von"
-
 #: src/sign-in-errors.ts
 msgid "Staff access to this organization isn't open."
 msgstr "Der Zugang für das Grasp-Team zu dieser Organisation ist nicht geöffnet."
@@ -3412,7 +3433,7 @@ msgstr "Dieses Transkript ist zu lang. Bringen Sie nur das Gespräch selbst ein,
 msgid "That way of signing in isn't set up here."
 msgstr "Diese Anmeldemethode ist hier nicht eingerichtet."
 
-#: src/routes/_shell.settings.models.tsx
+#: src/routes/_shell.settings.spend.tsx
 msgid "The {top} who spent most; more spent less."
 msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
 
@@ -3663,6 +3684,10 @@ msgstr "Dieser Link funktioniert nicht. Bitten Sie die Person, die ihn geschickt
 #: src/routes/guest.tsx
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Dieser Link ist abgelaufen. Bitten Sie die Person, die ihn geschickt hat, um einen neuen."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "This month so far"
+msgstr "Bisher in diesem Monat"
 
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
@@ -3924,9 +3949,17 @@ msgstr "Was Stephen in jedes Interview mitnimmt. Was das Gespräch offen ließ, 
 msgid "What the engine holds"
 msgstr "Was die Engine hat"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
+msgstr "Was die Modelle, die in Grasp für Sie arbeiten, diesen Monat ({month}, UTC) kosten, in US-Dollar, wie sie bepreist sind."
+
 #: src/routes/_shell.dashboard.tsx
 msgid "What waits on you, each with its next step, and what could be better."
 msgstr "Was auf Sie wartet, jeweils mit dem nächsten Schritt, und was besser gehen könnte."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "What was spent this month is under <0>AI spend</0>."
+msgstr "Was diesen Monat ausgegeben wurde, steht unter <0>KI-Ausgaben</0>."
 
 #: src/workflows/runs.tsx
 msgctxt "column: when a run happened"
