@@ -481,6 +481,17 @@ export class App extends DurableObject<Env> {
    * app-calls.ts) runs only on the version core checked it against, ends
    * by the time the call it came from must, and is kept with the Apps
    * above it, for the calls its code makes on (`callerOf`).
+   *
+   * Known gaps, both closed once the App's server code runs as stateless
+   * handlers, each call with its own isolate or with its authority passed
+   * in as arguments:
+   * - A call cut short by the deadline of the call it came from (`via`)
+   *   stops only its caller, so its method can go on writing the App's
+   *   database until it returns.
+   * - Every call runs in the one facet, so the App's code can keep a
+   *   caller's token in module state and use it in another call running
+   *   at the same time: that call then acts, and is audited, as the first
+   *   caller.
    */
   async call(
     caller: AppCallerInput,
