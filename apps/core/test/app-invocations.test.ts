@@ -3,14 +3,18 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
 import { release, requestGranted, serverBuilt } from "./apps.ts";
 import { reached } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
+import { newTeam } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
-import { outcome, signedInApi, unique } from "./sign-in.ts";
+import type { MailAnswer } from "./mail-server.ts";
+import { finished } from "./runs.ts";
+import { callAuth, outcome, signedInApi, unique } from "./sign-in.ts";
+import { workflowFiles } from "./workflow-apps.ts";
 
 // Every call into an App runs as an invocation the host makes as the
 // call starts (app.ts): who it acts for, on which version, until when, and
@@ -27,7 +31,11 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 //   get past that: only the token counts;
 // - a call's arguments or answer carry what no public value may (a big
 //   integer), or its error carries more of the App's text to a screen
-//   than an error may.
+//   than an error may;
+// - a call keeps acting after what let it in is gone, while its code
+//   still runs: the person's role in the App (a team left, which
+//   restarts nothing), or the calling App's permission on the export;
+// - a call keeps acting once its App's code was restarted under it.
 //
 // Every App here runs for real, in its own sandbox; calls go in through
 // the host as screens, workflows and other Apps make them.
@@ -126,6 +134,26 @@ export class App extends DurableObject {
     return await this.stub("DESK").call(caller, method, input);
   }
 
+  async pointAfter(caller: Caller, wait: (note: string) => Promise<void>): Promise<unknown> {
+    await wait("held");
+    const point = await tried(() => this.stub("STATISTICS").record(caller, { measure: "ticks", value: 1 }));
+    await this.ctx.storage.put("after", point);
+    return point;
+  }
+
+  async sendThenList(caller: Caller & { idempotencyKey?: string }): Promise<unknown> {
+    const sent = await tried(() =>
+      this.stub("MAIL").call(caller, "mail.send", { to: "ben@acme.test", subject: "Hello" }, { idempotencyKey: caller.idempotencyKey })
+    );
+    const listed = await tried(() => this.stub("OUTLOOK").call(caller, "mail.list", {}));
+    await this.ctx.storage.put("after", { sent, listed });
+    return { sent, listed };
+  }
+
+  async lastAfter(): Promise<unknown> {
+    return (await this.ctx.storage.get("after")) ?? null;
+  }
+
   echo(_caller: Caller, value: unknown): unknown {
     return value;
   }
@@ -157,6 +185,7 @@ const exported = {
     output: {},
   },
   change: { access: "write", input: { type: "object" }, output: {} },
+  sendThenList: { access: "write", input: { type: "object" }, output: {} },
 };
 
 /** A `task` record type for `collection`. */
@@ -196,7 +225,10 @@ const newApp = async (
  * records to, and its own exports (`SELF`, to call one marked `write`);
  * and the front desk, granted the desk's exports, whose screens call it.
  */
-const setUp = async () => {
+const setUp = async (
+  plan: MailAnswer[] = [],
+  frontFiles: Record<string, string> = {}
+) => {
   const admin = await personApi("admin");
   const { id: collectionId } = await admin.api.knowledge.createCollection({
     name: `Tasks ${unique()}`,
@@ -205,8 +237,8 @@ const setUp = async () => {
   const desk = await newApp(admin, {
     "app/records.json": taskType(collectionId),
   });
-  const front = await newApp(admin);
-  const mail = await mailConnection();
+  const front = await newApp(admin, frontFiles);
+  const mail = await mailConnection(plan);
   const grant = async (
     subject: AppId,
     object:
@@ -240,13 +272,57 @@ const setUp = async () => {
     ["read", "write"],
     "TASKS"
   );
-  await grant(front, { type: "app", appId: desk }, ["read", "write"], "DESK");
+  const calls = await grant(
+    front,
+    { type: "app", appId: desk },
+    ["read", "write"],
+    "DESK"
+  );
   // The desk's call of its own export marked `write`, from a read: only
   // the read stops it, never a missing grant.
   const other = await newApp(admin);
   await grant(desk, { type: "app", appId: other }, ["write"], "SELF");
-  return { admin, desk, front, mail };
+  return { admin, desk, front, mail, calls };
 };
+
+/**
+ * A screen's callback that holds the App call it is called from until
+ * `release`: `entered` once the App called it.
+ */
+const gate = () => {
+  const entered = Promise.withResolvers<boolean>();
+  const released = Promise.withResolvers<boolean>();
+  return {
+    entered: entered.promise,
+    release: () => {
+      released.resolve(true);
+    },
+    wait: async (): Promise<void> => {
+      entered.resolve(true);
+      await released.promise;
+    },
+  };
+};
+
+/**
+ * Waits until the App called `held`'s callback; fails at once should
+ * `call` end first, rather than wait for a callback that won't come.
+ */
+const entered = async (
+  held: ReturnType<typeof gate>,
+  call: Promise<string>
+): Promise<void> => {
+  await Promise.race([
+    held.entered,
+    call.then((ended) => {
+      throw new Error(`The call ended before it was held: ${ended}`);
+    }),
+  ]);
+};
+
+/** What the desk last did after its call was let go (`lastAfter`). */
+const lastAfter = async (desk: AppId, userId: string): Promise<unknown> =>
+  await callApp(env, desk, { userId, mode: "interactive" }, "lastAfter");
 
 /** Calls `front`'s `via` for `userId`, as its screen would. */
 const viaFront = async (
@@ -525,5 +601,113 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
       long: { fits: true, nearlyAll: true, start: true },
       wide: { fits: true, whole: true },
     });
+  });
+
+  it("stops acting for someone who loses their role in the App while their screen's call runs", async () => {
+    const admin = await personApi("admin");
+    // Granted nothing, so it may be shared with anyone.
+    const desk = await newApp(admin);
+    const clerk = await personApi("user");
+    const team = await newTeam(admin, [clerk]);
+    await admin.api.apps.members.add(desk, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    const pointAfter = async (meanwhile: () => Promise<unknown>) => {
+      const held = gate();
+      const call = outcome(
+        clerk.api.screens.call(desk, "pointAfter", [held.wait])
+      );
+      await entered(held, call);
+      await meanwhile();
+      held.release();
+      await call;
+      return await lastAfter(desk, admin.userId);
+    };
+
+    const stays = await pointAfter(async () => {
+      // Nothing changes for them.
+    });
+    // Leaving the team the App is shared with restarts nothing: the call
+    // goes on, and only the check of each stub call stops it.
+    const leaves = await pointAfter(
+      async () =>
+        await callAuth("/organization/remove-team-member", admin.session, {
+          teamId: team,
+          userId: clerk.userId,
+        })
+    );
+    expect({ stays, leaves }).toStrictEqual({
+      stays: "ok",
+      leaves: "app.not_found",
+    });
+  });
+
+  it("stops acting for another App whose permission on its export is revoked while the call runs", async () => {
+    const relay = workflowFiles(
+      "relay",
+      `  return await step.do("ask", { description: "Ask the desk" }, async () =>
+    await appExports<{ sendThenList: (input: object) => unknown }>(env.DESK).sendThenList({})
+  );`,
+      { ask: { sent: "ok", listed: "ok" } }
+    );
+    const { admin, desk, front, mail, calls } = await setUp(
+      ["slow"],
+      Object.fromEntries(
+        Object.entries(relay).map(([path, text]) => [
+          path,
+          text.replace(
+            "import { workflow, z }",
+            "import { appExports, workflow, z }"
+          ),
+        ])
+      )
+    );
+    const { id: run } = await admin.api.workflows.start(front, "relay");
+    // The desk's send is out, held at the mail server.
+    try {
+      await vi.waitFor(
+        async () => {
+          await expect(mail.holding()).resolves.toBeTruthy();
+        },
+        { timeout: 15_000, interval: 100 }
+      );
+      await admin.api.permissions.revoke(calls);
+    } finally {
+      await mail.release();
+    }
+    await finished(run);
+    expect({
+      after: await lastAfter(desk, admin.userId),
+      mail: await mail.did(),
+    }).toStrictEqual({
+      // The send went out before the revoke; nothing after it did.
+      after: { sent: "ok", listed: "permission.denied" },
+      mail: { calls: 1, sent: [{ to: "ben@acme.test", subject: "Hello" }] },
+    });
+  });
+
+  it("does nothing more once its App's code is restarted while the call runs", async () => {
+    const admin = await personApi("admin");
+    const desk = await newApp(admin);
+    const held = gate();
+    const call = outcome(
+      admin.api.screens.call(desk, "pointAfter", [held.wait])
+    );
+    await entered(held, call);
+    // A permission granted restarts the App's code, in a new isolate with
+    // the permissions as they are now.
+    await requestGranted(idp, admin, {
+      subject: { type: "app", appId: desk },
+      object: { type: "connection", connectionId: "connection-outlook" },
+      actions: ["mail.list"],
+      binding: "OUTLOOK",
+    });
+    held.release();
+    // However the screen hears of it, the call failed, and its code did
+    // nothing once let go: not even a refused statistics point.
+    await expect(call).resolves.not.toBe("ok");
+    await expect(lastAfter(desk, admin.userId)).resolves.toBeNull();
   });
 });

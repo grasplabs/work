@@ -9,6 +9,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { sourcesOf, sourcesOfApps, unreadableBy } from "./app-provenance.ts";
+import { teamsOf } from "./auth/identity.ts";
 import { apps, appMembers, teamMembers } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 
@@ -71,7 +72,7 @@ const ceilingOf = (by: Person): AppRole =>
 const appRole = async (
   env: Env,
   by: Person,
-  app: App
+  app: Pick<App, "id" | "owner">
 ): Promise<{ role: AppRole; shared: boolean } | undefined> => {
   if (isAdmin(by.role)) {
     return { role: "builder", shared: false };
@@ -100,7 +101,7 @@ const appRole = async (
 export const requireAppRole = async (
   env: Env,
   by: Person,
-  app: App,
+  app: Pick<App, "id" | "owner">,
   needed: AppRole
 ): Promise<AppRole> => {
   const found = await appRole(env, by, app);
@@ -121,6 +122,36 @@ export const requireAppRole = async (
     }
   }
   return role;
+};
+
+/**
+ * Refuses `by` unless they still have a role in the App `app` names, as
+ * `requireAppRole` decides it: for checking again, on each step of
+ * something already under way, that someone let in on their role still
+ * has it. Whom the App is shared with, its owner and the teams `by` is in
+ * are read now; their role in the organization is the session's that let
+ * them in (Grasp staff are admins only by their session), which the
+ * session's own checks follow within seconds.
+ */
+export const requireStillOpen = async (
+  env: Env,
+  by: Person,
+  app: AppId
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select({ id: apps.id, owner: apps.ownerId })
+    .from(apps)
+    .where(eq(apps.id, app))
+    .get();
+  if (row === undefined) {
+    throw appErrors.create("app.not_found");
+  }
+  await requireAppRole(
+    env,
+    { ...by, teams: await teamsOf(env.DB, by.userId) },
+    { id: appIdSchema.parse(row.id), owner: row.owner },
+    "user"
+  );
 };
 
 /**

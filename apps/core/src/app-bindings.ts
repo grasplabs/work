@@ -6,8 +6,9 @@ import type { StatisticUse } from "@grasp-os/shared/statistics";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
+import { requireStillOpen } from "./app-access.ts";
 import type { AppExportBinding } from "./app-calls.ts";
-import type { Admitted, InvocationKind } from "./app.ts";
+import type { Admission, Admitted, InvocationKind } from "./app.ts";
 import {
   collectionGrantOf,
   connectionGrantOf,
@@ -20,11 +21,72 @@ import type { ConnectionGrant } from "./bindings.ts";
 import { appHost } from "./durable-objects.ts";
 import type { AppGuestsBinding } from "./guests-binding.ts";
 import type { AppCollectionBinding } from "./knowledge/app-binding.ts";
-import { activePermissions } from "./permissions.ts";
+import { activePermissions, authorizeExport } from "./permissions.ts";
 import type { AppStatisticsBinding } from "./statistics-binding.ts";
 
 /** What App code passes as the caller: the one its method was called with. */
 const callerSchema = z.object({ token: z.string().min(1).max(100) });
+
+/**
+ * Refuses a stub call whose call has lost what let it in (`admission`),
+ * since: the person's role in App `app`, for a screen's call
+ * (`app.not_found`, as for any request of theirs), or the calling App's
+ * permission on `app`'s export, for a call from another App
+ * (`permission.denied`). A call in only on what every stub call checks
+ * anyway (a workflow run's, whose person and permissions each stub checks)
+ * has nothing more to lose here.
+ */
+const requireStillAdmitted = async (
+  env: Env,
+  app: AppId,
+  admission: Admission | undefined
+): Promise<void> => {
+  if (admission?.type === "role") {
+    await requireStillOpen(env, admission.person, app);
+  } else if (admission?.type === "export") {
+    const { authority, method, access, permissionId } = admission;
+    await authorizeExport(
+      env,
+      authority,
+      app,
+      { method, access },
+      permissionId
+    );
+  }
+};
+
+/**
+ * The token App code passed as its caller: only the token is read, so
+ * nothing else App code puts on it counts.
+ */
+const tokenOf = (caller: unknown): string => {
+  const parsed = callerSchema.safeParse(caller);
+  if (!parsed.success) {
+    throw appErrors.create("app.caller_invalid");
+  }
+  return parsed.data.token;
+};
+
+/**
+ * Admits one stub call for the call `token` names: `first` asks the host
+ * (`App.admit`, or `App.claimStatistic`, which also counts the use), what
+ * let the call in is checked again (`requireStillAdmitted`), and the host
+ * is asked once more, last, for `use`: so what the stub then does rests on
+ * a call that was still running, on code still current, within its
+ * deadline, after every check above awaited.
+ */
+const admitted = async (
+  env: Env,
+  app: AppId,
+  token: string,
+  use: InvocationKind,
+  first: (host: ReturnType<typeof appHost>) => Promise<Admitted>
+): Promise<Admitted> => {
+  const host = appHost(env, app);
+  const { admission } = await first(host);
+  await requireStillAdmitted(env, app, admission);
+  return await host.admit(token, use);
+};
 
 /**
  * Who `caller` is, as App `app`'s host knows them while their call runs,
@@ -34,8 +96,9 @@ const callerSchema = z.object({ token: z.string().min(1).max(100) });
  * changes anything (`write`) from a call that may only read is
  * `app.read_only`. App code can't name anyone, or say what its call may
  * do: only the caller's token is read, and a caller that isn't one of a
- * running call of this App (made up, ended, or another App's) is
- * `app.caller_invalid`.
+ * running call of this App (made up, ended, past its deadline, on code
+ * since stopped, or another App's) is `app.caller_invalid`. What let the
+ * call in is checked again first (`admitted`).
  */
 export const callerOf = async (
   env: Env,
@@ -43,11 +106,14 @@ export const callerOf = async (
   caller: unknown,
   use: InvocationKind
 ): Promise<Admitted> => {
-  const parsed = callerSchema.safeParse(caller);
-  if (!parsed.success) {
-    throw appErrors.create("app.caller_invalid");
-  }
-  return await appHost(env, app).admit(parsed.data.token, use);
+  const token = tokenOf(caller);
+  return await admitted(
+    env,
+    app,
+    token,
+    use,
+    async (host) => await host.admit(token, use)
+  );
 };
 
 /**
@@ -67,11 +133,14 @@ export const statisticCallerOf = async (
   idempotencyKey: string | undefined;
   attempt: string | undefined;
 }> => {
-  const parsed = callerSchema.safeParse(caller);
-  if (!parsed.success) {
-    throw appErrors.create("app.caller_invalid");
-  }
-  return await appHost(env, app).claimStatistic(parsed.data.token, use);
+  const token = tokenOf(caller);
+  return await admitted(
+    env,
+    app,
+    token,
+    use === "point" ? "write" : "read",
+    async (host) => await host.claimStatistic(token, use)
+  );
 };
 
 /**

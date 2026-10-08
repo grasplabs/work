@@ -224,10 +224,13 @@ export class AppCollectionBinding extends WorkerEntrypoint<
    * it; the kept fields its declaration gives to the method this call
    * runs in are set as `record` has them, and every other one is kept
    * (records.ts, `writeRecord`). Never from a call that may only read
-   * (`app.read_only`).
+   * (`app.read_only`), and only while the call still may write, asked
+   * again just before the write's batch: a call that ended, lost what let
+   * it in, or whose code was stopped while the save was on its way writes
+   * nothing.
    */
   async saveRecord(caller: unknown, input: unknown): Promise<DocumentSummary> {
-    const { collectionId } = this.ctx.props;
+    const { app, collectionId } = this.ctx.props;
     return await this.#run(
       caller,
       "write",
@@ -239,7 +242,10 @@ export class AppCollectionBinding extends WorkerEntrypoint<
           grant.permissionId,
           collectionId,
           input,
-          setter
+          setter,
+          async () => {
+            await callerOf(this.env, app, caller, "write");
+          }
         )
     );
   }

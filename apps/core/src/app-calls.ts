@@ -379,6 +379,15 @@ export const callExport = async (
           : { idempotencyKey: caller.idempotencyKey }),
         ...(caller.attempt === undefined ? {} : { attempt: caller.attempt }),
         app: { id: calling, version: callingVersion },
+        // In on the calling App's permission: each stub call of the
+        // called App's code checks it again (app-bindings.ts).
+        admission: {
+          type: "export",
+          authority: caller.authority,
+          permissionId: grant.permissionId,
+          method: name,
+          access,
+        },
       },
       name,
       [checked.input],
