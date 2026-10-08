@@ -6,8 +6,12 @@ import { corePort, idpOrigin, idpPort, origin, stateDir } from "./e2e/stack.ts";
 
 /** The end-to-end tests of the Playbook's built-ins (their own project). */
 const playbookTests = /(?:board-page|intake|workflow-map)\.e2e\.ts$/u;
-/** A screen's attacks on its frame, run in every browser engine. */
-const screenAttackTests = /screen-attacks\.e2e\.ts$/u;
+/**
+ * What the browser's own sandbox and policy hold, run in every browser
+ * engine: a screen's attacks on its frame, and the product page's refusal
+ * of screen modules and package files.
+ */
+const browserPolicyTests = /(?:screen-attacks|product-page-scripts)\.e2e\.ts$/u;
 const ci = process.env.CI === "true";
 
 /**
@@ -54,18 +58,18 @@ export default defineConfig({
       testMatch: playbookTests,
       workers: 1,
     },
-    // A screen's frame is held by the browser's own sandbox and policy, so
-    // what it can't do is shown in each engine: only that file, as the
-    // rest tests the product, not the browser.
+    // A screen's frame and the product page are held by the browser's own
+    // sandbox and policy, so what they can't do is shown in each engine:
+    // only those files, as the rest tests the product, not the browser.
     {
       name: "firefox",
       use: { ...devices["Desktop Firefox"] },
-      testMatch: screenAttackTests,
+      testMatch: browserPolicyTests,
     },
     {
       name: "webkit",
       use: { ...devices["Desktop Safari"] },
-      testMatch: screenAttackTests,
+      testMatch: browserPolicyTests,
     },
   ],
   // Never a server already running: on this checkout's ports (e2e/stack.ts)

@@ -4,6 +4,7 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import worker from "../src/index.ts";
+import { clientOrigin } from "./sign-in-config.ts";
 
 /** A request as the router sends it: over https, with the secret. */
 const routed = async (path: string) =>
@@ -52,14 +53,31 @@ describe("security headers on the frontend", () => {
     }
   });
 
-  it("runs only its own script files: no inline script, eval or other origin", async () => {
+  it("runs only the frontend's own script files: no inline script, eval, other origin or code of screens and packages", async () => {
     for (const response of await eachPage()) {
       const policy = policyOf(response);
       expect(policy.get("default-src")).toStrictEqual(["'self'"]);
-      expect(policy.get("script-src")).toStrictEqual(["'self'"]);
+      // The deployment's origin as people reach it, not core's address:
+      // only the build's directory and the theme script, so nothing under
+      // /screen-modules/ or /package-artifacts/.
+      expect(policy.get("script-src")).toStrictEqual([
+        `${clientOrigin}/assets/`,
+        `${clientOrigin}/theme.js`,
+      ]);
       // Would otherwise loosen what script-src allows, per kind of script.
       expect(policy.has("script-src-elem")).toBeFalsy();
       expect(policy.has("script-src-attr")).toBeFalsy();
+    }
+  });
+
+  it("starts no worker and applies only the frontend's own stylesheets", async () => {
+    for (const response of await eachPage()) {
+      const policy = policyOf(response);
+      expect(policy.get("worker-src")).toStrictEqual(["'none'"]);
+      expect(policy.get("style-src")).toStrictEqual([
+        `${clientOrigin}/assets/`,
+      ]);
+      expect(policy.has("style-src-elem")).toBeFalsy();
     }
   });
 
@@ -68,7 +86,6 @@ describe("security headers on the frontend", () => {
       const policy = policyOf(response);
       expect(policy.get("connect-src")).toStrictEqual(["'self'"]);
       expect(policy.get("form-action")).toStrictEqual(["'self'"]);
-      expect(policy.get("style-src")).toStrictEqual(["'self'"]);
       expect(policy.get("img-src")).toStrictEqual(["'self'", "data:"]);
     }
   });
@@ -158,6 +175,8 @@ describe("security headers on the screen frame", () => {
         async (path) => policyOf(await routed(path)).get("script-src")
       )
     );
-    expect(others).toStrictEqual(others.map(() => ["'self'"]));
+    expect(others).toStrictEqual(
+      others.map(() => [`${clientOrigin}/assets/`, `${clientOrigin}/theme.js`])
+    );
   });
 });

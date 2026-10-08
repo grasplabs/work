@@ -38,7 +38,7 @@ import {
 import type { GraspLock, PackageArtifact } from "@grasp-os/shared/packages";
 import { z } from "zod";
 
-import { execute, quoted } from "./connections-seed.ts";
+import { execute, quoted, whileBusy } from "./connections-seed.ts";
 import { apiOf } from "./people.ts";
 import type { Person } from "./people.ts";
 import { stateDir } from "./stack.ts";
@@ -155,32 +155,38 @@ const compilerVersion = async (): Promise<string> => {
 };
 
 /** Puts `text` at `key` in core's local R2 bucket. */
-const putFile = (key: string, text: string, type: string): void => {
+const putFile = async (
+  key: string,
+  text: string,
+  type: string
+): Promise<void> => {
   const directory = mkdtempSync(path.join(tmpdir(), "grasp-e2e-artifact-"));
   try {
     const file = path.join(directory, "file");
     writeFileSync(file, text);
-    execFileSync(
-      path.join(root, "node_modules/.bin/wrangler"),
-      [
-        "r2",
-        "object",
-        "put",
-        `grasp-os-files/${key}`,
-        "--local",
-        "--persist-to",
-        stateDir,
-        "--file",
-        file,
-        "--content-type",
-        type,
-      ],
-      {
-        cwd: coreDir,
-        stdio: "pipe",
-        env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
-      }
-    );
+    await whileBusy(() => {
+      execFileSync(
+        path.join(root, "node_modules/.bin/wrangler"),
+        [
+          "r2",
+          "object",
+          "put",
+          `grasp-os-files/${key}`,
+          "--local",
+          "--persist-to",
+          stateDir,
+          "--file",
+          file,
+          "--content-type",
+          type,
+        ],
+        {
+          cwd: coreDir,
+          stdio: "pipe",
+          env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
+        }
+      );
+    });
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -293,9 +299,10 @@ export const seedHostileArtifact = async (
       "core"
     );
     for (const [file, { text, type }] of Object.entries(files)) {
-      putFile(`package-builds/${hash}/${file}`, text, type);
+      // oxlint-disable-next-line no-await-in-loop -- one write at a time
+      await putFile(`package-builds/${hash}/${file}`, text, type);
     }
-    putFile(
+    await putFile(
       `package-builds/${hash}.json`,
       canonicalJson(described),
       "application/json"

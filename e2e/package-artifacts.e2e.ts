@@ -7,6 +7,7 @@ import type { SeededArtifact } from "./package-artifact.ts";
 import { apiOf, pageOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 import { serveAttacker } from "./screen-app.ts";
+import { origin } from "./stack.ts";
 
 // An approved npm package that turns hostile once it runs, and the browser
 // refusing each thing it tries: a worker from a computed name,
@@ -14,8 +15,9 @@ import { serveAttacker } from "./screen-app.ts";
 // elsewhere (one through a custom property set from script), and script in
 // an SVG. Its files are served under the artifact policy (core's
 // packages/serve.ts); a screen runs under the frame's. Each is tried where
-// a browser can run the file today: as a worker, as a document opened on
-// its own, and from a real screen. Every attempt is aimed at a receiver
+// a browser could run the file: as a worker (from a stand-in page, as the
+// product page can't start one), as a document opened on its own, and
+// from a real screen. Every attempt is aimed at a receiver
 // this file runs; a test passes when the browser reported refusing it and
 // the receiver heard nothing.
 
@@ -140,9 +142,30 @@ test("a package's code started as a worker can't start another, import scripts o
   browser,
 }) => {
   const page = await pageOf(browser, builder);
-  // A page of the deployment's origin, whose own policy lets it start a
-  // worker from that origin: the worker then runs under the artifact's.
-  await page.goto("/");
+  const workerUrl = new URL(`${seeded.address}${hostileName}.js`, origin).href;
+  // No page of the deployment can start it any more: the product page's
+  // policy allows no worker, and core refuses its same-origin requests for
+  // the file (product-page-scripts.e2e.ts). This stands in for a page of
+  // the origin that could, as defence in depth: a page without a policy at
+  // a made-up address, and the worker's script fetched from core as a
+  // browser that sends no Sec-Fetch-Site would, its headers (the
+  // artifact's policy among them) passed on as they came. The worker then
+  // runs under the artifact's policy alone.
+  await page.route(`${origin}/worker-host`, async (route) => {
+    await route.fulfill({
+      contentType: "text/html",
+      body: "<!doctype html><title>Worker host</title>",
+    });
+  });
+  await page.route(workerUrl, async (route) => {
+    const headers = Object.fromEntries(
+      Object.entries(await route.request().allHeaders()).filter(
+        ([name]) => !name.startsWith("sec-fetch-")
+      )
+    );
+    await route.fulfill({ response: await route.fetch({ headers }) });
+  });
+  await page.goto("/worker-host");
   // Everything the worker posts, and any error starting it, kept on the
   // page as it comes.
   await page.evaluate((url) => {
@@ -155,7 +178,7 @@ test("a package's code started as a worker can't start another, import scripts o
     worker.addEventListener("error", (event) => {
       reports.push({ error: event.message });
     });
-  }, `${seeded.address}${hostileName}.js`);
+  }, workerUrl);
   // The worker's outcomes and the violations the browser reported to it,
   // whichever order they come in: polled until all are there.
   const reported = async () => {

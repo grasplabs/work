@@ -355,8 +355,8 @@ const expectOverlayOpensAndCloses = async (
 };
 
 /**
- * What the app's policy (style-src 'self') may block on a page, and only
- * there. input-otp adds an empty `<style>` element and fills it through
+ * What the app's policy (style-src: only the frontend's own files) may
+ * block on a page, and only there. input-otp adds an empty `<style>` element and fills it through
  * CSSOM; the policy blocks the element, and the kit's stylesheet carries
  * its rules instead (styles.css). Screens allow inline styles, so there it
  * works as upstream.
@@ -366,7 +366,7 @@ const knownViolations: Record<string, readonly RegExp[]> = {
   // report with the hash of the empty string.
   "input-otp": [
     /^style-src-elem blocked inline at http:\/\/localhost:\d+\/assets\/[\w.-]+\.js:\d+:\d+$/u,
-    /^Applying inline style violates the following Content Security Policy directive 'style-src 'self''\. Either the 'unsafe-inline' keyword, a hash \('sha256-47DEQpj8HBSa\+\/TImW\+5JCeuQeRkm5NMpJWZG3hSuFU='\), or a nonce \('nonce-\.\.\.'\) is required to enable inline execution\. The action has been blocked\.$/u,
+    /^Applying inline style violates the following Content Security Policy directive 'style-src http:\/\/localhost:\d+\/assets\/'\. Either the 'unsafe-inline' keyword, a hash \('sha256-47DEQpj8HBSa\+\/TImW\+5JCeuQeRkm5NMpJWZG3hSuFU='\), or a nonce \('nonce-\.\.\.'\) is required to enable inline execution\. The action has been blocked\.$/u,
   ],
 };
 
