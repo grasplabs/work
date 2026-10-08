@@ -16,11 +16,19 @@
 // in the write that fails it: whatever it answers later is dropped, and
 // only the step's latest attempt can journal an outcome. A failed attempt
 // with retries left journals when the next is due, as an absolute time;
-// one due later parks the step, and once every step still out is parked
-// the activation suspends until the earliest of them, as a wait does.
-// Nothing of the run stays in memory between attempts. A parked step's
-// retry may wait past its time for siblings still out to land: a retry
-// is never early, and the step out is never cut off for it.
+// one due later parks the step. Once the definition has gone quiet (a
+// macrotask after the last park or return) and every step still out is
+// parked, the activation suspends until the earliest of them, as a wait
+// does. Nothing of the run stays in memory between attempts.
+//
+// Gone quiet means only that every sibling the definition reaches through
+// microtasks (in the same turn, or after a step returns) has registered.
+// A sibling it reaches only after a timer or I/O of its own (say `await
+// scheduler.wait(1)` before a `do`) isn't seen in time: the run suspends
+// without it, until the earliest parked step, and the next activation
+// runs it then. Such a step runs late, never early. Likewise a parked
+// step's retry may wait past its time for siblings still out to land:
+// the step out is never cut off for it.
 //
 // Every call of the step API carries the attempt it comes from, if any,
 // in its async context: a callback whose attempt has its outcome (one
@@ -55,7 +63,6 @@ import type { StreamResult } from "./codec.ts";
 import {
   defaultRetryDelayMs,
   delayFunctionTimeoutMs,
-  handlerBudgetMs,
   readCall,
   retryDelayMs,
 } from "./config.ts";
@@ -92,6 +99,7 @@ import type {
   StepRow,
   StepType,
 } from "./journal.ts";
+import { warnRecovered } from "./log.ts";
 import {
   discardChunks,
   isStoredWhole,
@@ -133,6 +141,11 @@ export type Stop = typeof superseded | typeof suspended | Fault | Halt;
 /** What of an activation's limits comes from its host. */
 export interface ActivationLimits {
   readonly leaseMs: number;
+  /**
+   * How much of the alarm handler's wall time attempts may take, from its
+   * start (config.ts): an attempt is claimed only if its deadline fits.
+   */
+  readonly handlerBudgetMs: number;
   /** The most bytes one step's stream result may hold. */
   readonly maxStreamBytes: number;
   /** The most bytes all of the run's stream results may hold. */
@@ -517,15 +530,27 @@ export class Activation {
    * suspended never does, so this stays set once the activation let go.
    */
   #waitPending = false;
-  /** `do` steps of this activation whose calls haven't settled. */
+  /**
+   * `do` steps of this activation whose outcome isn't journaled yet: what
+   * a sleep or a wait may not be reached beside.
+   */
   #stepsInFlight = 0;
   /**
+   * `do` calls of this activation that haven't returned: out at their
+   * effect, parked, or handing their outcome back to a continuation that
+   * may reach another step. The activation suspends only once the parked
+   * ones are all that is out.
+   */
+  #callsOut = 0;
+  /**
    * This activation's parked steps: steps whose next attempt comes later.
-   * They count among the steps in flight; once they are all that is, the
+   * They count among the calls out; once they are all that is, the
    * activation suspends until the earliest is due.
    */
   #parkedCount = 0;
   #parkedWake = Number.POSITIVE_INFINITY;
+  /** Whether a check for quiet waits for its macrotask. */
+  #quietCheckDue = false;
   /** When this activation's alarm handler started: its wall time's start. */
   readonly #startedAt = Date.now();
   /** Whether this activation has claimed an attempt yet. */
@@ -682,17 +707,22 @@ export class Activation {
    * set), and brings the run back with its deadlines as journaled.
    */
   #fault(fault: unknown): void {
-    if (!this.#over) {
-      this.#over = true;
-      try {
-        this.#recordEnd("faulted");
-      } catch {
-        // Storage is failing: the activation row stays open, as after a
-        // crash. The fault itself is what `stopped` reports.
-      }
+    // The one trace of the failure outside the journal, which may be what
+    // failed: the watchdog's activation retries.
+    warnRecovered("workflow_activation_faulted", fault);
+    this.#over = true;
+    try {
+      // Even once over: a halted activation whose run's end can't be
+      // written ends here. One whose end is journaled already (a
+      // suspension whose alarm write failed) keeps it: only an open row
+      // is written.
+      this.#recordEnd("faulted");
+    } catch {
+      // Storage is failing: the activation row stays open, as after a
+      // crash. The fault itself is what `stopped` reports.
     }
-    // Even once over: a suspension whose alarm write failed was over
-    // before it could report how it stopped. An earlier report stands.
+    // A suspension whose alarm write failed was over before it could
+    // report how it stopped. An earlier report stands.
     this.#stop({ fault });
   }
 
@@ -706,13 +736,18 @@ export class Activation {
     }
   }
 
-  /** Refuses a call from this activation, which is over. */
-  async #refuse(): Promise<never> {
+  /** `#endSuperseded`, for a caller that goes on however it is recorded. */
+  #letGo(): void {
     try {
       this.#endSuperseded();
     } catch {
-      // Only the record of it failed; the call is refused all the same.
+      // Only the record of it failed; the activation is over all the same.
     }
+  }
+
+  /** Refuses a call from this activation, which is over. */
+  async #refuse(): Promise<never> {
+    this.#letGo();
     return await never();
   }
 
@@ -813,7 +848,7 @@ export class Activation {
    * as one that timed out, and retried after its backoff. One cut off
    * before is retried at once, as on Cloudflare. Either way the attempts
    * a step gets are bounded by its limit, however often its activations
-   * die.
+   * die or are taken over.
    */
   #nextAttempt(identity: StepIdentity, config: StepConfig): Next {
     return this.#storage.transactionSync((): Next => {
@@ -917,6 +952,14 @@ export class Activation {
    * Returns what comes of it, unless that is a retry: then undefined, as
    * for an attempt cut off before its deadline with retries left, which
    * is retried at once.
+   *
+   * An attempt whose answer came back to its activation after a later one
+   * took over was ended `superseded`, its answer dropped, while the step
+   * still runs: it was cut off all the same, and is judged as one with no
+   * end. Whether its answer came first or this activation reached the
+   * step first changes nothing: the same end is journaled either way,
+   * over the `superseded` one when it is the last allowed or past its
+   * deadline.
    */
   #endCutOffIn(
     sql: SqlStorage,
@@ -925,7 +968,9 @@ export class Activation {
     latest: AttemptRow,
     config: StepConfig
   ): Exclude<Landing, "retry"> | undefined {
-    if (step.state !== "running" || latest.ended_at !== null) {
+    const cutOffAttempt =
+      latest.ended_at === null || latest.ended === "superseded";
+    if (step.state !== "running" || !cutOffAttempt) {
       return undefined;
     }
     const timedOut = now >= latest.deadline;
@@ -962,20 +1007,18 @@ export class Activation {
   #fits(now: number, config: StepConfig): boolean {
     return (
       !this.#claimed ||
-      now + config.timeoutMs <= this.#startedAt + handlerBudgetMs
+      now + config.timeoutMs <= this.#startedAt + this.#limits.handlerBudgetMs
     );
   }
 
   /**
-   * Journals the attempt's outcome if this activation is current and the
-   * attempt is still the step's latest and not ended; otherwise records
-   * that its answer was ignored.
-   */
-  /**
    * Whether the claimed attempt still holds its step: this activation is
-   * current, and the attempt is the step's latest and not ended (one that
-   * timed out is ended in the write that fails it). What it does while it
-   * doesn't (commit, store a chunk) is refused.
+   * current, and the attempt is the step's latest and not ended. The end
+   * fences an attempt that stays the step's latest after its activation
+   * is done with it: one that timed out is ended in the write that fails
+   * it, while its callback, or its stream's upload, may go on and try to
+   * store a chunk. What an attempt does while it doesn't hold its step
+   * (commit, store a chunk) is refused.
    */
   #holds(claim: Claim): boolean {
     if (!this.#current()) {
@@ -1405,8 +1448,34 @@ export class Activation {
   async #park(wake: number): Promise<never> {
     this.#parkedCount += 1;
     this.#parkedWake = Math.min(this.#parkedWake, wake);
-    this.#suspendIfParked();
+    this.#checkWhenQuiet();
     return await never();
+  }
+
+  /**
+   * Decides on suspending once the definition has gone quiet: a macrotask
+   * later, so every call it makes in this turn, or in the microtasks that
+   * turn queues, has registered first. Deciding at once would suspend
+   * before a sibling the definition reaches next is seen, though that one
+   * may be due sooner than the parked step, or due now. A sibling reached
+   * only after the definition's own timer or I/O comes too late for this,
+   * and runs in the next activation, late but never early (see the top of
+   * this file). Scheduled only by
+   * a park or a call's return, once at a time: a check never schedules
+   * another, so nothing loops. The macrotask runs none of the author's
+   * code, and what it decides goes through `#suspendIfParked`, which acts
+   * only for an activation that is still current.
+   */
+  #checkWhenQuiet(): void {
+    if (this.#quietCheckDue || this.#over) {
+      return;
+    }
+    this.#quietCheckDue = true;
+    void (async (): Promise<void> => {
+      await scheduler.wait(0);
+      this.#quietCheckDue = false;
+      this.#suspendIfParked();
+    })();
   }
 
   /**
@@ -1419,7 +1488,7 @@ export class Activation {
       !this.#over &&
       this.#parkedCount > 0 &&
       !this.#waitPending &&
-      this.#stepsInFlight === this.#parkedCount;
+      this.#callsOut === this.#parkedCount;
     if (!quiet) {
       return;
     }
@@ -1437,11 +1506,7 @@ export class Activation {
       return;
     }
     if (!suspendedNow) {
-      try {
-        this.#endSuperseded();
-      } catch {
-        // Only the record of it failed; the activation is over all the same.
-      }
+      this.#letGo();
       return;
     }
     this.#over = true;
@@ -1458,6 +1523,7 @@ export class Activation {
       return await this.#halt(parallelWait("step", name));
     }
     this.#stepsInFlight += 1;
+    this.#callsOut += 1;
     let inFlight = true;
     // Out of flight once its outcome is journaled: a wait started after
     // that can't cost the step its effect. Once, whichever way it lands.
@@ -1465,8 +1531,6 @@ export class Activation {
       if (inFlight) {
         inFlight = false;
         this.#stepsInFlight -= 1;
-        // The steps still out may all be parked now.
-        this.#suspendIfParked();
       }
     };
     try {
@@ -1474,6 +1538,10 @@ export class Activation {
     } finally {
       // Never reached by a step whose call never settles.
       land();
+      this.#callsOut -= 1;
+      // The calls still out may all be parked now, once the continuation
+      // this outcome goes to has had its turn to reach its next step.
+      this.#checkWhenQuiet();
     }
   }
 
@@ -1847,9 +1915,12 @@ export class Activation {
   }
 
   /**
-   * Journals the run's end, unless a later activation took over. `halted`:
-   * the activation stopped on a `Halt`, so it is over already, and only
-   * the generation decides.
+   * Journals the run's end, unless a later activation took over, and
+   * removes the run's alarm. `halted`: the activation stopped on a `Halt`,
+   * so it is over already, and only the generation decides. Never throws:
+   * a failed write faults the activation (journaled, if storage lets it),
+   * and the watchdog alarm, left as it was, brings the run back to the
+   * same end.
    */
   async settle(settlement: Settlement, halted = false): Promise<void> {
     let output: string | null = null;
@@ -1863,31 +1934,44 @@ export class Activation {
     } else {
       failure = JSON.stringify(errorRecord(settlement.error));
     }
-    const settled = this.#storage.transactionSync(() => {
-      if (!(halted ? this.#holdsGeneration() : this.#current())) {
-        return false;
-      }
-      const now = Date.now();
-      this.#storage.sql.exec(
-        "UPDATE run SET status = ?, output = ?, error = ?, ended_at = ?, lease_until = NULL, wake_at = NULL",
-        failure === null ? "complete" : "errored",
-        output,
-        failure,
-        now
-      );
-      this.#storage.sql.exec(
-        "UPDATE activations SET ended_at = ?, ended = 'settled' WHERE generation = ?",
-        now,
-        this.#generation
-      );
-      return true;
-    });
+    const settled = this.#write(() =>
+      this.#storage.transactionSync(() => {
+        if (!(halted ? this.#holdsGeneration() : this.#current())) {
+          return false;
+        }
+        const now = Date.now();
+        this.#storage.sql.exec(
+          "UPDATE run SET status = ?, output = ?, error = ?, ended_at = ?, lease_until = NULL, wake_at = NULL",
+          failure === null ? "complete" : "errored",
+          output,
+          failure,
+          now
+        );
+        this.#storage.sql.exec(
+          "UPDATE activations SET ended_at = ?, ended = 'settled' WHERE generation = ?",
+          now,
+          this.#generation
+        );
+        return true;
+      })
+    );
+    if (settled === failed) {
+      // Faulted, logged and (if storage lets it) journaled: the watchdog
+      // alarm, left as it was, brings the run back to write its end again.
+      return;
+    }
     if (!settled) {
-      this.#endSuperseded();
+      this.#letGo();
       return;
     }
     this.#over = true;
-    // In the same write as the outcome: nothing is left to wake for.
-    await this.#storage.deleteAlarm();
+    try {
+      // In the same write as the outcome: nothing is left to wake for.
+      await this.#storage.deleteAlarm();
+    } catch (error) {
+      // The run's end is journaled: the alarm left behind finds the run
+      // ended when it comes, and does nothing (run.ts).
+      warnRecovered("workflow_alarm_delete_failed", error);
+    }
   }
 }

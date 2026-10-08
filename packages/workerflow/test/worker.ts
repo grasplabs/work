@@ -1,3 +1,4 @@
+// oxlint-disable max-classes-per-file -- the run object classes the test Worker exports, one per host configuration
 // The Worker the tests run against: a run object whose host resolves the
 // test definitions, and nothing of Grasp.
 import type {
@@ -432,6 +433,109 @@ export const definitions: Record<string, WorkflowDefinition> = {
       ]);
     },
   },
+  // Two steps at once that both fail their first attempt: "slow" retries
+  // an hour later, and "fast", after a step "lead" that succeeds, a
+  // second later.
+  "staggered-retries": {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      const failsOnce =
+        (label: string) =>
+        async (context: WorkflowStepContext): Promise<string> => {
+          const receipt = await effect(instanceId, label, context);
+          if (context.attempt === 1) {
+            throw namedError("FlakyError", "attempt 1 failed");
+          }
+          return receipt;
+        };
+      return await Promise.all([
+        step.do(
+          "slow",
+          { retries: { limit: 1, delay: "1 hour", backoff: "constant" } },
+          failsOnce("slow")
+        ),
+        (async (): Promise<string> => {
+          await step.do(
+            "lead",
+            async (context) => await effect(instanceId, "lead", context)
+          );
+          return await step.do(
+            "fast",
+            { retries: { limit: 1, delay: "1 second", backoff: "constant" } },
+            failsOnce("fast")
+          );
+        })(),
+      ]);
+    },
+  },
+  // Two steps at once, for a host whose handlers have little wall time.
+  pair: {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      return await Promise.all([
+        step.do(
+          "first",
+          async (context) => await effect(instanceId, "first", context)
+        ),
+        step.do(
+          "second",
+          async (context) => await effect(instanceId, "second", context)
+        ),
+      ]);
+    },
+  },
+  // A step configured by the params, after a checkpoint each activation
+  // passes, so the test can hold the activation that takes the run over
+  // before it reaches the step.
+  "taken-over": {
+    run: async (event, step) => {
+      const { instanceId, payload } = event;
+      await checkpoint(instanceId, "activation");
+      const config: unknown = paramOf(payload, "config");
+      try {
+        const result: unknown = await Reflect.apply(step.do, step, [
+          "taken",
+          config,
+          async (context: WorkflowStepContext) =>
+            await effect(instanceId, "taken", context),
+        ]);
+        return result;
+      } catch (error) {
+        return { caught: errorOf(error) };
+      }
+    },
+  },
+  // A step whose callback calls a step of its own, which answers only
+  // after the outer attempt timed out; the author catches the timeout and,
+  // once the test lets it, makes one more step.
+  outlived: {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      let caught: { name: string; message: string } | undefined;
+      try {
+        await step.do(
+          "outer",
+          { retries: { limit: 0, delay: 0 }, timeout: "1 second" },
+          async () => {
+            const inner = await step.do(
+              "inner",
+              async (context) => await effect(instanceId, "inner", context)
+            );
+            witness(instanceId, "inner-answered");
+            return inner;
+          }
+        );
+      } catch (error) {
+        caught = errorOf(error);
+      }
+      await checkpoint(instanceId, "after");
+      const final = await step.do(
+        "final",
+        async (context) => await effect(instanceId, "final", context)
+      );
+      return { caught, final };
+    },
+  },
   // A run whose definition ends while one of its steps is still out.
   stray: {
     run: async (event, step) => {
@@ -527,11 +631,23 @@ export const definitions: Record<string, WorkflowDefinition> = {
   },
   // A definition whose replay strays from its first activation, on
   // something outside any step: the wait it reaches, its event type, or
-  // its timeout.
+  // its timeout; or a wait where it first reached a step that retries.
   drifts: {
     run: async (event, step) => {
       const what = paramOf(event.payload, "what");
       const first = (await checkpoint(event.instanceId, "drift")) === 1;
+      if (what === "retry") {
+        if (first) {
+          return await step.do(
+            "flaky",
+            { retries: { limit: 1, delay: "1 hour" } },
+            () => {
+              throw namedError("FlakyError", "attempt failed");
+            }
+          );
+        }
+        return await step.waitForEvent("second", { type: "x" });
+      }
       if (what === "new-wait") {
         return await step.waitForEvent(first ? "first" : "second", {
           type: "x",
@@ -659,6 +775,15 @@ export class TestRuns extends WorkflowRun {
   protected override clock(): number {
     return measuredClock();
   }
+}
+
+/**
+ * Run objects whose alarm handlers give attempts a second of wall time:
+ * an activation's first attempt still runs, and any later one with the
+ * default timeout is left for a fresh activation.
+ */
+export class BudgetedRuns extends TestRuns {
+  protected override readonly handlerBudgetMs = 1000;
 }
 
 export default {
