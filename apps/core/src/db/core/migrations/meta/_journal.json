@@ -351,6 +351,13 @@
       "when": 1791452424012,
       "tag": "0049_onboarding_gate",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1791458630694,
+      "tag": "0050_staff_access",
+      "breakpoints": true
     }
   ]
 }
