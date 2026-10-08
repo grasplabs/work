@@ -699,3 +699,69 @@ describe("reading large metadata", () => {
     });
   });
 });
+
+describe("refusing metadata as busy", () => {
+  it("cancels the registry's answer whenever it refuses one as busy, before or after its size is known", async () => {
+    // Two answers that hold for a moment, then break off, declaring
+    // between them every byte of the isolate's 40 MiB budget for metadata
+    // (src/npm.ts): the most one may be, and the rest. Each ends on its
+    // own: one request's stream can't be ended from another's.
+    let holding = 0;
+    const held = (declared: number) => (): Response => {
+      holding += 1;
+      return new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull: async (controller) => {
+              await scheduler.wait(1000);
+              controller.error(new TypeError("Network connection lost."));
+            },
+          },
+          { highWaterMark: 0 }
+        ),
+        { headers: { "content-length": String(declared) } }
+      );
+    };
+    registry.override("/held-one", held(registryLimits.metadataBytes));
+    registry.override(
+      "/held-two",
+      held(40 * 1024 * 1024 - registryLimits.metadataBytes)
+    );
+    const ending = [
+      outcome(connect.npmMetadata("held-one")),
+      outcome(connect.npmMetadata("held-two")),
+    ];
+    // The count moves as connect asks the registry, not in this loop.
+    // oxlint-disable-next-line no-unmodified-loop-condition
+    while (holding < 2) {
+      // oxlint-disable-next-line no-await-in-loop -- until both are asked
+      await scheduler.wait(10);
+    }
+    // One that says nothing of its size, refused once it would take its
+    // first buffer; and one that declares its size, refused at once.
+    const unsized = streamed(4, 1024);
+    registry.override("/unsized", unsized.respond);
+    const sized = streamed(4, 1024);
+    registry.override(
+      "/sized",
+      () =>
+        new Response(sized.respond().body, {
+          headers: { "content-length": "4096" },
+        })
+    );
+    const refused = [
+      await outcome(connect.npmMetadata("unsized")),
+      await outcome(connect.npmMetadata("sized")),
+    ];
+    const ended = await Promise.all(ending);
+    expect({
+      refused,
+      cancelled: [unsized.state.cancelled, sized.state.cancelled],
+      ended,
+    }).toStrictEqual({
+      refused: ["package.registry_busy", "package.registry_busy"],
+      cancelled: [true, true],
+      ended: ["package.registry_unavailable", "package.registry_unavailable"],
+    });
+  });
+});

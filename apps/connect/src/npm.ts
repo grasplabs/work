@@ -579,7 +579,7 @@ const readMetadata = async (name: string): Promise<NpmMetadata> => {
     name
   );
   const declared = Number(response.headers.get("content-length") ?? 0);
-  let reservation: Reservation;
+  let reservation: Reservation | undefined;
   try {
     reservation = reserveMetadata(
       Number.isSafeInteger(declared) && declared > 0
@@ -587,14 +587,17 @@ const readMetadata = async (name: string): Promise<NpmMetadata> => {
         : 0,
       name
     );
-  } catch (error) {
-    await response.body?.cancel();
-    throw error;
-  }
-  try {
     return await parsedMetadata(name, response, reservation);
+  } catch (error) {
+    // Refused before its body was read (busy as its first buffer is
+    // reserved, say): the registry's read is let go, not left open. A
+    // body being read was cancelled by its reader (`readEachCapped`).
+    if (response.body !== null && !response.body.locked) {
+      await response.body.cancel();
+    }
+    throw error;
   } finally {
-    reservation.release();
+    reservation?.release();
   }
 };
 
