@@ -9,6 +9,7 @@ import {
 import { collectionIdSchema, documentIdSchema } from "@grasp-os/shared/ids";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
+import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   uploadErrors,
@@ -30,7 +31,12 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { stringify } from "yaml";
 
 import { auditedBatch, outboxed, outboxedWhere } from "../audit-outbox.ts";
-import { identify, memberRole, staffRole, teamsOf } from "../auth/identity.ts";
+import {
+  identifyFull,
+  memberRole,
+  staffRole,
+  teamsOf,
+} from "../auth/identity.ts";
 import {
   collections,
   uploadCleanups,
@@ -409,9 +415,14 @@ const requireStillWritable = async (
   collection: CollectionRow
 ): Promise<void> => {
   const staff = auditActorSchema.parse(JSON.parse(row.actor)).type === "staff";
-  const role = staff
-    ? await staffRole(env, row.uploadedBy)
-    : await memberRole(env.DB, row.uploadedBy);
+  // Staff who reach the onboarding alone reach no Knowledge.
+  let role: Role | undefined = undefined;
+  if (staff) {
+    const access = await staffRole(env, row.uploadedBy);
+    role = access?.scope === "full" ? access.role : undefined;
+  } else {
+    role = await memberRole(env.DB, row.uploadedBy);
+  }
   if (role === undefined) {
     throw knowledgeErrors.create("knowledge.forbidden");
   }
@@ -727,7 +738,7 @@ export const originalResponse = async (
   if (request.method !== "GET") {
     return notFound();
   }
-  const person = await identify(env, request.headers);
+  const person = await identifyFull(env, request.headers);
   if (person === undefined) {
     return errorResponse(
       401,

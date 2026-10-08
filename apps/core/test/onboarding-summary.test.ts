@@ -148,6 +148,7 @@ const closed = (known: number, ready = false): GateView => ({
   known,
   parts: [],
   ready,
+  staff: null,
 });
 
 describe("where the summary says an onboarding stands", () => {

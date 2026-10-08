@@ -41,7 +41,7 @@ import {
   verifications,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
-import { mayComeIn } from "../onboarding/gate.ts";
+import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { checkClaims } from "./claims.ts";
 import { devIdpOrigin, oidcProviders, providerIds } from "./config.ts";
 import type { OidcProvider } from "./config.ts";
@@ -283,7 +283,14 @@ const startSession = async <T extends { expiresAt: Date; userId: string }>(
 ) => {
   const now = Date.now();
   if (providerId === providerIds.staff && config.staff) {
-    if (!staffWindowOpen(config, now)) {
+    // A window the company's admin ended, or onboarding access past its
+    // week after Grasp's go, lets nobody sign in (onboarding/gate.ts).
+    if (
+      !(
+        staffWindowOpen(config, now) &&
+        (await staffMayStay(env, config.staff.opened, config.staff.scope, now))
+      )
+    ) {
       return false;
     }
     const expiresAt = Math.min(

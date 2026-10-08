@@ -1,3 +1,4 @@
+import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
 /**
@@ -15,6 +16,21 @@ export const withPerson = async <T>(
   check: SessionCheck,
   run: (person: Identity) => T | Promise<T>
 ): Promise<T> => await run(await check());
+
+/**
+ * `check`, refusing Grasp staff who reach the onboarding alone (`SIGN_IN`'s
+ * staff scope) with `role.forbidden`: what every namespace but the
+ * onboarding's checks with.
+ */
+export const fullAccess =
+  (check: SessionCheck): SessionCheck =>
+  async () => {
+    const person = await check();
+    if (person.onboardingOnly === true) {
+      throw roleErrors.create("role.forbidden");
+    }
+    return person;
+  };
 
 /**
  * How long one reading of who is behind a connection holds. It is read

@@ -24,7 +24,7 @@ import { RpcTarget } from "capnweb";
 import { actorIdsOf, auditLog } from "./audit-log.ts";
 import type { SearchRange } from "./audit-log.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
-import { identify } from "./auth/identity.ts";
+import { identify, identifyFull } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -331,7 +331,7 @@ export const auditExportResponse = async (
       requestId
     );
   }
-  const person = await identify(env, request.headers);
+  const person = await identifyFull(env, request.headers);
   if (person === undefined) {
     return errorResponse(
       401,
