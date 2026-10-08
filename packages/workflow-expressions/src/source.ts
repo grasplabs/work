@@ -13,6 +13,56 @@
  * checks brackets balance, so the source is exactly one jq expression.
  */
 
+import { sizeText, sourceLimits } from "./limits.ts";
+
+/**
+ * Where in a workflow's data flow an expression runs. Each stage sees the
+ * variables Open Workflow 1.0 gives it (dsl.md, "Runtime expression
+ * arguments"), less `$secrets` and `$authorization`, which the profile
+ * doesn't have, plus Grasp's `$params` everywhere and the variables of the
+ * loops and catches around a task inside it.
+ */
+export const stageVariables = {
+  workflowInputFrom: ["workflow", "runtime", "params"],
+  taskIf: ["context", "task", "workflow", "runtime", "params"],
+  taskInputFrom: ["context", "task", "workflow", "runtime", "params"],
+  taskDefinition: ["context", "input", "task", "workflow", "runtime", "params"],
+  taskOutputAs: ["context", "input", "task", "workflow", "runtime", "params"],
+  taskExportAs: [
+    "context",
+    "input",
+    "output",
+    "task",
+    "workflow",
+    "runtime",
+    "params",
+  ],
+  workflowOutputAs: ["context", "workflow", "runtime", "params"],
+} as const satisfies Record<string, readonly string[]>;
+
+/**
+ * Names nothing may bind (an expression's `as`, a loop, a catch): every
+ * stage's variables, upstream's that the profile leaves out, and jq's own.
+ */
+const reservedVariables: ReadonlySet<string> = new Set([
+  ...Object.values(stageVariables).flat(),
+  "secrets",
+  "authorization",
+  "ENV",
+  "ARGS",
+]);
+
+const identifier = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+
+/**
+ * Whether a loop or catch may bind `name`: a jq identifier that isn't a
+ * reserved name and doesn't start with `__`, which jq keeps for itself.
+ */
+export const isBindableVariable = (name: string): boolean =>
+  identifier.test(name) &&
+  !reservedVariables.has(name) &&
+  !name.startsWith("__");
+
 /** The `evaluate` the profile has, and which a definition without one gets. */
 export const profileEvaluate = { language: "jq", mode: "strict" } as const;
 
@@ -53,31 +103,32 @@ export const resolveEvaluate = (
 
 // Strict mode: the whole string is `${ ... }`, or it is a literal.
 const expressionSlot = /^\$\{(?<source>[\s\S]*)\}$/u;
+// Upstream's runtime expression pattern (`^\s*\$\{.+\}\s*$`), which allows
+// whitespace around `${ }`; across lines too, as the profile's slots are.
+const paddedSlot = /^\s*\$\{[\s\S]*\}\s*$/u;
 
 /**
  * What a string in a definition is: an expression (strict mode: nothing
- * but `${ ... }`) or a literal. Never applied to values at run time:
- * input, model output and connector data are data, whatever they contain.
+ * but `${ ... }`), a literal, or `padded`: `${ ... }` with whitespace
+ * around it, which upstream reads as an expression and strict mode
+ * doesn't, so it is neither and is refused. Never applied to values at
+ * run time: input, model output and connector data are data, whatever
+ * they contain.
  */
 export const parseSlot = (
   value: string
 ):
   | { kind: "expression"; source: string }
-  | { kind: "literal"; value: string } => {
+  | { kind: "literal"; value: string }
+  | { kind: "padded"; value: string } => {
   const source = expressionSlot.exec(value)?.groups?.source;
-  return source === undefined
-    ? { kind: "literal", value }
-    : { kind: "expression", source: source.trim() };
+  if (source !== undefined) {
+    return { kind: "expression", source: source.trim() };
+  }
+  return paddedSlot.test(value)
+    ? { kind: "padded", value }
+    : { kind: "literal", value };
 };
-
-/** Limits of one expression's source. */
-export const sourceLimits = {
-  maxBytes: 4096,
-  /** Brackets, braces, parentheses and `if … end` together. */
-  maxNesting: 32,
-  /** Of a strptime/strftime format, which must be a literal. */
-  maxDateFormatBytes: 64,
-} as const;
 
 /**
  * The builtins the profile allows, with the arities each may be called
@@ -180,15 +231,17 @@ export interface SourceProblem {
  * at anything else (an index, a pipe, an operator).
  */
 export interface VariablePath {
-  variable: string;
-  fields: string[];
+  readonly variable: string;
+  readonly fields: readonly string[];
   /** The path is the whole expression: its value is the result. */
-  whole: boolean;
+  readonly whole: boolean;
 }
 
 export interface CheckedSource {
   /** Variables the source reads that it doesn't bind itself with `as`. */
   freeVariables: string[];
+  /** Variables the source binds itself with `as`. */
+  boundVariables: string[];
   /**
    * Every read of a free variable, with the fields it reads directly. What
    * a validator can check statically; anything past a path is dynamic.
@@ -454,7 +507,10 @@ const checkDateFormat = (tokens: readonly Token[], index: number): void => {
     );
   }
   if (new TextEncoder().encode(text).length > sourceLimits.maxDateFormatBytes) {
-    throw new SourceError("unsupported", `${name} with a format over 64 bytes`);
+    throw new SourceError(
+      "unsupported",
+      `${name} with a format over ${sizeText(sourceLimits.maxDateFormatBytes)}`
+    );
   }
   for (let position = 0; position < text.length; position += 1) {
     if (text[position] !== "%") {
@@ -597,7 +653,10 @@ const checkStructure = (tokens: readonly Token[]): Set<number> => {
     if (opens) {
       scopes.push(token.text);
       if (scopes.length > sourceLimits.maxNesting) {
-        throw new SourceError("too_deep", "nesting deeper than 32 levels");
+        throw new SourceError(
+          "too_deep",
+          `nesting deeper than ${sourceLimits.maxNesting} levels`
+        );
       }
     } else if (closes && scopes.pop() !== closing[token.text]) {
       throw new SourceError("invalid", "unbalanced brackets or if … end");
@@ -620,7 +679,10 @@ export const checkSource = (
   | { ok: false; problem: SourceProblem } => {
   try {
     if (new TextEncoder().encode(source).length > sourceLimits.maxBytes) {
-      throw new SourceError("too_large", "source over 4096 bytes");
+      throw new SourceError(
+        "too_large",
+        `source over ${sizeText(sourceLimits.maxBytes)}`
+      );
     }
     const tokens = tokenize(source);
     if (tokens.length === 0) {
@@ -628,6 +690,15 @@ export const checkSource = (
     }
     const words = checkStructure(tokens);
     const bound = boundVariables(tokens, words);
+    // A binding counts for the whole source here, reads before it included:
+    // `$params.nope as $params | 1` would hide the read of `$params.nope`
+    // from every check. So nothing rebinds a name the workflow or jq gives
+    // an expression.
+    for (const name of bound) {
+      if (reservedVariables.has(name)) {
+        throw new SourceError("unsupported", `rebinding $${name}`);
+      }
+    }
     const free = new Set<string>();
     const paths: VariablePath[] = [];
     for (const [index, token] of tokens.entries()) {
@@ -651,7 +722,10 @@ export const checkSource = (
         whole: index === 0 && next === tokens.length,
       });
     }
-    return { ok: true, source: { freeVariables: [...free], paths } };
+    return {
+      ok: true,
+      source: { freeVariables: [...free], boundVariables: [...bound], paths },
+    };
   } catch (error) {
     if (error instanceof SourceError) {
       return { ok: false, problem: error.problem };

@@ -4,12 +4,9 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { describe, expect, it } from "vite-plus/test";
 
 import { expressionErrors } from "../src/errors.ts";
-import {
-  compileExpression,
-  evaluateExpression,
-  evaluatorLimits,
-} from "../src/evaluate.ts";
+import { compileExpression, evaluateExpression } from "../src/evaluate.ts";
 import type { ResultContract } from "../src/evaluate.ts";
+import { evaluatorLimits } from "../src/limits.ts";
 import { builtinAllowlist } from "../src/source.ts";
 import { compileError, json, run } from "./run.ts";
 
@@ -39,19 +36,15 @@ const nestedIfs = (depth: number): string =>
 const scopeOf = (depth: number): string[] =>
   Array.from({ length: depth }, (_, index) => `task-${index}`);
 
-/**
- * How evaluating `source` on null ends: the resource it ran out of, and
- * the wall time it took, in milliseconds.
- */
+/** How evaluating `source` on null ends: the resource it ran out of. */
 const exhaust = async (
   source: string
-): Promise<{ code: string | undefined; reason: unknown; ms: number }> => {
+): Promise<{ code: string | undefined; reason: unknown }> => {
   const expression = await compileExpression(source, {
     stage: "taskDefinition",
     scope: ["runaway"],
     pointer: "/do/0/runaway/set",
   });
-  const started = performance.now();
   const failure: unknown = await evaluateExpression(
     expression,
     {
@@ -69,7 +62,6 @@ const exhaust = async (
     () => {},
     (error: unknown) => error
   );
-  const ms = performance.now() - started;
   const details =
     typeof failure === "object" && failure !== null && "details" in failure
       ? failure.details
@@ -78,7 +70,7 @@ const exhaust = async (
     typeof details === "object" && details !== null && "reason" in details
       ? details.reason
       : undefined;
-  return { code: expressionErrors.codeOf(failure), reason, ms };
+  return { code: expressionErrors.codeOf(failure), reason };
 };
 
 /** Whether `value` is an object whose status is pending. */
@@ -309,22 +301,34 @@ describe("result contracts, with no truthiness or coercion", () => {
     });
   });
 
-  it("needs a duration to be a safe positive integer", async () => {
+  it("needs a duration to be whole milliseconds or a fixed ISO 8601 duration, and returns its milliseconds", async () => {
     const duration = { kind: "duration" } as const;
     expect({
       milliseconds: await run("1500", {}, duration),
+      iso: await run('"PT1.5S"', {}, duration),
+      isoDays: await run('"P1DT1H"', {}, duration),
       zero: await run("0", {}, duration),
       negative: await run("-1", {}, duration),
       fraction: await run("1.5", {}, duration),
       unsafe: await run("9007199254740991 + 1", {}, duration),
-      string: await run('"1500"', {}, duration),
+      numberText: await run('"1500"', {}, duration),
+      isoZero: await run('"PT0S"', {}, duration),
+      isoCalendar: await run('"P1M"', {}, duration),
+      isoBelowMs: await run('"PT0.0001S"', {}, duration),
+      null: await run("null", {}, duration),
     }).toStrictEqual({
       milliseconds: { result: 1500 },
+      iso: { result: 1500 },
+      isoDays: { result: 90_000_000 },
       zero: { error: "expression.type_mismatch" },
       negative: { error: "expression.type_mismatch" },
       fraction: { error: "expression.type_mismatch" },
       unsafe: { error: "expression.result_invalid" },
-      string: { error: "expression.type_mismatch" },
+      numberText: { error: "expression.type_mismatch" },
+      isoZero: { error: "expression.type_mismatch" },
+      isoCalendar: { error: "expression.type_mismatch" },
+      isoBelowMs: { error: "expression.type_mismatch" },
+      null: { error: "expression.type_mismatch" },
     });
   });
 
@@ -398,19 +402,18 @@ describe("result contracts, with no truthiness or coercion", () => {
 });
 
 // Evaluation is synchronous inside the isolate: had a runaway not stopped
-// inside jq, nothing else could have run, these tests included. Fuel stops
-// it at the same point on every run, so the reason is deterministic too.
+// inside jq, nothing else could have run, these tests included. So each
+// test proves termination by finishing, and the reason it gives (fuel or
+// memory, never the platform's limit) proves the meter stopped it; fuel
+// stops it at the same point on every run, so the reason is deterministic.
+// Wall time isn't asserted: it depends on the machine, and workerd doesn't
+// advance its clock while code runs.
 describe("the kill path", () => {
-  it("stops a runaway loop where it is, within the wall time limit", async () => {
+  it("stops a runaway loop where it is, and the next evaluation runs", async () => {
     const runaway = await exhaust("reduce range(0; 1e15) as $i (0; . + 1)");
     const next = await run(". + 1", { input: 1 });
-    expect({
-      runaway: { code: runaway.code, reason: runaway.reason },
-      inTime: runaway.ms < evaluatorLimits.wallMs,
-      next,
-    }).toStrictEqual({
+    expect({ runaway, next }).toStrictEqual({
       runaway: { code: "expression.resource_exhausted", reason: "fuel" },
-      inTime: true,
       next: { result: 2 },
     });
   });
@@ -428,21 +431,12 @@ describe("the kill path", () => {
       source: "reduce range(0; 40) as $i ([0]; . + .) | length",
       reason: "memory",
     },
-  ])(
-    "stops $source by $reason, within the wall time limit",
-    async ({ source, reason }) => {
-      const outcome = await exhaust(source);
-      expect({
-        code: outcome.code,
-        reason: outcome.reason,
-        inTime: outcome.ms < evaluatorLimits.wallMs,
-      }).toStrictEqual({
-        code: "expression.resource_exhausted",
-        reason,
-        inTime: true,
-      });
-    }
-  );
+  ])("stops $source by $reason", async ({ source, reason }) => {
+    await expect(exhaust(source)).resolves.toStrictEqual({
+      code: "expression.resource_exhausted",
+      reason,
+    });
+  });
 
   it("leaves enough budget for real work on a large context", async () => {
     const items = Array.from({ length: 5000 }, (_, index) => ({
