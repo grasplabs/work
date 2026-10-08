@@ -30,13 +30,25 @@
 //   activation ends (activation.ts). Nothing of the run stays in memory.
 //   Every alarm and event replays to the wait, which reads its deadline
 //   back from the journal, so no duplicate, early or late alarm moves it.
+// - A step's failed attempt with a retry left journals the retry's
+//   absolute time in the write that ends the attempt; a retry not yet due
+//   suspends the run the way a sleep does, and every alarm replays to the
+//   step, which reads that time back. An attempt past its timeout is ended
+//   in the journal, and only a step's latest attempt can journal its
+//   outcome, so the late answer of one that timed out is ignored.
 // - Each alarm write follows the journal write it goes with in the same
 //   synchronous turn, so the alarm always says what the latest write
 //   meant, whichever path wrote last.
 //
+// The host enables `nodejs_als` (or `nodejs_compat`, which includes it):
+// each call of the step API is told apart by the attempt it comes from,
+// through AsyncLocalStorage (activation.ts).
+//
 // A step's outcome is journaled before the definition sees it. A step cut
 // off after its effect left but before that write runs again, with the
-// same idempotency key (contracts.ts): at least once, not exactly once.
+// same idempotency key (contracts.ts): at least once, not exactly once. So
+// does a step whose attempt timed out or failed: its retry has a new
+// attempt number, and the same key.
 import { DurableObject } from "cloudflare:workers";
 
 import { Activation, superseded, suspended } from "./activation.ts";
@@ -51,6 +63,7 @@ import { errorRecord, namedError, parseError } from "./errors.ts";
 import {
   createJournal,
   hasJournal,
+  JournalSchemaError,
   journalSchemaVersion,
   readJournal,
   maxEventPayloadBytes,
@@ -154,6 +167,16 @@ const hasEnded = (run: RunRow): boolean =>
 export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   /** How long an activation may go quiet before the alarm recovers the run. */
   protected readonly leaseMs: number = defaultLeaseMs;
+
+  /**
+   * The clock an attempt's running time, and a delay function's, is
+   * measured on: Date.now(). A test stands in for it to measure code that
+   * runs without awaiting anything.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- the seam a subclass overrides
+  protected clock(): number {
+    return Date.now();
+  }
 
   /**
    * The definition a run executes, built afresh for every activation:
@@ -270,7 +293,18 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
 
   /** One activation: replays the definition under a new generation. */
   override async alarm(): Promise<void> {
-    const run = this.#run();
+    let run: RunRow | undefined;
+    try {
+      run = this.#run();
+    } catch (error) {
+      if (!(error instanceof JournalSchemaError)) {
+        throw error;
+      }
+      // A journal this engine doesn't read: nothing here can run it, and
+      // retrying would only refuse it again. No alarm is left to do so.
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
     if (run === undefined || hasEnded(run)) {
       // A duplicate or late alarm: what it would do is journaled already.
       return;
@@ -293,7 +327,13 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     // The watchdog, in the same write as the new generation.
     await storage.setAlarm(now + this.leaseMs);
 
-    const activation = new Activation(storage, run, generation, this.leaseMs);
+    const activation = new Activation(
+      storage,
+      run,
+      generation,
+      this.leaseMs,
+      () => this.clock()
+    );
     const resolved = this.#resolve(run);
     if (!("run" in resolved)) {
       await activation.settle(resolved);

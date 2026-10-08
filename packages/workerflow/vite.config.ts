@@ -18,6 +18,9 @@ export default defineProject({
       main: "./test/worker.ts",
       miniflare: {
         compatibilityDate: "2026-09-15",
+        // AsyncLocalStorage, which tells a step call's attempt apart; hosts
+        // need it too (`nodejs_als`, or `nodejs_compat`, which includes it).
+        compatibilityFlags: ["nodejs_als"],
         durableObjects: {
           RUNS: { className: "TestRuns", useSQLite: true },
         },

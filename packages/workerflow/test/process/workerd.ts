@@ -50,6 +50,9 @@ export const bundleFixture = (directory: string): string => {
       "--no-sparkplug",
       wranglerCli,
       "deploy",
+      // Before the flags: `--compatibility-flags` takes a list, and would
+      // take the script after it as one more.
+      "test/death-fixture.ts",
       "--dry-run",
       "--outdir",
       directory,
@@ -57,7 +60,8 @@ export const bundleFixture = (directory: string): string => {
       "workerflow-death",
       "--compatibility-date",
       "2026-09-15",
-      "test/death-fixture.ts",
+      "--compatibility-flags",
+      "nodejs_als",
     ],
     { cwd: packageRoot, stdio: "pipe", timeout: bundleTimeoutMs }
   );
@@ -95,6 +99,7 @@ const config :Workerd.Config = (
 const main :Workerd.Worker = (
   modules = [(name = "worker.js", esModule = embed "worker.js")],
   compatibilityDate = "2026-09-15",
+  compatibilityFlags = ["nodejs_als"],
   bindings = [
     (name = "RUNS", durableObjectNamespace = "Runs"),
     (name = "EFFECTS", service = "effects"),
