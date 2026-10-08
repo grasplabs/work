@@ -71,6 +71,10 @@ export const compilerAssets = {
   kit: "kit.json",
   kitModules: "kit-modules.json",
   sdkModules: "sdk-modules.json",
+  /** The package builder's module (src/packages/worker.ts). */
+  packageBuilder: "package-builder.js",
+  /** esbuild's WebAssembly, which the package builder runs. */
+  esbuildWasm: "esbuild.wasm",
 } as const;
 
 /**

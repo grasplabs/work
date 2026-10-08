@@ -1,0 +1,25 @@
+{
+  "name": "@grasp-os/open-workflow",
+  "private": true,
+  "description": "The grasp-open-workflow/1 profile: checks a workflow.json against the restricted Open Workflow 1.0.3 profile before anything compiles or runs it",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./catalog": "./src/catalog.ts",
+    "./diagnostics": "./src/diagnostics.ts",
+    "./provenance": "./src/provenance.ts",
+    "./validate": "./src/validate.ts"
+  },
+  "dependencies": {
+    "@grasp-os/sdk": "workspace:*",
+    "@grasp-os/shared": "workspace:*",
+    "@grasp-os/workflow-expressions": "workspace:*"
+  },
+  "devDependencies": {
+    "@cfworker/json-schema": "catalog:",
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "yaml": "catalog:"
+  }
+}

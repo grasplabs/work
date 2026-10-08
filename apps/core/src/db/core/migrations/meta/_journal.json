@@ -337,6 +337,13 @@
       "when": 1791371662080,
       "tag": "0047_app_version_workflow_calls",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1791389141070,
+      "tag": "0048_dependency_locks",
+      "breakpoints": true
     }
   ]
 }

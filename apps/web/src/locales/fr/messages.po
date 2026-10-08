@@ -729,6 +729,10 @@ msgid "Builder"
 msgstr "Concepteur"
 
 #: src/activity/audit-words.ts
+msgid "Built approved packages"
+msgstr "A compilé des paquets approuvés"
+
+#: src/activity/audit-words.ts
 msgid "Called a model"
 msgstr "A appelé un modèle"
 
