@@ -1642,6 +1642,10 @@ msgstr "Das Grasp-Team kann hier keine Konten verbinden und nicht ändern, was a
 msgid "Grasp staff signed in"
 msgstr "Grasp-Mitarbeitende haben sich angemeldet"
 
+#: src/route-error.tsx
+msgid "Grasp was updated while this page was open. Try again to load the new version."
+msgstr "Grasp wurde aktualisiert, während diese Seite offen war. Versuchen Sie es erneut, um die neue Version zu laden."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp won't run what {about} needs: {requirement}"
 msgstr "Grasp führt nicht aus, was {about} braucht: {requirement}"

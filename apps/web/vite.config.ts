@@ -18,7 +18,15 @@ const linguiConfig = getConfig({ configPath: linguiConfigPath });
 
 export default defineConfig({
   plugins: [
-    tanstackRouter({ target: "react", autoCodeSplitting: true }),
+    tanstackRouter({
+      target: "react",
+      autoCodeSplitting: true,
+      // Only a page itself is a file of its own. What stands in its place
+      // (failed, not found, loading) comes with the app: when a page's file
+      // can't be fetched, as after a new release, the error that says so
+      // must not need a file of its own too.
+      codeSplittingOptions: { defaultBehavior: [["component"]] },
+    }),
     react(),
     babel({
       // Lingui's macros turn the English in the code into catalog lookups
