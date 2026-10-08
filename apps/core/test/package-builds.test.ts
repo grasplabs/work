@@ -23,6 +23,7 @@ import {
   refusalsOf,
 } from "./npm.ts";
 import type { Published } from "./npm.ts";
+import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
 // Building an App's approved packages (src/packages/build.ts) with
@@ -1631,7 +1632,174 @@ describe("one build of an App's packages at a time", () => {
   });
 });
 
+describe("waiting for another build", () => {
+  it("refuses the artifact another build pinned while it waited when the policy moved on meanwhile", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const admin = await personApi("admin");
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    // Built and pinned once; the pin taken out again, as if no build had
+    // pinned it yet.
+    await buildOf(app, "browser");
+    const pinned = await storedLock(app);
+    await storeLock(app, { ...pinned, artifacts: {} });
+    // Another build holds the lease for a moment.
+    await env.DB.prepare(
+      "INSERT INTO dependency_build_leases (app_id, graph_hash, target, holder, expires_at) VALUES (?, ?, 'browser', 'another', ?)"
+    )
+      .bind(app.app, app.request.graphHash, Date.now() + 1500)
+      .run();
+    // While this one waits, the other pins the artifact and the policy
+    // moves on.
+    let meanwhile: Promise<void> | undefined;
+    const waiting = new Proxy(env.DB, {
+      get: (target, property): unknown =>
+        property === "prepare"
+          ? (query: string) => {
+              if (
+                meanwhile === undefined &&
+                query.includes("dependency_build_leases")
+              ) {
+                meanwhile = (async () => {
+                  await storeLock(app, pinned);
+                  await admin.api.dependencies.grantApprover({
+                    type: "person",
+                    userId: identity.userId,
+                  });
+                })();
+              }
+              return target.prepare(query);
+            }
+          : bound(target, property),
+    });
+    const outcome = await failure(
+      buildDependencies({ ...env, DB: waiting }, identity, {
+        app: app.app,
+        graphHash: app.request.graphHash,
+        target: "browser",
+        policyGeneration,
+      })
+    );
+    await meanwhile;
+    expect(outcome.code).toBe("dependency.policy_changed");
+  });
+});
+
 describe("what a build leaves behind", () => {
+  it("deletes, from the cron, the leases builds left that nobody took again, and only those", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const now = Date.now();
+    // A build of a graph nobody asks for again died holding its lease;
+    // another build holds its lease now.
+    const lease = env.DB.prepare(
+      "INSERT INTO dependency_build_leases (app_id, graph_hash, target, holder, expires_at) VALUES (?, ?, ?, ?, ?)"
+    );
+    await env.DB.batch([
+      lease.bind(app.app, hashOf("a"), "browser", "died", now - 1000),
+      lease.bind(app.app, hashOf("b"), "browser", "building", now + 60_000),
+    ]);
+    await sweepPackageFiles(env, new Date(now));
+    const { results } = await env.DB.prepare(
+      "SELECT holder FROM dependency_build_leases WHERE app_id = ?"
+    )
+      .bind(app.app)
+      .all<{ holder: string }>();
+    expect(results.map(({ holder }) => holder)).toStrictEqual(["building"]);
+  });
+
+  it("reads what the cron sweeps by index, never a whole table", async () => {
+    const recorded = await recordedQueries(async () => {
+      await sweepPackageFiles(env, new Date(Date.now() + 2 * 60 * 60 * 1000));
+    });
+    const swept = recorded.filter(({ query }) =>
+      /package_cleanups|dependency_build_leases/u.test(query)
+    );
+    const plans = await Promise.all(swept.map(planOf));
+    expect({
+      tables: [
+        swept.some(({ query }) => query.includes("package_cleanups")),
+        swept.some(({ query }) => query.includes("dependency_build_leases")),
+      ],
+      scans: plans.flat().filter((step) => fullScan.test(step)),
+    }).toStrictEqual({ tables: [true, true], scans: [] });
+  });
+
+  it("deletes, from the cron, the files of a build whose lock gives up its room right after the build pins them", async () => {
+    const name = named("evicted");
+    await publish(plain(name, "1.0.0"));
+    const app = await approvedApp({ [name]: "1.0.0" }, { targets: ["server"] });
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    const lockText = async (): Promise<string | null> =>
+      await env.DB.prepare(
+        "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+      )
+        .bind(app.app, app.request.graphHash)
+        .first<string>("lock");
+    // Right after the pin lands, another resolve takes the lock's room,
+    // recording its files for cleanup as it deletes it (locks.ts).
+    let evicted: string | undefined;
+    const racing = new Proxy(env.DB, {
+      get: (target, property): unknown =>
+        property === "batch"
+          ? async (statements: D1PreparedStatement[]) => {
+              const before = await lockText();
+              const results = await target.batch(statements);
+              const after = await lockText();
+              if (evicted === undefined && after !== null && after !== before) {
+                const lock = graspLockSchema.parse(JSON.parse(after));
+                const pins = Object.values(lock.artifacts ?? {}).flatMap(
+                  (each) => Object.values(each).map(({ hash }) => hash)
+                );
+                [evicted] = pins;
+                await target.batch([
+                  target
+                    .prepare(
+                      "INSERT INTO package_cleanups (key, kind, created_at) VALUES (?, 'build', ?) ON CONFLICT (key) DO UPDATE SET created_at = excluded.created_at"
+                    )
+                    .bind(evicted ?? "", Date.now()),
+                  target
+                    .prepare(
+                      "DELETE FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+                    )
+                    .bind(app.app, app.request.graphHash),
+                ]);
+              }
+              return results;
+            }
+          : bound(target, property),
+    });
+    const built = await buildDependencies({ ...env, DB: racing }, identity, {
+      app: app.app,
+      graphHash: app.request.graphHash,
+      target: "server",
+      policyGeneration,
+    });
+    const left = await env.FILES.list({
+      prefix: `package-builds/${built.hash}`,
+    });
+
+    const later = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    for (let run = 0; run < 20; run += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await sweepPackageFiles(env, later);
+    }
+    const after = await env.FILES.list({
+      prefix: `package-builds/${built.hash}`,
+    });
+    expect({
+      evicted: evicted === built.hash,
+      left: left.objects.length > 0,
+      after: after.objects.length,
+    }).toStrictEqual({ evicted: true, left: true, after: 0 });
+  });
+
   it("deletes, from the cron, the files of a build that never pinned them", async () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });

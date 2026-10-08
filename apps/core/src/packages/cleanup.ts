@@ -1,14 +1,15 @@
 import { integritySchema } from "@grasp-os/shared/dependencies";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, asc, eq, lt } from "drizzle-orm";
+import { and, asc, eq, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { packageCleanups } from "../db/core/schema.ts";
+import { dependencyBuildLeases, packageCleanups } from "../db/core/schema.ts";
 import { deleteArtifact } from "./build.ts";
 import { tarballKey } from "./tarballs.ts";
 
-// Deleting the package store's files no lock names any more, from the
-// cron: tarballs fetched for a resolve that failed or whose lock was
+// Deleting, from the cron, the build leases that lapsed with nobody to
+// take them again (`sweepBuildLeases`), and the package store's files no
+// lock names any more: tarballs fetched for a resolve that failed or whose lock was
 // deleted, artifacts a build wrote and never pinned, and artifacts whose
 // pin or lock went. Each was recorded before it could be left behind
 // (`package_cleanups`, cleanup-records.ts and locks.ts); this deletes its
@@ -67,6 +68,31 @@ const namedByLocks = async (
   return new Set(results.map(({ key }) => key));
 };
 
+/** Most lapsed build leases one run deletes. */
+const leaseBatch = 100;
+
+/**
+ * Deletes, oldest first, build leases that lapsed: a build that died
+ * holding one, of a graph nobody builds again, would otherwise leave it
+ * for good (build.ts takes a lapsed lease again only for its own App,
+ * graph and target). One statement, by the expiry's index: a lease taken
+ * again as it runs no longer lapsed, and stays.
+ */
+const sweepBuildLeases = async (env: Env, now: Date): Promise<void> => {
+  const db = drizzle(env.DB);
+  const lapsed = db
+    .select({ rowid: sql`rowid` })
+    .from(dependencyBuildLeases)
+    .where(lt(dependencyBuildLeases.expiresAt, now))
+    .orderBy(asc(dependencyBuildLeases.expiresAt))
+    .limit(leaseBatch);
+  await db
+    .delete(dependencyBuildLeases)
+    .where(
+      and(sql`rowid IN ${lapsed}`, lt(dependencyBuildLeases.expiresAt, now))
+    );
+};
+
 /**
  * Deletes the files of records at least an hour old that no lock names,
  * and clears each record, a batch a run. A record recorded again while
@@ -74,7 +100,7 @@ const namedByLocks = async (
  * fails is logged and moved to the back of the queue, so one that keeps
  * failing never holds up the rest.
  */
-export const sweepPackageFiles = async (env: Env, now: Date): Promise<void> => {
+const sweepFiles = async (env: Env, now: Date): Promise<void> => {
   const db = drizzle(env.DB);
   try {
     const due = await db
@@ -127,4 +153,18 @@ export const sweepPackageFiles = async (env: Env, now: Date): Promise<void> => {
   } catch (error) {
     log.error("packages.cleanup_failed", errorFields(error));
   }
+};
+
+/**
+ * Deletes the build leases that lapsed (`sweepBuildLeases`), then the
+ * files of records at least an hour old that no lock names (`sweepFiles`).
+ * Never throws.
+ */
+export const sweepPackageFiles = async (env: Env, now: Date): Promise<void> => {
+  try {
+    await sweepBuildLeases(env, now);
+  } catch (error) {
+    log.error("packages.lease_sweep_failed", errorFields(error));
+  }
+  await sweepFiles(env, now);
 };

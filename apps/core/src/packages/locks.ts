@@ -1,5 +1,8 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import { dependencyTargetSchema } from "@grasp-os/shared/dependencies";
+import {
+  dependencyErrors,
+  dependencyTargetSchema,
+} from "@grasp-os/shared/dependencies";
 import type { DependencyTarget } from "@grasp-os/shared/dependencies";
 import { canonicalJson } from "@grasp-os/shared/json";
 import {
@@ -8,8 +11,9 @@ import {
   targetConfigHash,
 } from "@grasp-os/shared/packages";
 import type { GraspLock, PackageLimits } from "@grasp-os/shared/packages";
-import { and, count, eq, sql } from "drizzle-orm";
+import { and, count, eq, gte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { outboxed } from "../audit-outbox.ts";
@@ -34,11 +38,18 @@ import {
 //   deleted in the batch that supersedes or denies a request
 //   (`unusedLockStatements`). An App holds at most `packageLimits.appLocks`:
 //   a new lock takes the room of the oldest approval no longer in use (not
-//   pending, nor the latest for its targets: `stale`), in the batch that
-//   stores it, so changing graphs again and again never locks an App out.
-//   Only locks in use count against the limit (`package.quota`), checked
-//   again in the statement that inserts one, so two resolves can't both
-//   pass a check made before.
+//   pending, nor the latest for its targets, nor read through an artifact
+//   address that still holds: `stale`), in the batch that stores it, so
+//   changing graphs again and again never locks an App out for longer
+//   than an address holds (about 12 hours). Only locks in use count
+//   against the limit (`package.quota`), checked again in the statement
+//   that inserts one, so two resolves can't both pass a check made before.
+// - A page losing its files to another graph's resolve. An artifact's
+//   address holds for hours (address.ts), and serve.ts serves only what
+//   the lock still pins: a lock gives up its room only once every address
+//   of its artifacts handed out has expired, recorded on the lock before
+//   each is handed out (`holdLockFor`). Those locks count against the
+//   limit like any in use, so it still holds.
 // - Files no lock names any more. Each tarball and pinned artifact of a
 //   deleted lock is recorded for cleanup in the same batch
 //   (`package_cleanups`), and the cron deletes what no lock names by then
@@ -113,14 +124,16 @@ const unused = (lock: string): SQL =>
 
 /**
  * That the lock `lock` is no longer in use: neither the App's pending
- * request names it, nor its latest approval for any set of targets. An
- * approval never ends (until GRA-359), so an App that changes its graph
- * again and again keeps older approvals; their locks are what a new one
- * may take the room of. A resolve back to such a graph finds its approval
+ * request names it, nor its latest approval for any set of targets, and
+ * no address of one of its artifacts handed out still holds
+ * (`holdLockFor`). An approval never ends (until GRA-359), so an App that
+ * changes its graph again and again keeps older approvals; their locks
+ * are what a new one may take the room of, once nothing handed out reads
+ * them any more. A resolve back to such a graph finds its approval
  * standing, and writes its lock again.
  */
 const stale = (lock: string): SQL =>
-  sql`NOT EXISTS (SELECT 1 FROM dependency_requests r WHERE r.app_id = ${sql.raw(lock)}.app_id AND r.graph_hash = ${sql.raw(lock)}.graph_hash AND (r.status = 'pending' OR (r.status = 'approved' AND NOT EXISTS (SELECT 1 FROM dependency_requests n WHERE n.app_id = r.app_id AND n.status = 'approved' AND n.targets = r.targets AND n.decided_at > r.decided_at))))`;
+  sql`(COALESCE(${sql.raw(lock)}.served_until, 0) <= ${Date.now()} AND NOT EXISTS (SELECT 1 FROM dependency_requests r WHERE r.app_id = ${sql.raw(lock)}.app_id AND r.graph_hash = ${sql.raw(lock)}.graph_hash AND (r.status = 'pending' OR (r.status = 'approved' AND NOT EXISTS (SELECT 1 FROM dependency_requests n WHERE n.app_id = r.app_id AND n.status = 'approved' AND n.targets = r.targets AND n.decided_at > r.decided_at)))))`;
 
 /**
  * That the lock `lock` is one a new lock of `app` takes the room of, as
@@ -223,7 +236,7 @@ export const lockStatements = async (
   const guard = db
     .insert(dependencyLocks)
     .select(
-      sql`SELECT ${app}, ${graphHash}, NULL, 0 WHERE NOT EXISTS (SELECT 1 FROM ${dependencyLocks} WHERE ${where} AND ${dependencyLocks.lock} = ${stored})`
+      sql`SELECT ${app}, ${graphHash}, NULL, 0, NULL WHERE NOT EXISTS (SELECT 1 FROM ${dependencyLocks} WHERE ${where} AND ${dependencyLocks.lock} = ${stored})`
     );
   if (row === undefined) {
     const live = await db
@@ -250,7 +263,7 @@ export const lockStatements = async (
         db
           .insert(dependencyLocks)
           .select(
-            sql`SELECT ${app}, ${graphHash}, ${stored}, ${Date.now()} WHERE (SELECT COUNT(*) FROM ${dependencyLocks} WHERE ${dependencyLocks.appId} = ${app}) < ${limits.appLocks}`
+            sql`SELECT ${app}, ${graphHash}, ${stored}, ${Date.now()}, NULL WHERE (SELECT COUNT(*) FROM ${dependencyLocks} WHERE ${dependencyLocks.appId} = ${app}) < ${limits.appLocks}`
           )
           .onConflictDoNothing(),
         guard,
@@ -300,3 +313,42 @@ export const lockStatements = async (
  */
 export const unusedLockStatements = (db: DrizzleD1Database, app: string) =>
   forgetLocks(db, app, unused);
+
+/**
+ * Records on `app`'s lock of `graphHash` that an address of one of its
+ * artifacts holds until `until`, before the address is handed out: until
+ * then the lock keeps its room (`stale`). It writes only when it moves
+ * the time on, so about once a window; the read in the same batch says
+ * whether the lock holds that long. A lock gone (another resolve took its
+ * room as this ran) is refused as one never resolved: its address would
+ * serve nothing.
+ */
+export const holdLockFor = async (
+  env: Env,
+  { app, graphHash, until }: { app: string; graphHash: string; until: number }
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const where = and(
+    eq(dependencyLocks.appId, app),
+    eq(dependencyLocks.graphHash, graphHash)
+  );
+  const [, held] = await db.batch([
+    db
+      .update(dependencyLocks)
+      .set({ servedUntil: new Date(until) })
+      .where(
+        and(where, sql`COALESCE(${dependencyLocks.servedUntil}, 0) < ${until}`)
+      ),
+    db
+      .select({ app: dependencyLocks.appId })
+      .from(dependencyLocks)
+      .where(and(where, gte(dependencyLocks.servedUntil, new Date(until)))),
+  ]);
+  if (held.length === 0) {
+    throw dependencyErrors.create("dependency.invalid", {
+      issues: [
+        "graphHash: no lock for this graph: resolve the dependencies first",
+      ],
+    });
+  }
+};

@@ -1,7 +1,7 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { packageCleanups } from "../db/core/schema.ts";
+import { dependencyLocks, packageCleanups } from "../db/core/schema.ts";
 
 // Recording files of the package store for cleanup before they could be
 // left behind (cleanup.ts deletes them): the intent first, then the write,
@@ -27,11 +27,24 @@ export const recordCleanup = async (
     });
 };
 
-/** Clears `key`'s record once a lock names what was written. */
-export const clearCleanup = async (env: Env, key: string): Promise<void> => {
+/**
+ * Clears the record of artifact `hash` once `app`'s lock of `graphHash`
+ * pins it, and only while it does, in one statement: a resolve that takes
+ * the lock's room records the artifact again as it deletes the lock
+ * (locks.ts), and that record must stand, before or after this runs.
+ */
+export const clearBuildCleanup = async (
+  env: Env,
+  { app, graphHash, hash }: { app: string; graphHash: string; hash: string }
+): Promise<void> => {
   await drizzle(env.DB)
     .delete(packageCleanups)
-    .where(eq(packageCleanups.key, key));
+    .where(
+      and(
+        eq(packageCleanups.key, hash),
+        sql`EXISTS (SELECT 1 FROM ${dependencyLocks} l, json_each(l.lock, '$.artifacts') c, json_each(c.value) pin WHERE l.app_id = ${app} AND l.graph_hash = ${graphHash} AND json_extract(pin.value, '$.hash') = ${hash})`
+      )
+    );
 };
 
 /**

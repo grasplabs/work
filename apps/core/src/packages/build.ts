@@ -52,8 +52,10 @@ import {
 } from "../db/core/schema.ts";
 import { policyGenerationSql } from "../dependencies/policy.ts";
 import { admitDependencies } from "../dependencies/requests.ts";
+import { windowedAccessEnd } from "../screen-frame.ts";
 import { packageArtifactAddress } from "./address.ts";
-import { clearCleanup, recordCleanup } from "./cleanup-records.ts";
+import { clearBuildCleanup, recordCleanup } from "./cleanup-records.ts";
+import { holdLockFor } from "./locks.ts";
 import { graphOfLock } from "./resolve.ts";
 import { verifiedTarball } from "./tarballs.ts";
 
@@ -655,7 +657,9 @@ const builtArtifact = async (env: Env, request: BuildRequest) => {
 
 /**
  * Where a build's files are served: only the browser target's, which
- * runs in a browser; the others never leave core.
+ * runs in a browser; the others never leave core. The lock records how
+ * long the address holds first, so it keeps its room until then
+ * (`holdLockFor`, locks.ts).
  */
 const addressOf = async (
   env: Env,
@@ -665,10 +669,14 @@ const addressOf = async (
     target,
   }: { app: AppId; graphHash: string; target: PackageArtifact["target"] },
   hash: string
-): Promise<string | null> =>
-  target === "browser"
-    ? await packageArtifactAddress(env, { app, graphHash, hash })
-    : null;
+): Promise<string | null> => {
+  if (target !== "browser") {
+    return null;
+  }
+  const now = Date.now();
+  await holdLockFor(env, { app, graphHash, until: windowedAccessEnd(now) });
+  return await packageArtifactAddress(env, { app, graphHash, hash }, now);
+};
 
 /** How long a build may hold its lease before another may take it. */
 const leaseMs = 5 * 60 * 1000;
@@ -934,8 +942,13 @@ const buildUnderLease = async (
   if (holds !== hash) {
     throw packageErrors.create("package.artifact_mismatch");
   }
-  // Pinned: its files are named by the lock, and need no cleanup.
-  await clearCleanup(env, hash);
+  // Pinned: its files are named by the lock, and need no cleanup, unless
+  // the lock gave up its room since (and recorded them again).
+  await clearBuildCleanup(env, {
+    app: asked.app,
+    graphHash: asked.graphHash,
+    hash,
+  });
   log.info("packages.built", {
     app: asked.app,
     approval,
@@ -1005,9 +1018,11 @@ export const buildDependencies = async (
   };
   await leaseFor(env, leased, holder);
   try {
-    // Another build may have pinned it while this one waited.
-    const now = await pinnedNow(env, building);
-    return now.kept ?? (await buildUnderLease(env, by, building, now));
+    // The wait may have been long: what decides now is what holds, and
+    // another build may have pinned it while this one waited.
+    const leasedBuild: Asked = { ...building, admitted: await admit() };
+    const now = await pinnedNow(env, leasedBuild);
+    return now.kept ?? (await buildUnderLease(env, by, leasedBuild, now));
   } finally {
     await giveLeaseBack(env, leased, holder);
   }
