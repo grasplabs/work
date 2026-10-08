@@ -17,6 +17,7 @@ const messages: Readonly<Record<SignInErrorCode, MessageDescriptor>> = {
   email_unverified: msg`That account's email address isn't verified.`,
   staff_not_listed: msg`That staff account hasn't been given access here.`,
   staff_window_closed: msg`Staff access to this organization isn't open.`,
+  not_open_yet: msg`Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email.`,
   "account not linked": msg`That email address already signs in with another account.`,
   state_mismatch: msg`Sign-in timed out or was started elsewhere. Try again.`,
   state_not_found: msg`Sign-in timed out or was started elsewhere. Try again.`,

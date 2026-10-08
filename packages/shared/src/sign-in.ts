@@ -11,6 +11,9 @@ const signInRefusals = [
   "staff_not_listed",
   "staff_window_closed",
   "method_not_allowed",
+  // The deployment is onboarding: only its admins and Grasp's staff come in
+  // until Grasp's go (core's onboarding/gate.ts).
+  "not_open_yet",
 ] as const;
 export type SignInRefusal = (typeof signInRefusals)[number];
 
