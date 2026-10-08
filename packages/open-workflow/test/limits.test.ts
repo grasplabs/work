@@ -112,14 +112,24 @@ describe("the definition's structure", () => {
     );
   });
 
-  it("stops at the expression limit", async () => {
-    const tasks = tasksOf(profileLimits.maxExpressions / 4 + 1, () => ({
-      set: { a: "${ 1 }", b: "${ 2 }", c: "${ 3 }", d: "${ 4 }" },
-    }));
-    await expect(codesOf(plain(tasks))).resolves.toContain(
-      "expression.too_many"
-    );
-  });
+  // Reaching the limit means recording maxExpressions expressions, and
+  // validation compiles every recorded one in a fresh jq instance: about a
+  // second here, already the cheapest expression there is. Shared CI runners
+  // have pushed it past the default 5 s, so this one test gets headroom.
+  const expressionLimitTimeoutMs = 30_000;
+
+  it(
+    "stops at the expression limit",
+    async () => {
+      const tasks = tasksOf(profileLimits.maxExpressions / 4 + 1, () => ({
+        set: { a: "${ 1 }", b: "${ 2 }", c: "${ 3 }", d: "${ 4 }" },
+      }));
+      await expect(codesOf(plain(tasks))).resolves.toContain(
+        "expression.too_many"
+      );
+    },
+    expressionLimitTimeoutMs
+  );
 
   it("checks a long chain of forward transitions one by one", async () => {
     const count = profileLimits.maxTasks;
