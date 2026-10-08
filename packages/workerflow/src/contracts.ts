@@ -7,10 +7,10 @@
 // This profile is partial. It has named `do` steps with retries and
 // timeouts, sleeps and event waits, persisted and replayed; step results
 // are structured values (codec.ts) or byte streams (streams.ts), and a
-// step may be `sensitive`. An instance can be paused, resumed, terminated,
-// restarted (from a step, too) and deleted (instance.ts). Rollbacks and
-// retention come in later slices; until then they are absent or refused,
-// never silently ignored.
+// step may be `sensitive`, and may register a rollback. An instance can be
+// paused, resumed, terminated (rolling back, too), restarted (from a step,
+// too) and deleted (instance.ts). Retention comes in a later slice; until
+// then it is absent, never silently ignored.
 
 /** What a run's definition is given when it runs. */
 export interface WorkflowEvent<Params = unknown> {
@@ -115,6 +115,44 @@ export interface WorkflowStepConfig {
   readonly sensitive?: "output";
 }
 
+/**
+ * What a step's rollback is given, as Cloudflare gives it, and the key
+ * and attempt of the rollback itself.
+ */
+export interface WorkflowRollbackContext<Output = unknown> {
+  /** The step's own context, as its latest attempt was given it. */
+  readonly ctx: WorkflowStepContext;
+  /**
+   * Why the run rolls back: the error that ended it, or, for a
+   * `terminate({ rollback: true })`, an error named `Terminated`.
+   */
+  readonly error: Error;
+  /** What the step returned; undefined if it failed or never answered. */
+  readonly output: Output | undefined;
+  /** @deprecated As Cloudflare's: `${name}-${count}`; use `ctx.step`. */
+  readonly stepName: string;
+  /**
+   * The rollback's own key: the same for each of its attempts, and never
+   * the step's (`ctx.idempotencyKey`), so a receiver tells undoing an
+   * effect apart from doing it again.
+   */
+  readonly idempotencyKey: string;
+  /** Which attempt at the rollback this is, from 1. */
+  readonly attempt: number;
+}
+
+/**
+ * A step's rollback: run, should the run roll back, after the rollbacks of
+ * every step started after it. `rollbackConfig` takes `retries` and
+ * `timeout`, with a step's defaults.
+ */
+export interface WorkflowStepRollbackOptions<Output = unknown> {
+  readonly rollback: (
+    context: WorkflowRollbackContext<Output>
+  ) => Promise<void> | void;
+  readonly rollbackConfig?: Pick<WorkflowStepConfig, "retries" | "timeout">;
+}
+
 /** An event as a wait receives it. */
 export interface WorkflowStepEvent<Payload = unknown> {
   readonly payload: Payload;
@@ -133,15 +171,23 @@ export interface WorkflowStep {
    * NonRetryableError (errors.ts) is not retried. A `ReadableStream` of
    * bytes it returns is read to its end within the attempt and kept; the
    * step then returns, on every replay, a fresh stream of those bytes.
+   *
+   * A step started with a rollback is rolled back when the run is: when
+   * its definition throws, or it is terminated with `rollback: true`.
+   * Rollbacks run in the reverse order their steps started in, each with
+   * its own retries, journaled; the first that fails ends the rolling
+   * back, and the run's status says so beside its own error.
    */
   do: (<T>(
     name: string,
-    callback: (context: WorkflowStepContext) => Promise<T> | T
+    callback: (context: WorkflowStepContext) => Promise<T> | T,
+    rollback?: WorkflowStepRollbackOptions<T>
   ) => Promise<T>) &
     (<T>(
       name: string,
       config: WorkflowStepConfig,
-      callback: (context: WorkflowStepContext) => Promise<T> | T
+      callback: (context: WorkflowStepContext) => Promise<T> | T,
+      rollback?: WorkflowStepRollbackOptions<T>
     ) => Promise<T>);
   /**
    * Resolves once `duration` has passed since this sleep was first
@@ -201,6 +247,11 @@ export interface WorkflowError {
   readonly code?: string;
 }
 
+/** How a run's rolling back ended. */
+export type RollbackOutcome =
+  | { readonly status: "complete" }
+  | { readonly status: "errored"; readonly error: WorkflowError };
+
 export type InstanceStatus =
   /** Created; no activation has started yet. */
   | { readonly status: "queued" }
@@ -218,10 +269,20 @@ export type InstanceStatus =
   | { readonly status: "waitingForPause" }
   /** Paused: nothing runs, and no deadline of its comes due, until resumed. */
   | { readonly status: "paused" }
+  /**
+   * Running its steps' rollbacks: its definition threw, or it was
+   * terminated with `rollback: true`. It ends errored or terminated.
+   */
+  | { readonly status: "rollingBack" }
   | { readonly status: "complete"; readonly output: unknown }
-  | { readonly status: "errored"; readonly error: WorkflowError }
+  | {
+      readonly status: "errored";
+      readonly error: WorkflowError;
+      /** Present when the run rolled back: how that went, apart. */
+      readonly rollback?: RollbackOutcome;
+    }
   /** Ended by `terminate`. */
-  | { readonly status: "terminated" };
+  | { readonly status: "terminated"; readonly rollback?: RollbackOutcome };
 
 /** Where `restart` starts the run again from: a step it has started. */
 export interface RestartFrom {

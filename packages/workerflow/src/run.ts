@@ -75,6 +75,14 @@
 //   their attempts, results and the events their waits took; the steps
 //   before it keep their outcomes, which replay returns. A step it runs
 //   again goes out under a key of the new execution (identity.ts).
+// - `terminate({ rollback: true })` of a run with steps to roll back
+//   fences the activation as `terminate` does, and rolls the run back:
+//   it is `rollingBack`, its alarm set to now, and a compensating
+//   activation runs its steps' rollbacks (activation.ts) before it ends as
+//   `terminated`. A definition that throws, with steps to roll back, is
+//   rolled back the same way before it ends as `errored`. A run rolling
+//   back can't be paused (as on the reference), terminated or restarted:
+//   what undoes its effects isn't cut short by a command.
 // - `delete` removes the run, its journal and its alarm. A stale
 //   activation of it is fenced by the run's identity: it can't act on the
 //   run, nor on one created again under the same ID.
@@ -100,10 +108,16 @@ import { DurableObject } from "cloudflare:workers";
 import { Activation, superseded, suspended } from "./activation.ts";
 import type { Settlement } from "./activation.ts";
 import { decode, equivalent, streamResultOf } from "./codec.ts";
-import { handlerBudgetMs as defaultHandlerBudgetMs } from "./config.ts";
+import {
+  defaultRollbackReplays,
+  handlerBudgetMs as defaultHandlerBudgetMs,
+  maxRollbackReplayMs,
+  rollbackReplayCapMs,
+} from "./config.ts";
 import type {
   DefinitionIdentity,
   InstanceStatus,
+  RollbackOutcome,
   WorkflowDefinition,
 } from "./contracts.ts";
 import { errorRecord, namedError, parseError } from "./errors.ts";
@@ -115,6 +129,7 @@ import {
   JournalSchemaError,
   journalSchemaVersion,
   readJournal,
+  readRollbackWorklist,
   maxEventPayloadBytes,
   maxInboxBytes,
   maxInboxEvents,
@@ -213,17 +228,31 @@ export type PauseOutcome = "pausing" | "paused" | "ignored" | "missing";
  */
 export type ResumeOutcome = "resumed" | "ignored" | "missing";
 
-/** `ended`: the run has ended already, and can't be terminated. */
-export type TerminateOutcome = "terminated" | "ended" | "missing";
+/**
+ * `ended`: the run has ended already, and can't be terminated.
+ * `rolling_back`: it is rolling back, which a command doesn't cut short.
+ */
+export type TerminateOutcome =
+  | "terminated"
+  | "ended"
+  | "rolling_back"
+  | "missing";
+
+/** Whether a termination rolls the run's steps back first. */
+export interface TerminateCommand {
+  rollback: boolean;
+}
 
 /**
  * `no_such_step`: the run has started no step `from` names.
  * `nested_step`: the step was called from inside another step's callback.
+ * `rolling_back`: it is rolling back, which a command doesn't cut short.
  */
 export type RestartOutcome =
   | "restarted"
   | "no_such_step"
   | "nested_step"
+  | "rolling_back"
   | "missing";
 
 export type DeleteOutcome = "deleted" | "missing";
@@ -243,7 +272,41 @@ interface CommandDecision<Outcome> {
   alarm?: number | null;
 }
 
+/** Why a run terminated with `rollback: true` rolls back, as Cloudflare says. */
+const terminatedTrigger = JSON.stringify(
+  errorRecord(namedError("Terminated", "Instance terminated during rollback"))
+);
+
+/** How a run's rolling back ended, as its journal keeps it. */
+const rollbackOf = (text: string): RollbackOutcome => {
+  const parsed: unknown = JSON.parse(text);
+  if (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    "status" in parsed &&
+    parsed.status === "complete"
+  ) {
+    return { status: "complete" };
+  }
+  if (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    "status" in parsed &&
+    parsed.status === "errored" &&
+    "error" in parsed
+  ) {
+    return {
+      status: "errored",
+      error: parseError(JSON.stringify(parsed.error)),
+    };
+  }
+  throw new Error(
+    `The journal holds a rollback this engine can't read: ${text}`
+  );
+};
+
 const statusOf = (run: RunRow): InstanceStatus => {
+  const rollback = run.rollback === null ? undefined : rollbackOf(run.rollback);
   switch (run.status) {
     case "complete": {
       return {
@@ -252,20 +315,25 @@ const statusOf = (run: RunRow): InstanceStatus => {
       };
     }
     case "errored": {
-      return {
-        status: "errored",
-        error:
-          run.error === null
-            ? { name: "Error", message: "" }
-            : parseError(run.error),
-      };
+      const error =
+        run.error === null
+          ? { name: "Error", message: "" }
+          : parseError(run.error);
+      return rollback === undefined
+        ? { status: "errored", error }
+        : { status: "errored", error, rollback };
+    }
+    case "terminated": {
+      return rollback === undefined
+        ? { status: "terminated" }
+        : { status: "terminated", rollback };
     }
     case "queued":
     case "running":
     case "waiting":
     case "waitingForPause":
     case "paused":
-    case "terminated": {
+    case "rollingBack": {
       return { status: run.status };
     }
     default: {
@@ -274,6 +342,12 @@ const statusOf = (run: RunRow): InstanceStatus => {
       );
     }
   }
+};
+
+/** A settlement's error, as an Error. */
+const errorOf = (settlement: Settlement): Error => {
+  const error = settlement.ok ? undefined : settlement.error;
+  return error instanceof Error ? error : new Error(String(error));
 };
 
 const hasEnded = (run: RunRow): boolean =>
@@ -381,10 +455,49 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   protected readonly maxRunStreamBytes: number = defaultMaxRunStreamBytes;
 
   /**
+   * How long a compensating replay may take before a later activation
+   * tries again (config.ts): at most what the handler budget allows
+   * (`rollbackReplayCapMs`), which a longer setting is cut to.
+   */
+  protected readonly rollbackReplayMs: number = maxRollbackReplayMs;
+
+  /**
+   * How many compensating replays in a row may end without the rollbacks
+   * still to run before the rolling back ends as errored (config.ts).
+   */
+  protected readonly rollbackReplays: number = defaultRollbackReplays;
+
+  /**
+   * The rollback settings, checked: a replay bound that isn't a time above
+   * 0, or a count that isn't a whole number from 1, is the host's mistake,
+   * never run with: refused at a run's start, and logged at an alarm,
+   * which leaves the run to its watchdog as it was.
+   */
+  #rollbackLimits(): { rollbackReplayMs: number; rollbackReplays: number } {
+    const ms = this.rollbackReplayMs;
+    const replays = this.rollbackReplays;
+    if (!Number.isFinite(ms) || ms <= 0) {
+      throw new TypeError(
+        `A run's rollbackReplayMs is a time above 0: ${String(ms)}`
+      );
+    }
+    if (!Number.isSafeInteger(replays) || replays < 1) {
+      throw new TypeError(
+        `A run's rollbackReplays is a whole number from 1: ${String(replays)}`
+      );
+    }
+    return {
+      rollbackReplayMs: Math.min(ms, rollbackReplayCapMs(this.handlerBudgetMs)),
+      rollbackReplays: replays,
+    };
+  }
+
+  /**
    * How much of an alarm handler's wall time a run's attempts may take
    * (config.ts). A host whose handlers get less than Cloudflare's 15
    * minutes says so here; a test, to see an attempt left for a fresh
-   * activation without waiting minutes.
+   * activation without waiting minutes. The compensating replay's bound
+   * scales with it.
    */
   protected readonly handlerBudgetMs: number = defaultHandlerBudgetMs;
 
@@ -418,6 +531,8 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * caller hears `created` or `existing`, the run will execute.
    */
   async start(command: StartCommand): Promise<StartOutcome> {
+    // Refused before any run exists, rather than at its first alarm.
+    this.#rollbackLimits();
     const existing = this.#run();
     if (existing !== undefined) {
       const sameStart =
@@ -580,8 +695,46 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     }
   }
 
+  /**
+   * Pauses a run whose pausing activation died first (an alarm comes only
+   * once no alarm handler runs): nothing of it is out any more, so the run
+   * is paused now. One still out somehow is fenced.
+   */
+  async #pauseNow(): Promise<void> {
+    const { storage } = this.ctx;
+    const now = Date.now();
+    try {
+      storage.transactionSync(() => {
+        supersedeIn(storage.sql, now);
+        pauseIn(storage.sql, now);
+      });
+    } catch (error) {
+      // Nothing was written: the watchdog's alarm finds it pausing still.
+      await this.#leaveToWatchdog("workflow_pause_failed", error);
+      return;
+    }
+    try {
+      await storage.deleteAlarm();
+    } catch (error) {
+      // The run is paused: the alarm left behind finds it so, and does
+      // nothing.
+      warnRecovered("workflow_alarm_delete_failed", error);
+    }
+  }
+
   /** One activation: replays the definition under a new generation. */
   override async alarm(): Promise<void> {
+    // The host's settings first, before the run is read or a generation
+    // taken: a mistake in them touches no run. It is logged, and the run
+    // is left to a watchdog a lease away, the settings fixed by then or
+    // not.
+    let limits: { rollbackReplayMs: number; rollbackReplays: number };
+    try {
+      limits = this.#rollbackLimits();
+    } catch (error) {
+      await this.#leaveToWatchdog("workflow_settings_invalid", error);
+      return;
+    }
     let run: RunRow | undefined;
     try {
       run = this.#run();
@@ -610,36 +763,19 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     }
     const { storage } = this.ctx;
     if (run.status === "waitingForPause") {
-      // The activation asked to pause died first (an alarm comes only once
-      // no alarm handler runs): nothing of it is out any more, so the run
-      // is paused now. One still out somehow is fenced.
-      const now = Date.now();
-      try {
-        storage.transactionSync(() => {
-          supersedeIn(storage.sql, now);
-          pauseIn(storage.sql, now);
-        });
-      } catch (error) {
-        // Nothing was written: the watchdog's alarm finds it pausing still.
-        await this.#leaveToWatchdog("workflow_pause_failed", error);
-        return;
-      }
-      try {
-        await storage.deleteAlarm();
-      } catch (error) {
-        // The run is paused: the alarm left behind finds it so, and does
-        // nothing.
-        warnRecovered("workflow_alarm_delete_failed", error);
-      }
+      await this.#pauseNow();
       return;
     }
     const generation = run.generation + 1;
     const now = Date.now();
+    // A run rolling back stays so: this activation runs its rollbacks.
+    const compensating = run.status === "rollingBack";
     try {
       storage.transactionSync(() => {
         storage.sql.exec(
-          "UPDATE run SET generation = ?, status = 'running', lease_until = ?, wake_at = NULL",
+          "UPDATE run SET generation = ?, status = ?, lease_until = ?, wake_at = NULL",
           generation,
+          compensating ? "rollingBack" : "running",
           now + this.leaseMs
         );
         storage.sql.exec(
@@ -683,12 +819,25 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         handlerBudgetMs: this.handlerBudgetMs,
         maxStreamBytes: this.maxStreamOutputBytes,
         maxRunStreamBytes: this.maxRunStreamBytes,
+        ...limits,
       },
-      () => this.clock()
+      () => this.clock(),
+      compensating
     );
     const resolved = this.#resolve(run);
     if (!("run" in resolved)) {
-      await activation.settle(resolved);
+      // No definition to run, nor to get its rollbacks back from: the run
+      // ends, rolling back nothing.
+      await (compensating
+        ? activation.endCompensation({
+            status: "errored",
+            error: errorOf(resolved),
+          })
+        : activation.settle(resolved));
+      return;
+    }
+    if (compensating) {
+      await this.#compensate(activation, resolved);
       return;
     }
     const settlement = await Promise.race([
@@ -716,6 +865,32 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       return;
     }
     await activation.settle(settlement);
+  }
+
+  /** A compensating activation, from its replay to the run's end. */
+  // oxlint-disable-next-line class-methods-use-this -- beside alarm(), whose part it is
+  async #compensate(
+    activation: Activation,
+    definition: WorkflowDefinition
+  ): Promise<void> {
+    const result = await Promise.race([
+      activation.compensate(definition),
+      activation.stopped,
+    ]);
+    if (result === superseded || result === suspended) {
+      // A later activation owns the run, or a rollback waits for its
+      // retry, the run still rolling back.
+      return;
+    }
+    if ("fault" in result) {
+      // The watchdog brings the run back, its rolling back as journaled.
+      return;
+    }
+    // A replay that strayed, or a result that can't be read back, ends the
+    // rolling back: replaying again would only reach the same.
+    await activation.endCompensation(
+      "halt" in result ? { status: "errored", error: result.halt } : result
+    );
   }
 
   /**
@@ -805,15 +980,29 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     return outcome;
   }
 
-  /** Ends the run as terminated, fencing any activation still out. */
-  async terminate(): Promise<TerminateOutcome> {
+  /**
+   * Ends the run as terminated, fencing any activation still out; with
+   * `rollback`, rolls its steps back first, if any registered a rollback.
+   */
+  async terminate(command: TerminateCommand): Promise<TerminateOutcome> {
     const { sql } = this.ctx.storage;
     return await this.#command(
       (run, now): CommandDecision<TerminateOutcome> => {
         if (hasEnded(run)) {
           return { outcome: "ended" };
         }
+        if (run.status === "rollingBack") {
+          return { outcome: "rolling_back" };
+        }
         supersedeIn(sql, now);
+        if (command.rollback && readRollbackWorklist(sql).length > 0) {
+          sql.exec(
+            "UPDATE run SET status = 'rollingBack', rollback_trigger = ?, rollback_end = 'terminated', lease_until = NULL, wake_at = ?, paused_at = NULL",
+            terminatedTrigger,
+            now
+          );
+          return { outcome: "terminated", alarm: now };
+        }
         sql.exec(
           "UPDATE run SET status = 'terminated', ended_at = ?, lease_until = NULL, wake_at = NULL, paused_at = NULL",
           now
@@ -829,7 +1018,10 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    */
   async restart(command: RestartCommand): Promise<RestartOutcome> {
     const { sql } = this.ctx.storage;
-    return await this.#command((_, now): CommandDecision<RestartOutcome> => {
+    return await this.#command((run, now): CommandDecision<RestartOutcome> => {
+      if (run.status === "rollingBack") {
+        return { outcome: "rolling_back" };
+      }
       let forget: { clause: string; values: SqlStorageValue[] } = {
         clause: "1 = 1",
         values: [],
@@ -863,7 +1055,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       supersedeIn(sql, now);
       forgetIn(sql, forget);
       sql.exec(
-        "UPDATE run SET status = 'queued', execution_uid = ?, output = NULL, error = NULL, ended_at = NULL, lease_until = NULL, paused_at = NULL, wake_at = ?",
+        "UPDATE run SET status = 'queued', execution_uid = ?, output = NULL, error = NULL, ended_at = NULL, lease_until = NULL, paused_at = NULL, rollback_trigger = NULL, rollback_end = NULL, rollback = NULL, rollback_replays = 0, wake_at = ?",
         crypto.randomUUID(),
         now
       );

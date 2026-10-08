@@ -566,7 +566,7 @@ describe("terminate", () => {
     );
   });
 
-  it("refuses a rollback until rollbacks come, and options it can't read", async () => {
+  it("refuses options it can't read", async () => {
     const id = newId();
     await workflow("napper").create({ id });
     await suspendedOn("napper", id, "nap");
@@ -577,7 +577,7 @@ describe("terminate", () => {
       }, options);
     };
 
-    await expect(terminate({ rollback: true })).rejects.toThrow(TypeError);
+    await expect(terminate("rollback")).rejects.toThrow(TypeError);
     await expect(terminate({ rollback: "yes" })).rejects.toThrow(TypeError);
     await expect(terminate({ rolback: false })).rejects.toThrow(TypeError);
     await expect(run.status()).resolves.toStrictEqual({ status: "waiting" });
