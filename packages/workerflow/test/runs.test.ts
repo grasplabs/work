@@ -5,7 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { SerializationError } from "../src/codec.ts";
 import { maxErrorMessageBytes } from "../src/errors.ts";
-import { JournalSchemaError } from "../src/journal.ts";
+import { JournalSchemaError, journalSchemaVersion } from "../src/journal.ts";
 import { WorkflowRun } from "../src/run.ts";
 import {
   alarmOf,
@@ -429,7 +429,7 @@ describe("a journal of another schema", () => {
 
     expect(refused).toBeInstanceOf(JournalSchemaError);
     expect(String(refused)).toMatch(
-      /schema 1, where this engine reads only schema 2/u
+      `schema 1, where this engine reads only schema ${journalSchemaVersion}`
     );
     await expect(exec("SELECT * FROM activations")).resolves.toStrictEqual(
       before

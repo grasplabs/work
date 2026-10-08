@@ -83,10 +83,10 @@ export interface StepCall {
 const isWork = (value: unknown): value is StepWork =>
   typeof value === "function";
 
-const describe = (value: unknown): string =>
+export const describe = (value: unknown): string =>
   typeof value === "string" ? JSON.stringify(value) : `a ${typeof value}`;
 
-const isPlainObject = (value: unknown): value is object =>
+export const isPlainObject = (value: unknown): value is object =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
@@ -95,7 +95,7 @@ const isPlainObject = (value: unknown): value is object =>
  * on the object or its prototypes, is refused, as is an object that throws
  * while it is read: an unknown shape is never read as a default.
  */
-const readSettings = <Key extends string>(
+export const readSettings = <Key extends string>(
   what: string,
   value: object,
   keys: readonly Key[]

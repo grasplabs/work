@@ -2,8 +2,9 @@
 // where the run is and how it got there, so recovery after a crash, an
 // eviction or a duplicate alarm reads them and nothing else.
 //
-//   run          one row: identity, params, status, the current generation,
-//                and when a waiting run is next due
+//   run          one row: identity, params, status, the current generation
+//                and execution, when a waiting run is next due, and when a
+//                paused one was paused
 //   activations  each time the run was executed, by generation, and how
 //                that ended (no end: the process died or it was evicted)
 //   steps        each step occurrence: identity, start order, outcome; a
@@ -32,11 +33,11 @@ export class JournalSchemaError extends Error {
 
 /**
  * The journal's own layout; a change to it is a new version. No journal
- * predates version 2 (nothing earlier was released), so a run of any other
+ * predates version 3 (nothing earlier was released), so a run of any other
  * version is refused when it is read; a later layout that changes it
  * brings its own upgrade.
  */
-export const journalSchemaVersion = 2;
+export const journalSchemaVersion = 3;
 
 /**
  * The largest event payload a run accepts, as the encoded text it keeps:
@@ -55,12 +56,21 @@ export { maxStoredTextBytes as maxEventPayloadBytes } from "./codec.ts";
 export const maxInboxEvents = 10_000;
 export const maxInboxBytes = 32 * 1024 * 1024;
 
+/**
+ * `waitingForPause`: a pause was asked for while an activation ran; it
+ * finishes the steps it has out and starts nothing new, then the run is
+ * `paused`, with no activation and no alarm, until it is resumed.
+ * `terminated`: ended by a command, not by its definition.
+ */
 export type RunState =
   | "queued"
   | "running"
   | "waiting"
+  | "waitingForPause"
+  | "paused"
   | "complete"
-  | "errored";
+  | "errored"
+  | "terminated";
 
 export interface RunRow extends Record<string, SqlStorageValue> {
   schema: number;
@@ -72,8 +82,22 @@ export interface RunRow extends Record<string, SqlStorageValue> {
   params: string;
   created_at: number;
   status: RunState;
-  /** Bumped by every activation: the fence against stale ones. */
+  /**
+   * Bumped by every activation, and by every command that ends one's hold
+   * on the run (terminate, restart, a pause taken over from a dead one):
+   * the fence against stale ones.
+   */
   generation: number;
+  /**
+   * The current execution of the run: drawn when it is created, and drawn
+   * again by every restart. A step's idempotency key is drawn from the
+   * execution it first ran in (identity.ts), so a step a restart runs
+   * again goes out under another key than before, where a retry goes out
+   * under the same one.
+   */
+  execution_uid: string;
+  /** When a paused run was paused; null otherwise. */
+  paused_at: number | null;
   /**
    * About when the watchdog alarm is due while an activation runs: a lease
    * after the activation's start or its latest write for a step (a claim,
@@ -143,7 +167,8 @@ export interface StepRow extends Record<string, SqlStorageValue> {
   error: string | null;
   /**
    * A sleep's or a wait's absolute deadline, journaled when the step was
-   * first reached and never moved after.
+   * first reached. Nothing a replay, an alarm or an event does moves it;
+   * only `resume` does, by the time the run was paused (run.ts).
    */
   deadline: number | null;
   /** The event type a wait takes. */
@@ -159,6 +184,12 @@ export interface StepRow extends Record<string, SqlStorageValue> {
    * sleep or a wait.
    */
   config: string | null;
+  /**
+   * 1 when the step was called from inside another step's attempt: a
+   * replay that returns that step's outcome never calls it again, so a
+   * restart can't start from it (run.ts).
+   */
+  nested: number;
 }
 
 /**
@@ -177,11 +208,17 @@ export type AttemptEnd = "succeeded" | "failed" | "timed_out" | "superseded";
  * How an activation ended. `settled`: it journaled the run's end.
  * `superseded`: a later generation took over. `suspended`: it reached a
  * wait that isn't due, or every step it had out was parked, and let go of
- * the run until its alarm. `faulted`: one of the engine's own storage
+ * the run until its alarm. `paused`: a pause was asked for, and it let go
+ * of the run once nothing it had out was still out. `faulted`: one of the engine's own storage
  * calls failed, and the watchdog alarm brings the run back. No end: the
  * process died, or the object was evicted.
  */
-export type ActivationEnd = "settled" | "superseded" | "suspended" | "faulted";
+export type ActivationEnd =
+  | "settled"
+  | "superseded"
+  | "suspended"
+  | "paused"
+  | "faulted";
 
 export interface AttemptRow extends Record<string, SqlStorageValue> {
   ordinal: number;
@@ -243,8 +280,10 @@ export const createJournal = (sql: SqlStorage): void => {
       start_key TEXT NOT NULL,
       params TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'waiting', 'complete', 'errored')),
+      status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'waiting', 'waitingForPause', 'paused', 'complete', 'errored', 'terminated')),
       generation INTEGER NOT NULL,
+      execution_uid TEXT NOT NULL,
+      paused_at INTEGER,
       lease_until INTEGER,
       wake_at INTEGER,
       event_count INTEGER NOT NULL DEFAULT 0,
@@ -258,10 +297,13 @@ export const createJournal = (sql: SqlStorage): void => {
       generation INTEGER PRIMARY KEY,
       started_at INTEGER NOT NULL,
       ended_at INTEGER,
-      ended TEXT CHECK (ended IN ('settled', 'superseded', 'suspended', 'faulted'))
+      ended TEXT CHECK (ended IN ('settled', 'superseded', 'suspended', 'paused', 'faulted'))
     );
+    -- AUTOINCREMENT: an ordinal is never used again, not even for a step a
+    -- restart ran again, so nothing a stale activation does by ordinal
+    -- reaches another step's rows.
     CREATE TABLE IF NOT EXISTS steps (
-      ordinal INTEGER PRIMARY KEY,
+      ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
       type TEXT NOT NULL CHECK (type IN ('do', 'sleep', 'waitForEvent')),
       name TEXT NOT NULL,
       occurrence INTEGER NOT NULL,
@@ -274,6 +316,7 @@ export const createJournal = (sql: SqlStorage): void => {
       event_type TEXT,
       duration_ms INTEGER,
       config TEXT,
+      nested INTEGER NOT NULL DEFAULT 0,
       UNIQUE (type, name, occurrence)
     );
     CREATE TABLE IF NOT EXISTS attempts (
@@ -320,6 +363,11 @@ export const hasJournal = (sql: SqlStorage): boolean =>
     .toArray().length > 0;
 
 export const readRun = (sql: SqlStorage): RunRow | undefined => {
+  // A run deleted (its tables with it) is no run: a stale activation of it
+  // reads that, and is fenced, rather than fail on a missing table.
+  if (!hasJournal(sql)) {
+    return undefined;
+  }
   // The version first, on its own: another layout's columns may not be
   // the ones read below.
   const [stored] = sql
@@ -336,13 +384,13 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
   }
   return sql
     .exec<RunRow>(
-      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at FROM run"
+      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at FROM run"
     )
     .toArray()[0];
 };
 
 const stepColumns =
-  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, duration_ms, config";
+  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, duration_ms, config, nested";
 
 export const readStep = (
   sql: SqlStorage,

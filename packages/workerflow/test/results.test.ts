@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { errorRecord } from "../src/errors.ts";
 import type { HistoryEvent } from "../src/history.ts";
+import { journalSchemaVersion } from "../src/journal.ts";
 import type { StepOutput } from "../src/run.ts";
 import { patterned, sha256 } from "./bytes.ts";
 import {
@@ -1122,7 +1123,9 @@ describe("a journal of another schema", () => {
       runInDurableObject(runObject("echo", id), (run) =>
         run instanceof TestRuns ? run.status() : undefined
       )
-    ).rejects.toThrow(/schema 1, where this engine reads only schema 2/u);
+    ).rejects.toThrow(
+      `schema 1, where this engine reads only schema ${journalSchemaVersion}`
+    );
   });
 });
 

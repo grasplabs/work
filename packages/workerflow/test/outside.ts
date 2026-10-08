@@ -100,6 +100,35 @@ export const effect = async (
   return receipt;
 };
 
+/** Each run object whose alarm handler has returned, by its ID. */
+export const handled: string[] = [];
+
+/**
+ * The engine's warnings while `during` runs (log.ts writes them through
+ * console.warn): each is an object with an `event`.
+ */
+export const warningsDuring = async (
+  during: () => Promise<unknown>
+): Promise<unknown[]> => {
+  const { warn } = console;
+  const seen: unknown[] = [];
+  console.warn = (...args: unknown[]): void => {
+    seen.push(...args.slice(0, 1));
+  };
+  try {
+    await during();
+  } finally {
+    console.warn = warn;
+  }
+  return seen;
+};
+
+/** The event a warning names, if it is one of the engine's. */
+export const eventOf = (warning: unknown): unknown =>
+  typeof warning === "object" && warning !== null && "event" in warning
+    ? warning.event
+    : undefined;
+
 const checkpoints = new Map<string, number>();
 
 /**

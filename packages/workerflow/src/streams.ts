@@ -733,6 +733,13 @@ export interface StreamTarget {
    * stores each chunk. Throws what storage throws.
    */
   readonly holds: () => boolean;
+  /**
+   * Whether the run is still the one the upload was for: not deleted, nor
+   * deleted and created again, whose step of the same ordinal and attempt
+   * holds chunks of its own. Checked in the write that deletes what the
+   * upload stored.
+   */
+  readonly owns: () => boolean;
   /** Settles when the activation stops: superseded, suspended, faulted. */
   readonly stopped: Promise<unknown>;
   readonly maxBytes: number;
@@ -882,7 +889,9 @@ export const persistStream = async (
       try {
         // A failed or superseded upload leaves nothing behind.
         storage.transactionSync(() => {
-          discardChunks(storage.sql, ordinal, attempt);
+          if (target.owns()) {
+            discardChunks(storage.sql, ordinal, attempt);
+          }
         });
       } catch {
         // Storage that can't delete now: the step's next claim deletes
