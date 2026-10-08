@@ -35,9 +35,23 @@
 // or duration, or a new wait while the run's suspended one still waits)
 // ends it with a WorkflowReplayMismatchError: a `Halt`, through the same
 // typed outcome, never a loop of activations.
+//
+// A step's result is kept as codec text, or as a stream's chunks
+// (streams.ts), within the attempt: a stream's upload runs inside the
+// attempt's deadline and its async scope, and only the attempt that still
+// holds the step (latest, not ended, of a current activation) can store a
+// chunk. A result the step can't keep (a value structured clone refuses, a
+// stream that can't be read) is no failure to retry: it ends the run as
+// Cloudflare ends it, with a WorkflowFatalError, journaled as the step's
+// `fatal` outcome first, through a `Halt`. A failure of the engine's own
+// storage while a result is kept or read back is a `Fault`, as for every
+// other journal write: the watchdog recovers the run, and the definition
+// never hears of it. A sensitive step's errors are redacted wherever they
+// are kept: the step's, each attempt's, and the run's.
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import { decode, encode } from "./codec.ts";
+import { decode, encode, encodeStreamResult, streamResultOf } from "./codec.ts";
+import type { StreamResult } from "./codec.ts";
 import {
   defaultRetryDelayMs,
   delayFunctionTimeoutMs,
@@ -48,6 +62,7 @@ import {
 import type { StepConfig, StepWork } from "./config.ts";
 import type {
   WorkflowDefinition,
+  WorkflowError,
   WorkflowDuration,
   WorkflowEvent,
   WorkflowStep,
@@ -61,6 +76,7 @@ import {
   waitTimedOut,
 } from "./durations.ts";
 import { errorRecord, isNonRetryable, namedError, rebuild } from "./errors.ts";
+import { recordStepCompleted } from "./history.ts";
 import { assertEventType, assertStepName, stepKey } from "./identity.ts";
 import {
   readAttempt,
@@ -76,6 +92,15 @@ import type {
   StepRow,
   StepType,
 } from "./journal.ts";
+import {
+  discardChunks,
+  isStoredWhole,
+  isStream,
+  persistStream,
+  replayStream,
+  StreamResultError,
+} from "./streams.ts";
+import type { Replay } from "./streams.ts";
 
 /** What the definition did: returned, or threw. */
 export type Settlement =
@@ -93,9 +118,10 @@ export interface Fault {
 
 /**
  * The definition did something this engine can't run on: its replay
- * strayed from what the journal holds, or it waited on two things at
- * once. The run ends with `halt` as its error; no handler of the author's
- * sees it, and replaying would only do the same again.
+ * strayed from what the journal holds, it waited on two things at once,
+ * or a step returned what it can't keep. The run ends with `halt` as its
+ * error; no handler of the author's sees it, and replaying would only do
+ * the same again.
  */
 export interface Halt {
   readonly halt: Error;
@@ -103,6 +129,18 @@ export interface Halt {
 
 /** Why an activation stopped short of settling the run. */
 export type Stop = typeof superseded | typeof suspended | Fault | Halt;
+
+/** What of an activation's limits comes from its host. */
+export interface ActivationLimits {
+  readonly leaseMs: number;
+  /** The most bytes one step's stream result may hold. */
+  readonly maxStreamBytes: number;
+  /** The most bytes all of the run's stream results may hold. */
+  readonly maxRunStreamBytes: number;
+}
+
+/** What a sensitive step's error message is, wherever it is kept. */
+const redactedMessage = "[REDACTED]";
 
 /** A step, sleep or wait reached beside a sleep or wait still pending. */
 const parallelWait = (kind: string, name: string): Error =>
@@ -180,16 +218,48 @@ interface AttemptFailure {
   retryable: boolean;
 }
 
+/**
+ * A result the step can't keep: Cloudflare Workflows ends the run with
+ * it, as a `WorkflowFatalError`, and the definition never hears of it.
+ */
+interface Fatal {
+  /** What ended the run, in Cloudflare's words. */
+  run: Error;
+  /** What the step returned that couldn't be kept, for the journal. */
+  detail: string;
+}
+
 /** How one attempt came out, as the journal keeps it. */
 type AttemptOutcome =
-  | { ok: true; value: string }
-  | ({ ok: false } & AttemptFailure);
+  | { ok: true; value: string; stream?: StreamResult }
+  | ({ ok: false } & AttemptFailure)
+  | { fatal: Fatal }
+  | { fault: unknown }
+  | { superseded: true };
+
+/** An attempt's outcome the journal keeps as the step's. */
+type Committable = Extract<AttemptOutcome, { ok: boolean }>;
 
 /** A step's value, once an attempt's outcome is journaled. */
 interface Landed {
   ok: true;
   value: string;
+  /** The step's ordinal, which a stream result is read back by. */
+  ordinal: number;
 }
+
+/**
+ * Marks what came of keeping a callback's stream within its attempt: no
+ * value of the author's can carry this key.
+ */
+const keptStream = Symbol("kept stream");
+
+interface KeptStream {
+  readonly [keptStream]: AttemptOutcome;
+}
+
+const isKeptStream = (value: unknown): value is KeptStream =>
+  typeof value === "object" && value !== null && keptStream in value;
 
 /** A retry's delay, or why the step is spent instead. */
 type Delay = { ms: number } | { error: string };
@@ -202,6 +272,38 @@ type Delay = { ms: number } | { error: string };
 interface AttemptScope {
   live: boolean;
 }
+
+/**
+ * What a step's thrown error is kept as: redacted for a sensitive step,
+ * its name and code kept.
+ */
+const failureText = (record: WorkflowError, config: StepConfig): string =>
+  JSON.stringify(
+    config.sensitive ? { ...record, message: redactedMessage } : record
+  );
+
+/**
+ * A step's result it can't keep, as Cloudflare words it. A sensitive
+ * step's detail (a stream source's own message may carry its secret) is
+ * redacted.
+ */
+const fatalOf = (
+  identity: StepIdentity,
+  config: StepConfig,
+  failure: { detail: string; reason: string; detailInRun: boolean }
+): { fatal: Fatal } => {
+  const shown = config.sensitive ? redactedMessage : failure.detail;
+  const run = `The execution of the Workflow instance was terminated, as the step "${identity.name}" ${failure.reason}`;
+  return {
+    fatal: {
+      run: namedError(
+        "WorkflowFatalError",
+        failure.detailInRun ? `${run} ${shown}` : run
+      ),
+      detail: shown,
+    },
+  };
+};
 
 const attempts = new AsyncLocalStorage<AttemptScope>();
 
@@ -401,7 +503,7 @@ export class Activation {
   readonly #storage: DurableObjectStorage;
   readonly #run: RunRow;
   readonly #generation: number;
-  readonly #leaseMs: number;
+  readonly #limits: ActivationLimits;
   /** The clock an attempt's or a delay function's running time is measured on. */
   readonly #clock: () => number;
   /** Settled, superseded, suspended or faulted: every later call is refused. */
@@ -436,13 +538,13 @@ export class Activation {
     storage: DurableObjectStorage,
     run: RunRow,
     generation: number,
-    leaseMs: number,
+    limits: ActivationLimits,
     clock: () => number
   ) {
     this.#storage = storage;
     this.#run = run;
     this.#generation = generation;
-    this.#leaseMs = leaseMs;
+    this.#limits = limits;
     this.#clock = clock;
     const { promise, resolve } = Promise.withResolvers<Stop>();
     this.stopped = promise;
@@ -539,9 +641,14 @@ export class Activation {
    * settles the run with `error`, and the definition's call never settles.
    */
   async #halt(error: Error): Promise<never> {
+    this.#haltNow(error);
+    return await never();
+  }
+
+  /** `#halt`, for a caller that can't wait on it: a stream's pull. */
+  #haltNow(error: Error): void {
     this.#over = true;
     this.#stop({ halt: error });
-    return await never();
   }
 
   /** Records how this activation ended, if nothing has yet. */
@@ -612,7 +719,7 @@ export class Activation {
   #renewLease(now: number): void {
     this.#storage.sql.exec(
       "UPDATE run SET lease_until = ?",
-      now + this.#leaseMs
+      now + this.#limits.leaseMs
     );
   }
 
@@ -640,7 +747,7 @@ export class Activation {
     if (this.#over) {
       return;
     }
-    await this.#arm(Date.now() + this.#leaseMs);
+    await this.#arm(Date.now() + this.#limits.leaseMs);
   }
 
   /**
@@ -674,6 +781,7 @@ export class Activation {
       landing = "retry";
     }
     assertTime(retryAt);
+    discardChunks(sql, claim.ordinal, claim.attempt);
     sql.exec(
       "UPDATE steps SET state = ?, value = NULL, error = ? WHERE ordinal = ?",
       retryAt === null ? "failed" : "retrying",
@@ -778,6 +886,9 @@ export class Activation {
           attempt,
           ordinal
         );
+        // What an earlier attempt uploaded of a stream is no result: only
+        // the committing attempt's chunks survive.
+        discardChunks(sql, ordinal);
       }
       const claim: Claim = {
         ordinal,
@@ -860,51 +971,213 @@ export class Activation {
    * attempt is still the step's latest and not ended; otherwise records
    * that its answer was ignored.
    */
+  /**
+   * Whether the claimed attempt still holds its step: this activation is
+   * current, and the attempt is the step's latest and not ended (one that
+   * timed out is ended in the write that fails it). What it does while it
+   * doesn't (commit, store a chunk) is refused.
+   */
+  #holds(claim: Claim): boolean {
+    if (!this.#current()) {
+      return false;
+    }
+    const { sql } = this.#storage;
+    const latest = sql
+      .exec<{ attempt: number }>(
+        "SELECT attempt FROM steps WHERE ordinal = ?",
+        claim.ordinal
+      )
+      .one();
+    const attempt = readAttempt(sql, claim.ordinal, claim.attempt);
+    return latest.attempt === claim.attempt && attempt?.ended_at === null;
+  }
+
+  /** Records that the attempt's answer was ignored, and drops its upload. */
+  #ignore(claim: Claim, now: number): void {
+    this.#storage.sql.exec(
+      "UPDATE attempts SET ended_at = ?, ended = 'superseded' WHERE ordinal = ? AND attempt = ? AND ended_at IS NULL",
+      now,
+      claim.ordinal,
+      claim.attempt
+    );
+    discardChunks(this.#storage.sql, claim.ordinal, claim.attempt);
+  }
+
+  /**
+   * Journals the attempt's outcome if the attempt still holds its step;
+   * otherwise records that its answer was ignored. A stream result is
+   * journaled only if every chunk it names is stored, checked in the same
+   * write. With a result, the observers' record of it (history.ts).
+   */
   #commit(
     claim: Claim,
     config: StepConfig,
-    outcome: AttemptOutcome
-  ): Landing | Landed | null {
-    return this.#storage.transactionSync((): Landing | Landed | null => {
-      const { sql } = this.#storage;
-      const now = Date.now();
-      const latest = sql
-        .exec<{ attempt: number }>(
-          "SELECT attempt FROM steps WHERE ordinal = ?",
-          claim.ordinal
-        )
-        .one();
-      const attempt = readAttempt(sql, claim.ordinal, claim.attempt);
-      if (
-        !this.#current() ||
-        latest.attempt !== claim.attempt ||
-        attempt?.ended_at !== null
-      ) {
+    outcome: Committable
+  ): Landing | Landed | "incomplete" | null {
+    return this.#storage.transactionSync(
+      (): Landing | Landed | "incomplete" | null => {
+        const { sql } = this.#storage;
+        const now = Date.now();
+        if (!this.#holds(claim)) {
+          this.#ignore(claim, now);
+          return null;
+        }
+        this.#renewLease(now);
+        if (!outcome.ok) {
+          return this.#endFailedIn(sql, now, claim, config, outcome);
+        }
+        if (
+          outcome.stream !== undefined &&
+          !isStoredWhole(sql, claim.ordinal, outcome.stream)
+        ) {
+          return "incomplete";
+        }
         sql.exec(
-          "UPDATE attempts SET ended_at = ?, ended = 'superseded' WHERE ordinal = ? AND attempt = ? AND ended_at IS NULL",
+          "UPDATE steps SET state = 'succeeded', value = ?, error = NULL WHERE ordinal = ?",
+          outcome.value,
+          claim.ordinal
+        );
+        sql.exec(
+          "UPDATE attempts SET ended_at = ?, ended = 'succeeded' WHERE ordinal = ? AND attempt = ?",
           now,
           claim.ordinal,
           claim.attempt
         );
-        return null;
+        recordStepCompleted(sql, {
+          ordinal: claim.ordinal,
+          at: now,
+          sensitive: config.sensitive,
+          result:
+            outcome.stream === undefined
+              ? { kind: "value", value: outcome.value }
+              : { kind: "stream", result: outcome.stream },
+        });
+        return { ok: true, value: outcome.value, ordinal: claim.ordinal };
       }
-      this.#renewLease(now);
-      if (!outcome.ok) {
-        return this.#endFailedIn(sql, now, claim, config, outcome);
+    );
+  }
+
+  /**
+   * Journals a step's fatal outcome, in one write with the check that the
+   * attempt still holds its step: `fatal`, not `failed`, so a replay that
+   * reaches it, should the run's end not follow (the process dies, its
+   * write fails), halts the run with the same error rather than hand it
+   * to the definition; and never retried. Then halts, so the driver ends
+   * the run with it (and clears its wake and its alarm).
+   */
+  async #fail(claim: Claim, fatal: Fatal): Promise<never> {
+    const journaled = this.#write(() =>
+      this.#storage.transactionSync(() => {
+        const { sql } = this.#storage;
+        const now = Date.now();
+        if (!this.#holds(claim)) {
+          this.#ignore(claim, now);
+          return false;
+        }
+        discardChunks(sql, claim.ordinal, claim.attempt);
+        const error = JSON.stringify({
+          ...errorRecord(fatal.run),
+          detail: fatal.detail,
+        });
+        sql.exec(
+          "UPDATE steps SET state = 'fatal', value = NULL, error = ? WHERE ordinal = ?",
+          error,
+          claim.ordinal
+        );
+        sql.exec(
+          "UPDATE attempts SET ended_at = ?, ended = 'failed', error = ?, retry_at = NULL WHERE ordinal = ? AND attempt = ?",
+          now,
+          error,
+          claim.ordinal,
+          claim.attempt
+        );
+        return true;
+      })
+    );
+    if (journaled === failed) {
+      return await never();
+    }
+    if (!journaled) {
+      return await this.#refuse();
+    }
+    return await this.#halt(fatal.run);
+  }
+
+  /**
+   * Keeps a stream result, inside its attempt: its chunks stored only
+   * while the attempt holds its step, its reading stopped when the
+   * attempt ends (an answer, a timeout) or the activation stops. The
+   * stream's own failures are fatal; storage's are a fault.
+   */
+  async #keepStream(
+    identity: StepIdentity,
+    claim: Claim,
+    config: StepConfig,
+    stream: object,
+    attemptEnded: Promise<unknown>
+  ): Promise<AttemptOutcome> {
+    let result: StreamResult | undefined;
+    try {
+      result = await persistStream(stream, {
+        storage: this.#storage,
+        ordinal: claim.ordinal,
+        attempt: claim.attempt,
+        holds: () => this.#holds(claim),
+        stopped: Promise.race([this.stopped, attemptEnded]),
+        maxBytes: this.#limits.maxStreamBytes,
+        maxRunBytes: this.#limits.maxRunStreamBytes,
+      });
+    } catch (error) {
+      if (!(error instanceof StreamResultError)) {
+        // The engine's own storage or hashing: not the step's doing.
+        return { fault: error };
       }
-      sql.exec(
-        "UPDATE steps SET state = 'succeeded', value = ?, error = NULL WHERE ordinal = ?",
-        outcome.value,
-        claim.ordinal
-      );
-      sql.exec(
-        "UPDATE attempts SET ended_at = ?, ended = 'succeeded' WHERE ordinal = ? AND attempt = ?",
-        now,
-        claim.ordinal,
-        claim.attempt
-      );
-      return outcome;
-    });
+      return fatalOf(identity, config, {
+        detail: errorRecord(error).message,
+        reason: "returned an invalid ReadableStream output.",
+        detailInRun: true,
+      });
+    }
+    return result === undefined
+      ? { superseded: true }
+      : { ok: true, value: encodeStreamResult(result), stream: result };
+  }
+
+  /**
+   * A succeeded step's value, as its journal row keeps it: fresh. Storage
+   * failing while a stream result is read back faults the activation, and
+   * bytes that aren't what the commit named halt it; the reader hears of
+   * neither, and its read never settles.
+   */
+  async #result(ordinal: number, value: string): Promise<unknown> {
+    const stream = streamResultOf(value);
+    if (stream === undefined) {
+      return decode(value);
+    }
+    let replay: Replay;
+    try {
+      replay = await replayStream(this.#storage.sql, ordinal, stream, {
+        fault: (error) => {
+          this.#fault(error);
+        },
+        corrupt: (error) => {
+          this.#haltNow(error);
+        },
+        // Read from a step's callback whose attempt has ended (it timed
+        // out and goes on), or once this activation is over: it acts for
+        // nothing, so it reads nothing more.
+        stopped: () => this.#over || hasEnded(attempts.getStore()),
+      });
+    } catch (error) {
+      this.#fault(error);
+      return await never();
+    }
+    if ("corrupt" in replay) {
+      // A result the journal holds but can't give back: replaying again
+      // would find the same, so the run ends with it, as on a fatal step.
+      return await this.#halt(replay.corrupt);
+    }
+    return replay.stream;
   }
 
   /** Runs one attempt at the step: its callback, to an outcome. */
@@ -930,15 +1203,37 @@ export class Activation {
     // calls of the step API once the attempt has an outcome is answered.
     const context = contextOf(identity, claim, config);
     const scope: AttemptScope = { live: true };
+    // Ends with the attempt (its answer, its timeout): a stream still being
+    // uploaded then stops reading, and stores nothing more.
+    const attemptEnded = Promise.withResolvers<true>();
     let answer: Answer;
     try {
       answer = await answerWithin(
-        async () => await attempts.run(scope, async () => await work(context)),
+        async () =>
+          await attempts.run(scope, async () => {
+            const returned: unknown = await work(context);
+            // A stream is kept within the attempt: its upload counts
+            // against the attempt's deadline, in the attempt's scope.
+            if (!isStream(returned)) {
+              return returned;
+            }
+            const kept: KeptStream = {
+              [keptStream]: await this.#keepStream(
+                identity,
+                claim,
+                config,
+                returned,
+                attemptEnded.promise
+              ),
+            };
+            return kept;
+          }),
         claim.deadline - Date.now(),
         this.#clock
       );
     } finally {
       scope.live = false;
+      attemptEnded.resolve(true);
     }
     if ("timedOut" in answer) {
       return {
@@ -948,24 +1243,29 @@ export class Activation {
         retryable: true,
       };
     }
+    if (answer.ok && isKeptStream(answer.value)) {
+      return answer.value[keptStream];
+    }
     if (answer.ok) {
       try {
         return { ok: true, value: encode(answer.value) };
       } catch (error) {
-        // A value the journal can't keep fails the step, as a throw
-        // would; the same callback would only return it again.
-        return {
-          ok: false,
-          error: JSON.stringify(errorRecord(error)),
-          ended: "failed",
-          retryable: false,
-        };
+        // A value the journal can't keep is no failure to retry: the same
+        // callback would only return it again. It ends the run, as on
+        // Cloudflare.
+        return fatalOf(identity, config, {
+          detail: `Value returned from step "${identity.name}" is not serialisable: ${errorRecord(error).message}`,
+          reason: "returned a value which is not serialisable",
+          detailInRun: false,
+        });
       }
     }
+    // Read once: the retry decision and the stored error are the same
+    // reading, whatever the error's getters answer another time.
     const record = errorRecord(answer.error);
     return {
       ok: false,
-      error: JSON.stringify(record),
+      error: failureText(record, config),
       ended: "failed",
       retryable: !isNonRetryable(record),
     };
@@ -1026,7 +1326,7 @@ export class Activation {
     } else {
       said = delayFailure(
         identity,
-        `threw an error: ${errorRecord(answer.error).message}`
+        `threw an error: ${config.sensitive ? redactedMessage : errorRecord(answer.error).message}`
       );
     }
     const landing = this.#write(() => this.#journalDelay(claim, said));
@@ -1207,13 +1507,19 @@ export class Activation {
     }
     if (journaled?.state === "succeeded" && journaled.value !== null) {
       land();
-      // What this step's work returned, through the codec, as the attempt
-      // that journaled it returned it.
-      return decode(journaled.value);
+      // What this step's work returned, through the codec or from storage,
+      // as the attempt that journaled it returned it.
+      return await this.#result(journaled.ordinal, journaled.value);
     }
     if (journaled?.state === "failed" && journaled.error !== null) {
       land();
       throw rebuild(journaled.error);
+    }
+    if (journaled?.state === "fatal" && journaled.error !== null) {
+      // The step's result couldn't be kept, and the run ends with that,
+      // however this replay got here: never to the definition.
+      land();
+      return await this.#halt(rebuild(journaled.error));
     }
     return await this.#attempts(identity, config, work, land);
   }
@@ -1242,9 +1548,36 @@ export class Activation {
     if ("claim" in next) {
       const { claim } = next;
       const outcome = await this.#runAttempt(identity, config, claim, work);
+      if ("fault" in outcome) {
+        this.#fault(outcome.fault);
+        return await never();
+      }
+      if ("superseded" in outcome) {
+        // Superseded mid-upload: recorded as an answer ignored, like a
+        // late one.
+        this.#write(() => {
+          this.#storage.transactionSync(() => {
+            this.#ignore(claim, Date.now());
+          });
+        });
+        return await this.#refuse();
+      }
+      if ("fatal" in outcome) {
+        return await this.#fail(claim, outcome.fatal);
+      }
       const committed = this.#write(() => this.#commit(claim, config, outcome));
       if (committed === failed) {
         return await never();
+      }
+      if (committed === "incomplete") {
+        return await this.#fail(
+          claim,
+          fatalOf(identity, config, {
+            detail: "Its stream output was stored incompletely",
+            reason: "returned a ReadableStream output that couldn't be kept.",
+            detailInRun: true,
+          }).fatal
+        );
       }
       journaled = committed;
     } else {
@@ -1265,7 +1598,7 @@ export class Activation {
     if ("failed" in landed) {
       throw rebuild(landed.failed);
     }
-    return decode(landed.value);
+    return await this.#result(landed.ordinal, landed.value);
   }
 
   /**

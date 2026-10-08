@@ -16,15 +16,10 @@
 //                wait that took it
 //
 // Values and errors are kept as codec text (codec.ts), never as live
-// objects.
-
-/**
- * The journal's own layout; a change to it is a new version. No journal
- * predates version 2 (nothing earlier was released), so a run of any other
- * version is refused when it is read; a later layout that changes it
- * brings its own upgrade.
- */
-export const journalSchemaVersion = 2;
+// objects; a step's stream result as chunks beside them (streams.ts). What
+// observers are shown is the run's history (history.ts).
+import { createHistory } from "./history.ts";
+import { createStreamChunks } from "./streams.ts";
 
 /**
  * A journal of a layout this engine doesn't read. It is refused as it is
@@ -36,10 +31,19 @@ export class JournalSchemaError extends Error {
 }
 
 /**
- * The largest event payload a run accepts, as encoded: the most the codec
- * keeps of any one value (codec.ts), and Cloudflare's per-step limit.
+ * The journal's own layout; a change to it is a new version. No journal
+ * predates version 2 (nothing earlier was released), so a run of any other
+ * version is refused when it is read; a later layout that changes it
+ * brings its own upgrade.
  */
-export const maxEventPayloadBytes = 1024 * 1024;
+export const journalSchemaVersion = 2;
+
+/**
+ * The largest event payload a run accepts, as the encoded text it keeps:
+ * the most text the codec writes for any one value, which holds every
+ * value within Cloudflare's 1 MiB limit that a journal value can hold.
+ */
+export { maxStoredTextBytes as maxEventPayloadBytes } from "./codec.ts";
 
 /**
  * What one run's inbox holds at most, taken and untaken events alike, so
@@ -91,6 +95,11 @@ export interface RunRow extends Record<string, SqlStorageValue> {
    */
   event_count: number;
   event_bytes: number;
+  /**
+   * What the run's stream chunks hold in all, kept in the writes that add
+   * and delete them (streams.ts), so a cap on it reads one row.
+   */
+  stream_bytes: number;
   output: string | null;
   error: string | null;
   ended_at: number | null;
@@ -100,14 +109,17 @@ export interface RunRow extends Record<string, SqlStorageValue> {
  * `running`: a `do` step's latest attempt is out, or was cut off.
  * `retrying`: its latest attempt failed, and the next is due at that
  * attempt's `retry_at`. `waiting`: a sleep or an event wait that hasn't
- * come to its outcome.
+ * come to its outcome. `fatal`: a `do` step returned what it can't keep,
+ * and the run ends with it; unlike `failed`, no replay hands it to the
+ * definition.
  */
 export type StepState =
   | "running"
   | "retrying"
   | "waiting"
   | "succeeded"
-  | "failed";
+  | "failed"
+  | "fatal";
 
 /** What kind of step a row is; part of its identity. */
 export type StepType = "do" | "sleep" | "waitForEvent";
@@ -137,8 +149,9 @@ export interface StepRow extends Record<string, SqlStorageValue> {
    */
   duration_ms: number | null;
   /**
-   * A `do` step's config as first given (config.ts), in milliseconds,
-   * which every replay must give again; null for a sleep or a wait.
+   * A `do` step's config as first given (config.ts), in milliseconds, its
+   * sensitivity with it, which every replay must give again; null for a
+   * sleep or a wait.
    */
   config: string | null;
 }
@@ -222,6 +235,7 @@ export const createJournal = (sql: SqlStorage): void => {
       wake_at INTEGER,
       event_count INTEGER NOT NULL DEFAULT 0,
       event_bytes INTEGER NOT NULL DEFAULT 0,
+      stream_bytes INTEGER NOT NULL DEFAULT 0,
       output TEXT,
       error TEXT,
       ended_at INTEGER
@@ -238,7 +252,7 @@ export const createJournal = (sql: SqlStorage): void => {
       name TEXT NOT NULL,
       occurrence INTEGER NOT NULL,
       idempotency_key TEXT NOT NULL,
-      state TEXT NOT NULL CHECK (state IN ('running', 'retrying', 'waiting', 'succeeded', 'failed')),
+      state TEXT NOT NULL CHECK (state IN ('running', 'retrying', 'waiting', 'succeeded', 'failed', 'fatal')),
       attempt INTEGER NOT NULL,
       value TEXT,
       error TEXT,
@@ -278,6 +292,8 @@ export const createJournal = (sql: SqlStorage): void => {
     CREATE INDEX IF NOT EXISTS steps_pending
       ON steps (state) WHERE state IN ('waiting', 'retrying');
   `);
+  createStreamChunks(sql);
+  createHistory(sql);
 };
 
 /**
@@ -306,7 +322,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
   }
   return sql
     .exec<RunRow>(
-      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, lease_until, wake_at, event_count, event_bytes, output, error, ended_at FROM run"
+      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at FROM run"
     )
     .toArray()[0];
 };

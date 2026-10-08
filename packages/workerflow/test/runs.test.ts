@@ -101,16 +101,6 @@ describe("a workflow run", () => {
     });
   });
 
-  it("fails a step whose value the journal can't keep with a SerializationError", async () => {
-    const id = newId();
-    await workflow("unkeepable").create({ id });
-
-    await expect(ended("unkeepable", id)).resolves.toMatchObject({
-      status: "complete",
-      output: { name: "SerializationError" },
-    });
-  });
-
   it("gives each call of the same step name its own occurrence and key", async () => {
     const id = newId();
     await workflow("repeats").create({ id });
@@ -169,7 +159,7 @@ describe("a workflow run", () => {
       { timeout: "16 minutes" },
     ],
     ["a setting it doesn't know", { retry: { limit: 1, delay: 0 } }],
-    ["a setting of a later slice", { sensitive: "output" }],
+    ["a sensitivity it doesn't know", { sensitive: "input" }],
     ["null for a config", null],
   ])(
     "refuses a step configured with %s rather than run it otherwise",

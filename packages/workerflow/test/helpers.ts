@@ -50,6 +50,22 @@ export const until = async <T>(
   throw new Error(`timed out waiting for ${what}`);
 };
 
+/** Awaits `promise`, or fails at the deadline. */
+export const within = async <T>(
+  what: string,
+  promise: Promise<T>
+): Promise<T> => {
+  const deadline = Promise.withResolvers<never>();
+  const timer = setTimeout(() => {
+    deadline.reject(new Error(`timed out waiting for ${what}`));
+  }, deadlineMs);
+  try {
+    return await Promise.race([promise, deadline.promise]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 /** Waits until the run has ended, and returns how. */
 export const ended = async (
   definition: string,

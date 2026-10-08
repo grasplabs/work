@@ -57,6 +57,32 @@ const effect = async (
   return await response.text();
 };
 
+/**
+ * A stream of bytes from the outside world: the test can withhold the rest
+ * of it after the first part, so the step is mid-upload when it kills.
+ */
+const download = async (
+  env: FixtureEnv,
+  run: string,
+  context: WorkflowStepContext
+): Promise<ReadableStream<Uint8Array> | null> => {
+  const response = await env.EFFECTS.fetch("http://effects/stream", {
+    method: "POST",
+    body: JSON.stringify({
+      run,
+      label: "export",
+      key: context.idempotencyKey,
+      attempt: context.attempt,
+    }),
+  });
+  return response.body;
+};
+
+const hex = (digest: ArrayBuffer): string =>
+  Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+
 const declinedCard = (): Error =>
   namedError("PaymentError", "The card was declined");
 
@@ -75,6 +101,25 @@ const definitionsFor = (
         async (context) => await effect(env, event.instanceId, "ship", context)
       );
       return { charge, ship };
+    },
+  },
+  // A stream from outside, then a step that reads back what the first
+  // returned and reports its hash outside.
+  export: {
+    run: async (event, step) => {
+      const body = await step.do(
+        "export",
+        async (context) => await download(env, event.instanceId, context)
+      );
+      return await step.do("digest", async (context) => {
+        const bytes = new Uint8Array(await new Response(body).arrayBuffer());
+        const digest = {
+          sha256: hex(await crypto.subtle.digest("SHA-256", bytes)),
+          length: bytes.byteLength,
+        };
+        await effect(env, event.instanceId, "digest", context);
+        return digest;
+      });
     },
   },
   declined: {
@@ -205,6 +250,15 @@ export class Runs extends WorkflowRun<FixtureEnv> {
     return outcome;
   }
 
+  /** Test-only: the stream chunks storage holds, by step and attempt. */
+  chunks(): Record<string, SqlStorageValue>[] {
+    return this.ctx.storage.sql
+      .exec(
+        "SELECT ordinal, attempt, COUNT(*) AS chunks, SUM(LENGTH(bytes)) AS length FROM stream_chunks GROUP BY ordinal, attempt ORDER BY ordinal, attempt"
+      )
+      .toArray();
+  }
+
   /** Test-only: resets the object as an eviction does; storage stays. */
   evict(): void {
     this.ctx.abort("evicted by the test");
@@ -303,6 +357,25 @@ export default {
         } catch (error) {
           return json({ error: errorText(error) }, 404);
         }
+      }
+      case "/chunks": {
+        return json(await stub.chunks());
+      }
+      case "/output": {
+        const output = await stub.stepOutput({
+          name: url.searchParams.get("name") ?? "",
+          count: 1,
+        });
+        if (output?.kind !== "stream") {
+          return json(output);
+        }
+        return new Response(output.stream, {
+          headers: {
+            "x-length": String(output.length),
+            "x-sha256": output.sha256,
+            "x-encoding": output.encoding,
+          },
+        });
       }
       case "/journal": {
         return json(await stub.journal());

@@ -5,8 +5,10 @@
 // opaque name and version, a run knows nothing of who started it or why.
 //
 // This profile is partial. It has named `do` steps with retries and
-// timeouts, sleeps and event waits, persisted and replayed. Pause,
-// terminate, restart, rollbacks, sensitive steps and retention come in
+// timeouts, sleeps and event waits, persisted and replayed; step results
+// are structured values (codec.ts) or byte streams (streams.ts), and a
+// step may be `sensitive`. Pause, terminate, restart, rollbacks and
+// retention come in
 // later slices; until then they are absent or refused, never silently
 // ignored.
 
@@ -58,6 +60,8 @@ export interface WorkflowStepContext {
       readonly backoff: WorkflowBackoff;
     };
     readonly timeout: WorkflowDuration;
+    /** Present when the step is sensitive. */
+    readonly sensitive?: "output";
   };
 }
 
@@ -102,6 +106,13 @@ export interface WorkflowStepConfig {
   };
   /** Each attempt's; more than 0 and at most 14 minutes. */
   readonly timeout?: WorkflowDuration;
+  /**
+   * `"output"`: observers (the run's history) see `"[REDACTED]"` in place
+   * of the step's result, and its errors' messages are redacted; the
+   * journal keeps the result for the run's own replay and the host's
+   * inspection.
+   */
+  readonly sensitive?: "output";
 }
 
 /** An event as a wait receives it. */
@@ -119,7 +130,9 @@ export interface WorkflowStep {
    * returns that value, or throws that error again, without calling
    * `callback`. A failed attempt is retried after a delay journaled as an
    * absolute time, with nothing of the run in memory meanwhile; a
-   * NonRetryableError (errors.ts) is not retried.
+   * NonRetryableError (errors.ts) is not retried. A `ReadableStream` of
+   * bytes it returns is read to its end within the attempt and kept; the
+   * step then returns, on every replay, a fresh stream of those bytes.
    */
   do: (<T>(
     name: string,
@@ -167,10 +180,14 @@ export interface DefinitionIdentity {
   readonly version: string | undefined;
 }
 
-/** A run's error as it crosses the journal: name and message survive. */
+/**
+ * A run's error as it crosses the journal: name and message survive, and a
+ * code when the error carried one in the safe shape (errors.ts).
+ */
 export interface WorkflowError {
   readonly name: string;
   readonly message: string;
+  readonly code?: string;
 }
 
 export type InstanceStatus =

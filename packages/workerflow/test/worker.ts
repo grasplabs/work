@@ -15,6 +15,11 @@ import {
   measuredClock,
   witness,
 } from "./outside.ts";
+import {
+  resultDefinitions,
+  testMaxRunStreamBytes,
+  testMaxStreamBytes,
+} from "./result-definitions.ts";
 
 const errorOf = (error: unknown): { name: string; message: string } =>
   error instanceof Error
@@ -119,17 +124,6 @@ export const definitions: Record<string, WorkflowDefinition> = {
         throw declinedCard();
       });
       return "unreachable";
-    },
-  },
-  // A step returning something the journal can't keep: a URL object.
-  unkeepable: {
-    run: async (_event, step) => {
-      try {
-        await step.do("link", () => new URL("https://example.com"));
-        return "kept";
-      } catch (error) {
-        return errorOf(error);
-      }
     },
   },
   // The same name twice: two occurrences, two keys.
@@ -651,11 +645,14 @@ export const definitions: Record<string, WorkflowDefinition> = {
 };
 
 export class TestRuns extends WorkflowRun {
+  protected override readonly maxStreamOutputBytes = testMaxStreamBytes;
+  protected override readonly maxRunStreamBytes = testMaxRunStreamBytes;
+
   // oxlint-disable-next-line class-methods-use-this -- the host's hook; this host needs nothing of its own
   protected definition({
     definition,
   }: DefinitionIdentity): WorkflowDefinition | undefined {
-    return definitions[definition];
+    return definitions[definition] ?? resultDefinitions[definition];
   }
 
   // oxlint-disable-next-line class-methods-use-this -- the test's clock, shared by every run
