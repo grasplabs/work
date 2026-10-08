@@ -63,7 +63,7 @@
 /*
  * From the prototype (packages/grasp/src/index.css), the chat's own motion.
  */
-/* Grasp's eyes beside each answer in the chat (chat/grasp-eyes.tsx): the Home buddy's
+/* Grasp's eyes beside each answer in a guest's chat (chat/grasp-eyes.tsx): the Home buddy's
    eyes on a dark tile. data-eyes says what Grasp is doing and picks how the eyes move; data-live
    marks the newest answer, the only one whose eyes move at all. Sizes are shares of the tile. */
 @utility eyes {
