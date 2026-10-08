@@ -22,25 +22,49 @@ export const quoted = (text: string): string =>
   `'${text.replaceAll("'", "''")}'`;
 
 /**
- * How often `execute` tries a write the database was too busy for (the dev
- * server shares the file), waiting 200 ms first and twice as long each time
- * after: 3 s at most in all.
+ * How often `whileBusy` tries a write the stack's local state was too busy
+ * for (the dev server shares its files), waiting 200 ms first and twice as
+ * long each time after: 3 s at most in all.
  */
 const busyAttempts = 5;
 const firstBusyWaitMs = 200;
 
 /**
- * What wrangler prints when another connection held the file: SQLite's
- * SQLITE_BUSY, or workerd's opaque "internal error; reference = …" when
- * the batch fails under the same contention. Any other error, a constraint
- * failing say, fails the run.
+ * What wrangler prints when another process held the state: SQLite's
+ * SQLITE_BUSY, workerd's opaque "internal error; reference = …" when a D1
+ * batch fails under the same contention, or R2's "Unspecified error" when
+ * two puts (two test workers seeding at once) meet. Any other error, a
+ * constraint failing say, fails the run.
  */
-const busyErrors = ["SQLITE_BUSY", "internal error; reference ="];
+const busyErrors = [
+  "SQLITE_BUSY",
+  "internal error; reference =",
+  "put: Unspecified error",
+];
 
 const isBusy = (error: unknown): boolean =>
   error instanceof Error &&
   "stderr" in error &&
   busyErrors.some((text) => String(error.stderr).includes(text));
+
+/**
+ * Runs `write`, a wrangler command on the stack's local state that does
+ * the same whether it runs once or again, until it isn't refused as busy.
+ */
+export const whileBusy = async (write: () => void): Promise<void> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      write();
+      return;
+    } catch (error) {
+      if (attempt >= busyAttempts || !isBusy(error)) {
+        throw error;
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one try at a time
+    await sleep(firstBusyWaitMs * 2 ** (attempt - 1));
+  }
+};
 
 /** Each Worker's wrangler config, from core's folder. */
 const configs = {
@@ -57,37 +81,28 @@ export const execute = async (
   sql: string,
   worker: keyof typeof configs = "connect"
 ): Promise<void> => {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      execFileSync(
-        path.join(import.meta.dirname, "../node_modules/.bin/wrangler"),
-        [
-          "d1",
-          "execute",
-          "DB",
-          "--local",
-          "-c",
-          configs[worker],
-          "--persist-to",
-          stateDir,
-          "--command",
-          sql,
-        ],
-        {
-          cwd: path.join(import.meta.dirname, "../apps/core"),
-          stdio: "pipe",
-          env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
-        }
-      );
-      return;
-    } catch (error) {
-      if (attempt >= busyAttempts || !isBusy(error)) {
-        throw error;
+  await whileBusy(() => {
+    execFileSync(
+      path.join(import.meta.dirname, "../node_modules/.bin/wrangler"),
+      [
+        "d1",
+        "execute",
+        "DB",
+        "--local",
+        "-c",
+        configs[worker],
+        "--persist-to",
+        stateDir,
+        "--command",
+        sql,
+      ],
+      {
+        cwd: path.join(import.meta.dirname, "../apps/core"),
+        stdio: "pipe",
+        env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
       }
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one try at a time
-    await sleep(firstBusyWaitMs * 2 ** (attempt - 1));
-  }
+    );
+  });
 };
 
 export interface SeededConnection {
