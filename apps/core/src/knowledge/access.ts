@@ -9,6 +9,7 @@ import type { PermissionId } from "@grasp-os/shared/ids";
 import type { Provenance } from "@grasp-os/shared/knowledge";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
+import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, exists, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -65,15 +66,18 @@ export type Reader =
 export interface PersonAccess {
   userId: string;
   teamIds: string[];
+  /** An admin (Grasp staff included): reads the collections for admins. */
+  admin: boolean;
 }
 
 /** Collections a person may read, as a condition on `collections`. */
 const readableBy = (
   db: DrizzleD1Database,
-  { userId, teamIds }: PersonAccess
+  { userId, teamIds, admin }: PersonAccess
 ): SQL =>
   or(
     eq(collections.access, "everyone"),
+    admin ? eq(collections.access, "admins") : undefined,
     // Its owner always, also of a team collection for teams they aren't in.
     eq(collections.owner, userId),
     teamIds.length === 0
@@ -108,7 +112,7 @@ export interface CollectionAccess {
  * access doesn't compile here until it is decided.
  */
 export const mayRead = (
-  { userId, teamIds }: PersonAccess,
+  { userId, teamIds, admin }: PersonAccess,
   { access, owner, teamIds: shared }: CollectionAccess
 ): boolean => {
   // Its owner always, also of a team collection for teams they aren't in.
@@ -124,6 +128,9 @@ export const mayRead = (
     }
     case "me": {
       return false;
+    }
+    case "admins": {
+      return admin;
     }
     default: {
       return access satisfies never;
@@ -177,11 +184,12 @@ export const collectionsAllowed = async (
   reader: Reader
 ): Promise<CollectionsAllowed> => {
   if (reader.type === "person") {
-    const { userId, teams } = reader.person;
+    const { userId, teams, role } = reader.person;
     return {
       condition: readableBy(db, {
         userId,
         teamIds: teams.map(({ id }) => id),
+        admin: isAdmin(role),
       }),
       granted: undefined,
     };
@@ -201,9 +209,12 @@ export const collectionsAllowed = async (
         // of its person's own collection (their USER.md) it reads as
         // memory, through `readableForPerson`.
         ne(collections.access, "me"),
+        // Nor one for admins: what the onboarding holds stays with people.
+        ne(collections.access, "admins"),
         readableBy(db, {
           userId: authority.onBehalfOf,
           teamIds: teams.map(({ id }) => id),
+          admin: false,
         })
       ) ?? sql`0`,
     granted,
@@ -233,7 +244,12 @@ export const readableForPerson = async (
   userId: string
 ): Promise<SQL> => {
   const teams = await teamsOf(env.DB, userId);
-  return readableBy(db, { userId, teamIds: teams.map(({ id }) => id) });
+  // Memory is the person's own files and the company's: never admins'.
+  return readableBy(db, {
+    userId,
+    teamIds: teams.map(({ id }) => id),
+    admin: false,
+  });
 };
 
 /** Who read, as the audit log names them. */

@@ -479,6 +479,10 @@ msgstr "Toegevoegd: deze code handelt namens iedereen die de engine gebruikt, me
 msgid "Admin"
 msgstr "Beheerder"
 
+#: src/knowledge/collection-markers.tsx
+msgid "Admins"
+msgstr "Beheerders"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Beheerders kunnen ieders rol wijzigen, sessies beëindigen en mensen verwijderen, andere beheerders inbegrepen."
