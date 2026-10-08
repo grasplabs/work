@@ -110,6 +110,18 @@ const loop = (name: string): Record<string, unknown> => {
   return value;
 };
 
+/** A ring of `length` objects, each pointing at the next; its first. */
+const ring = (length: number): unknown[] => {
+  const nodes: { index: number; next: unknown }[] = Array.from(
+    { length },
+    (_, index) => ({ index: index % 2, next: null })
+  );
+  for (const [index, node] of nodes.entries()) {
+    node.next = nodes[(index + 1) % length];
+  }
+  return nodes.slice(0, 1);
+};
+
 /** Codec text of the current version holding `node` as it is. */
 const codecText = (node: unknown): string =>
   JSON.stringify([codecVersion, node]);
@@ -718,14 +730,31 @@ describe("equivalent codec text", () => {
     ).toBeTruthy();
   });
 
-  test("holds whichever parts are one shared object and which equal copies", () => {
-    const shared = { y: 1, x: 2 };
+  test("holds for the same sharing, whatever the key order; not for other sharing", () => {
+    const first = { y: 1, x: 2 };
+    const second = { x: 2, y: 1 };
+    // Shared alike, keys in another order: the same value.
     expect(
       equivalent(
-        encode({ b: shared, a: shared }),
-        encode({ a: { x: 2, y: 1 }, b: { y: 1, x: 2 } })
+        encode({ b: first, a: first }),
+        encode({ a: second, b: second })
       )
     ).toBeTruthy();
+    // One shared object against two equal copies: which parts are one
+    // object is part of the value.
+    expect(
+      equivalent(
+        encode({ b: first, a: first }),
+        encode({ a: { x: 2, y: 1 }, b: { y: 1, x: 2 } })
+      )
+    ).toBeFalsy();
+  });
+
+  test("tells rings of other lengths apart, exactly and without throwing", () => {
+    const rings = (length: number): unknown[] =>
+      Array.from({ length: 5 }, () => ring(length));
+    expect(equivalent(encode(rings(499)), encode(rings(500)))).toBeFalsy();
+    expect(equivalent(encode(rings(500)), encode(rings(500)))).toBeTruthy();
   });
 
   test("holds for two cyclic values of the same shape, and not for another shape", () => {

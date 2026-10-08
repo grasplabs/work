@@ -622,11 +622,16 @@ const stoppedReading = Symbol("stopped reading");
  * subscription to that end for the whole upload, not one per read: a
  * source of many chunks leaves no reaction per chunk behind.
  */
-interface Stop {
-  race: (pendingRead: unknown) => Promise<unknown>;
+export interface Stop {
+  /**
+   * Starts a read with `startRead` and races it against the end; once the
+   * end has come, starts none. A read the end beats is still awaited, its
+   * rejection handled, so none is left unhandled.
+   */
+  race: (startRead: () => unknown) => Promise<unknown>;
 }
 
-const stopOf = (stopped: Promise<unknown>): Stop => {
+export const stopOf = (stopped: Promise<unknown>): Stop => {
   let isStopped = false;
   let current: ((value: typeof stoppedReading) => void) | undefined;
   const watching = async (): Promise<void> => {
@@ -636,16 +641,18 @@ const stopOf = (stopped: Promise<unknown>): Stop => {
   };
   void watching();
   return {
-    race: async (pendingRead) => {
+    race: async (startRead) => {
       if (isStopped) {
+        // Stopped already: no read is started, so none is abandoned.
         return stoppedReading;
       }
       const turn = Promise.withResolvers<unknown>();
       current = turn.resolve;
       const settling = async (): Promise<void> => {
         try {
-          turn.resolve(await pendingRead);
+          turn.resolve(await startRead());
         } catch (error) {
+          // Handled whether or not the end won: a settled turn ignores it.
           turn.reject(error);
         }
       };
@@ -669,7 +676,7 @@ const readChunk = async (
 ): Promise<ReadResult | typeof stoppedReading> => {
   let result: unknown;
   try {
-    result = await stop.race(invoke(read, reader));
+    result = await stop.race(() => invoke(read, reader));
   } catch (error) {
     throw new StreamResultError(
       "InvalidStepReadableStreamError",

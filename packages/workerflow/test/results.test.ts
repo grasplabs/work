@@ -908,7 +908,7 @@ describe("a step's sensitivity on replay", () => {
 });
 
 describe("an event delivered again", () => {
-  it("is the same event whichever parts of its payload were shared", async () => {
+  it("is the same event with its payload's keys in another order, and another event if it shares its parts otherwise", async () => {
     const id = newId();
     const use = hold(id, "use");
     await workflow("secret").create({ id });
@@ -922,11 +922,18 @@ describe("an event delivered again", () => {
       payload: { a: shared, b: shared },
       key,
     });
+    const reordered = { x: [2], y: 1 };
     const again = await instance.deliverEvent({
       type: "note",
-      payload: { b: { x: [2], y: 1 }, a: { y: 1, x: [2] } },
+      payload: { b: reordered, a: reordered },
       key,
     });
+    const copies = instance.deliverEvent({
+      type: "note",
+      payload: { a: { y: 1, x: [2] }, b: { y: 1, x: [2] } },
+      key,
+    });
+    await expect(copies).rejects.toThrow(/was sent before with another/u);
 
     use.release();
     await ended("secret", id);

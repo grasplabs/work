@@ -306,6 +306,8 @@ interface Encoder {
   size: number;
   /** How deep the object being encoded sits. */
   depth: number;
+  /** Writes plain objects' keys in code-unit order (canonical text). */
+  readonly sortKeys: boolean;
 }
 
 const tooLarge = (bytes: number): SerializationError =>
@@ -491,7 +493,12 @@ const encodePlainObject = (
   inner: Inner
 ): Node => {
   const node: Node[] = ["O"];
-  for (const [key, item] of Object.entries(value)) {
+  const entries = Object.entries(value);
+  if (state.sortKeys) {
+    // By code unit, the same in every runtime (not locale order).
+    entries.sort(([a], [b]) => (a < b ? -1 : Number(a > b)));
+  }
+  for (const [key, item] of entries) {
     count(state, stringSize(key));
     node.push(key, inner(item, `${path}.${key}`));
   }
@@ -600,9 +607,9 @@ const storedText = (node: Node): string => {
   return text;
 };
 
-/** Encodes `value` for the journal; throws SerializationError if it can't. */
-export const encode = (value: unknown): string => {
-  const state: Encoder = { seen: new Map(), size: 0, depth: 0 };
+/** `encode`, with plain objects' keys sorted when `sortKeys`. */
+const encodeWith = (value: unknown, sortKeys: boolean): string => {
+  const state: Encoder = { seen: new Map(), size: 0, depth: 0, sortKeys };
   let node: Node;
   try {
     node = encodeNode(value, "the value", state);
@@ -619,6 +626,9 @@ export const encode = (value: unknown): string => {
   }
   return storedText(node);
 };
+
+/** Encodes `value` for the journal; throws SerializationError if it can't. */
+export const encode = (value: unknown): string => encodeWith(value, false);
 
 // Stream results
 
@@ -1050,156 +1060,23 @@ export const decode = (text: string): unknown => {
 
 // Equivalence
 
-/** Each object node of `node`, in the order the encoder numbered them. */
-const objectNodes = (root: Node): Node[][] => {
-  const table: Node[][] = [];
-  // Depth first, children in order: the encoder's order.
-  const pending: Node[] = [root];
-  while (pending.length > 0) {
-    const node = pending.pop();
-    if (!Array.isArray(node)) {
-      continue;
-    }
-    const [tag, ...rest] = node;
-    if (typeof tag !== "string" || !objectTags.has(tag)) {
-      continue;
-    }
-    table.push(node);
-    let children: Node[] = [];
-    if (tag === "A" || tag === "M" || tag === "S") {
-      children = rest;
-    } else if (tag === "O") {
-      children = rest.filter((_, index) => index % 2 === 1);
-    } else if (tag === "T") {
-      children = rest.slice(1, 2);
-    } else if (tag === "V") {
-      children = rest.slice(0, 1);
-    }
-    // One at a time: a spread of an array's items can pass the engine's
-    // limit on arguments.
-    for (let index = children.length - 1; index >= 0; index -= 1) {
-      pending.push(children[index] ?? null);
-    }
-  }
-  return table;
-};
-
-interface Graph {
-  readonly objects: Node[][];
-}
-
-const resolve = (node: Node, graph: Graph): Node => {
-  if (Array.isArray(node) && node[0] === "P") {
-    const [, index] = node;
-    return isCount(index) ? (graph.objects[index] ?? null) : null;
-  }
-  return node;
-};
-
-const entriesOf = (rest: Node[]): Map<string, Node> =>
-  new Map(
-    pairs(rest).map(([key, item]): [string, Node] => [String(key), item])
-  );
-
 /**
- * The pairs of nodes whose sameness `pair` rests on, or false when it
- * can't hold whatever they are.
+ * Codec text in one canonical form: decoded, then encoded again with every
+ * plain object's keys in sorted order. References are numbered as the
+ * encoder numbers them, by first visit in its one deterministic walk, so
+ * the same graph always gives the same text. Linear in the text, with no
+ * budget that could change an answer.
  */
-const childPairs = (a: Node[], b: Node[]): [Node, Node][] | false => {
-  const [tag, ...restA] = a;
-  const [otherTag, ...restB] = b;
-  if (tag !== otherTag || typeof tag !== "string") {
-    return false;
-  }
-  switch (tag) {
-    case "O": {
-      const entriesA = entriesOf(restA);
-      const entriesB = entriesOf(restB);
-      if (entriesA.size !== entriesB.size) {
-        return false;
-      }
-      const found: [Node, Node][] = [];
-      for (const [key, item] of entriesA) {
-        const other = entriesB.get(key);
-        if (other === undefined) {
-          return false;
-        }
-        found.push([item, other]);
-      }
-      return found;
-    }
-    case "A":
-    case "M":
-    case "S":
-    case "T":
-    case "V":
-    case "W": {
-      return restA.length === restB.length
-        ? restA.map((item, index): [Node, Node] => [item, restB[index] ?? null])
-        : false;
-    }
-    default: {
-      return JSON.stringify(restA) === JSON.stringify(restB) ? [] : false;
-    }
-  }
-};
-
-/**
- * Whether two codec nodes hold the same value, ignoring which parts are
- * one shared object and which equal copies, and a plain object's key
- * order. Walked with a queue of pairs, not recursion, so no shape of value
- * can overflow the stack. A pair met again is taken as the same (a cycle,
- * or a part compared already). At most `maxEncodedBytes` pairs are
- * compared, the encoder's own budget: past it the two are not taken as
- * the same, and a caller treats them as different.
- */
-const sameNode = (left: Node, right: Node, graphs: [Graph, Graph]): boolean => {
-  const met = new Map<Node, Set<Node>>();
-  const queue: [Node, Node][] = [[left, right]];
-  let compared = 0;
-  // An array's iterator reads its length at every step: pairs pushed while
-  // it walks are walked too.
-  for (const [x, y] of queue) {
-    const a = resolve(x, graphs[0]);
-    const b = resolve(y, graphs[1]);
-    if (!Array.isArray(a) || !Array.isArray(b)) {
-      if (a !== b) {
-        return false;
-      }
-      continue;
-    }
-    const pairsMet = met.get(a) ?? new Set<Node>();
-    if (pairsMet.has(b)) {
-      continue;
-    }
-    pairsMet.add(b);
-    met.set(a, pairsMet);
-    compared += 1;
-    if (compared > maxEncodedBytes) {
-      return false;
-    }
-    const children = childPairs(a, b);
-    if (children === false) {
-      return false;
-    }
-    for (const pair of children) {
-      queue.push(pair);
-    }
-  }
-  return true;
-};
+const canonicalOf = (text: string): string => encodeWith(decode(text), true);
 
 /**
  * Whether two codec texts hold the same value: the same content, whatever
- * order a plain object's keys came in and whichever parts were shared. A
+ * order a plain object's keys came in. Which parts are one shared object
+ * and which equal copies is part of the value: two texts that share
+ * differently are different. (A start or an event delivered again comes
+ * over RPC or JSON, where sharing is kept the same or lost in both.) A
  * Map's entries, a Set's items and an array's elements keep their order:
  * the codec keeps it, and it is part of the value.
  */
-export const equivalent = (left: string, right: string): boolean => {
-  const a = readNode(left);
-  const b = readNode(right);
-  return sameNode(a, b, [
-    { objects: objectNodes(a) },
-    { objects: objectNodes(b) },
-  ]);
-};
+export const equivalent = (left: string, right: string): boolean =>
+  canonicalOf(left) === canonicalOf(right);
