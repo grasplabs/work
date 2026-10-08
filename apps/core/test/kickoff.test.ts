@@ -1,11 +1,15 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
+import { authErrors } from "@grasp-os/shared/errors";
 import type { KickoffInput } from "@grasp-os/shared/kickoff";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { models } from "../src/models.ts";
 import type { ModelsEnv } from "../src/models.ts";
+import { OnboardingStaffRpc } from "../src/onboarding/staff-rpc.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import type { SessionCheck } from "../src/session-check.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
@@ -42,7 +46,8 @@ Jakob (Grasp): Waar gaat de meeste tijd naartoe?
 Anna (COO): Het overtypen van klantgegevens tussen het CRM en de bankportalen kost ons team elke week uren.
 Anna (COO): Aan de salarisadministratie mag niemand komen, daar loopt een onderzoek.
 Jakob (Grasp): Welke systemen gebruiken jullie?
-Anna (COO): Vooral Salesforce en Excel, en de portalen van de banken.`;
+Anna (COO): Vooral Salesforce en Excel, en de portalen van de banken.
+Anna (COO): Ons team hypotheekadvies telt 12 adviseurs.`;
 
 /** What the model answers about `dutch`: one quote it made up. */
 const reading = {
@@ -81,7 +86,15 @@ const reading = {
       ask: "In welke talen werken de teams?",
     },
   ],
-  teams: [{ name: "advies", does: "Hypotheekadvies", people: 12 }],
+  teams: [
+    {
+      name: "hypotheekadvies",
+      does: "Hypotheekadvies voor klanten",
+      people: 12,
+    },
+    // Never named: made up.
+    { name: "Juridisch", does: "Contracten", people: 3 },
+  ],
 };
 
 const answer = (body: unknown): GatewayReply => ({
@@ -161,7 +174,13 @@ describe("the kickoff", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       said: ["limits", "pain", "systems"],
       ask: { business: "", languages: "In welke talen werken de teams?" },
-      teams: [{ name: "Advies", does: "Hypotheekadvies", people: 12 }],
+      teams: [
+        {
+          name: "Hypotheekadvies",
+          does: "Hypotheekadvies voor klanten",
+          people: 12,
+        },
+      ],
       transcript: null,
       pain: true,
       leaveAlone: true,
@@ -284,6 +303,38 @@ describe("the kickoff", { timeout: 60_000 }, () => {
       back: undefined,
       unknown: "kickoff.invalid",
     });
+  });
+
+  it("keeps nothing when the company ends Grasp's access while it is read", async () => {
+    const before = await onboardingStore(env).kickoff();
+    // A session that is staff's when the call comes in, and no longer once
+    // the reading is back: the company ended Grasp's access meanwhile.
+    const staff: Identity = {
+      userId: "staff-ended",
+      email: "staff@grasp.example",
+      name: "Grasp staff",
+      role: "admin",
+      teams: [],
+      staff: true,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const check = vi
+      .fn<SessionCheck>()
+      .mockResolvedValueOnce(staff)
+      .mockRejectedValue(authErrors.create("auth.unauthenticated"));
+    const { result, requests } = await answering(
+      [answer(reading)],
+      async () =>
+        await outcome(
+          new OnboardingStaffRpc(env, check).saveKickoff(pasted(dutch))
+        )
+    );
+    const after = await onboardingStore(env).kickoff();
+    expect({
+      read: requests.length,
+      result,
+      kept: after.transcript?.at === before.transcript?.at,
+    }).toStrictEqual({ read: 1, result: "auth.unauthenticated", kept: true });
   });
 
   it("is staff's alone: a member and the company's admin get nothing from it", async () => {

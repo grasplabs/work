@@ -691,6 +691,10 @@ msgid "Ask the agent to fix"
 msgstr "Demander à l’agent de corriger"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Ask the sponsor about {title}."
+msgstr "Demandez au sponsor : {title}."
+
+#: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Ask the sponsor: {ask}"
 msgstr "Demandez au sponsor : {ask}"
 
@@ -3360,13 +3364,29 @@ msgstr "Cela n’a pas fonctionné. Réessayez dans un instant."
 msgid "That email address already signs in with another account."
 msgstr "Cette adresse e-mail se connecte déjà avec un autre compte."
 
+#: src/onboarding/kickoff-errors.ts
+msgid "That file couldn't be read. Bring in a .txt, .vtt, .srt or .docx transcript, or paste it."
+msgstr "Ce fichier n’a pas pu être lu. Apportez une transcription .txt, .vtt, .srt ou .docx, ou collez-la."
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "That file is too large for a transcript."
 msgstr "Ce fichier est trop volumineux pour une transcription."
 
+#: src/onboarding/kickoff-errors.ts
+msgid "That is too short to be a conversation."
+msgstr "C’est trop court pour être une conversation."
+
+#: src/onboarding/kickoff-errors.ts
+msgid "That isn't something the kickoff takes."
+msgstr "Ce n’est pas quelque chose que le lancement accepte."
+
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
 msgstr "Ce compte de l’équipe n’a pas reçu d’accès ici."
+
+#: src/onboarding/kickoff-errors.ts
+msgid "That transcript is too long. Bring in the conversation itself, without attachments."
+msgstr "Cette transcription est trop longue. Apportez la conversation elle-même, sans pièces jointes."
 
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
@@ -3423,9 +3443,9 @@ msgctxt "who did it, in the log"
 msgid "The company"
 msgstr "L’entreprise"
 
-#: src/routes/_shell.onboarding.kickoff.tsx
-msgid "The conversation didn't say."
-msgstr "La conversation ne l’a pas dit."
+#: src/onboarding/kickoff-errors.ts
+msgid "The conversation couldn't be read just now. Try again in a moment."
+msgstr "La conversation n’a pas pu être lue pour l’instant. Réessayez dans un instant."
 
 #: src/onboarding/staff-words.ts
 msgid "The data processing agreement isn't signed"

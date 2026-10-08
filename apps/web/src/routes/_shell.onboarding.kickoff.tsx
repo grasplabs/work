@@ -25,6 +25,7 @@ import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import { inLanguage } from "../onboarding/kickoff-errors.ts";
 import { visionTitles } from "../onboarding/staff-words.ts";
 import {
   SettingsBody,
@@ -59,7 +60,11 @@ const BringIn = ({ replacing }: { replacing: boolean }) => {
     await run(async (session) => {
       await changeThenRefresh(
         async () => {
-          await session.onboardingStaff.saveKickoff({ locale, transcript });
+          try {
+            await session.onboardingStaff.saveKickoff({ locale, transcript });
+          } catch (error) {
+            throw inLanguage(i18n, error);
+          }
           setText("");
         },
         async () => {
@@ -150,7 +155,7 @@ const Answer = ({
   field: VisionField;
   answer: string | undefined;
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const router = useRouter();
   const id = useId();
   const { busy, failure, run } = useCoreAction();
@@ -159,7 +164,11 @@ const Answer = ({
     await run(async (session) => {
       await changeThenRefresh(
         async () => {
-          await session.onboardingStaff.answerKickoff(field, text);
+          try {
+            await session.onboardingStaff.answerKickoff(field, text);
+          } catch (error) {
+            throw inLanguage(i18n, error);
+          }
         },
         async () => {
           await router.invalidate({ sync: true });
@@ -216,6 +225,7 @@ const Field = ({
   const ask = kickoff.reading?.ask[field];
   const answer = kickoff.answers[field];
   const known = said !== undefined || answer !== undefined;
+  const title = i18n._(visionTitles[field]);
   const Icon = known ? CircleCheckIcon : CircleHelpIcon;
   return (
     <li className="flex flex-col gap-2 border-t px-5 py-4">
@@ -226,27 +236,30 @@ const Field = ({
             known ? "size-4" : "text-status-attention size-4 flex-none"
           }
         />
-        <h3 className="font-medium">{i18n._(visionTitles[field])}</h3>
+        <h3 className="font-medium">{title}</h3>
       </div>
       {said === undefined ? (
         <div className="flex flex-col gap-2 pl-6">
-          {ask === undefined || ask === "" ? (
-            <p className="text-muted-foreground">
-              <Trans>The conversation didn&apos;t say.</Trans>
-            </p>
-          ) : (
-            <p>
+          <p>
+            {ask === undefined || ask === "" ? (
+              <Trans>Ask the sponsor about {title}.</Trans>
+            ) : (
               <Trans>Ask the sponsor: {ask}</Trans>
-            </p>
-          )}
+            )}
+          </p>
           <Answer answer={answer} field={field} key={answer ?? ""} />
         </div>
       ) : (
-        <div className="flex flex-col gap-1 pl-6">
+        <div className="flex flex-col gap-2 pl-6">
           <p>{said.text}</p>
           <blockquote className="text-muted-foreground border-l-2 pl-3 italic">
             {said.quote}
           </blockquote>
+          {/* An answer from before a new reading stays in Stephen's
+              context: in sight, to change or take back. */}
+          {answer === undefined ? null : (
+            <Answer answer={answer} field={field} key={answer} />
+          )}
         </div>
       )}
     </li>

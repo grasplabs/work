@@ -691,6 +691,10 @@ msgid "Ask the agent to fix"
 msgstr "Agenten um Behebung bitten"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Ask the sponsor about {title}."
+msgstr "Fragen Sie den Sponsor nach: {title}."
+
+#: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Ask the sponsor: {ask}"
 msgstr "Fragen Sie den Sponsor: {ask}"
 
@@ -3360,13 +3364,29 @@ msgstr "Das hat nicht funktioniert. Versuchen Sie es gleich noch einmal."
 msgid "That email address already signs in with another account."
 msgstr "Mit dieser E-Mail-Adresse wird bereits ein anderes Konto angemeldet."
 
+#: src/onboarding/kickoff-errors.ts
+msgid "That file couldn't be read. Bring in a .txt, .vtt, .srt or .docx transcript, or paste it."
+msgstr "Diese Datei konnte nicht gelesen werden. Bringen Sie ein Transkript als .txt, .vtt, .srt oder .docx ein, oder fügen Sie es ein."
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "That file is too large for a transcript."
 msgstr "Diese Datei ist zu groß für ein Transkript."
 
+#: src/onboarding/kickoff-errors.ts
+msgid "That is too short to be a conversation."
+msgstr "Das ist zu kurz für ein Gespräch."
+
+#: src/onboarding/kickoff-errors.ts
+msgid "That isn't something the kickoff takes."
+msgstr "Das nimmt das Kickoff nicht an."
+
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
 msgstr "Dieses Konto des Grasp-Teams hat hier keinen Zugang erhalten."
+
+#: src/onboarding/kickoff-errors.ts
+msgid "That transcript is too long. Bring in the conversation itself, without attachments."
+msgstr "Dieses Transkript ist zu lang. Bringen Sie nur das Gespräch selbst ein, ohne Anhänge."
 
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
@@ -3423,9 +3443,9 @@ msgctxt "who did it, in the log"
 msgid "The company"
 msgstr "Das Unternehmen"
 
-#: src/routes/_shell.onboarding.kickoff.tsx
-msgid "The conversation didn't say."
-msgstr "Das Gespräch hat es nicht gesagt."
+#: src/onboarding/kickoff-errors.ts
+msgid "The conversation couldn't be read just now. Try again in a moment."
+msgstr "Das Gespräch konnte gerade nicht gelesen werden. Versuchen Sie es gleich noch einmal."
 
 #: src/onboarding/staff-words.ts
 msgid "The data processing agreement isn't signed"

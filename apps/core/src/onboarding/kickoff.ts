@@ -122,24 +122,35 @@ const quoteMinLength = 4;
 const teamsMax = 30;
 
 /** A team as the company named it: with a capital, however it came up in a sentence. */
-const teamOf = (team: Answer["teams"][number]): KickoffTeam[] => {
-  const called = tidy(team.name, 60);
-  if (called === "") {
-    return [];
-  }
-  const name = called.charAt(0).toUpperCase() + called.slice(1);
-  const { people } = team;
-  const counted =
-    Number.isInteger(people) && people > 0 && people < 100_000
-      ? { people }
-      : {};
-  return [{ name, does: tidy(team.does, 160), ...counted }];
-};
+/**
+ * A team as the company named it, kept only when the transcript (`said`,
+ * as `plain` made it) names it: with a capital, however it came up in a
+ * sentence, and its head count only when that number was said.
+ */
+const teamOf =
+  (said: string) =>
+  (team: Answer["teams"][number]): KickoffTeam[] => {
+    const called = tidy(team.name, 60);
+    const named = plain(called);
+    if (named.length < 2 || !` ${said} `.includes(` ${named} `)) {
+      return [];
+    }
+    const name = called.charAt(0).toUpperCase() + called.slice(1);
+    const { people } = team;
+    const counted =
+      Number.isInteger(people) &&
+      people > 0 &&
+      people < 100_000 &&
+      ` ${said} `.includes(` ${people} `)
+        ? { people }
+        : {};
+    return [{ name, does: tidy(team.does, 160), ...counted }];
+  };
 
 /**
  * What the model gave back, checked against `transcript`: a field counts
- * only when the words it rests on were really said. Whatever is left over
- * is what to ask the sponsor.
+ * only when the words it rests on were really said, and a team only when
+ * it was named. Whatever is left over is what to ask the sponsor.
  */
 export const readingOf = (
   answer: Answer,
@@ -158,7 +169,7 @@ export const readingOf = (
       reading.ask[field] = tidy(entry?.ask ?? "", 200);
     }
   }
-  reading.teams = answer.teams.slice(0, teamsMax).flatMap(teamOf);
+  reading.teams = answer.teams.slice(0, teamsMax).flatMap(teamOf(said));
   return reading;
 };
 

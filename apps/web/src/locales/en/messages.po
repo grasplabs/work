@@ -691,6 +691,10 @@ msgid "Ask the agent to fix"
 msgstr "Ask the agent to fix"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Ask the sponsor about {title}."
+msgstr "Ask the sponsor about {title}."
+
+#: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Ask the sponsor: {ask}"
 msgstr "Ask the sponsor: {ask}"
 
@@ -3360,13 +3364,29 @@ msgstr "That didn't work. Try again in a moment."
 msgid "That email address already signs in with another account."
 msgstr "That email address already signs in with another account."
 
+#: src/onboarding/kickoff-errors.ts
+msgid "That file couldn't be read. Bring in a .txt, .vtt, .srt or .docx transcript, or paste it."
+msgstr "That file couldn't be read. Bring in a .txt, .vtt, .srt or .docx transcript, or paste it."
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "That file is too large for a transcript."
 msgstr "That file is too large for a transcript."
 
+#: src/onboarding/kickoff-errors.ts
+msgid "That is too short to be a conversation."
+msgstr "That is too short to be a conversation."
+
+#: src/onboarding/kickoff-errors.ts
+msgid "That isn't something the kickoff takes."
+msgstr "That isn't something the kickoff takes."
+
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
 msgstr "That staff account hasn't been given access here."
+
+#: src/onboarding/kickoff-errors.ts
+msgid "That transcript is too long. Bring in the conversation itself, without attachments."
+msgstr "That transcript is too long. Bring in the conversation itself, without attachments."
 
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
@@ -3423,9 +3443,9 @@ msgctxt "who did it, in the log"
 msgid "The company"
 msgstr "The company"
 
-#: src/routes/_shell.onboarding.kickoff.tsx
-msgid "The conversation didn't say."
-msgstr "The conversation didn't say."
+#: src/onboarding/kickoff-errors.ts
+msgid "The conversation couldn't be read just now. Try again in a moment."
+msgstr "The conversation couldn't be read just now. Try again in a moment."
 
 #: src/onboarding/staff-words.ts
 msgid "The data processing agreement isn't signed"

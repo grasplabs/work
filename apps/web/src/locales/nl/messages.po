@@ -691,6 +691,10 @@ msgid "Ask the agent to fix"
 msgstr "Vraag de agent om het te herstellen"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
+msgid "Ask the sponsor about {title}."
+msgstr "Vraag de sponsor naar: {title}."
+
+#: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Ask the sponsor: {ask}"
 msgstr "Vraag de sponsor: {ask}"
 
@@ -3360,13 +3364,29 @@ msgstr "Dat is niet gelukt. Probeer het zo opnieuw."
 msgid "That email address already signs in with another account."
 msgstr "Met dat e-mailadres wordt al ingelogd met een ander account."
 
+#: src/onboarding/kickoff-errors.ts
+msgid "That file couldn't be read. Bring in a .txt, .vtt, .srt or .docx transcript, or paste it."
+msgstr "Dat bestand kon niet worden gelezen. Breng een transcript als .txt, .vtt, .srt of .docx binnen, of plak het."
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "That file is too large for a transcript."
 msgstr "Dat bestand is te groot voor een transcript."
 
+#: src/onboarding/kickoff-errors.ts
+msgid "That is too short to be a conversation."
+msgstr "Dat is te kort voor een gesprek."
+
+#: src/onboarding/kickoff-errors.ts
+msgid "That isn't something the kickoff takes."
+msgstr "Dat neemt de kick-off niet aan."
+
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
 msgstr "Dat medewerkersaccount heeft hier geen toegang gekregen."
+
+#: src/onboarding/kickoff-errors.ts
+msgid "That transcript is too long. Bring in the conversation itself, without attachments."
+msgstr "Dat transcript is te lang. Breng alleen het gesprek zelf binnen, zonder bijlagen."
 
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
@@ -3423,9 +3443,9 @@ msgctxt "who did it, in the log"
 msgid "The company"
 msgstr "Het bedrijf"
 
-#: src/routes/_shell.onboarding.kickoff.tsx
-msgid "The conversation didn't say."
-msgstr "Het gesprek zei het niet."
+#: src/onboarding/kickoff-errors.ts
+msgid "The conversation couldn't be read just now. Try again in a moment."
+msgstr "Het gesprek kon nu niet worden gelezen. Probeer het zo opnieuw."
 
 #: src/onboarding/staff-words.ts
 msgid "The data processing agreement isn't signed"

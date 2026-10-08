@@ -216,6 +216,9 @@ export class OnboardingStaffRpc
       const { text, fileName } = await transcriptOf(this.#env, transcript);
       const by = actorOf(person);
       const reading = await readKickoff(this.#env, text, locale, by);
+      // The reading takes a while: the company may have ended Grasp's
+      // access meanwhile. Nothing is kept unless they are still in.
+      requireStaff(await this.#check());
       return await onboardingStore(this.#env).saveKickoff(
         { transcript: text, fileName, reading },
         by
