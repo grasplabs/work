@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
 import { interviewLocaleSchema } from "./onboarding.ts";
-import { uploadMaxBytes } from "./uploads.ts";
+import { uploadMaxBytes, uploadNameSchema } from "./uploads.ts";
 
 // Documents the company's admin shares in the onboarding (core's
 // onboarding/documents.ts): each is kept in Knowledge, in a collection
@@ -67,7 +67,8 @@ export interface OnboardingDocument {
 /** A document shared: its file, and the language it is read in. */
 export const shareDocumentSchema = z.strictObject({
   locale: interviewLocaleSchema,
-  name: z.string().trim().min(1).max(255),
+  // Knowledge's own rule for a file name, checked before any reading.
+  name: uploadNameSchema,
   bytes: z
     .instanceof(Uint8Array)
     .refine((bytes) => bytes.byteLength <= uploadMaxBytes, {

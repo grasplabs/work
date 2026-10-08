@@ -213,6 +213,13 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
         await outcome(
           admin.onboarding.shareDocument({
             locale: "en",
+            name: "claims #2 [draft].docx",
+            bytes: draft,
+          })
+        ),
+        await outcome(
+          admin.onboarding.shareDocument({
+            locale: "en",
             name: "huge.pdf",
             bytes: new Uint8Array(10 * 1024 * 1024 + 1),
           })
@@ -225,7 +232,7 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
       .bind(name)
       .all();
     expect({ result, kept: kept.length }).toStrictEqual({
-      result: ["document.not_read", "document.too_large"],
+      result: ["document.not_read", "document.invalid", "document.too_large"],
       kept: 0,
     });
   });
