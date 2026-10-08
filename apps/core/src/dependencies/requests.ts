@@ -784,32 +784,28 @@ const admissionSchema = z.strictObject({
 /** What a build asks to use: one graph, for one App and targets. */
 export type DependencyAdmission = z.input<typeof admissionSchema>;
 
+/** What `admissionOf` decided. */
+export type Admission =
+  | { admitted: true; approval: string; policyGeneration: number }
+  | {
+      admitted: false;
+      reason: "policy_changed" | "not_approved";
+      /** A request waiting for a decision on the App, if any. */
+      waiting: string | undefined;
+    };
+
 /**
- * Whether exactly this graph is approved: for this App, for every one of
- * these targets, under the policy generation the caller read. The one
- * check for anything that would build with, run or publish an App's
- * packages; it answers with the approval it relied on, to record with
- * what was built. One read of the database answers it, so a decision or a
- * policy change lands wholly before or after.
- *
- * Which revision of the source the graph comes from is not asked: an
- * approved graph holds for every revision that resolves to it, and a
- * source that asks for anything else resolves to another hash.
- *
- * Refused with `dependency.policy_changed` when the generation moved on
- * since the caller read it (read the status again), and with
- * `dependency.approval_required` for anything not approved as asked: its
- * details name the request waiting for that graph, if one is. Each refusal
- * is audited as `actor`'s. An admission that succeeds records nothing
- * here: what uses it records the approval it relied on.
+ * The one check `admitDependencies` makes, without its audit: whether a
+ * person's approval covers exactly this App, graph and targets under the
+ * policy generation the caller read. For a caller that records a refusal
+ * its own way (serving an artifact, packages/serve.ts, which would
+ * otherwise write an audit row for every refused file a browser asks for).
  */
-export const admitDependencies = async (
-  env: Env,
-  actor: AuditActor,
+export const admissionOf = async (
+  db: DrizzleD1Database,
   input: DependencyAdmission
-): Promise<{ approval: string; policyGeneration: number }> => {
+): Promise<Admission> => {
   const asked = admissionSchema.parse(input);
-  const db = drizzle(env.DB);
   const [[policy], candidates] = await db.batch([
     // No row yet is generation 0 (policy.ts).
     db
@@ -838,9 +834,53 @@ export const admitDependencies = async (
         (row) => row.status === "approved" && covers(row, asked.targets)
       );
   if (approval) {
-    return { approval: approval.id, policyGeneration: generation };
+    return {
+      admitted: true,
+      approval: approval.id,
+      policyGeneration: generation,
+    };
   }
-  const waiting = candidates.find((row) => row.status === "pending");
+  return {
+    admitted: false,
+    reason: policyChanged ? "policy_changed" : "not_approved",
+    waiting: candidates.find((row) => row.status === "pending")?.id,
+  };
+};
+
+/**
+ * Whether exactly this graph is approved: for this App, for every one of
+ * these targets, under the policy generation the caller read. The one
+ * check for anything that would build with, run or publish an App's
+ * packages; it answers with the approval it relied on, to record with
+ * what was built. One read of the database answers it, so a decision or a
+ * policy change lands wholly before or after.
+ *
+ * Which revision of the source the graph comes from is not asked: an
+ * approved graph holds for every revision that resolves to it, and a
+ * source that asks for anything else resolves to another hash.
+ *
+ * Refused with `dependency.policy_changed` when the generation moved on
+ * since the caller read it (read the status again), and with
+ * `dependency.approval_required` for anything not approved as asked: its
+ * details name the request waiting for that graph, if one is. Each refusal
+ * is audited as `actor`'s. An admission that succeeds records nothing
+ * here: what uses it records the approval it relied on.
+ */
+export const admitDependencies = async (
+  env: Env,
+  actor: AuditActor,
+  input: DependencyAdmission
+): Promise<{ approval: string; policyGeneration: number }> => {
+  const asked = admissionSchema.parse(input);
+  const db = drizzle(env.DB);
+  const decided = await admissionOf(db, asked);
+  if (decided.admitted) {
+    return {
+      approval: decided.approval,
+      policyGeneration: decided.policyGeneration,
+    };
+  }
+  const { reason, waiting } = decided;
   await auditedBatch(env, db, [
     outboxed(db, {
       actor,
@@ -851,15 +891,15 @@ export const admitDependencies = async (
         graphHash: asked.graphHash,
         targets: asked.targets.toSorted().join(" "),
         policyGeneration: asked.policyGeneration,
-        reason: policyChanged ? "policy_changed" : "not_approved",
-        ...(waiting ? { request: waiting.id } : {}),
+        reason,
+        ...(waiting === undefined ? {} : { request: waiting }),
       },
     }),
   ]);
-  throw policyChanged
+  throw reason === "policy_changed"
     ? dependencyErrors.create("dependency.policy_changed")
     : dependencyErrors.create(
         "dependency.approval_required",
-        waiting ? { request: waiting.id } : undefined
+        waiting === undefined ? undefined : { request: waiting }
       );
 };
