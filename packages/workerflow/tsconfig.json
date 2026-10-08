@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": [
+      "@cloudflare/workers-types",
+      "@cloudflare/vitest-pool-workers/types",
+      // node:async_hooks, for AsyncLocalStorage (activation.ts).
+      "node"
+    ]
+  },
+  "include": ["src", "test", "vite.config.ts"],
+  // Node drives plain workerd from there (its own tsconfig).
+  "exclude": ["test/process"]
+}

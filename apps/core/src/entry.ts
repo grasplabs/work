@@ -15,6 +15,7 @@ import { screenFramePath } from "@grasp-os/shared/screens";
 
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
+import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
 import { handleConnectionCallback } from "./connections.ts";
@@ -23,6 +24,10 @@ import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { interviewResponse } from "./onboarding/links.ts";
+import {
+  packageArtifactResponse,
+  withoutArtifactToken,
+} from "./packages/serve.ts";
 import { platformUpdateResponse } from "./platform-updates.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
@@ -34,6 +39,26 @@ const isUnder = (pathname: string, base: string): boolean =>
 
 /** `/api/knowledge/uploads/<id>/original`: an upload's original. */
 const originalPath = /^\/api\/knowledge\/uploads\/(?<id>[\w-]+)\/original$/u;
+
+/**
+ * The pages a link opens, which have no session: the link's secret in the
+ * body is all they have. A guest's (src/guests.ts), and someone's own
+ * interview, with the device's key too (src/onboarding/links.ts).
+ */
+const linkResponse = async (
+  pathname: string,
+  request: Request,
+  env: Env,
+  requestId: string
+): Promise<Response | undefined> => {
+  if (pathname === guestApiPath) {
+    return await guestResponse(request, env, requestId);
+  }
+  if (pathname === interviewApiPath) {
+    return await interviewResponse(request, env, requestId);
+  }
+  return undefined;
+};
 
 /** Routes a request that has passed the router-secret check. */
 const route = async (
@@ -62,6 +87,10 @@ const route = async (
   if (screenModule !== null) {
     return screenModule;
   }
+  const packageArtifact = await packageArtifactResponse(env, request);
+  if (packageArtifact !== null) {
+    return packageArtifact;
+  }
   if (isUnder(pathname, authBasePath)) {
     return await handleAuthRequest(request, env, requestId);
   }
@@ -74,15 +103,9 @@ const route = async (
   if (pathname === auditExportPath) {
     return await auditExportResponse(request, env, requestId);
   }
-  // A guest's page, which has no session: the link's secret in the body
-  // is all it has (src/guests.ts).
-  if (pathname === guestApiPath) {
-    return await guestResponse(request, env, requestId);
-  }
-  // Someone's own interview link, which has no session either: the link's
-  // secret and the device's key in the body (src/onboarding/links.ts).
-  if (pathname === interviewApiPath) {
-    return await interviewResponse(request, env, requestId);
+  const linked = await linkResponse(pathname, request, env, requestId);
+  if (linked !== undefined) {
+    return linked;
   }
   if (pathname === errorReportPath) {
     return await errorReportResponse(request, env, requestId);
@@ -179,11 +202,12 @@ export const handleRequest = async (
     ctx,
     requestId
   );
-  // One line per request. Only the path: query strings can carry tokens.
+  // One line per request. Only the path: query strings can carry tokens,
+  // and so can an artifact's path, without it.
   log[level]("request", {
     requestId,
     method: request.method,
-    path: url.pathname,
+    path: withoutArtifactToken(url.pathname),
     status: response.status,
     durationMs: Date.now() - startedAt,
     ...fields,
@@ -191,6 +215,10 @@ export const handleRequest = async (
   const tagged = withRequestId(response, requestId);
   // On every response, not only the frontend's: a route added later that
   // serves HTML is covered too.
-  setSecurityHeaders(tagged.headers, url);
+  setSecurityHeaders(
+    tagged.headers,
+    url,
+    signInConfig(env)?.origin ?? url.origin
+  );
   return tagged;
 };

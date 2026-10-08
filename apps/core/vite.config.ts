@@ -127,6 +127,17 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
             STATISTICS_READ_LIMITS: "20/60",
             // One memory limit set, the others at their defaults.
             MEMORY_LIMITS: { "USER.md": 500 },
+            // Package limits a test can reach with packages it publishes
+            // on the fake npm registry (test/packages.test.ts).
+            PACKAGE_LIMITS: {
+              graphDepth: 4,
+              graphPackages: 12,
+              graphArchiveBytes: 512 * 1024,
+              extractedBytes: 1024 * 1024,
+              extractedEntries: 64,
+              graphExtractedBytes: 2 * 1024 * 1024,
+              artifactBytes: 256 * 1024,
+            },
             // The gateway runs call the model through; tests fake the AI binding.
             MODEL_GATEWAY: {
               gateway: "grasp-os-test",

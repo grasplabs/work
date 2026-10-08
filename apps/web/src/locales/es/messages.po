@@ -790,6 +790,10 @@ msgid "Builder"
 msgstr "Creador"
 
 #: src/activity/audit-words.ts
+msgid "Built approved packages"
+msgstr "Compiló paquetes aprobados"
+
+#: src/activity/audit-words.ts
 msgid "Called a model"
 msgstr "Llamó a un modelo"
 

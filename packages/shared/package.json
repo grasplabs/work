@@ -40,6 +40,7 @@
     "./onboarding-documents": "./src/onboarding-documents.ts",
     "./onboarding-gate": "./src/onboarding-gate.ts",
     "./onboarding-staff": "./src/onboarding-staff.ts",
+    "./packages": "./src/packages.ts",
     "./permissions": "./src/permissions.ts",
     "./platform-change": "./src/platform-change.ts",
     "./release": "./src/release.ts",
