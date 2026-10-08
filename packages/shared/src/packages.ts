@@ -118,6 +118,8 @@ export const packageErrors = defineErrorFamily({
   "package.not_found": "The registry has no such package or version.",
   "package.registry_unavailable":
     "The package registry couldn't be reached. Try again in a minute.",
+  "package.registry_busy":
+    "Too many packages are being read from the registry at once. Try again in a moment.",
   "package.redirect_refused":
     "The registry sent the request somewhere other than the registry.",
   "package.too_large": "The package is larger than Grasp takes.",
@@ -134,6 +136,8 @@ export const packageErrors = defineErrorFamily({
     "A package needs something Grasp doesn't run: install scripts, native code, links or files outside itself.",
   "package.artifact_mismatch":
     "Building the packages made other files than the lock pinned for them.",
+  "package.build_busy":
+    "Another build of this App's packages is still running. Try again in a minute.",
   "package.platform_changed":
     "The platform's React changed since these packages were resolved. Resolve them again.",
 });
@@ -161,17 +165,36 @@ export const packageLimits = {
    * builder in one call, under the 32 MiB a Worker RPC message may be.
    */
   graphArchiveBytes: 24 * 1024 * 1024,
-  /** What one package's tarball unpacks to (gzip's output). */
-  extractedBytes: 64 * 1024 * 1024,
+  /**
+   * What one package's tarball unpacks to (gzip's output). No more than a
+   * whole graph may (`graphExtractedBytes`): unpacking one holds it all.
+   */
+  extractedBytes: 40 * 1024 * 1024,
   /** Entries in one package's tarball. */
   extractedEntries: 20_000,
-  /** What a whole graph's tarballs unpack to. */
-  graphExtractedBytes: 256 * 1024 * 1024,
+  /**
+   * What a whole graph's tarballs unpack to. A build holds all of it at
+   * once in the package builder's isolate, which has 128 MB in all, beside
+   * the tarballs themselves (up to `graphArchiveBytes`, 24 MiB), esbuild's
+   * WebAssembly memory (it grows with the build; leave about 32 MiB) and
+   * the artifact it makes (up to `artifactBytes`, 16 MiB): 72 MiB. This
+   * takes 40 MiB of the rest, leaving about 10 MiB for everything else the
+   * isolate holds. Past what the isolate has, a build would be stopped by
+   * the runtime instead of refused with a reason.
+   */
+  graphExtractedBytes: 40 * 1024 * 1024,
   /** Longest path in a tarball, in bytes, and most segments. */
   pathBytes: 1024,
   pathDepth: 64,
   /** The lock as core stores it. */
   lockBytes: 1024 * 1024,
+  /**
+   * Locks one App holds: one per graph a pending or approved request
+   * names (others are deleted as their request goes). Past it, the lock
+   * of the oldest approval no longer in use gives up its room; only locks
+   * in use (pending, or the latest approval for some targets) are refused.
+   */
+  appLocks: 32,
   /** What one target's build makes, every file of it together. */
   artifactBytes: 16 * 1024 * 1024,
 } as const;

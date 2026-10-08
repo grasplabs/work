@@ -8,6 +8,7 @@ import { sweepGuestChats } from "./guests.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
+import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
 import { sweepStatistics } from "./statistics.ts";
@@ -82,7 +83,9 @@ export default {
   // chats 30 days after they ended (see src/guests.ts), and the details
   // of workflow runs that ended longer ago than their retention (see
   // src/workflows/retention.ts), and screens' staged builds 30 days
-  // after they were last staged (see src/screen-frame.ts). And the
+  // after they were last staged (see src/screen-frame.ts), and npm
+  // tarballs and package builds no lock names any more (see
+  // src/packages/cleanup.ts). And the
   // audit log's retention alarm armed, if it isn't yet: retention itself
   // runs on that alarm (see
   // src/audit-log.ts), and a deployment that appends nothing after a
@@ -98,6 +101,7 @@ export default {
             sweepGuestChats(env, new Date(controller.scheduledTime)),
             sweepRunDetails(env, new Date(controller.scheduledTime)),
             sweepScreenFrames(env, new Date(controller.scheduledTime)),
+            sweepPackageFiles(env, new Date(controller.scheduledTime)),
             auditLog(env).armRetention(),
           ]
         : [

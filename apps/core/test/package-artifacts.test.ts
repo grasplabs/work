@@ -381,6 +381,80 @@ describe("serving an App's built packages", () => {
     });
   });
 
+  it("keeps serving a build whose address is out while newer graphs take the App's room, and refuses one more graph until it expires", async () => {
+    const served = await servedBuild();
+    const file = `${served.address}${served.name}.js`;
+    const admin = await personApi("admin");
+    await admin.api.dependencies.grantApprover({
+      type: "person",
+      userId: admin.userId,
+    });
+    /** Resolves `served`'s App to a graph of its own and approves it. */
+    const approveAnother = async (): Promise<void> => {
+      const name = named("next");
+      await publish({
+        name,
+        version: "1.0.0",
+        manifest: { type: "module", main: "index.js", license: "MIT" },
+        files: { "index.js": "export const next = 1;" },
+      });
+      const { request } = await served.builder.api.dependencies.resolve(
+        intentFor(served.app, { [name]: "1.0.0" })
+      );
+      const { policyGeneration } = await admin.api.dependencies.waiting();
+      await admin.api.dependencies.decide(request.id, {
+        approved: true,
+        reviewed: { graphHash: request.graphHash, policyGeneration },
+      });
+    };
+    // The tests' limit is three locks (vite.config.ts): the served graph,
+    // then two more, approved in turn. The fourth takes the room of the
+    // oldest approval whose files nobody was handed, never the served one.
+    await approveAnother();
+    await approveAnother();
+    await approveAnother();
+    const kept = await statusOf(file);
+    // Every lock left is the latest approval, or one whose address is
+    // out: none gives up its room, and the next graph is refused.
+    const { builder, app } = served;
+    const latest = await env.DB.prepare(
+      "SELECT graph_hash FROM dependency_locks WHERE app_id = ? AND graph_hash != ? ORDER BY created_at ASC LIMIT 1"
+    )
+      .bind(app, served.graphHash)
+      .first<{ graph_hash: string }>();
+    const { policyGeneration } = await builder.api.dependencies.status(app);
+    await builder.api.dependencies.build({
+      app,
+      graphHash: latest?.graph_hash ?? "",
+      target: "browser",
+      policyGeneration,
+    });
+    const refused = await failure(approveAnother());
+    // Once every address handed out has expired, the oldest approval's
+    // lock gives up its room again.
+    // As the hours since leave them: each lock's time to hold, gone by.
+    await env.DB.prepare(
+      "UPDATE dependency_locks SET served_until = ? WHERE app_id = ? AND served_until IS NOT NULL"
+    )
+      .bind(Date.now() - 1, app)
+      .run();
+    await approveAnother();
+    const after = await env.DB.prepare(
+      "SELECT 1 FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+    )
+      .bind(app, served.graphHash)
+      .first();
+
+    expect({ kept, refused, after }).toStrictEqual({
+      kept: 200,
+      refused: {
+        code: "package.quota",
+        details: { quota: "appLocks", limit: 3 },
+      },
+      after: null,
+    });
+  });
+
   it("serves no bytes but the ones built, and the next build makes them again, to the pin", async () => {
     const served = await servedBuild();
     const { built, address, name } = served;

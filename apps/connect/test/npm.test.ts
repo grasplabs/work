@@ -600,3 +600,168 @@ describe("a tarball", () => {
     ).resolves.toBe("package.not_found");
   });
 });
+
+describe("reading large metadata", () => {
+  it("reads a packument of several MiB sent in small chunks whole, byte for byte", async () => {
+    await registry.publish(leftPad);
+    const own = await registry.answer(
+      new Request(`${registry.origin}/left-pad`)
+    );
+    const packument: unknown = await own.json();
+    // Past the first buffer twice over, so it has to grow, and every
+    // chunk lands after the ones before it.
+    const big = new TextEncoder().encode(
+      JSON.stringify({
+        ...(typeof packument === "object" ? packument : {}),
+        readme: "é".repeat(2 * 1024 * 1024),
+      })
+    );
+    const chunk = 16 * 1024;
+    registry.override("/left-pad", () => {
+      let at = 0;
+      return new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull: (controller) => {
+              if (at >= big.byteLength) {
+                controller.close();
+                return;
+              }
+              controller.enqueue(big.slice(at, at + chunk));
+              at += chunk;
+            },
+          },
+          { highWaterMark: 0 }
+        )
+      );
+    });
+    const metadata = await connect.npmMetadata("left-pad");
+    expect({
+      bytes: big.byteLength > 3 * 1024 * 1024,
+      versions: metadata.versions.map(({ version, integrity }) => ({
+        version,
+        integrity,
+      })),
+    }).toStrictEqual({
+      bytes: true,
+      versions: [
+        {
+          version: "1.3.0",
+          integrity: registry.integrityOf("left-pad", "1.3.0"),
+        },
+      ],
+    });
+  });
+
+  it("refuses at once, as busy, metadata past what this isolate reads at once, and reads again once that is given back", async () => {
+    await registry.publish(leftPad);
+    await registry.publish({ ...leftPad, name: "right-pad" });
+    const declared = registryLimits.metadataBytes;
+    const { promise: held, resolve: holding } =
+      Promise.withResolvers<boolean>();
+    let fail: ((error: Error) => void) | undefined;
+    // One answer that declares 20 MiB and holds: its read keeps its share.
+    registry.override(
+      "/left-pad",
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start: (controller) => {
+              fail = (error) => {
+                controller.error(error);
+              };
+              holding(true);
+            },
+          }),
+          { headers: { "content-length": String(declared) } }
+        )
+    );
+    registry.override(
+      "/right-pad",
+      () =>
+        new Response("{}", {
+          headers: { "content-length": String(declared) },
+        })
+    );
+    const first = outcome(connect.npmMetadata("left-pad"));
+    await held;
+    const second = await outcome(connect.npmMetadata("right-pad"));
+    fail?.(new TypeError("Network connection lost."));
+    const firstEnded = await first;
+    // Given back however the first ended: the next read goes ahead.
+    registry.reset();
+    await registry.publish({ ...leftPad, name: "right-pad" });
+    const after = await outcome(connect.npmMetadata("right-pad"));
+    expect({ second, firstEnded, after }).toStrictEqual({
+      second: "package.registry_busy",
+      firstEnded: "package.registry_unavailable",
+      after: "ok",
+    });
+  });
+});
+
+describe("refusing metadata as busy", () => {
+  it("cancels the registry's answer whenever it refuses one as busy, before or after its size is known", async () => {
+    // Two answers that hold for a moment, then break off, declaring
+    // between them every byte of the isolate's 40 MiB budget for metadata
+    // (src/npm.ts): the most one may be, and the rest. Each ends on its
+    // own: one request's stream can't be ended from another's.
+    let holding = 0;
+    const held = (declared: number) => (): Response => {
+      holding += 1;
+      return new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull: async (controller) => {
+              await scheduler.wait(1000);
+              controller.error(new TypeError("Network connection lost."));
+            },
+          },
+          { highWaterMark: 0 }
+        ),
+        { headers: { "content-length": String(declared) } }
+      );
+    };
+    registry.override("/held-one", held(registryLimits.metadataBytes));
+    registry.override(
+      "/held-two",
+      held(40 * 1024 * 1024 - registryLimits.metadataBytes)
+    );
+    const ending = [
+      outcome(connect.npmMetadata("held-one")),
+      outcome(connect.npmMetadata("held-two")),
+    ];
+    // The count moves as connect asks the registry, not in this loop.
+    // oxlint-disable-next-line no-unmodified-loop-condition
+    while (holding < 2) {
+      // oxlint-disable-next-line no-await-in-loop -- until both are asked
+      await scheduler.wait(10);
+    }
+    // One that says nothing of its size, refused once it would take its
+    // first buffer; and one that declares its size, refused at once.
+    const unsized = streamed(4, 1024);
+    registry.override("/unsized", unsized.respond);
+    const sized = streamed(4, 1024);
+    registry.override(
+      "/sized",
+      () =>
+        new Response(sized.respond().body, {
+          headers: { "content-length": "4096" },
+        })
+    );
+    const refused = [
+      await outcome(connect.npmMetadata("unsized")),
+      await outcome(connect.npmMetadata("sized")),
+    ];
+    const ended = await Promise.all(ending);
+    expect({
+      refused,
+      cancelled: [unsized.state.cancelled, sized.state.cancelled],
+      ended,
+    }).toStrictEqual({
+      refused: ["package.registry_busy", "package.registry_busy"],
+      cancelled: [true, true],
+      ended: ["package.registry_unavailable", "package.registry_unavailable"],
+    });
+  });
+});

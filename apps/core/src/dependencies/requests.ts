@@ -29,6 +29,7 @@ import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
+import type { GraspLock, PackageLimits } from "@grasp-os/shared/packages";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -40,6 +41,7 @@ import {
   inArray,
   sql,
 } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -56,6 +58,11 @@ import {
   users,
 } from "../db/core/schema.ts";
 import { isUniqueViolation } from "../db/d1.ts";
+import {
+  lockGuardFailed,
+  lockStatements,
+  unusedLockStatements,
+} from "../packages/locks.ts";
 import { holdsApprove, holdsApproveSql } from "./approvers.ts";
 import { peerIssues } from "./peers.ts";
 import { policyGeneration, policyGenerationSql } from "./policy.ts";
@@ -375,13 +382,186 @@ const gravity: Record<DependencyFinding["severity"], number> = {
   info: 0,
 };
 
+/** The lock a resolve proposes its graph with, stored in the same batch. */
+interface ResolvedLock {
+  lock: GraspLock;
+  limits: PackageLimits;
+}
+
+/** Whether request `id` waits with exactly `snapshot` as its review. */
+const sameReview = async (
+  db: DrizzleD1Database,
+  id: string,
+  snapshot: string
+): Promise<boolean> => {
+  const same = await db
+    .select({ id: dependencyRequests.id })
+    .from(dependencyRequests)
+    .where(
+      and(
+        eq(dependencyRequests.id, id),
+        eq(dependencyRequests.snapshot, snapshot)
+      )
+    )
+    .get();
+  return same !== undefined;
+};
+
+/** What a proposal is, once checked, as each attempt goes by it. */
+interface Checked {
+  proposal: z.output<typeof dependencyProposalSchema>;
+  graph: DependencyGraph;
+  graphHash: string;
+  targets: string;
+  snapshot: string;
+}
+
+/** A new pending request's row for `checked`. */
+const newRequest = (
+  { proposal, graph, graphHash, targets, snapshot }: Checked,
+  by: Acting,
+  previous: string | null,
+  generation: number
+): Row => ({
+  id: crypto.randomUUID(),
+  appId: proposal.app,
+  sourceRevision: proposal.sourceRevision,
+  graphHash,
+  targets,
+  purpose: proposal.purpose,
+  snapshot,
+  summary: {
+    direct: graph.direct.slice(0, dependencySummaryDirect).map(packageKey),
+    findings: proposal.findings
+      .toSorted((a, b) => gravity[b.severity] - gravity[a.severity])
+      .slice(0, dependencySummaryFindings),
+  },
+  direct: graph.direct.length,
+  packages: graph.packages.length,
+  findings: proposal.findings.length,
+  refused: proposal.refused.length,
+  previous,
+  status: "pending",
+  requestedBy: by.userId,
+  requestedVia: by.via ?? null,
+  requestedAt: new Date(),
+  policyGeneration: generation,
+  decidedBy: null,
+  decidedAt: null,
+  decidedGeneration: null,
+  reason: null,
+});
+
+/** One attempt's outcome: the request it answers with, and its batch. */
+interface Attempt {
+  request: Listed;
+  statements: BatchItem<"sqlite">[];
+  lock: GraspLock | undefined;
+}
+
 /**
- * Proposes a graph the resolver made for an App (packages/resolve.ts, its
- * only caller), as one of its builders or the chat's agent acting for
- * one: a pending request, which allows nothing. Never Grasp staff, who
- * neither ask for nor decide what a client's Apps may use. Not offered to
- * anyone directly: a graph handed in would be whatever its sender says,
- * where the resolver's is what the registry has.
+ * What one attempt at a proposal writes, by how things stand as it reads
+ * them: see `propose`.
+ */
+const attempt = async (
+  env: Env,
+  by: Acting,
+  checked: Checked,
+  resolved: ResolvedLock | undefined
+): Promise<Attempt> => {
+  const { proposal, graphHash, targets, snapshot } = checked;
+  const actor = by.actor ?? actorOf(by);
+  const db = drizzle(env.DB);
+  const [approvals, latest, waiting, generation, written] = await Promise.all([
+    approvalsOf(env, proposal.app, graphHash),
+    latestApproval(env, proposal.app),
+    pendingFor(env, proposal.app),
+    policyGeneration(db),
+    resolved === undefined
+      ? undefined
+      : lockStatements(db, by, {
+          app: proposal.app,
+          graphHash,
+          fresh: resolved.lock,
+          limits: resolved.limits,
+        }),
+  ]);
+  const lockFirst = written?.statements ?? [];
+  const lock = written?.lock;
+  const standing = approvals.find((row) => covers(row, proposal.targets));
+  if (standing) {
+    // The App is back on a graph it has approved: whatever else waits for
+    // it is no longer asked for, and goes as any replaced request.
+    // Whatever waits as the batch runs, not what was read above: another
+    // proposal may have taken that one's place since. Dropped before the
+    // lock is written, so the lock of what waited gives up its room to it
+    // (`lockStatements`).
+    return {
+      request: standing,
+      lock,
+      statements: [
+        ...dropPending(db, actor, proposal.app, standing.id),
+        ...lockFirst,
+        ...unusedLockStatements(db, proposal.app),
+      ],
+    };
+  }
+  // The same graph and targets: the same request if what was reported of
+  // it is the same too. Only this one row's review is read.
+  if (
+    waiting?.graphHash === graphHash &&
+    waiting.targets === targets &&
+    (await sameReview(db, waiting.id, snapshot))
+  ) {
+    return { request: waiting, lock, statements: lockFirst };
+  }
+  const row = newRequest(checked, by, latest?.id ?? null, generation);
+  const superseded = waiting
+    ? [
+        db
+          .delete(dependencyRequests)
+          .where(
+            and(
+              eq(dependencyRequests.id, waiting.id),
+              eq(dependencyRequests.status, "pending")
+            )
+          ),
+        outboxedIfChanged(
+          db,
+          requestEntry(actor, "superseded", waiting, { by: row.id })
+        ),
+      ]
+    : [];
+  return {
+    request: row,
+    lock,
+    // The request it replaces goes first, so its lock gives up its room to
+    // this one's (`lockStatements`).
+    statements: [
+      ...superseded,
+      ...lockFirst,
+      db.insert(dependencyRequests).values(row),
+      outboxed(
+        db,
+        requestEntry(actor, "requested", row, {
+          requestedBy: by.userId,
+          findings: row.findings,
+          refused: row.refused,
+          policyGeneration: generation,
+        })
+      ),
+      ...unusedLockStatements(db, proposal.app),
+    ],
+  };
+};
+
+/**
+ * Proposes a graph for an App, as one of its builders or the chat's agent
+ * acting for one: a pending request, which allows nothing. Never Grasp
+ * staff, who neither ask for nor decide what a client's Apps may use. Not
+ * offered to anyone directly: a graph handed in would be whatever its
+ * sender says, where the resolver's is what the registry has
+ * (`proposeResolved`).
  *
  * What is already there decides what happens. The same graph already
  * approved for these targets, at any revision of the source: that
@@ -390,14 +570,17 @@ const gravity: Record<DependencyFinding["severity"], number> = {
  * that stores the new request (or on its own, when the proposal is one
  * already approved): its row is deleted (one waits per App, so
  * asking again and again stores nothing more) and the audit log keeps its
- * ID and graph hash. A proposal that loses that race to another starts
- * over.
+ * ID and graph hash, and each lock no pending or approved request names
+ * any more goes with it (packages/locks.ts). With `resolved`, its lock is
+ * written in each of those batches, and the batch lands only with it. A
+ * proposal that loses a race to another starts over.
  */
-export const proposeDependencies = async (
+const propose = async (
   env: Env,
   by: Acting,
-  input: unknown
-): Promise<DependencyRequest> => {
+  input: unknown,
+  resolved?: ResolvedLock
+): Promise<{ request: DependencyRequest; lock: GraspLock | undefined }> => {
   if (by.staff) {
     throw roleErrors.create("role.forbidden");
   }
@@ -423,128 +606,71 @@ export const proposeDependencies = async (
       issues: [`graph: at most ${dependencyMaxBytes} bytes, this is ${bytes}`],
     });
   }
-  const graphHash = await dependencyGraphHash(graph);
-  const targets = JSON.stringify(proposal.targets.toSorted());
-  const actor = by.actor ?? actorOf(by);
+  const checked: Checked = {
+    proposal,
+    graph,
+    graphHash: await dependencyGraphHash(graph),
+    targets: JSON.stringify(proposal.targets.toSorted()),
+    snapshot,
+  };
   const db = drizzle(env.DB);
-  for (let attempt = 0; attempt < proposalTries; attempt += 1) {
-    // Each attempt reads how things stand now.
+  for (let tries = 0; tries < proposalTries; tries += 1) {
+    // Each attempt reads how things stand now, the lock included.
     // oxlint-disable-next-line no-await-in-loop
-    const [approvals, latest, waiting, generation] = await Promise.all([
-      approvalsOf(env, proposal.app, graphHash),
-      latestApproval(env, proposal.app),
-      pendingFor(env, proposal.app),
-      policyGeneration(db),
-    ]);
-    const standing = approvals.find((row) => covers(row, proposal.targets));
-    if (standing) {
-      // The App is back on a graph it has approved: whatever else waits
-      // for it is no longer asked for, and goes as any replaced request.
-      // Whatever waits as the batch runs, not what was read above: another
-      // proposal may have taken that one's place since.
-      // oxlint-disable-next-line no-await-in-loop
-      await auditedBatch(
-        env,
-        db,
-        dropPending(db, actor, proposal.app, standing.id)
-      );
-      // oxlint-disable-next-line no-await-in-loop
-      return await toRequest(env, standing);
-    }
-    if (waiting?.graphHash === graphHash && waiting.targets === targets) {
-      // The same graph and targets: the same request if what was reported
-      // of it is the same too. Only this one row's review is read.
-      // oxlint-disable-next-line no-await-in-loop
-      const same = await db
-        .select({ id: dependencyRequests.id })
-        .from(dependencyRequests)
-        .where(
-          and(
-            eq(dependencyRequests.id, waiting.id),
-            eq(dependencyRequests.snapshot, snapshot)
-          )
-        )
-        .get();
-      if (same) {
-        // oxlint-disable-next-line no-await-in-loop
-        return await toRequest(env, waiting);
-      }
-    }
-    const row: Row = {
-      id: crypto.randomUUID(),
-      appId: proposal.app,
-      sourceRevision: proposal.sourceRevision,
-      graphHash,
-      targets,
-      purpose: proposal.purpose,
-      snapshot,
-      summary: {
-        direct: graph.direct.slice(0, dependencySummaryDirect).map(packageKey),
-        findings: proposal.findings
-          .toSorted((a, b) => gravity[b.severity] - gravity[a.severity])
-          .slice(0, dependencySummaryFindings),
-      },
-      direct: graph.direct.length,
-      packages: graph.packages.length,
-      findings: proposal.findings.length,
-      refused: proposal.refused.length,
-      previous: latest?.id ?? null,
-      status: "pending",
-      requestedBy: by.userId,
-      requestedVia: by.via ?? null,
-      requestedAt: new Date(),
-      policyGeneration: generation,
-      decidedBy: null,
-      decidedAt: null,
-      decidedGeneration: null,
-      reason: null,
-    };
-    const requested = [
-      db.insert(dependencyRequests).values(row),
-      outboxed(
-        db,
-        requestEntry(actor, "requested", row, {
-          requestedBy: by.userId,
-          findings: row.findings,
-          refused: row.refused,
-          policyGeneration: generation,
-        })
-      ),
-    ] as const;
+    const { request, statements, lock } = await attempt(
+      env,
+      by,
+      checked,
+      resolved
+    );
+    const [first, ...rest] = statements;
     try {
+      if (first !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop
+        await auditedBatch(env, db, [first, ...rest]);
+      }
       // oxlint-disable-next-line no-await-in-loop
-      await auditedBatch(
-        env,
-        db,
-        waiting
-          ? [
-              db
-                .delete(dependencyRequests)
-                .where(
-                  and(
-                    eq(dependencyRequests.id, waiting.id),
-                    eq(dependencyRequests.status, "pending")
-                  )
-                ),
-              outboxedIfChanged(
-                db,
-                requestEntry(actor, "superseded", waiting, { by: row.id })
-              ),
-              ...requested,
-            ]
-          : [...requested]
-      );
-      // oxlint-disable-next-line no-await-in-loop
-      return await toRequest(env, row);
+      return { request: await toRequest(env, request), lock };
     } catch (error) {
-      // Another request for the App is pending now: the batch wrote
-      // nothing, and the next attempt goes by that one.
-      if (!isUniqueViolation(error)) {
+      // Another request for the App is pending now, or another resolve
+      // wrote the lock first: the batch wrote nothing, and the next
+      // attempt goes by how things stand then.
+      if (!(isUniqueViolation(error) || lockGuardFailed(error))) {
         throw error;
       }
     }
   }
   throw dependencyErrors.create("dependency.stale");
+};
+
+/**
+ * Proposes a graph with no lock of its own: `propose`'s request alone.
+ * For tests only, of the request machinery itself (approval, supersession,
+ * decisions): nothing in the product calls it, and nothing offers it to a
+ * client. The product proposes only what it resolved (`proposeResolved`).
+ */
+export const proposeForTests = async (
+  env: Env,
+  by: Acting,
+  input: unknown
+): Promise<DependencyRequest> => {
+  const { request } = await propose(env, by, input);
+  return request;
+};
+
+/**
+ * Proposes the graph a resolve made (packages/resolve.ts), with its lock,
+ * which is stored in the batch that stores the request: never one without
+ * the other. Returns the request and the lock that holds.
+ */
+export const proposeResolved = async (
+  env: Env,
+  by: Acting,
+  input: unknown,
+  resolved: ResolvedLock
+): Promise<{ request: DependencyRequest; lock: GraspLock }> => {
+  const { request, lock } = await propose(env, by, input, resolved);
+  return { request, lock: lock ?? resolved.lock };
 };
 
 /** How an App's dependencies stand, for its builders. */
@@ -768,6 +894,8 @@ export const decideDependency = async (
         ...(reason === undefined ? {} : { reason }),
       })
     ),
+    // A denied graph's lock goes, unless another request still names it.
+    ...unusedLockStatements(db, found.appId),
   ]);
   if (!decided) {
     // Who holds the permission can have changed since it was checked above.

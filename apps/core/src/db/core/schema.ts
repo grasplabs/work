@@ -940,8 +940,64 @@ export const dependencyLocks = sqliteTable(
     graphHash: text("graph_hash").notNull(),
     lock: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * Until when an address of one of its artifacts handed out holds
+     * (src/packages/address.ts): until then the lock never gives up its
+     * room to a new one (src/packages/locks.ts), so what was handed out
+     * keeps being served. Null when none was.
+     */
+    servedUntil: timestamp("served_until"),
   },
   (table) => [primaryKey({ columns: [table.appId, table.graphHash] })]
+);
+
+/**
+ * Files of the deployment's package store that may no longer be needed,
+ * recorded before they could be left behind (src/packages/cleanup.ts): a
+ * tarball (`kind` `tarball`, `key` its integrity) as it is stored, and the
+ * tarballs and pinned artifacts of a lock as it is deleted; an artifact
+ * (`kind` `build`, `key` its hash) as a build writes its files. The cron
+ * deletes the files of one no lock names once it is an hour old, then the
+ * row; one a lock names loses its row only. Recording one again moves its
+ * time on.
+ */
+export const packageCleanups = sqliteTable(
+  "package_cleanups",
+  {
+    key: text().primaryKey(),
+    kind: text({ enum: ["tarball", "build"] }).notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    // The cron's sweep: records an hour old, oldest first.
+    index("package_cleanups_created_at_idx").on(table.createdAt),
+  ]
+);
+
+/**
+ * The one build under way of each target of an App's graph
+ * (src/packages/build.ts): a build takes its lease before it builds, and
+ * gives it back when it ends; another of the same App, graph and target
+ * waits for it, then hands out what it pinned. A lease that outlived
+ * `expiresAt` (a build that died) may be taken, and the cron deletes it
+ * once nobody did (src/packages/cleanup.ts).
+ */
+export const dependencyBuildLeases = sqliteTable(
+  "dependency_build_leases",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    graphHash: text("graph_hash").notNull(),
+    target: text().notNull(),
+    holder: text().notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.graphHash, table.target] }),
+    // The cron's sweep of leases that lapsed.
+    index("dependency_build_leases_expires_at_idx").on(table.expiresAt),
+  ]
 );
 
 /**
