@@ -78,7 +78,7 @@ const attempt = async (
     const scriptOutcome = settled(element);
     document.head.append(element);
 
-    // Chromium refuses it with an error event, not by throwing. One that
+    // Every engine refuses it with an error event, not by throwing. One that
     // started would never send it, and the test would time out.
     let worker = "";
     try {
@@ -135,6 +135,7 @@ const openScreen = async (page: Page): Promise<string> => {
 
 test("the product page runs no screen module or package file, however its HTML is injected, and its screens still run theirs", async ({
   browser,
+  browserName,
 }) => {
   const page = await pageOf(browser, builder);
   const violations = await recordCspViolations(page);
@@ -154,10 +155,21 @@ test("the product page runs no screen module or package file, however its HTML i
   // Refused by the page's policy, not by some other failure to load: the
   // script element in the page and the one in the `srcdoc` frame (each
   // document reports its own), and the worker, for both addresses.
+  // Firefox runs Playwright's init script in no `srcdoc` frame, so there
+  // the frame's violation reaches only the console, which names the frame.
+  const framedInConsole = (address: string): number =>
+    browserName === "firefox"
+      ? violations.filter(
+          (line) =>
+            line.includes(`(script-src-elem) at ${address} `) &&
+            line.includes('{file: "about:srcdoc"')
+        ).length
+      : 0;
   const reported = (address: string) => ({
-    script: violations.filter((line) =>
-      line.startsWith(`script-src-elem blocked ${address} `)
-    ).length,
+    script:
+      violations.filter((line) =>
+        line.startsWith(`script-src-elem blocked ${address} `)
+      ).length + framedInConsole(address),
     worker: violations.filter((line) =>
       line.startsWith(`worker-src blocked ${address} `)
     ).length,
