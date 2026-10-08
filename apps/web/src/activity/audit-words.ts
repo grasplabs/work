@@ -132,6 +132,7 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   { action: "dependency.requested", text: msg`Proposed packages` },
   { action: "dependency.approved", text: msg`Approved packages` },
   { action: "dependency.denied", text: msg`Denied packages` },
+  { action: "dependency.built", text: msg`Built approved packages` },
   {
     action: "dependency.superseded",
     text: msg`Replaced a request for packages`,
