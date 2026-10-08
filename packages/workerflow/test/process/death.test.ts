@@ -3,6 +3,7 @@
 // the same directory, and runs that sleep or wait for an event through it
 // with no process alive. Every wait polls with a deadline; the journal each
 // test reads back is what recovery had to go on.
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,7 +18,7 @@ import {
   it,
 } from "vite-plus/test";
 
-import { Outside, until } from "./outside.ts";
+import { Outside, streamed, until } from "./outside.ts";
 import { bundleFixture, Workerd } from "./workerd.ts";
 
 const bundleDirectory = mkdtempSync(path.join(tmpdir(), "workerflow-bundle-"));
@@ -197,6 +198,9 @@ const pastTime = async (time: number): Promise<void> => {
 /** Each effect of the run, as label and attempt, in the order received. */
 const timeline = (id: string): [string, number][] =>
   outside.of(id).map((effect) => [effect.label, effect.attempt]);
+
+const sha256Of = (bytes: Uint8Array): string =>
+  createHash("sha256").update(bytes).digest("hex");
 
 const keysOf = (id: string, label: string): Set<string> =>
   new Set(outside.of(id, label).map((effect) => effect.key));
@@ -447,6 +451,117 @@ describe("a run on disk-backed workerd", () => {
       ["charge", 1],
       ["ship", 1],
     ]);
+  });
+
+  it("never completes a step from an upload cut off by process death; the next attempt keeps the whole stream", async () => {
+    const id = "upload-cut-off";
+    const exportHeld = outside.hold(id, "export", 1);
+    await workerd.request("/start", startOf("export", id));
+    await exportHeld;
+    // Part of the stream is stored, durably (the answer leaves only once
+    // its writes are), when the process dies: the two whole chunks of the
+    // first part sent.
+    const partial = await until("part of the upload to be stored", async () => {
+      const { body } = await workerd.request(
+        `/chunks?definition=export&id=${id}`
+      );
+      return JSON.stringify(body).includes('"chunks":2') ? body : undefined;
+    });
+    const cutOff = await journalOf("export", id);
+    await workerd.kill();
+    await workerd.start();
+
+    const status = await ended("export", id);
+
+    expect({ partial, cutOff }).toMatchObject({
+      partial: [{ ordinal: 1, attempt: 1, chunks: 2, length: 512 * 1024 }],
+      cutOff: {
+        steps: [{ name: "export", state: "running", attempt: 1, value: null }],
+      },
+    });
+    // Both attempts at the download went out under one key.
+    expect({
+      timeline: timeline(id),
+      keys: keysOf(id, "export").size,
+    }).toStrictEqual({
+      timeline: [
+        ["export", 1],
+        ["export", 2],
+        ["digest", 1],
+      ],
+      keys: 1,
+    });
+    // The step read back the whole stream, from the attempt that finished.
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: { sha256: sha256Of(streamed), length: streamed.byteLength },
+    });
+    await expect(journalOf("export", id)).resolves.toMatchObject({
+      steps: [
+        { name: "export", state: "succeeded", attempt: 2 },
+        { name: "digest", state: "succeeded", attempt: 1 },
+      ],
+      attempts: [
+        { ordinal: 1, attempt: 1, ended: null },
+        { ordinal: 1, attempt: 2, ended: "succeeded" },
+        { ordinal: 2, attempt: 1, ended: "succeeded" },
+      ],
+    });
+    // The cut-off upload is gone; only the kept attempt's chunks remain.
+    await expect(
+      workerd.request(`/chunks?definition=export&id=${id}`)
+    ).resolves.toMatchObject({
+      body: [
+        {
+          ordinal: 1,
+          attempt: 2,
+          chunks: Math.ceil(streamed.byteLength / (256 * 1024)),
+          length: streamed.byteLength,
+        },
+      ],
+    });
+  });
+
+  it("reads a stream result back from storage after eviction: a fresh, verified stream with its hash, length and encoding", async () => {
+    const id = "stream-after-eviction";
+    const digestHeld = outside.hold(id, "digest", 1);
+    await workerd.request("/start", startOf("export", id));
+    await digestHeld;
+
+    await workerd.request(`/evict?definition=export&id=${id}`, {});
+    await until("digest to go out again", () =>
+      outside.of(id, "digest").find((effect) => effect.attempt === 2)
+    );
+    const status = await ended("export", id);
+    // Evicted again: the host's own reading is fresh from storage too.
+    await workerd.request(`/evict?definition=export&id=${id}`, {});
+    const output = await workerd.bytes(
+      `/output?definition=export&id=${id}&name=export`
+    );
+
+    // The replay didn't fetch the stream again: it read what was kept.
+    expect(timeline(id)).toStrictEqual([
+      ["export", 1],
+      ["digest", 1],
+      ["digest", 2],
+    ]);
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: { sha256: sha256Of(streamed), length: streamed.byteLength },
+    });
+    expect({
+      status: output.status,
+      length: output.headers.get("x-length"),
+      sha256: output.headers.get("x-sha256"),
+      encoding: output.headers.get("x-encoding"),
+      body: sha256Of(output.body),
+    }).toStrictEqual({
+      status: 200,
+      length: String(streamed.byteLength),
+      sha256: sha256Of(streamed),
+      encoding: "identity",
+      body: sha256Of(streamed),
+    });
   });
 
   it("survives a kill at every step, and each step that completed ran once", async () => {
