@@ -106,6 +106,12 @@ export type CapabilityClaims = z.infer<typeof capabilityClaimsSchema>;
 export interface CapabilityCall {
   connectionId: string;
   resource?: string | undefined;
+  /**
+   * When the work the call comes from must end, in milliseconds since the
+   * epoch: the capability expires by then, if that is sooner than its own
+   * lifetime.
+   */
+  notAfter?: number | undefined;
   action: string;
   idempotencyKey?: string | undefined;
 }
@@ -167,7 +173,10 @@ export const signCapability = async (
     aud: "connect",
     jti: crypto.randomUUID(),
     iat: now,
-    exp: now + capabilityTtlMs,
+    exp: Math.min(
+      now + capabilityTtlMs,
+      scope.notAfter ?? Number.POSITIVE_INFINITY
+    ),
     authority,
     connectionId: scope.connectionId,
     resource: scope.resource ?? null,

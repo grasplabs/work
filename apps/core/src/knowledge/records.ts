@@ -301,7 +301,9 @@ export const writeRecord = async (
  * `delegateWriter`), from the App's method `setter` runs in, if any (see
  * `writeRecord`). The version is that person's, and the audit log names
  * the App or agent. `knowledge.not_found` for a collection that doesn't
- * exist.
+ * exist. `stillAllowed`, if given, is checked last of all, just before
+ * the write's batch: the caller's own word that what let it write still
+ * holds (for an App, that the call it runs in still may, app-binding.ts).
  */
 export const saveRecordAsDelegate = async (
   env: Env,
@@ -310,7 +312,8 @@ export const saveRecordAsDelegate = async (
   permissionId: PermissionId,
   collectionId: CollectionId,
   input: unknown,
-  setter?: Setter
+  setter?: Setter,
+  stillAllowed?: () => Promise<void>
 ): Promise<DocumentSummary> => {
   const writer = await delegateWriter(
     env,
@@ -323,7 +326,22 @@ export const saveRecordAsDelegate = async (
   if (!collection) {
     throw knowledgeErrors.create("knowledge.not_found");
   }
-  return await writeRecord(env, writer, collection, input, setter);
+  const { lastCheck } = writer;
+  return await writeRecord(
+    env,
+    stillAllowed === undefined
+      ? writer
+      : {
+          ...writer,
+          lastCheck: async () => {
+            await lastCheck?.();
+            await stillAllowed();
+          },
+        },
+    collection,
+    input,
+    setter
+  );
 };
 
 /**

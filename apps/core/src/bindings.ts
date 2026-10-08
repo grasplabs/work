@@ -43,6 +43,11 @@ export interface CallGrant {
    * export marked `read`): connect then refuses its side effects.
    */
   readOnly?: boolean;
+  /**
+   * When the work the call comes from must end, in milliseconds since the
+   * epoch: the capability expires by then, whatever its usual lifetime.
+   */
+  notAfter?: number;
 }
 
 /**
@@ -57,7 +62,14 @@ export interface CallGrant {
  */
 export const signedCall = async (
   env: Env,
-  { authority, context, connection, permissionId, readOnly }: CallGrant,
+  {
+    authority,
+    context,
+    connection,
+    permissionId,
+    readOnly,
+    notAfter,
+  }: CallGrant,
   { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
   confirms?: string
 ) => {
@@ -76,6 +88,7 @@ export const signedCall = async (
       ...scope,
       restricted,
       readOnly,
+      notAfter,
       origin: { permissionId, context },
       context,
       confirms,
@@ -160,6 +173,14 @@ export const requireStepKey = (
 export interface StubCaller {
   authority: Authority;
   readOnly?: boolean;
+  /** When the work it comes from must end: the capability expires by then. */
+  notAfter?: number;
+  /**
+   * The resolver's last word, asked just before the call goes to connect,
+   * after the permission check and the signing awaited: whether the work
+   * it comes from may still act.
+   */
+  stillAllowed?: () => Promise<void>;
 }
 
 /**
@@ -173,16 +194,16 @@ export type StubAuthority =
 
 /**
  * Everything of a stub call before connect sees it: the feature, the
- * call's shape, the permission and the signed capability. What it refuses
- * connect never saw, so connect recorded nothing of it; errors as the
- * sandbox sees them.
+ * call's shape, the permission and the signed capability, and what to ask
+ * last (`StubCaller.stillAllowed`). What it refuses connect never saw, so
+ * connect recorded nothing of it; errors as the sandbox sees them.
  */
-export const signedStubCall = async (
+const signedStub = async (
   env: Env,
   authority: StubAuthority,
   { context, permissionId, connection }: ConnectionGrant,
   call: unknown[]
-): Promise<ConnectCall> => {
+): Promise<{ request: ConnectCall; stillAllowed?: () => Promise<void> }> => {
   const parsed = stubCallSchema.safeParse(call);
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
@@ -198,16 +219,33 @@ export const signedStubCall = async (
       {
         authority: caller.authority,
         readOnly: caller.readOnly,
+        notAfter: caller.notAfter,
         context,
         connection,
         permissionId,
       },
       { action, idempotencyKey: options?.idempotencyKey }
     );
-    return { capability, ...scope, input };
+    return {
+      request: { capability, ...scope, input },
+      ...(caller.stillAllowed === undefined
+        ? {}
+        : { stillAllowed: caller.stillAllowed }),
+    };
   } catch (error) {
     throw forSandbox(error);
   }
+};
+
+/** A stub call, signed, as `signedStub` makes it, for connect. */
+export const signedStubCall = async (
+  env: Env,
+  authority: StubAuthority,
+  grant: ConnectionGrant,
+  call: unknown[]
+): Promise<ConnectCall> => {
+  const { request } = await signedStub(env, authority, grant, call);
+  return request;
 };
 
 /**
@@ -222,8 +260,14 @@ export const runStubCall = async (
   grant: ConnectionGrant,
   call: unknown[]
 ): Promise<ConnectResult> => {
-  const request = await signedStubCall(env, authority, grant, call);
+  const { request, stillAllowed } = await signedStub(
+    env,
+    authority,
+    grant,
+    call
+  );
   try {
+    await stillAllowed?.();
     return await env.CONNECT.call(request);
   } catch (error) {
     throw forSandbox(error);
