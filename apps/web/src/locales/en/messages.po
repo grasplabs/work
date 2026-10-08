@@ -878,6 +878,10 @@ msgid "Changed what a connection listens for"
 msgstr "Changed what a connection listens for"
 
 #: src/activity/audit-words.ts
+msgid "Changed what is built of approved packages"
+msgstr "Changed what is built of approved packages"
+
+#: src/activity/audit-words.ts
 msgid "Changed whether an engine's data needs approved apps"
 msgstr "Changed whether an engine's data needs approved apps"
 
@@ -1309,6 +1313,10 @@ msgid "Dropped a held action nobody can confirm"
 msgstr "Dropped a held action nobody can confirm"
 
 #: src/activity/audit-words.ts
+msgid "Dropped a kept build of approved packages"
+msgstr "Dropped a kept build of approved packages"
+
+#: src/activity/audit-words.ts
 msgid "Dropped an event no workflow could take"
 msgstr "Dropped an event no workflow could take"
 
@@ -1612,6 +1620,10 @@ msgstr "Grasp itself"
 #: src/sign-in-errors.ts
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 msgstr "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
+
+#: src/dashboard/dependency-requests.tsx
+msgid "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
+msgstr "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Grasp sets these for your organization, as agreed with you. To change them, contact Grasp."
@@ -3504,10 +3516,6 @@ msgstr "The most pressing first."
 msgctxt "log filter: what"
 msgid "The onboarding"
 msgstr "The onboarding"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "The packages, their licences and the findings are as reported by {requester}. Grasp hasn't checked them against the registry."
-msgstr "The packages, their licences and the findings are as reported by {requester}. Grasp hasn't checked them against the registry."
 
 #: src/onboarding/staff-words.ts
 msgid "The risk assessment isn't done"

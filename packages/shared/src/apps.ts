@@ -565,6 +565,8 @@ export const appErrors = defineErrorFamily({
   "app.timed_out": "The App's server code took too long to answer.",
   "app.caller_invalid":
     "Pass the caller of the App method this runs in, while that call runs.",
+  "app.read_only":
+    "This call only reads, so nothing it calls may change anything: no writes, no side effects.",
   "app.checks_exhausted":
     "This draft failed its checks too many times in a row this turn. Stop, and tell the person what still fails.",
   "app.creates_exhausted":
@@ -674,6 +676,15 @@ export const appCallLimits = {
   answerBytes: 1024 * 1024,
   depth: 3,
 } as const;
+
+/**
+ * The most an App's error carries to its caller besides its code (its
+ * details: the version, the method and the App's own message), as UTF-8
+ * JSON, in bytes. The App's message is cut to fit, never sent whole: an
+ * error reaches a screen, which is held to what it may receive whatever
+ * the App throws.
+ */
+export const appErrorDetailsBytes = 16 * 1024;
 
 /**
  * Names no export has: those core refuses as an App's method, `read` and

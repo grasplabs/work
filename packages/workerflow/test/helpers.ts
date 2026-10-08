@@ -11,21 +11,26 @@ import type { TestRuns } from "./worker.ts";
 const pollMs = 10;
 const deadlineMs = 10_000;
 
-export const workflow = (definition: string): Workflow =>
-  new Workflow(env.RUNS, definition);
+/** Where a test's runs live: `RUNS`, unless it says otherwise. */
+type Runs = DurableObjectNamespace<TestRuns>;
+
+export const workflow = (definition: string, runs: Runs = env.RUNS): Workflow =>
+  new Workflow(runs, definition);
 
 /** The run's own object, for its journal and its alarm. */
 export const runObject = (
   definition: string,
-  id: string
+  id: string,
+  runs: Runs = env.RUNS
 ): DurableObjectStub<TestRuns> =>
-  env.RUNS.get(env.RUNS.idFromName(runObjectName(definition, id)));
+  runs.get(runs.idFromName(runObjectName(definition, id)));
 
 export const journalOf = async (
   definition: string,
-  id: string
+  id: string,
+  runs: Runs = env.RUNS
 ): Promise<Journal> => {
-  const journal = await runObject(definition, id).journal();
+  const journal = await runObject(definition, id, runs).journal();
   if (journal === undefined) {
     throw new Error(`run ${id} has no journal`);
   }
@@ -69,9 +74,10 @@ export const within = async <T>(
 /** Waits until the run has ended, and returns how. */
 export const ended = async (
   definition: string,
-  id: string
+  id: string,
+  runs: Runs = env.RUNS
 ): Promise<InstanceStatus> => {
-  const instance = await workflow(definition).get(id);
+  const instance = await workflow(definition, runs).get(id);
   return await until(`run ${id} to end`, async () => {
     const status = await instance.status();
     return status.status === "complete" || status.status === "errored"

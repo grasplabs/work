@@ -75,17 +75,22 @@ export interface RunRow extends Record<string, SqlStorageValue> {
   /** Bumped by every activation: the fence against stale ones. */
   generation: number;
   /**
-   * When the watchdog alarm is due: the current activation's lease, renewed
-   * at every step. Nothing reads it to decide anything; it records when
-   * recovery would start. An object gets no alarm while its alarm handler
-   * still runs, so a step that hangs is ended by its own timeout, in the
-   * activation, not by the watchdog.
+   * About when the watchdog alarm is due while an activation runs: a lease
+   * after the activation's start or its latest write for a step (a claim,
+   * an outcome, a wait's end). The alarm is moved after each such write,
+   * so it may come a little later than this. Null while the run waits and
+   * once it has ended. Nothing reads it to decide anything; it records
+   * when recovery would start. An object gets no alarm while its alarm
+   * handler still runs, so a step that hangs is ended by its own timeout,
+   * in the activation, not by the watchdog.
    */
   lease_until: number | null;
   /**
-   * When a waiting run is next due: the nearest deadline of its waits or
-   * retries, or the time an event a wait can take was accepted. Written with the
-   * alarm it sets, like `lease_until`, and like it read by nothing.
+   * When a waiting run is next due: the deadline of the wait it suspended
+   * on, or the earliest time one of its parked steps is due (a retry, or
+   * an attempt left for a fresh activation, due at once), or the time an
+   * event its wait can take was accepted. Written with the alarm it sets,
+   * in the same synchronous turn, and read by nothing.
    */
   wake_at: number | null;
   /**
@@ -157,16 +162,25 @@ export interface StepRow extends Record<string, SqlStorageValue> {
 }
 
 /**
- * How an activation or an attempt ended: `settled` and `succeeded` /
- * `failed` journaled its outcome; `timed_out`: the attempt ran past its
- * deadline, failed as it did, and whatever it answers later is ignored;
- * `superseded` means a later generation took over, and what it came back
- * with was ignored. `suspended`: the
- * activation reached a wait that isn't due, and let go of the run until
- * its alarm. `faulted`: one of the engine's own journal writes failed, and
- * the watchdog alarm brings the run back.
+ * How an attempt ended. `succeeded` / `failed`: its outcome is journaled
+ * (a failure with a retry left has its `retry_at`). `timed_out`: it ran
+ * past its deadline and failed as it did; whatever it answers later is
+ * ignored. `superseded`: its activation was over (a later generation took
+ * over) or a later attempt had the step when it came back, and what it
+ * came back with was ignored. One still the step's latest counts as cut
+ * off: the next activation to reach the step ends it as such, over this
+ * (activation.ts).
  */
 export type AttemptEnd = "succeeded" | "failed" | "timed_out" | "superseded";
+
+/**
+ * How an activation ended. `settled`: it journaled the run's end.
+ * `superseded`: a later generation took over. `suspended`: it reached a
+ * wait that isn't due, or every step it had out was parked, and let go of
+ * the run until its alarm. `faulted`: one of the engine's own storage
+ * calls failed, and the watchdog alarm brings the run back. No end: the
+ * process died, or the object was evicted.
+ */
 export type ActivationEnd = "settled" | "superseded" | "suspended" | "faulted";
 
 export interface AttemptRow extends Record<string, SqlStorageValue> {

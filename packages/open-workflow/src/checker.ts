@@ -127,7 +127,13 @@ export const createReport = (): Report => {
 };
 
 /** What a result must be, where it can be proven before a run. */
-export type Expectation = "boolean" | "array" | "string" | "number";
+export type Expectation =
+  | "boolean"
+  | "array"
+  | "string"
+  | "number"
+  /** Whole milliseconds, or an ISO 8601 duration text. */
+  | "duration";
 
 /** One `${ … }` in the definition, compiled after the walk. */
 export interface ExpressionSlot {

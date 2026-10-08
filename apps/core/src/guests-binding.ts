@@ -8,7 +8,8 @@ import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-import { callerOf } from "./app-bindings.ts";
+import { callerOf, stillAdmitted, tokenOf } from "./app-bindings.ts";
+import type { InvocationKind } from "./app.ts";
 import { forSandbox } from "./bindings.ts";
 import { inviteGuest, listGuests, readGuest, revokeGuest } from "./guests.ts";
 
@@ -31,8 +32,9 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   async invite(caller: unknown, input: unknown): Promise<GuestInvitation> {
     return await this.#run(
       caller,
-      async (authority, permissionId) =>
-        await inviteGuest(this.env, authority, permissionId, input),
+      "write",
+      async (authority, permissionId, lastCheck) =>
+        await inviteGuest(this.env, authority, permissionId, input, lastCheck),
       { personOnly: true }
     );
   }
@@ -41,6 +43,7 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   async list(caller: unknown): Promise<GuestChat[]> {
     return await this.#run(
       caller,
+      "read",
       async (authority, permissionId) =>
         await listGuests(this.env, authority, permissionId)
     );
@@ -50,6 +53,7 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   async read(caller: unknown, id: unknown): Promise<GuestTranscript> {
     return await this.#run(
       caller,
+      "read",
       async (authority, permissionId) =>
         await readGuest(this.env, authority, permissionId, id)
     );
@@ -59,26 +63,40 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   async revoke(caller: unknown, id: unknown): Promise<GuestChat> {
     return await this.#run(
       caller,
-      async (authority, permissionId) =>
-        await revokeGuest(this.env, authority, permissionId, id)
+      "write",
+      async (authority, permissionId, lastCheck) =>
+        await revokeGuest(this.env, authority, permissionId, id, lastCheck)
     );
   }
 
-  /** Runs `run` for `caller`, with errors as the sandbox sees them. */
+  /**
+   * Runs `run` for `caller`, admitted for `use` (a change, or a read:
+   * `callerOf`), with errors as the sandbox sees them, and what `run` asks
+   * just before it writes (`lastCheck`): the call admitted again, in full,
+   * for `use` (`stillAdmitted`).
+   */
   async #run<T>(
     caller: unknown,
-    run: (authority: Authority, permissionId: PermissionId) => Promise<T>,
+    use: InvocationKind,
+    run: (
+      authority: Authority,
+      permissionId: PermissionId,
+      lastCheck: () => Promise<void>
+    ) => Promise<T>,
     { personOnly = false }: { personOnly?: boolean } = {}
   ): Promise<T> {
     const { app, permissionId } = this.ctx.props;
     try {
-      const { authority, path } = await callerOf(this.env, app, caller);
+      const token = tokenOf(caller);
+      const { authority, path } = await callerOf(this.env, app, { token }, use);
       const person =
         authority.mode === "interactive" && path.chain.length === 1;
       if (personOnly && !person) {
         throw guestErrors.create("guest.invalid");
       }
-      return await run(authority, permissionId);
+      return await run(authority, permissionId, async () => {
+        await stillAdmitted(this.env, app, token, use);
+      });
     } catch (error) {
       throw forSandbox(error);
     }

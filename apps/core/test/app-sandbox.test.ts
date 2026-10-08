@@ -789,19 +789,30 @@ describe("App server code", { timeout: 60_000 }, () => {
     await running.entered;
     // A call through an export, as app-calls.ts makes it, from a call that
     // has a moment left: it ends at that call's deadline, long before the
-    // App's own time for a call.
+    // App's own time for a call. Its deadline's timer is held until its
+    // method has started, however slow the runner is, then let go.
     const cutShort = gate();
-    const cutShortCall = outcome(
-      appHost(env, app).call(caller, "writeLater", [cutShort.wait, "short"], {
-        version: 1,
-        chain: [],
-        deadline: Date.now() + 1000,
-        readOnly: false,
-        onPinned: async () => {},
-      })
-    );
-    await cutShort.entered;
-    const cutShortEnded = await cutShortCall;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let cutShortEnded: string;
+    try {
+      const cutShortCall = outcome(
+        appHost(env, app).call(caller, "writeLater", [cutShort.wait, "short"], {
+          version: 1,
+          chain: [],
+          deadline: Date.now() + 5000,
+          readOnly: false,
+          onPinned: async () => {},
+        })
+      );
+      await cutShort.entered;
+      // In the App's object, whose timer it is.
+      await runInDurableObject(appHost(env, app), async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      cutShortEnded = await cutShortCall;
+    } finally {
+      vi.useRealTimers();
+    }
     running.release();
     cutShort.release();
     expect({
