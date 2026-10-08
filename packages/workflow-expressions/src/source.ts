@@ -174,9 +174,26 @@ export interface SourceProblem {
   reason: string;
 }
 
+/**
+ * A free variable as the source reads it: `$params.a.b` is the variable
+ * `params` with fields `a`, `b`. Only `.name` steps count; the path stops
+ * at anything else (an index, a pipe, an operator).
+ */
+export interface VariablePath {
+  variable: string;
+  fields: string[];
+  /** The path is the whole expression: its value is the result. */
+  whole: boolean;
+}
+
 export interface CheckedSource {
   /** Variables the source reads that it doesn't bind itself with `as`. */
   freeVariables: string[];
+  /**
+   * Every read of a free variable, with the fields it reads directly. What
+   * a validator can check statically; anything past a path is dynamic.
+   */
+  paths: VariablePath[];
 }
 
 const identStart = /[A-Za-z_]/u;
@@ -612,12 +629,29 @@ export const checkSource = (
     const words = checkStructure(tokens);
     const bound = boundVariables(tokens, words);
     const free = new Set<string>();
-    for (const token of tokens) {
-      if (token.kind === "variable" && !bound.has(token.text)) {
-        free.add(token.text);
+    const paths: VariablePath[] = [];
+    for (const [index, token] of tokens.entries()) {
+      if (token.kind !== "variable" || bound.has(token.text)) {
+        continue;
       }
+      free.add(token.text);
+      const fields: string[] = [];
+      let next = index + 1;
+      for (
+        let field = tokens[next];
+        field?.kind === "field";
+        field = tokens[next]
+      ) {
+        fields.push(field.text.slice(1));
+        next += 1;
+      }
+      paths.push({
+        variable: token.text,
+        fields,
+        whole: index === 0 && next === tokens.length,
+      });
     }
-    return { ok: true, source: { freeVariables: [...free] } };
+    return { ok: true, source: { freeVariables: [...free], paths } };
   } catch (error) {
     if (error instanceof SourceError) {
       return { ok: false, problem: error.problem };

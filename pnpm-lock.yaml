@@ -27,6 +27,9 @@ catalogs:
     '@better-auth/sso':
       specifier: 1.7.5
       version: 1.7.5
+    '@cfworker/json-schema':
+      specifier: 4.1.1
+      version: 4.1.1
     '@cloudflare/dynamic-workflows':
       specifier: 0.1.1
       version: 0.1.1
@@ -737,6 +740,31 @@ importers:
         specifier: 'catalog:'
         version: 5.20260921.1
 
+  packages/open-workflow:
+    dependencies:
+      '@grasp-os/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+      '@grasp-os/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@grasp-os/workflow-expressions':
+        specifier: workspace:*
+        version: link:../workflow-expressions
+    devDependencies:
+      '@cfworker/json-schema':
+        specifier: 'catalog:'
+        version: 4.1.1
+      '@cloudflare/vitest-pool-workers':
+        specifier: 'catalog:'
+        version: 0.22.0(@cloudflare/workers-types@5.20260921.1)(@types/node@26.6.2)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11)
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 5.20260921.1
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.1
+
   packages/sdk:
     dependencies:
       '@babel/parser':
@@ -1286,6 +1314,7 @@ packages:
 
   '@cloudflare/vitest-pool-workers@0.22.0':
     resolution: {integrity: sha512-OJv/qikkOgxnKxJ5xrLS7zuOLZhc/6iziU+llqZm4tiQf2CJUYwlMuXN68VaWIQebORd1AUx4w6A0oy8XRbuaQ==}
+    deprecated: '@cloudflare/vitest-pool-workers has been renamed to @cloudflare/vitest-plugin. This package will not receive future updates.'
     peerDependencies:
       '@vitest/runner': ^4.1.0
       '@vitest/snapshot': ^4.1.0
@@ -8141,8 +8170,7 @@ snapshots:
       hashery: 1.5.1
       keyv: 5.6.0
 
-  '@cfworker/json-schema@4.1.1':
-    optional: true
+  '@cfworker/json-schema@4.1.1': {}
 
   '@clack/core@1.5.1':
     dependencies:
