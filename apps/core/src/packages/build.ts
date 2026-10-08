@@ -5,6 +5,7 @@ import {
 } from "@grasp-os/compiler";
 import type { BuildRequest } from "@grasp-os/compiler";
 import { actorOf } from "@grasp-os/shared/audit";
+import type { AuditEntry } from "@grasp-os/shared/audit";
 import {
   dependencyErrors,
   dependencyGraphHash,
@@ -12,7 +13,7 @@ import {
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   graspLockSchema,
   packageArtifactSchema,
@@ -35,7 +36,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { appFor } from "../apps.ts";
-import { auditedBatch, outboxed } from "../audit-outbox.ts";
+import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
 import { policyGenerationSql } from "../dependencies/policy.ts";
@@ -239,25 +240,37 @@ const newestFirst = (a: string, b: string): number => {
 /**
  * A lock's pins once `added` is pinned for `compiler` under `config`, and
  * the hashes of the pins that drops: a config of the same target past the
- * newest {@link maxTargetConfigs}, and every pin of a compiler past the
- * {@link maxCompilers} that pinned last. Nothing else is dropped: a pin of
- * another config, another target or another kept compiler stays.
+ * newest {@link maxTargetConfigs} (by when each was last pinned or handed
+ * out, `touchPin`), and every pin of a compiler past the
+ * {@link maxCompilers} that pinned last. Never the config the lock names
+ * for the target now (`inUse`), which a build may have read before a
+ * resolve set it back. Nothing else is dropped: a pin of another config,
+ * another target or another kept compiler stays.
  */
 export const withPin = (
   artifacts: GraspLock["artifacts"],
   compiler: string,
   config: string,
-  added: ArtifactPin
+  added: ArtifactPin,
+  inUse?: string
 ): { artifacts: NonNullable<GraspLock["artifacts"]>; dropped: string[] } => {
   const pins: Record<string, ArtifactPin> = {
     ...artifacts?.[compiler],
     [config]: added,
   };
+  // Kept whatever their time: the config pinned now, and the one in use.
+  const keptAnyway =
+    inUse !== undefined && inUse !== config && pins[inUse] !== undefined
+      ? 2
+      : 1;
   const tooMany = new Set(
     Object.entries(pins)
-      .filter(([key, { target }]) => key !== config && target === added.target)
+      .filter(
+        ([key, { target }]) =>
+          key !== config && key !== inUse && target === added.target
+      )
       .toSorted(([, a], [, b]) => newestFirst(a.pinnedAt, b.pinnedAt))
-      .slice(maxTargetConfigs - 1)
+      .slice(maxTargetConfigs - keptAnyway)
       .map(([key]) => key)
   );
   const others = Object.entries(artifacts ?? {})
@@ -295,6 +308,31 @@ interface Admitted {
 const stillAdmitted = ({ approval, policyGeneration }: Admitted): SQL =>
   sql`EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.id} = ${approval} AND ${dependencyRequests.status} = 'approved') AND ${policyGenerationSql} = ${policyGeneration}`;
 
+/**
+ * The audit entry of a pin a build writes: which App, graph, target config
+ * and artifact, the approval it relied on, and the pins writing it
+ * dropped. Only for a pin written: a build that hands out an artifact
+ * pinned before records nothing, so asking again and again adds nothing
+ * to the trail.
+ */
+const pinEntry = (
+  by: Acting,
+  pinned: {
+    app: string;
+    graphHash: string;
+    target: PackageArtifact["target"];
+    config: string;
+    approval: string;
+    hash: string;
+    dropped: string[];
+  }
+): AuditEntry => ({
+  actor: by.actor ?? actorOf(by),
+  action: "dependency.built",
+  target: { type: "app", id: pinned.app },
+  detail: { ...pinned, dropped: pinned.dropped.join(" ") },
+});
+
 /** How often pinning starts over when another write changed the lock first. */
 const pinTries = 3;
 
@@ -316,6 +354,7 @@ interface Pinning {
  */
 const pin = async (
   env: Env,
+  by: Acting,
   app: string,
   graphHash: string,
   read: { lock: GraspLock; stored: string },
@@ -323,15 +362,21 @@ const pin = async (
   limits: PackageLimits,
   admitted: Admitted,
   admit: () => Promise<unknown>
-): Promise<{ hash: string; dropped: string[] | undefined }> => {
+): Promise<string> => {
   const db = drizzle(env.DB);
   let current = read;
   for (let attempt = 0; attempt < pinTries; attempt += 1) {
     const existing =
       current.lock.artifacts?.[compilerVersion]?.[pinning.config];
     if (existing) {
-      return { hash: existing.hash, dropped: undefined };
+      return existing.hash;
     }
+    const named = current.lock.targets[pinning.target];
+    const inUse =
+      named === undefined
+        ? undefined
+        : // oxlint-disable-next-line no-await-in-loop
+          await targetConfigHash(pinning.target, named);
     const { artifacts, dropped } = withPin(
       current.lock.artifacts,
       compilerVersion,
@@ -341,7 +386,8 @@ const pin = async (
         hash: pinning.hash,
         exports: pinning.exports,
         pinnedAt: new Date().toISOString(),
-      }
+      },
+      inUse
     );
     const stored = canonicalJson(
       graspLockSchema.parse({ ...current.lock, artifacts })
@@ -352,22 +398,40 @@ const pin = async (
         limit: limits.lockBytes,
       });
     }
-    // In turn: each attempt writes on the lock the one before read.
+    // In turn: each attempt writes on the lock the one before read. The
+    // pin and its audit event land together or not at all: the event only
+    // if this update changed the lock, as the batch runs.
     // oxlint-disable-next-line no-await-in-loop
-    const updated = await db
-      .update(dependencyLocks)
-      .set({ lock: stored })
-      .where(
-        and(
-          eq(dependencyLocks.appId, app),
-          eq(dependencyLocks.graphHash, graphHash),
-          eq(dependencyLocks.lock, current.stored),
-          stillAdmitted(admitted)
+    const [updated] = await auditedBatch(env, db, [
+      db
+        .update(dependencyLocks)
+        .set({ lock: stored })
+        .where(
+          and(
+            eq(dependencyLocks.appId, app),
+            eq(dependencyLocks.graphHash, graphHash),
+            eq(dependencyLocks.lock, current.stored),
+            stillAdmitted(admitted)
+          )
         )
-      )
-      .returning({ lock: dependencyLocks.lock });
+        .returning({ lock: dependencyLocks.lock }),
+      // Only if this update changed the lock: two builds of the same bytes
+      // can write the same text, and only the one that lands records it.
+      outboxedIfChanged(
+        db,
+        pinEntry(by, {
+          app,
+          graphHash,
+          target: pinning.target,
+          config: pinning.config,
+          approval: admitted.approval,
+          hash: pinning.hash,
+          dropped,
+        })
+      ),
+    ]);
     if (updated.length > 0) {
-      return { hash: pinning.hash, dropped };
+      return pinning.hash;
     }
     // The admission no longer holds (this throws), or another write
     // changed the lock first: read it as it is now.
@@ -379,35 +443,54 @@ const pin = async (
   throw dependencyErrors.create("dependency.stale");
 };
 
+/** How long a pin handed out goes before its time is moved on. */
+const touchAfterMs = 24 * 60 * 60 * 1000;
+
 /**
- * Records in the audit trail a pin a build wrote: which App, graph,
- * target config and artifact, the approval it relied on, and the pins
- * writing it dropped. Only when a pin is written: a build that hands out
- * an artifact pinned before records nothing, so asking again and again
- * adds nothing to the trail.
+ * Moves a pin's time on when it is handed out and its time is a day old,
+ * so the pins kept for a target are the ones in use, not the ones pinned
+ * first (`withPin`). One conditional write on the lock as it was read; a
+ * write that loses to another, or fails, changes nothing and is only
+ * logged: handing the artifact out doesn't depend on it.
  */
-const recordPin = async (
+const touchPin = async (
   env: Env,
-  by: Acting,
-  pinned: {
-    app: string;
-    graphHash: string;
-    target: PackageArtifact["target"];
-    config: string;
-    approval: string;
-    hash: string;
-    dropped: string[];
-  }
+  app: string,
+  graphHash: string,
+  read: { lock: GraspLock; stored: string },
+  config: string,
+  pinned: ArtifactPin
 ): Promise<void> => {
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    outboxed(db, {
-      actor: by.actor ?? actorOf(by),
-      action: "dependency.built",
-      target: { type: "app", id: pinned.app },
-      detail: { ...pinned, dropped: pinned.dropped.join(" ") },
-    }),
-  ]);
+  if (Date.now() - Date.parse(pinned.pinnedAt) < touchAfterMs) {
+    return;
+  }
+  const pins = read.lock.artifacts?.[compilerVersion] ?? {};
+  const stored = canonicalJson(
+    graspLockSchema.parse({
+      ...read.lock,
+      artifacts: {
+        ...read.lock.artifacts,
+        [compilerVersion]: {
+          ...pins,
+          [config]: { ...pinned, pinnedAt: new Date().toISOString() },
+        },
+      },
+    })
+  );
+  try {
+    await drizzle(env.DB)
+      .update(dependencyLocks)
+      .set({ lock: stored })
+      .where(
+        and(
+          eq(dependencyLocks.appId, app),
+          eq(dependencyLocks.graphHash, graphHash),
+          eq(dependencyLocks.lock, read.stored)
+        )
+      );
+  } catch (error) {
+    log.warn("packages.pin_touch_failed", { app, ...errorFields(error) });
+  }
 };
 
 /** Every tarball of the lock, checked, counting bytes as they come. */
@@ -561,6 +644,7 @@ export const buildDependencies = async (
     // it is served (serve.ts), every time.
     const kept = await keptDescription(env, pinned.hash);
     if (kept) {
+      await touchPin(env, asked.app, asked.graphHash, read, configHash, pinned);
       return {
         hash: pinned.hash,
         artifact: kept,
@@ -619,9 +703,10 @@ export const buildDependencies = async (
   // Made again under its pin (the kept one was corrupt): the same bytes,
   // and nothing new to record.
   const holds = pinned
-    ? { hash: pinned.hash, dropped: undefined }
+    ? pinned.hash
     : await pin(
         env,
+        by,
         asked.app,
         asked.graphHash,
         read,
@@ -640,19 +725,8 @@ export const buildDependencies = async (
         admitted,
         admit
       );
-  if (holds.hash !== hash) {
+  if (holds !== hash) {
     throw packageErrors.create("package.artifact_mismatch");
-  }
-  if (holds.dropped !== undefined) {
-    await recordPin(env, by, {
-      app: asked.app,
-      graphHash: asked.graphHash,
-      target: asked.target,
-      config: configHash,
-      approval,
-      hash,
-      dropped: holds.dropped,
-    });
   }
   log.info("packages.built", {
     app: asked.app,

@@ -10,7 +10,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { buildDependencies } from "../src/packages/build.ts";
+import { buildDependencies, withPin } from "../src/packages/build.ts";
 import { mockIdp } from "./idp.ts";
 import {
   failure,
@@ -1318,5 +1318,107 @@ describe("what a build names and keeps", () => {
       rebuilt: true,
       recorded: [],
     });
+  });
+});
+
+describe("what a pin keeps and records", () => {
+  it("records a pin with the write that makes it: a request that dies right after still leaves its event", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    const lockText = async (): Promise<string | null> =>
+      await env.DB.prepare(
+        "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+      )
+        .bind(app.app, app.request.graphHash)
+        .first<string>("lock");
+    // The request dies right after the batch that changes the lock lands.
+    const dying = new Proxy(env.DB, {
+      get: (target, property): unknown =>
+        property === "batch"
+          ? async (statements: D1PreparedStatement[]) => {
+              const before = await lockText();
+              const results = await target.batch(statements);
+              if ((await lockText()) !== before) {
+                throw new Error("The request died");
+              }
+              return results;
+            }
+          : bound(target, property),
+    });
+    let died = false;
+    const events = await auditedDuring(async () => {
+      try {
+        await buildDependencies({ ...env, DB: dying }, identity, {
+          app: app.app,
+          graphHash: app.request.graphHash,
+          target: "browser",
+          policyGeneration,
+        });
+      } catch (error) {
+        died = error instanceof Error && error.message === "The request died";
+      }
+    });
+    const lock = await storedLock(app);
+    const pinned =
+      lock.artifacts?.[compilerVersion]?.[await configOf(lock, "browser")];
+    expect({
+      died,
+      recorded: pinsRecorded(events).map(({ hash }) => hash),
+    }).toStrictEqual({ died: true, recorded: [pinned?.hash] });
+  });
+
+  it("keeps the config a target names now, and moves a pin's time on as it is handed out", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    await buildOf(app, "browser");
+    const lock = await storedLock(app);
+    const config = await configOf(lock, "browser");
+    const pinned = lock.artifacts?.[compilerVersion]?.[config];
+    if (pinned === undefined) {
+      throw new Error("No pin");
+    }
+    const day = 24 * 60 * 60 * 1000;
+    const pinOf = (hash: string, daysAgo: number) => ({
+      target: "browser" as const,
+      hash,
+      exports: {},
+      pinnedAt: new Date(Date.now() - daysAgo * day).toISOString(),
+    });
+    // The config in use was pinned first of five: adding one more drops
+    // the oldest of the others, never it.
+    const { dropped } = withPin(
+      {
+        [compilerVersion]: {
+          [config]: pinOf(hashOf("a"), 9),
+          [hashOf("1")]: pinOf(hashOf("b"), 4),
+          [hashOf("2")]: pinOf(hashOf("c"), 3),
+          [hashOf("3")]: pinOf(hashOf("d"), 2),
+        },
+      },
+      compilerVersion,
+      hashOf("4"),
+      pinOf(hashOf("e"), 0),
+      config
+    );
+    // Handed out two days after it was pinned: its time moves on.
+    await storeLock(app, {
+      ...lock,
+      artifacts: {
+        [compilerVersion]: {
+          [config]: { ...pinned, pinnedAt: pinOf("", 2).pinnedAt },
+        },
+      },
+    });
+    await buildOf(app, "browser");
+    const after = await storedLock(app);
+    const touched = after.artifacts?.[compilerVersion]?.[config];
+    expect({
+      dropped,
+      touched: Date.now() - Date.parse(touched?.pinnedAt ?? "") < day,
+    }).toStrictEqual({ dropped: [hashOf("b")], touched: true });
   });
 });

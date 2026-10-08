@@ -405,6 +405,26 @@ describe("serving an App's built packages", () => {
     });
   });
 
+  it("serves nothing of a lock this release can't read, and answers not found", async () => {
+    const served = await servedBuild();
+    // As an older release wrote it, its pins in another shape.
+    const lock = await lockFor(served);
+    await env.DB.prepare(
+      "UPDATE dependency_locks SET lock = ? WHERE app_id = ? AND graph_hash = ?"
+    )
+      .bind(
+        JSON.stringify({
+          ...lock,
+          artifacts: { older: { browser: { hash: served.built.hash } } },
+        }),
+        served.app,
+        served.graphHash
+      )
+      .run();
+    const response = await routed(`${served.address}${served.name}.js`);
+    expect(response.status).toBe(404);
+  });
+
   it("builds and serves nothing of a lock resolved against another React, and says to resolve again", async () => {
     const served = await servedBuild();
     // As a release with another React finds a lock, and its approval,
@@ -533,9 +553,11 @@ describe("logging an artifact's request", () => {
     try {
       for (const path of [
         `${address}${name}.js`,
-        // An empty segment, and one too many, before the token.
+        // An empty segment, and one too many, before the token; and an
+        // empty segment where the token goes, the token after it.
         `/package-artifacts/${rest}${name}.js`,
         `/package-artifacts/extra${rest}${name}.js`,
+        `${address.replace(`/${token}/`, `//${token}/`)}${name}.js`,
       ]) {
         // oxlint-disable-next-line no-await-in-loop -- one log line each
         await routed(path);
@@ -545,7 +567,7 @@ describe("logging an artifact's request", () => {
       info.mockRestore();
     }
     const logged = lines.filter((line) => line.includes("/package-artifacts"));
-    expect(logged).toHaveLength(3);
+    expect(logged).toHaveLength(4);
     expect(logged.filter((line) => line.includes(token))).toStrictEqual([]);
   });
 });

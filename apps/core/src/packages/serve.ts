@@ -6,6 +6,7 @@ import {
   packageArtifactPath,
 } from "@grasp-os/shared/packages";
 import { drizzle } from "drizzle-orm/d1";
+import { ZodError } from "zod";
 
 import { policyGeneration } from "../dependencies/policy.ts";
 import { admissionOf } from "../dependencies/requests.ts";
@@ -162,6 +163,15 @@ const pinned = async (env: Env, ref: ArtifactRef): Promise<boolean> => {
     );
   } catch (error) {
     if (isExpectedError(error)) {
+      return false;
+    }
+    // A lock that doesn't read as this release's (one an older release
+    // wrote as this one deploys): nothing it pins is served.
+    if (error instanceof ZodError) {
+      log.warn("packages.lock_unreadable", {
+        app: ref.app,
+        graphHash: ref.graphHash,
+      });
       return false;
     }
     throw error;
