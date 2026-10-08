@@ -1,0 +1,20 @@
+Open Workflow Specification (formerly Serverless Workflow Specification)
+https://github.com/open-workflow-specification/specification
+
+Copyright the Open Workflow Specification authors (a CNCF project).
+Licensed under the Apache License, Version 2.0; see LICENSE in this
+directory.
+
+Files vendored here, unmodified, from commit
+fe69b1b8090601a1b73555e9bd576a7590a131e1 (DSL 1.0.3; 26 commits after
+the v1.0.3 tag, 9b5b1da29e9d4fff2358580241e11aab22704a16):
+
+  schema/workflow.yaml -> workflow.yaml
+    sha256 4de09c2b62c46fcbddaa4942cb84d6539bd28995de4410004118c82cc2030d8f
+  LICENSE -> LICENSE
+    sha256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
+
+Grasp's grasp-open-workflow/1 profile (packages/open-workflow/src) is a
+restricted subset of this schema written for Grasp; it does not claim full
+Open Workflow conformance. Its tests check accepted definitions against
+workflow.yaml. Nothing loads the schema at build or run time.

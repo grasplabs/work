@@ -33,6 +33,7 @@ import type {
 } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
+import type { NpmMetadata } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { ackAuditEvents, auditCall, takeAuditEvents } from "./audit.ts";
@@ -52,6 +53,7 @@ import {
   syncEventSources,
   takeConnectorEvents,
 } from "./events.ts";
+import { npmMetadata, npmTarball } from "./npm.ts";
 import {
   abandonFlow,
   disconnect,
@@ -266,6 +268,21 @@ export default class Connect
     request: StartToolkitConnection
   ): Promise<{ url: string }> {
     return await startToolkitConnection(this.env, request);
+  }
+
+  // The npm registry (src/npm.ts): a package's metadata, and one
+  // version's tarball by its integrity hash, for core to resolve and
+  // unpack. Public data; nothing here is a client's.
+
+  // RPC exposes prototype methods only, so these can't be static.
+  // oxlint-disable-next-line class-methods-use-this
+  async npmMetadata(name: unknown): Promise<NpmMetadata> {
+    return await npmMetadata(name);
+  }
+
+  // oxlint-disable-next-line class-methods-use-this
+  async npmTarball(request: unknown): Promise<Uint8Array> {
+    return await npmTarball(request);
   }
 
   // The catalog (src/catalog.ts): what can be connected.

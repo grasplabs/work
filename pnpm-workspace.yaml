@@ -50,6 +50,12 @@ catalog:
   drizzle-orm: 0.45.3
   # Knowledge frontmatter.
   yaml: 2.9.1
+  # Bundles an App's approved npm packages in the package builder's isolate
+  # (packages/compiler/src/packages): the browser build, run on workerd.
+  esbuild-wasm: 0.28.2
+  # jq 1.8.2 compiled to WebAssembly (MIT): the expression language of JSON
+  # workflows. scripts/jq-wasm meters and pins its bytes.
+  jq-wasm: 3.0.0-jq-1.8.2
   # Text of uploaded files, extracted in core: PDF, Word and Excel.
   fflate: 0.8.3
   unpdf: 1.8.1
@@ -60,6 +66,10 @@ catalog:
   zod: 4.6.5
   # The types of Standard Schema, which the SDK's value schemas implement.
   "@standard-schema/spec": 1.1.0
+  # JSON Schema 2020-12 in workerd (MIT): only the Open Workflow profile's
+  # tests use it, to check accepted definitions against the vendored upstream
+  # schema. Nothing ships a general JSON Schema validator.
+  "@cfworker/json-schema": 4.1.1
 
   # Identity, agents, connections
   # Better Auth's core, for its IP normalisation in the router; same release
@@ -92,6 +102,9 @@ catalog:
   "@lingui/vite-plugin": 6.8.0
   "@messageformat/parser": 5.1.1
   "@rolldown/plugin-babel": 0.2.4
+  # The kit's chat components (message-scroller, questionnaire): shadcn's
+  # own headless primitives.
+  "@shadcn/react": 0.3.1
   "@tailwindcss/vite": 4.3.3
   "@tanstack/react-router": 1.170.38
   "@tanstack/react-start": 1.168.56
@@ -108,12 +121,26 @@ catalog:
   babel-plugin-react-compiler: 1.0.0
   class-variance-authority: 0.7.1
   clsx: 2.1.1
+  # The kit's command palette (components/command), as shadcn builds it.
+  cmdk: 1.1.1
+  # The kit's carousel.
+  embla-carousel-react: 8.6.0
   eslint: 10.11.0
+  # The kit's one-time-code input.
+  input-otp: 1.5.0
   lucide-react: 1.47.0
   react: 19.3.0
+  # The kit's calendar.
+  react-day-picker: 10.0.2
   react-dom: 19.3.0
+  # recharts' peer; same release as react.
+  react-is: 19.3.0
   # Knowledge documents, rendered in the frontend: no raw HTML.
   react-markdown: 10.1.0
+  # The kit's resizable panels.
+  react-resizable-panels: 4.14.2
+  # The kit's charts.
+  recharts: 3.10.1
   remark-gfm: 4.0.1
   shadcn: 4.21.0
   tailwind-merge: 3.7.0
@@ -146,3 +173,9 @@ peerDependencyRules:
     "@typescript-eslint/project-service>typescript": "7"
     "@typescript-eslint/tsconfig-utils>typescript": "7"
     "@typescript-eslint/typescript-estree>typescript": "7"
+
+# jq-wasm's Workers entry imports its own, unmetered jq.wasm as a default;
+# the patch drops that import, so a bundle carries only the metered module
+# (packages/workflow-expressions/src/jq.wasm).
+patchedDependencies:
+  jq-wasm@3.0.0-jq-1.8.2: patches/jq-wasm@3.0.0-jq-1.8.2.patch

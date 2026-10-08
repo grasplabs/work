@@ -6,6 +6,8 @@
   "type": "module",
   "exports": {
     "./catalog": "./catalog/inventory.ts",
+    "./catalog/demos": "./catalog/demos.ts",
+    "./catalog/examples": "./catalog/examples.ts",
     "./components/*": "./src/components/*.tsx",
     "./lib/*": "./src/lib/*.ts",
     "./hooks/*": "./src/hooks/*.ts",
@@ -13,9 +15,17 @@
   },
   "dependencies": {
     "@base-ui/react": "catalog:",
+    "@shadcn/react": "catalog:",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
+    "cmdk": "catalog:",
+    "embla-carousel-react": "catalog:",
+    "input-otp": "catalog:",
     "lucide-react": "catalog:",
+    "react-day-picker": "catalog:",
+    "react-is": "catalog:",
+    "react-resizable-panels": "catalog:",
+    "recharts": "catalog:",
     "shadcn": "catalog:",
     "tailwind-merge": "catalog:",
     "tw-animate-css": "catalog:"
