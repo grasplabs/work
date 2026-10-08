@@ -29,6 +29,17 @@ export type ModelEffort = (typeof modelEfforts)[number];
 /** The effort of a call that names none. */
 export const defaultModelEffort: ModelEffort = "medium";
 
+/** The efforts a model takes, and the one a call that names none gets. */
+export interface ModelEfforts {
+  /** Least first; empty for a model that doesn't think. */
+  levels: ModelEffort[];
+  /**
+   * {@link defaultModelEffort} as the model takes it: on a model without
+   * medium, the level it gets instead. Null for one that doesn't think.
+   */
+  default: ModelEffort | null;
+}
+
 /** Whose spend a budget counts: all calls, each workflow's, each person's. */
 export type ModelBudgetScope = "deployment" | "workflow" | "user";
 

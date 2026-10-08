@@ -12,7 +12,10 @@ import type {
   TranscriptContext,
   Usage,
 } from "@earendil-works/pi-ai";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import {
+  clampThinkingLevel,
+  getSupportedThinkingLevels,
+} from "@earendil-works/pi-ai";
 import { streamSimple as anthropicMessages } from "@earendil-works/pi-ai/api/anthropic-messages";
 import {
   CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL,
@@ -50,7 +53,7 @@ import {
   modelEfforts,
   modelErrors,
 } from "@grasp-os/shared/models";
-import type { ModelEffort } from "@grasp-os/shared/models";
+import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
 import {
   authoritySchema,
   permissionErrors,
@@ -279,17 +282,43 @@ export const gatewaySettings = (
 });
 
 /**
- * The efforts `ref` takes, least first: those of {@link modelEfforts} its
- * catalog entry supports, none for a model that doesn't think or isn't
- * one the gateway offers.
+ * The thinking level a request asks `model` for: the call's effort, or
+ * {@link defaultModelEffort}, as the model takes it. A level it lacks
+ * becomes the next one up that it has, or its highest when it has none
+ * above: pi's rule, which its OpenAI adapters apply anyway, applied here
+ * for every provider (Anthropic's falls back its own way). So a call that
+ * names none asks what it did before efforts. `undefined` for a model
+ * that doesn't think, which pi then asks for none.
  */
-export const modelEffortsOf = (ref: string): ModelEffort[] => {
+const thinkingOf = (
+  model: Model<Api>,
+  effort?: ModelEffort
+): ThinkingLevel | undefined => {
+  if (!model.reasoning) {
+    return undefined;
+  }
+  const level = clampThinkingLevel(model, effort ?? defaultModelEffort);
+  return level === "off" ? undefined : level;
+};
+
+/**
+ * The efforts `ref` takes, least first (those of {@link modelEfforts} its
+ * catalog entry supports), and the one a call that names none gets
+ * ({@link thinkingOf}). None for a model that doesn't think or isn't one
+ * the gateway offers.
+ */
+export const modelEffortsOf = (ref: string): ModelEfforts => {
   const model = parseModelRef(ref)?.catalog;
   if (model === undefined) {
-    return [];
+    return { levels: [], default: null };
   }
   const supported = new Set<string>(getSupportedThinkingLevels(model));
-  return modelEfforts.filter((effort) => supported.has(effort));
+  const levels = modelEfforts.filter((effort) => supported.has(effort));
+  const fallback = thinkingOf(model);
+  return {
+    levels,
+    default: levels.find((effort) => effort === fallback) ?? null,
+  };
 };
 
 /**
@@ -463,19 +492,6 @@ const noUsage: Usage = {
   totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
-
-/**
- * The thinking level a request asks `model` for: the call's effort, or
- * {@link defaultModelEffort}, so a call that names none asks what it did
- * before efforts. pi's adapters ask a model that lacks the level for its
- * nearest one (`modelEffortsOf` lists those it has). `undefined` for a
- * model that doesn't think, which pi then asks for none.
- */
-const thinkingOf = (
-  model: Model<Api>,
-  effort: ModelEffort | undefined
-): ThinkingLevel | undefined =>
-  model.reasoning ? (effort ?? defaultModelEffort) : undefined;
 
 /** The call's messages in pi's shape. */
 const toMessages = (call: Call, model: Model<Api>): Message[] => {
@@ -1006,6 +1022,8 @@ const auditEntry = (
         logId !== undefined && logId.length <= auditIdentifierMaxLength
           ? logId
           : null,
+      // How hard the model was asked to think: a cost the person chose.
+      effort: thinkingOf(ref.catalog, call.effort) ?? null,
       // Which rule kept the call in the EU, if one did.
       euOnly: judged.euOnly ?? null,
       // Why it carried sensitive data, if a data rule asked and it did.

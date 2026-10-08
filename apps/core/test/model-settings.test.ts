@@ -253,15 +253,25 @@ describe("model settings", { timeout: 60_000 }, () => {
         })
       )
     ).resolves.toStrictEqual({
-      [workersAi]: [],
-      [anthropic]: ["low", "medium", "high"],
-      [euModel]: ["low", "medium", "high", "xhigh"],
-      "anthropic/claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
+      [workersAi]: { levels: [], default: null },
+      [anthropic]: { levels: ["low", "medium", "high"], default: "medium" },
+      [euModel]: {
+        levels: ["low", "medium", "high", "xhigh"],
+        default: "medium",
+      },
+      "anthropic/claude-opus-4-8": {
+        levels: ["low", "medium", "high", "xhigh", "max"],
+        default: "medium",
+      },
     });
-    // A new deployment's: GLM-5.3 Flash has no medium.
+    // A new deployment's: GLM-5.3 Flash has no medium, so a question that
+    // names no effort gets the next level up.
     await expect(efforts(envWith())).resolves.toStrictEqual({
-      [defaultGatewayModels[0]]: [],
-      [defaultGatewayModels[1]]: ["low", "high", "max"],
+      [defaultGatewayModels[0]]: { levels: [], default: null },
+      [defaultGatewayModels[1]]: {
+        levels: ["low", "high", "max"],
+        default: "high",
+      },
     });
   });
 

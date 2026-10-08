@@ -93,9 +93,11 @@ const newPerson = () =>
   ({ type: "person", userId: `person-${crypto.randomUUID()}` }) as const;
 
 // Efforts: Claude Opus 4.8 and GPT-5.6 Sol take all five levels; GPT-5.4 none
-// past xhigh, Claude Sonnet 4.5 none past high, and GLM-5.3 Flash
-// (a default model) low, high and max only. Llama 3.3 doesn't think.
+// past xhigh, Claude Sonnet 4.5 none past high, Claude Opus 4.6 all but
+// xhigh, and GLM-5.3 Flash (a default model) low, high and max only.
+// Llama 3.3 doesn't think.
 const opus = "anthropic/claude-opus-4-8";
+const opus46 = "anthropic/claude-opus-4-6";
 const sol = "openai/gpt-5.6-sol";
 const glm = "workers-ai/@cf/zai-org/glm-5.3-flash";
 
@@ -234,13 +236,18 @@ describe("model gateway", { timeout: 30_000 }, () => {
     });
   });
 
-  it("asks a model for the nearest effort it takes when it lacks the one asked", async () => {
+  it("asks a model that lacks the effort asked for the next one up it takes, or its highest", async () => {
+    // The next level up it has, or its highest when it has none above.
     expect({
       gpt54: await sentAt(openai, "max"),
       sonnet45: await sentAt(anthropic, "max"),
+      opus46: await sentAt(opus46, "xhigh"),
+      glm: await sentAt(glm, "medium"),
     }).toStrictEqual({
       gpt54: await sentAt(openai, "xhigh"),
       sonnet45: await sentAt(anthropic, "high"),
+      opus46: await sentAt(opus46, "max"),
+      glm: await sentAt(glm, "high"),
     });
   });
 
@@ -252,9 +259,46 @@ describe("model gateway", { timeout: 30_000 }, () => {
         await sentAt(model, "medium")
       );
     }
+    await expect(sentAt(opus)).resolves.toMatchObject({
+      output_config: { effort: "medium" },
+    });
+    await expect(sentAt(sol)).resolves.toMatchObject({
+      reasoning: { effort: "medium" },
+    });
     await expect(sentAt(workersAi, "max")).resolves.toStrictEqual(
       await sentAt(workersAi)
     );
+  });
+
+  it("records in the audit log the effort each request asked its model for", async () => {
+    const trigger = newPerson();
+    const { gatewayEnv } = withGateway(
+      [answer("One"), answer("Two"), answer("Three")],
+      { gateway: "grasp-os-test", models: [opus, openai, workersAi] }
+    );
+    for (const model of [opus, openai, workersAi]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await models(gatewayEnv).call({
+        model,
+        input: "Think hard.",
+        effort: "max",
+        purpose: "chat.turn",
+        trigger,
+        work: work(),
+      });
+    }
+
+    const events = await auditedFor(trigger.userId, 3);
+    // GPT-5.4 has no max; Llama 3.3 doesn't think.
+    expect(
+      Object.fromEntries(
+        events.map(({ model, detail }) => [model?.model, detail.effort])
+      )
+    ).toStrictEqual({
+      "claude-opus-4-8": "max",
+      "gpt-5.4": "xhigh",
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast": null,
+    });
   });
 
   it("sends no provider key, so the gateway uses the keys it stores, and takes no answer from its cache", async () => {

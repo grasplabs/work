@@ -15,7 +15,7 @@ import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId, WorkspaceId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import type { ModelEffort } from "@grasp-os/shared/models";
+import type { ModelEfforts } from "@grasp-os/shared/models";
 import {
   screenErrors,
   screenNameSchema,
@@ -145,7 +145,7 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
     );
   }
 
-  async efforts(): Promise<Record<string, ModelEffort[]>> {
+  async efforts(): Promise<Record<string, ModelEfforts>> {
     return await withPerson(this.#check, () =>
       Object.fromEntries(
         gatewaySettings(this.#env).models.map((model) => [

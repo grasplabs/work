@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { ModelEffort } from "./models.ts";
+import type { ModelEffort, ModelEfforts } from "./models.ts";
 import type { ScreenBundle, ScreenProblem } from "./screens.ts";
 
 // A person's chats with the organization's agent, as the frontend sees them
@@ -243,9 +243,10 @@ export interface ChatQuestion {
   model: string;
   /**
    * How hard the model thinks before it answers: one of the levels
-   * `ChatsApi.efforts()` lists for `model`. Without one, the default
-   * (`defaultModelEffort`). A level the model doesn't take becomes the
-   * nearest one it does; a model that doesn't think ignores it.
+   * `ChatsApi.efforts()` lists for `model`; without one, its default
+   * there. A level the model doesn't take becomes the next one up that it
+   * does, or its highest when it has none above; a model that doesn't
+   * think ignores it.
    */
   effort?: ModelEffort;
 }
@@ -263,10 +264,11 @@ export interface ChatsApi {
   /** The models a question may name, the default first. */
   models: () => Promise<string[]>;
   /**
-   * The efforts a question may name with each of `models()`, least first:
-   * empty for a model that doesn't think, so none is offered for it.
+   * The efforts a question may name with each of `models()`, and the one
+   * it gets naming none: no levels for a model that doesn't think, so
+   * none is offered for it.
    */
-  efforts: () => Promise<Record<string, ModelEffort[]>>;
+  efforts: () => Promise<Record<string, ModelEfforts>>;
   /** The person's chats, newest first. */
   list: () => Promise<ChatSummary[]>;
   create: (title: string) => Promise<ChatSummary>;
