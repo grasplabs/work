@@ -771,14 +771,14 @@ const giveLeaseBack = async (
 /**
  * Waits until `leased`'s lease is `holder`'s: at once if nobody holds it,
  * otherwise once the build that does ends or outlives its lease, looking
- * with a plain read until it's free before trying to take it.
- * `package.build_busy` after {@link leaseWaitMs}.
+ * with a plain read until it's free before trying to take it. Whether it
+ * did: not after {@link leaseWaitMs}.
  */
 const leaseFor = async (
   env: Env,
   leased: Leased,
   holder: string
-): Promise<void> => {
+): Promise<boolean> => {
   const until = Date.now() + leaseWaitMs;
   for (;;) {
     // One look at a time: a plain read, and a write only once it's free.
@@ -786,10 +786,10 @@ const leaseFor = async (
     const held = await leaseHeld(env, leased);
     // oxlint-disable-next-line no-await-in-loop
     if (!held && (await takeLease(env, leased, holder))) {
-      return;
+      return true;
     }
     if (Date.now() >= until) {
-      throw packageErrors.create("package.build_busy");
+      return false;
     }
     // oxlint-disable-next-line no-await-in-loop
     await scheduler.wait(leasePollMs);
@@ -1016,14 +1016,23 @@ export const buildDependencies = async (
     graphHash: asked.graphHash,
     target: asked.target,
   };
-  await leaseFor(env, leased, holder);
+  const taken = await leaseFor(env, leased, holder);
+  // The wait may have been long: what decides now is what holds, and
+  // another build may have pinned it while this one waited, whether or
+  // not it gave its lease back (it died, or giving it back failed).
   try {
-    // The wait may have been long: what decides now is what holds, and
-    // another build may have pinned it while this one waited.
     const leasedBuild: Asked = { ...building, admitted: await admit() };
     const now = await pinnedNow(env, leasedBuild);
-    return now.kept ?? (await buildUnderLease(env, by, leasedBuild, now));
+    if (now.kept) {
+      return now.kept;
+    }
+    if (!taken) {
+      throw packageErrors.create("package.build_busy");
+    }
+    return await buildUnderLease(env, by, leasedBuild, now);
   } finally {
-    await giveLeaseBack(env, leased, holder);
+    if (taken) {
+      await giveLeaseBack(env, leased, holder);
+    }
   }
 };

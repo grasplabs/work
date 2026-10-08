@@ -130,10 +130,12 @@ const unused = (lock: string): SQL =>
  * changes its graph again and again keeps older approvals; their locks
  * are what a new one may take the room of, once nothing handed out reads
  * them any more. A resolve back to such a graph finds its approval
- * standing, and writes its lock again.
+ * standing, and writes its lock again. With `waiting` `replaced`, the
+ * App's pending request counts as gone: what a resolve that writes a new
+ * lock counts its room by, since its batch drops that request first.
  */
-const stale = (lock: string): SQL =>
-  sql`(COALESCE(${sql.raw(lock)}.served_until, 0) <= ${Date.now()} AND NOT EXISTS (SELECT 1 FROM dependency_requests r WHERE r.app_id = ${sql.raw(lock)}.app_id AND r.graph_hash = ${sql.raw(lock)}.graph_hash AND (r.status = 'pending' OR (r.status = 'approved' AND NOT EXISTS (SELECT 1 FROM dependency_requests n WHERE n.app_id = r.app_id AND n.status = 'approved' AND n.targets = r.targets AND n.decided_at > r.decided_at)))))`;
+const stale = (lock: string, waiting: "in use" | "replaced" = "in use"): SQL =>
+  sql`(COALESCE(${sql.raw(lock)}.served_until, 0) <= ${Date.now()} AND NOT EXISTS (SELECT 1 FROM dependency_requests r WHERE r.app_id = ${sql.raw(lock)}.app_id AND r.graph_hash = ${sql.raw(lock)}.graph_hash AND (${sql.raw(waiting === "in use" ? "r.status = 'pending'" : "0")} OR (r.status = 'approved' AND NOT EXISTS (SELECT 1 FROM dependency_requests n WHERE n.app_id = r.app_id AND n.status = 'approved' AND n.targets = r.targets AND n.decided_at > r.decided_at)))))`;
 
 /**
  * That the lock `lock` is one a new lock of `app` takes the room of, as
@@ -183,7 +185,7 @@ const forgetLocks = (
 export interface LockWrite {
   /** The lock that holds once the batch lands. */
   lock: GraspLock;
-  /** Its write, its audit event, and the guard: first in the batch. */
+  /** Its write, its audit event, and the guard: in the batch right after the request it replaces is dropped. */
   statements: SQLiteBatchItem[];
 }
 
@@ -200,6 +202,8 @@ type SQLiteBatchItem = Parameters<DrizzleD1Database["batch"]>[0][number];
  * unless the lock is the one written (`lockGuardFailed`). A new lock past
  * the limit is refused here with `package.quota`; one the limit refused
  * only as the batch ran fails its guard, and the next attempt says so.
+ * The batch drops the App's waiting request before these, so its lock is
+ * one that gives up its room.
  */
 export const lockStatements = async (
   db: DrizzleD1Database,
@@ -239,13 +243,17 @@ export const lockStatements = async (
       sql`SELECT ${app}, ${graphHash}, NULL, 0, NULL WHERE NOT EXISTS (SELECT 1 FROM ${dependencyLocks} WHERE ${where} AND ${dependencyLocks.lock} = ${stored})`
     );
   if (row === undefined) {
+    // A new lock is never the waiting request's (that one has its lock),
+    // and the batch that writes it drops that request before this runs
+    // (`attempt`, dependencies/requests.ts): its lock gives up its room
+    // like any other no longer in use.
     const live = await db
       .select({ locks: count() })
       .from(dependencyLocks)
       .where(
         and(
           eq(dependencyLocks.appId, app),
-          sql`NOT ${stale("dependency_locks")}`
+          sql`NOT ${stale("dependency_locks", "replaced")}`
         )
       )
       .get();

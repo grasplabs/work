@@ -1135,6 +1135,71 @@ describe("an App's locks and the files they name", () => {
     });
   });
 
+  it("lets a graph take the room of the waiting request it replaces, at the limit, new or approved before", async () => {
+    const decide = await approverOf();
+    const { builder, app } = await builderWithApp();
+    const [old, browser, server, waiting, replacing] = [
+      named("one"),
+      named("two"),
+      named("three"),
+      named("four"),
+      named("five"),
+    ];
+    const names = [old, browser, server, waiting, replacing];
+    for (const name of names) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await publish(plain(name, "1.0.0"));
+    }
+    const resolve = async (
+      name: string,
+      targets: ("browser" | "server" | "workflow")[]
+    ) =>
+      await builder.api.dependencies.resolve(
+        intentFor(app, { [name]: "1" }, { targets })
+      );
+    // An approval no longer in use, then the latest approval for each of
+    // two sets of targets: the tests' limit of three locks (vite.config.ts).
+    for (const [name, targets] of [
+      [old, ["browser"]],
+      [browser, ["browser"]],
+      [server, ["server"]],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      const { request } = await resolve(name, [...targets]);
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await decide(request);
+    }
+    // A graph waiting for a decision takes the old approval's room.
+    const first = await resolve(waiting, ["workflow"]);
+    // Two locks in use and one waiting: another graph replaces the one
+    // waiting, and takes its room.
+    const replaced = await resolve(replacing, ["workflow"]);
+    const afterReplace = await lockedGraphs(app);
+    // Back to the old approval, whose lock went: it replaces the one
+    // waiting too.
+    const back = await resolve(old, ["browser"]);
+    const afterBack = await lockedGraphs(app);
+    expect({
+      replaced: replaced.request.status,
+      replacedLocked: afterReplace.includes(replaced.request.graphHash),
+      firstGone: afterReplace.includes(first.request.graphHash),
+      locks: afterReplace.length,
+      back: back.request.status,
+      backLocked: afterBack.includes(back.request.graphHash),
+      replacedGone: afterBack.includes(replaced.request.graphHash),
+      locksAfterBack: afterBack.length,
+    }).toStrictEqual({
+      replaced: "pending",
+      replacedLocked: true,
+      firstGone: false,
+      locks: 3,
+      back: "approved",
+      backLocked: true,
+      replacedGone: false,
+      locksAfterBack: 3,
+    });
+  });
+
   it("refuses a lock past the limit when the room goes as the batch runs, with a clear refusal", async () => {
     const decide = await approverOf();
     const { builder, app } = await builderWithApp();

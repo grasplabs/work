@@ -493,13 +493,15 @@ const attempt = async (
     // The App is back on a graph it has approved: whatever else waits for
     // it is no longer asked for, and goes as any replaced request.
     // Whatever waits as the batch runs, not what was read above: another
-    // proposal may have taken that one's place since.
+    // proposal may have taken that one's place since. Dropped before the
+    // lock is written, so the lock of what waited gives up its room to it
+    // (`lockStatements`).
     return {
       request: standing,
       lock,
       statements: [
-        ...lockFirst,
         ...dropPending(db, actor, proposal.app, standing.id),
+        ...lockFirst,
         ...unusedLockStatements(db, proposal.app),
       ],
     };
@@ -533,9 +535,11 @@ const attempt = async (
   return {
     request: row,
     lock,
+    // The request it replaces goes first, so its lock gives up its room to
+    // this one's (`lockStatements`).
     statements: [
-      ...lockFirst,
       ...superseded,
+      ...lockFirst,
       db.insert(dependencyRequests).values(row),
       outboxed(
         db,

@@ -7,7 +7,7 @@ import type {
 import { graspLockSchema, targetConfigHash } from "@grasp-os/shared/packages";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { buildDependencies, withPin } from "../src/packages/build.ts";
@@ -1633,6 +1633,60 @@ describe("one build of an App's packages at a time", () => {
 });
 
 describe("waiting for another build", () => {
+  it("hands out what another build pinned when it never gave its lease back, once the wait is over", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    const built = await buildOf(app, "browser");
+    const pinned = await storedLock(app);
+    await storeLock(app, { ...pinned, artifacts: {} });
+    // Another build holds the lease for minutes yet: it pins the artifact
+    // while this one waits, and dies without giving the lease back.
+    await env.DB.prepare(
+      "INSERT INTO dependency_build_leases (app_id, graph_hash, target, holder, expires_at) VALUES (?, ?, 'browser', 'died', ?)"
+    )
+      .bind(app.app, app.request.graphHash, Date.now() + 5 * 60 * 1000)
+      .run();
+    // The other build's pin lands as this one first looks at the lease,
+    // and this one's minute of waiting is over by its next look.
+    const realNow = Date.now.bind(Date);
+    let pinning: Promise<void> | undefined;
+    const waiting = new Proxy(env.DB, {
+      get: (target, property): unknown =>
+        property === "prepare"
+          ? (query: string) => {
+              if (
+                pinning === undefined &&
+                query.includes("dependency_build_leases")
+              ) {
+                pinning = storeLock(app, pinned);
+                vi.spyOn(Date, "now").mockReturnValue(realNow() + 61_000);
+              }
+              return target.prepare(query);
+            }
+          : bound(target, property),
+    });
+    let handed: PackageBuild | undefined;
+    try {
+      handed = await buildDependencies({ ...env, DB: waiting }, identity, {
+        app: app.app,
+        graphHash: app.request.graphHash,
+        target: "browser",
+        policyGeneration,
+      });
+    } finally {
+      vi.restoreAllMocks();
+      await pinning;
+    }
+    expect({
+      hash: handed.hash === built.hash,
+      built: handed.stats === null,
+    }).toStrictEqual({ hash: true, built: true });
+  });
+
   it("refuses the artifact another build pinned while it waited when the policy moved on meanwhile", async () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
