@@ -738,6 +738,16 @@ describe("equivalent codec text", () => {
     expect(equivalent(encode(items), encode([...items]))).toBeTruthy();
   });
 
+  test("compares a self-linked value with a long chain without overflowing, and finds them different", () => {
+    const self = loop("link");
+    let chain: Record<string, unknown> = { name: "link", self: null };
+    for (let link = 0; link < maxNestingDepth - 2; link += 1) {
+      chain = { name: "link", self: chain };
+    }
+    expect(equivalent(encode(self), encode(chain))).toBeFalsy();
+    expect(equivalent(encode(chain), encode(self))).toBeFalsy();
+  });
+
   test("doesn't hold for other content", () => {
     expect(equivalent(encode({ a: 1 }), encode({ a: 2 }))).toBeFalsy();
     expect(equivalent(encode({ a: 1 }), encode({ a: 1, b: 1 }))).toBeFalsy();

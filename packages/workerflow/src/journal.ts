@@ -95,6 +95,11 @@ export interface RunRow extends Record<string, SqlStorageValue> {
    */
   event_count: number;
   event_bytes: number;
+  /**
+   * What the run's stream chunks hold in all, kept in the writes that add
+   * and delete them (streams.ts), so a cap on it reads one row.
+   */
+  stream_bytes: number;
   output: string | null;
   error: string | null;
   ended_at: number | null;
@@ -230,6 +235,7 @@ export const createJournal = (sql: SqlStorage): void => {
       wake_at INTEGER,
       event_count INTEGER NOT NULL DEFAULT 0,
       event_bytes INTEGER NOT NULL DEFAULT 0,
+      stream_bytes INTEGER NOT NULL DEFAULT 0,
       output TEXT,
       error TEXT,
       ended_at INTEGER
@@ -316,7 +322,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
   }
   return sql
     .exec<RunRow>(
-      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, lease_until, wake_at, event_count, event_bytes, output, error, ended_at FROM run"
+      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at FROM run"
     )
     .toArray()[0];
 };

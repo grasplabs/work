@@ -25,6 +25,7 @@ import {
   slowStreamFirst,
   slowStreamRest,
   testMaxRunStreamBytes,
+  tinyChunks,
 } from "./result-definitions.ts";
 import { TestRuns } from "./worker.ts";
 
@@ -110,6 +111,19 @@ const readInObject = async (
         return { given, ended: errorRecord(error).message };
       }
     })
+  );
+
+/** The run's count of its stream bytes, and what its chunks hold. */
+const streamBytesOf = async (
+  definition: string,
+  id: string
+): Promise<{ counted: number; stored: number }> =>
+  await runInDurableObject(runObject(definition, id), (_, state) =>
+    state.storage.sql
+      .exec<{ counted: number; stored: number }>(
+        "SELECT (SELECT stream_bytes FROM run) AS counted, (SELECT COALESCE(SUM(LENGTH(bytes)), 0) FROM stream_chunks) AS stored"
+      )
+      .one()
   );
 
 /** Whether a read ended, or was refused, on corruption. */
@@ -320,6 +334,12 @@ describe("a step's stream result", () => {
         { attempt: 2, generation: 2, ended: "succeeded" },
       ],
     });
+    // The run's count of its stream bytes is what its chunks hold, after
+    // the superseded upload's were deleted.
+    await expect(streamBytesOf("slow-stream", id)).resolves.toStrictEqual({
+      counted: content.byteLength,
+      stored: content.byteLength,
+    });
     await expect(chunksOf("slow-stream", id)).resolves.toStrictEqual([
       { ordinal: 1, attempt: 2, chunk_index: 0, length: 256 * kib },
       {
@@ -432,6 +452,10 @@ describe("a step's stream result", () => {
         ),
       },
     });
+    await expect(streamBytesOf("two-streams", id)).resolves.toStrictEqual({
+      counted: 700 * kib,
+      stored: 700 * kib,
+    });
     await expect(chunksOf("two-streams", id)).resolves.toMatchObject([
       { ordinal: 1 },
       { ordinal: 1 },
@@ -455,6 +479,10 @@ describe("a stream the step can't keep ends the run, and the definition can't ca
       "Step returned a ReadableStream of more than the 1048576 bytes a step's stream output may hold.",
     ],
     ["a-cancel-that-never-settles", unsupported],
+    [
+      "a-detached-chunk",
+      "Step returned a ReadableStream chunk that can't be read: its buffer is detached. Return chunks the stream no longer changes.",
+    ],
     [
       "errors-midway",
       "Failed to read from step ReadableStream output. the source broke",
@@ -601,6 +629,47 @@ describe("a replayed stream whose storage fails while it is read", () => {
       "pause",
       "read-attempt-2",
     ]);
+  });
+});
+
+describe("a stream of many tiny chunks", () => {
+  it("is kept whole, chunk after chunk", async () => {
+    const id = newId();
+    const content = Uint8Array.from(
+      { length: tinyChunks },
+      (_, index) => index % 256
+    );
+    await workflow("tiny-chunks").create({ id });
+
+    await expect(ended("tiny-chunks", id)).resolves.toStrictEqual({
+      status: "complete",
+      output: {
+        sha256: await sha256(content),
+        length: tinyChunks,
+        fresh: true,
+      },
+    });
+  });
+});
+
+describe("a step error whose getters answer differently each time", () => {
+  it("is read once: the retry decision and the stored error agree", async () => {
+    const id = newId();
+    await workflow("fickle-error").create({ id });
+
+    const status = await ended("fickle-error", id);
+
+    // Not retried: the one reading said NonRetryableError, and that is
+    // what was stored and thrown.
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: "NonRetryableError",
+    });
+    const { attempts, steps } = await journalOf("fickle-error", id);
+    expect(attempts).toHaveLength(1);
+    expect(steps[0]?.error).toBe(
+      JSON.stringify({ name: "NonRetryableError", message: "changes its mind" })
+    );
   });
 });
 

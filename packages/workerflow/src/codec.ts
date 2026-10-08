@@ -1102,45 +1102,31 @@ const entriesOf = (rest: Node[]): Map<string, Node> =>
   );
 
 /**
- * Whether two codec nodes hold the same value, ignoring which parts are
- * one shared object and which equal copies, and a plain object's key
- * order. A pair met again while it is compared is taken as the same (a
- * cycle), and a pair compared once is not compared again.
+ * The pairs of nodes whose sameness `pair` rests on, or false when it
+ * can't hold whatever they are.
  */
-const sameNode = (
-  left: Node,
-  right: Node,
-  graphs: [Graph, Graph],
-  assumed: Map<Node, Set<Node>>
-): boolean => {
-  const a = resolve(left, graphs[0]);
-  const b = resolve(right, graphs[1]);
-  if (!Array.isArray(a) || !Array.isArray(b)) {
-    return a === b;
-  }
+const childPairs = (a: Node[], b: Node[]): [Node, Node][] | false => {
   const [tag, ...restA] = a;
   const [otherTag, ...restB] = b;
   if (tag !== otherTag || typeof tag !== "string") {
     return false;
   }
-  const pairsMet = assumed.get(a) ?? new Set<Node>();
-  if (pairsMet.has(b)) {
-    return true;
-  }
-  pairsMet.add(b);
-  assumed.set(a, pairsMet);
-  const same = (x: Node, y: Node): boolean => sameNode(x, y, graphs, assumed);
   switch (tag) {
     case "O": {
       const entriesA = entriesOf(restA);
       const entriesB = entriesOf(restB);
-      return (
-        entriesA.size === entriesB.size &&
-        [...entriesA].every(([key, item]) => {
-          const other = entriesB.get(key);
-          return other !== undefined && same(item, other);
-        })
-      );
+      if (entriesA.size !== entriesB.size) {
+        return false;
+      }
+      const found: [Node, Node][] = [];
+      for (const [key, item] of entriesA) {
+        const other = entriesB.get(key);
+        if (other === undefined) {
+          return false;
+        }
+        found.push([item, other]);
+      }
+      return found;
     }
     case "A":
     case "M":
@@ -1148,15 +1134,59 @@ const sameNode = (
     case "T":
     case "V":
     case "W": {
-      return (
-        restA.length === restB.length &&
-        restA.every((item, index) => same(item, restB[index] ?? null))
-      );
+      return restA.length === restB.length
+        ? restA.map((item, index): [Node, Node] => [item, restB[index] ?? null])
+        : false;
     }
     default: {
-      return JSON.stringify(restA) === JSON.stringify(restB);
+      return JSON.stringify(restA) === JSON.stringify(restB) ? [] : false;
     }
   }
+};
+
+/**
+ * Whether two codec nodes hold the same value, ignoring which parts are
+ * one shared object and which equal copies, and a plain object's key
+ * order. Walked with a queue of pairs, not recursion, so no shape of value
+ * can overflow the stack. A pair met again is taken as the same (a cycle,
+ * or a part compared already). At most `maxEncodedBytes` pairs are
+ * compared, the encoder's own budget: past it the two are not taken as
+ * the same, and a caller treats them as different.
+ */
+const sameNode = (left: Node, right: Node, graphs: [Graph, Graph]): boolean => {
+  const met = new Map<Node, Set<Node>>();
+  const queue: [Node, Node][] = [[left, right]];
+  let compared = 0;
+  // An array's iterator reads its length at every step: pairs pushed while
+  // it walks are walked too.
+  for (const [x, y] of queue) {
+    const a = resolve(x, graphs[0]);
+    const b = resolve(y, graphs[1]);
+    if (!Array.isArray(a) || !Array.isArray(b)) {
+      if (a !== b) {
+        return false;
+      }
+      continue;
+    }
+    const pairsMet = met.get(a) ?? new Set<Node>();
+    if (pairsMet.has(b)) {
+      continue;
+    }
+    pairsMet.add(b);
+    met.set(a, pairsMet);
+    compared += 1;
+    if (compared > maxEncodedBytes) {
+      return false;
+    }
+    const children = childPairs(a, b);
+    if (children === false) {
+      return false;
+    }
+    for (const pair of children) {
+      queue.push(pair);
+    }
+  }
+  return true;
 };
 
 /**
@@ -1168,10 +1198,8 @@ const sameNode = (
 export const equivalent = (left: string, right: string): boolean => {
   const a = readNode(left);
   const b = readNode(right);
-  return sameNode(
-    a,
-    b,
-    [{ objects: objectNodes(a) }, { objects: objectNodes(b) }],
-    new Map()
-  );
+  return sameNode(a, b, [
+    { objects: objectNodes(a) },
+    { objects: objectNodes(b) },
+  ]);
 };

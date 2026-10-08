@@ -62,6 +62,7 @@ import {
 import type { StepConfig, StepWork } from "./config.ts";
 import type {
   WorkflowDefinition,
+  WorkflowError,
   WorkflowDuration,
   WorkflowEvent,
   WorkflowStep,
@@ -276,12 +277,10 @@ interface AttemptScope {
  * What a step's thrown error is kept as: redacted for a sensitive step,
  * its name and code kept.
  */
-const failureText = (thrown: unknown, config: StepConfig): string => {
-  const record = errorRecord(thrown);
-  return JSON.stringify(
+const failureText = (record: WorkflowError, config: StepConfig): string =>
+  JSON.stringify(
     config.sensitive ? { ...record, message: redactedMessage } : record
   );
-};
 
 /**
  * A step's result it can't keep, as Cloudflare words it. A sensitive
@@ -1261,10 +1260,12 @@ export class Activation {
         });
       }
     }
+    // Read once: the retry decision and the stored error are the same
+    // reading, whatever the error's getters answer another time.
     const record = errorRecord(answer.error);
     return {
       ok: false,
-      error: failureText(answer.error, config),
+      error: failureText(record, config),
       ended: "failed",
       retryable: !isNonRetryable(record),
     };

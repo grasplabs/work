@@ -38,8 +38,10 @@ import {
   getterOf,
   invoke,
   isArrayBuffer,
+  isDetached,
   methodOf,
   notOfKind,
+  viewOf,
 } from "./builtins.ts";
 import type { StreamResult } from "./codec.ts";
 import { errorRecord, namedError } from "./errors.ts";
@@ -115,15 +117,17 @@ export const discardChunks = (
   ordinal: number,
   attempt?: number
 ): void => {
-  if (attempt === undefined) {
-    sql.exec("DELETE FROM stream_chunks WHERE ordinal = ?", ordinal);
-    return;
-  }
+  const where =
+    attempt === undefined
+      ? { clause: "ordinal = ?", values: [ordinal] }
+      : { clause: "ordinal = ? AND attempt = ?", values: [ordinal, attempt] };
+  // The run's count of its stream bytes goes down by what goes, in the
+  // same synchronous turn: one write, as every write of a turn is.
   sql.exec(
-    "DELETE FROM stream_chunks WHERE ordinal = ? AND attempt = ?",
-    ordinal,
-    attempt
+    `UPDATE run SET stream_bytes = stream_bytes - (SELECT COALESCE(SUM(LENGTH(bytes)), 0) FROM stream_chunks WHERE ${where.clause})`,
+    ...where.values
   );
+  sql.exec(`DELETE FROM stream_chunks WHERE ${where.clause}`, ...where.values);
 };
 
 interface ChunkSummary {
@@ -173,12 +177,13 @@ export const isStoredWhole = (
 };
 
 /** The bytes all of the run's stream chunks hold. */
+/**
+ * The bytes all of the run's stream chunks hold: the run's count, kept in
+ * the writes that add and delete chunks, not a scan of them.
+ */
 const runStreamBytes = (sql: SqlStorage): number =>
-  sql
-    .exec<{
-      length: number;
-    }>("SELECT COALESCE(SUM(LENGTH(bytes)), 0) AS length FROM stream_chunks")
-    .one().length;
+  sql.exec<{ bytes: number }>("SELECT stream_bytes AS bytes FROM run").one()
+    .bytes;
 
 const hex = (digest: ArrayBuffer): string =>
   Array.from(new Uint8Array(digest), (byte) =>
@@ -507,12 +512,24 @@ const verifyStored = async (
   }
 };
 
-/** Takes `size` bytes off the front of `pending`. */
-const take = (pending: Uint8Array[], size: number): Uint8Array => {
+/** Bytes read from a source and not yet stored, in order. */
+interface Pending {
+  chunks: Uint8Array[];
+  /** The bytes all of `chunks` hold. */
+  bytes: number;
+}
+
+/**
+ * Takes `size` bytes off the front of `pending`. The chunks it uses up are
+ * walked by index and dropped together at the end, never one shift at a
+ * time: a source of many tiny chunks costs linear time, not quadratic.
+ */
+const take = (pending: Pending, size: number): Uint8Array => {
   const out = new Uint8Array(size);
   let offset = 0;
+  let first = 0;
   while (offset < size) {
-    const [head] = pending;
+    const head = pending.chunks[first];
     if (head === undefined) {
       throw new Error("fewer bytes pending than taken");
     }
@@ -520,13 +537,15 @@ const take = (pending: Uint8Array[], size: number): Uint8Array => {
     if (head.byteLength <= wanted) {
       out.set(head, offset);
       offset += head.byteLength;
-      pending.shift();
+      first += 1;
     } else {
       out.set(head.subarray(0, wanted), offset);
-      pending[0] = head.subarray(wanted);
+      pending.chunks[first] = head.subarray(wanted);
       offset += wanted;
     }
   }
+  pending.chunks = pending.chunks.slice(first);
+  pending.bytes -= size;
   return out;
 };
 
@@ -536,13 +555,46 @@ const unsupportedChunk = (): StreamResultError =>
     "Step returned a ReadableStream with unsupported chunk type. Only ArrayBuffer and TypedArray chunks are supported."
   );
 
+/** A chunk whose buffer was transferred away, or can't be read at all. */
+const unreadableChunk = (detail: string): StreamResultError =>
+  new StreamResultError(
+    "InvalidStepReadableStreamError",
+    `Step returned a ReadableStream chunk that can't be read: ${detail}. Return chunks the stream no longer changes.`
+  );
+
+/** The buffer `value` holds its bytes in, when it is one we read. */
+const bufferOf = (value: unknown): ArrayBuffer | undefined => {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  return isArrayBuffer(value) ? value : viewOf(value)?.buffer;
+};
+
 /**
  * A chunk's bytes, copied the moment it is read: its size read through the
- * built-in getters first, so an oversized chunk is never copied.
+ * built-in getters first, so an oversized chunk is never copied. Whatever
+ * fails while a chunk is inspected or copied is the source's doing (its
+ * buffer detached, say), never the engine's: an invalid stream.
  */
 const chunkBytes = (value: unknown): Uint8Array => {
-  // A DataView is refused, as Cloudflare Workflows refuses it.
-  const size = byteLengthOf(value, { dataViews: false });
+  let size: number | undefined;
+  let bytes: Uint8Array | undefined;
+  try {
+    const buffer = bufferOf(value);
+    if (buffer !== undefined && isDetached(buffer)) {
+      throw unreadableChunk("its buffer is detached");
+    }
+    // A DataView is refused, as Cloudflare Workflows refuses it.
+    size = byteLengthOf(value, { dataViews: false });
+    if (size !== undefined && size <= maxInputChunkBytes) {
+      bytes = copyBytes(value, { dataViews: false });
+    }
+  } catch (error) {
+    if (error instanceof StreamResultError) {
+      throw error;
+    }
+    throw unreadableChunk(errorRecord(error).message);
+  }
   if (size === undefined) {
     throw unsupportedChunk();
   }
@@ -552,7 +604,6 @@ const chunkBytes = (value: unknown): Uint8Array => {
       `Step returned a ReadableStream chunk larger than the maximum allowed size of ${maxInputChunkBytes} bytes. Return smaller chunks from step.do().`
     );
   }
-  const bytes = copyBytes(value, { dataViews: false });
   if (bytes === undefined) {
     throw unsupportedChunk();
   }
@@ -567,16 +618,58 @@ interface ReadResult {
 const stoppedReading = Symbol("stopped reading");
 
 /**
+ * Each read raced against the attempt's or activation's end, with one
+ * subscription to that end for the whole upload, not one per read: a
+ * source of many chunks leaves no reaction per chunk behind.
+ */
+interface Stop {
+  race: (pendingRead: unknown) => Promise<unknown>;
+}
+
+const stopOf = (stopped: Promise<unknown>): Stop => {
+  let isStopped = false;
+  let current: ((value: typeof stoppedReading) => void) | undefined;
+  const watching = async (): Promise<void> => {
+    await stopped;
+    isStopped = true;
+    current?.(stoppedReading);
+  };
+  void watching();
+  return {
+    race: async (pendingRead) => {
+      if (isStopped) {
+        return stoppedReading;
+      }
+      const turn = Promise.withResolvers<unknown>();
+      current = turn.resolve;
+      const settling = async (): Promise<void> => {
+        try {
+          turn.resolve(await pendingRead);
+        } catch (error) {
+          turn.reject(error);
+        }
+      };
+      void settling();
+      try {
+        return await turn.promise;
+      } finally {
+        current = undefined;
+      }
+    },
+  };
+};
+
+/**
  * The next chunk, or stoppedReading once `stopped` settles first: a
  * superseded attempt stops at once, not at its source's next chunk.
  */
 const readChunk = async (
   reader: object,
-  stopped: Promise<typeof stoppedReading>
+  stop: Stop
 ): Promise<ReadResult | typeof stoppedReading> => {
   let result: unknown;
   try {
-    result = await Promise.race([invoke(read, reader), stopped]);
+    result = await stop.race(invoke(read, reader));
   } catch (error) {
     throw new StreamResultError(
       "InvalidStepReadableStreamError",
@@ -672,6 +765,10 @@ const store = async (
       bytes,
       digest
     );
+    storage.sql.exec(
+      "UPDATE run SET stream_bytes = stream_bytes + ?",
+      bytes.byteLength
+    );
     return true;
   });
   if (stored) {
@@ -706,15 +803,11 @@ const upload = async (
   target: StreamTarget,
   state: Upload
 ): Promise<boolean> => {
-  const stopped = (async (): Promise<typeof stoppedReading> => {
-    await target.stopped;
-    return stoppedReading;
-  })();
-  const pending: Uint8Array[] = [];
-  let pendingBytes = 0;
+  const stop = stopOf(target.stopped);
+  const pending: Pending = { chunks: [], bytes: 0 };
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- a stream is read in order
-    const next = await readChunk(reader, stopped);
+    const next = await readChunk(reader, stop);
     if (next === stoppedReading) {
       return false;
     }
@@ -723,25 +816,24 @@ const upload = async (
     }
     const bytes = chunkBytes(next.value);
     // Counted on the bytes themselves, before they are kept.
-    if (state.length + pendingBytes + bytes.byteLength > target.maxBytes) {
+    if (state.length + pending.bytes + bytes.byteLength > target.maxBytes) {
       throw tooLarge(
         `Step returned a ReadableStream of more than the ${target.maxBytes} bytes a step's stream output may hold.`
       );
     }
     if (bytes.byteLength > 0) {
-      pending.push(bytes);
-      pendingBytes += bytes.byteLength;
+      pending.chunks.push(bytes);
+      pending.bytes += bytes.byteLength;
     }
-    while (pendingBytes >= storedChunkBytes) {
-      pendingBytes -= storedChunkBytes;
+    while (pending.bytes >= storedChunkBytes) {
       // oxlint-disable-next-line no-await-in-loop -- chunks are stored in order
       if (!(await store(target, state, take(pending, storedChunkBytes)))) {
         return false;
       }
     }
   }
-  return await (pendingBytes === 0 ||
-    store(target, state, take(pending, pendingBytes)));
+  return await (pending.bytes === 0 ||
+    store(target, state, take(pending, pending.bytes)));
 };
 
 /**
@@ -783,7 +875,9 @@ export const persistStream = async (
       await state.hash.abandon();
       try {
         // A failed or superseded upload leaves nothing behind.
-        discardChunks(storage.sql, ordinal, attempt);
+        storage.transactionSync(() => {
+          discardChunks(storage.sql, ordinal, attempt);
+        });
       } catch {
         // Storage that can't delete now: the step's next claim deletes
         // them. The error that got here is the one to report.

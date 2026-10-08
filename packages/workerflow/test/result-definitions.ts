@@ -10,6 +10,9 @@ import { checkpoint, effect, witness } from "./outside.ts";
 /** The most a step's stream may hold in these tests (the host's limit). */
 export const testMaxStreamBytes = 1024 * 1024;
 
+/** How many one-byte chunks "tiny-chunks" streams. */
+export const tinyChunks = 262_144;
+
 /** How long the stalled upload's attempt has. */
 export const stuckStreamTimeoutMs = 500;
 
@@ -78,6 +81,15 @@ const invalidStreams: Record<string, () => unknown> = {
         controller.enqueue("text");
       },
       cancel: async () => await Promise.withResolvers<never>().promise,
+    }),
+  // A chunk whose buffer is transferred away after it was handed over.
+  "a-detached-chunk": () =>
+    new ReadableStream({
+      start: (controller) => {
+        const buffer = new ArrayBuffer(8);
+        controller.enqueue(buffer);
+        buffer.transfer();
+      },
     }),
   "too-large": () => chunkStream([patterned(testMaxStreamBytes), patterned(1)]),
   "errors-midway": () =>
@@ -293,6 +305,41 @@ export const resultDefinitions: Record<string, WorkflowDefinition> = {
           throw error;
         }
         return { name: errorName(error), message: errorMessage(error) };
+      }
+    },
+  },
+  // A stream of 262,144 one-byte chunks, read back.
+  "tiny-chunks": {
+    run: async (_event, step) => {
+      const body = await step.do("export", () =>
+        chunkStream(
+          Array.from({ length: tinyChunks }, (_, index) =>
+            Uint8Array.of(index % 256)
+          )
+        )
+      );
+      return await digestOf(body);
+    },
+  },
+  // A step whose error says it can't be retried the first time its name is
+  // read, and that it can the next.
+  "fickle-error": {
+    run: async (_event, step) => {
+      try {
+        await step.do("flaky", { retries: { limit: 2, delay: 0 } }, () => {
+          let reads = 0;
+          const error = new Error("changes its mind");
+          Object.defineProperty(error, "name", {
+            get: () => {
+              reads += 1;
+              return reads === 1 ? "NonRetryableError" : "Error";
+            },
+          });
+          throw error;
+        });
+        return "unreachable";
+      } catch (error) {
+        return errorName(error);
       }
     },
   },
