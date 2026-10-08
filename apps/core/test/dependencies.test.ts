@@ -44,6 +44,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { testBinding } from "./test-env.ts";
 
 // npm packages for an App need a person's approval, from its threat model
 // (src/dependencies/requests.ts, approvers.ts). Each case below is a way
@@ -771,6 +772,44 @@ describe("dependency approval", () => {
           targets: "browser",
         },
       ],
+    });
+  });
+
+  it("shows an approver only graphs Grasp resolved, once the migration drops what the removed propose API left waiting", async () => {
+    const admin = await personApi("admin");
+    const approver = await approverBy(admin);
+    const resolvedBy = await builderWithApp();
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    const { request: resolved } =
+      await resolvedBy.builder.api.dependencies.resolve(
+        intentFor(resolvedBy.app, { [dates]: "^1.0.0" })
+      );
+    // As the propose API left it: a graph as its proposer stated it, which
+    // no resolve stored a lock for.
+    const handedIn = await builderWithApp();
+    const stated = await proposeAs(handedIn.builder, proposalFor(handedIn.app));
+    const ours = [resolved.id, stated.id];
+    const waitedBefore = await waitingFor(approver.api);
+    const before = waitedBefore.filter((id) => ours.includes(id));
+    const migration = z
+      .array(z.object({ name: z.string(), queries: z.array(z.string()) }))
+      .parse(testBinding("CORE_MIGRATIONS"))
+      .filter(({ name }) => name.includes("dependency_admission_refusals"));
+    // What it does to requests, as a deploy runs it.
+    for (const { queries } of migration) {
+      for (const query of queries) {
+        if (query.includes("DELETE FROM `dependency_requests`")) {
+          // oxlint-disable-next-line no-await-in-loop -- in order, as D1 applies them
+          await env.DB.prepare(query).run();
+        }
+      }
+    }
+    const waitedAfter = await waitingFor(approver.api);
+    const after = waitedAfter.filter((id) => ours.includes(id));
+    expect({ before: before.toSorted(), after }).toStrictEqual({
+      before: ours.toSorted(),
+      after: [resolved.id],
     });
   });
 
