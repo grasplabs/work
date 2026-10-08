@@ -197,6 +197,20 @@ export const kickoff = sqliteTable(
 );
 
 /**
+ * Documents the company's admin shared (onboarding/documents.ts), by their
+ * upload in Knowledge: Stephen's reading of each (JSON, `DocumentReading`),
+ * and the admin's answer to its question. The file itself is Knowledge's.
+ */
+export const documents = sqliteTable("documents", {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  at: text().notNull(),
+  by: text().notNull(),
+  reading: text().notNull(),
+  answer: text(),
+});
+
+/**
  * The AI the onboarding used, by day, purpose and model: calls, tokens
  * read new and from a cache, tokens written, and seconds of voice.
  */

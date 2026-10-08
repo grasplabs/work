@@ -479,6 +479,10 @@ msgstr "Añadido: actúa en nombre de quien use el motor, con todo lo que el mot
 msgid "Admin"
 msgstr "Administrador"
 
+#: src/knowledge/collection-markers.tsx
+msgid "Admins"
+msgstr "Administradores"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Los administradores pueden cambiar el rol de cualquiera, cerrar sus sesiones y quitarlo, incluidos otros administradores."

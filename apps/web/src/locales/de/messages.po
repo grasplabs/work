@@ -479,6 +479,10 @@ msgstr "Hinzugefügt: Er handelt für jeden, der die Engine nutzt, mit allem, wa
 msgid "Admin"
 msgstr "Admin"
 
+#: src/knowledge/collection-markers.tsx
+msgid "Admins"
+msgstr "Admins"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Admins können die Rolle jeder Person ändern, ihre Sitzungen beenden und sie entfernen, andere Admins eingeschlossen."
