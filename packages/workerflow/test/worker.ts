@@ -13,6 +13,7 @@ import {
   busyFor,
   checkpoint,
   effect,
+  handled,
   measuredClock,
   witness,
 } from "./outside.ts";
@@ -559,6 +560,25 @@ export const definitions: Record<string, WorkflowDefinition> = {
       return "done";
     },
   },
+  // A step whose callback calls another step, then a last step.
+  nesting: {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      const outer = await step.do(
+        "outer",
+        async () =>
+          await step.do(
+            "inner",
+            async (context) => await effect(instanceId, "inner", context)
+          )
+      );
+      const last = await step.do(
+        "last",
+        async (context) => await effect(instanceId, "last", context)
+      );
+      return { outer, last };
+    },
+  },
   // A step, a sleep of the duration in the params, another step.
   napper: {
     run: async (event, step) => {
@@ -774,6 +794,14 @@ export class TestRuns extends WorkflowRun {
   // oxlint-disable-next-line class-methods-use-this -- the test's clock, shared by every run
   protected override clock(): number {
     return measuredClock();
+  }
+
+  override async alarm(): Promise<void> {
+    try {
+      await super.alarm();
+    } finally {
+      handled.push(this.ctx.id.toString());
+    }
   }
 }
 
