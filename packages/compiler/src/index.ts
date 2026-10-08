@@ -15,10 +15,12 @@ import { version } from "#version";
 
 import { compilerAssets, kitModule } from "./kit.ts";
 import type { KitModules } from "./kit.ts";
+import type PackageBuilder from "./packages/worker.ts";
 import type ScreenCompiler from "./worker.ts";
 
 export type { Diagnostic } from "./diagnostic.ts";
 export type { KitModules } from "./kit.ts";
+export type { BuildRequest, InspectRequest } from "./packages/worker.ts";
 export type { ScreenBuild, ServerBuild, WorkflowBuild } from "./worker.ts";
 export {
   buildFiles,
@@ -29,6 +31,7 @@ export {
   workflowPaths,
 } from "./inputs.ts";
 export { appModuleName, kitModuleName, screenRuntime } from "./kit.ts";
+export { platformPeers, platformScope } from "./packages/platform.ts";
 /** Part of every build's cache key: a new compiler or kit builds again. */
 export { version as compilerVersion } from "#version";
 
@@ -51,6 +54,23 @@ const readCompilerFile = async (
     );
   }
   return await response.text();
+};
+
+/** One of this release's compiler files as bytes, as `readCompilerFile` reads text. */
+const readCompilerBytes = async (
+  assets: Fetcher,
+  file: string,
+  type: string
+): Promise<ArrayBuffer> => {
+  const url = `https://assets${compilerAssets.directory(version)}/${file}`;
+  const response = await assets.fetch(url);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!(response.ok && contentType.includes(type))) {
+    throw new Error(
+      `The screen compiler's ${file} is not among the static assets: build the compiler into them (packages/compiler/build.ts).`
+    );
+  }
+  return await response.arrayBuffer();
 };
 
 const isKitModules = (value: unknown): value is KitModules =>
@@ -153,3 +173,43 @@ export const startScreenCompiler = (
       };
     })
     .getEntrypoint<ScreenCompiler>();
+
+/**
+ * How the package builder's isolate runs: no bindings, no importable env,
+ * no network (`globalOutbound: null` and no subrequests), no Node.js
+ * compatibility, and at most 30 s of CPU per call.
+ */
+export const packageBuilderSettings = {
+  ...isolateBase,
+  env: {},
+  globalOutbound: null,
+  limits: { cpuMs: 30_000, subRequests: 0 },
+} satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
+
+/**
+ * The package builder (src/packages/worker.ts) in a fresh isolate of its
+ * own, with its code read from core's static assets: one per resolve or
+ * build, so nothing one App's packages leave in memory is there for the
+ * next. It reads and bundles the bytes it is handed and runs none of
+ * them.
+ */
+export const startPackageBuilder = async (
+  loader: WorkerLoader,
+  assets: Fetcher
+): Promise<Service<PackageBuilder>> => {
+  const [source, wasm] = await Promise.all([
+    readCompilerFile(assets, compilerAssets.packageBuilder, "javascript"),
+    readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm"),
+  ]);
+  return loader
+    .load({
+      ...packageBuilderSettings,
+      mainModule: "package-builder.js",
+      modules: {
+        "package-builder.js": source,
+        // Compiled as the isolate loads; the isolate itself can't.
+        "esbuild.wasm": { wasm },
+      },
+    })
+    .getEntrypoint<PackageBuilder>();
+};

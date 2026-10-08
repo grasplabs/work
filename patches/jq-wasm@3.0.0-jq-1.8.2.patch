@@ -1,0 +1,28 @@
+diff --git a/dist/edge.mjs b/dist/edge.mjs
+index 75a65c0de2c0cce5de04fdf3c3565d76cafa292e..9412cef35f9788b56b9521468d8c8f107a545b63 100644
+--- a/dist/edge.mjs
++++ b/dist/edge.mjs
+@@ -1,15 +1,17 @@
+ import {
+   JqError,
+   makeConvenience,
+-  makeLoadJq,
+-  moduleHook
++  makeLoadJq
+ } from "./chunk-OUKQZV2W.mjs";
+ 
+ // src/edge.ts
+-import jqModule from "./build/jq.wasm";
+-var defaultBuilder = (reject) => ({
+-  instantiateWasm: moduleHook(jqModule, reject)
+-});
++// Patched by Grasp OS: no default jq.wasm import, so a bundle carries only
++// the metered module its caller passes through `instantiateWasm`.
++var defaultBuilder = () => {
++  throw new TypeError(
++    "jq-wasm (edge): pass instantiateWasm or wasmModule; the default jq.wasm is not bundled."
++  );
++};
+ function fromURL() {
+   throw new TypeError(
+     "jq-wasm (edge): wasmURL is not supported on Workers/edge; pass wasmModule (a pre-compiled WebAssembly.Module)."

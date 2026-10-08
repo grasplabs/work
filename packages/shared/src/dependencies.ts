@@ -6,6 +6,12 @@ import { defineErrorFamily } from "./errors.ts";
 import { appIdSchema, identifierMaxLength } from "./ids.ts";
 import type { AppId } from "./ids.ts";
 import { canonicalJson } from "./json.ts";
+import type {
+  DependencyIntent,
+  GraspLock,
+  PackageBuild,
+  PackageBuildRequest,
+} from "./packages.ts";
 
 // npm packages an App wants to use, and a person's approval of them. An
 // agent or a builder proposes one exact graph: every package it would
@@ -51,7 +57,7 @@ const maxPeers = 32;
 const maxPlatformPeers = 16;
 
 /** An npm package name, scoped or not, as the registry allows them. */
-const packageNameSchema = z
+export const packageNameSchema = z
   .string()
   .max(214)
   .regex(
@@ -60,7 +66,7 @@ const packageNameSchema = z
   );
 
 /** One exact version: never a range, a tag or a URL. */
-const exactVersionSchema = z
+export const exactVersionSchema = z
   .string()
   .max(128)
   .regex(
@@ -68,8 +74,16 @@ const exactVersionSchema = z
     "an exact version"
   );
 
+/**
+ * The registry's SHA-512 of a tarball, as npm writes it (Subresource
+ * Integrity): which bytes, not whether they are safe.
+ */
+export const integritySchema = z
+  .string()
+  .regex(/^sha512-[A-Za-z0-9+/]{86}==$/u, "a sha512 integrity hash");
+
 /** One package of a graph, by name and exact version. */
-const packageRefSchema = z.strictObject({
+export const packageRefSchema = z.strictObject({
   name: packageNameSchema,
   version: exactVersionSchema,
 });
@@ -96,9 +110,7 @@ const packageSchema = z.strictObject({
   version: exactVersionSchema,
   origin: z.literal(npmRegistryOrigin),
   /** The registry's SHA-512 of its tarball: which bytes, not whether they are safe. */
-  integrity: z
-    .string()
-    .regex(/^sha512-[A-Za-z0-9+/]{86}==$/u, "a sha512 integrity hash"),
+  integrity: integritySchema,
   /** The licence it reports, as it reports it; null when it reports none. */
   license: z.string().min(1).max(128).nullable(),
   /** The packages it depends on, each one of the graph. */
@@ -120,6 +132,26 @@ const repeated = (refs: readonly DependencyPackageRef[]): string[] => {
   }
   return [...twice];
 };
+
+/**
+ * The packages of the graph a package leads to: its dependencies and the
+ * peers a package of the graph meets. One on a package the platform
+ * provides, at the platform's own version, is an edge the review shows
+ * but never a copy in the graph.
+ */
+const graphEdges = (
+  node: DependencyPackage | undefined,
+  platformPeers: Readonly<Record<string, string>>
+): DependencyPackageRef[] => [
+  ...(node?.dependencies ?? []).filter(
+    (ref) => platformPeers[ref.name] !== ref.version
+  ),
+  ...(node?.peers ?? []).flatMap(({ name, resolved }) =>
+    resolved !== null && platformPeers[name] !== resolved
+      ? [{ name, version: resolved }]
+      : []
+  ),
+];
 
 /**
  * One resolved graph: the packages the source asks for (`direct`), every
@@ -181,14 +213,8 @@ export const dependencyGraphSchema = z
     }
     for (let key = queue.pop(); key !== undefined; key = queue.pop()) {
       const node = byKey.get(key);
-      for (const ref of node?.dependencies ?? []) {
+      for (const ref of graphEdges(node, platformPeers)) {
         follow("packages", ref);
-      }
-      for (const { name, resolved } of node?.peers ?? []) {
-        // The platform's own version meets it, or a package of the graph.
-        if (resolved !== null && platformPeers[name] !== resolved) {
-          follow("packages", { name, version: resolved });
-        }
       }
     }
     for (const key of byKey.keys()) {
@@ -476,6 +502,21 @@ export interface DependenciesApi {
    * the same request; another one for the App takes a waiting one's place.
    */
   propose: (proposal: DependencyProposal) => Promise<DependencyRequest>;
+  /**
+   * Resolves what an App's package.json asks for into an exact graph
+   * from the npm registry, checks every package's bytes without running
+   * them, and proposes it, as `propose` does: for one of its builders.
+   */
+  resolve: (intent: DependencyIntent) => Promise<{
+    request: DependencyRequest;
+    lock: GraspLock;
+  }>;
+  /**
+   * Builds one target of an App's approved graph into an artifact (or
+   * returns the one built before), for one of its builders: only what
+   * was approved, under the policy generation the caller read.
+   */
+  build: (request: PackageBuildRequest) => Promise<PackageBuild>;
   /** How an App's dependencies stand, for its builders. */
   status: (app: string) => Promise<DependencyStatus>;
   /**

@@ -786,6 +786,10 @@ msgid "Builder"
 msgstr "Bouwer"
 
 #: src/activity/audit-words.ts
+msgid "Built approved packages"
+msgstr "Goedgekeurde pakketten gebouwd"
+
+#: src/activity/audit-words.ts
 msgid "Called a model"
 msgstr "Een model aangeroepen"
 

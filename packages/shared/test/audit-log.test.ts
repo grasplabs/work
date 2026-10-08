@@ -118,10 +118,18 @@ describe("audit event types", () => {
         "dependency.requested",
         "dependency.admission_refused",
         "dependency.superseded",
+        "dependency.built",
         "dependency.approved",
         "dependency.denied",
       ].map((action) => typeOf(action))
-    ).toStrictEqual(["action", "action", "action", "decision", "decision"]);
+    ).toStrictEqual([
+      "action",
+      "action",
+      "action",
+      "action",
+      "decision",
+      "decision",
+    ]);
   });
 
   it("files a person deciding on a held action as a decision, and dropping one as an action", () => {
