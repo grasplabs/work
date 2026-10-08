@@ -274,20 +274,42 @@ const timeoutAfter = async (
 };
 
 /**
- * What `call` did, or its timeout after `ms`, whichever comes first. A
- * call that throws before it returns fails as one that rejects, and one
- * that answers after its timeout answers no one: its answer is a value,
- * so even a late rejection is never an unhandled one.
+ * What `call` did, or its timeout after `ms`, whichever comes first. The
+ * deadline is taken and the timer started before any of the author's
+ * code runs. A timer can't interrupt synchronous code, so an answer that
+ * comes back past the deadline (by `clock`, the clock the deadline was
+ * taken on) timed out, though it beat the timer. A call that throws
+ * before it returns fails as one that rejects, and one that answers after
+ * its timeout answers no one: its answer is a value, so even a late
+ * rejection is never an unhandled one.
+ *
+ * On workerd the clock only moves with I/O, so code that never awaits any
+ * looks instant to it; the host's CPU limit is what ends such code there.
  */
 const answerWithin = async (
   call: () => Promise<unknown>,
-  ms: number
+  ms: number,
+  clock: () => number
 ): Promise<Answer> => {
+  const deadline = clock() + ms;
   const timer = new AbortController();
+  const timedOut = timeoutAfter(ms, timer.signal);
   try {
-    return await Promise.race([answerOf(call), timeoutAfter(ms, timer.signal)]);
+    const answer = await Promise.race([answerOf(call), timedOut]);
+    return clock() >= deadline ? { timedOut: true } : answer;
   } finally {
     timer.abort();
+  }
+};
+
+/**
+ * Refuses to journal a time that isn't one: a retry's time is computed
+ * from config, and the alarm set to it must be a real time. Throwing in the
+ * journal's write faults the activation, and nothing is written.
+ */
+const assertTime = (time: number | null): void => {
+  if (time !== null && !Number.isFinite(time)) {
+    throw new RangeError(`A retry's time came out as ${String(time)}`);
   }
 };
 
@@ -380,6 +402,8 @@ export class Activation {
   readonly #run: RunRow;
   readonly #generation: number;
   readonly #leaseMs: number;
+  /** The clock an attempt's or a delay function's running time is measured on. */
+  readonly #clock: () => number;
   /** Settled, superseded, suspended or faulted: every later call is refused. */
   #over = false;
   readonly #stop: (stop: Stop) => void;
@@ -412,12 +436,14 @@ export class Activation {
     storage: DurableObjectStorage,
     run: RunRow,
     generation: number,
-    leaseMs: number
+    leaseMs: number,
+    clock: () => number
   ) {
     this.#storage = storage;
     this.#run = run;
     this.#generation = generation;
     this.#leaseMs = leaseMs;
+    this.#clock = clock;
     const { promise, resolve } = Promise.withResolvers<Stop>();
     this.stopped = promise;
     this.#stop = resolve;
@@ -647,6 +673,7 @@ export class Activation {
       retryAt = now + retryDelayMs(config.backoff, config.delay, claim.attempt);
       landing = "retry";
     }
+    assertTime(retryAt);
     sql.exec(
       "UPDATE steps SET state = ?, value = NULL, error = ? WHERE ordinal = ?",
       retryAt === null ? "failed" : "retrying",
@@ -907,7 +934,8 @@ export class Activation {
     try {
       answer = await answerWithin(
         async () => await attempts.run(scope, async () => await work(context)),
-        claim.deadline - Date.now()
+        claim.deadline - Date.now(),
+        this.#clock
       );
     } finally {
       scope.live = false;
@@ -976,7 +1004,8 @@ export class Activation {
           { live: false },
           async () => await delay({ ctx, error: rebuild(asking.error) })
         ),
-      delayFunctionTimeoutMs
+      delayFunctionTimeoutMs,
+      this.#clock
     );
     let said: Delay;
     if ("timedOut" in answer) {
@@ -1034,9 +1063,11 @@ export class Activation {
         return null;
       }
       if ("ms" in said) {
+        const retryAt = ended.ended_at + said.ms;
+        assertTime(retryAt);
         sql.exec(
           "UPDATE attempts SET retry_at = ? WHERE ordinal = ? AND attempt = ?",
-          ended.ended_at + said.ms,
+          retryAt,
           claim.ordinal,
           claim.attempt
         );

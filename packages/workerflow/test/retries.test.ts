@@ -340,6 +340,29 @@ describe("a step's delay function", () => {
   );
 });
 
+describe("a callback that runs past its timeout without awaiting", () => {
+  it("times out, though it answered before any timer could fire", async () => {
+    const id = newId();
+    await workflow("busy").create({ id });
+
+    const status = await ended("busy", id);
+
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: {
+        caught: {
+          name: "WorkflowTimeoutError",
+          message: "Execution timed out after 1ms",
+        },
+      },
+    });
+    await expect(journalOf("busy", id)).resolves.toMatchObject({
+      steps: [{ name: "busy", state: "failed", value: null }],
+      attempts: [{ attempt: 1, ended: "timed_out" }],
+    });
+  });
+});
+
 describe("a callback whose attempt has ended", () => {
   it("can't call the step API: nothing it calls is journaled or counted, or answered", async () => {
     const id = newId();

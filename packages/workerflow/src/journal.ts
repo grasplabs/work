@@ -18,8 +18,22 @@
 // Values and errors are kept as codec text (codec.ts), never as live
 // objects.
 
-/** The journal's own layout; a change to it is a new version. */
+/**
+ * The journal's own layout; a change to it is a new version. No journal
+ * predates version 2 (nothing earlier was released), so a run of any other
+ * version is refused when it is read; a later layout that changes it
+ * brings its own upgrade.
+ */
 export const journalSchemaVersion = 2;
+
+/**
+ * A journal of a layout this engine doesn't read. It is refused as it is
+ * read, before any of its other columns are: the run object answers with
+ * this, and its alarm ends without an activation (run.ts).
+ */
+export class JournalSchemaError extends Error {
+  override readonly name = "JournalSchemaError";
+}
 
 /**
  * The largest event payload a run accepts, as encoded: the most the codec
@@ -275,12 +289,27 @@ export const hasJournal = (sql: SqlStorage): boolean =>
     .exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run'")
     .toArray().length > 0;
 
-export const readRun = (sql: SqlStorage): RunRow | undefined =>
-  sql
+export const readRun = (sql: SqlStorage): RunRow | undefined => {
+  // The version first, on its own: another layout's columns may not be
+  // the ones read below.
+  const [stored] = sql
+    .exec<{ schema: number | string | null }>("SELECT schema FROM run")
+    .toArray();
+  if (stored === undefined) {
+    return undefined;
+  }
+  if (stored.schema !== journalSchemaVersion) {
+    // No journal predates this version; see journalSchemaVersion.
+    throw new JournalSchemaError(
+      `This run's journal has schema ${String(stored.schema)}, where this engine reads only schema ${journalSchemaVersion}`
+    );
+  }
+  return sql
     .exec<RunRow>(
       "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, lease_until, wake_at, event_count, event_bytes, output, error, ended_at FROM run"
     )
     .toArray()[0];
+};
 
 const stepColumns =
   "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, duration_ms, config";

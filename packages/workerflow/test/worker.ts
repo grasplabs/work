@@ -8,7 +8,13 @@ import type {
 } from "../src/contracts.ts";
 import { NonRetryableError, namedError } from "../src/errors.ts";
 import { WorkflowRun } from "../src/run.ts";
-import { checkpoint, effect, witness } from "./outside.ts";
+import {
+  busyFor,
+  checkpoint,
+  effect,
+  measuredClock,
+  witness,
+} from "./outside.ts";
 
 const errorOf = (error: unknown): { name: string; message: string } =>
   error instanceof Error
@@ -390,6 +396,24 @@ export const definitions: Record<string, WorkflowDefinition> = {
       return { caught, nested };
     },
   },
+  // A step whose callback runs past its 1 ms timeout without awaiting
+  // anything, so no timer can fire before it answers.
+  busy: {
+    run: async (_event, step) => {
+      try {
+        return await step.do(
+          "busy",
+          { retries: { limit: 0, delay: 0 }, timeout: 1 },
+          () => {
+            busyFor(5);
+            return "answered";
+          }
+        );
+      } catch (error) {
+        return { caught: errorOf(error) };
+      }
+    },
+  },
   // Two steps at once: one fails its first attempt and retries a second
   // later, while the other is out at its effect.
   "retry-beside": {
@@ -632,6 +656,11 @@ export class TestRuns extends WorkflowRun {
     definition,
   }: DefinitionIdentity): WorkflowDefinition | undefined {
     return definitions[definition];
+  }
+
+  // oxlint-disable-next-line class-methods-use-this -- the test's clock, shared by every run
+  protected override clock(): number {
+    return measuredClock();
   }
 }
 

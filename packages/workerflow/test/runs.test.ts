@@ -5,6 +5,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { SerializationError } from "../src/codec.ts";
 import { maxErrorMessageBytes } from "../src/errors.ts";
+import { JournalSchemaError } from "../src/journal.ts";
+import { WorkflowRun } from "../src/run.ts";
 import {
   alarmOf,
   ended,
@@ -398,4 +400,50 @@ describe("a thrown value the journal can't keep as it is", () => {
       await expect(alarmOf(definition, id)).resolves.toBeNull();
     }
   );
+});
+
+describe("a journal of another schema", () => {
+  it("is refused clearly and for good: its alarm runs nothing and leaves no other", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await until("the run to sleep", async () => {
+      const journal = await journalOf("napper", id);
+      return journal.run.status === "waiting" ? journal : undefined;
+    });
+    // As a version-1 journal would be: its version, and no step config.
+    const exec = async (query: string): Promise<unknown[]> =>
+      await runInDurableObject(runObject("napper", id), (_, state) =>
+        state.storage.sql.exec(query).toArray()
+      );
+    await exec("UPDATE run SET schema = 1");
+    await exec("ALTER TABLE steps DROP COLUMN config");
+    const before = await exec("SELECT * FROM activations");
+
+    // In the object: nothing crosses RPC to be logged.
+    const refused = await runInDurableObject(
+      runObject("napper", id),
+      async (run) => {
+        if (!(run instanceof WorkflowRun) || run.alarm === undefined) {
+          throw new TypeError("the object isn't a run object");
+        }
+        await run.alarm();
+        let thrown: unknown = "nothing thrown";
+        try {
+          run.status();
+        } catch (error) {
+          thrown = error;
+        }
+        return thrown;
+      }
+    );
+
+    expect(refused).toBeInstanceOf(JournalSchemaError);
+    expect(String(refused)).toMatch(
+      /schema 1, where this engine reads only schema 2/u
+    );
+    await expect(exec("SELECT * FROM activations")).resolves.toStrictEqual(
+      before
+    );
+    await expect(alarmOf("napper", id)).resolves.toBeNull();
+  });
 });

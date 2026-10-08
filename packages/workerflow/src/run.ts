@@ -63,6 +63,7 @@ import { errorRecord, namedError, parseError } from "./errors.ts";
 import {
   createJournal,
   hasJournal,
+  JournalSchemaError,
   journalSchemaVersion,
   readJournal,
   maxEventPayloadBytes,
@@ -166,6 +167,16 @@ const hasEnded = (run: RunRow): boolean =>
 export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   /** How long an activation may go quiet before the alarm recovers the run. */
   protected readonly leaseMs: number = defaultLeaseMs;
+
+  /**
+   * The clock an attempt's running time, and a delay function's, is
+   * measured on: Date.now(). A test stands in for it to measure code that
+   * runs without awaiting anything.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- the seam a subclass overrides
+  protected clock(): number {
+    return Date.now();
+  }
 
   /**
    * The definition a run executes, built afresh for every activation:
@@ -282,7 +293,18 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
 
   /** One activation: replays the definition under a new generation. */
   override async alarm(): Promise<void> {
-    const run = this.#run();
+    let run: RunRow | undefined;
+    try {
+      run = this.#run();
+    } catch (error) {
+      if (!(error instanceof JournalSchemaError)) {
+        throw error;
+      }
+      // A journal this engine doesn't read: nothing here can run it, and
+      // retrying would only refuse it again. No alarm is left to do so.
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
     if (run === undefined || hasEnded(run)) {
       // A duplicate or late alarm: what it would do is journaled already.
       return;
@@ -305,7 +327,13 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     // The watchdog, in the same write as the new generation.
     await storage.setAlarm(now + this.leaseMs);
 
-    const activation = new Activation(storage, run, generation, this.leaseMs);
+    const activation = new Activation(
+      storage,
+      run,
+      generation,
+      this.leaseMs,
+      () => this.clock()
+    );
     const resolved = this.#resolve(run);
     if (!("run" in resolved)) {
       await activation.settle(resolved);

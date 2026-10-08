@@ -264,18 +264,28 @@ export const readCall = (rest: unknown[]): StepCall => {
  * How long after attempt `attempt` failed the next one comes, from the
  * delay `base` (the config's, or what its function said): Cloudflare's
  * backoff. No retry waits longer than a sleep can: a schedule past that
- * (an exponential one, many attempts in) waits `maxWaitMs`.
+ * (an exponential one, many attempts in) waits `maxWaitMs`. Never NaN or
+ * Infinity, whatever the attempt: a delay of 0 stays 0, and a multiplier
+ * that would carry the delay past the cap saturates before it multiplies.
  */
 export const retryDelayMs = (
   backoff: WorkflowBackoff,
   base: number,
   attempt: number
 ): number => {
-  let delay = base;
-  if (backoff === "exponential") {
-    delay = base * 2 ** (attempt - 1);
-  } else if (backoff === "linear") {
-    delay = base * attempt;
+  if (base === 0) {
+    return 0;
   }
-  return Math.min(delay, maxWaitMs);
+  let multiplier = 1;
+  if (backoff === "exponential") {
+    multiplier = 2 ** (attempt - 1);
+  } else if (backoff === "linear") {
+    multiplier = attempt;
+  }
+  // `base` is a whole, finite number of ms above 0 (parseDuration), so
+  // only the multiplier can run away; 2 ** 1024 is Infinity.
+  if (!(multiplier < maxWaitMs / base)) {
+    return maxWaitMs;
+  }
+  return Math.min(base * multiplier, maxWaitMs);
 };
