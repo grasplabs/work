@@ -93,6 +93,7 @@ import {
   readStep,
 } from "./journal.ts";
 import type { Journal, RunRow } from "./journal.ts";
+import { warnRecovered } from "./log.ts";
 import {
   defaultMaxRunStreamBytes,
   defaultMaxStreamBytes,
@@ -401,11 +402,13 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
 
   /**
    * Leaves the run to a watchdog a lease from now, after a storage
-   * failure before any of the definition ran. When even that alarm can't
-   * be set, `error` goes to the host: with no alarm of the run's own, the
-   * host's retry of this one is the run's only way back.
+   * failure before any of the definition ran (logged as `event`): the
+   * watchdog's activation tries again. When even that alarm can't be set,
+   * `error` goes to the host: with no alarm of the run's own, the host's
+   * retry of this one is the run's only way back.
    */
-  async #leaveToWatchdog(error: unknown): Promise<void> {
+  async #leaveToWatchdog(event: string, error: unknown): Promise<void> {
+    warnRecovered(event, error);
     try {
       await this.ctx.storage.setAlarm(Date.now() + this.leaseMs);
     } catch {
@@ -420,16 +423,19 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       run = this.#run();
     } catch (error) {
       if (!(error instanceof JournalSchemaError)) {
-        // Storage failed as the run was read: nothing was written.
-        await this.#leaveToWatchdog(error);
+        // Storage failed as the run was read: nothing was written, and
+        // the watchdog's activation reads it again.
+        await this.#leaveToWatchdog("workflow_run_read_failed", error);
         return;
       }
       // A journal this engine doesn't read: nothing here can run it, and
       // retrying would only refuse it again. No alarm is left to do so.
       try {
         await this.ctx.storage.deleteAlarm();
-      } catch {
-        // An alarm left behind is refused the same way when it comes.
+      } catch (deleteError) {
+        // An alarm left behind is refused the same way when it comes, and
+        // tries to remove itself again.
+        warnRecovered("workflow_alarm_delete_failed", deleteError);
       }
       return;
     }
@@ -454,8 +460,9 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         );
       });
     } catch (error) {
-      // No generation was taken, and no activation journaled.
-      await this.#leaveToWatchdog(error);
+      // No generation was taken, and no activation journaled: the
+      // watchdog's activation takes one.
+      await this.#leaveToWatchdog("workflow_generation_failed", error);
       return;
     }
     try {

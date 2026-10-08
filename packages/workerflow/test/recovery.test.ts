@@ -14,6 +14,7 @@ import {
   journalOf,
   newId,
   runObject,
+  suspendedOn,
   until,
   workflow,
 } from "./helpers.ts";
@@ -368,6 +369,40 @@ describe("storage that fails around an activation", () => {
     });
     expect(watchdog).toBe(faulted.run.lease_until);
     expect(status).toStrictEqual({ status: "complete", output: 3 });
+  });
+
+  it("leaves a halted run whose end can't be written to the watchdog, the activation journaled as faulted, and the watchdog's replay halts the same way", async () => {
+    const id = newId();
+    await workflow("drifts").create({ id, params: { what: "type" } });
+    await suspendedOn("drifts", id, "held");
+    await exec(
+      "drifts",
+      id,
+      "CREATE TRIGGER fail_end BEFORE UPDATE OF status ON run WHEN NEW.status = 'errored' BEGIN SELECT RAISE(ABORT, 'injected storage failure'); END"
+    );
+
+    // A replay that strays from its journal halts, and can't end the run.
+    const outcome = await outcomeOf(deliverAlarm("drifts", id));
+    const faulted = await journalOf("drifts", id);
+    const watchdog = await alarmOf("drifts", id);
+    await exec("drifts", id, "DROP TRIGGER fail_end");
+    // The watchdog's activation, delivered now rather than a lease away.
+    await deliverAlarm("drifts", id);
+    const status = await ended("drifts", id);
+
+    expect(outcome).toBe("returned");
+    expect(faulted).toMatchObject({
+      run: { status: "running", generation: 2 },
+      activations: [
+        { generation: 1, ended: "suspended" },
+        { generation: 2, ended: "faulted" },
+      ],
+    });
+    expect(watchdog).toBe(faulted.run.lease_until);
+    expect(status).toMatchObject({
+      status: "errored",
+      error: { name: "WorkflowReplayMismatchError" },
+    });
   });
 
   it("lets an activation taken over go when even its end as superseded can't be written", async () => {

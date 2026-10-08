@@ -17,12 +17,18 @@
 // only the step's latest attempt can journal an outcome. A failed attempt
 // with retries left journals when the next is due, as an absolute time;
 // one due later parks the step. Once the definition has gone quiet (a
-// macrotask after the last park or return, so every sibling it reaches in
-// the meantime has registered) and every step still out is parked, the
-// activation suspends until the earliest of them, as a wait does. Nothing
-// of the run stays in memory between attempts. A parked step's retry may
-// wait past its time for siblings still out to land: a retry is never
-// early, and the step out is never cut off for it.
+// macrotask after the last park or return) and every step still out is
+// parked, the activation suspends until the earliest of them, as a wait
+// does. Nothing of the run stays in memory between attempts.
+//
+// Gone quiet means only that every sibling the definition reaches through
+// microtasks (in the same turn, or after a step returns) has registered.
+// A sibling it reaches only after a timer or I/O of its own (say `await
+// scheduler.wait(1)` before a `do`) isn't seen in time: the run suspends
+// without it, until the earliest parked step, and the next activation
+// runs it then. Such a step runs late, never early. Likewise a parked
+// step's retry may wait past its time for siblings still out to land:
+// the step out is never cut off for it.
 //
 // Every call of the step API carries the attempt it comes from, if any,
 // in its async context: a callback whose attempt has its outcome (one
@@ -93,6 +99,7 @@ import type {
   StepRow,
   StepType,
 } from "./journal.ts";
+import { warnRecovered } from "./log.ts";
 import {
   discardChunks,
   isStoredWhole,
@@ -700,6 +707,9 @@ export class Activation {
    * set), and brings the run back with its deadlines as journaled.
    */
   #fault(fault: unknown): void {
+    // The one trace of the failure outside the journal, which may be what
+    // failed: the watchdog's activation retries.
+    warnRecovered("workflow_activation_faulted", fault);
     this.#over = true;
     try {
       // Even once over: a halted activation whose run's end can't be
@@ -1447,7 +1457,10 @@ export class Activation {
    * later, so every call it makes in this turn, or in the microtasks that
    * turn queues, has registered first. Deciding at once would suspend
    * before a sibling the definition reaches next is seen, though that one
-   * may be due sooner than the parked step, or due now. Scheduled only by
+   * may be due sooner than the parked step, or due now. A sibling reached
+   * only after the definition's own timer or I/O comes too late for this,
+   * and runs in the next activation, late but never early (see the top of
+   * this file). Scheduled only by
    * a park or a call's return, once at a time: a check never schedules
    * another, so nothing loops. The macrotask runs none of the author's
    * code, and what it decides goes through `#suspendIfParked`, which acts
@@ -1943,6 +1956,8 @@ export class Activation {
       })
     );
     if (settled === failed) {
+      // Faulted, logged and (if storage lets it) journaled: the watchdog
+      // alarm, left as it was, brings the run back to write its end again.
       return;
     }
     if (!settled) {
@@ -1953,9 +1968,10 @@ export class Activation {
     try {
       // In the same write as the outcome: nothing is left to wake for.
       await this.#storage.deleteAlarm();
-    } catch {
-      // The run's end is journaled: an alarm left behind finds the run
-      // ended, and does nothing (run.ts).
+    } catch (error) {
+      // The run's end is journaled: the alarm left behind finds the run
+      // ended when it comes, and does nothing (run.ts).
+      warnRecovered("workflow_alarm_delete_failed", error);
     }
   }
 }
