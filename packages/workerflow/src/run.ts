@@ -300,9 +300,12 @@ const pauseIn = (sql: SqlStorage, now: number): void => {
 
 /**
  * Moves each of the run's pending deadlines on by `ms`, the time it was
- * paused: a sleep's or a wait's, a retry's, and an attempt's still open
- * (its activation died before the pause). Paused time doesn't count
- * against them, as on the reference engine.
+ * paused: a sleep's or a wait's, a retry's, and that of an attempt cut
+ * off, its step's latest with no outcome journaled: one still open (its
+ * activation died before the pause) or one whose answer came back
+ * superseded, which the next activation ends as cut off by its deadline
+ * (activation.ts). Paused time doesn't count against them, as on the
+ * reference engine.
  */
 const shiftDeadlinesIn = (sql: SqlStorage, ms: number): void => {
   sql.exec(
@@ -314,7 +317,7 @@ const shiftDeadlinesIn = (sql: SqlStorage, ms: number): void => {
     ms
   );
   sql.exec(
-    "UPDATE attempts SET deadline = deadline + ? WHERE ended_at IS NULL",
+    "UPDATE attempts SET deadline = deadline + ? WHERE ended_at IS NULL OR (ended = 'superseded' AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'running'))",
     ms
   );
 };
@@ -604,11 +607,23 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       // no alarm handler runs): nothing of it is out any more, so the run
       // is paused now. One still out somehow is fenced.
       const now = Date.now();
-      storage.transactionSync(() => {
-        supersedeIn(storage.sql, now);
-        pauseIn(storage.sql, now);
-      });
-      await storage.deleteAlarm();
+      try {
+        storage.transactionSync(() => {
+          supersedeIn(storage.sql, now);
+          pauseIn(storage.sql, now);
+        });
+      } catch (error) {
+        // Nothing was written: the watchdog's alarm finds it pausing still.
+        await this.#leaveToWatchdog("workflow_pause_failed", error);
+        return;
+      }
+      try {
+        await storage.deleteAlarm();
+      } catch (error) {
+        // The run is paused: the alarm left behind finds it so, and does
+        // nothing.
+        warnRecovered("workflow_alarm_delete_failed", error);
+      }
       return;
     }
     const generation = run.generation + 1;

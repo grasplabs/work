@@ -7,7 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { decode, encode } from "../src/codec.ts";
 import type { InstanceStatus } from "../src/contracts.ts";
 import type { WorkflowInstance } from "../src/instance.ts";
-import { WorkflowRun } from "../src/run.ts";
+import { defaultLeaseMs, WorkflowRun } from "../src/run.ts";
 import {
   alarmOf,
   deliverAlarm,
@@ -394,6 +394,81 @@ describe("pause", () => {
     await expect(ended("orders", id)).resolves.toMatchObject({
       status: "complete",
     });
+  });
+
+  it("moves on the deadline of an attempt whose answer came back superseded, the step's latest still", async () => {
+    const id = newId();
+    const charge = hold(id, "charge");
+    await workflow("orders").create({ id });
+    await charge.held;
+    const run = await instance("orders", id);
+    await run.pause();
+    // The pausing activation is taken for dead, and its step's answer then
+    // comes back to no one: the attempt is ended superseded, the step's
+    // latest still, its deadline what the next activation judges it by.
+    await deliverAlarm("orders", id);
+    charge.release();
+    const before = await until("the late answer to be ignored", async () => {
+      const journal = await journalOf("orders", id);
+      return journal.attempts[0]?.ended === "superseded" ? journal : undefined;
+    });
+    const deadline = before.attempts[0]?.deadline ?? Number.NaN;
+    const pausedAt = before.run.paused_at ?? Number.NaN;
+    const pauseMs = 20;
+    await pastTime(pausedAt + pauseMs);
+
+    await run.resume();
+    const resumedBy = Date.now();
+    await ended("orders", id);
+    // What the resume moved it to: the attempt's row keeps it after.
+    const { attempts } = await journalOf("orders", id);
+    const moved = attempts[0]?.deadline ?? Number.NaN;
+
+    expect(moved - deadline).toBeGreaterThanOrEqual(pauseMs);
+    expect(moved - deadline).toBeLessThanOrEqual(resumedBy - pausedAt);
+  });
+
+  it("is reached by an alarm that can't write the pause, which leaves the run to its watchdog", async () => {
+    const id = newId();
+    const charge = hold(id, "charge");
+    await workflow("orders").create({ id });
+    await charge.held;
+    const run = await instance("orders", id);
+    await run.pause();
+    await runInDurableObject(runObject("orders", id), (_, state) => {
+      state.storage.sql.exec(
+        "CREATE TRIGGER fail_pause BEFORE UPDATE OF status ON run WHEN NEW.status = 'paused' BEGIN SELECT RAISE(ABORT, 'injected storage failure'); END"
+      );
+    });
+    const before = await journalOf("orders", id);
+
+    const from = Date.now();
+    const warnings = await warningsDuring(async () => {
+      await deliverAlarm("orders", id);
+    });
+    const to = Date.now();
+    const after = await journalOf("orders", id);
+    const watchdog = (await alarmOf("orders", id)) ?? Number.NaN;
+    await runInDurableObject(runObject("orders", id), (_, state) => {
+      state.storage.sql.exec("DROP TRIGGER fail_pause");
+    });
+    await deliverAlarm("orders", id);
+    const paused = await run.status();
+    charge.release();
+
+    expect({
+      run: after.run,
+      activations: after.activations,
+      events: warnings.map((warning) => eventOf(warning)),
+      paused,
+    }).toStrictEqual({
+      run: before.run,
+      activations: before.activations,
+      events: ["workflow_pause_failed"],
+      paused: { status: "paused" },
+    });
+    expect(watchdog).toBeGreaterThanOrEqual(from + defaultLeaseMs);
+    expect(watchdog).toBeLessThanOrEqual(to + defaultLeaseMs);
   });
 
   it("is ignored by a resume of a run that isn't paused, which repairs an alarm it lost", async () => {
