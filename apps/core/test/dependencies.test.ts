@@ -13,7 +13,7 @@ import type {
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
@@ -31,6 +31,7 @@ import { allEvents } from "./audit-events.ts";
 import { actingFor, envOf } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
+import { intentFor, named, plain, publish } from "./npm.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { racingDb } from "./racing-db.ts";
 import {
@@ -112,6 +113,29 @@ const proposalFor = (
   refused: [],
   ...changes,
 });
+
+/**
+ * Proposes `proposal` as `person`, as the resolver does once it resolved a
+ * graph (src/packages/resolve.ts): nobody can hand in a graph of their own.
+ */
+const proposeAs = async (
+  person: Person,
+  proposal: DependencyProposal
+): Promise<DependencyRequest> =>
+  await proposeDependencies(env, await person.api.whoami(), proposal);
+
+/** Calls `method` of an RPC stub whatever its type says, as any client can. */
+const callAnyway = async (
+  stub: object,
+  method: string,
+  ...args: unknown[]
+): Promise<unknown> => {
+  const call: unknown = Reflect.get(stub, method);
+  if (typeof call !== "function") {
+    throw new TypeError(`No ${method} to call`);
+  }
+  return await Reflect.apply(call, stub, args);
+};
 
 /** A builder with a new App of theirs. */
 const builderWithApp = async () => {
@@ -220,7 +244,7 @@ describe("dependency approval", () => {
 
     let request: DependencyRequest | undefined;
     const events = await auditedDuring(async () => {
-      request = await builder.api.dependencies.propose(proposal);
+      request = await proposeAs(builder, proposal);
     });
     if (request === undefined) {
       throw new Error("No request");
@@ -321,14 +345,20 @@ describe("dependency approval", () => {
     ]);
   });
 
-  it("records every refused admission and every decision", async () => {
+  it("records each refused admission once, and every decision", async () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
     const approver = await approverBy(admin);
-    const request = await builder.api.dependencies.propose(proposalFor(app));
+    const request = await proposeAs(builder, proposalFor(app));
 
     const events = await auditedDuring(async () => {
+      // The same refusal, again and again, however it is asked: one row in
+      // the trail for each reason.
       await admission(builder, request);
+      await admission(builder, request);
+      await admission(builder, request, { targets: ["browser", "browser"] });
+      await admission(builder, request, { policyGeneration: 1000 });
+      await admission(builder, request, { policyGeneration: 1001 });
       await approver.api.dependencies.decide(request.id, {
         approved: true,
         reviewed: {
@@ -358,6 +388,17 @@ describe("dependency approval", () => {
         },
       },
       {
+        action: "dependency.admission_refused",
+        actor: { type: "person", userId: builder.userId },
+        target: { type: "app", id: app },
+        detail: {
+          ...about,
+          policyGeneration: 1000,
+          reason: "policy_changed",
+          request: request.id,
+        },
+      },
+      {
         action: "dependency.approved",
         actor: { type: "person", userId: approver.userId },
         target: { type: "dependency_request", id: request.id },
@@ -374,13 +415,53 @@ describe("dependency approval", () => {
     ]);
   });
 
+  it("records no refused admission of a graph nobody proposed, however often it is asked for", async () => {
+    const { builder, app } = await builderWithApp();
+    const request = await proposeAs(builder, proposalFor(app));
+    const madeUp = { ...request, graphHash: "f".repeat(64) };
+    const warn = vi.spyOn(console, "warn").mockReturnValue();
+    let outcomes: string[] = [];
+    let warned: unknown[] = [];
+    let events: AuditEvent[] = [];
+    try {
+      events = await auditedDuring(async () => {
+        outcomes = await Promise.all(
+          Array.from(
+            { length: 5 },
+            async () => await admission(builder, madeUp)
+          )
+        );
+      });
+      warned = warn.mock.calls.map(([fields]: unknown[]) => fields);
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect({
+      outcomes,
+      recorded: eventsOf(events, request),
+      logged: warned.filter(
+        (fields) =>
+          typeof fields === "object" &&
+          fields !== null &&
+          Reflect.get(fields, "event") === "dependencies.admission_refused" &&
+          Reflect.get(fields, "graphHash") === madeUp.graphHash
+      ).length,
+    }).toStrictEqual({
+      outcomes: Array.from({ length: 5 }, () => "dependency.approval_required"),
+      recorded: [],
+      logged: 5,
+    });
+  });
+
   it("takes the same graph in any order as the same request, and another as its replacement", async () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
     const approver = await approverBy(admin);
     const graph = charts();
-    const first = await builder.api.dependencies.propose(proposalFor(app));
-    const again = await builder.api.dependencies.propose(
+    const first = await proposeAs(builder, proposalFor(app));
+    const again = await proposeAs(
+      builder,
       proposalFor(app, {
         purpose: "The same, said differently.",
         graph: { ...graph, packages: graph.packages.toReversed() },
@@ -388,7 +469,8 @@ describe("dependency approval", () => {
     );
     let other: DependencyRequest | undefined;
     const events = await auditedDuring(async () => {
-      other = await builder.api.dependencies.propose(
+      other = await proposeAs(
+        builder,
         proposalFor(app, { graph: charts("3.2.0") })
       );
     });
@@ -400,7 +482,8 @@ describe("dependency approval", () => {
     // is kept but its audit events.
     const replaced = await outcome(approve(approver.api, first));
     await approve(approver.api, other);
-    const approvedAgain = await builder.api.dependencies.propose(
+    const approvedAgain = await proposeAs(
+      builder,
       proposalFor(app, { sourceRevision: "rev-9", graph: charts("3.2.0") })
     );
 
@@ -526,9 +609,7 @@ describe("dependency approval", () => {
     for (const [name, proposal] of Object.entries(invalid)) {
       // oxlint-disable-next-line no-await-in-loop -- one proposal at a time
       outcomes[name] = await outcome(
-        builder.api.dependencies.propose(
-          z.custom<DependencyProposal>().parse(proposal)
-        )
+        proposeAs(builder, z.custom<DependencyProposal>().parse(proposal))
       );
     }
     const status = await builder.api.dependencies.status(app);
@@ -552,7 +633,8 @@ describe("dependency approval", () => {
       "*",
     ];
     const names = ranges.map((_, index) => `uses-react-${index}`);
-    const request = await builder.api.dependencies.propose(
+    const request = await proposeAs(
+      builder,
       proposalFor(app, {
         graph: {
           direct: names.map((name) => ({ name, version: "1.0.0" })),
@@ -584,17 +666,17 @@ describe("dependency approval", () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
     const approver = await approverBy(admin);
-    const approvedGraph = await builder.api.dependencies.propose(
-      proposalFor(app)
-    );
+    const approvedGraph = await proposeAs(builder, proposalFor(app));
     await approve(approver.api, approvedGraph);
-    const other = await builder.api.dependencies.propose(
+    const other = await proposeAs(
+      builder,
       proposalFor(app, { graph: charts("3.2.0") })
     );
 
     let back: DependencyRequest | undefined;
     const events = await auditedDuring(async () => {
-      back = await builder.api.dependencies.propose(
+      back = await proposeAs(
+        builder,
         proposalFor(app, { sourceRevision: "rev-2" })
       );
     });
@@ -622,11 +704,10 @@ describe("dependency approval", () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
     const approver = await approverBy(admin);
-    const approvedGraph = await builder.api.dependencies.propose(
-      proposalFor(app)
-    );
+    const approvedGraph = await proposeAs(builder, proposalFor(app));
     await approve(approver.api, approvedGraph);
-    const read = await builder.api.dependencies.propose(
+    const read = await proposeAs(
+      builder,
       proposalFor(app, { graph: charts("3.2.0") })
     );
     const identity = await builder.api.whoami();
@@ -637,7 +718,8 @@ describe("dependency approval", () => {
     const db = racingDb(async () => {
       if (!raced) {
         raced = true;
-        newer = await builder.api.dependencies.propose(
+        newer = await proposeAs(
+          builder,
           proposalFor(app, { graph: charts("3.3.0") })
         );
       }
@@ -696,13 +778,11 @@ describe("dependency approval", () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
     const approver = await approverBy(admin);
-    const request = await builder.api.dependencies.propose(proposalFor(app));
+    const request = await proposeAs(builder, proposalFor(app));
     await approve(approver.api, request);
 
     const queries = await recordedQueries(async () => {
-      await builder.api.dependencies.propose(
-        proposalFor(app, { graph: charts("3.2.0") })
-      );
+      await proposeAs(builder, proposalFor(app, { graph: charts("3.2.0") }));
       await builder.api.dependencies.status(app);
       await admission(builder, request);
     });
@@ -746,13 +826,15 @@ describe("dependency approval", () => {
 
     const refused = {
       tooMany: await outcome(
-        builder.api.dependencies.propose(proposalFor(app, { graph: tooMany }))
+        proposeAs(builder, proposalFor(app, { graph: tooMany }))
       ),
-      tooLarge: await builder.api.dependencies
-        .propose(proposalFor(app, { graph: tooLarge }))
-        .catch((error: unknown) => error),
+      tooLarge: await proposeAs(
+        builder,
+        proposalFor(app, { graph: tooLarge })
+      ).catch((error: unknown) => error),
     };
-    const accepted = await builder.api.dependencies.propose(
+    const accepted = await proposeAs(
+      builder,
       proposalFor(app, { graph: largest })
     );
 
@@ -777,7 +859,7 @@ describe("dependency approval", () => {
     const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
     const { core: staffCore } = await openRpc(staffSession);
     const staff = staffCore.authenticate();
-    const request = await builder.api.dependencies.propose(proposalFor(app));
+    const request = await proposeAs(builder, proposalFor(app));
     const decision = {
       approved: true,
       reviewed: {
@@ -811,11 +893,17 @@ describe("dependency approval", () => {
       adminWaiting: await waitingFor(admin.api),
       adminCount: await admin.api.dependencies.waitingCount(),
       strangerReads: await outcome(stranger.api.dependencies.get(request.id)),
-      staffProposes: await outcome(
-        staff.dependencies.propose(proposalFor(app))
+      // Nor resolve for an App: staff never, and only its builders.
+      staffResolves: await outcome(
+        staff.dependencies.resolve(intentFor(app, { charts: "^3.0.0" }))
       ),
-      strangerProposes: await outcome(
-        stranger.api.dependencies.propose(proposalFor(app))
+      strangerResolves: await outcome(
+        stranger.api.dependencies.resolve(intentFor(app, { charts: "^3.0.0" }))
+      ),
+      // And nobody hands in a graph of their own: only the resolver
+      // proposes one.
+      builderProposes: await outcome(
+        callAnyway(builder.api.dependencies, "propose", proposalFor(app))
       ),
     };
     const stillPending = await builder.api.dependencies.status(app);
@@ -836,8 +924,10 @@ describe("dependency approval", () => {
       adminWaiting: [],
       adminCount: 0,
       strangerReads: "dependency.not_found",
-      staffProposes: "role.forbidden",
-      strangerProposes: "app.not_found",
+      staffResolves: "dependency.forbidden",
+      strangerResolves: "app.not_found",
+      // Refused as any method the API doesn't have.
+      builderProposes: "internal.unexpected",
     });
     expect(stillPending.pending?.id).toBe(request.id);
     expect(own).toMatchObject({
@@ -959,7 +1049,7 @@ describe("dependency approval", () => {
     const leftTeam = await personApi("user");
     const team = await newTeam(admin, [inTeam, leftTeam]);
     await admin.api.dependencies.grantApprover({ type: "team", teamId: team });
-    const request = await builder.api.dependencies.propose(proposalFor(app));
+    const request = await proposeAs(builder, proposalFor(app));
     const seen = {
       revoked: await waitingFor(revoked.api),
       leftTeam: await waitingFor(leftTeam.api),
@@ -1007,7 +1097,7 @@ describe("dependency approval", () => {
     ) => {
       const { builder, app } = await builderWithApp();
       const approver = await approverBy(admin);
-      const request = await builder.api.dependencies.propose(proposalFor(app));
+      const request = await proposeAs(builder, proposalFor(app));
       const identity = await approver.api.whoami();
       const { policyGeneration } = await approver.api.dependencies.waiting();
       // After the decision's own checks passed, just before its write.
@@ -1048,9 +1138,7 @@ describe("dependency approval", () => {
       await admin.api.members.remove(approver.userId);
     });
     const replaced = await racedBy(async ({ builder, app }) => {
-      await builder.api.dependencies.propose(
-        proposalFor(app, { graph: charts("3.2.0") })
-      );
+      await proposeAs(builder, proposalFor(app, { graph: charts("3.2.0") }));
     });
     const policyChanged = await racedBy(async () => {
       const another = await personApi("user");
@@ -1088,7 +1176,7 @@ describe("dependency approval", () => {
     const { builder, app } = await builderWithApp();
     const approver = await approverBy(admin);
     const second = await approverBy(admin);
-    const request = await builder.api.dependencies.propose(proposalFor(app));
+    const request = await proposeAs(builder, proposalFor(app));
     const { policyGeneration } = await approver.api.dependencies.waiting();
     const reviewed = { graphHash: request.graphHash, policyGeneration };
 
@@ -1141,7 +1229,7 @@ describe("dependency approval", () => {
       admitted: await admission(builder, request),
     };
     // Asking again is a new request, for a new decision.
-    const askedAgain = await builder.api.dependencies.propose(proposalFor(app));
+    const askedAgain = await proposeAs(builder, proposalFor(app));
 
     expect(refused).toStrictEqual({
       otherGraph: "dependency.stale",
@@ -1179,15 +1267,17 @@ describe("dependency approval", () => {
       name: `App ${unique()}`,
     });
     const approver = await approverBy(admin);
-    const request = await builder.api.dependencies.propose(proposalFor(app));
+    const request = await proposeAs(builder, proposalFor(app));
     await approve(approver.api, request);
     // The source moves on. The same packages at a later revision are the
     // approved graph still, and ask nobody again; other packages are a
     // request of their own.
-    const laterRevision = await builder.api.dependencies.propose(
+    const laterRevision = await proposeAs(
+      builder,
       proposalFor(app, { sourceRevision: "rev-2" })
     );
-    const edited = await builder.api.dependencies.propose(
+    const edited = await proposeAs(
+      builder,
       proposalFor(app, { sourceRevision: "rev-3", graph: charts("3.2.0") })
     );
     const review = await approver.api.dependencies.get(edited.id);
@@ -1216,7 +1306,8 @@ describe("dependency approval", () => {
     // The same names and versions with other bytes are another graph, and
     // the review says which package's bytes differ.
     const [chartsNode, scale] = charts("3.2.0").packages;
-    const swapped = await builder.api.dependencies.propose(
+    const swapped = await proposeAs(
+      builder,
       proposalFor(app, {
         graph: {
           ...charts("3.2.0"),
@@ -1270,7 +1361,7 @@ describe("dependency approval", () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
     const approver = await approverBy(admin);
-    const request = await builder.api.dependencies.propose(proposalFor(app));
+    const request = await proposeAs(builder, proposalFor(app));
     await approve(approver.api, request);
     const { policyGeneration: read } =
       await builder.api.dependencies.status(app);
@@ -1304,7 +1395,8 @@ describe("dependency approval", () => {
     const authority = actingFor({ type: "app", appId: app }, builder.userId);
     const before = Object.keys(await envOf(authority)).toSorted();
 
-    const request = await builder.api.dependencies.propose(
+    const request = await proposeAs(
+      builder,
       proposalFor(app, {
         targets: ["browser", "server", "workflow", "computation"],
       })
@@ -1320,7 +1412,7 @@ describe("dependency approval", () => {
     );
   });
 
-  it("lets a chat's agent propose, and never approve, grant or ask for the permission", async () => {
+  it("lets a chat's agent resolve, and never propose a graph of its own, approve, grant or ask for the permission", async () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");
     const { id: existing } = await builder.api.apps.create({ name: "Ledger" });
@@ -1334,15 +1426,19 @@ describe("dependency approval", () => {
       userId: builder.userId,
     });
     const proposal = proposalFor(app);
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    const intent = intentFor(app, { [dates]: "^1.0.0" });
     const chat = await chatOf(
       builder.userId,
       codeStep(`export default async (env) => {
         const tried = async (call) => { try { return await call(); } catch (error) { return error.message; } };
-        const request = await env.build.proposeDependencies(${JSON.stringify(app)}, ${JSON.stringify(proposal)});
+        const { request } = await env.build.resolveDependencies(${JSON.stringify(app)}, ${JSON.stringify(intent)});
         const decision = { approved: true, reviewed: { graphHash: request.graphHash, policyGeneration: request.policyGeneration } };
         const subject = { type: "person", userId: ${JSON.stringify(builder.userId)} };
         return {
           request: { id: request.id, status: request.status },
+          proposes: await tried(() => env.build.proposeDependencies(${JSON.stringify(app)}, ${JSON.stringify(proposal)})),
           buildDecides: await tried(() => env.build.decideDependency(request.id, decision)),
           buildApproves: await tried(() => env.build.approveDependencies(request.id, decision)),
           decides: (await tried(() => env.dependencies.decide(request.id, decision))).split(". ")[0],
@@ -1381,6 +1477,7 @@ describe("dependency approval", () => {
 
     expect(returned).toStrictEqual({
       request: { id: status.pending?.id, status: "pending" },
+      proposes: 'The RPC receiver does not implement "proposeDependencies".',
       buildDecides: 'The RPC receiver does not implement "decideDependency".',
       buildApproves:
         'The RPC receiver does not implement "approveDependencies".',
@@ -1412,7 +1509,7 @@ describe("dependency approval", () => {
     const admin = await personApi("admin");
     const { builder, app } = await builderWithApp();
     const approver = await approverBy(admin);
-    const request = await builder.api.dependencies.propose(proposalFor(app));
+    const request = await proposeAs(builder, proposalFor(app));
     const identity = await approver.api.whoami();
     const { policyGeneration } = await approver.api.dependencies.waiting();
     const decision = {

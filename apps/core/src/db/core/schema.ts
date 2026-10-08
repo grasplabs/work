@@ -938,6 +938,39 @@ export const dependencyLocks = sqliteTable(
 );
 
 /**
+ * Each refused admission the audit trail recorded, once per App, graph,
+ * set of targets, policy generation in force and reason
+ * (src/dependencies/requests.ts):
+ * a build asking again and again for the same refused graph adds no more
+ * audit rows. Only for a graph some request of the App's names; a refusal
+ * of any other hash is logged, never stored.
+ */
+export const dependencyAdmissionRefusals = sqliteTable(
+  "dependency_admission_refusals",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    graphHash: text("graph_hash").notNull(),
+    targets: text().notNull(),
+    policyGeneration: integer("policy_generation").notNull(),
+    reason: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.appId,
+        table.graphHash,
+        table.targets,
+        table.policyGeneration,
+        table.reason,
+      ],
+    }),
+  ]
+);
+
+/**
  * The values people set for workflows' parameters, one per App, workflow
  * and parameter; a parameter without one has its code's default. `set_by`
  * set it directly.

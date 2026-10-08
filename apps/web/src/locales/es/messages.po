@@ -821,6 +821,10 @@ msgid "Changed what a connection listens for"
 msgstr "Cambió lo que escucha una conexión"
 
 #: src/activity/audit-words.ts
+msgid "Changed what is built of approved packages"
+msgstr "Cambió lo que se compila de paquetes aprobados"
+
+#: src/activity/audit-words.ts
 msgid "Changed whether an engine's data needs approved apps"
 msgstr "Cambió si los datos de un motor requieren aplicaciones aprobadas"
 
@@ -1502,6 +1506,10 @@ msgstr "Grasp en tu idioma. Los números, las fechas y los importes también lo 
 #: src/sign-in-errors.ts
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 msgstr "Grasp abre pronto para todos, en cuanto Stephen haya hablado con los equipos. Si tienes un enlace de entrevista, está en tu correo."
+
+#: src/dashboard/dependency-requests.tsx
+msgid "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
+msgstr "Grasp resolvió estos paquetes desde el registro de npm y comprobó los archivos de cada uno con el hash del registro. Una licencia es la que indica el propio paquete."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Grasp sets these for your organization, as agreed with you. To change them, contact Grasp."
@@ -3158,10 +3166,6 @@ msgstr "El enlace funciona hasta el {until}."
 #: src/chat/thread.tsx
 msgid "The model call failed."
 msgstr "La llamada al modelo falló."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "The packages, their licences and the findings are as reported by {requester}. Grasp hasn't checked them against the registry."
-msgstr "Los paquetes, sus licencias y los hallazgos son los que indicó {requester}. Grasp no los ha comprobado con el registro."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."
