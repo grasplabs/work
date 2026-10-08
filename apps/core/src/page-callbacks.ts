@@ -1,7 +1,7 @@
 import { jsonBytes } from "@grasp-os/shared/screens";
 import { RpcStub } from "capnweb";
 
-import { isPlainData } from "./app.ts";
+import { holdsBigInt, isPlainData } from "./app.ts";
 
 // Callbacks a page passes over `/rpc` for an object to keep and call later:
 // a screen's for its App (screens-rpc.ts), a chat page's for the chat's
@@ -32,7 +32,8 @@ export interface Refusals {
 
 /**
  * The page's callback `stub` as a function an object can keep and call
- * later: it passes on plain data only, never a way into the object, and
+ * later: it passes on plain data only (no big integer, which no public
+ * value is), never a way into the object, and
  * gives it nothing back from the page. It's released by the runtime once
  * the object lets it go, or by its owner; releasing it twice does nothing.
  * Releasing it releases the page's stub too, which tells the page to
@@ -59,7 +60,7 @@ export const callbackFor = (
   };
   return Object.assign(
     async (value: unknown): Promise<void> => {
-      if (!isPlainData(value)) {
+      if (!isPlainData(value) || holdsBigInt(value)) {
         throw refusals.invalid();
       }
       if (

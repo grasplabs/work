@@ -7,7 +7,7 @@ import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
 import type { AppExportBinding } from "./app-calls.ts";
-import type { CallPath } from "./app.ts";
+import type { Admitted, InvocationKind } from "./app.ts";
 import {
   collectionGrantOf,
   connectionGrantOf,
@@ -29,27 +29,25 @@ const callerSchema = z.object({ token: z.string().min(1).max(100) });
 /**
  * Who `caller` is, as App `app`'s host knows them while their call runs,
  * that call's step key, for a workflow run's caller, where the call is
- * within calls between Apps, and the App method it calls. App code can't
- * name anyone: a caller that
- * isn't one of a running call of this App (made up, ended, or another
- * App's) is `app.caller_invalid`.
+ * within calls between Apps, the App method it calls, and what the call
+ * may do, admitted by the host for `use` (`App.admit`): a stub call that
+ * changes anything (`write`) from a call that may only read is
+ * `app.read_only`. App code can't name anyone, or say what its call may
+ * do: only the caller's token is read, and a caller that isn't one of a
+ * running call of this App (made up, ended, or another App's) is
+ * `app.caller_invalid`.
  */
 export const callerOf = async (
   env: Env,
   app: AppId,
-  caller: unknown
-): Promise<{
-  authority: Authority;
-  idempotencyKey: string | undefined;
-  attempt: string | undefined;
-  path: CallPath;
-  method: string;
-}> => {
+  caller: unknown,
+  use: InvocationKind
+): Promise<Admitted> => {
   const parsed = callerSchema.safeParse(caller);
   if (!parsed.success) {
     throw appErrors.create("app.caller_invalid");
   }
-  return await appHost(env, app).callerOf(parsed.data.token);
+  return await appHost(env, app).admit(parsed.data.token, use);
 };
 
 /**
@@ -118,15 +116,20 @@ export class AppConnectionBinding extends WorkerEntrypoint<
     return await runStubCall(
       this.env,
       async (key) => {
-        const { authority, idempotencyKey } = await callerOf(
+        // Admitted as a read: whether the action changes anything is
+        // connect's to know, and a read-only call has it refuse those.
+        const { authority, idempotencyKey, kind } = await callerOf(
           this.env,
           app,
-          caller
+          caller,
+          "read"
         );
         if (authority.mode === "workflow") {
           requireStepKey(key, idempotencyKey);
         }
-        return authority;
+        // Whether the action changes anything is connect's to know: a
+        // call that may only read has it refuse every side effect.
+        return { authority, readOnly: kind === "read" };
       },
       grant,
       [action, input, options]

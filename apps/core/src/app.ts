@@ -1,4 +1,5 @@
 import {
+  appErrorDetailsBytes,
   appErrors,
   appMethodPattern,
   reservedAppMethods,
@@ -159,13 +160,154 @@ export const isPlainData = (value: unknown): boolean => {
   }
 };
 
+/** Whether `value` is a boxed big integer (`Object(7n)`), whatever its prototype. */
+const isBoxedBigInt = (value: object): boolean => {
+  try {
+    // Reads the internal slot only a boxed big integer has.
+    BigInt.prototype.valueOf.call(value);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * A getter of every typed array's, which reads its internal slots: what
+ * kind it is, and how long. Its own properties can't stand in for them.
+ */
+const typedArrayGetter = (name: PropertyKey): ((value: object) => unknown) => {
+  const typedArray = Reflect.getPrototypeOf(Int8Array.prototype);
+  const getter =
+    typedArray === null
+      ? undefined
+      : Reflect.getOwnPropertyDescriptor(typedArray, name)?.get;
+  if (getter === undefined) {
+    throw new Error(`Typed arrays have no getter ${String(name)}`);
+  }
+  return (value) => {
+    const read: unknown = Reflect.apply(getter, value, []);
+    return read;
+  };
+};
+
+const typedArrayKind = typedArrayGetter(Symbol.toStringTag);
+const typedArrayLength = typedArrayGetter("length");
+
+/** Whether `value` is a typed array of big integers with any in it. */
+const isBigIntArray = (value: object): boolean => {
+  // The kind is `undefined` for anything but a typed array, so the length
+  // is only read of one.
+  const kind = typedArrayKind(value);
+  return (
+    (kind === "BigInt64Array" || kind === "BigUint64Array") &&
+    typedArrayLength(value) !== 0
+  );
+};
+
+/** Whether `value` is a typed array or a view of a buffer: numbers only. */
+const isNumbers = (value: object): boolean => ArrayBuffer.isView(value);
+
+/**
+ * A map's keys and values, or a set's members, read through the internal
+ * slot so a changed prototype can't hide them; `undefined` for neither.
+ */
+const collected = (value: object): unknown[] | undefined => {
+  const held: unknown[] = [];
+  try {
+    Map.prototype.forEach.call(value, (inner: unknown, key: unknown) => {
+      held.push(key, inner);
+    });
+    return held;
+  } catch {
+    // Not a map.
+  }
+  try {
+    Set.prototype.forEach.call(value, (inner: unknown) => {
+      held.push(inner);
+    });
+    return held;
+  } catch {
+    return undefined;
+  }
+};
+
+/** What `heldBy` gives for a getter: what it yields isn't known unrun. */
+const unknownYield = Symbol("unknown yield");
+
+/**
+ * The values an object holds: a map's keys and values, a set's members,
+ * or every own property's, named by a string or a symbol, enumerable or
+ * not, as `unknownYield` for a getter.
+ */
+const heldBy = (value: object): unknown[] => {
+  const members = collected(value);
+  if (members !== undefined) {
+    return members;
+  }
+  const held: unknown[] = [];
+  for (const key of Reflect.ownKeys(value)) {
+    const property = Object.getOwnPropertyDescriptor(value, key);
+    if (property !== undefined) {
+      held.push("value" in property ? property.value : unknownYield);
+    }
+  }
+  return held;
+};
+
+/**
+ * Whether `value` holds a big integer anywhere within it: a big integer, a
+ * boxed one or a typed array of them, at any depth, in a map, a set or an
+ * error's cause. No value of an App's calls or answers may: they reach
+ * screens and workflows, whose values are JSON's.
+ *
+ * What's walked is what structured clone carries of `value`, as RPC does:
+ * a getter read once into plain data, no proxy, and none of the keys it
+ * drops. Only a value it can't carry (an argument holding a stub) is
+ * walked as it is, where a getter counts as holding one. The walk runs no
+ * code of the value's and has no recursion, so a value nested deep can't
+ * exhaust the stack; it looks at each object once, and a function (a
+ * stub) holds nothing.
+ */
+export const holdsBigInt = (value: unknown): boolean => {
+  let carried: unknown = value;
+  try {
+    carried = structuredClone(value);
+  } catch {
+    // Walked as it is (see above).
+  }
+  const pending: unknown[] = [carried];
+  const seen = new Set<object>();
+  while (pending.length > 0) {
+    const next = pending.pop();
+    if (typeof next === "bigint" || next === unknownYield) {
+      return true;
+    }
+    if (typeof next !== "object" || next === null || seen.has(next)) {
+      continue;
+    }
+    seen.add(next);
+    if (isBoxedBigInt(next) || isBigIntArray(next)) {
+      return true;
+    }
+    if (isNumbers(next)) {
+      continue;
+    }
+    // One at a time, not spread: a long array would pass too many
+    // arguments at once.
+    for (const inner of heldBy(next)) {
+      pending.push(inner);
+    }
+  }
+  return false;
+};
+
 /** `answer`, if it is plain data; `app.answer_invalid` if not. */
 const plainAnswer = (
   answer: AppAnswer,
   version: number | null,
   method: string
 ): AppAnswer => {
-  if (!isPlainData(answer)) {
+  if (!isPlainData(answer) || holdsBigInt(answer)) {
     throw appErrors.create("app.answer_invalid", { version, method });
   }
   return answer;
@@ -198,11 +340,56 @@ interface RanAt {
   method: string;
 }
 
+/** Splits text into characters as a person reads them, so a cut keeps each whole. */
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** How many bytes `value` takes as UTF-8 JSON. */
+const jsonBytesOf = (value: unknown): number =>
+  new TextEncoder().encode(JSON.stringify(value)).byteLength;
+
+/**
+ * What `app.failed` carries: the version, the method and the App's own
+ * message, cut to fit `appErrorDetailsBytes` as UTF-8 JSON, at a whole
+ * character. Each UTF-16 code unit takes at least a byte, so no more than
+ * that many of the message's first code units can fit: only those are
+ * measured, and a huge message costs no more than a short one.
+ */
+export const failureDetails = (
+  version: number | null,
+  method: string,
+  message: string
+): { version: number | null; method: string; message: string } => {
+  const start = message.slice(0, appErrorDetailsBytes);
+  const whole = { version, method, message };
+  if (start === message && jsonBytesOf(whole) <= appErrorDetailsBytes) {
+    return whole;
+  }
+  const characters = Array.from(
+    graphemes.segment(start),
+    ({ segment }) => segment
+  );
+  // The longest start of the message that fits.
+  let fits = 0;
+  let tooLong = characters.length;
+  while (tooLong - fits > 1) {
+    const middle = Math.floor((fits + tooLong) / 2);
+    const cut = characters.slice(0, middle).join("");
+    if (
+      jsonBytesOf({ version, method, message: cut }) <= appErrorDetailsBytes
+    ) {
+      fits = middle;
+    } else {
+      tooLong = middle;
+    }
+  }
+  return { version, method, message: characters.slice(0, fits).join("") };
+};
+
 /**
  * An error of an App's code as its caller gets it: `app.failed`, with the
- * version that ran and the App's own message, never a stack or a code the
- * App made up. The log gets no App-written text: only which App, version
- * and method, and the error's name.
+ * version that ran and the App's own message (`failureDetails`), never a
+ * stack, a cause or a code the App made up. The log gets no App-written
+ * text: only which App, version and method, and the error's name.
  */
 const appFailure = (error: unknown, { app, version, method }: RanAt): Error => {
   log.warn("app.call_failed", {
@@ -211,11 +398,10 @@ const appFailure = (error: unknown, { app, version, method }: RanAt): Error => {
     method,
     errorName: errorNameOf(error),
   });
-  const reported = appErrors.create("app.failed", {
-    version,
-    method,
-    message: messageOf(error),
-  });
+  const reported = appErrors.create(
+    "app.failed",
+    failureDetails(version, method, messageOf(error))
+  );
   reported.stack = undefined;
   return reported;
 };
@@ -309,11 +495,32 @@ export interface CallPath {
   readOnly: boolean;
 }
 
-/** A call running now, as the host keeps it by its token. */
-interface RunningCall {
+/**
+ * What a call may do through the App's stubs: only read (`read`, a call
+ * through an export marked `read`, or one made while serving one), or
+ * change things too (`write`).
+ *
+ * Only the stubs go by it. The App's own SQLite database is not a stub:
+ * App code holds it directly, in the same object for every call, so a
+ * call that may only read can still write it. That stays so until App
+ * methods run as stateless handlers with no storage of their own, whose
+ * data goes through the host like everything else.
+ */
+export type InvocationKind = "read" | "write";
+
+/**
+ * A call running now, as the host keeps it by its token: the call's
+ * invocation, which the host makes as the call starts from what core
+ * knows of it (the session, the run, or the export core checked), never
+ * from anything App code passes. Every stub call of the App's code is
+ * admitted against it (`admit`).
+ */
+interface Invocation {
   caller: AppCallerInput;
   /** The method of the App's server code it calls. */
   method: string;
+  /** What the call may do through the App's stubs. */
+  kind: InvocationKind;
   /** Statistics points it recorded and reads it made (`claimStatistic`). */
   statistics?: { point: number; read: number };
   /** The version its code runs on, once started. */
@@ -321,7 +528,16 @@ interface RunningCall {
   /** The Apps whose calls are under way above it, outermost first. */
   above: readonly AppId[];
   deadline: number;
-  readOnly: boolean;
+}
+
+/** Who a stub call acts for, as the host admits it (`App.admit`). */
+export interface Admitted {
+  authority: Authority;
+  idempotencyKey: string | undefined;
+  attempt: string | undefined;
+  path: CallPath;
+  method: string;
+  kind: InvocationKind;
 }
 
 /**
@@ -414,7 +630,7 @@ export class App extends DurableObject<Env> {
    * The calls running now, by token, with the version their code runs on
    * once it started, and where each runs within calls between Apps.
    */
-  readonly #calls = new Map<string, RunningCall>();
+  readonly #calls = new Map<string, Invocation>();
 
   /** Statistics points the App recorded, and reads, in the current minute. */
   #statisticsMinute = { minute: 0, point: 0, read: 0 };
@@ -500,6 +716,11 @@ export class App extends DurableObject<Env> {
     via?: ExportCall
   ): Promise<AppAnswer> {
     requireAppMethod(method);
+    // Each on its own: a stub among them would keep the others from being
+    // walked as structured clone carries them (`holdsBigInt`).
+    if (args.some((arg) => holdsBigInt(arg))) {
+      throw appErrors.create("app.call_invalid", { method });
+    }
     const ownMs = callTimeoutMs(this.env);
     const ms = Math.min(
       ownMs,
@@ -512,12 +733,12 @@ export class App extends DurableObject<Env> {
     }
     const token = crypto.randomUUID();
     const { attempt: _attempt, ...shown } = caller;
-    const call: RunningCall = {
+    const call: Invocation = {
       caller,
       method,
+      kind: via?.readOnly === true ? "read" : "write",
       above: via?.chain ?? [],
       deadline: Date.now() + ms,
-      readOnly: via?.readOnly ?? false,
     };
     this.#calls.set(token, call);
     let version: number | undefined;
@@ -827,27 +1048,31 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * Who a stub call acts for: the caller of the running call `token`
-   * names, with the version of the code the call runs, and, for a
-   * workflow run's step, that step's idempotency key and its attempt, and where the call
-   * is within calls between Apps (`path`), and the method it calls,
-   * which a record's kept fields go by (knowledge/records.ts). For the
-   * App's stubs (app-bindings.ts, app-calls.ts) only. A call whose code
-   * hasn't started has handed its token to no one, so no stub call can
-   * come with it.
+   * Admits one stub call of the App's code made with `token`, for `use`:
+   * who it acts for (the caller of the running call `token` names), with
+   * the version of the code the call runs, and, for a workflow run's step,
+   * that step's idempotency key and its attempt, where the call is within
+   * calls between Apps (`path`), the method it calls, which a record's
+   * kept fields go by (knowledge/records.ts), and what it may do (`kind`).
+   * For the App's stubs (app-bindings.ts, app-calls.ts) only, each of
+   * which says whether its call changes anything (`use`): a call that may
+   * only read is refused one that does, `app.read_only`, before any of it
+   * is done. What the call may do is the host's, as its caller is: App
+   * code passes only the token, and nothing else it puts on the caller
+   * counts. A call whose code hasn't started has handed its token to no
+   * one, so no stub call can come with it. Writes to the App's own SQLite
+   * never come through here, so a read call can still make them (see
+   * `InvocationKind`).
    */
-  callerOf(token: string): {
-    authority: Authority;
-    idempotencyKey: string | undefined;
-    attempt: string | undefined;
-    path: CallPath;
-    method: string;
-  } {
+  admit(token: string, use: InvocationKind): Admitted {
     const call = this.#calls.get(token);
     if (call?.version === undefined) {
       throw appErrors.create("app.caller_invalid");
     }
-    const { caller, method, version, above, deadline: ends, readOnly } = call;
+    const { caller, method, kind, version, above, deadline: ends } = call;
+    if (use === "write" && kind === "read") {
+      throw appErrors.create("app.read_only");
+    }
     return {
       authority: {
         subject: { type: "app", appId: this.#app },
@@ -857,8 +1082,13 @@ export class App extends DurableObject<Env> {
       },
       idempotencyKey: caller.idempotencyKey,
       attempt: caller.attempt,
-      path: { chain: [...above, this.#app], deadline: ends, readOnly },
+      path: {
+        chain: [...above, this.#app],
+        deadline: ends,
+        readOnly: kind === "read",
+      },
       method,
+      kind,
     };
   }
 
@@ -869,14 +1099,12 @@ export class App extends DurableObject<Env> {
    * `callerOf` does: at most the use's bounds (`statisticLimitsOf`) in one
    * call, and for the App in one minute, all its calls together, kept in
    * memory (a restart of this object starts the minute again).
-   * `statistics.rate_limited` past either, and `app.caller_invalid` for a
-   * token of no running call.
+   * `statistics.rate_limited` past either, `app.caller_invalid` for a
+   * token of no running call, and `app.read_only` for a point recorded
+   * by a call that may only read.
    */
-  claimStatistic(
-    token: string,
-    use: StatisticUse
-  ): ReturnType<App["callerOf"]> {
-    const resolved = this.callerOf(token);
+  claimStatistic(token: string, use: StatisticUse): Admitted {
+    const resolved = this.admit(token, use === "point" ? "write" : "read");
     const call = this.#calls.get(token);
     if (call === undefined) {
       throw appErrors.create("app.caller_invalid");
@@ -910,12 +1138,12 @@ export class App extends DurableObject<Env> {
    * minute, for the App; undefined for the rest of that minute, so a loop
    * can't flood the audit log.
    */
-  limitedReadAudit(token: string): ReturnType<App["callerOf"]> | undefined {
+  limitedReadAudit(token: string): Admitted | undefined {
     const minute = Math.floor(Date.now() / 60_000);
     if (this.#limitedAuditMinute === minute) {
       return undefined;
     }
-    const resolved = this.callerOf(token);
+    const resolved = this.admit(token, "read");
     this.#limitedAuditMinute = minute;
     return resolved;
   }

@@ -15,6 +15,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { callerOf } from "../app-bindings.ts";
+import type { InvocationKind } from "../app.ts";
 import { forSandbox } from "../bindings.ts";
 import { collectionReads, readAsDelegate } from "./binding.ts";
 import type { CollectionGrant } from "./binding.ts";
@@ -53,20 +54,25 @@ export class AppCollectionBinding extends WorkerEntrypoint<
   #authorityOf(caller: unknown): () => Promise<Authority> {
     const { app } = this.ctx.props;
     return async () => {
-      const resolved = await callerOf(this.env, app, caller);
+      const resolved = await callerOf(this.env, app, caller, "read");
       return resolved.authority;
     };
   }
 
-  /** Who `caller` is, and the App method their call runs. */
+  /**
+   * Who `caller` is, the App method their call runs, and whether the call
+   * may only read, admitted for `use` (`callerOf`).
+   */
   async #callerOf(
-    caller: unknown
-  ): Promise<{ authority: Authority; setter: Setter }> {
+    caller: unknown,
+    use: InvocationKind
+  ): Promise<{ authority: Authority; setter: Setter; readOnly: boolean }> {
     const { app } = this.ctx.props;
-    const resolved = await callerOf(this.env, app, caller);
+    const resolved = await callerOf(this.env, app, caller, use);
     return {
       authority: resolved.authority,
       setter: { app, method: resolved.method },
+      readOnly: resolved.kind === "read",
     };
   }
 
@@ -167,22 +173,25 @@ export class AppCollectionBinding extends WorkerEntrypoint<
   /**
    * Whether `saveRecord` would write for `caller` now, by the checks it
    * makes (`canWriteAsDelegate` in records.ts): a permission to write the
-   * collection, a caller who may change it themselves, and an App that
-   * hasn't read restricted data. A hint for showing only what core takes:
-   * each write is checked again.
+   * collection, a caller who may change it themselves, an App that
+   * hasn't read restricted data, and a call that may change things (not
+   * one through an export marked `read`). A hint for showing only what
+   * core takes: each write is checked again.
    */
   async canWrite(caller: unknown): Promise<boolean> {
     const { collectionId } = this.ctx.props;
-    return await this.#write(
+    return await this.#run(
       caller,
-      async ({ authority }, grant) =>
-        await canWriteAsDelegate(
+      "read",
+      async ({ authority, readOnly }, grant) =>
+        !readOnly &&
+        (await canWriteAsDelegate(
           this.env,
           authority,
           grant.context,
           grant.permissionId,
           collectionId
-        )
+        ))
     );
   }
 
@@ -196,7 +205,7 @@ export class AppCollectionBinding extends WorkerEntrypoint<
   async ownedTypes(caller: unknown): Promise<string[]> {
     const { app, collectionId } = this.ctx.props;
     try {
-      await callerOf(this.env, app, caller);
+      await callerOf(this.env, app, caller, "read");
       const declared = await declaredTypes(this.env, collectionId);
       return [...declared]
         .filter(([, rule]) => rule.app === app)
@@ -214,12 +223,14 @@ export class AppCollectionBinding extends WorkerEntrypoint<
    * for someone who may change it themselves. The record's type checks
    * it; the kept fields its declaration gives to the method this call
    * runs in are set as `record` has them, and every other one is kept
-   * (records.ts, `writeRecord`).
+   * (records.ts, `writeRecord`). Never from a call that may only read
+   * (`app.read_only`).
    */
   async saveRecord(caller: unknown, input: unknown): Promise<DocumentSummary> {
     const { collectionId } = this.ctx.props;
-    return await this.#write(
+    return await this.#run(
       caller,
+      "write",
       async ({ authority, setter }, grant) =>
         await saveRecordAsDelegate(
           this.env,
@@ -233,17 +244,21 @@ export class AppCollectionBinding extends WorkerEntrypoint<
     );
   }
 
-  /** Runs a write for `caller`, with errors as the sandbox sees them. */
-  async #write<T>(
+  /**
+   * Runs `run` for `caller`, admitted for `use`, with errors as the
+   * sandbox sees them.
+   */
+  async #run<T>(
     caller: unknown,
+    use: InvocationKind,
     run: (
-      resolved: { authority: Authority; setter: Setter },
+      resolved: { authority: Authority; setter: Setter; readOnly: boolean },
       grant: CollectionGrant
     ) => Promise<T>
   ): Promise<T> {
     const { app: _app, ...grant } = this.ctx.props;
     try {
-      return await run(await this.#callerOf(caller), grant);
+      return await run(await this.#callerOf(caller, use), grant);
     } catch (error) {
       throw forSandbox(error);
     }

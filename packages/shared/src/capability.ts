@@ -76,6 +76,12 @@ export const capabilityClaimsSchema = z.strictObject({
    */
   restricted: z.boolean().default(false),
   /**
+   * The call comes from work that may only read (an App call through an
+   * export marked `read`): connect refuses every side effect of it, before
+   * holding or running one. Only the capability says it.
+   */
+  readOnly: z.boolean().default(false),
+  /**
    * What core checks again if connect holds the call and the person
    * confirms it: the permission that allowed it and the context it came
    * from.
@@ -108,6 +114,8 @@ export interface CapabilityCall {
 export interface CapabilityScope extends CapabilityCall {
   /** The caller's context is in restricted mode: signed, not compared. */
   restricted?: boolean | undefined;
+  /** The caller may only read: signed, not compared. */
+  readOnly?: boolean | undefined;
   /** What core checks again when a held call is confirmed: signed. */
   origin: z.input<typeof originSchema>;
   /** Where the call is made, for the audit log: signed, not compared. */
@@ -166,6 +174,7 @@ export const signCapability = async (
     action: scope.action,
     idempotencyKey: scope.idempotencyKey ?? null,
     restricted: scope.restricted === true,
+    readOnly: scope.readOnly === true,
     origin: scope.origin,
     ...(scope.context === undefined ? {} : { context: scope.context }),
     ...(scope.confirms === undefined ? {} : { confirms: scope.confirms }),
