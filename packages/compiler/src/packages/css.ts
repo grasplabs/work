@@ -422,6 +422,11 @@ export interface CssFetch {
    * resolves strings in image functions or `src()`.
    */
   bundled: boolean;
+  /**
+   * Whether the URL comes from `var()` or `env()`, whose value the build
+   * can't know: `url` is then only the function's name.
+   */
+  computed: boolean;
 }
 
 /**
@@ -436,6 +441,9 @@ const imageFunctions = new Set([
   "cross-fade",
   "-webkit-cross-fade",
 ]);
+
+/** Functions whose value is only known where the stylesheet is used. */
+const computedFunctions = new Set(["var", "env"]);
 
 /** Functions whose string argument is a URL. */
 const urlFunctions = new Set(["url", "src"]);
@@ -500,7 +508,10 @@ const stringFetch = (
  * Every URL a stylesheet would fetch, from the positions that fetch only:
  * `url()` (unquoted or quoted), `src()`, the string of an `@import`
  * prelude, and strings in image position of `image()`, `image-set()`,
- * `-webkit-image-set()` and `cross-fade()`.
+ * `-webkit-image-set()` and `cross-fade()`. A `var()` or `env()` in any of
+ * those positions (but `url()`, which takes none) is a fetch of a URL the
+ * build can't know, `computed`. A `url()` anywhere counts, a custom
+ * property's value included.
  */
 export const cssFetches = (css: string): CssFetch[] => {
   const found: CssFetch[] = [];
@@ -512,12 +523,20 @@ export const cssFetches = (css: string): CssFetch[] => {
     token !== undefined;
     token = tokenizer.next()
   ) {
-    const bundled =
-      token.type === "string"
+    const name = token.value.toLowerCase();
+    const position =
+      token.type === "string" ||
+      (token.type === "function" && computedFunctions.has(name))
         ? stringFetch(open.at(-1), importPrelude)
         : token.type === "url" || undefined;
-    if (bundled !== undefined) {
-      found.push({ url: asUrl(token.value), bundled });
+    if (position !== undefined && token.type === "function") {
+      found.push({ url: `${name}()`, bundled: false, computed: true });
+    } else if (position !== undefined) {
+      found.push({
+        url: asUrl(token.value),
+        bundled: position,
+        computed: false,
+      });
     }
     // An `@import`'s prelude runs to its `;` or a block.
     if (token.type === "at-keyword") {

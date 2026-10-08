@@ -51,7 +51,12 @@ import {
   withinPackage,
 } from "./exports.ts";
 import type { PackageFiles } from "./exports.ts";
-import { inertDataUrl, remoteInCss, unbundledInCss } from "./inert.ts";
+import {
+  computedInCss,
+  inertDataUrl,
+  remoteInCss,
+  unbundledInCss,
+} from "./inert.ts";
 import { platformModules, platformPeers } from "./platform.ts";
 import { svgRefusal } from "./svg.ts";
 
@@ -381,10 +386,11 @@ class Resolver {
           `${from.key} imports ${path}, which its package.json doesn't map`
         );
       }
-      // A bare target is the package's own import of it: through its own
-      // dependencies, with every refusal any import has.
+      // A bare target is the package's own import of it: through its
+      // `browser` remaps and its own dependencies, with every refusal any
+      // import has.
       return target.kind === "bare"
-        ? this.#bare(target.specifier, from, false)
+        ? this.#bareWithin(target.specifier, from, pkg)
         : this.#remapped(from.key, pkg, target.path);
     }
     if (path.startsWith("/")) {
@@ -393,19 +399,30 @@ class Resolver {
     if (path.startsWith(".")) {
       return this.#relative(path, from, pkg);
     }
-    // A package's `browser` field may swap a module for a file of its own
-    // (a shim for `crypto`, say) or for nothing.
-    const remap = this.#browser ? browserRemap(pkg, path) : undefined;
+    return this.#bareWithin(path, from, pkg);
+  }
+
+  /**
+   * A bare specifier a package imports, directly or through its
+   * `imports`: in the browser, its `browser` field may swap the module
+   * for a file of its own (a shim for `crypto`, say) or for nothing.
+   */
+  #bareWithin(
+    specifier: string,
+    from: Located,
+    pkg: PackageFiles
+  ): OnResolveResult {
+    const remap = this.#browser ? browserRemap(pkg, specifier) : undefined;
     if (remap === false) {
-      return { path, namespace: "empty" };
+      return { path: specifier, namespace: "empty" };
     }
     if (remap !== undefined) {
       const file = resolveFile(pkg, remap, true);
       return file === undefined
-        ? refuse(`${from.key} remaps ${path} to a file it doesn't have`)
+        ? refuse(`${from.key} remaps ${specifier} to a file it doesn't have`)
         : located(from.key, file);
     }
-    return this.#bare(path, from, false);
+    return this.#bare(specifier, from, false);
   }
 
   resolve = (args: OnResolveArgs): OnResolveResult => {
@@ -560,6 +577,10 @@ const leavingOutput = (
       ...unbundledInCss(text, limit).map(
         (name) =>
           `the stylesheet ${path} names ${name} as a string, which isn't bundled: use url()`
+      ),
+      ...computedInCss(text, limit).map(
+        (name) =>
+          `the stylesheet ${path} takes a URL it loads from ${name}, which the build can't check`
       ),
     ].slice(0, limit);
   }

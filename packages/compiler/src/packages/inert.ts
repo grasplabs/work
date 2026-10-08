@@ -42,6 +42,7 @@ export const remoteInCss = (css: string, limit = 50): string[] =>
   [
     ...new Set(
       cssFetches(css)
+        .filter(({ computed }) => !computed)
         .map(({ url }) => url)
         .filter((url) => outside.test(url) && !inline(url))
         .map((url) => url.slice(0, 120))
@@ -58,8 +59,22 @@ export const unbundledInCss = (css: string, limit = 50): string[] =>
     ...new Set(
       cssFetches(css)
         .filter(
-          ({ url, bundled }) => !(bundled || outside.test(url) || inline(url))
+          ({ url, bundled, computed }) =>
+            !(computed || bundled || outside.test(url) || inline(url))
         )
         .map(({ url }) => url.slice(0, 120))
+    ),
+  ].slice(0, limit);
+
+/**
+ * The functions (`var()`, `env()`) a stylesheet takes a fetched URL from,
+ * whose value the build can't know, so can't check. Up to `limit`.
+ */
+export const computedInCss = (css: string, limit = 50): string[] =>
+  [
+    ...new Set(
+      cssFetches(css)
+        .filter(({ computed }) => computed)
+        .map(({ url }) => url)
     ),
   ].slice(0, limit);

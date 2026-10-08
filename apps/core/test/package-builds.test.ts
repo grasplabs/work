@@ -452,6 +452,57 @@ describe("what a package's code may reach", () => {
     ]);
   });
 
+  it("puts a bare imports target through the package's browser remaps, to a file or to nothing", async () => {
+    const shimmed = named("imports-shim");
+    await publish(
+      esm(
+        shimmed,
+        {
+          "index.js":
+            'import { digest } from "#crypto"; import "#os"; export { digest };',
+          "crypto-browser.js": "export const digest = () => 'browser shim';",
+        },
+        {
+          imports: { "#crypto": "crypto", "#os": "os" },
+          browser: { crypto: "./crypto-browser.js", os: false },
+        }
+      )
+    );
+    const app = await approvedApp({ [shimmed]: "1" });
+    const built = await buildOf(app, "browser");
+    const module = await artifactText(built.hash, `${shimmed}.js`);
+    expect(module).toContain("browser shim");
+  });
+
+  it("skips a null fallback in an exports array, and takes a null alone as not exported", async () => {
+    const fallback = named("null-fallback");
+    const blocked = named("null-blocked");
+    await publish(
+      esm(
+        fallback,
+        { "index.js": "export const from = 'fallback';" },
+        { exports: { ".": [null, "./index.js"] } }
+      )
+    );
+    await publish(
+      esm(
+        blocked,
+        { "index.js": "export const from = 'blocked';" },
+        { exports: { ".": null } }
+      )
+    );
+    const ok = await approvedApp({ [fallback]: "1" });
+    const built = await buildOf(ok, "browser");
+    const refused = await approvedApp({ [blocked]: "1" });
+    expect({
+      resolved: built.artifact.entries[fallback]?.resolved,
+      refusals: await refusalsOf(buildOf(refused, "browser")),
+    }).toStrictEqual({
+      resolved: `${fallback}@1.0.0/index.js`,
+      refusals: [`${blocked}@1.0.0 doesn't export . for the browser target`],
+    });
+  });
+
   it("refuses an import of a package it doesn't depend on, even one in the graph", async () => {
     const shared = named("shared");
     const phantom = named("phantom");
@@ -927,6 +978,21 @@ describe("what a build names and keeps", () => {
         `the stylesheet ${photos}.css names ./photo.png as a string, which isn't bundled: use url()`,
       ],
     });
+  });
+
+  it("refuses a stylesheet that takes a URL it loads from a custom property", async () => {
+    const themed = named("themed");
+    await publish(
+      esm(themed, {
+        "index.js": 'import "./theme.css"; export {};',
+        "theme.css":
+          '.p { --photo: "https://cdn.example/p.png"; background: image-set(var(--photo) 1x); }',
+      })
+    );
+    const app = await approvedApp({ [themed]: "1" });
+    await expect(refusalsOf(buildOf(app, "browser"))).resolves.toStrictEqual([
+      `the stylesheet ${themed}.css takes a URL it loads from var(), which the build can't check`,
+    ]);
   });
 
   it("takes a stylesheet's text that only looks like a URL", async () => {

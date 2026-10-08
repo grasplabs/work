@@ -58,8 +58,28 @@ export type Resolved =
   | null
   | undefined;
 
-/** Node's "Invalid Package Target" and "Invalid Module Specifier". */
+/**
+ * Node's "Invalid Package Target" and "Invalid Module Specifier": an array
+ * skips it for its next fallback.
+ */
 const invalid = Symbol("invalid");
+
+/**
+ * Node's "Invalid Package Configuration" (a condition key that is an
+ * array index): nothing resolves, fallbacks included.
+ */
+const invalidConfiguration = Symbol("invalidConfiguration");
+
+type Outcome = Resolved | typeof invalid | typeof invalidConfiguration;
+
+/** Whether `target` parses as a URL, as Node's `new URL(target)` does. */
+const isUrl = (target: string): boolean => {
+  try {
+    return new URL(target).href !== "";
+  } catch {
+    return false;
+  }
+};
 
 /**
  * Whether `path`, split at `/` and `\\`, has a segment Node refuses in a
@@ -87,13 +107,13 @@ const stringTarget = (
   target: string,
   patternMatch: string | null,
   isImports: boolean
-): Resolved | typeof invalid => {
+): Outcome => {
   if (!target.startsWith("./")) {
     if (
       !isImports ||
       target.startsWith("../") ||
       target.startsWith("/") ||
-      /^[a-z][a-z0-9+.-]*:/iu.test(target)
+      isUrl(target)
     ) {
       return invalid;
     }
@@ -115,13 +135,45 @@ const stringTarget = (
   return { kind: "file", path: target.slice(2).replaceAll("*", patternMatch) };
 };
 
+/**
+ * An array of fallbacks, as Node resolves one: an invalid target, an
+ * unmatched condition and a `null` each go on to the next; the result is
+ * the first that resolves, else what the last gave (`null` for an empty
+ * array). A `null` alone, outside an array, blocks the export.
+ */
+const resolveFallbacks = (
+  targets: readonly unknown[],
+  patternMatch: string | null,
+  isImports: boolean,
+  conditions: readonly string[]
+): Outcome => {
+  if (targets.length === 0) {
+    return null;
+  }
+  let last: Outcome;
+  for (const each of targets) {
+    // oxlint-disable-next-line no-use-before-define -- the two recurse into each other
+    const resolved = resolveTarget(each, patternMatch, isImports, conditions);
+    if (resolved === invalidConfiguration) {
+      return resolved;
+    }
+    if (resolved !== invalid && resolved !== undefined && resolved !== null) {
+      return resolved;
+    }
+    if (resolved !== undefined) {
+      last = resolved;
+    }
+  }
+  return last;
+};
+
 /** Node's `PACKAGE_TARGET_RESOLVE`, with invalid targets as `invalid`. */
 const resolveTarget = (
   target: unknown,
   patternMatch: string | null,
   isImports: boolean,
   conditions: readonly string[]
-): Resolved | typeof invalid => {
+): Outcome => {
   if (typeof target === "string") {
     return stringTarget(target, patternMatch, isImports);
   }
@@ -129,36 +181,29 @@ const resolveTarget = (
     return null;
   }
   if (Array.isArray(target)) {
-    let last: Resolved | typeof invalid = null;
-    for (const each of target) {
-      const resolved = resolveTarget(each, patternMatch, isImports, conditions);
-      last = resolved;
-      if (resolved !== invalid && resolved !== undefined) {
+    return resolveFallbacks(target, patternMatch, isImports, conditions);
+  }
+  if (!isRecord(target)) {
+    return invalid;
+  }
+  const keys = Object.keys(target);
+  if (keys.some((key) => /^\d+$/u.test(key))) {
+    return invalidConfiguration;
+  }
+  for (const condition of keys) {
+    if (condition === "default" || conditions.includes(condition)) {
+      const resolved = resolveTarget(
+        target[condition],
+        patternMatch,
+        isImports,
+        conditions
+      );
+      if (resolved !== undefined) {
         return resolved;
       }
     }
-    return last === undefined ? null : last;
   }
-  if (isRecord(target)) {
-    for (const [condition, value] of Object.entries(target)) {
-      if (/^\d+$/u.test(condition)) {
-        return invalid;
-      }
-      if (condition === "default" || conditions.includes(condition)) {
-        const resolved = resolveTarget(
-          value,
-          patternMatch,
-          isImports,
-          conditions
-        );
-        if (resolved !== undefined) {
-          return resolved;
-        }
-      }
-    }
-    return undefined;
-  }
-  return invalid;
+  return undefined;
 };
 
 /**
@@ -186,13 +231,21 @@ const patternKeyCompare = (keyA: string, keyB: string): number => {
   return keyB.length > keyA.length ? 1 : 0;
 };
 
+/** What resolved, or `null` for nothing: blocked, unmatched or invalid. */
+const resolution = (outcome: Outcome): Exclude<Resolved, undefined> =>
+  outcome === invalid ||
+  outcome === invalidConfiguration ||
+  outcome === undefined
+    ? null
+    : outcome;
+
 /** Node's `PACKAGE_IMPORTS_EXPORTS_RESOLVE`. */
 const throughMap = (
   map: Record<string, unknown>,
   matchKey: string,
   isImports: boolean,
   conditions: readonly string[]
-): Resolved | typeof invalid => {
+): Outcome => {
   if (Object.hasOwn(map, matchKey) && !matchKey.includes("*")) {
     return resolveTarget(map[matchKey], null, isImports, conditions);
   }
@@ -245,7 +298,7 @@ const resolveExports = (
     subpath === "." && !Object.hasOwn(map, ".")
       ? null
       : throughMap(map, subpath, false, conditions);
-  return resolved === invalid || resolved === undefined ? null : resolved;
+  return resolution(resolved);
 };
 
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
@@ -426,11 +479,16 @@ export const resolveImports = (
   conditions: readonly string[]
 ): ImportTarget | undefined => {
   const { imports } = pkg.manifest;
-  if (specifier === "#" || specifier.startsWith("#/") || !isRecord(imports)) {
+  if (
+    specifier === "#" ||
+    specifier.startsWith("#/") ||
+    specifier.endsWith("/") ||
+    !isRecord(imports)
+  ) {
     return undefined;
   }
-  const resolved = throughMap(imports, specifier, true, conditions);
-  if (resolved === invalid || resolved === null || resolved === undefined) {
+  const resolved = resolution(throughMap(imports, specifier, true, conditions));
+  if (resolved === null) {
     return undefined;
   }
   if (resolved.kind === "bare") {

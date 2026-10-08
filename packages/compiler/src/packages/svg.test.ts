@@ -54,6 +54,9 @@ describe("an SVG's references", () => {
       crossFade: [
         '<style>rect{fill:cross-fade("https://x.example/a.png" 50%, red)}</style>',
       ],
+      customProperty: [
+        '<style>rect{--photo:"https://x.example/a.png";fill:image-set(var(--photo) 1x)}</style>',
+      ],
       cssEscapedImport: [
         '<style>@\\69mport "https://x.example/a.css";</style>',
       ],

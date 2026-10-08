@@ -190,7 +190,11 @@ const checkReference = (value: string, image: boolean): void => {
  * (`cssFetches`) is a fragment or an inline image.
  */
 const checkCss = (css: string): void => {
-  for (const { url } of cssFetches(css)) {
+  for (const { url, computed } of cssFetches(css)) {
+    if (computed) {
+      // `var()` or `env()`: a URL nothing here can check.
+      refuse(loadsOutside);
+    }
     checkReference(url, true);
   }
 };

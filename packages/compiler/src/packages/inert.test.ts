@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { remoteInCss, unbundledInCss } from "./inert.ts";
+import { computedInCss, remoteInCss, unbundledInCss } from "./inert.ts";
 import { svgRefusal } from "./svg.ts";
 
 // The checks on what an artifact carries, on their own: pure, so tested in
@@ -219,5 +219,36 @@ describe("a stylesheet an artifact carries", () => {
       '@supports (content:"url(https://cdn.example/f)"){.f{color:red}}',
     ].join("\n");
     expect([remoteInCss(css), unbundledInCss(css)]).toStrictEqual([[], []]);
+  });
+
+  it("names var() and env() wherever they would give a URL to fetch", () => {
+    const fetching = [
+      '.a{--photo:"https://cdn.example/a.png";background:image-set(var(--photo) 1x)}',
+      ".b{background:-webkit-image-set(env(--b) 1x)}",
+      ".c{background:image(var(--c))}",
+      ".d{background:cross-fade(var(--d) 50%, red)}",
+      "@font-face{src:src(var(--e))}",
+      "@import var(--f);",
+    ];
+    expect(fetching.map((css) => computedInCss(css))).toStrictEqual([
+      ["var()"],
+      ["env()"],
+      ["var()"],
+      ["var()"],
+      ["var()"],
+      ["var()"],
+    ]);
+  });
+
+  it("takes var() where nothing is fetched, and catches a url() in a custom property", () => {
+    const css = [
+      ".a{color:var(--accent);margin:env(safe-area-inset-top)}",
+      ".b{background:image-set(url(./assets/b-HASH.png) type(var(--t)) 1x)}",
+      ".c{--photo:url(https://cdn.example/c.png);background:var(--photo)}",
+    ].join("\n");
+    expect([computedInCss(css), remoteInCss(css)]).toStrictEqual([
+      [],
+      ["https://cdn.example/c.png"],
+    ]);
   });
 });
