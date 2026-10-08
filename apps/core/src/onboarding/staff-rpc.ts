@@ -1,5 +1,16 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import {
+  answerMaxLength,
+  kickoffErrors,
+  kickoffInputSchema,
+  visionFieldSchema,
+} from "@grasp-os/shared/kickoff";
+import type {
+  KickoffInput,
+  KickoffView,
+  VisionField,
+} from "@grasp-os/shared/kickoff";
+import {
   agreementsSchema,
   onboardingErrors,
   rosterPersonSchema,
@@ -28,6 +39,7 @@ import { appendAuditEvent } from "../audit-outbox.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { gateView } from "./gate.ts";
+import { readKickoff, transcriptOf } from "./kickoff.ts";
 import { needsOf, stagesOf } from "./staff-area.ts";
 import type { StaffFacts } from "./staff-area.ts";
 import { onboardingStore } from "./store.ts";
@@ -36,12 +48,20 @@ import { onboardingStore } from "./store.ts";
 // interviews and let them run again, say where the agreements stand, give
 // someone who lost their device a new start, and Grasp's onboarding area
 // (staff-area.ts): where it stands, what needs Grasp, notes, the log, and
-// someone's interview, whose every read is in the audit log.
+// someone's interview, whose every read is in the audit log; and the
+// kickoff, brought in, read for what Stephen needs (kickoff.ts), and the
+// sponsor's answers to what it left open.
 // Until the agreements are in and while the interviews are paused, no link
 // opens and none goes out. The client's admin sees both (`view()`), and
 // the audit log has every change, as the staff member who made it.
 
 const noteSchema = z.string().trim().min(1).max(noteMaxLength);
+
+/** The sponsor's answer to one field the kickoff left open. */
+const answerSchema = z.strictObject({
+  field: visionFieldSchema,
+  text: z.string().max(answerMaxLength),
+});
 
 /** Refuses anyone but Grasp's staff, with `onboarding.staff_only`. */
 const requireStaff = (person: Identity): void => {
@@ -109,11 +129,13 @@ export class OnboardingStaffRpc
       const view = await store.view(now);
       const gate = await gateView(this.#env, view, now);
       const { sent, interviews } = await store.staffFacts();
+      const { transcript } = await store.kickoff();
       const facts: StaffFacts = {
         agreements: await store.agreements(),
         sent: new Set(sent.map((link) => link.person)),
         sentAt: new Map(sent.map((link) => [link.person, link.sentAt])),
         interviews: new Map(interviews.map((one) => [one.person, one])),
+        kickoff: transcript !== null,
       };
       return {
         stages: stagesOf(view, gate, facts),
@@ -169,6 +191,55 @@ export class OnboardingStaffRpc
         detail: {},
       });
       return transcript;
+    });
+  }
+
+  async kickoff(): Promise<KickoffView> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      return await onboardingStore(this.#env).kickoff();
+    });
+  }
+
+  /**
+   * Brings the kickoff's transcript in and reads it, before anything is
+   * kept: a transcript that can't be read leaves the one before in place.
+   */
+  async saveKickoff(input: KickoffInput): Promise<KickoffView> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const { locale, transcript } = kickoffErrors.parse(
+        "kickoff.invalid",
+        kickoffInputSchema,
+        input
+      );
+      const { text, fileName } = await transcriptOf(this.#env, transcript);
+      const by = actorOf(person);
+      const reading = await readKickoff(this.#env, text, locale, by);
+      // The reading takes a while: the company may have ended Grasp's
+      // access meanwhile. Nothing is kept unless they are still in.
+      requireStaff(await this.#check());
+      return await onboardingStore(this.#env).saveKickoff(
+        { transcript: text, fileName, reading },
+        by
+      );
+    });
+  }
+
+  async answerKickoff(field: VisionField, text: string): Promise<KickoffView> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const parsed = kickoffErrors.parse("kickoff.invalid", answerSchema, {
+        field,
+        text,
+      });
+      const store = onboardingStore(this.#env);
+      if (
+        !(await store.answerKickoff(parsed.field, parsed.text, actorOf(person)))
+      ) {
+        throw kickoffErrors.create("kickoff.invalid");
+      }
+      return await store.kickoff();
     });
   }
 

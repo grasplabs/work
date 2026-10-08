@@ -1,3 +1,4 @@
+import type { VisionField } from "@grasp-os/shared/kickoff";
 import type {
   LogActor,
   StaffNeed,
@@ -93,4 +94,33 @@ export const needText = (i18n: I18n, need: StaffNeed): string => {
     : i18n._(
         msg`The interviews are over with ${known}% known, short of ${threshold}%: Grasp decides`
       );
+};
+
+/** What Stephen needs from the kickoff, field by field, as the area names it. */
+export const visionTitles: Record<VisionField, MessageDescriptor> = {
+  business: msg({ message: "The business", context: "kickoff field" }),
+  teams: msg({ message: "The teams", context: "kickoff field" }),
+  goals: msg({ message: "Goals, and why AI now", context: "kickoff field" }),
+  success: msg({
+    message: "What counts as success",
+    context: "kickoff field",
+  }),
+  stakeholders: msg({
+    message: "Who decides, who can block",
+    context: "kickoff field",
+  }),
+  pain: msg({
+    message: "Work that costs too much time",
+    context: "kickoff field",
+  }),
+  limits: msg({
+    message: "What Stephen leaves alone",
+    context: "kickoff field",
+  }),
+  sensitivities: msg({
+    message: "What is sensitive now",
+    context: "kickoff field",
+  }),
+  systems: msg({ message: "Their tools", context: "kickoff field" }),
+  languages: msg({ message: "Languages", context: "kickoff field" }),
 };

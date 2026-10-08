@@ -177,6 +177,26 @@ export const notes = sqliteTable("notes", {
 });
 
 /**
+ * The kickoff, one row: Grasp's first conversation with the sponsor, as
+ * staff brought it in, Stephen's reading of it (JSON, `KickoffReading`),
+ * and the sponsor's answers to what it left open (JSON, by field). Only
+ * staff read it; Stephen's context is made from it.
+ */
+export const kickoff = sqliteTable(
+  "kickoff",
+  {
+    id: integer().primaryKey(),
+    at: text().notNull(),
+    by: text().notNull(),
+    fileName: text("file_name"),
+    transcript: text().notNull(),
+    reading: text().notNull(),
+    answers: text().notNull().default("{}"),
+  },
+  (table) => [check("kickoff_one_row", sql`${table.id} = 1`)]
+);
+
+/**
  * The AI the onboarding used, by day, purpose and model: calls, tokens
  * read new and from a cache, tokens written, and seconds of voice.
  */

@@ -19,6 +19,7 @@ import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
 import { onboardingGate, sessions, users } from "../db/core/schema.ts";
 import { closesOn, dayOf } from "./rules.ts";
+import { onboardingStore } from "./store.ts";
 
 // The gate of a deployment that is onboarding (`@grasp-os/shared/onboarding-gate`).
 // From the threat model (GRA-307, W10), what it can't let happen, and what
@@ -82,11 +83,12 @@ const share = (some: number, of: number): number => (of === 0 ? 0 : some / of);
 
 /**
  * What Grasp knows of the company, part by part, from what the onboarding
- * holds. The kickoff, the documents, where they live, Pulse and the review
- * come in with their own issues (GRA-318, GRA-299, GRA-300, GRA-304) and
+ * holds; the kickoff by how much of what Stephen needs from it is in
+ * (`kickoff`, 0 to 1). The documents, where they live, Pulse and the
+ * review come in with their own issues (GRA-299, GRA-300, GRA-304) and
  * count nothing until then.
  */
-export const knownParts = (view: OnboardingView): KnownPart[] => {
+export const knownParts = (view: OnboardingView, kickoff = 0): KnownPart[] => {
   const { roster, progress } = view;
   const taking = roster?.teams.filter((team) => !team.off) ?? [];
   const conversations =
@@ -95,7 +97,7 @@ export const knownParts = (view: OnboardingView): KnownPart[] => {
       : 0.5 * share(progress.leadsTalked, progress.leads) +
         0.5 * share(progress.talked, progress.asked);
   return [
-    part("kickoff", 0),
+    part("kickoff", kickoff),
     part("people", roster === null ? 0 : 1),
     part("sources", 0),
     part("documents", 0),
@@ -168,7 +170,7 @@ export const gateView = async (
   now: string = new Date().toISOString()
 ): Promise<GateView> => {
   const { closedAt, openedAt, threshold } = await stored(env);
-  const parts = knownParts(view);
+  const parts = knownParts(view, await onboardingStore(env).kickoffKnown());
   let sum = 0;
   for (const { weight, known } of parts) {
     sum += weight * known;

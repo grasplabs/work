@@ -60,7 +60,10 @@ export interface RulesInput {
    * be missing only for a caller that isn't type-checked: the rules refuse
    * such a call.
    */
-  work?: { authority: Authority; context: WorkContext };
+  work?:
+    | { authority: Authority; context: WorkContext }
+    /** Core's own onboarding: always carries sensitive data. */
+    | { onboarding: true };
 }
 
 /** Why a call must stay in the EU: which rule says so. */
@@ -186,6 +189,11 @@ const restrictedWork = async (
 ): Promise<boolean | undefined> => {
   if (work === undefined) {
     return undefined;
+  }
+  // What the company told Grasp, and what its people say in interviews:
+  // judged as data the deployment's sensitive-data rule covers.
+  if ("onboarding" in work) {
+    return true;
   }
   try {
     return await isRestricted(env, work.authority, work.context);

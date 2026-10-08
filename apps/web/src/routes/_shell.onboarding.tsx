@@ -11,6 +11,7 @@ import {
 import {
   HistoryIcon,
   LayoutDashboardIcon,
+  MessagesSquareIcon,
   NotebookPenIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -32,7 +33,11 @@ import { SiteHeader } from "../frame/site-header.tsx";
 // is no list of them: its sections sit in a page sidebar that folds to a
 // rail, the section in the address. Core checks it is staff on every call.
 
-type AreaPath = "/onboarding" | "/onboarding/notes" | "/onboarding/log";
+type AreaPath =
+  | "/onboarding"
+  | "/onboarding/kickoff"
+  | "/onboarding/notes"
+  | "/onboarding/log";
 
 interface AreaSection {
   to: AreaPath;
@@ -48,6 +53,11 @@ const overview: AreaSection = {
 
 const sections: readonly AreaSection[] = [
   overview,
+  {
+    to: "/onboarding/kickoff",
+    label: msg({ message: "Kickoff", context: "onboarding area section" }),
+    icon: MessagesSquareIcon,
+  },
   {
     to: "/onboarding/notes",
     label: msg({ message: "Notes", context: "onboarding area section" }),
