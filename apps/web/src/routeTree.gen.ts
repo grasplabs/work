@@ -41,6 +41,8 @@ import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settin
 import { Route as ShellSettingsModelsRouteImport } from './routes/_shell.settings.models'
 import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settings.profile'
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell.workflows.index'
+import { Route as KitComponentsNameRouteImport } from './routes/kit_.components.$name'
+import { Route as KitExamplesNameRouteImport } from './routes/kit_.examples.$name'
 import { Route as ShellEnginesEngineIndexRouteImport } from './routes/_shell.engines.$engine.index'
 import { Route as ShellWorkflowsAppWorkflowRouteImport } from './routes/_shell.workflows.$app.$workflow'
 import { Route as AppsAppScreensScreenRouteImport } from './routes/apps.$app.screens.$screen'
@@ -208,6 +210,16 @@ const ShellWorkflowsIndexRoute = ShellWorkflowsIndexRouteImport.update({
   path: '/workflows/',
   getParentRoute: () => ShellRoute,
 } as any)
+const KitComponentsNameRoute = KitComponentsNameRouteImport.update({
+  id: '/kit_/components/$name',
+  path: '/kit/components/$name',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const KitExamplesNameRoute = KitExamplesNameRouteImport.update({
+  id: '/kit_/examples/$name',
+  path: '/kit/examples/$name',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ShellEnginesEngineIndexRoute = ShellEnginesEngineIndexRouteImport.update({
   id: '/engines/$engine/',
   path: '/engines/$engine/',
@@ -262,6 +274,8 @@ export interface FileRoutesByFullPath {
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
+  '/kit/components/$name': typeof KitComponentsNameRoute
+  '/kit/examples/$name': typeof KitExamplesNameRoute
   '/apps/': typeof ShellAppsIndexRoute
   '/engines/': typeof ShellEnginesIndexRoute
   '/integrations/': typeof ShellIntegrationsIndexRoute
@@ -298,6 +312,8 @@ export interface FileRoutesByTo {
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
+  '/kit/components/$name': typeof KitComponentsNameRoute
+  '/kit/examples/$name': typeof KitExamplesNameRoute
   '/apps': typeof ShellAppsIndexRoute
   '/engines': typeof ShellEnginesIndexRoute
   '/integrations': typeof ShellIntegrationsIndexRoute
@@ -338,6 +354,8 @@ export interface FileRoutesById {
   '/_shell/settings/members': typeof ShellSettingsMembersRoute
   '/_shell/settings/models': typeof ShellSettingsModelsRoute
   '/_shell/settings/profile': typeof ShellSettingsProfileRoute
+  '/kit_/components/$name': typeof KitComponentsNameRoute
+  '/kit_/examples/$name': typeof KitExamplesNameRoute
   '/_shell/apps/': typeof ShellAppsIndexRoute
   '/_shell/engines/': typeof ShellEnginesIndexRoute
   '/_shell/integrations/': typeof ShellIntegrationsIndexRoute
@@ -378,6 +396,8 @@ export interface FileRouteTypes {
     | '/settings/members'
     | '/settings/models'
     | '/settings/profile'
+    | '/kit/components/$name'
+    | '/kit/examples/$name'
     | '/apps/'
     | '/engines/'
     | '/integrations/'
@@ -414,6 +434,8 @@ export interface FileRouteTypes {
     | '/settings/members'
     | '/settings/models'
     | '/settings/profile'
+    | '/kit/components/$name'
+    | '/kit/examples/$name'
     | '/apps'
     | '/engines'
     | '/integrations'
@@ -453,6 +475,8 @@ export interface FileRouteTypes {
     | '/_shell/settings/members'
     | '/_shell/settings/models'
     | '/_shell/settings/profile'
+    | '/kit_/components/$name'
+    | '/kit_/examples/$name'
     | '/_shell/apps/'
     | '/_shell/engines/'
     | '/_shell/integrations/'
@@ -473,6 +497,8 @@ export interface RootRouteChildren {
   KitRoute: typeof KitRoute
   SignInRoute: typeof SignInRoute
   DecisionsDecisionRoute: typeof DecisionsDecisionRoute
+  KitComponentsNameRoute: typeof KitComponentsNameRoute
+  KitExamplesNameRoute: typeof KitExamplesNameRoute
   AppsAppScreensScreenRoute: typeof AppsAppScreensScreenRoute
   EnginesEngineAppsScreenFullRoute: typeof EnginesEngineAppsScreenFullRoute
 }
@@ -703,6 +729,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellWorkflowsIndexRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/kit_/components/$name': {
+      id: '/kit_/components/$name'
+      path: '/kit/components/$name'
+      fullPath: '/kit/components/$name'
+      preLoaderRoute: typeof KitComponentsNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/kit_/examples/$name': {
+      id: '/kit_/examples/$name'
+      path: '/kit/examples/$name'
+      fullPath: '/kit/examples/$name'
+      preLoaderRoute: typeof KitExamplesNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_shell/engines/$engine/': {
       id: '/_shell/engines/$engine/'
       path: '/engines/$engine'
@@ -835,6 +875,8 @@ const rootRouteChildren: RootRouteChildren = {
   KitRoute: KitRoute,
   SignInRoute: SignInRoute,
   DecisionsDecisionRoute: DecisionsDecisionRoute,
+  KitComponentsNameRoute: KitComponentsNameRoute,
+  KitExamplesNameRoute: KitExamplesNameRoute,
   AppsAppScreensScreenRoute: AppsAppScreensScreenRoute,
   EnginesEngineAppsScreenFullRoute: EnginesEngineAppsScreenFullRoute,
 }
