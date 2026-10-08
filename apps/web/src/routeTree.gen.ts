@@ -32,6 +32,7 @@ import { Route as ShellIntegrationsIntegrationRouteImport } from './routes/_shel
 import { Route as ShellKnowledgeIndexRouteImport } from './routes/_shell.knowledge.index'
 import { Route as ShellKnowledgeCollectionRouteImport } from './routes/_shell.knowledge.$collection'
 import { Route as ShellOnboardingIndexRouteImport } from './routes/_shell.onboarding.index'
+import { Route as ShellOnboardingKickoffRouteImport } from './routes/_shell.onboarding.kickoff'
 import { Route as ShellOnboardingLogRouteImport } from './routes/_shell.onboarding.log'
 import { Route as ShellOnboardingNotesRouteImport } from './routes/_shell.onboarding.notes'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell.settings.index'
@@ -165,6 +166,11 @@ const ShellOnboardingIndexRoute = ShellOnboardingIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ShellOnboardingRoute,
 } as any)
+const ShellOnboardingKickoffRoute = ShellOnboardingKickoffRouteImport.update({
+  id: '/kickoff',
+  path: '/kickoff',
+  getParentRoute: () => ShellOnboardingRoute,
+} as any)
 const ShellOnboardingLogRoute = ShellOnboardingLogRouteImport.update({
   id: '/log',
   path: '/log',
@@ -267,6 +273,7 @@ export interface FileRoutesByFullPath {
   '/apps/$app': typeof ShellAppsAppRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
+  '/onboarding/kickoff': typeof ShellOnboardingKickoffRoute
   '/onboarding/log': typeof ShellOnboardingLogRoute
   '/onboarding/notes': typeof ShellOnboardingNotesRoute
   '/settings/approvals': typeof ShellSettingsApprovalsRoute
@@ -305,6 +312,7 @@ export interface FileRoutesByTo {
   '/apps/$app': typeof ShellAppsAppRoute
   '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
+  '/onboarding/kickoff': typeof ShellOnboardingKickoffRoute
   '/onboarding/log': typeof ShellOnboardingLogRoute
   '/onboarding/notes': typeof ShellOnboardingNotesRoute
   '/settings/approvals': typeof ShellSettingsApprovalsRoute
@@ -347,6 +355,7 @@ export interface FileRoutesById {
   '/_shell/apps/$app': typeof ShellAppsAppRoute
   '/_shell/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
   '/_shell/knowledge/$collection': typeof ShellKnowledgeCollectionRoute
+  '/_shell/onboarding/kickoff': typeof ShellOnboardingKickoffRoute
   '/_shell/onboarding/log': typeof ShellOnboardingLogRoute
   '/_shell/onboarding/notes': typeof ShellOnboardingNotesRoute
   '/_shell/settings/approvals': typeof ShellSettingsApprovalsRoute
@@ -389,6 +398,7 @@ export interface FileRouteTypes {
     | '/apps/$app'
     | '/integrations/$integration'
     | '/knowledge/$collection'
+    | '/onboarding/kickoff'
     | '/onboarding/log'
     | '/onboarding/notes'
     | '/settings/approvals'
@@ -427,6 +437,7 @@ export interface FileRouteTypes {
     | '/apps/$app'
     | '/integrations/$integration'
     | '/knowledge/$collection'
+    | '/onboarding/kickoff'
     | '/onboarding/log'
     | '/onboarding/notes'
     | '/settings/approvals'
@@ -468,6 +479,7 @@ export interface FileRouteTypes {
     | '/_shell/apps/$app'
     | '/_shell/integrations/$integration'
     | '/_shell/knowledge/$collection'
+    | '/_shell/onboarding/kickoff'
     | '/_shell/onboarding/log'
     | '/_shell/onboarding/notes'
     | '/_shell/settings/approvals'
@@ -666,6 +678,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellOnboardingIndexRouteImport
       parentRoute: typeof ShellOnboardingRoute
     }
+    '/_shell/onboarding/kickoff': {
+      id: '/_shell/onboarding/kickoff'
+      path: '/kickoff'
+      fullPath: '/onboarding/kickoff'
+      preLoaderRoute: typeof ShellOnboardingKickoffRouteImport
+      parentRoute: typeof ShellOnboardingRoute
+    }
     '/_shell/onboarding/log': {
       id: '/_shell/onboarding/log'
       path: '/log'
@@ -782,12 +801,14 @@ declare module '@tanstack/react-router' {
 }
 
 interface ShellOnboardingRouteChildren {
+  ShellOnboardingKickoffRoute: typeof ShellOnboardingKickoffRoute
   ShellOnboardingLogRoute: typeof ShellOnboardingLogRoute
   ShellOnboardingNotesRoute: typeof ShellOnboardingNotesRoute
   ShellOnboardingIndexRoute: typeof ShellOnboardingIndexRoute
 }
 
 const ShellOnboardingRouteChildren: ShellOnboardingRouteChildren = {
+  ShellOnboardingKickoffRoute: ShellOnboardingKickoffRoute,
   ShellOnboardingLogRoute: ShellOnboardingLogRoute,
   ShellOnboardingNotesRoute: ShellOnboardingNotesRoute,
   ShellOnboardingIndexRoute: ShellOnboardingIndexRoute,

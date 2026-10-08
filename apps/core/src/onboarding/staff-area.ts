@@ -24,6 +24,8 @@ export interface StaffFacts {
   sent: ReadonlySet<string>;
   sentAt: ReadonlyMap<string, string>;
   interviews: ReadonlyMap<string, InterviewState>;
+  /** Whether the kickoff's transcript is in and read. */
+  kickoff: boolean;
 }
 
 const agreementKinds = ["processing", "assessment", "council"] as const;
@@ -57,8 +59,7 @@ const todosOf = (
   const talked = (person: string) =>
     (facts.interviews.get(person)?.completedAt ?? null) !== null;
   return {
-    // The kickoff's reading comes with GRA-318.
-    kickoff: [{ kind: "kickoff", done: false }],
+    kickoff: [{ kind: "kickoff", done: facts.kickoff }],
     agreements: agreementKinds.map((what) => ({
       kind: what,
       done: agreementIn(facts.agreements, what),

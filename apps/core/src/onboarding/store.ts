@@ -11,6 +11,12 @@ import type {
   InterviewSaved,
   InterviewSession,
 } from "@grasp-os/shared/interview-links";
+import { visionFields } from "@grasp-os/shared/kickoff";
+import type {
+  KickoffReading,
+  KickoffView,
+  VisionField,
+} from "@grasp-os/shared/kickoff";
 import { agreementsSchema, planSchema } from "@grasp-os/shared/onboarding";
 import type {
   Agreements,
@@ -53,6 +59,7 @@ import {
   interviewStates,
   interviews,
   linkCodes,
+  kickoff,
   links,
   notes,
   onboarding,
@@ -62,6 +69,11 @@ import {
   usage,
 } from "../db/onboarding/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
+import {
+  kickoffBrief,
+  storedAnswersSchema,
+  storedReadingSchema,
+} from "./kickoff.ts";
 import { linkSecretOf } from "./link-secret.ts";
 import {
   agreementsIn,
@@ -672,6 +684,108 @@ export class Onboarding extends DurableObject<Env> {
   /** Where the agreements stand, as staff last said; none before they did. */
   agreements(): Agreements | null {
     return this.#row().agreements;
+  }
+
+  /** The kickoff as staff see it: when it came in, its reading, the answers. */
+  kickoff(): KickoffView {
+    const [row] = this.#db.select().from(kickoff).all();
+    if (row === undefined) {
+      return { transcript: null, reading: null, answers: {} };
+    }
+    return {
+      transcript: {
+        at: row.at,
+        fileName: row.fileName,
+        characters: row.transcript.length,
+      },
+      reading: storedReadingSchema.parse(JSON.parse(row.reading)),
+      answers: storedAnswersSchema.parse(JSON.parse(row.answers)),
+    };
+  }
+
+  /**
+   * Keeps the kickoff's transcript and its reading, replacing any before
+   * them; the sponsor's answers stay, for they answer the company, not one
+   * transcript. In the log and the audit log without its words.
+   */
+  saveKickoff(
+    kept: {
+      transcript: string;
+      fileName: string | null;
+      reading: KickoffReading;
+    },
+    by: AuditActor
+  ): KickoffView {
+    const at = new Date().toISOString();
+    const values = {
+      at,
+      by: whoIs(by),
+      fileName: kept.fileName,
+      transcript: kept.transcript,
+      reading: JSON.stringify(kept.reading),
+    };
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .insert(kickoff)
+        .values({ id: 1, ...values })
+        .onConflictDoUpdate({ target: kickoff.id, set: values })
+        .run();
+      this.#changed(by, "onboarding.kickoff.saved", {
+        characters: kept.transcript.length,
+        said: Object.keys(kept.reading.fields).length,
+      });
+    });
+    this.#deliverAudit();
+    return this.kickoff();
+  }
+
+  /**
+   * Keeps the sponsor's answer to what the kickoff left open about
+   * `field`; an empty one takes it back. False before the kickoff is in.
+   */
+  answerKickoff(field: VisionField, text: string, by: AuditActor): boolean {
+    const [row] = this.#db.select().from(kickoff).all();
+    if (row === undefined) {
+      return false;
+    }
+    const trimmed = text.trim();
+    const kept = storedAnswersSchema.parse(JSON.parse(row.answers));
+    const answers: Partial<Record<VisionField, string>> = {};
+    for (const each of visionFields) {
+      const answer = each === field ? trimmed : (kept[each] ?? "");
+      if (answer !== "") {
+        answers[each] = answer;
+      }
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(kickoff)
+        .set({ answers: JSON.stringify(answers) })
+        .where(eq(kickoff.id, 1))
+        .run();
+      this.#changed(by, "onboarding.kickoff.answered", { field });
+    });
+    this.#deliverAudit();
+    return true;
+  }
+
+  /**
+   * How much of what Stephen needs from the kickoff is in, 0 to 1: the
+   * fields it said, or the sponsor answered, of the ten.
+   */
+  kickoffKnown(): number {
+    const { reading, answers } = this.kickoff();
+    const known = visionFields.filter(
+      (field) =>
+        reading?.fields[field] !== undefined || answers[field] !== undefined
+    );
+    return known.length / visionFields.length;
+  }
+
+  /** What the kickoff gives Stephen's context: empty before it is in. */
+  kickoffBrief(): string {
+    const { reading, answers } = this.kickoff();
+    return kickoffBrief(reading, answers);
   }
 
   /** Grasp's notes, the newest first. */

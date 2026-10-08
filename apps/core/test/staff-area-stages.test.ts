@@ -38,6 +38,7 @@ const gate: GateView = {
 
 const facts: StaffFacts = {
   agreements: null,
+  kickoff: false,
   sent: new Set(["olga"]),
   sentAt: new Map([["olga", "2026-10-01"]]),
   interviews: new Map([

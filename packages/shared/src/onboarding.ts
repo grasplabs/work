@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
+import type { KickoffApi } from "./kickoff.ts";
 import type {
   LogFilter,
   StaffLog,
@@ -245,8 +246,8 @@ export interface OnboardingApi {
   savePlan: (plan: PlanInput) => Promise<OnboardingView>;
 }
 
-/** What only Grasp's staff do in an onboarding. */
-export interface OnboardingStaffApi {
+/** What only Grasp's staff do in an onboarding, the kickoff included. */
+export interface OnboardingStaffApi extends KickoffApi {
   /** Stops the interviews: no link opens and none goes out. */
   pause: () => Promise<OnboardingView>;
   resume: () => Promise<OnboardingView>;
