@@ -36,6 +36,9 @@ const testLeaseMs = 1000;
  */
 const napMs = 3000;
 
+/** The `stuck` step's timeout: the kill comes within milliseconds. */
+const stuckTimeoutMs = 5000;
+
 const effect = async (
   env: FixtureEnv,
   run: string,
@@ -78,7 +81,9 @@ const definitionsFor = (
     run: async (event, step) => {
       let declined: string | undefined;
       try {
-        await step.do("charge", async (context) => {
+        // No retry: the failure is the point, and it is the step's at once.
+        const once = { retries: { limit: 0, delay: 0 } };
+        await step.do("charge", once, async (context) => {
           await effect(env, event.instanceId, "charge", context);
           throw declinedCard();
         });
@@ -115,6 +120,49 @@ const definitionsFor = (
       );
       return { before, after };
     },
+  },
+  // A step whose first attempt fails, and whose retry comes a few seconds
+  // later (or as the params' `delay` says, in ms).
+  flaky: {
+    run: async (event, step) => {
+      const delay: unknown =
+        typeof event.payload === "object" &&
+        event.payload !== null &&
+        "delay" in event.payload
+          ? event.payload.delay
+          : undefined;
+      return await step.do(
+        "flaky",
+        {
+          retries: {
+            limit: 1,
+            delay: typeof delay === "number" ? delay : napMs,
+            backoff: "constant",
+          },
+        },
+        async (context) => {
+          const receipt = await effect(env, event.instanceId, "flaky", context);
+          if (context.attempt === 1) {
+            throw namedError("FlakyError", "attempt 1 failed");
+          }
+          return receipt;
+        }
+      );
+    },
+  },
+  // A step with one retry, a second's backoff and a timeout long enough
+  // for a test to kill the process while an attempt is out, well before
+  // its deadline.
+  stuck: {
+    run: async (event, step) =>
+      await step.do(
+        "stuck",
+        {
+          retries: { limit: 1, delay: 1000, backoff: "constant" },
+          timeout: stuckTimeoutMs,
+        },
+        async (context) => await effect(env, event.instanceId, "stuck", context)
+      ),
   },
   // A step, a wait for an "approved" event, another step.
   approval: {

@@ -132,3 +132,23 @@ export const witness = (run: string, label: string): void => {
     at: Date.now(),
   });
 };
+
+/**
+ * The clock the run objects measure an attempt's running time on
+ * (`WorkflowRun.clock`): the real one, plus whatever a test's code has
+ * moved it on by. Only ever forward, so every other measure stays true.
+ */
+const clockOffset = { ms: 0 };
+
+export const measuredClock = (): number => Date.now() + clockOffset.ms;
+
+/**
+ * Code that runs for `ms` without awaiting anything, as the measured clock
+ * sees it: a loop on that clock, which moves it on as it goes.
+ */
+export const busyFor = (ms: number): void => {
+  const until = measuredClock() + ms;
+  while (measuredClock() < until) {
+    clockOffset.ms += 1;
+  }
+};

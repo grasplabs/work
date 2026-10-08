@@ -136,6 +136,64 @@ const asleepAt = async (
       : undefined;
   });
 
+/**
+ * Waits until the run has suspended on the retry of its first step, with
+ * no activation alive, and returns when the journal says it is due.
+ */
+const retryDueAt = async (definition: string, id: string): Promise<number> =>
+  await until(`run ${id} to wait for a retry`, async () => {
+    const journal = await journalOf(definition, id);
+    const attempts: unknown[] =
+      typeof journal === "object" &&
+      journal !== null &&
+      "attempts" in journal &&
+      Array.isArray(journal.attempts)
+        ? journal.attempts
+        : [];
+    const [first] = attempts;
+    const retryAt =
+      typeof first === "object" && first !== null && "retry_at" in first
+        ? first.retry_at
+        : undefined;
+    return runStatusIn(journal) === "waiting" && typeof retryAt === "number"
+      ? retryAt
+      : undefined;
+  });
+
+interface AttemptView {
+  attempt: number;
+  deadline: number;
+  started_at: number;
+  ended: string | null;
+  retry_at: number | null;
+}
+
+const isAttemptView = (value: unknown): value is AttemptView =>
+  typeof value === "object" &&
+  value !== null &&
+  "attempt" in value &&
+  "deadline" in value &&
+  typeof value.deadline === "number" &&
+  "started_at" in value &&
+  "ended" in value &&
+  "retry_at" in value;
+
+/** The journal's attempts, as far as these tests read them. */
+const attemptsOf = (journal: unknown): AttemptView[] =>
+  typeof journal === "object" &&
+  journal !== null &&
+  "attempts" in journal &&
+  Array.isArray(journal.attempts)
+    ? journal.attempts.filter((attempt) => isAttemptView(attempt))
+    : [];
+
+/** Waits until the clock is past `time`, with no process needed. */
+const pastTime = async (time: number): Promise<void> => {
+  await until(`the clock to pass ${time}`, () =>
+    Date.now() > time ? true : undefined
+  );
+};
+
 /** Each effect of the run, as label and attempt, in the order received. */
 const timeline = (id: string): [string, number][] =>
   outside.of(id).map((effect) => [effect.label, effect.attempt]);
@@ -455,6 +513,88 @@ describe("a run on disk-backed workerd", () => {
         { name: "before", attempt: 1 },
         { name: "nap", state: "succeeded", deadline },
         { name: "after", attempt: 1 },
+      ],
+    });
+  });
+
+  it("retries a failed step at the time journaled before the process died, with no request reaching it", async () => {
+    const id = "retrying-when-killed";
+    await workerd.request("/start", startOf("flaky", id));
+    const retryAt = await retryDueAt("flaky", id);
+    await workerd.kill();
+
+    // No process at all until the retry is well past due.
+    await until("the retry to be due", () =>
+      Date.now() > retryAt + leaseMargin ? true : undefined
+    );
+    await workerd.start();
+    const retry = await until("the retry to go out", () =>
+      outside.of(id, "flaky").find((effect) => effect.attempt === 2)
+    );
+    const status = await ended("flaky", id);
+
+    expect(retry.at).toBeGreaterThanOrEqual(retryAt);
+    expect(timeline(id)).toStrictEqual([
+      ["flaky", 1],
+      ["flaky", 2],
+    ]);
+    expect(keysOf(id, "flaky").size).toBe(1);
+    expect(status).toStrictEqual({ status: "complete", output: retry.receipt });
+    // The retry's time, as journaled before the kill, never computed again.
+    await expect(journalOf("flaky", id)).resolves.toMatchObject({
+      activations: [
+        { generation: 1, ended: "suspended" },
+        { generation: 2, ended: "settled" },
+      ],
+      attempts: [
+        { attempt: 1, generation: 1, ended: "failed", retry_at: retryAt },
+        { attempt: 2, generation: 2, ended: "succeeded" },
+      ],
+    });
+  });
+
+  it("counts an attempt cut off past its deadline as timed out, backs off, and fails the step once its retries are spent", async () => {
+    const id = "cut-off-past-its-deadline";
+    const first = outside.hold(id, "stuck", 1);
+    await workerd.request("/start", startOf("stuck", id));
+    await first;
+    // Killed while the attempt is out, well before its deadline.
+    const [firstOut] = attemptsOf(await journalOf("stuck", id));
+    await workerd.kill();
+    await pastTime((firstOut?.deadline ?? Number.NaN) + leaseMargin);
+
+    const second = outside.hold(id, "stuck", 2);
+    await workerd.start();
+    await second;
+    const retried = attemptsOf(await journalOf("stuck", id));
+    await workerd.kill();
+    await pastTime((retried[1]?.deadline ?? Number.NaN) + leaseMargin);
+    await workerd.start();
+    const status = await ended("stuck", id);
+
+    const timedOut = {
+      name: "WorkflowTimeoutError",
+      message: "Execution timed out after 5000ms",
+    };
+    // The first, found past its deadline, ended as timed out; the second
+    // came after its backoff, not at once.
+    expect(retried).toMatchObject([
+      { attempt: 1, ended: "timed_out", error: JSON.stringify(timedOut) },
+      { attempt: 2, ended: null },
+    ]);
+    expect(retried[1]?.started_at).toBeGreaterThanOrEqual(
+      retried[0]?.retry_at ?? Number.NaN
+    );
+    expect(status).toStrictEqual({ status: "errored", error: timedOut });
+    expect(timeline(id)).toStrictEqual([
+      ["stuck", 1],
+      ["stuck", 2],
+    ]);
+    await expect(journalOf("stuck", id)).resolves.toMatchObject({
+      steps: [{ name: "stuck", state: "failed", attempt: 2 }],
+      attempts: [
+        { attempt: 1, ended: "timed_out" },
+        { attempt: 2, ended: "timed_out", retry_at: null },
       ],
     });
   });

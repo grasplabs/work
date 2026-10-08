@@ -86,6 +86,26 @@ export const namedError = (name: string, message: string): Error => {
   return error;
 };
 
+/**
+ * Thrown from a step's callback, fails the step at once: no retry, however
+ * many its config allows. As Cloudflare's own (`cloudflare:workflows`),
+ * and recognised as Cloudflare recognises it, by its name or a message
+ * that starts with it: an error crosses an RPC boundary as a name and a
+ * message, never as its class.
+ */
+export class NonRetryableError extends Error {
+  constructor(message: string, name = "NonRetryableError") {
+    super(message);
+    // oxlint-disable-next-line unicorn/custom-error-definition -- Cloudflare's constructor takes the name too
+    this.name = name;
+  }
+}
+
+/** Whether a step's error, as journaled, ends its retries. */
+export const isNonRetryable = (record: WorkflowError): boolean =>
+  record.name === "NonRetryableError" ||
+  record.message.startsWith("NonRetryableError");
+
 /** The error a journaled failure is thrown as, on first run and on replay. */
 export const rebuild = (text: string): Error => {
   const { name, message } = parseError(text);

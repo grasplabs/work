@@ -11,13 +11,41 @@
 // `stopped`, a typed outcome of its own: nothing is thrown through the
 // definition, and nothing is recognised by an error's name or message.
 //
+// A `do` step's attempt runs to its outcome or its timeout, whichever
+// comes first. One that times out is ended in the journal as `timed_out`
+// in the write that fails it: whatever it answers later is dropped, and
+// only the step's latest attempt can journal an outcome. A failed attempt
+// with retries left journals when the next is due, as an absolute time;
+// one due later parks the step, and once every step still out is parked
+// the activation suspends until the earliest of them, as a wait does.
+// Nothing of the run stays in memory between attempts. A parked step's
+// retry may wait past its time for siblings still out to land: a retry
+// is never early, and the step out is never cut off for it.
+//
+// Every call of the step API carries the attempt it comes from, if any,
+// in its async context: a callback whose attempt has its outcome (one
+// that timed out goes on regardless) can't journal, count or wait for
+// anything. An attempt is claimed only if its deadline fits in what is
+// left of the alarm handler's wall time (config.ts); one that doesn't is
+// left for a fresh activation, whose first attempt always runs.
+//
 // Waits come one at a time. A second sleep or wait reached while one is
 // pending ends the run with a WorkflowParallelWaitError, and a replay that
 // reaches a wait other than the one the journal holds (another event type
 // or duration, or a new wait while the run's suspended one still waits)
 // ends it with a WorkflowReplayMismatchError: a `Halt`, through the same
 // typed outcome, never a loop of activations.
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { decode, encode } from "./codec.ts";
+import {
+  defaultRetryDelayMs,
+  delayFunctionTimeoutMs,
+  handlerBudgetMs,
+  readCall,
+  retryDelayMs,
+} from "./config.ts";
+import type { StepConfig, StepWork } from "./config.ts";
 import type {
   WorkflowDefinition,
   WorkflowDuration,
@@ -32,15 +60,22 @@ import {
   parseDuration,
   waitTimedOut,
 } from "./durations.ts";
-import { errorRecord, namedError, rebuild } from "./errors.ts";
+import { errorRecord, isNonRetryable, namedError, rebuild } from "./errors.ts";
 import { assertEventType, assertStepName, stepKey } from "./identity.ts";
 import {
+  readAttempt,
   readConsumedEvent,
   readNextEvent,
   readRun,
   readStep,
 } from "./journal.ts";
-import type { EventRow, RunRow, StepRow, StepType } from "./journal.ts";
+import type {
+  AttemptRow,
+  EventRow,
+  RunRow,
+  StepRow,
+  StepType,
+} from "./journal.ts";
 
 /** What the definition did: returned, or threw. */
 export type Settlement =
@@ -94,8 +129,6 @@ const never = async (): Promise<never> =>
 /** What a guarded journal write returns when it failed. */
 const failed = Symbol("failed");
 
-type StepWork<T> = (context: WorkflowStepContext) => Promise<T> | T;
-
 interface StepIdentity {
   type: StepType;
   name: string;
@@ -106,9 +139,94 @@ interface Claim {
   ordinal: number;
   attempt: number;
   key: string;
+  /** When the attempt's timeout ends it. */
+  deadline: number;
 }
 
-type StepOutcome = { ok: true; value: string } | { ok: false; error: string };
+/** A failed attempt whose retry waits for the step's delay function. */
+interface Asking {
+  claim: Claim;
+  /** The attempt's error, which the function is told. */
+  error: string;
+}
+
+/**
+ * What comes of a failed attempt once it is journaled: a retry, the delay
+ * function to ask first, or the step's failure.
+ */
+type Landing = "retry" | { ask: Asking } | { failed: string };
+
+/** A failed attempt's landing once any delay function has answered. */
+type Settled = Exclude<Landing, { ask: Asking }>;
+
+/** What comes next for a step, in this activation. */
+type Next =
+  | { claim: Claim }
+  | { park: number }
+  | Exclude<Landing, "retry">
+  | null;
+
+/** What a callback did, before its timeout or after it. */
+type Answer =
+  | { ok: true; value: unknown }
+  | { ok: false; error: unknown }
+  | { timedOut: true };
+
+/** How a failed attempt failed, as the journal keeps it. */
+interface AttemptFailure {
+  error: string;
+  ended: "failed" | "timed_out";
+  /** False for a NonRetryableError or a value it can't keep. */
+  retryable: boolean;
+}
+
+/** How one attempt came out, as the journal keeps it. */
+type AttemptOutcome =
+  | { ok: true; value: string }
+  | ({ ok: false } & AttemptFailure);
+
+/** A step's value, once an attempt's outcome is journaled. */
+interface Landed {
+  ok: true;
+  value: string;
+}
+
+/** A retry's delay, or why the step is spent instead. */
+type Delay = { ms: number } | { error: string };
+
+/**
+ * The attempt a call of the step API comes from, through the callback's
+ * async context. `live` is false once the attempt has an outcome (it
+ * answered, or timed out), and for a delay function.
+ */
+interface AttemptScope {
+  live: boolean;
+}
+
+const attempts = new AsyncLocalStorage<AttemptScope>();
+
+/** Whether `scope` is an attempt's that has its outcome; read each time. */
+const hasEnded = (scope: AttemptScope | undefined): boolean =>
+  scope?.live === false;
+
+/** What an attempt cut off before its outcome was journaled failed with. */
+const cutOff = (): Error =>
+  namedError(
+    "WorkflowInternalError",
+    "Attempt failed due to internal workflows error"
+  );
+
+/** A delay function's failure, as Cloudflare words it. */
+const delayFailure = (identity: StepIdentity, reason: string): Delay => ({
+  error: JSON.stringify(
+    errorRecord(
+      namedError(
+        "NonRetryableDelayError",
+        `The delay function for step "${identity.name}-${identity.occurrence}" ${reason}`
+      )
+    )
+  ),
+});
 
 /** How a sleep or a wait came out, in this activation. */
 type WaitOutcome =
@@ -131,6 +249,82 @@ interface WaitPlan {
    */
   durationMs: number | null;
 }
+
+/** What `call` did, as a value: it never rejects. */
+const answerOf = async (call: () => Promise<unknown>): Promise<Answer> => {
+  try {
+    return { ok: true, value: await call() };
+  } catch (error) {
+    return { ok: false, error };
+  }
+};
+
+/** A timeout after `ms`, or never once `signal` aborts. */
+const timeoutAfter = async (
+  ms: number,
+  signal: AbortSignal
+): Promise<Answer> => {
+  try {
+    await scheduler.wait(Math.max(0, ms), { signal });
+  } catch {
+    // Aborted: what it timed answered first.
+    return await never();
+  }
+  return { timedOut: true };
+};
+
+/**
+ * What `call` did, or its timeout after `ms`, whichever comes first. The
+ * deadline is taken and the timer started before any of the author's
+ * code runs. A timer can't interrupt synchronous code, so an answer that
+ * comes back past the deadline (by `clock`, the clock the deadline was
+ * taken on) timed out, though it beat the timer. A call that throws
+ * before it returns fails as one that rejects, and one that answers after
+ * its timeout answers no one: its answer is a value, so even a late
+ * rejection is never an unhandled one.
+ *
+ * On workerd the clock only moves with I/O, so code that never awaits any
+ * looks instant to it; the host's CPU limit is what ends such code there.
+ */
+const answerWithin = async (
+  call: () => Promise<unknown>,
+  ms: number,
+  clock: () => number
+): Promise<Answer> => {
+  const deadline = clock() + ms;
+  const timer = new AbortController();
+  const timedOut = timeoutAfter(ms, timer.signal);
+  try {
+    const answer = await Promise.race([answerOf(call), timedOut]);
+    return clock() >= deadline ? { timedOut: true } : answer;
+  } finally {
+    timer.abort();
+  }
+};
+
+/**
+ * Refuses to journal a time that isn't one: a retry's time is computed
+ * from config, and the alarm set to it must be a real time. Throwing in the
+ * journal's write faults the activation, and nothing is written.
+ */
+const assertTime = (time: number | null): void => {
+  if (time !== null && !Number.isFinite(time)) {
+    throw new RangeError(`A retry's time came out as ${String(time)}`);
+  }
+};
+
+/** What a step's callback, or its delay function, is told. */
+const contextOf = (
+  identity: StepIdentity,
+  claim: Claim,
+  config: StepConfig
+): WorkflowStepContext => ({
+  step: { name: identity.name, count: identity.occurrence },
+  attempt: claim.attempt,
+  idempotencyKey: claim.key,
+  // A copy each time: what one callback does to it, the next never sees.
+  config: structuredClone(config.context),
+});
 
 const stepEvent = <Payload>(event: EventRow): WorkflowStepEvent<Payload> => ({
   // SAFETY: what the sender sent, through the codec; the payload's type is
@@ -191,10 +385,14 @@ const mismatchIn = (
     .exec<{
       type: string;
       name: string;
-    }>("SELECT type, name FROM steps WHERE state = 'waiting' LIMIT 1")
+      state: string;
+    }>(
+      "SELECT type, name, state FROM steps WHERE state IN ('waiting', 'retrying') LIMIT 1"
+    )
     .toArray();
   if (other !== undefined) {
-    return `it reached ${named} while the ${other.type} ${JSON.stringify(other.name)} it suspended on is still waiting`;
+    const still = other.state === "retrying" ? "waiting to retry" : "waiting";
+    return `it reached ${named} while the ${other.type} ${JSON.stringify(other.name)} it suspended on is still ${still}`;
   }
   return undefined;
 };
@@ -204,6 +402,8 @@ export class Activation {
   readonly #run: RunRow;
   readonly #generation: number;
   readonly #leaseMs: number;
+  /** The clock an attempt's or a delay function's running time is measured on. */
+  readonly #clock: () => number;
   /** Settled, superseded, suspended or faulted: every later call is refused. */
   #over = false;
   readonly #stop: (stop: Stop) => void;
@@ -217,6 +417,17 @@ export class Activation {
   #waitPending = false;
   /** `do` steps of this activation whose calls haven't settled. */
   #stepsInFlight = 0;
+  /**
+   * This activation's parked steps: steps whose next attempt comes later.
+   * They count among the steps in flight; once they are all that is, the
+   * activation suspends until the earliest is due.
+   */
+  #parkedCount = 0;
+  #parkedWake = Number.POSITIVE_INFINITY;
+  /** When this activation's alarm handler started: its wall time's start. */
+  readonly #startedAt = Date.now();
+  /** Whether this activation has claimed an attempt yet. */
+  #claimed = false;
 
   /** What the definition is handed as `step`. */
   readonly step: WorkflowStep;
@@ -225,24 +436,25 @@ export class Activation {
     storage: DurableObjectStorage,
     run: RunRow,
     generation: number,
-    leaseMs: number
+    leaseMs: number,
+    clock: () => number
   ) {
     this.#storage = storage;
     this.#run = run;
     this.#generation = generation;
     this.#leaseMs = leaseMs;
+    this.#clock = clock;
     const { promise, resolve } = Promise.withResolvers<Stop>();
     this.stopped = promise;
     this.#stop = resolve;
     // Every call goes through #toAuthor, the one place an outcome is
     // handed back to the definition.
+    const doStep = async (name: string, ...rest: unknown[]): Promise<unknown> =>
+      await this.#toAuthor(async () => await this.#do(name, rest));
     this.step = {
-      do: async <T>(
-        name: string,
-        work: StepWork<T>,
-        ...rest: unknown[]
-      ): Promise<T> =>
-        await this.#toAuthor(async () => await this.#do(name, work, rest)),
+      // SAFETY: both of the contract's forms, told apart by `rest` (config.ts).
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      do: doStep as WorkflowStep["do"],
       sleep: async (
         name: string,
         duration: WorkflowDuration
@@ -279,6 +491,15 @@ export class Activation {
    * the author's runs after the stop.
    */
   async #toAuthor<T>(call: () => Promise<T>): Promise<T> {
+    // A call from a step's callback whose attempt has its outcome (it
+    // answered, or timed out and goes on regardless) acts for nothing: it
+    // never settles, journals nothing and counts no occurrence. Not
+    // #refuse: this activation is still current, only that attempt is over.
+    // Nested calls from an attempt still out are the reference's, and run.
+    const caller = attempts.getStore();
+    if (hasEnded(caller)) {
+      return await never();
+    }
     let settled: { ok: true; value: T } | { ok: false; error: unknown };
     try {
       settled = { ok: true, value: await call() };
@@ -291,6 +512,11 @@ export class Activation {
     }
     if (!current) {
       return await this.#refuse();
+    }
+    if (hasEnded(caller)) {
+      // Called while its attempt was out, and answered after it ended: the
+      // answer has no one to go to.
+      return await never();
     }
     if (!settled.ok) {
       throw settled.error;
@@ -405,65 +631,241 @@ export class Activation {
     }
   }
 
-  /** Moves the watchdog alarm to a lease from now. */
+  /**
+   * Moves the watchdog alarm to a lease from now, unless the activation is
+   * over: then the alarm is what its end set (a suspension's wake, or none
+   * once settled), and a renewal issued after that would replace it.
+   */
   async #renewWatchdog(): Promise<void> {
+    if (this.#over) {
+      return;
+    }
     await this.#arm(Date.now() + this.#leaseMs);
   }
 
-  /** Journals a new attempt at the step, if this activation is current. */
-  #claim(step: StepIdentity, journaled: StepRow | undefined): Claim | null {
-    return this.#storage.transactionSync(() => {
+  /**
+   * Ends the failed attempt `claim` in the journal and says what comes
+   * next for its step: a retry (its absolute time journaled here), a
+   * delay function to ask (a provisional retry journaled here, so the
+   * attempt is fenced now and recovery finds one consistent state), or
+   * the step's failure once its retries are spent. Called inside the
+   * transaction that found the attempt failed.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- one of the step's journal writes, beside the others
+  #endFailedIn(
+    sql: SqlStorage,
+    now: number,
+    claim: Claim,
+    config: StepConfig,
+    failure: AttemptFailure
+  ): Landing {
+    const retrying = failure.retryable && claim.attempt <= config.limit;
+    let retryAt: number | null = null;
+    let landing: Landing = { failed: failure.error };
+    if (retrying && typeof config.delay === "function") {
+      // Until the function answers, the retry is due after the default
+      // delay: should the activation die while it asks, that is when the
+      // retry comes, and the function is never asked again for this
+      // attempt.
+      retryAt = now + defaultRetryDelayMs;
+      landing = { ask: { claim, error: failure.error } };
+    } else if (retrying && typeof config.delay === "number") {
+      retryAt = now + retryDelayMs(config.backoff, config.delay, claim.attempt);
+      landing = "retry";
+    }
+    assertTime(retryAt);
+    sql.exec(
+      "UPDATE steps SET state = ?, value = NULL, error = ? WHERE ordinal = ?",
+      retryAt === null ? "failed" : "retrying",
+      retryAt === null ? failure.error : null,
+      claim.ordinal
+    );
+    sql.exec(
+      "UPDATE attempts SET ended_at = ?, ended = ?, error = ?, retry_at = ? WHERE ordinal = ? AND attempt = ?",
+      now,
+      failure.ended,
+      failure.error,
+      retryAt,
+      claim.ordinal,
+      claim.attempt
+    );
+    return landing;
+  }
+
+  /**
+   * What comes next for a step, if this activation is current: its first
+   * attempt, the next one (after a retry that is due, or one cut off
+   * before its outcome was journaled), parking until a retry is due, or
+   * the step's end. The journal is read in the same write that acts on
+   * it, so what was read is what the write is for.
+   *
+   * An attempt cut off (the process died, the object was evicted or taken
+   * over) counts against the step's retries like any other. One cut off
+   * past its deadline timed out, as far as the step can tell: it is ended
+   * as one that timed out, and retried after its backoff. One cut off
+   * before is retried at once, as on Cloudflare. Either way the attempts
+   * a step gets are bounded by its limit, however often its activations
+   * die.
+   */
+  #nextAttempt(identity: StepIdentity, config: StepConfig): Next {
+    return this.#storage.transactionSync((): Next => {
       if (!this.#current()) {
         return null;
       }
       const { sql } = this.#storage;
       const now = Date.now();
-      let claim: Claim;
-      if (journaled === undefined) {
-        const key = stepKey(this.#run.run_uid, step);
-        const { ordinal } = sql
+      const step = readStep(sql, identity);
+      let ordinal: number;
+      let attempt = 1;
+      let key = stepKey(this.#run.run_uid, identity);
+      if (step === undefined) {
+        if (!this.#fits(now, config)) {
+          return { park: now };
+        }
+        ({ ordinal } = sql
           .exec<{ ordinal: number }>(
-            "INSERT INTO steps (type, name, occurrence, idempotency_key, state, attempt) VALUES (?, ?, ?, ?, 'running', 1) RETURNING ordinal",
-            step.type,
-            step.name,
-            step.occurrence,
-            key
+            "INSERT INTO steps (type, name, occurrence, idempotency_key, state, attempt, config) VALUES (?, ?, ?, ?, 'running', 1, ?) RETURNING ordinal",
+            identity.type,
+            identity.name,
+            identity.occurrence,
+            key,
+            config.journal
           )
-          .one();
-        claim = { ordinal, attempt: 1, key };
+          .one());
       } else {
-        // An earlier attempt was cut off before its outcome was journaled:
-        // this one goes out again under the same key.
-        claim = {
-          ordinal: journaled.ordinal,
-          attempt: journaled.attempt + 1,
-          key: journaled.idempotency_key,
-        };
+        const latest = readAttempt(sql, step.ordinal, step.attempt);
+        if (latest === undefined) {
+          throw new Error(`The journal lost the attempts of ${identity.name}`);
+        }
+        const ended = this.#endCutOffIn(sql, now, step, latest, config);
+        if (ended !== undefined) {
+          return ended;
+        }
+        const after = readStep(sql, identity);
+        if (after?.state === "retrying") {
+          const retryAt = readAttempt(
+            sql,
+            after.ordinal,
+            after.attempt
+          )?.retry_at;
+          if (typeof retryAt !== "number") {
+            throw new TypeError(
+              `The journal lost the retry of ${identity.name}`
+            );
+          }
+          if (now < retryAt) {
+            return { park: retryAt };
+          }
+        } else if (after?.state !== "running") {
+          throw new Error(
+            `The journal holds the step ${identity.name} as ${String(after?.state)}, with no attempt left to make`
+          );
+        }
+        if (!this.#fits(now, config)) {
+          return { park: now };
+        }
+        // A retry that is due, or an attempt cut off before its deadline
+        // with retries left. The next goes out under the step's one key
+        // (contracts.ts): an attempt that timed out or was cut off may
+        // still have had its effect, and a receiver that deduplicates by
+        // the key applies it once. Effect receipts stay stable across
+        // attempts, as spec 43.6 asks; the attempt number is the fence.
+        ({ ordinal } = step);
+        attempt = step.attempt + 1;
+        key = step.idempotency_key;
         sql.exec(
           "UPDATE steps SET attempt = ?, state = 'running' WHERE ordinal = ?",
-          claim.attempt,
-          claim.ordinal
+          attempt,
+          ordinal
         );
       }
+      const claim: Claim = {
+        ordinal,
+        attempt,
+        key,
+        deadline: now + config.timeoutMs,
+      };
       sql.exec(
-        "INSERT INTO attempts (ordinal, attempt, generation, started_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO attempts (ordinal, attempt, generation, started_at, deadline) VALUES (?, ?, ?, ?, ?)",
         claim.ordinal,
         claim.attempt,
         this.#generation,
-        now
+        now,
+        claim.deadline
       );
       this.#renewLease(now);
-      return claim;
+      this.#claimed = true;
+      return { claim };
     });
   }
 
   /**
-   * Journals the attempt's outcome if this activation is current and the
-   * attempt is still the step's latest; otherwise records that its answer
-   * was ignored.
+   * Ends the step's latest attempt if it was cut off before its outcome
+   * was journaled and counts as a failure now: past its deadline (it timed
+   * out, as far as the step can tell), or the last its retries allow.
+   * Returns what comes of it, unless that is a retry: then undefined, as
+   * for an attempt cut off before its deadline with retries left, which
+   * is retried at once.
    */
-  #commit(claim: Claim, outcome: StepOutcome): boolean {
-    return this.#storage.transactionSync(() => {
+  #endCutOffIn(
+    sql: SqlStorage,
+    now: number,
+    step: StepRow,
+    latest: AttemptRow,
+    config: StepConfig
+  ): Exclude<Landing, "retry"> | undefined {
+    if (step.state !== "running" || latest.ended_at !== null) {
+      return undefined;
+    }
+    const timedOut = now >= latest.deadline;
+    if (!timedOut && step.attempt <= config.limit) {
+      return undefined;
+    }
+    const landing = this.#endFailedIn(
+      sql,
+      now,
+      {
+        ordinal: step.ordinal,
+        attempt: step.attempt,
+        key: step.idempotency_key,
+        deadline: latest.deadline,
+      },
+      config,
+      {
+        error: JSON.stringify(
+          errorRecord(timedOut ? waitTimedOut(config.timeoutMs) : cutOff())
+        ),
+        ended: timedOut ? "timed_out" : "failed",
+        retryable: true,
+      }
+    );
+    this.#renewLease(now);
+    return landing === "retry" ? undefined : landing;
+  }
+
+  /**
+   * Whether an attempt claimed now can run to its deadline inside this
+   * alarm handler's wall time. An activation's first attempt always runs:
+   * the next activation would be no fresher, so it would never run.
+   */
+  #fits(now: number, config: StepConfig): boolean {
+    return (
+      !this.#claimed ||
+      now + config.timeoutMs <= this.#startedAt + handlerBudgetMs
+    );
+  }
+
+  /**
+   * Journals the attempt's outcome if this activation is current and the
+   * attempt is still the step's latest and not ended; otherwise records
+   * that its answer was ignored.
+   */
+  #commit(
+    claim: Claim,
+    config: StepConfig,
+    outcome: AttemptOutcome
+  ): Landing | Landed | null {
+    return this.#storage.transactionSync((): Landing | Landed | null => {
       const { sql } = this.#storage;
       const now = Date.now();
       const latest = sql
@@ -472,48 +874,46 @@ export class Activation {
           claim.ordinal
         )
         .one();
-      if (!this.#current() || latest.attempt !== claim.attempt) {
+      const attempt = readAttempt(sql, claim.ordinal, claim.attempt);
+      if (
+        !this.#current() ||
+        latest.attempt !== claim.attempt ||
+        attempt?.ended_at !== null
+      ) {
         sql.exec(
           "UPDATE attempts SET ended_at = ?, ended = 'superseded' WHERE ordinal = ? AND attempt = ? AND ended_at IS NULL",
           now,
           claim.ordinal,
           claim.attempt
         );
-        return false;
+        return null;
+      }
+      this.#renewLease(now);
+      if (!outcome.ok) {
+        return this.#endFailedIn(sql, now, claim, config, outcome);
       }
       sql.exec(
-        "UPDATE steps SET state = ?, value = ?, error = ? WHERE ordinal = ?",
-        outcome.ok ? "succeeded" : "failed",
-        outcome.ok ? outcome.value : null,
-        outcome.ok ? null : outcome.error,
+        "UPDATE steps SET state = 'succeeded', value = ?, error = NULL WHERE ordinal = ?",
+        outcome.value,
         claim.ordinal
       );
       sql.exec(
-        "UPDATE attempts SET ended_at = ?, ended = ? WHERE ordinal = ? AND attempt = ?",
+        "UPDATE attempts SET ended_at = ?, ended = 'succeeded' WHERE ordinal = ? AND attempt = ?",
         now,
-        outcome.ok ? "succeeded" : "failed",
         claim.ordinal,
         claim.attempt
       );
-      this.#renewLease(now);
-      return true;
+      return outcome;
     });
   }
 
-  /** Runs the step's work once, journaling what it returned or threw. */
-  async #attempt<T>(
+  /** Runs one attempt at the step: its callback, to an outcome. */
+  async #runAttempt(
     identity: StepIdentity,
-    journaled: StepRow | undefined,
-    work: StepWork<T>,
-    land: () => void
-  ): Promise<T> {
-    const claim = this.#write(() => this.#claim(identity, journaled));
-    if (claim === failed) {
-      return await never();
-    }
-    if (claim === null) {
-      return await this.#refuse();
-    }
+    config: StepConfig,
+    claim: Claim,
+    work: StepWork
+  ): Promise<AttemptOutcome> {
     await this.#renewWatchdog();
     // The await above lets other calls of the definition run; one of them
     // may have ended this activation (a halt, a suspension). The callback
@@ -525,34 +925,166 @@ export class Activation {
     if (!stillCurrent) {
       return await this.#refuse();
     }
-    let outcome: StepOutcome;
+    // A callback still out at its deadline goes on (JavaScript can't be
+    // stopped), but nothing it answers is looked at again, and nothing it
+    // calls of the step API once the attempt has an outcome is answered.
+    const context = contextOf(identity, claim, config);
+    const scope: AttemptScope = { live: true };
+    let answer: Answer;
     try {
-      const value = await work({
-        step: { name: identity.name, count: identity.occurrence },
-        attempt: claim.attempt,
-        idempotencyKey: claim.key,
-      });
-      // A value the journal can't keep fails the step, as a throw would.
-      outcome = { ok: true, value: encode(value) };
-    } catch (error) {
-      outcome = { ok: false, error: JSON.stringify(errorRecord(error)) };
+      answer = await answerWithin(
+        async () => await attempts.run(scope, async () => await work(context)),
+        claim.deadline - Date.now(),
+        this.#clock
+      );
+    } finally {
+      scope.live = false;
     }
-    const committed = this.#write(() => this.#commit(claim, outcome));
-    if (committed === failed) {
+    if ("timedOut" in answer) {
+      return {
+        ok: false,
+        error: JSON.stringify(errorRecord(waitTimedOut(config.timeoutMs))),
+        ended: "timed_out",
+        retryable: true,
+      };
+    }
+    if (answer.ok) {
+      try {
+        return { ok: true, value: encode(answer.value) };
+      } catch (error) {
+        // A value the journal can't keep fails the step, as a throw
+        // would; the same callback would only return it again.
+        return {
+          ok: false,
+          error: JSON.stringify(errorRecord(error)),
+          ended: "failed",
+          retryable: false,
+        };
+      }
+    }
+    const record = errorRecord(answer.error);
+    return {
+      ok: false,
+      error: JSON.stringify(record),
+      ended: "failed",
+      retryable: !isNonRetryable(record),
+    };
+  }
+
+  /**
+   * Asks the step's delay function, once, when the attempt `asking.claim`
+   * that failed is due again, and journals what it says over the
+   * provisional retry: the retry's time, or the step's failure. It is the
+   * author's code, so it runs only while this activation is current, has
+   * `delayFunctionTimeoutMs`, and nothing it calls of the step API is
+   * answered. One that throws, takes too long or says something that
+   * isn't a delay spends the step, as Cloudflare's NonRetryableDelayError.
+   */
+  async #askDelay(
+    identity: StepIdentity,
+    config: StepConfig,
+    asking: Asking
+  ): Promise<Settled | null> {
+    const { delay } = config;
+    if (typeof delay !== "function") {
+      throw new TypeError(`The step ${identity.name} has no delay function`);
+    }
+    const current = this.#write(() => this.#current());
+    if (current === failed) {
       return await never();
     }
-    if (!committed) {
+    if (!current) {
       return await this.#refuse();
     }
-    land();
-    await this.#renewWatchdog();
-    if (!outcome.ok) {
-      throw rebuild(outcome.error);
+    const { claim } = asking;
+    const ctx = contextOf(identity, claim, config);
+    const answer = await answerWithin(
+      async () =>
+        await attempts.run(
+          { live: false },
+          async () => await delay({ ctx, error: rebuild(asking.error) })
+        ),
+      delayFunctionTimeoutMs,
+      this.#clock
+    );
+    let said: Delay;
+    if ("timedOut" in answer) {
+      said = delayFailure(
+        identity,
+        `did not return within ${delayFunctionTimeoutMs / 1000} seconds`
+      );
+    } else if (answer.ok) {
+      try {
+        const base = parseDuration(answer.value, "A retry delay");
+        said = { ms: retryDelayMs(config.backoff, base, claim.attempt) };
+      } catch {
+        said = delayFailure(
+          identity,
+          'returned an invalid delay value (expected a number of ms or a duration string like "30 seconds")'
+        );
+      }
+    } else {
+      said = delayFailure(
+        identity,
+        `threw an error: ${errorRecord(answer.error).message}`
+      );
     }
-    // SAFETY: the work's own value through the codec, which is what every
-    // replay of this step returns too.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-    return decode(outcome.value) as T;
+    const landing = this.#write(() => this.#journalDelay(claim, said));
+    if (landing === failed) {
+      return await never();
+    }
+    return landing;
+  }
+
+  /**
+   * Journals what a delay function said over the provisional retry, if
+   * this activation is current and that retry still stands: the retry's
+   * time, counted from when the attempt ended, or the step's failure.
+   * Null when it no longer stands.
+   */
+  #journalDelay(claim: Claim, said: Delay): Settled | null {
+    return this.#storage.transactionSync((): Settled | null => {
+      if (!this.#current()) {
+        return null;
+      }
+      const { sql } = this.#storage;
+      const step = sql
+        .exec<{ attempt: number; state: string }>(
+          "SELECT attempt, state FROM steps WHERE ordinal = ?",
+          claim.ordinal
+        )
+        .one();
+      const ended = readAttempt(sql, claim.ordinal, claim.attempt);
+      if (
+        step.attempt !== claim.attempt ||
+        step.state !== "retrying" ||
+        typeof ended?.ended_at !== "number"
+      ) {
+        return null;
+      }
+      if ("ms" in said) {
+        const retryAt = ended.ended_at + said.ms;
+        assertTime(retryAt);
+        sql.exec(
+          "UPDATE attempts SET retry_at = ? WHERE ordinal = ? AND attempt = ?",
+          retryAt,
+          claim.ordinal,
+          claim.attempt
+        );
+        return "retry";
+      }
+      sql.exec(
+        "UPDATE steps SET state = 'failed', error = ? WHERE ordinal = ?",
+        said.error,
+        claim.ordinal
+      );
+      sql.exec(
+        "UPDATE attempts SET retry_at = NULL WHERE ordinal = ? AND attempt = ?",
+        claim.ordinal,
+        claim.attempt
+      );
+      return { failed: said.error };
+    });
   }
 
   /** The next occurrence of `name` among steps of `type`, from 1. */
@@ -563,7 +1095,65 @@ export class Activation {
     return { type, name, occurrence };
   }
 
-  async #do<T>(name: string, work: StepWork<T>, rest: unknown[]): Promise<T> {
+  /**
+   * Parks a step until `wake`: its retry, or a fresh activation for an
+   * attempt this one has no wall time left for. Its call doesn't settle in
+   * this activation. The activation suspends once every step still out is
+   * parked, so no step out at its effect is cut off by the suspension: a
+   * parked step's retry may wait for its siblings to land.
+   */
+  async #park(wake: number): Promise<never> {
+    this.#parkedCount += 1;
+    this.#parkedWake = Math.min(this.#parkedWake, wake);
+    this.#suspendIfParked();
+    return await never();
+  }
+
+  /**
+   * Suspends the activation until the earliest parked step is due, once
+   * the parked steps are all that is out and no wait is pending. The wake
+   * is journaled and the alarm set in one synchronous turn.
+   */
+  #suspendIfParked(): void {
+    const quiet =
+      !this.#over &&
+      this.#parkedCount > 0 &&
+      !this.#waitPending &&
+      this.#stepsInFlight === this.#parkedCount;
+    if (!quiet) {
+      return;
+    }
+    const wake = this.#parkedWake;
+    const suspendedNow = this.#write(() =>
+      this.#storage.transactionSync(() => {
+        if (!this.#current()) {
+          return false;
+        }
+        this.#suspendIn(this.#storage.sql, Date.now(), wake);
+        return true;
+      })
+    );
+    if (suspendedNow === failed) {
+      return;
+    }
+    if (!suspendedNow) {
+      try {
+        this.#endSuperseded();
+      } catch {
+        // Only the record of it failed; the activation is over all the same.
+      }
+      return;
+    }
+    this.#over = true;
+    // Issued now, in the turn of the write it goes with; `stopped` reports
+    // the suspension once it is set, or the fault if it couldn't be.
+    void (async (): Promise<void> => {
+      await this.#arm(wake);
+      this.#stop(suspended);
+    })();
+  }
+
+  async #do(name: string, rest: unknown[]): Promise<unknown> {
     if (this.#waitPending) {
       return await this.#halt(parallelWait("step", name));
     }
@@ -575,22 +1165,23 @@ export class Activation {
       if (inFlight) {
         inFlight = false;
         this.#stepsInFlight -= 1;
+        // The steps still out may all be parked now.
+        this.#suspendIfParked();
       }
     };
     try {
-      return await this.#doAlone(name, work, rest, land);
+      return await this.#doAlone(name, rest, land);
     } finally {
       // Never reached by a step whose call never settles.
       land();
     }
   }
 
-  async #doAlone<T>(
+  async #doAlone(
     name: string,
-    work: StepWork<T>,
     rest: unknown[],
     land: () => void
-  ): Promise<T> {
+  ): Promise<unknown> {
     const current = this.#write(() => this.#current());
     if (current === failed) {
       return await never();
@@ -599,30 +1190,82 @@ export class Activation {
       return await this.#refuse();
     }
     assertStepName(name);
-    if (typeof work !== "function" || rest.length > 0) {
-      // A configured step (`do(name, config, callback)`) would retry and
-      // time out; until retries are built it is refused, not run without.
-      throw new TypeError(
-        "step.do takes a name and a callback; configured steps aren't supported yet"
-      );
-    }
+    const { work, config } = readCall(rest);
     const identity = this.#occurrence("do", name);
     const journaled = this.#write(() => readStep(this.#storage.sql, identity));
     if (journaled === failed) {
       return await never();
     }
+    // Checked whatever state the step is in, as a wait's are: a step
+    // configured otherwise isn't the step the journal holds.
+    if (journaled !== undefined && journaled.config !== config.journal) {
+      return await this.#halt(
+        replayMismatch(
+          `the do ${JSON.stringify(name)} was configured ${String(journaled.config)}, and is now configured ${config.journal}`
+        )
+      );
+    }
     if (journaled?.state === "succeeded" && journaled.value !== null) {
       land();
-      // SAFETY: what this step's work returned, through the codec, as the
-      // attempt that journaled it returned it.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-      return decode(journaled.value) as T;
+      // What this step's work returned, through the codec, as the attempt
+      // that journaled it returned it.
+      return decode(journaled.value);
     }
     if (journaled?.state === "failed" && journaled.error !== null) {
       land();
       throw rebuild(journaled.error);
     }
-    return await this.#attempt(identity, journaled, work, land);
+    return await this.#attempts(identity, config, work, land);
+  }
+
+  /**
+   * The step's next attempt, and each after it that is due at once, to
+   * the step's outcome; a retry due later parks the step.
+   */
+  async #attempts(
+    identity: StepIdentity,
+    config: StepConfig,
+    work: StepWork,
+    land: () => void
+  ): Promise<unknown> {
+    const next = this.#write(() => this.#nextAttempt(identity, config));
+    if (next === failed) {
+      return await never();
+    }
+    if (next === null) {
+      return await this.#refuse();
+    }
+    if ("park" in next) {
+      return await this.#park(next.park);
+    }
+    let journaled: Landing | Landed | null;
+    if ("claim" in next) {
+      const { claim } = next;
+      const outcome = await this.#runAttempt(identity, config, claim, work);
+      const committed = this.#write(() => this.#commit(claim, config, outcome));
+      if (committed === failed) {
+        return await never();
+      }
+      journaled = committed;
+    } else {
+      journaled = next;
+    }
+    const landed: Settled | Landed | null =
+      typeof journaled === "object" && journaled !== null && "ask" in journaled
+        ? await this.#askDelay(identity, config, journaled.ask)
+        : journaled;
+    if (landed === null) {
+      return await this.#refuse();
+    }
+    if (landed === "retry") {
+      return await this.#attempts(identity, config, work, land);
+    }
+    land();
+    await this.#renewWatchdog();
+    if ("failed" in landed) {
+      throw rebuild(landed.failed);
+    }
+    return decode(landed.value);
   }
 
   /**

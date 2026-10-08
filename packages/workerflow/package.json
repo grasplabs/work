@@ -9,6 +9,7 @@
     "./binding": "./src/binding.ts",
     "./codec": "./src/codec.ts",
     "./contracts": "./src/contracts.ts",
+    "./errors": "./src/errors.ts",
     "./instance": "./src/instance.ts",
     "./run": "./src/run.ts"
   },
