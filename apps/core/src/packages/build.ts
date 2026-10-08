@@ -670,29 +670,67 @@ const addressOf = async (
     ? await packageArtifactAddress(env, { app, graphHash, hash })
     : null;
 
-/** How long a build may hold its App's lease before another may take it. */
+/** How long a build may hold its lease before another may take it. */
 const leaseMs = 5 * 60 * 1000;
 
-/** How long a build waits for another of its App's to end, and how often it looks. */
+/**
+ * How long a build waits for another of the same target to end, and how
+ * often it looks: a build takes seconds, so a look a second is plenty.
+ */
 const leaseWaitMs = 60 * 1000;
-const leasePollMs = 250;
+const leasePollMs = 1000;
+
+/** Which build a lease is for: one target of one App's graph. */
+interface Leased {
+  app: string;
+  graphHash: string;
+  target: PackageArtifact["target"];
+}
+
+/** That `lease` is the row of `leased`. */
+const leaseRow = ({ app, graphHash, target }: Leased): SQL | undefined =>
+  and(
+    eq(dependencyBuildLeases.appId, app),
+    eq(dependencyBuildLeases.graphHash, graphHash),
+    eq(dependencyBuildLeases.target, target)
+  );
+
+/** Whether another build holds `leased`'s lease now, unexpired: one read. */
+const leaseHeld = async (env: Env, leased: Leased): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ expiresAt: dependencyBuildLeases.expiresAt })
+    .from(dependencyBuildLeases)
+    .where(leaseRow(leased))
+    .get();
+  return row !== undefined && row.expiresAt.getTime() > Date.now();
+};
 
 /**
- * Takes `app`'s build lease for `holder` if no build holds it, or the one
+ * Takes `leased`'s lease for `holder` if no build holds it, or the one
  * that does outlived it; whether it did. One statement: two builds never
  * both take it.
  */
 const takeLease = async (
   env: Env,
-  app: string,
+  leased: Leased,
   holder: string
 ): Promise<boolean> => {
   const now = Date.now();
   const taken = await drizzle(env.DB)
     .insert(dependencyBuildLeases)
-    .values({ appId: app, holder, expiresAt: new Date(now + leaseMs) })
+    .values({
+      appId: leased.app,
+      graphHash: leased.graphHash,
+      target: leased.target,
+      holder,
+      expiresAt: new Date(now + leaseMs),
+    })
     .onConflictDoUpdate({
-      target: dependencyBuildLeases.appId,
+      target: [
+        dependencyBuildLeases.appId,
+        dependencyBuildLeases.graphHash,
+        dependencyBuildLeases.target,
+      ],
       set: { holder, expiresAt: new Date(now + leaseMs) },
       setWhere: lt(dependencyBuildLeases.expiresAt, new Date(now)),
     })
@@ -701,46 +739,51 @@ const takeLease = async (
 };
 
 /**
- * Gives `app`'s lease back, if `holder` still holds it. A failure is
+ * Gives `leased`'s lease back, if `holder` still holds it. A failure is
  * logged, never thrown: what the build answers stands, and the lease
  * lapses on its own.
  */
 const giveLeaseBack = async (
   env: Env,
-  app: string,
+  leased: Leased,
   holder: string
 ): Promise<void> => {
   try {
     await drizzle(env.DB)
       .delete(dependencyBuildLeases)
-      .where(
-        and(
-          eq(dependencyBuildLeases.appId, app),
-          eq(dependencyBuildLeases.holder, holder)
-        )
-      );
+      .where(and(leaseRow(leased), eq(dependencyBuildLeases.holder, holder)));
   } catch (error) {
-    log.error("packages.lease_release_failed", { app, ...errorFields(error) });
+    log.error("packages.lease_release_failed", {
+      app: leased.app,
+      ...errorFields(error),
+    });
   }
 };
 
 /**
- * Waits until `app`'s build lease is `holder`'s: at once if nobody holds
- * it, otherwise once the build that does ends or outlives its lease.
+ * Waits until `leased`'s lease is `holder`'s: at once if nobody holds it,
+ * otherwise once the build that does ends or outlives its lease, looking
+ * with a plain read until it's free before trying to take it.
  * `package.build_busy` after {@link leaseWaitMs}.
  */
 const leaseFor = async (
   env: Env,
-  app: string,
+  leased: Leased,
   holder: string
 ): Promise<void> => {
   const until = Date.now() + leaseWaitMs;
-  // oxlint-disable-next-line no-await-in-loop -- one look at a time
-  while (!(await takeLease(env, app, holder))) {
+  for (;;) {
+    // One look at a time: a plain read, and a write only once it's free.
+    // oxlint-disable-next-line no-await-in-loop
+    const held = await leaseHeld(env, leased);
+    // oxlint-disable-next-line no-await-in-loop
+    if (!held && (await takeLease(env, leased, holder))) {
+      return;
+    }
     if (Date.now() >= until) {
       throw packageErrors.create("package.build_busy");
     }
-    // oxlint-disable-next-line no-await-in-loop -- one look at a time
+    // oxlint-disable-next-line no-await-in-loop
     await scheduler.wait(leasePollMs);
   }
 };
@@ -921,9 +964,10 @@ const buildUnderLease = async (
  * one of the App's builders, or the chat's agent acting for one; never
  * Grasp staff.
  *
- * One build of an App's packages runs at a time (its lease, spec 19.2):
- * another asked for meanwhile waits for it, then hands out what it
- * pinned when that is what it asks for, without building again. A lease
+ * One build of each target of an App's graph runs at a time (its lease,
+ * spec 19.2): another of the same asked for meanwhile waits for it, then
+ * hands out what it pinned when that is what it asks for, without
+ * building again. A lease
  * a build outlives (it died) lapses; then two builds could run, and the
  * pin's own conditional write still keeps one artifact per config.
  */
@@ -954,12 +998,17 @@ export const buildDependencies = async (
     return before.kept;
   }
   const holder = crypto.randomUUID();
-  await leaseFor(env, asked.app, holder);
+  const leased: Leased = {
+    app: asked.app,
+    graphHash: asked.graphHash,
+    target: asked.target,
+  };
+  await leaseFor(env, leased, holder);
   try {
     // Another build may have pinned it while this one waited.
     const now = await pinnedNow(env, building);
     return now.kept ?? (await buildUnderLease(env, by, building, now));
   } finally {
-    await giveLeaseBack(env, asked.app, holder);
+    await giveLeaseBack(env, leased, holder);
   }
 };

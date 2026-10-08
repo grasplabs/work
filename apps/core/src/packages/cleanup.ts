@@ -1,9 +1,9 @@
 import { integritySchema } from "@grasp-os/shared/dependencies";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, asc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { dependencyLocks, packageCleanups } from "../db/core/schema.ts";
+import { packageCleanups } from "../db/core/schema.ts";
 import { deleteArtifact } from "./build.ts";
 import { tarballKey } from "./tarballs.ts";
 
@@ -48,45 +48,83 @@ const deleteFiles = async (
 };
 
 /**
+ * Which of `keys` some lock names now, as a tarball's integrity or a pin's
+ * hash: one read over every lock's packages and pins for the whole run,
+ * never one scan of every lock per record.
+ */
+const namedByLocks = async (
+  env: Env,
+  keys: readonly string[]
+): Promise<ReadonlySet<string>> => {
+  const wanted = JSON.stringify(keys);
+  const { results } = await env.DB.prepare(
+    `SELECT json_extract(p.value, '$.integrity') AS key FROM dependency_locks l, json_each(l.lock, '$.packages') p WHERE json_extract(p.value, '$.integrity') IN (SELECT value FROM json_each(?1))
+     UNION
+     SELECT json_extract(pin.value, '$.hash') AS key FROM dependency_locks l, json_each(l.lock, '$.artifacts') c, json_each(c.value) pin WHERE json_extract(pin.value, '$.hash') IN (SELECT value FROM json_each(?1))`
+  )
+    .bind(wanted)
+    .all<{ key: string }>();
+  return new Set(results.map(({ key }) => key));
+};
+
+/**
  * Deletes the files of records at least an hour old that no lock names,
  * and clears each record, a batch a run. A record recorded again while
  * this ran keeps its row for the next run. Never throws: a record that
- * fails is logged and tried again next time.
+ * fails is logged and moved to the back of the queue, so one that keeps
+ * failing never holds up the rest.
  */
 export const sweepPackageFiles = async (env: Env, now: Date): Promise<void> => {
   const db = drizzle(env.DB);
-  const due = await db
-    .select()
-    .from(packageCleanups)
-    .where(
-      lt(packageCleanups.createdAt, new Date(now.getTime() - cleanupGraceMs))
-    )
-    .orderBy(asc(packageCleanups.createdAt))
-    .limit(cleanupBatch);
-  for (const { key, kind, createdAt } of due) {
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- a few at a time
-      const named = await db
-        .select({ named: sql<number>`1` })
-        .from(dependencyLocks)
-        .where(sql`instr(${dependencyLocks.lock}, ${key}) > 0`)
-        .limit(1)
-        .get();
-      if (named === undefined) {
-        // oxlint-disable-next-line no-await-in-loop -- a few at a time
-        await deleteFiles(env, kind, key);
-      }
-      // oxlint-disable-next-line no-await-in-loop -- a few at a time
-      await db
-        .delete(packageCleanups)
-        .where(
-          and(
-            eq(packageCleanups.key, key),
-            eq(packageCleanups.createdAt, createdAt)
-          )
-        );
-    } catch (error) {
-      log.error("packages.cleanup_failed", { kind, ...errorFields(error) });
+  try {
+    const due = await db
+      .select()
+      .from(packageCleanups)
+      .where(
+        lt(packageCleanups.createdAt, new Date(now.getTime() - cleanupGraceMs))
+      )
+      .orderBy(asc(packageCleanups.createdAt))
+      .limit(cleanupBatch);
+    if (due.length === 0) {
+      return;
     }
+    const named = await namedByLocks(
+      env,
+      due.map(({ key }) => key)
+    );
+    for (const { key, kind, createdAt } of due) {
+      try {
+        if (!named.has(key)) {
+          // oxlint-disable-next-line no-await-in-loop -- a few at a time
+          await deleteFiles(env, kind, key);
+        }
+        // oxlint-disable-next-line no-await-in-loop -- a few at a time
+        await db
+          .delete(packageCleanups)
+          .where(
+            and(
+              eq(packageCleanups.key, key),
+              eq(packageCleanups.createdAt, createdAt)
+            )
+          );
+      } catch (error) {
+        log.error("packages.cleanup_failed", { kind, ...errorFields(error) });
+        // oxlint-disable-next-line no-await-in-loop -- a few at a time
+        await db
+          .update(packageCleanups)
+          .set({ createdAt: now })
+          .where(
+            and(
+              eq(packageCleanups.key, key),
+              eq(packageCleanups.createdAt, createdAt)
+            )
+          )
+          .catch((pushError: unknown) => {
+            log.error("packages.cleanup_failed", errorFields(pushError));
+          });
+      }
+    }
+  } catch (error) {
+    log.error("packages.cleanup_failed", errorFields(error));
   }
 };

@@ -32,9 +32,13 @@ import {
 //   the proposal then starts over.
 // - Locks piling up. One that no pending or approved request names is
 //   deleted in the batch that supersedes or denies a request
-//   (`unusedLockStatements`), and an App holds at most
-//   `packageLimits.appLocks` (`package.quota`), checked in the statement
-//   that inserts one, so two resolves can't both pass a check made before.
+//   (`unusedLockStatements`). An App holds at most `packageLimits.appLocks`:
+//   a new lock takes the room of the oldest approval no longer in use (not
+//   pending, nor the latest for its targets: `stale`), in the batch that
+//   stores it, so changing graphs again and again never locks an App out.
+//   Only locks in use count against the limit (`package.quota`), checked
+//   again in the statement that inserts one, so two resolves can't both
+//   pass a check made before.
 // - Files no lock names any more. Each tarball and pinned artifact of a
 //   deleted lock is recorded for cleanup in the same batch
 //   (`package_cleanups`), and the cron deletes what no lock names by then
@@ -103,6 +107,65 @@ export const lockGuardFailed = (error: unknown): boolean =>
   error instanceof Error &&
   (error.message.includes(guardFailure) || lockGuardFailed(error.cause));
 
+/** That no pending or approved request of its App names the lock `lock`. */
+const unused = (lock: string): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.appId} = ${sql.raw(lock)}.app_id AND ${dependencyRequests.graphHash} = ${sql.raw(lock)}.graph_hash AND ${dependencyRequests.status} IN ('pending', 'approved'))`;
+
+/**
+ * That the lock `lock` is no longer in use: neither the App's pending
+ * request names it, nor its latest approval for any set of targets. An
+ * approval never ends (until GRA-359), so an App that changes its graph
+ * again and again keeps older approvals; their locks are what a new one
+ * may take the room of. A resolve back to such a graph finds its approval
+ * standing, and writes its lock again.
+ */
+const stale = (lock: string): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM dependency_requests r WHERE r.app_id = ${sql.raw(lock)}.app_id AND r.graph_hash = ${sql.raw(lock)}.graph_hash AND (r.status = 'pending' OR (r.status = 'approved' AND NOT EXISTS (SELECT 1 FROM dependency_requests n WHERE n.app_id = r.app_id AND n.status = 'approved' AND n.targets = r.targets AND n.decided_at > r.decided_at))))`;
+
+/**
+ * That the lock `lock` is one a new lock of `app` takes the room of, as
+ * the statement runs: of its stale locks, the oldest by when they were
+ * last approved, as many as the App holds past `cap` with the new one.
+ */
+const evicted = (lock: string, app: string, cap: number): SQL =>
+  sql`${sql.raw(lock)}.graph_hash IN (SELECT e.graph_hash FROM dependency_locks e WHERE e.app_id = ${app} AND ${stale("e")} ORDER BY (SELECT MAX(a.decided_at) FROM dependency_requests a WHERE a.app_id = e.app_id AND a.graph_hash = e.graph_hash AND a.status = 'approved') ASC LIMIT MAX(0, (SELECT COUNT(*) FROM dependency_locks c WHERE c.app_id = ${app}) - ${cap} + 1))`;
+
+/**
+ * The statements that delete each of `app`'s locks `which` selects (by an
+ * alias it is given), after recording each tarball and pinned artifact it
+ * named for cleanup (cleanup.ts): what another lock still names is kept.
+ */
+const forgetLocks = (
+  db: DrizzleD1Database,
+  app: string,
+  which: (lock: string) => SQL
+) => {
+  const now = Date.now();
+  return [
+    db
+      .insert(packageCleanups)
+      .select(
+        sql`SELECT json_extract(p.value, '$.integrity'), 'tarball', ${now} FROM ${dependencyLocks} l, json_each(l.lock, '$.packages') p WHERE l.app_id = ${app} AND ${which("l")}`
+      )
+      .onConflictDoUpdate({
+        target: packageCleanups.key,
+        set: { createdAt: sql`excluded.created_at` },
+      }),
+    db
+      .insert(packageCleanups)
+      .select(
+        sql`SELECT json_extract(pin.value, '$.hash'), 'build', ${now} FROM ${dependencyLocks} l, json_each(l.lock, '$.artifacts') c, json_each(c.value) pin WHERE l.app_id = ${app} AND ${which("l")}`
+      )
+      .onConflictDoUpdate({
+        target: packageCleanups.key,
+        set: { createdAt: sql`excluded.created_at` },
+      }),
+    db
+      .delete(dependencyLocks)
+      .where(and(eq(dependencyLocks.appId, app), which("dependency_locks"))),
+  ] as const;
+};
+
 /** What `lockStatements` read and worked out, for a batch to write. */
 export interface LockWrite {
   /** The lock that holds once the batch lands. */
@@ -116,8 +179,9 @@ type SQLiteBatchItem = Parameters<DrizzleD1Database["batch"]>[0][number];
 
 /**
  * The statements that store `fresh` as the lock of `app`'s graph, or add
- * its targets to the one stored, as part of a batch: an insert, held to
- * the App's `appLocks` as it runs; or an update, only while the lock is
+ * its targets to the one stored, as part of a batch: an insert, after
+ * the locks of older approvals give up their room, held to the App's
+ * `appLocks` as it runs; or an update, only while the lock is
  * the text read, with a target whose config changes audited
  * (`dependency.lock_targets_changed`); then a guard that fails the batch
  * unless the lock is the one written (`lockGuardFailed`). A new lock past
@@ -162,12 +226,17 @@ export const lockStatements = async (
       sql`SELECT ${app}, ${graphHash}, NULL, 0 WHERE NOT EXISTS (SELECT 1 FROM ${dependencyLocks} WHERE ${where} AND ${dependencyLocks.lock} = ${stored})`
     );
   if (row === undefined) {
-    const held = await db
+    const live = await db
       .select({ locks: count() })
       .from(dependencyLocks)
-      .where(eq(dependencyLocks.appId, app))
+      .where(
+        and(
+          eq(dependencyLocks.appId, app),
+          sql`NOT ${stale("dependency_locks")}`
+        )
+      )
       .get();
-    if ((held?.locks ?? 0) >= limits.appLocks) {
+    if ((live?.locks ?? 0) >= limits.appLocks) {
       throw packageErrors.create("package.quota", {
         quota: "appLocks",
         limit: limits.appLocks,
@@ -176,6 +245,8 @@ export const lockStatements = async (
     return {
       lock: merged.lock,
       statements: [
+        // Room first: the oldest approvals no longer in use give up theirs.
+        ...forgetLocks(db, app, (lock) => evicted(lock, app, limits.appLocks)),
         db
           .insert(dependencyLocks)
           .select(
@@ -222,40 +293,10 @@ export const lockStatements = async (
   };
 };
 
-/** That no pending or approved request of its App names the lock `lock`. */
-const unused = (lock: string): SQL =>
-  sql`NOT EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.appId} = ${sql.raw(lock)}.app_id AND ${dependencyRequests.graphHash} = ${sql.raw(lock)}.graph_hash AND ${dependencyRequests.status} IN ('pending', 'approved'))`;
-
 /**
  * The statements, for the end of a batch that supersedes or denies one of
  * `app`'s requests, that delete each of its locks no pending or approved
- * request names any more, after recording each tarball and pinned
- * artifact it named for cleanup (cleanup.ts): what is still named by
- * another lock then is kept.
+ * request names any more, recording their files for cleanup.
  */
-export const unusedLockStatements = (db: DrizzleD1Database, app: string) => {
-  const now = Date.now();
-  return [
-    db
-      .insert(packageCleanups)
-      .select(
-        sql`SELECT json_extract(p.value, '$.integrity'), 'tarball', ${now} FROM ${dependencyLocks} l, json_each(l.lock, '$.packages') p WHERE l.app_id = ${app} AND ${unused("l")}`
-      )
-      .onConflictDoUpdate({
-        target: packageCleanups.key,
-        set: { createdAt: sql`excluded.created_at` },
-      }),
-    db
-      .insert(packageCleanups)
-      .select(
-        sql`SELECT json_extract(pin.value, '$.hash'), 'build', ${now} FROM ${dependencyLocks} l, json_each(l.lock, '$.artifacts') c, json_each(c.value) pin WHERE l.app_id = ${app} AND ${unused("l")}`
-      )
-      .onConflictDoUpdate({
-        target: packageCleanups.key,
-        set: { createdAt: sql`excluded.created_at` },
-      }),
-    db
-      .delete(dependencyLocks)
-      .where(and(eq(dependencyLocks.appId, app), unused("dependency_locks"))),
-  ] as const;
-};
+export const unusedLockStatements = (db: DrizzleD1Database, app: string) =>
+  forgetLocks(db, app, unused);

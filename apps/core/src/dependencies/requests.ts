@@ -639,8 +639,13 @@ const propose = async (
   throw dependencyErrors.create("dependency.stale");
 };
 
-/** Proposes a graph with no lock of its own: `propose`'s request alone. */
-export const proposeDependencies = async (
+/**
+ * Proposes a graph with no lock of its own: `propose`'s request alone.
+ * For tests only, of the request machinery itself (approval, supersession,
+ * decisions): nothing in the product calls it, and nothing offers it to a
+ * client. The product proposes only what it resolved (`proposeResolved`).
+ */
+export const proposeForTests = async (
   env: Env,
   by: Acting,
   input: unknown

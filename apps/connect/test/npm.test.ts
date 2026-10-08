@@ -600,3 +600,102 @@ describe("a tarball", () => {
     ).resolves.toBe("package.not_found");
   });
 });
+
+describe("reading large metadata", () => {
+  it("reads a packument of several MiB sent in small chunks whole, byte for byte", async () => {
+    await registry.publish(leftPad);
+    const own = await registry.answer(
+      new Request(`${registry.origin}/left-pad`)
+    );
+    const packument: unknown = await own.json();
+    // Past the first buffer twice over, so it has to grow, and every
+    // chunk lands after the ones before it.
+    const big = new TextEncoder().encode(
+      JSON.stringify({
+        ...(typeof packument === "object" ? packument : {}),
+        readme: "é".repeat(2 * 1024 * 1024),
+      })
+    );
+    const chunk = 16 * 1024;
+    registry.override("/left-pad", () => {
+      let at = 0;
+      return new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull: (controller) => {
+              if (at >= big.byteLength) {
+                controller.close();
+                return;
+              }
+              controller.enqueue(big.slice(at, at + chunk));
+              at += chunk;
+            },
+          },
+          { highWaterMark: 0 }
+        )
+      );
+    });
+    const metadata = await connect.npmMetadata("left-pad");
+    expect({
+      bytes: big.byteLength > 3 * 1024 * 1024,
+      versions: metadata.versions.map(({ version, integrity }) => ({
+        version,
+        integrity,
+      })),
+    }).toStrictEqual({
+      bytes: true,
+      versions: [
+        {
+          version: "1.3.0",
+          integrity: registry.integrityOf("left-pad", "1.3.0"),
+        },
+      ],
+    });
+  });
+
+  it("refuses at once, as busy, metadata past what this isolate reads at once, and reads again once that is given back", async () => {
+    await registry.publish(leftPad);
+    await registry.publish({ ...leftPad, name: "right-pad" });
+    const declared = registryLimits.metadataBytes;
+    const { promise: held, resolve: holding } =
+      Promise.withResolvers<boolean>();
+    let fail: ((error: Error) => void) | undefined;
+    // One answer that declares 20 MiB and holds: its read keeps its share.
+    registry.override(
+      "/left-pad",
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start: (controller) => {
+              fail = (error) => {
+                controller.error(error);
+              };
+              holding(true);
+            },
+          }),
+          { headers: { "content-length": String(declared) } }
+        )
+    );
+    registry.override(
+      "/right-pad",
+      () =>
+        new Response("{}", {
+          headers: { "content-length": String(declared) },
+        })
+    );
+    const first = outcome(connect.npmMetadata("left-pad"));
+    await held;
+    const second = await outcome(connect.npmMetadata("right-pad"));
+    fail?.(new TypeError("Network connection lost."));
+    const firstEnded = await first;
+    // Given back however the first ended: the next read goes ahead.
+    registry.reset();
+    await registry.publish({ ...leftPad, name: "right-pad" });
+    const after = await outcome(connect.npmMetadata("right-pad"));
+    expect({ second, firstEnded, after }).toStrictEqual({
+      second: "package.registry_busy",
+      firstEnded: "package.registry_unavailable",
+      after: "ok",
+    });
+  });
+});

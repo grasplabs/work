@@ -1,5 +1,6 @@
 import { platformPeers } from "@grasp-os/compiler";
 import { sha512Integrity, toHex } from "@grasp-os/shared/encoding";
+import { packageErrors } from "@grasp-os/shared/packages";
 import type { GraspLock } from "@grasp-os/shared/packages";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
@@ -965,6 +966,30 @@ const approverOf = async () => {
   };
 };
 
+/** Connect, refusing as busy the first `times` asks for metadata. */
+const busyFor = (times: number) => {
+  const asked = { count: 0 };
+  const connect = new Proxy(env.CONNECT, {
+    get: (target, property): unknown => {
+      if (property === "npmMetadata") {
+        return async (name: string) => {
+          asked.count += 1;
+          if (asked.count <= times) {
+            throw packageErrors.create("package.registry_busy");
+          }
+          return await target.npmMetadata(name);
+        };
+      }
+      // An RPC binding's methods are called on it, never bound.
+      return property === "npmTarball"
+        ? async (request: Parameters<typeof target.npmTarball>[0]) =>
+            await target.npmTarball(request)
+        : Reflect.get(target, property);
+    },
+  });
+  return { connect, asked };
+};
+
 describe("an App's locks and the files they name", () => {
   it("stores no lock when its request can't be stored", async () => {
     const { builder, app } = await builderWithApp();
@@ -1067,27 +1092,104 @@ describe("an App's locks and the files they name", () => {
     });
   });
 
-  it("holds an App to its number of locks, with a clear refusal", async () => {
+  it("keeps approving an App's new graphs past its number of locks, giving up those of older approvals", async () => {
     const decide = await approverOf();
     const { builder, app } = await builderWithApp();
-    const names = [named("one"), named("two"), named("three"), named("four")];
-    for (const name of names) {
+    const dates = named("dates");
+    const versions = Array.from({ length: 33 }, (_, index) => `1.0.${index}`);
+    for (const version of versions) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await publish(plain(dates, version));
+    }
+    // The tests' limit is three locks (vite.config.ts): each new graph,
+    // approved in turn, takes the room of the oldest approval's.
+    const statuses: string[] = [];
+    let first = "";
+    for (const version of versions) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      const { request } = await builder.api.dependencies.resolve(
+        intentFor(app, { [dates]: version })
+      );
+      first ||= request.id;
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await decide(request);
+      statuses.push(request.status);
+    }
+    const locks = await lockedGraphs(app);
+    // Back to the first graph: its approval stands, and its lock is
+    // written again.
+    const back = await builder.api.dependencies.resolve(
+      intentFor(app, { [dates]: versions[0] ?? "" })
+    );
+    const locksAfter = await lockedGraphs(app);
+    expect({
+      statuses: new Set(statuses),
+      locks: locks.length <= 3,
+      back: [back.request.id === first, back.request.status],
+      backLocked: locksAfter.includes(back.request.graphHash),
+    }).toStrictEqual({
+      statuses: new Set(["pending"]),
+      locks: true,
+      back: [true, "approved"],
+      backLocked: true,
+    });
+  });
+
+  it("refuses a lock past the limit when the room goes as the batch runs, with a clear refusal", async () => {
+    const decide = await approverOf();
+    const { builder, app } = await builderWithApp();
+    const [browser, server, more] = [
+      named("one"),
+      named("two"),
+      named("three"),
+    ];
+    for (const name of [browser, server, more]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       await publish(plain(name, "1.0.0"));
     }
-    // The tests' limit is three (vite.config.ts): each approved, so each
-    // lock stays.
-    for (const name of names.slice(0, 3)) {
+    // Two locks in use, each the latest approval for its targets: one
+    // short of the tests' limit of three.
+    for (const [name, targets] of [
+      [browser, ["browser"]],
+      [server, ["server"]],
+    ] as const) {
       // oxlint-disable-next-line no-await-in-loop -- one after another
       const { request } = await builder.api.dependencies.resolve(
-        intentFor(app, { [name]: "1" })
+        intentFor(app, { [name]: "1" }, { targets: [...targets] })
       );
       // oxlint-disable-next-line no-await-in-loop -- one after another
       await decide(request);
     }
+    const identity = await builder.api.whoami();
+    // Just before the batch that stores the third, another lock in use
+    // lands: the insert's own count refuses it.
+    const db = racingDb(async (target) => {
+      await target.batch([
+        target
+          .prepare(
+            "INSERT OR IGNORE INTO dependency_requests (id, app_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation, decided_by, decided_at, decided_generation, reason) VALUES (?, ?, 'rev-0', ?, '[\"workflow\"]', 'Another', '{}', '{\"direct\":[],\"findings\":[]}', 1, 1, 0, 0, NULL, 'approved', ?, NULL, ?, 0, ?, ?, 0, NULL)"
+          )
+          .bind(
+            `raced-${app}`,
+            app,
+            "e".repeat(64),
+            identity.userId,
+            Date.now(),
+            identity.userId,
+            Date.now()
+          ),
+        target
+          .prepare(
+            "INSERT OR IGNORE INTO dependency_locks (app_id, graph_hash, lock, created_at) VALUES (?, ?, '{}', ?)"
+          )
+          .bind(app, "e".repeat(64), Date.now()),
+      ]);
+    });
     const refused = await failure(
-      builder.api.dependencies.resolve(
-        intentFor(app, { [names[3] ?? ""]: "1" })
+      resolveDependencies(
+        { ...env, DB: db },
+        identity,
+        intentFor(app, { [more]: "1" })
       )
     );
     const locks = await lockedGraphs(app);
@@ -1097,6 +1199,60 @@ describe("an App's locks and the files they name", () => {
         details: { quota: "appLocks", limit: 3 },
       },
       locks: 3,
+    });
+  });
+
+  it("starts over when another write changes the lock just before the batch, and says so after three tries", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    const intent = intentFor(app, { [dates]: "^1.0.0" });
+    await builder.api.dependencies.resolve(intent);
+    const identity = await builder.api.whoami();
+    // Just before each batch, the lock's text changes under it.
+    const db = racingDb(async (target) => {
+      await target
+        .prepare(
+          "UPDATE dependency_locks SET lock = lock || ' ' WHERE app_id = ?"
+        )
+        .bind(app)
+        .run();
+    });
+    const outcome = await failure(
+      resolveDependencies({ ...env, DB: db }, identity, intent)
+    );
+    expect(outcome.code).toBe("dependency.stale");
+  });
+
+  it("asks connect again after a pause while it is reading too much at once, and gives up after a few tries", async () => {
+    const { builder, app } = await builderWithApp();
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    const identity = await builder.api.whoami();
+    const once = busyFor(1);
+    const resolved = await resolveDependencies(
+      { ...env, CONNECT: once.connect },
+      identity,
+      intentFor(app, { [dates]: "^1.0.0" })
+    );
+    const always = busyFor(100);
+    const refused = await failure(
+      resolveDependencies(
+        { ...env, CONNECT: always.connect },
+        identity,
+        intentFor(app, { [dates]: "^1.0.0" })
+      )
+    );
+    expect({
+      resolved: resolved.lock.direct,
+      askedOnce: once.asked.count,
+      refused: refused.code,
+      askedAlways: always.asked.count,
+    }).toStrictEqual({
+      resolved: { [dates]: "1.0.0" },
+      askedOnce: 2,
+      refused: "package.registry_busy",
+      askedAlways: 4,
     });
   });
 });

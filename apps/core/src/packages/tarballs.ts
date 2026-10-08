@@ -7,7 +7,7 @@ import { log } from "@grasp-os/shared/log";
 import { packageErrors } from "@grasp-os/shared/packages";
 import type { NpmTarballRequest } from "@grasp-os/shared/packages";
 
-import { recordCleanup } from "./cleanup-records.ts";
+import { recordCleanup, touchCleanup } from "./cleanup-records.ts";
 
 // npm tarballs as this deployment keeps them: in its own R2 bucket (in
 // the EU), by the SHA-512 of their bytes, after connect fetched them and
@@ -40,6 +40,9 @@ export const verifiedTarball = async (
   if (stored) {
     const bytes = new Uint8Array(await stored.arrayBuffer());
     if ((await sha512Integrity(bytes)) === request.integrity) {
+      // In use: one waiting for cleanup gets its full hour again, so the
+      // cron never deletes a tarball a resolve or build just read.
+      await touchCleanup(env, request.integrity);
       return bytes;
     }
     log.warn("packages.tarball_corrupt", {

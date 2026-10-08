@@ -118,6 +118,8 @@ export const packageErrors = defineErrorFamily({
   "package.not_found": "The registry has no such package or version.",
   "package.registry_unavailable":
     "The package registry couldn't be reached. Try again in a minute.",
+  "package.registry_busy":
+    "Too many packages are being read from the registry at once. Try again in a moment.",
   "package.redirect_refused":
     "The registry sent the request somewhere other than the registry.",
   "package.too_large": "The package is larger than Grasp takes.",
@@ -188,7 +190,9 @@ export const packageLimits = {
   lockBytes: 1024 * 1024,
   /**
    * Locks one App holds: one per graph a pending or approved request
-   * names (others are deleted as their request goes).
+   * names (others are deleted as their request goes). Past it, the lock
+   * of the oldest approval no longer in use gives up its room; only locks
+   * in use (pending, or the latest approval for some targets) are refused.
    */
   appLocks: 32,
   /** What one target's build makes, every file of it together. */

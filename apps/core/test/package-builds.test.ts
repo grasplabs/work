@@ -1600,7 +1600,17 @@ describe("one build of an App's packages at a time", () => {
                   identity,
                   asked
                 );
-                await secondWaits;
+                // A deadline well under the test's: a second build that
+                // never waits fails here, saying so, not by a timeout.
+                const waited = await Promise.race([
+                  secondWaits,
+                  scheduler.wait(10_000).then(() => false),
+                ]);
+                if (!waited) {
+                  throw new Error(
+                    "The second build never waited for the lease"
+                  );
+                }
               }
               return await target.fetch(input, init);
             }

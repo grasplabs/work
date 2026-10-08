@@ -33,3 +33,14 @@ export const clearCleanup = async (env: Env, key: string): Promise<void> => {
     .delete(packageCleanups)
     .where(eq(packageCleanups.key, key));
 };
+
+/**
+ * Moves `key`'s record on, if it has one, as its file is read: what is in
+ * use gets its full hour again before the cron may delete it.
+ */
+export const touchCleanup = async (env: Env, key: string): Promise<void> => {
+  await drizzle(env.DB)
+    .update(packageCleanups)
+    .set({ createdAt: new Date() })
+    .where(eq(packageCleanups.key, key));
+};

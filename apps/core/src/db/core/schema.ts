@@ -961,18 +961,27 @@ export const packageCleanups = sqliteTable("package_cleanups", {
 });
 
 /**
- * The one build of an App's packages under way (src/packages/build.ts): a
- * build takes the App's lease before it builds, and gives it back when it
- * ends; another for the App waits for it, then hands out what it pinned.
- * A lease that outlived `expiresAt` (a build that died) may be taken.
+ * The one build under way of each target of an App's graph
+ * (src/packages/build.ts): a build takes its lease before it builds, and
+ * gives it back when it ends; another of the same App, graph and target
+ * waits for it, then hands out what it pinned. A lease that outlived
+ * `expiresAt` (a build that died) may be taken.
  */
-export const dependencyBuildLeases = sqliteTable("dependency_build_leases", {
-  appId: text("app_id")
-    .primaryKey()
-    .references(() => apps.id),
-  holder: text().notNull(),
-  expiresAt: timestamp("expires_at").notNull(),
-});
+export const dependencyBuildLeases = sqliteTable(
+  "dependency_build_leases",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    graphHash: text("graph_hash").notNull(),
+    target: text().notNull(),
+    holder: text().notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.graphHash, table.target] }),
+  ]
+);
 
 /**
  * Each refused admission the audit trail recorded, once per App, graph,

@@ -123,7 +123,13 @@ const readEachCapped = async (
       await reader.cancel();
       throw packageErrors.create("package.too_large", { limit: maxBytes });
     }
-    take(value);
+    try {
+      take(value);
+    } catch (error) {
+      // oxlint-disable-next-line no-await-in-loop
+      await reader.cancel();
+      throw error;
+    }
   }
   return total;
 };
@@ -146,6 +152,62 @@ const readCapped = async (
   return bytes;
 };
 
+/**
+ * The most bytes of metadata this isolate holds at once, across every
+ * request it serves: a package's metadata can be tens of MiB, and reading
+ * one holds its bytes, then its text and what that parses to, about twice
+ * its bytes at the peak. Connect's isolate has 128 MB and also serves the
+ * connectors' calls, so metadata reads together take at most 40 MiB of
+ * buffers: one read of the largest metadata taken (24 MiB, its buffer
+ * growing from 16 MiB to 24 holds both for a moment), or a few smaller
+ * ones. A read past that is refused at once as busy, never waited for
+ * (`package.registry_busy`, which core retries after a pause). Each read
+ * reserves the size its answer declares, then what its buffer grows to,
+ * and gives it all back when it ends, however it ends. Nothing here waits
+ * on another request: workerd doesn't let one request's promise settle
+ * another's.
+ */
+const metadataBudgetBytes = 40 * 1024 * 1024;
+
+/** Bytes of metadata reserved in this isolate now (`reserveMetadata`). */
+let reservedMetadataBytes = 0;
+
+/** One read's share of {@link metadataBudgetBytes}. */
+interface Reservation {
+  /** Grows the share to `bytes`, or refuses as busy. */
+  grow: (bytes: number) => void;
+  /** Gives the share back; once is enough, twice is harmless. */
+  release: () => void;
+}
+
+/** A share of the budget of `bytes` to start with, or `package.registry_busy`. */
+const reserveMetadata = (bytes: number, what: string): Reservation => {
+  let held = 0;
+  const grow = (wanted: number): void => {
+    if (wanted <= held) {
+      return;
+    }
+    if (reservedMetadataBytes - held + wanted > metadataBudgetBytes) {
+      log.warn("npm.busy", {
+        package: what,
+        reserved: reservedMetadataBytes,
+        wanted,
+      });
+      throw packageErrors.create("package.registry_busy");
+    }
+    reservedMetadataBytes += wanted - held;
+    held = wanted;
+  };
+  grow(bytes);
+  return {
+    grow,
+    release: () => {
+      reservedMetadataBytes -= held;
+      held = 0;
+    },
+  };
+};
+
 /** The first buffer a body of text is read into; it doubles as it fills. */
 const firstTextBufferBytes = 1024 * 1024;
 
@@ -162,18 +224,22 @@ const firstTextBufferBytes = 1024 * 1024;
 const readTextCapped = async (
   response: Response,
   maxBytes: number,
-  what: string
+  what: string,
+  reservation: Reservation
 ): Promise<string> => {
-  let buffer = new Uint8Array(Math.min(firstTextBufferBytes, maxBytes));
+  const first = Math.min(firstTextBufferBytes, maxBytes);
+  reservation.grow(first);
+  let buffer = new Uint8Array(first);
   let used = 0;
   await readEachCapped(response, maxBytes, (chunk) => {
     if (used + chunk.byteLength > buffer.byteLength) {
-      const grown = new Uint8Array(
-        Math.min(
-          Math.max(buffer.byteLength * 2, used + chunk.byteLength),
-          maxBytes
-        )
+      const size = Math.min(
+        Math.max(buffer.byteLength * 2, used + chunk.byteLength),
+        maxBytes
       );
+      // The old buffer and the new are both held as one is copied over.
+      reservation.grow(buffer.byteLength + size);
+      const grown = new Uint8Array(size);
       grown.set(buffer.subarray(0, used));
       buffer = grown;
     }
@@ -448,16 +514,20 @@ const parsedJson = (text: string, name: string): unknown => {
   }
 };
 
-/** `name`'s metadata, read and parsed down to what is passed on. */
-const readMetadata = async (name: string): Promise<NpmMetadata> => {
-  const response = await fetchFromRegistry(
-    metadataUrl(name),
-    "application/json",
-    name
-  );
+/** `name`'s metadata from `response`, within `reservation`. */
+const parsedMetadata = async (
+  name: string,
+  response: Response,
+  reservation: Reservation
+): Promise<NpmMetadata> => {
   // The text is held only while it is parsed, never beside the result.
   const parsed = parsedJson(
-    await readTextCapped(response, registryLimits.metadataBytes, name),
+    await readTextCapped(
+      response,
+      registryLimits.metadataBytes,
+      name,
+      reservation
+    ),
     name
   );
   const packument = packumentSchema.safeParse(parsed);
@@ -499,6 +569,33 @@ const readMetadata = async (name: string): Promise<NpmMetadata> => {
     log.info("npm.versions_dropped", { package: name, dropped });
   }
   return npmMetadataSchema.parse({ name, versions: kept });
+};
+
+/** `name`'s metadata, read and parsed down to what is passed on. */
+const readMetadata = async (name: string): Promise<NpmMetadata> => {
+  const response = await fetchFromRegistry(
+    metadataUrl(name),
+    "application/json",
+    name
+  );
+  const declared = Number(response.headers.get("content-length") ?? 0);
+  let reservation: Reservation;
+  try {
+    reservation = reserveMetadata(
+      Number.isSafeInteger(declared) && declared > 0
+        ? Math.min(declared, registryLimits.metadataBytes)
+        : 0,
+      name
+    );
+  } catch (error) {
+    await response.body?.cancel();
+    throw error;
+  }
+  try {
+    return await parsedMetadata(name, response, reservation);
+  } finally {
+    reservation.release();
+  }
 };
 
 /**

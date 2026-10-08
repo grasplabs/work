@@ -210,6 +210,40 @@ const metadataRefusals = (version: NpmVersion): string[] => [
     : []),
 ];
 
+/**
+ * How often a metadata request connect refused as busy is asked again, and
+ * how long the first pause is; each pause after doubles it.
+ */
+const busyTries = 4;
+const firstBusyPauseMs = 500;
+
+/**
+ * `name`'s metadata from connect, asked again after a pause while connect
+ * says it is reading too much metadata at once (`package.registry_busy`),
+ * a few times at most: then the refusal stands, and says to try again.
+ */
+const metadataWhenFree = async (
+  env: Env,
+  name: string
+): Promise<NpmMetadata> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      // One at a time: each pause waits on the one before.
+      // oxlint-disable-next-line no-await-in-loop
+      return await env.CONNECT.npmMetadata(name);
+    } catch (error) {
+      if (
+        packageErrors.codeOf(error) !== "package.registry_busy" ||
+        attempt >= busyTries
+      ) {
+        throw error;
+      }
+      // oxlint-disable-next-line no-await-in-loop
+      await scheduler.wait(firstBusyPauseMs * 2 ** (attempt - 1));
+    }
+  }
+};
+
 /** One resolve's state: the graph so far, and what it read. */
 class Resolution {
   readonly nodes = new Map<string, Node>();
@@ -248,7 +282,7 @@ class Resolution {
     name: string,
     ranges: ReadonlySet<string>
   ): Promise<NpmVersion[]> {
-    const { versions }: NpmMetadata = await this.#env.CONNECT.npmMetadata(name);
+    const { versions } = await metadataWhenFree(this.#env, name);
     return versions.filter((version) =>
       [...ranges].some((range) => satisfies(version.version, range))
     );
