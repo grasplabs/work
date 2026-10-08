@@ -50,6 +50,9 @@ export const bundleFixture = (directory: string): string => {
       "--no-sparkplug",
       wranglerCli,
       "deploy",
+      // Before the flags: `--compatibility-flags` takes a list, and would
+      // take the script after it as one more.
+      "test/death-fixture.ts",
       "--dry-run",
       "--outdir",
       directory,
@@ -57,7 +60,8 @@ export const bundleFixture = (directory: string): string => {
       "workerflow-death",
       "--compatibility-date",
       "2026-09-15",
-      "test/death-fixture.ts",
+      "--compatibility-flags",
+      "nodejs_als",
     ],
     { cwd: packageRoot, stdio: "pipe", timeout: bundleTimeoutMs }
   );
@@ -95,6 +99,7 @@ const config :Workerd.Config = (
 const main :Workerd.Worker = (
   modules = [(name = "worker.js", esModule = embed "worker.js")],
   compatibilityDate = "2026-09-15",
+  compatibilityFlags = ["nodejs_als"],
   bindings = [
     (name = "RUNS", durableObjectNamespace = "Runs"),
     (name = "EFFECTS", service = "effects"),
@@ -204,6 +209,18 @@ export class Workerd {
     });
     const parsed: unknown = await response.json();
     return { status: response.status, body: parsed };
+  }
+
+  /** A GET whose answer is bytes, with its headers. */
+  async bytes(
+    pathname: string
+  ): Promise<{ status: number; headers: Headers; body: Uint8Array }> {
+    // The signal bounds the body read as well as the answer.
+    const response = await fetch(`${this.url}${pathname}`, {
+      signal: AbortSignal.timeout(requestTimeoutMs),
+    });
+    const body = new Uint8Array(await response.arrayBuffer());
+    return { status: response.status, headers: response.headers, body };
   }
 
   async dispose(): Promise<void> {

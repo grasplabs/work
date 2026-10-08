@@ -8,6 +8,8 @@ export interface Effect {
   attempt: number;
   /** What the outside system answered with. */
   receipt: string;
+  /** When it arrived. */
+  at: number;
 }
 
 /**
@@ -30,9 +32,13 @@ const holds = new Map<
 const holdKey = (run: string, label: string, attempt: number): string =>
   JSON.stringify([run, label, attempt]);
 
+/** How long a test waits for a held effect to arrive before it fails. */
+const arrivalDeadlineMs = 5000;
+
 /**
  * Withholds the answer to `label`'s `attempt` in `run`. `held` resolves once
- * the effect arrived; the answer goes out on `release()`.
+ * the effect arrived, and rejects if it hasn't by the deadline; the answer
+ * goes out on `release()`.
  */
 export const hold = (
   run: string,
@@ -44,8 +50,21 @@ export const hold = (
     release: Promise.withResolvers<true>(),
   };
   holds.set(holdKey(run, label, attempt), entry);
+  const arrived = new AbortController();
+  const timedOut = async (): Promise<never> => {
+    await scheduler.wait(arrivalDeadlineMs, { signal: arrived.signal });
+    throw new Error(`${label} of ${run} never arrived`);
+  };
+  // Every test awaits what it holds; the timer stops once it arrived.
+  const held = (async (): Promise<true> => {
+    try {
+      return await Promise.race([entry.held.promise, timedOut()]);
+    } finally {
+      arrived.abort();
+    }
+  })();
   return {
-    held: entry.held.promise,
+    held,
     release: () => {
       entry.release.resolve(true);
     },
@@ -71,6 +90,7 @@ export const effect = async (
     key: context.idempotencyKey,
     attempt: context.attempt,
     receipt,
+    at: Date.now(),
   });
   const entry = holds.get(holdKey(run, label, context.attempt));
   if (entry !== undefined) {
@@ -103,5 +123,32 @@ export const checkpoint = async (
 
 /** An effect from outside any step: a definition's own catch or finally. */
 export const witness = (run: string, label: string): void => {
-  effects.push({ run, label, key: "", attempt: 0, receipt: "" });
+  effects.push({
+    run,
+    label,
+    key: "",
+    attempt: 0,
+    receipt: "",
+    at: Date.now(),
+  });
+};
+
+/**
+ * The clock the run objects measure an attempt's running time on
+ * (`WorkflowRun.clock`): the real one, plus whatever a test's code has
+ * moved it on by. Only ever forward, so every other measure stays true.
+ */
+const clockOffset = { ms: 0 };
+
+export const measuredClock = (): number => Date.now() + clockOffset.ms;
+
+/**
+ * Code that runs for `ms` without awaiting anything, as the measured clock
+ * sees it: a loop on that clock, which moves it on as it goes.
+ */
+export const busyFor = (ms: number): void => {
+  const until = measuredClock() + ms;
+  while (measuredClock() < until) {
+    clockOffset.ms += 1;
+  }
 };

@@ -6,6 +6,8 @@ import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { setTimeout as wait } from "node:timers/promises";
 
+import { patterned } from "../bytes.ts";
+
 const pollMs = 25;
 /** How long any wait in these tests may take before it fails. */
 const deadlineMs = 20_000;
@@ -47,6 +49,15 @@ export const until = async <T>(
   throw new Error(`timed out waiting for ${what}`);
 };
 
+/** What `/stream` answers with: more than four stored chunks. */
+export const streamed = patterned(1024 * 1024 + 12_345);
+
+/**
+ * How much of it a withheld `/stream` sends before it holds the rest: more
+ * than two stored chunks, so some are written when the test kills.
+ */
+const streamedFirst = 600 * 1024;
+
 /** One effect as the outside world received it. */
 export interface Effect {
   run: string;
@@ -54,6 +65,8 @@ export interface Effect {
   key: string;
   attempt: number;
   receipt: string;
+  /** When it arrived, by this process's clock. */
+  at: number;
 }
 
 interface Arrival {
@@ -67,7 +80,7 @@ interface Hold {
   arrived: boolean;
 }
 
-const isArrival = (value: unknown): value is Omit<Effect, "receipt"> =>
+const isArrival = (value: unknown): value is Omit<Effect, "receipt" | "at"> =>
   typeof value === "object" &&
   value !== null &&
   "run" in value &&
@@ -79,7 +92,7 @@ export class Outside {
   readonly #withheld: {
     arrival: Arrival;
     response: ServerResponse;
-    answer: string;
+    answer: string | Uint8Array;
   }[] = [];
   readonly #server = createServer((request, response) => {
     void this.#answer(request, response);
@@ -150,6 +163,24 @@ export class Outside {
       response.end();
       return;
     }
+    if (request.url === "/stream") {
+      // An effect whose answer is a stream of bytes; withheld after its
+      // first part.
+      this.effects.push({ ...sent, receipt: "stream", at: Date.now() });
+      if (
+        !this.#withhold(
+          sent,
+          response,
+          streamed.subarray(streamedFirst),
+          () => {
+            response.write(streamed.subarray(0, streamedFirst));
+          }
+        )
+      ) {
+        response.end(streamed);
+      }
+      return;
+    }
     if (request.url !== "/effect") {
       const label = request.url?.slice(1) ?? "";
       if (!this.#withhold({ run: sent.run, label }, response, "{}")) {
@@ -158,7 +189,7 @@ export class Outside {
       return;
     }
     const receipt = `${sent.label}#${this.effects.length + 1}`;
-    this.effects.push({ ...sent, receipt });
+    this.effects.push({ ...sent, receipt, at: Date.now() });
     if (!this.#withhold(sent, response, receipt)) {
       response.end(receipt);
     }
@@ -167,12 +198,14 @@ export class Outside {
   #withhold(
     arrival: Arrival,
     response: ServerResponse,
-    answer: string
+    answer: string | Uint8Array,
+    before?: () => void
   ): boolean {
     const index = this.#holds.findIndex((hold) => hold.matches(arrival));
     if (index === -1) {
       return false;
     }
+    before?.();
     const [hold] = this.#holds.splice(index, 1);
     this.#withheld.push({ arrival, response, answer });
     if (hold !== undefined) {

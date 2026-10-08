@@ -50,6 +50,12 @@ catalog:
   drizzle-orm: 0.45.3
   # Knowledge frontmatter.
   yaml: 2.9.1
+  # Bundles an App's approved npm packages in the package builder's isolate
+  # (packages/compiler/src/packages): the browser build, run on workerd.
+  esbuild-wasm: 0.28.2
+  # jq 1.8.2 compiled to WebAssembly (MIT): the expression language of JSON
+  # workflows. scripts/jq-wasm meters and pins its bytes.
+  jq-wasm: 3.0.0-jq-1.8.2
   # Text of uploaded files, extracted in core: PDF, Word and Excel.
   fflate: 0.8.3
   unpdf: 1.8.1
@@ -60,6 +66,10 @@ catalog:
   zod: 4.6.5
   # The types of Standard Schema, which the SDK's value schemas implement.
   "@standard-schema/spec": 1.1.0
+  # JSON Schema 2020-12 in workerd (MIT): only the Open Workflow profile's
+  # tests use it, to check accepted definitions against the vendored upstream
+  # schema. Nothing ships a general JSON Schema validator.
+  "@cfworker/json-schema": 4.1.1
 
   # Identity, agents, connections
   # Better Auth's core, for its IP normalisation in the router; same release
@@ -163,3 +173,9 @@ peerDependencyRules:
     "@typescript-eslint/project-service>typescript": "7"
     "@typescript-eslint/tsconfig-utils>typescript": "7"
     "@typescript-eslint/typescript-estree>typescript": "7"
+
+# jq-wasm's Workers entry imports its own, unmetered jq.wasm as a default;
+# the patch drops that import, so a bundle carries only the metered module
+# (packages/workflow-expressions/src/jq.wasm).
+patchedDependencies:
+  jq-wasm@3.0.0-jq-1.8.2: patches/jq-wasm@3.0.0-jq-1.8.2.patch
