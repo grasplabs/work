@@ -78,6 +78,30 @@ describe("the definition's structure", () => {
     await expect(codesOf(plain(tasks))).resolves.toContain("task.too_many");
   });
 
+  it("counts a task before its children, nested or reusable", async () => {
+    const leaves = (count: number) => tasksOf(count, () => ({ set: { a: 1 } }));
+    // A do of 499 leaves is 500 tasks: at the limit, not over it.
+    await expect(
+      codesOf(plain([{ outer: { do: leaves(profileLimits.maxTasks - 1) } }]))
+    ).resolves.toStrictEqual([]);
+    await expect(
+      codesOf(plain([{ outer: { do: leaves(profileLimits.maxTasks) } }]))
+    ).resolves.toContain("task.too_many");
+    // Reusable function roots count too.
+    const withFunction = JSON.stringify(
+      documentAround(
+        {
+          name: "limits",
+          input: {},
+          required: [],
+          use: { functions: { "fn-a": { set: { a: 1 } } } },
+        },
+        [{ start: { call: "fn-a" } }, ...leaves(profileLimits.maxTasks - 1)]
+      )
+    );
+    await expect(codesOf(withFunction)).resolves.toContain("task.too_many");
+  });
+
   it("stops at 16 scopes", async () => {
     let task: unknown = { set: { a: 1 } };
     for (let level = 0; level < profileLimits.maxScopes; level += 1) {

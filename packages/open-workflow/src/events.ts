@@ -1,3 +1,5 @@
+import { parseSlot } from "@grasp-os/workflow-expressions/source";
+
 import { member } from "./checker.ts";
 import type { Binding, Checker, Site } from "./checker.ts";
 import { pointerJoin } from "./diagnostics.ts";
@@ -16,6 +18,8 @@ import {
   literalText,
   objectAt,
   requireKey,
+  isOneLine,
+  isUri,
 } from "./values.ts";
 
 /**
@@ -47,13 +51,35 @@ const maxEventFilters = 16;
 
 const maxCorrelations = 16;
 
-/** An event attribute: literal text or `${ … }`. */
+/** The attributes upstream types as a URI or a runtime expression. */
+const uriAttributes = new Set(["source", "dataschema"]);
+
+/**
+ * An event attribute: literal text or `${ … }`. `source` and `dataschema`
+ * are URIs, or an expression on one line, as upstream has them.
+ */
 const attributeValue = (
   checker: Checker,
   value: JsonValue | undefined,
   pointer: string,
-  site: Site
+  site: Site,
+  key = ""
 ): void => {
+  if (uriAttributes.has(key) && typeof value === "string") {
+    const isExpression = parseSlot(value).kind === "expression";
+    const valid = isExpression ? isOneLine(value) : isUri(value);
+    if (!valid) {
+      checker.report.error(
+        "profile.invalid_value",
+        at(site, pointer),
+        isExpression
+          ? "Write the expression on one line."
+          : "Give an absolute URI, such as https://example.com/jobs.",
+        { expected: "URI" }
+      );
+      return;
+    }
+  }
   textOrExpression(checker, value, pointer, site, 1024);
 };
 
@@ -132,7 +158,7 @@ export const checkEmit = (
         site
       );
     } else if (key !== "type" && emitAttributes.includes(key)) {
-      attributeValue(checker, value, pointerJoin(withPointer, key), site);
+      attributeValue(checker, value, pointerJoin(withPointer, key), site, key);
     }
   }
 };
@@ -167,7 +193,8 @@ const checkEventFilter = (
             checker,
             attribute,
             pointerJoin(withPointer, key),
-            site
+            site,
+            key
           );
         }
       }

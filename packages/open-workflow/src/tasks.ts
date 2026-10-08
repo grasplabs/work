@@ -26,6 +26,7 @@ import { isObject } from "./json-text.ts";
 import type { JsonObject, JsonValue } from "./json-text.ts";
 import { profileLimits } from "./limits.ts";
 import {
+  checkAbsentArguments,
   checkArguments,
   requireBinding,
   schemaAt,
@@ -431,6 +432,14 @@ const checkRun = (
     checkPinned(checker, named, pinned, workflowPointer, site);
   }
   if (!Object.hasOwn(workflow, "input")) {
+    // Omitted is no input: the contract still decides whether that's
+    // allowed, as an absent value or an empty object.
+    checkAbsentArguments(
+      checker,
+      binding?.contract?.input,
+      workflowPointer,
+      site
+    );
     return;
   }
   const inputPointer = pointerJoin(workflowPointer, "input");
@@ -442,17 +451,10 @@ const checkRun = (
     "the child's input"
   );
   if (input !== undefined) {
-    const hasExpression = dataValue(
-      checker,
-      input,
-      inputPointer,
-      taskDefinition,
-      site
-    );
+    dataValue(checker, input, inputPointer, taskDefinition, site);
     checkArguments(
       checker,
       input,
-      hasExpression,
       binding?.contract?.input,
       inputPointer,
       site
@@ -1047,6 +1049,26 @@ export const checkTask = (
   return record;
 };
 
+/**
+ * Counts a task before anything in it is walked, a reusable function's
+ * root included: the count is the definition's, whatever nests where.
+ */
+export const countTask = (
+  checker: Checker,
+  pointer: string,
+  site: Site
+): void => {
+  checker.taskCount += 1;
+  if (checker.taskCount > profileLimits.maxTasks) {
+    // Past this, checking more tasks only costs: the walk stops here.
+    checker.report.fatal(
+      "task.too_many",
+      at(site, pointer),
+      `Keep the definition to ${profileLimits.maxTasks} tasks, or split it into child workflows.`
+    );
+  }
+};
+
 /** Whether `id` can be a task's ID; reports why not. */
 export const checkTaskId = (
   checker: Checker,
@@ -1129,14 +1151,7 @@ export const checkTaskList: ListWalker = (
     }
     const [id, body] = entry;
     const taskPointer = pointerJoin(itemPointer, id);
-    if (checker.tasks.length >= profileLimits.maxTasks) {
-      // Past this, checking more tasks only costs: the walk stops here.
-      checker.report.fatal(
-        "task.too_many",
-        at(site, taskPointer),
-        `Keep the definition to ${profileLimits.maxTasks} tasks, or split it into child workflows.`
-      );
-    }
+    countTask(checker, taskPointer, site);
     if (site.scope.length + 1 > profileLimits.maxScopes) {
       checker.report.error(
         "task.scope_too_deep",

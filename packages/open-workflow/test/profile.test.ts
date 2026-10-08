@@ -839,6 +839,78 @@ describe("tasks and calls", () => {
   });
 });
 
+describe("a child run's input", () => {
+  const childRun = (input?: unknown) =>
+    probe([
+      {
+        child: {
+          run: {
+            workflow: {
+              namespace: "grasp",
+              name: "summarize-note",
+              version: "1.0.0",
+              ...(input === undefined ? {} : { input }),
+            },
+          },
+          metadata: { grasp: { binding: "summaryChild" } },
+        },
+      },
+    ]);
+
+  it("checks an omitted input against the child's contract", async () => {
+    await expect(refusals(childRun())).resolves.toContainEqual(
+      expect.objectContaining({
+        code: "call.invalid_arguments",
+        pointer: "/do/0/child/run/workflow",
+        taskId: "child",
+        reason: "value.required",
+      })
+    );
+  });
+
+  it("accepts an omitted input when the child's contract allows none", async () => {
+    const optionalInput = JSON.stringify(
+      v.object({ noteId: v.id("notes").optional() }).descriptor
+    );
+    const result = await validateWorkflow(JSON.stringify(childRun()), {
+      ...options,
+      catalog: (key) => {
+        const contract = options.catalog(key);
+        return key === "grasp/summarize-note/1.0.0" && contract !== undefined
+          ? { ...contract, input: optionalInput }
+          : contract;
+      },
+    });
+    expect(result.ok ? [] : result.diagnostics).toStrictEqual([]);
+  });
+
+  it("checks literal parts nested among expressions", async () => {
+    await expect(
+      refusals(
+        probe([
+          {
+            load: {
+              call: "grasp.operation",
+              with: {
+                binding: "loadNote",
+                arguments: {
+                  id: "${ $workflow.input.noteId }",
+                  extra: { a: 1 },
+                },
+              },
+            },
+          },
+        ])
+      )
+    ).resolves.toContainEqual(
+      expect.objectContaining({
+        code: "call.invalid_arguments",
+        pointer: "/do/0/load/with/arguments/extra",
+      })
+    );
+  });
+});
+
 describe("control flow", () => {
   it.each([
     [
@@ -1292,6 +1364,22 @@ describe("expressions", () => {
         { size: { set: { words: `\${ $params.${marker} }` } } },
         { field: { set: { id: `\${ $workflow.input.${marker} }` } } },
         { variable: { set: { a: `\${ $${marker} }` } } },
+        {
+          loop: {
+            for: { each: `${marker}item`, at: `${marker}at`, in: "${ [1] }" },
+            do: [{ "in-loop": { set: { a: "${ $nope }" } } }],
+          },
+        },
+        {
+          guard: {
+            try: [{ "guarded-step": { set: { a: 1 } } }],
+            catch: {
+              as: `${marker}caught`,
+              when: "${ $other }",
+              do: [{ "in-catch": { set: { a: "${ $nope }" } } }],
+            },
+          },
+        },
         { syntax: { set: { a: `\${ ${marker}( }` } } },
         { pause: { wait: `P${marker}` } },
         { extra: { set: { a: 1 }, [marker]: true } },

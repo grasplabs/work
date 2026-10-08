@@ -1,5 +1,6 @@
 import type { ValueSchema } from "@grasp-os/sdk";
 import { expressionErrors } from "@grasp-os/workflow-expressions/errors";
+import type { ExpressionErrorCode } from "@grasp-os/workflow-expressions/errors";
 import { compileExpression } from "@grasp-os/workflow-expressions/evaluate";
 import type { CompiledExpression } from "@grasp-os/workflow-expressions/evaluate";
 
@@ -64,8 +65,43 @@ export type ValidationResult =
     }
   | { readonly ok: false; readonly diagnostics: readonly Diagnostic[] };
 
-const textOf = (value: unknown): string | undefined =>
-  typeof value === "string" ? value.slice(0, 500) : undefined;
+/** The message of each expression error, as the family states it. */
+const expressionMessages: Readonly<Record<ExpressionErrorCode, string>> = {
+  "expression.unsupported_language":
+    "Expressions are jq in strict mode; no other language or mode is available.",
+  "expression.too_large": "The expression is longer than 4096 bytes.",
+  "expression.too_deep": "The expression nests deeper than 32 levels.",
+  "expression.scope_too_deep": "The task nests deeper than 16 scopes.",
+  "expression.invalid": "The expression isn't valid jq.",
+  "expression.unsupported":
+    "The expression uses something outside the workflow expression profile.",
+  "expression.unavailable_variable":
+    "The expression uses a variable that isn't available where it runs.",
+  "expression.context_invalid":
+    "The expression's input or variables aren't plain JSON within the limits.",
+  "expression.context_too_large":
+    "The expression's input and variables are over 1 MiB together.",
+  "expression.failed": "The expression failed.",
+  "expression.resource_exhausted":
+    "The expression ran out of its computation or memory budget.",
+  "expression.result_count": "The expression must produce exactly one result.",
+  "expression.result_too_large": "The expression's result is over 1 MiB.",
+  "expression.result_invalid":
+    "The expression's result nests deeper than 32 levels, or has a number or key that isn't allowed.",
+  "expression.type_mismatch":
+    "The expression's result doesn't have the type its place requires.",
+};
+
+/** Fixed remedies for the expression errors compiling can give. */
+const expressionRemedies: Partial<Record<ExpressionErrorCode, string>> = {
+  "expression.too_large": "Shorten the expression to 4096 bytes.",
+  "expression.too_deep": "Nest the expression at most 32 levels deep.",
+  "expression.scope_too_deep": "Move the task up, or split the workflow.",
+  "expression.invalid": "Fix the expression's jq syntax.",
+  "expression.unsupported": "Use only the profile's grammar and builtins.",
+  "expression.unavailable_variable":
+    "Use only the variables of this stage, and loop or catch variables only inside their loop or catch.",
+};
 
 /** Compiles one expression; a refusal becomes a diagnostic at its place. */
 const compileSlot = async (
@@ -84,24 +120,16 @@ const compileSlot = async (
     if (code === undefined) {
       throw error;
     }
-    const details: unknown =
-      typeof error === "object" && error !== null
-        ? Reflect.get(error, "details")
-        : undefined;
-    const read = (key: string): string | undefined =>
-      typeof details === "object" && details !== null
-        ? textOf(Reflect.get(details, key))
-        : undefined;
-    const expected = read("expected");
-    // The expression package's reasons can quote the source (a variable's
-    // name, jq's syntax message); the pointer already says where it is.
+    // Only the code is taken from the expression package: its remedies and
+    // reasons can name the source's own variables or quote jq's syntax
+    // message. The message and remedy here are fixed text per code; the
+    // pointer says where.
     checker.report.add(
       "error",
       code,
-      error instanceof Error ? error.message : code,
+      expressionMessages[code],
       { pointer: slot.pointer, taskId: slot.scope.at(-1) },
-      read("remedy") ?? "Fix the expression.",
-      expected === undefined ? {} : { expected }
+      expressionRemedies[code] ?? "Fix the expression."
     );
     return undefined;
   }

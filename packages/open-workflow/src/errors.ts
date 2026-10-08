@@ -13,6 +13,8 @@ import {
   literalText,
   objectAt,
   requireKey,
+  isUri,
+  maxUriLength,
 } from "./values.ts";
 
 /**
@@ -25,10 +27,6 @@ const hostErrorPrefixes = [
   "https://open-workflow-specification.org/spec/",
   "https://serverlessworkflow.io/spec/",
 ];
-
-const uriPattern = /^[A-Za-z][A-Za-z0-9+.-]*:[^\s]+$/u;
-
-const maxUriLength = 512;
 
 /** Authentication and authorization are the host's to decide. */
 const hostStatuses = new Set([401, 403]);
@@ -91,7 +89,7 @@ export const checkErrorDefinition = (
       site,
       maxUriLength
     );
-    if (type !== undefined && !uriPattern.test(type)) {
+    if (type !== undefined && !isUri(type)) {
       checker.report.error(
         "profile.invalid_value",
         at(site, typePointer),

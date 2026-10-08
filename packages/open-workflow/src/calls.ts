@@ -113,15 +113,9 @@ const callData = (
   schema: ValueSchema<unknown, unknown> | undefined
 ): void => {
   const [value, pointer] = args.field(key);
-  const hasExpression = args.data(key);
-  checkArguments(
-    args.checker,
-    value,
-    hasExpression,
-    schema,
-    pointer,
-    args.site
-  );
+  // Expressions in it are recorded for compilation.
+  args.data(key);
+  checkArguments(args.checker, value, schema, pointer, args.site);
 };
 
 const checkConnectorCall = (args: CallArgs): void => {

@@ -216,6 +216,8 @@ export interface Checker {
   reusableRetries: Set<string>;
   reusableTimeouts: Set<string>;
   taskIds: Set<string>;
+  /** Tasks counted so far, each before its body is walked. */
+  taskCount: number;
   tasks: TaskRecord[];
   lists: ListRecord[];
   slots: ExpressionSlot[];
@@ -238,6 +240,7 @@ export const createChecker = (options: ReadOptions): Checker => ({
   reusableRetries: new Set(),
   reusableTimeouts: new Set(),
   taskIds: new Set(),
+  taskCount: 0,
   tasks: [],
   lists: [],
   slots: [],

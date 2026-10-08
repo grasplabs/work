@@ -16,6 +16,7 @@ import { dslVersion, profileLimits, profileName } from "./limits.ts";
 import {
   checkDataFlow,
   checkTask,
+  countTask,
   checkTaskId,
   checkTaskList,
   namePattern,
@@ -610,6 +611,7 @@ const checkFunctions = (checker: Checker, functions: JsonObject): void => {
   for (const [name, body] of Object.entries(functions)) {
     const pointer = pointerJoin("/use/functions", name);
     const inner: Site = { ...site, scope: [name], inFunction: name };
+    countTask(checker, pointer, site);
     if (!checkTaskId(checker, name, pointer, inner)) {
       continue;
     }

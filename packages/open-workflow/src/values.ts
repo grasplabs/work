@@ -260,6 +260,33 @@ export const literalText = (
   return text;
 };
 
+// RFC 3986, without IP-literal hosts: an absolute URI, so a valid
+// uri-reference, matching upstream's uriTemplate pattern too. Upstream
+// types source, dataschema and error types as such a URI (or a runtime
+// expression); the profile accepts only what that holds for.
+const pchar = String.raw`(?:[A-Za-z0-9\-._~!$&'()*+,;=:@]|%[0-9A-Fa-f]{2})`;
+const regName = String.raw`(?:[A-Za-z0-9\-._~!$&'()*+,;=]|%[0-9A-Fa-f]{2})*`;
+const userInfo = String.raw`(?:(?:[A-Za-z0-9\-._~!$&'()*+,;=:]|%[0-9A-Fa-f]{2})*@)?`;
+const absoluteUri = new RegExp(
+  String.raw`^[A-Za-z][A-Za-z0-9+.\-]*:` +
+    String.raw`(?://${userInfo}${regName}(?::[0-9]*)?(?:/${pchar}*)*|${pchar}+(?:/${pchar}*)*|/(?:${pchar}+(?:/${pchar}*)*)?)` +
+    String.raw`(?:\?(?:${pchar}|[/?])*)?(?:#(?:${pchar}|[/?])*)?$`,
+  "u"
+);
+export const maxUriLength = 512;
+
+/** Whether `text` is an absolute URI upstream's URI fields accept. */
+export const isUri = (text: string): boolean =>
+  text.length <= maxUriLength && absoluteUri.test(text);
+
+const lineBreak = /[\n\r\u2028\u2029]/u;
+
+/**
+ * Where upstream types a field as a runtime expression, its pattern
+ * (`^\s*\$\{.+\}\s*$`) holds the source to one line: so does the profile.
+ */
+export const isOneLine = (text: string): boolean => !lineBreak.test(text);
+
 const msPerUnit = {
   W: 604_800_000n,
   D: 86_400_000n,
@@ -343,8 +370,10 @@ export const durationAt = (
     }
     if (expression === undefined) {
       refuse("Write this duration as a literal.");
-    } else {
+    } else if (isOneLine(value)) {
       addSlot(checker, slot.source, pointer, expression.stage, site, "string");
+    } else {
+      refuse("Write the duration's expression on one line.");
     }
     return undefined;
   }
