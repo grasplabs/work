@@ -15,6 +15,7 @@ import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId, WorkspaceId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import type { ModelEffort } from "@grasp-os/shared/models";
 import {
   screenErrors,
   screenNameSchema,
@@ -28,7 +29,7 @@ import { organizationId } from "./auth/auth.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import { workspace } from "./durable-objects.ts";
-import { gatewaySettings } from "./models.ts";
+import { gatewaySettings, modelEffortsOf } from "./models.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
 import { fixQuestion, runToFix } from "./run-fixes.ts";
@@ -144,6 +145,17 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
     );
   }
 
+  async efforts(): Promise<Record<string, ModelEffort[]>> {
+    return await withPerson(this.#check, () =>
+      Object.fromEntries(
+        gatewaySettings(this.#env).models.map((model) => [
+          model,
+          modelEffortsOf(model),
+        ])
+      )
+    );
+  }
+
   async list(): Promise<ChatSummary[]> {
     return await withPerson(
       this.#check,
@@ -209,7 +221,8 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
   async send(chatId: string, question: ChatQuestion): Promise<void> {
     await withPerson(this.#check, async ({ userId }) => {
       const id = chatIdOf(chatId);
-      // Two strings only: whatever else the page passed goes no further.
+      // Its strings and effort only: whatever else the page passed goes no
+      // further.
       const parsed = questionSchema.safeParse(question);
       if (!parsed.success) {
         throw agentErrors.create("agent.invalid_question");

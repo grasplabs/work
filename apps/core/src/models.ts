@@ -8,9 +8,11 @@ import type {
   ProviderHeaders,
   SimpleStreamOptions,
   StreamFunction,
+  ThinkingLevel,
   TranscriptContext,
   Usage,
 } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { streamSimple as anthropicMessages } from "@earendil-works/pi-ai/api/anthropic-messages";
 import {
   CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL,
@@ -43,7 +45,12 @@ import {
 import type { ModelRules } from "@grasp-os/shared/deployment-config";
 import { connectionIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { modelErrors } from "@grasp-os/shared/models";
+import {
+  defaultModelEffort,
+  modelEfforts,
+  modelErrors,
+} from "@grasp-os/shared/models";
+import type { ModelEffort } from "@grasp-os/shared/models";
 import {
   authoritySchema,
   permissionErrors,
@@ -272,6 +279,20 @@ export const gatewaySettings = (
 });
 
 /**
+ * The efforts `ref` takes, least first: those of {@link modelEfforts} its
+ * catalog entry supports, none for a model that doesn't think or isn't
+ * one the gateway offers.
+ */
+export const modelEffortsOf = (ref: string): ModelEffort[] => {
+  const model = parseModelRef(ref)?.catalog;
+  if (model === undefined) {
+    return [];
+  }
+  const supported = new Set<string>(getSupportedThinkingLevels(model));
+  return modelEfforts.filter((effort) => supported.has(effort));
+};
+
+/**
  * Whether the deployment's config keeps every call in the EU
  * (`eu.deployment`): for what sends data out of the Worker without being a model call,
  * such as Workers AI's document conversion (knowledge/extract.ts), which
@@ -298,6 +319,11 @@ const sessionShape = {
   maxTokens: z.int().positive().optional(),
   /** How long a request may take, in milliseconds, retries included. */
   timeoutMs: z.int().positive().max(maxTimeoutMs).optional(),
+  /**
+   * How hard a model that thinks does so before it answers
+   * ({@link thinkingOf}); {@link defaultModelEffort} without one.
+   */
+  effort: z.enum(modelEfforts).optional(),
   /** Why the call is made, for the audit log. */
   purpose: z.string().max(64).regex(purposePattern),
   /** Who or what asked: a person, an agent, an App or a workflow run. */
@@ -437,6 +463,19 @@ const noUsage: Usage = {
   totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
+
+/**
+ * The thinking level a request asks `model` for: the call's effort, or
+ * {@link defaultModelEffort}, so a call that names none asks what it did
+ * before efforts. pi's adapters ask a model that lacks the level for its
+ * nearest one (`modelEffortsOf` lists those it has). `undefined` for a
+ * model that doesn't think, which pi then asks for none.
+ */
+const thinkingOf = (
+  model: Model<Api>,
+  effort: ModelEffort | undefined
+): ThinkingLevel | undefined =>
+  model.reasoning ? (effort ?? defaultModelEffort) : undefined;
 
 /** The call's messages in pi's shape. */
 const toMessages = (call: Call, model: Model<Api>): Message[] => {
@@ -706,9 +745,8 @@ const open = (
     headers: gatewayHeaders(call),
     maxTokens: answerTokens(call, model),
     maxRetries,
-    // Reasoning at a middle effort where the model has it: without a level
-    // pi turns it off.
-    reasoning: model.reasoning ? "medium" : undefined,
+    // Without a level pi turns reasoning off.
+    reasoning: thinkingOf(model, call.effort),
     signal,
     onPayload: ref.provider === "workers-ai" ? workersAiPayload : undefined,
     onResponse: ({ status, headers }) => {

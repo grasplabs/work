@@ -238,6 +238,33 @@ describe("model settings", { timeout: 60_000 }, () => {
     ]);
   });
 
+  it("tell chat the efforts each allowed model takes, and none for one that doesn't think", async () => {
+    const { session } = await signedInWithRole(idp, "user");
+    const efforts = async (coreEnv: Env) => {
+      const { core } = await openRpc(session, { coreEnv });
+      return await core.authenticate().chats.efforts();
+    };
+
+    await expect(
+      efforts(
+        envWith({
+          gateway: "grasp-os-test",
+          models: [...allowed, "anthropic/claude-opus-4-8"],
+        })
+      )
+    ).resolves.toStrictEqual({
+      [workersAi]: [],
+      [anthropic]: ["low", "medium", "high"],
+      [euModel]: ["low", "medium", "high", "xhigh"],
+      "anthropic/claude-opus-4-8": ["low", "medium", "high", "xhigh", "max"],
+    });
+    // A new deployment's: GLM-5.3 Flash has no medium.
+    await expect(efforts(envWith())).resolves.toStrictEqual({
+      [defaultGatewayModels[0]]: [],
+      [defaultGatewayModels[1]]: ["low", "high", "max"],
+    });
+  });
+
   it("list the most who spent, most first and ties by key, say more spent, and name nobody who's gone", async () => {
     const coreEnv = envWith({
       gateway: "grasp-os-test",

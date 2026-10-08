@@ -16,6 +16,19 @@ export const modelErrors = defineErrorFamily({
     "The model's answer didn't match the expected shape, also when asked again.",
 });
 
+/**
+ * How hard a model thinks before it answers, least first: the levels
+ * Claude and OpenAI both take. A model takes some, all or none of them
+ * (`ChatsApi.efforts`).
+ */
+export const modelEfforts = ["low", "medium", "high", "xhigh", "max"] as const;
+
+/** One of {@link modelEfforts}. */
+export type ModelEffort = (typeof modelEfforts)[number];
+
+/** The effort of a call that names none. */
+export const defaultModelEffort: ModelEffort = "medium";
+
 /** Whose spend a budget counts: all calls, each workflow's, each person's. */
 export type ModelBudgetScope = "deployment" | "workflow" | "user";
 

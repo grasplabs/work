@@ -92,6 +92,33 @@ const work = (): ModelCall<undefined>["work"] => {
 const newPerson = () =>
   ({ type: "person", userId: `person-${crypto.randomUUID()}` }) as const;
 
+// Efforts: Claude Opus 4.8 and GPT-5.6 Sol take all five levels; GPT-5.4 none
+// past xhigh, Claude Sonnet 4.5 none past high, and GLM-5.3 Flash
+// (a default model) low, high and max only. Llama 3.3 doesn't think.
+const opus = "anthropic/claude-opus-4-8";
+const sol = "openai/gpt-5.6-sol";
+const glm = "workers-ai/@cf/zai-org/glm-5.3-flash";
+
+/** The request body a call to `model` at `effort` sent the provider. */
+const sentAt = async (
+  model: string,
+  effort?: ModelCall<undefined>["effort"]
+): Promise<unknown> => {
+  const { gateway, gatewayEnv } = withGateway([answer("Hello.")], {
+    gateway: "grasp-os-test",
+    models: [model],
+  });
+  await models(gatewayEnv).call({
+    model,
+    input: "Say hello.",
+    effort,
+    purpose: "chat.turn",
+    trigger: newPerson(),
+    work: work(),
+  });
+  return gateway.requests[0]?.body;
+};
+
 /** The audit events triggered by `userId`, once `count` have arrived. */
 const auditedFor = async (
   userId: string,
@@ -192,6 +219,42 @@ describe("model gateway", { timeout: 30_000 }, () => {
         ({ url }) => new URL(url).pathname.split("/")[3]
       ),
     }).toStrictEqual({ text: "Hello.", gateways: ["grasp-os"] });
+  });
+
+  it("asks a model that thinks for max effort with each provider's own parameter", async () => {
+    await expect(sentAt(opus, "max")).resolves.toMatchObject({
+      thinking: { type: "adaptive" },
+      output_config: { effort: "max" },
+    });
+    await expect(sentAt(sol, "max")).resolves.toMatchObject({
+      reasoning: { effort: "max" },
+    });
+    await expect(sentAt(glm, "max")).resolves.toMatchObject({
+      reasoning_effort: "max",
+    });
+  });
+
+  it("asks a model for the nearest effort it takes when it lacks the one asked", async () => {
+    expect({
+      gpt54: await sentAt(openai, "max"),
+      sonnet45: await sentAt(anthropic, "max"),
+    }).toStrictEqual({
+      gpt54: await sentAt(openai, "xhigh"),
+      sonnet45: await sentAt(anthropic, "high"),
+    });
+  });
+
+  it("asks for medium effort when a call names none, and a model that doesn't think as before", async () => {
+    for (const model of [opus, sol, glm, anthropic]) {
+      // oxlint-disable-next-line no-await-in-loop -- one model at a time
+      await expect(sentAt(model)).resolves.toStrictEqual(
+        // oxlint-disable-next-line no-await-in-loop -- one model at a time
+        await sentAt(model, "medium")
+      );
+    }
+    await expect(sentAt(workersAi, "max")).resolves.toStrictEqual(
+      await sentAt(workersAi)
+    );
   });
 
   it("sends no provider key, so the gateway uses the keys it stores, and takes no answer from its cache", async () => {

@@ -563,6 +563,38 @@ describe("model rules", { timeout: 60_000 }, () => {
     expect(outcomes).toStrictEqual(["ok", "ok", "ok", "model.over_budget"]);
   });
 
+  it("count what a model thought against the budget, as the provider counts it in the answer", async () => {
+    // Two answers of $0.0045 each fit a cent. One that thought 900 tokens
+    // more first is $0.018 at Claude Sonnet 4.5's $15 per million tokens
+    // out: alone past the cent.
+    const thought = {
+      ...pricedAnswer,
+      outputTokens: pricedAnswer.outputTokens + 900,
+      thinking: { text: "Ada said hello; greet her back.", tokens: 900 },
+    };
+    const outcomesOf = async (answer: GatewayReply) => {
+      const { call } = withRules(
+        { budgets: { user: { limit: 0.01 } } },
+        answer
+      );
+      const ada = newPerson();
+      const outcomes: string[] = [];
+      for (let made = 0; made < 2; made += 1) {
+        outcomes.push(
+          // oxlint-disable-next-line no-await-in-loop -- one after another
+          await outcome(call(hello(anthropic, { trigger: ada })))
+        );
+      }
+      return outcomes;
+    };
+
+    await expect(outcomesOf(pricedAnswer)).resolves.toStrictEqual(["ok", "ok"]);
+    await expect(outcomesOf(thought)).resolves.toStrictEqual([
+      "ok",
+      "model.over_budget",
+    ]);
+  });
+
   it("count an answer cancelled midway by an estimate of what it used, said in its audit event, so cancelling isn't free", async () => {
     // The answer stops after its first 12 characters, until released: the
     // provider's count, which comes with the answer's end, never arrives.
