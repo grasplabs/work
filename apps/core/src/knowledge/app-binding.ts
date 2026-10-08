@@ -14,7 +14,7 @@ import type {
 import type { Authority } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-import { callerOf, tokenOf } from "../app-bindings.ts";
+import { callerOf, stillAdmitted, tokenOf } from "../app-bindings.ts";
 import type { InvocationKind } from "../app.ts";
 import { forSandbox } from "../bindings.ts";
 import { collectionReads, readAsDelegate } from "./binding.ts";
@@ -244,7 +244,7 @@ export class AppCollectionBinding extends WorkerEntrypoint<
           input,
           setter,
           async () => {
-            await callerOf(this.env, app, { token }, "write");
+            await stillAdmitted(this.env, app, token, "write");
           }
         )
     );

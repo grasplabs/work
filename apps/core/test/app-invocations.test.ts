@@ -1,18 +1,23 @@
 import { appErrorDetailsBytes } from "@grasp-os/shared/apps";
-import { appIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  collectionIdSchema,
+  permissionIdSchema,
+} from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { callerOf } from "../src/app-bindings.ts";
+import { AppConnectionBinding } from "../src/app-bindings.ts";
 import { callApp } from "../src/app.ts";
-import { saveRecordAsDelegate } from "../src/knowledge/records.ts";
+import { AppGuestsBinding } from "../src/guests-binding.ts";
+import { AppCollectionBinding } from "../src/knowledge/app-binding.ts";
 import { ordinaryData, release, requestGranted, serverBuilt } from "./apps.ts";
 import { reached } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
-import { mailConnection } from "./mail-connection.ts";
+import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import type { MailAnswer } from "./mail-server.ts";
 import { finished } from "./runs.ts";
 import { callAuth, outcome, signedInApi, unique } from "./sign-in.ts";
@@ -37,7 +42,12 @@ import { workflowFiles } from "./workflow-apps.ts";
 // - a call keeps acting after what let it in is gone, while its code
 //   still runs: the person's role in the App (a team left, which
 //   restarts nothing), or the calling App's permission on the export;
-// - a call keeps acting once its App's code was restarted under it.
+// - a call keeps acting once its App's code was restarted under it;
+// - a stub call that awaits after it was admitted (a permission check,
+//   signing, a lookup) acts on what let it in as it was then: the
+//   person's role, or a permission up a chain of Apps, gone while it
+//   awaited, still lets a connection call reach connect, a guest be
+//   invited or a guest chat be revoked.
 //
 // Every App here runs for real, in its own sandbox; calls go in through
 // the host as screens, workflows and other Apps make them.
@@ -146,7 +156,7 @@ export class App extends DurableObject {
   }
 
   async waitThenPoint(caller: Caller): Promise<unknown> {
-    await this.ctx.storage.put("waiting", true);
+    await this.ctx.storage.put("waiting", caller);
     await new Promise<void>((resolve) => {
       waiting = resolve;
     });
@@ -156,7 +166,11 @@ export class App extends DurableObject {
   }
 
   async isWaiting(): Promise<boolean> {
-    return (await this.ctx.storage.get("waiting")) === true;
+    return (await this.ctx.storage.get("waiting")) !== undefined;
+  }
+
+  async waitingCaller(): Promise<unknown> {
+    return (await this.ctx.storage.get("waiting")) ?? null;
   }
 
   async letGo(): Promise<boolean> {
@@ -288,7 +302,7 @@ const setUp = async (
       actions,
       binding,
     });
-  await grant(
+  const outlook = await grant(
     desk,
     { type: "connection", connectionId: "connection-outlook" },
     ["mail.list"],
@@ -316,7 +330,14 @@ const setUp = async (
   // the read stops it, never a missing grant.
   const other = await newApp(admin);
   await grant(desk, { type: "app", appId: other }, ["write"], "SELF");
-  return { admin, desk, front, mail, calls };
+  return {
+    admin,
+    desk,
+    front,
+    mail,
+    calls,
+    outlook: permissionIdSchema.parse(outlook),
+  };
 };
 
 /**
@@ -360,17 +381,28 @@ const as = (userId: string) => ({ userId, mode: "interactive" }) as const;
 /** A read of the documents table, as a save reads before it writes. */
 const readsDocuments = /from "documents"/iu;
 
+/** A read of permissions, as a stub call's permission check makes it. */
+const readsPermissions = /from "permissions"/iu;
+
+/** A read of guest chats, as a revoke finds its chat before it writes. */
+const readsGuestChats = /from "guest_chats"/iu;
+
 /**
- * Knowledge's database, with `first` run once, just before the first
- * statement whose query `when` matches runs: something changing while a
- * save is on its way, after its first checks and before its write.
+ * The database `real`, with `first` run once, just before the statement
+ * whose query `when` matches runs for the time after the first `skip`:
+ * something changing while a stub call is on its way, after its first
+ * checks and before it acts.
  */
-const beforeRead = (when: RegExp, first: () => Promise<void>): D1Database => {
-  const real = env.KNOWLEDGE;
-  let done = false;
+const beforeRead = (
+  real: D1Database,
+  when: RegExp,
+  first: () => Promise<void>,
+  skip = 0
+): D1Database => {
+  let seen = 0;
   const once = async (): Promise<void> => {
-    if (!done) {
-      done = true;
+    seen += 1;
+    if (seen === skip + 1) {
       await first();
     }
   };
@@ -409,6 +441,21 @@ const beforeRead = (when: RegExp, first: () => Promise<void>): D1Database => {
     dump: async () => await real.dump(),
     withSession: (constraint) => real.withSession(constraint),
   };
+};
+
+/**
+ * One of an App's stubs as core serves it to the App's code, run here on
+ * `coreEnv`: core's own entrypoint, with its database raced.
+ */
+const stubOn = <Props, Stub>(
+  Binding: new (ctx: ExecutionContext<Props>, env: Env) => Stub,
+  props: Props,
+  coreEnv: Env
+): Stub => {
+  const ctx: Pick<ExecutionContext<Props>, "props"> = { props };
+  // SAFETY: the stubs read only `props` of their context.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return new Binding(ctx as ExecutionContext<Props>, coreEnv);
 };
 
 /** What the desk last did after its call was let go (`lastAfter`). */
@@ -891,7 +938,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     );
     await ordinaryData(desk);
     // A screen call of the clerk's, held, whose caller the screen gets:
-    // the save below runs as the desk's record stub runs it for that call.
+    // the save below is the desk's record stub's, for that call.
     const held = gate();
     const call = outcome(
       clerk.api.screens.call(desk, "holdCaller", [held.wait])
@@ -900,7 +947,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     const save = async (path: string, leave: boolean): Promise<string> => {
       // The clerk leaves the team once the save has checked everything it
       // checks first, and before its write.
-      const racing = beforeRead(readsDocuments, async () => {
+      const racing = beforeRead(env.KNOWLEDGE, readsDocuments, async () => {
         if (leave) {
           await callAuth("/organization/remove-team-member", admin.session, {
             teamId: team,
@@ -909,28 +956,21 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
         }
       });
       return await outcome(
-        saveRecordAsDelegate(
-          { ...env, KNOWLEDGE: racing },
+        stubOn(
+          AppCollectionBinding,
           {
-            subject: { type: "app", appId: desk },
-            onBehalfOf: clerk.userId,
-            mode: "interactive",
-            appVersion: 1,
+            app: desk,
+            context: { type: "app", appId: desk },
+            permissionId,
+            collectionId: collectionIdSchema.parse(collectionId),
           },
-          { type: "app", appId: desk },
-          permissionId,
-          collectionId,
-          {
-            path,
-            ifVersion: 0,
-            record: { type: "task", status: "open" },
-            body: "",
-          },
-          undefined,
-          async () => {
-            await callerOf(env, desk, caller, "write");
-          }
-        )
+          { ...env, KNOWLEDGE: racing }
+        ).saveRecord(caller, {
+          path,
+          ifVersion: 0,
+          record: { type: "task", status: "open" },
+          body: "",
+        })
       );
     };
     const stays = `tasks/${unique()}.md`;
@@ -952,6 +992,202 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       results: { stays: "ok", leaves: "app.not_found" },
       written: [stays],
+    });
+  });
+
+  it("reaches no connection, invites no guest and revokes no chat once the person loses their role in the App, however late in the stub call that happens", async () => {
+    const admin = await personApi("admin");
+    const desk = await newApp(admin);
+    const granted = async (
+      object:
+        | { type: "connection"; connectionId: string }
+        | { type: "platform" },
+      actions: string[],
+      binding: string
+    ) =>
+      permissionIdSchema.parse(
+        await requestGranted(idp, admin, {
+          subject: { type: "app", appId: desk },
+          object,
+          actions,
+          binding,
+        })
+      );
+    // A shared connection, so the desk may be shared with anyone.
+    const mail = await mailConnection([], mailWithSearch);
+    const search = await granted(
+      { type: "connection", connectionId: mail.id },
+      ["mail.search"],
+      "MAIL"
+    );
+    const guests = await granted({ type: "platform" }, ["guests"], "GUESTS");
+    await ordinaryData(desk);
+    // A clerk for each stub call, each in a team of their own the desk is
+    // shared with, each with a screen call of the desk held: the stub
+    // calls below are the desk's stubs', for those calls.
+    const clerks = await Promise.all(
+      ["search", "invite", "revoke"].map(async () => {
+        const clerk = await personApi("user");
+        const team = await newTeam(admin, [clerk]);
+        await admin.api.apps.members.add(desk, {
+          type: "team",
+          id: team,
+          role: "user",
+        });
+        const held = gate();
+        const call = outcome(
+          clerk.api.screens.call(desk, "holdCaller", [held.wait])
+        );
+        return {
+          caller: await entered(held, call),
+          leave: async () => {
+            await callAuth("/organization/remove-team-member", admin.session, {
+              teamId: team,
+              userId: clerk.userId,
+            });
+          },
+          done: async () => {
+            held.release();
+            await call;
+          },
+        };
+      })
+    );
+    const [lister, inviter, revoker] = clerks;
+    if (
+      lister === undefined ||
+      inviter === undefined ||
+      revoker === undefined
+    ) {
+      throw new Error("Expected three clerks");
+    }
+    const connection = (coreEnv: Env) =>
+      stubOn(
+        AppConnectionBinding,
+        {
+          app: desk,
+          context: { type: "app", appId: desk },
+          permissionId: search,
+          connection: { type: "connection", connectionId: mail.id },
+        },
+        coreEnv
+      );
+    const guestChats = (coreEnv: Env) =>
+      stubOn(AppGuestsBinding, { app: desk, permissionId: guests }, coreEnv);
+    // Core's database, with the clerk leaving their team just before the
+    // first read `when` matches: after the stub call was admitted, before
+    // it acts.
+    const leaving = (clerk: { leave: () => Promise<void> }, when: RegExp) => ({
+      ...env,
+      DB: beforeRead(env.DB, when, clerk.leave),
+    });
+    const anna = { name: "Anna", skill: "interview-a-stakeholder" };
+
+    const stays = {
+      search: await outcome(
+        connection(env).call(lister.caller, "mail.search", { query: "stays" })
+      ),
+      invite: await outcome(guestChats(env).invite(inviter.caller, anna)),
+    };
+    const chat = await guestChats(env).invite(revoker.caller, anna);
+    const leaves = {
+      search: await outcome(
+        connection(leaving(lister, readsPermissions)).call(
+          lister.caller,
+          "mail.search",
+          { query: "leaves" }
+        )
+      ),
+      invite: await outcome(
+        guestChats(leaving(inviter, readsPermissions)).invite(
+          inviter.caller,
+          anna
+        )
+      ),
+      revoke: await outcome(
+        guestChats(leaving(revoker, readsGuestChats)).revoke(
+          revoker.caller,
+          chat.id
+        )
+      ),
+    };
+    await Promise.all(
+      clerks.map(async ({ done }) => {
+        await done();
+      })
+    );
+    const chats = await env.DB.prepare(
+      "SELECT ended FROM guest_chats WHERE app_id = ? ORDER BY created_at"
+    )
+      .bind(desk)
+      .all<{ ended: string | null }>();
+    expect({
+      stays,
+      leaves,
+      // Only the two invitations made before anyone left; neither revoked.
+      chats: chats.results.map(({ ended }) => ended),
+      // Only the search made before anyone left reached the mail server.
+      searched: await mail.searched(),
+    }).toStrictEqual({
+      stays: { search: "ok", invite: "ok" },
+      leaves: {
+        search: "app.not_found",
+        invite: "app.not_found",
+        revoke: "app.not_found",
+      },
+      chats: [null, null],
+      searched: ["stays"],
+    });
+  });
+
+  it("reaches no connection once the App a call came through loses its permission, however late in the stub call that happens", async () => {
+    const { admin, desk, front, calls, outlook } = await setUp();
+    // The front desk's call of the desk's export, waiting in the desk.
+    const call = outcome(viaFront(front, admin.userId, "waitThenPoint", {}));
+    await vi.waitFor(
+      async () => {
+        await expect(
+          callApp(env, desk, as(admin.userId), "isWaiting")
+        ).resolves.toBeTruthy();
+      },
+      { timeout: 15_000, interval: 50 }
+    );
+    const caller = await callApp(env, desk, as(admin.userId), "waitingCaller");
+    const list = async (coreEnv: Env): Promise<string> =>
+      await outcome(
+        stubOn(
+          AppConnectionBinding,
+          {
+            app: desk,
+            context: { type: "app", appId: desk },
+            permissionId: outlook,
+            connection: {
+              type: "connection",
+              connectionId: "connection-outlook",
+            },
+          },
+          coreEnv
+        ).call(caller, "mail.list", {})
+      );
+    const stays = await list(env);
+    // Revoked once the stub call was admitted, as its own permission is
+    // checked: the second read of permissions, after the front desk's.
+    const revoked = await list({
+      ...env,
+      DB: beforeRead(
+        env.DB,
+        readsPermissions,
+        async () => {
+          await admin.api.permissions.revoke(calls);
+        },
+        1
+      ),
+    });
+    await callApp(env, desk, as(admin.userId), "letGo");
+    await call;
+    expect({ stays, revoked }).toStrictEqual({
+      stays: reached,
+      revoked: "permission.denied",
     });
   });
 });

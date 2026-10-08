@@ -83,8 +83,9 @@ export const tokenOf = (caller: unknown): string => {
  * (`App.admit`, or `App.claimStatistic`, which also counts the use), what
  * let the call in is checked again (`requireStillAdmitted`), and the host
  * is asked once more, last, for `use`. That is not yet the act: a stub
- * that awaits more before it acts (a permission check, a lookup) asks the
- * host again just before (`stillAdmitted`): a connection call before it
+ * that awaits more before it acts (a permission check, signing, a lookup)
+ * admits the call again, in full, just before (`stillAdmitted`): a
+ * connection call before it
  * goes to connect, with a capability that expires by the call's deadline;
  * a guest chat or a record just before its write's batch. A statistics
  * point is written straight after, with nothing awaited between.
@@ -100,21 +101,6 @@ const admitted = async (
   const { admission } = await first(host);
   await requireStillAdmitted(env, app, admission);
   return await host.admit(token, use);
-};
-
-/**
- * Asks App `app`'s host, once more, whether the call `token` names may
- * still do `use`: for a stub's last word before it acts, after whatever
- * it awaited since it was admitted. No more than that: what let the call
- * in was checked when it was.
- */
-export const stillAdmitted = async (
-  env: Env,
-  app: AppId,
-  token: string,
-  use: InvocationKind
-): Promise<void> => {
-  await appHost(env, app).admit(token, use);
 };
 
 /**
@@ -143,6 +129,24 @@ export const callerOf = async (
     use,
     async (host) => await host.admit(token, use)
   );
+};
+
+/**
+ * Admits the call `token` names for `use` again, in full, as `callerOf`
+ * does: a stub's last word before it acts, after whatever it awaited
+ * since it was admitted. Not the host's word alone: what let the call in
+ * (the person's role in the App, the calling App's permission and its own
+ * call, up the chain) can be gone while the stub awaited, with the call's
+ * token still good. Its last step is the host's, and the stub awaits
+ * nothing after it but the act.
+ */
+export const stillAdmitted = async (
+  env: Env,
+  app: AppId,
+  token: string,
+  use: InvocationKind
+): Promise<void> => {
+  await callerOf(env, app, { token }, use);
 };
 
 /**

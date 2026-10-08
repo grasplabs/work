@@ -72,7 +72,8 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   /**
    * Runs `run` for `caller`, admitted for `use` (a change, or a read:
    * `callerOf`), with errors as the sandbox sees them, and what `run` asks
-   * just before it writes (`lastCheck`): the host again, for `use`.
+   * just before it writes (`lastCheck`): the call admitted again, in full,
+   * for `use` (`stillAdmitted`).
    */
   async #run<T>(
     caller: unknown,
