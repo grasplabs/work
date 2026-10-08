@@ -7,6 +7,7 @@
 //             retries after the first attempt, the first 10 seconds after
 //             it failed, each one twice as long after the one before
 //   timeout   "10 minutes", each attempt
+//   sensitive none: observers see the step's result
 //
 // The 10-second delay is Cloudflare's documented default. The local
 // engine Wrangler ships (miniflare's) waits 1 second instead; the
@@ -59,8 +60,14 @@ export interface StepConfig {
   readonly backoff: WorkflowBackoff;
   readonly timeoutMs: number;
   /**
+   * `sensitive: "output"`: observers (history.ts) see "[REDACTED]" for its
+   * result, and its errors' messages are redacted wherever they are kept.
+   */
+  readonly sensitive: boolean;
+  /**
    * What the journal keeps of it, and every replay must give again: the
-   * values in milliseconds, so "10 seconds" and 10000 are the same.
+   * values in milliseconds, so "10 seconds" and 10000 are the same, and
+   * the sensitivity, so a replay can't show what the run kept hidden.
    */
   readonly journal: string;
   /** What the step's callback is told, as Cloudflare tells it. */
@@ -204,27 +211,44 @@ const readTimeout = (
   return { ms, given: timeout as WorkflowDuration };
 };
 
-const configOf = (retries: Retries, timeout?: unknown): StepConfig => {
+const readSensitive = (sensitive: unknown): boolean => {
+  if (sensitive !== undefined && sensitive !== "output") {
+    throw new TypeError(
+      `A step's sensitive setting is "output", not ${describe(sensitive)}`
+    );
+  }
+  return sensitive === "output";
+};
+
+const configOf = (
+  retries: Retries,
+  timeout?: unknown,
+  sensitive = false
+): StepConfig => {
   const { ms: timeoutMs, given: timeoutGiven } = readTimeout(timeout);
   const { limit, delay, backoff, given } = retries;
+  const resolvedRetries =
+    given === undefined ? { limit, backoff } : { limit, delay: given, backoff };
   return {
     limit,
     delay,
     backoff,
     timeoutMs,
+    sensitive,
     journal: JSON.stringify({
       limit,
       delay: typeof delay === "function" ? "dynamic" : delay,
       backoff,
       timeout: timeoutMs,
+      sensitive,
     }),
-    context: {
-      retries:
-        given === undefined
-          ? { limit, backoff }
-          : { limit, delay: given, backoff },
-      timeout: timeoutGiven,
-    },
+    context: sensitive
+      ? {
+          retries: resolvedRetries,
+          timeout: timeoutGiven,
+          sensitive: "output",
+        }
+      : { retries: resolvedRetries, timeout: timeoutGiven },
   };
 };
 
@@ -234,11 +258,12 @@ const readConfig = (config: unknown): StepConfig => {
       `A step's config is an object, not ${config === null ? "null" : describe(config)}`
     );
   }
-  const { retries, timeout } = readSettings("A step's config", config, [
-    "retries",
-    "timeout",
-  ] as const);
-  return configOf(readRetries(retries), timeout);
+  const { retries, timeout, sensitive } = readSettings(
+    "A step's config",
+    config,
+    ["retries", "timeout", "sensitive"] as const
+  );
+  return configOf(readRetries(retries), timeout, readSensitive(sensitive));
 };
 
 /**

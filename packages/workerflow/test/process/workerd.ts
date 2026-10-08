@@ -211,6 +211,18 @@ export class Workerd {
     return { status: response.status, body: parsed };
   }
 
+  /** A GET whose answer is bytes, with its headers. */
+  async bytes(
+    pathname: string
+  ): Promise<{ status: number; headers: Headers; body: Uint8Array }> {
+    // The signal bounds the body read as well as the answer.
+    const response = await fetch(`${this.url}${pathname}`, {
+      signal: AbortSignal.timeout(requestTimeoutMs),
+    });
+    const body = new Uint8Array(await response.arrayBuffer());
+    return { status: response.status, headers: response.headers, body };
+  }
+
   async dispose(): Promise<void> {
     await this.kill();
     rmSync(this.#work, { recursive: true, force: true });
