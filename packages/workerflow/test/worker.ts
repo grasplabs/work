@@ -4,8 +4,9 @@ import type {
   DefinitionIdentity,
   WorkflowDefinition,
   WorkflowDuration,
+  WorkflowStepContext,
 } from "../src/contracts.ts";
-import { namedError } from "../src/errors.ts";
+import { NonRetryableError, namedError } from "../src/errors.ts";
 import { WorkflowRun } from "../src/run.ts";
 import { checkpoint, effect, witness } from "./outside.ts";
 
@@ -16,6 +17,13 @@ const errorOf = (error: unknown): { name: string; message: string } =>
 
 const declinedCard = (): Error =>
   namedError("PaymentError", "The card was declined");
+
+/**
+ * For steps whose failure is the point: no retry, so the failure is the
+ * step's at once. Without it a failing step retries five times, over
+ * minutes, as on Cloudflare.
+ */
+const once = { retries: { limit: 0, delay: 0 } };
 
 /** A field of a run's params, as the test passed it. */
 const paramOf = (params: unknown, field: string): unknown =>
@@ -83,7 +91,7 @@ export const definitions: Record<string, WorkflowDefinition> = {
     run: async (event, step) => {
       let declined: { name: string; message: string } | undefined;
       try {
-        await step.do("charge", async (context) => {
+        await step.do("charge", once, async (context) => {
           await effect(event.instanceId, "charge", context);
           throw declinedCard();
         });
@@ -100,7 +108,7 @@ export const definitions: Record<string, WorkflowDefinition> = {
   // A step's failure the author doesn't catch ends the run.
   uncaught: {
     run: async (event, step) => {
-      await step.do("charge", async (context) => {
+      await step.do("charge", once, async (context) => {
         await effect(event.instanceId, "charge", context);
         throw declinedCard();
       });
@@ -184,7 +192,7 @@ export const definitions: Record<string, WorkflowDefinition> = {
   // a step and in the definition's own body.
   "bare-in-step": {
     run: async (_event, step) =>
-      await step.do("bare", () => {
+      await step.do("bare", once, () => {
         throw unprintableValue();
       }),
   },
@@ -196,7 +204,7 @@ export const definitions: Record<string, WorkflowDefinition> = {
   },
   "huge-in-step": {
     run: async (_event, step) =>
-      await step.do("huge", () => {
+      await step.do("huge", once, () => {
         throw oversizedError();
       }),
   },
@@ -215,17 +223,153 @@ export const definitions: Record<string, WorkflowDefinition> = {
         instanceId: event.instanceId,
       }),
   },
-  // A configured step, which this profile refuses rather than ignores.
-  configured: {
-    run: async (_event, step) => {
-      // Called as a Cloudflare definition with a step config would; the
-      // contract doesn't offer that form yet.
+  // A step called with the config in the params, as an author passing
+  // whatever they were given would: refused or run, never run otherwise.
+  misconfigured: {
+    run: async (event, step) => {
+      const config: unknown = paramOf(event.payload, "config");
       const result: unknown = await Reflect.apply(step.do, step, [
-        "retrying",
-        { retries: { limit: 3 } },
+        "configured",
+        config,
         () => "ran",
       ]);
       return result;
+    },
+  },
+  // A step configured by the params' `config` (or with none) that fails
+  // its first `fails` attempts, as `failure` says; the author catches what
+  // it throws in the end.
+  retrying: {
+    run: async (event, step) => {
+      const { instanceId, payload } = event;
+      const fails = paramOf(payload, "fails");
+      const failure = paramOf(payload, "failure");
+      const config: unknown = paramOf(payload, "config");
+      const work = async (context: WorkflowStepContext): Promise<unknown> => {
+        const receipt = await effect(instanceId, "flaky", context);
+        if (typeof fails === "number" && context.attempt <= fails) {
+          if (failure === "non-retryable") {
+            throw new NonRetryableError(`attempt ${context.attempt} failed`);
+          }
+          if (failure === "prefixed") {
+            throw new Error(
+              `NonRetryableError: attempt ${context.attempt} failed`
+            );
+          }
+          throw namedError("FlakyError", `attempt ${context.attempt} failed`);
+        }
+        return { receipt, attempt: context.attempt, config: context.config };
+      };
+      try {
+        const result: unknown = await Reflect.apply(
+          step.do,
+          step,
+          config === undefined ? ["flaky", work] : ["flaky", config, work]
+        );
+        return result;
+      } catch (error) {
+        return { caught: errorOf(error) };
+      }
+    },
+  },
+  // A step whose retry delay a function says: what the params' `delay`
+  // holds, or a throw for "throw".
+  "dynamic-delay": {
+    run: async (event, step) => {
+      const { instanceId, payload } = event;
+      const said: unknown = paramOf(payload, "delay");
+      try {
+        return await step.do(
+          "flaky",
+          {
+            retries: {
+              limit: 3,
+              backoff: "constant",
+              delay: ({ ctx, error }) => {
+                witness(instanceId, `asked-${ctx.attempt}-${error.name}`);
+                if (said === "throw") {
+                  throw new Error("no delay today");
+                }
+                // SAFETY: whatever the test passed, unchecked here: the
+                // engine is what checks it.
+                // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+                return said as WorkflowDuration;
+              },
+            },
+          },
+          async (context) => {
+            await effect(instanceId, "flaky", context);
+            throw namedError("FlakyError", `attempt ${context.attempt} failed`);
+          }
+        );
+      } catch (error) {
+        return { caught: errorOf(error) };
+      }
+    },
+  },
+  // A step whose config the params give: `first` in the first activation,
+  // `later` in every later one. It always fails.
+  reconfigured: {
+    run: async (event, step) => {
+      const { instanceId, payload } = event;
+      const first = (await checkpoint(instanceId, "config")) === 1;
+      const config: unknown = paramOf(payload, first ? "first" : "later");
+      const result: unknown = await Reflect.apply(step.do, step, [
+        "flaky",
+        config,
+        async (context: WorkflowStepContext) => {
+          await effect(instanceId, "flaky", context);
+          throw namedError("FlakyError", `attempt ${context.attempt} failed`);
+        },
+      ]);
+      return result;
+    },
+  },
+  // A step that times out after a second and retries a second later. Each
+  // activation passes a checkpoint first, so the test can hold the one
+  // the retry's alarm starts.
+  hung: {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      await checkpoint(instanceId, "activation");
+      return await step.do(
+        "hung",
+        {
+          retries: { limit: 1, delay: "1 second", backoff: "constant" },
+          timeout: "1 second",
+        },
+        async (context) => {
+          const receipt = await effect(instanceId, "hung", context);
+          // The callback's own code, once its answer came: it runs for an
+          // attempt that timed out too, and is seen to.
+          witness(instanceId, `answered-${context.attempt}`);
+          return receipt;
+        }
+      );
+    },
+  },
+  // Two steps at once: one fails its first attempt and retries a second
+  // later, while the other is out at its effect.
+  "retry-beside": {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      return await Promise.all([
+        step.do(
+          "flaky",
+          { retries: { limit: 1, delay: "1 second", backoff: "constant" } },
+          async (context) => {
+            const receipt = await effect(instanceId, "flaky", context);
+            if (context.attempt === 1) {
+              throw namedError("FlakyError", "attempt 1 failed");
+            }
+            return receipt;
+          }
+        ),
+        step.do(
+          "steady",
+          async (context) => await effect(instanceId, "steady", context)
+        ),
+      ]);
     },
   },
   // A run whose definition ends while one of its steps is still out.

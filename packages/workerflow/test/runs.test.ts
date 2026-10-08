@@ -151,19 +151,40 @@ describe("a workflow run", () => {
     });
   });
 
-  it("refuses a configured step rather than run it without its configuration", async () => {
-    const id = newId();
-    await workflow("configured").create({ id });
+  it.each([
+    ["retries without a delay", { retries: { limit: 3 } }],
+    ["a retry limit that isn't whole", { retries: { limit: 1.5, delay: 0 } }],
+    ["a negative retry limit", { retries: { limit: -1, delay: 0 } }],
+    [
+      "a backoff it doesn't know",
+      { retries: { limit: 1, delay: 0, backoff: "random" } },
+    ],
+    ["a delay that isn't a duration", { retries: { limit: 1, delay: "soon" } }],
+    ["null retries", { retries: null }],
+    ["a timeout of 0", { timeout: 0 }],
+    [
+      "a timeout longer than an attempt can run here",
+      { timeout: "16 minutes" },
+    ],
+    ["a setting it doesn't know", { retry: { limit: 1, delay: 0 } }],
+    ["a setting of a later slice", { sensitive: "output" }],
+    ["null for a config", null],
+  ])(
+    "refuses a step configured with %s rather than run it otherwise",
+    async (_, config) => {
+      const id = newId();
+      await workflow("misconfigured").create({ id, params: { config } });
 
-    const status = await ended("configured", id);
+      const status = await ended("misconfigured", id);
 
-    expect(status).toMatchObject({
-      status: "errored",
-      error: { name: "TypeError" },
-    });
-    const { steps } = await journalOf("configured", id);
-    expect(steps).toStrictEqual([]);
-  });
+      expect(status).toMatchObject({
+        status: "errored",
+        error: { name: "TypeError" },
+      });
+      const { steps } = await journalOf("misconfigured", id);
+      expect(steps).toStrictEqual([]);
+    }
+  );
 
   it("ends as errored when the host has no such definition", async () => {
     const id = newId();

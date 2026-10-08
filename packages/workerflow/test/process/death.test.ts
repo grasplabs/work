@@ -136,6 +136,30 @@ const asleepAt = async (
       : undefined;
   });
 
+/**
+ * Waits until the run has suspended on the retry of its first step, with
+ * no activation alive, and returns when the journal says it is due.
+ */
+const retryDueAt = async (definition: string, id: string): Promise<number> =>
+  await until(`run ${id} to wait for a retry`, async () => {
+    const journal = await journalOf(definition, id);
+    const attempts: unknown[] =
+      typeof journal === "object" &&
+      journal !== null &&
+      "attempts" in journal &&
+      Array.isArray(journal.attempts)
+        ? journal.attempts
+        : [];
+    const [first] = attempts;
+    const retryAt =
+      typeof first === "object" && first !== null && "retry_at" in first
+        ? first.retry_at
+        : undefined;
+    return runStatusIn(journal) === "waiting" && typeof retryAt === "number"
+      ? retryAt
+      : undefined;
+  });
+
 /** Each effect of the run, as label and attempt, in the order received. */
 const timeline = (id: string): [string, number][] =>
   outside.of(id).map((effect) => [effect.label, effect.attempt]);
@@ -455,6 +479,42 @@ describe("a run on disk-backed workerd", () => {
         { name: "before", attempt: 1 },
         { name: "nap", state: "succeeded", deadline },
         { name: "after", attempt: 1 },
+      ],
+    });
+  });
+
+  it("retries a failed step at the time journaled before the process died, with no request reaching it", async () => {
+    const id = "retrying-when-killed";
+    await workerd.request("/start", startOf("flaky", id));
+    const retryAt = await retryDueAt("flaky", id);
+    await workerd.kill();
+
+    // No process at all until the retry is well past due.
+    await until("the retry to be due", () =>
+      Date.now() > retryAt + leaseMargin ? true : undefined
+    );
+    await workerd.start();
+    const retry = await until("the retry to go out", () =>
+      outside.of(id, "flaky").find((effect) => effect.attempt === 2)
+    );
+    const status = await ended("flaky", id);
+
+    expect(retry.at).toBeGreaterThanOrEqual(retryAt);
+    expect(timeline(id)).toStrictEqual([
+      ["flaky", 1],
+      ["flaky", 2],
+    ]);
+    expect(keysOf(id, "flaky").size).toBe(1);
+    expect(status).toStrictEqual({ status: "complete", output: retry.receipt });
+    // The retry's time, as journaled before the kill, never computed again.
+    await expect(journalOf("flaky", id)).resolves.toMatchObject({
+      activations: [
+        { generation: 1, ended: "suspended" },
+        { generation: 2, ended: "settled" },
+      ],
+      attempts: [
+        { attempt: 1, generation: 1, ended: "failed", retry_at: retryAt },
+        { attempt: 2, generation: 2, ended: "succeeded" },
       ],
     });
   });

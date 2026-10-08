@@ -8,8 +8,10 @@
 //                that ended (no end: the process died or it was evicted)
 //   steps        each step occurrence: identity, start order, outcome; a
 //                sleep's or an event wait's absolute deadline
-//   attempts     each attempt at a `do` step, by generation, and how it
-//                ended (no end: cut off before its outcome was journaled)
+//   attempts     each attempt at a `do` step, by generation: its timeout's
+//                absolute deadline, how it ended (no end: cut off before
+//                its outcome was journaled), and when a failed one's retry
+//                is due
 //   events       the inbox: each event the run accepted, in order, and the
 //                wait that took it
 //
@@ -17,7 +19,7 @@
 // objects.
 
 /** The journal's own layout; a change to it is a new version. */
-export const journalSchemaVersion = 1;
+export const journalSchemaVersion = 2;
 
 /**
  * The largest event payload a run accepts, as encoded: the most the codec
@@ -58,14 +60,13 @@ export interface RunRow extends Record<string, SqlStorageValue> {
    * When the watchdog alarm is due: the current activation's lease, renewed
    * at every step. Nothing reads it to decide anything; it records when
    * recovery would start. An object gets no alarm while its alarm handler
-   * still runs, so a step that hangs hangs its run: until step timeouts
-   * are built, only the host ending the handler (Cloudflare's alarm wall
-   * time; on workerd, nothing) recovers it.
+   * still runs, so a step that hangs is ended by its own timeout, in the
+   * activation, not by the watchdog.
    */
   lease_until: number | null;
   /**
-   * When a waiting run is next due: the nearest deadline of its waits, or
-   * the time an event one of them can take was accepted. Written with the
+   * When a waiting run is next due: the nearest deadline of its waits or
+   * retries, or the time an event a wait can take was accepted. Written with the
    * alarm it sets, like `lease_until`, and like it read by nothing.
    */
   wake_at: number | null;
@@ -81,8 +82,18 @@ export interface RunRow extends Record<string, SqlStorageValue> {
   ended_at: number | null;
 }
 
-/** `waiting`: a sleep or an event wait that hasn't come to its outcome. */
-export type StepState = "running" | "waiting" | "succeeded" | "failed";
+/**
+ * `running`: a `do` step's latest attempt is out, or was cut off.
+ * `retrying`: its latest attempt failed, and the next is due at that
+ * attempt's `retry_at`. `waiting`: a sleep or an event wait that hasn't
+ * come to its outcome.
+ */
+export type StepState =
+  | "running"
+  | "retrying"
+  | "waiting"
+  | "succeeded"
+  | "failed";
 
 /** What kind of step a row is; part of its identity. */
 export type StepType = "do" | "sleep" | "waitForEvent";
@@ -111,17 +122,24 @@ export interface StepRow extends Record<string, SqlStorageValue> {
    * replay must give again; null for `sleepUntil`.
    */
   duration_ms: number | null;
+  /**
+   * A `do` step's config as first given (config.ts), in milliseconds,
+   * which every replay must give again; null for a sleep or a wait.
+   */
+  config: string | null;
 }
 
 /**
  * How an activation or an attempt ended: `settled` and `succeeded` /
- * `failed` journaled its outcome; `superseded` means a later generation
- * took over, and what it came back with was ignored. `suspended`: the
+ * `failed` journaled its outcome; `timed_out`: the attempt ran past its
+ * deadline, failed as it did, and whatever it answers later is ignored;
+ * `superseded` means a later generation took over, and what it came back
+ * with was ignored. `suspended`: the
  * activation reached a wait that isn't due, and let go of the run until
  * its alarm. `faulted`: one of the engine's own journal writes failed, and
  * the watchdog alarm brings the run back.
  */
-export type AttemptEnd = "succeeded" | "failed" | "superseded";
+export type AttemptEnd = "succeeded" | "failed" | "timed_out" | "superseded";
 export type ActivationEnd = "settled" | "superseded" | "suspended" | "faulted";
 
 export interface AttemptRow extends Record<string, SqlStorageValue> {
@@ -129,8 +147,18 @@ export interface AttemptRow extends Record<string, SqlStorageValue> {
   attempt: number;
   generation: number;
   started_at: number;
+  /** When its timeout ends it: journaled before its callback is called. */
+  deadline: number;
   ended_at: number | null;
   ended: AttemptEnd | null;
+  /** What a failed or timed-out attempt threw, as error text. */
+  error: string | null;
+  /**
+   * When the next attempt is due, for a failed attempt with a retry left:
+   * an absolute time, journaled in the write that ended this one, and
+   * never computed again.
+   */
+  retry_at: number | null;
 }
 
 export interface ActivationRow extends Record<string, SqlStorageValue> {
@@ -196,13 +224,14 @@ export const createJournal = (sql: SqlStorage): void => {
       name TEXT NOT NULL,
       occurrence INTEGER NOT NULL,
       idempotency_key TEXT NOT NULL,
-      state TEXT NOT NULL CHECK (state IN ('running', 'waiting', 'succeeded', 'failed')),
+      state TEXT NOT NULL CHECK (state IN ('running', 'retrying', 'waiting', 'succeeded', 'failed')),
       attempt INTEGER NOT NULL,
       value TEXT,
       error TEXT,
       deadline INTEGER,
       event_type TEXT,
       duration_ms INTEGER,
+      config TEXT,
       UNIQUE (type, name, occurrence)
     );
     CREATE TABLE IF NOT EXISTS attempts (
@@ -210,8 +239,11 @@ export const createJournal = (sql: SqlStorage): void => {
       attempt INTEGER NOT NULL,
       generation INTEGER NOT NULL,
       started_at INTEGER NOT NULL,
+      deadline INTEGER NOT NULL,
       ended_at INTEGER,
-      ended TEXT CHECK (ended IN ('succeeded', 'failed', 'superseded')),
+      ended TEXT CHECK (ended IN ('succeeded', 'failed', 'timed_out', 'superseded')),
+      error TEXT,
+      retry_at INTEGER,
       PRIMARY KEY (ordinal, attempt)
     );
     CREATE TABLE IF NOT EXISTS events (
@@ -228,6 +260,9 @@ export const createJournal = (sql: SqlStorage): void => {
     -- deep however long the run's history grows.
     CREATE INDEX IF NOT EXISTS steps_waiting
       ON steps (type, event_type) WHERE state = 'waiting';
+    -- The waits and retries a run suspended on: a handful at most.
+    CREATE INDEX IF NOT EXISTS steps_pending
+      ON steps (state) WHERE state IN ('waiting', 'retrying');
   `);
 };
 
@@ -248,7 +283,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined =>
     .toArray()[0];
 
 const stepColumns =
-  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, duration_ms";
+  "ordinal, type, name, occurrence, idempotency_key, state, attempt, value, error, deadline, event_type, duration_ms, config";
 
 export const readStep = (
   sql: SqlStorage,
@@ -260,6 +295,23 @@ export const readStep = (
       step.type,
       step.name,
       step.occurrence
+    )
+    .toArray()[0];
+
+const attemptColumns =
+  "ordinal, attempt, generation, started_at, deadline, ended_at, ended, error, retry_at";
+
+/** An attempt at a `do` step. */
+export const readAttempt = (
+  sql: SqlStorage,
+  ordinal: number,
+  attempt: number
+): AttemptRow | undefined =>
+  sql
+    .exec<AttemptRow>(
+      `SELECT ${attemptColumns} FROM attempts WHERE ordinal = ? AND attempt = ?`,
+      ordinal,
+      attempt
     )
     .toArray()[0];
 
@@ -317,7 +369,7 @@ export const readJournal = (sql: SqlStorage): Journal | undefined => {
       .toArray(),
     attempts: sql
       .exec<AttemptRow>(
-        "SELECT ordinal, attempt, generation, started_at, ended_at, ended FROM attempts ORDER BY ordinal, attempt"
+        `SELECT ${attemptColumns} FROM attempts ORDER BY ordinal, attempt`
       )
       .toArray(),
     events: sql

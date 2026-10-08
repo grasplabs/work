@@ -4,11 +4,11 @@
 // definition runs on either engine. They are generic: a definition is an
 // opaque name and version, a run knows nothing of who started it or why.
 //
-// This profile is partial. It has named `do` steps, sleeps and event waits,
-// persisted and replayed. Retries, step configuration (and with it the step
-// context's resolved `config`), step timeouts, pause, terminate, restart,
-// rollbacks and retention come in later slices; until then they are absent
-// or refused, never silently ignored.
+// This profile is partial. It has named `do` steps with retries and
+// timeouts, sleeps and event waits, persisted and replayed. Pause,
+// terminate, restart, rollbacks, sensitive steps and retention come in
+// later slices; until then they are absent or refused, never silently
+// ignored.
 
 /** What a run's definition is given when it runs. */
 export interface WorkflowEvent<Params = unknown> {
@@ -30,19 +30,32 @@ export interface WorkflowStepContext {
     readonly count: number;
   };
   /**
-   * Which attempt at this step this is, from 1. A step only runs again when
-   * an earlier attempt was cut off before its outcome was journaled: the
-   * process died, or the object was evicted or superseded.
+   * Which attempt at this step this is, from 1. A step runs again when an
+   * attempt failed or timed out and its retries allow another, and when an
+   * attempt was cut off before its outcome was journaled (the process
+   * died, or the object was evicted or superseded). Every attempt has its
+   * own number, and only the step's latest attempt can journal an outcome:
+   * one that timed out, or was cut off, can't answer for the step.
    */
   readonly attempt: number;
   /**
    * The same for every attempt at this step occurrence, and different for
-   * every other step and run. An effect whose attempt was cut off after it
-   * left, but before the step was journaled, goes out again with the same
-   * key, so a receiver that deduplicates by it applies it once. The engine
-   * can't make an outside effect exactly-once on its own.
+   * every other step and run. An attempt that timed out or was cut off may
+   * still have had its effect, late: the next attempt goes out with the
+   * same key, so a receiver that deduplicates by it applies it once. The
+   * engine can't make an outside effect exactly-once on its own.
    */
   readonly idempotencyKey: string;
+  /** The step's config, defaults filled in, as Cloudflare resolves it. */
+  readonly config: {
+    readonly retries: {
+      readonly limit: number;
+      /** As given; absent when the delay is a function. */
+      readonly delay?: WorkflowDuration;
+      readonly backoff: WorkflowBackoff;
+    };
+    readonly timeout: WorkflowDuration;
+  };
 }
 
 export type WorkflowDurationLabel =
@@ -59,6 +72,35 @@ export type WorkflowDuration =
   | number
   | `${number} ${WorkflowDurationLabel}${"s" | ""}`;
 
+/** How a step's retry delays grow: Cloudflare's three. */
+export type WorkflowBackoff = "constant" | "linear" | "exponential";
+
+/**
+ * A retry delay said per failure: called once with the failed attempt's
+ * context (no `delay` in its config) and error, and what it says is
+ * journaled; it is never asked again for that attempt. It has 5 seconds.
+ */
+export type WorkflowDelayFunction = (input: {
+  ctx: WorkflowStepContext;
+  error: Error;
+}) => WorkflowDuration | Promise<WorkflowDuration>;
+
+/**
+ * How a `do` step retries and times out; what is left out is Cloudflare's
+ * default (config.ts). An attempt that runs past `timeout` fails with a
+ * WorkflowTimeoutError, and its late answer is ignored.
+ */
+export interface WorkflowStepConfig {
+  readonly retries?: {
+    /** Retries after the first attempt. */
+    readonly limit: number;
+    readonly delay: WorkflowDuration | WorkflowDelayFunction;
+    readonly backoff?: WorkflowBackoff;
+  };
+  /** Each attempt's; more than 0 and at most 15 minutes. */
+  readonly timeout?: WorkflowDuration;
+}
+
 /** An event as a wait receives it. */
 export interface WorkflowStepEvent<Payload = unknown> {
   readonly payload: Payload;
@@ -69,14 +111,22 @@ export interface WorkflowStepEvent<Payload = unknown> {
 
 export interface WorkflowStep {
   /**
-   * Runs `callback` once and journals what it returned or threw under
-   * `name`. Every later replay of the run returns that value, or throws
-   * that error again, without calling `callback`.
+   * Runs `callback` and journals what it returned, or what it threw once
+   * its retries are spent, under `name`. Every later replay of the run
+   * returns that value, or throws that error again, without calling
+   * `callback`. A failed attempt is retried after a delay journaled as an
+   * absolute time, with nothing of the run in memory meanwhile; a
+   * NonRetryableError (errors.ts) is not retried.
    */
-  do: <T>(
+  do: (<T>(
     name: string,
     callback: (context: WorkflowStepContext) => Promise<T> | T
-  ) => Promise<T>;
+  ) => Promise<T>) &
+    (<T>(
+      name: string,
+      config: WorkflowStepConfig,
+      callback: (context: WorkflowStepContext) => Promise<T> | T
+    ) => Promise<T>);
   /**
    * Resolves once `duration` has passed since this sleep was first
    * reached. The deadline is journaled then: no replay, restart or

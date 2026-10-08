@@ -78,7 +78,9 @@ const definitionsFor = (
     run: async (event, step) => {
       let declined: string | undefined;
       try {
-        await step.do("charge", async (context) => {
+        // No retry: the failure is the point, and it is the step's at once.
+        const once = { retries: { limit: 0, delay: 0 } };
+        await step.do("charge", once, async (context) => {
           await effect(env, event.instanceId, "charge", context);
           throw declinedCard();
         });
@@ -114,6 +116,35 @@ const definitionsFor = (
         async (context) => await effect(env, event.instanceId, "after", context)
       );
       return { before, after };
+    },
+  },
+  // A step whose first attempt fails, and whose retry comes a few seconds
+  // later (or as the params' `delay` says, in ms).
+  flaky: {
+    run: async (event, step) => {
+      const delay: unknown =
+        typeof event.payload === "object" &&
+        event.payload !== null &&
+        "delay" in event.payload
+          ? event.payload.delay
+          : undefined;
+      return await step.do(
+        "flaky",
+        {
+          retries: {
+            limit: 1,
+            delay: typeof delay === "number" ? delay : napMs,
+            backoff: "constant",
+          },
+        },
+        async (context) => {
+          const receipt = await effect(env, event.instanceId, "flaky", context);
+          if (context.attempt === 1) {
+            throw namedError("FlakyError", "attempt 1 failed");
+          }
+          return receipt;
+        }
+      );
     },
   },
   // A step, a wait for an "approved" event, another step.

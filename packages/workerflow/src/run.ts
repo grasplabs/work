@@ -30,13 +30,21 @@
 //   activation ends (activation.ts). Nothing of the run stays in memory.
 //   Every alarm and event replays to the wait, which reads its deadline
 //   back from the journal, so no duplicate, early or late alarm moves it.
+// - A step's failed attempt with a retry left journals the retry's
+//   absolute time in the write that ends the attempt; a retry not yet due
+//   suspends the run the way a sleep does, and every alarm replays to the
+//   step, which reads that time back. An attempt past its timeout is ended
+//   in the journal, and only a step's latest attempt can journal its
+//   outcome, so the late answer of one that timed out is ignored.
 // - Each alarm write follows the journal write it goes with in the same
 //   synchronous turn, so the alarm always says what the latest write
 //   meant, whichever path wrote last.
 //
 // A step's outcome is journaled before the definition sees it. A step cut
 // off after its effect left but before that write runs again, with the
-// same idempotency key (contracts.ts): at least once, not exactly once.
+// same idempotency key (contracts.ts): at least once, not exactly once. So
+// does a step whose attempt timed out or failed: its retry has a new
+// attempt number, and the same key.
 import { DurableObject } from "cloudflare:workers";
 
 import { Activation, superseded, suspended } from "./activation.ts";
