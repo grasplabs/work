@@ -429,24 +429,11 @@ export interface CssFetch {
   computed: boolean;
 }
 
-/**
- * Functions whose top-level strings are images, fetched like `url()`:
- * `image("a.png")`, `image-set("a.png" 1x)`, `cross-fade("a.png", …)`.
- * A string nested in another function (`type("image/png")`) isn't one.
- */
-const imageFunctions = new Set([
-  "image",
-  "image-set",
-  "-webkit-image-set",
-  "cross-fade",
-  "-webkit-cross-fade",
-]);
-
 /** Functions whose value is only known where the stylesheet is used. */
 const computedFunctions = new Set(["var", "env"]);
 
-/** Functions whose string argument is a URL. */
-const urlFunctions = new Set(["url", "src"]);
+/** `cross-fade()`: each argument an image or colour, and a percentage. */
+const crossFades = new Set(["cross-fade", "-webkit-cross-fade"]);
 
 /** Whether `closer` ends the innermost open block, `inside`. */
 const closes = (closer: string, inside: string | undefined): boolean => {
@@ -469,86 +456,214 @@ const closes = (closer: string, inside: string | undefined): boolean => {
 const asUrl = (value: string): string =>
   value.replaceAll(/[\t\n\r]/gu, "").replaceAll(/^[\0- ]+|[\0- ]+$/gu, "");
 
-/** Keeps `open`, the blocks open, as `token` opens or closes one. */
-const track = (open: string[], token: CssToken): void => {
+/**
+ * An open block, a function (by its lowercase name) or a bracket, and
+ * where in it the reader is.
+ */
+interface Block {
+  name: string;
+  /** Which comma-separated argument, from 0. */
+  argument: number;
+  /** Which component of that argument, from 0, whitespace aside. */
+  component: number;
+  /** In `cross-fade()`: the argument's `var()` or `env()`, if any. */
+  computed: string | undefined;
+  /** In `cross-fade()`: whether something else fills the argument's image. */
+  filled: boolean;
+}
+
+/** The reader's state over one stylesheet. */
+interface Reading {
+  found: CssFetch[];
+  open: Block[];
+  /** In an `@import` prelude, which component of it; else undefined. */
+  prelude: number | undefined;
+}
+
+/**
+ * Whether a token in `block`, where the reader is, is in image position,
+ * and if it is, whether esbuild resolves a URL there; undefined where it
+ * isn't one:
+ * - `url()`: its argument.
+ * - `src()`: the first component of its first argument (the rest are
+ *   modifiers).
+ * - `image-set()`: each option's first component (its resolution and
+ *   `type()` follow).
+ * - `image()`: its first argument (after it, the fallback colour).
+ * - An `@import` prelude: its first component.
+ */
+const imagePosition = (
+  block: Block | undefined,
+  prelude: number | undefined
+): boolean | undefined => {
+  if (block === undefined) {
+    return prelude === 0 ? true : undefined;
+  }
+  const { name, argument, component } = block;
+  if (name === "url") {
+    return true;
+  }
+  if (name === "src") {
+    return argument === 0 && component === 0 ? false : undefined;
+  }
+  if (name === "image-set" || name === "-webkit-image-set") {
+    return component === 0 ? false : undefined;
+  }
+  return name === "image" && argument === 0 ? false : undefined;
+};
+
+/**
+ * Ends an argument of `block`: in `cross-fade()`, a `var()` is its image
+ * unless something else (an image or a colour) is; a percentage isn't.
+ */
+const settle = (reading: Reading, block: Block | undefined): void => {
+  if (
+    block !== undefined &&
+    crossFades.has(block.name) &&
+    block.computed !== undefined &&
+    !block.filled
+  ) {
+    reading.found.push({ url: block.computed, bundled: false, computed: true });
+  }
+  if (block !== undefined) {
+    block.computed = undefined;
+    block.filled = false;
+  }
+};
+
+/** What a component token in `block` fetches, if anything. */
+const fetchOf = (
+  reading: Reading,
+  token: CssToken,
+  block: Block | undefined
+): void => {
+  if (token.type === "url") {
+    reading.found.push({
+      url: asUrl(token.value),
+      bundled: true,
+      computed: false,
+    });
+    if (block !== undefined && crossFades.has(block.name)) {
+      block.filled = true;
+    }
+    return;
+  }
+  const name = token.value.toLowerCase();
+  const computed = token.type === "function" && computedFunctions.has(name);
+  if (block !== undefined && crossFades.has(block.name)) {
+    if (token.type === "string") {
+      reading.found.push({
+        url: asUrl(token.value),
+        bundled: false,
+        computed: false,
+      });
+    }
+    if (computed) {
+      block.computed ??= `${name}()`;
+    } else if (token.type !== "numeric") {
+      block.filled = true;
+    }
+    return;
+  }
+  if (token.type !== "string" && !computed) {
+    return;
+  }
+  const bundled = imagePosition(block, reading.prelude);
+  if (bundled === undefined) {
+    return;
+  }
+  reading.found.push(
+    computed
+      ? { url: `${name}()`, bundled: false, computed: true }
+      : { url: asUrl(token.value), bundled, computed: false }
+  );
+};
+
+/**
+ * Reads a token that separates rather than is a component: whitespace,
+ * a closing bracket, a comma, an at-rule's start or end. Whether it was.
+ */
+const separates = (
+  reading: Reading,
+  token: CssToken,
+  block: Block | undefined
+): boolean => {
   const { type } = token;
-  if (type === "function") {
-    open.push(token.value.toLowerCase());
-  } else if (type === "(" || type === "[" || type === "{") {
-    open.push(type);
-  } else if (
-    (type === ")" || type === "]" || type === "}") &&
+  if (type === "whitespace") {
+    return true;
+  }
+  if (type === ")" || type === "]" || type === "}") {
     // Only the matching bracket closes a block; any other is a token
     // inside it, as the parser reads it.
-    closes(type, open.at(-1))
-  ) {
-    open.pop();
+    if (closes(type, block?.name)) {
+      settle(reading, block);
+      reading.open.pop();
+    }
+    return true;
+  }
+  if (type === "," && block !== undefined) {
+    settle(reading, block);
+    block.argument += 1;
+    block.component = 0;
+    return true;
+  }
+  // An `@import`'s prelude runs to its `;` or a block.
+  if (block === undefined && (type === "at-keyword" || type === ";")) {
+    reading.prelude =
+      type === "at-keyword" && token.value.toLowerCase() === "import"
+        ? 0
+        : undefined;
+    return true;
+  }
+  return false;
+};
+
+/** Reads one token: what it fetches, and the blocks and positions. */
+const read = (reading: Reading, token: CssToken): void => {
+  const { type } = token;
+  const block = reading.open.at(-1);
+  if (separates(reading, token, block)) {
+    return;
+  }
+  fetchOf(reading, token, block);
+  if (block !== undefined) {
+    block.component += 1;
+  } else if (reading.prelude !== undefined) {
+    reading.prelude += 1;
+  }
+  if (type === "{") {
+    reading.prelude = undefined;
+  }
+  if (type === "function" || type === "(" || type === "[" || type === "{") {
+    reading.open.push({
+      name: type === "function" ? token.value.toLowerCase() : type,
+      argument: 0,
+      component: 0,
+      computed: undefined,
+      filled: false,
+    });
   }
 };
 
 /**
- * Whether a string inside `inside` (the innermost open block) fetches,
- * and if it does, whether esbuild resolves it: undefined where it is
- * only text.
- */
-const stringFetch = (
-  inside: string | undefined,
-  importPrelude: boolean
-): boolean | undefined => {
-  if (inside === undefined) {
-    return importPrelude ? true : undefined;
-  }
-  if (urlFunctions.has(inside)) {
-    return inside === "url";
-  }
-  return imageFunctions.has(inside) ? false : undefined;
-};
-
-/**
- * Every URL a stylesheet would fetch, from the positions that fetch only:
- * `url()` (unquoted or quoted), `src()`, the string of an `@import`
- * prelude, and strings in image position of `image()`, `image-set()`,
- * `-webkit-image-set()` and `cross-fade()`. A `var()` or `env()` in any of
- * those positions (but `url()`, which takes none) is a fetch of a URL the
- * build can't know, `computed`. A `url()` anywhere counts, a custom
- * property's value included.
+ * Every URL a stylesheet would fetch, from the positions that fetch only
+ * (`imagePosition`): `url()` (unquoted or quoted) anywhere, a custom
+ * property's value included; `src()`; an `@import` prelude; the image of
+ * `image()`, `image-set()` and `-webkit-image-set()`; and the image of
+ * each argument of `cross-fade()`. A `var()` or `env()` in one of those
+ * positions is a URL the build can't know, `computed`; anywhere else
+ * (a resolution, a `type()`, a fallback colour, a percentage) it is
+ * nothing fetched.
  */
 export const cssFetches = (css: string): CssFetch[] => {
-  const found: CssFetch[] = [];
-  const open: string[] = [];
-  let importPrelude = false;
+  const reading: Reading = { found: [], open: [], prelude: undefined };
   const tokenizer = new Tokenizer(css);
   for (
     let token = tokenizer.next();
     token !== undefined;
     token = tokenizer.next()
   ) {
-    const name = token.value.toLowerCase();
-    const position =
-      token.type === "string" ||
-      (token.type === "function" && computedFunctions.has(name))
-        ? stringFetch(open.at(-1), importPrelude)
-        : token.type === "url" || undefined;
-    if (position !== undefined && token.type === "function") {
-      found.push({ url: `${name}()`, bundled: false, computed: true });
-    } else if (position !== undefined) {
-      found.push({
-        url: asUrl(token.value),
-        bundled: position,
-        computed: false,
-      });
-    }
-    // An `@import`'s prelude runs to its `;` or a block.
-    if (token.type === "at-keyword") {
-      importPrelude =
-        open.length === 0 && token.value.toLowerCase() === "import";
-    } else if (
-      token.type === "{" ||
-      (token.type === ";" && open.length === 0)
-    ) {
-      importPrelude = false;
-    }
-    track(open, token);
+    read(reading, token);
   }
-  return found;
+  return reading.found;
 };

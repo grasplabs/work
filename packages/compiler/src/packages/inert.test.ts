@@ -221,9 +221,11 @@ describe("a stylesheet an artifact carries", () => {
     expect([remoteInCss(css), unbundledInCss(css)]).toStrictEqual([[], []]);
   });
 
-  it("names var() and env() wherever they would give a URL to fetch", () => {
+  it("names var() and env() in image position, wherever they would give a URL to fetch", () => {
     const fetching = [
       '.a{--photo:"https://cdn.example/a.png";background:image-set(var(--photo) 1x)}',
+      ".a2{background:image-set(url(./assets/a-HASH.png) 1x, var(--photo) 2x)}",
+      ".a3{background:cross-fade(url(./assets/a-HASH.png) 30%, var(--img) 70%)}",
       ".b{background:-webkit-image-set(env(--b) 1x)}",
       ".c{background:image(var(--c))}",
       ".d{background:cross-fade(var(--d) 50%, red)}",
@@ -231,6 +233,8 @@ describe("a stylesheet an artifact carries", () => {
       "@import var(--f);",
     ];
     expect(fetching.map((css) => computedInCss(css))).toStrictEqual([
+      ["var()"],
+      ["var()"],
       ["var()"],
       ["env()"],
       ["var()"],
@@ -240,11 +244,16 @@ describe("a stylesheet an artifact carries", () => {
     ]);
   });
 
-  it("takes var() where nothing is fetched, and catches a url() in a custom property", () => {
+  it("takes var() where nothing is fetched (a resolution, type(), modifier, fallback colour or percentage), and catches a url() in a custom property", () => {
     const css = [
       ".a{color:var(--accent);margin:env(safe-area-inset-top)}",
       ".b{background:image-set(url(./assets/b-HASH.png) type(var(--t)) 1x)}",
       ".c{--photo:url(https://cdn.example/c.png);background:var(--photo)}",
+      '.d{background:image-set(url("./assets/d-HASH.png") var(--density))}',
+      ".e{background:image(url(./assets/e-HASH.png), var(--fallback))}",
+      ".f{background:cross-fade(var(--p) url(./assets/f-HASH.png), red)}",
+      '@font-face{src:src("./assets/g-HASH.woff" var(--modifier))}',
+      ".h{background:-webkit-image-set(url(./assets/h-HASH.png) var(--x), url(./assets/i-HASH.png) 2x)}",
     ].join("\n");
     expect([computedInCss(css), remoteInCss(css)]).toStrictEqual([
       [],

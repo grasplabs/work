@@ -139,7 +139,9 @@ const stringTarget = (
  * An array of fallbacks, as Node resolves one: an invalid target, an
  * unmatched condition and a `null` each go on to the next; the result is
  * the first that resolves, else what the last gave (`null` for an empty
- * array). A `null` alone, outside an array, blocks the export.
+ * array). When no element matched a condition, that is undefined, so the
+ * condition after the array is tried (as Node does, checked against it in
+ * exports.test.ts). A `null` alone, outside an array, blocks the export.
  */
 const resolveFallbacks = (
   targets: readonly unknown[],
@@ -167,6 +169,16 @@ const resolveFallbacks = (
   return last;
 };
 
+/**
+ * Whether a condition key is an array index, as Node's `isArrayIndex`
+ * has it: a number's own text, below 2^32 - 1. `01` and `4294967295` are
+ * names; `0` is an index.
+ */
+const isArrayIndex = (key: string): boolean => {
+  const value = Number(key);
+  return String(value) === key && value >= 0 && value < 0xff_ff_ff_ff;
+};
+
 /** Node's `PACKAGE_TARGET_RESOLVE`, with invalid targets as `invalid`. */
 const resolveTarget = (
   target: unknown,
@@ -187,7 +199,7 @@ const resolveTarget = (
     return invalid;
   }
   const keys = Object.keys(target);
-  if (keys.some((key) => /^\d+$/u.test(key))) {
+  if (keys.some(isArrayIndex)) {
     return invalidConfiguration;
   }
   for (const condition of keys) {
