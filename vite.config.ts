@@ -27,6 +27,8 @@ const generated = [
   "**/src/db/**/migrations/**",
   // Release fixtures and the golden manifest the release test writes.
   "scripts/release/testdata/**",
+  // Third-party files vendored byte for byte, pinned by their hashes.
+  "packages/*/vendor/**",
 ];
 
 export default defineConfig({

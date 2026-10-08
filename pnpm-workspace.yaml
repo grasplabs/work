@@ -63,6 +63,10 @@ catalog:
   zod: 4.6.5
   # The types of Standard Schema, which the SDK's value schemas implement.
   "@standard-schema/spec": 1.1.0
+  # JSON Schema 2020-12 in workerd (MIT): only the Open Workflow profile's
+  # tests use it, to check accepted definitions against the vendored upstream
+  # schema. Nothing ships a general JSON Schema validator.
+  "@cfworker/json-schema": 4.1.1
 
   # Identity, agents, connections
   # Better Auth's core, for its IP normalisation in the router; same release
