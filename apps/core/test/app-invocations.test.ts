@@ -1,12 +1,14 @@
 import { appErrorDetailsBytes } from "@grasp-os/shared/apps";
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { callerOf } from "../src/app-bindings.ts";
 import { callApp } from "../src/app.ts";
-import { release, requestGranted, serverBuilt } from "./apps.ts";
+import { saveRecordAsDelegate } from "../src/knowledge/records.ts";
+import { ordinaryData, release, requestGranted, serverBuilt } from "./apps.ts";
 import { reached } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
@@ -94,6 +96,10 @@ const carrying = (shape: string): unknown => {
   }
 };
 
+// What waitThenPoint waits for, until letGo: another call of the
+// same code, in the same module.
+let waiting: (() => void) | undefined;
+
 export class App extends DurableObject {
   stub(binding: string): Stub {
     return (this.env as Record<string, Stub>)[binding] ?? {};
@@ -132,6 +138,33 @@ export class App extends DurableObject {
 
   async via(caller: Caller, method: string, input: unknown): Promise<unknown> {
     return await this.stub("DESK").call(caller, method, input);
+  }
+
+  async holdCaller(caller: Caller, wait: (held: Caller) => Promise<void>): Promise<string> {
+    await wait(caller);
+    return "let go";
+  }
+
+  async waitThenPoint(caller: Caller): Promise<unknown> {
+    await this.ctx.storage.put("waiting", true);
+    await new Promise<void>((resolve) => {
+      waiting = resolve;
+    });
+    const point = await tried(() => this.stub("STATISTICS").record(caller, { measure: "ticks", value: 1 }));
+    await this.ctx.storage.put("after", point);
+    return point;
+  }
+
+  async isWaiting(): Promise<boolean> {
+    return (await this.ctx.storage.get("waiting")) === true;
+  }
+
+  async letGo(): Promise<boolean> {
+    await this.ctx.storage.delete("waiting");
+    const resolve = waiting;
+    waiting = undefined;
+    resolve?.();
+    return resolve !== undefined;
   }
 
   async pointAfter(caller: Caller, wait: (note: string) => Promise<void>): Promise<unknown> {
@@ -186,6 +219,7 @@ const exported = {
   },
   change: { access: "write", input: { type: "object" }, output: {} },
   sendThenList: { access: "write", input: { type: "object" }, output: {} },
+  waitThenPoint: { access: "write", input: { type: "object" }, output: {} },
 };
 
 /** A `task` record type for `collection`. */
@@ -290,34 +324,91 @@ const setUp = async (
  * `release`: `entered` once the App called it.
  */
 const gate = () => {
-  const entered = Promise.withResolvers<boolean>();
+  const entered = Promise.withResolvers<unknown>();
   const released = Promise.withResolvers<boolean>();
   return {
     entered: entered.promise,
     release: () => {
       released.resolve(true);
     },
-    wait: async (): Promise<void> => {
-      entered.resolve(true);
+    wait: async (value: unknown): Promise<void> => {
+      entered.resolve(value);
       await released.promise;
     },
   };
 };
 
 /**
- * Waits until the App called `held`'s callback; fails at once should
- * `call` end first, rather than wait for a callback that won't come.
+ * Waits until the App called `held`'s callback, and answers what it passed;
+ * fails at once should `call` end first, rather than wait for a callback
+ * that won't come.
  */
 const entered = async (
   held: ReturnType<typeof gate>,
   call: Promise<string>
-): Promise<void> => {
+): Promise<unknown> =>
   await Promise.race([
     held.entered,
     call.then((ended) => {
       throw new Error(`The call ended before it was held: ${ended}`);
     }),
   ]);
+
+/** A person using an App, as a call names them. */
+const as = (userId: string) => ({ userId, mode: "interactive" }) as const;
+
+/** A read of the documents table, as a save reads before it writes. */
+const readsDocuments = /from "documents"/iu;
+
+/**
+ * Knowledge's database, with `first` run once, just before the first
+ * statement whose query `when` matches runs: something changing while a
+ * save is on its way, after its first checks and before its write.
+ */
+const beforeRead = (when: RegExp, first: () => Promise<void>): D1Database => {
+  const real = env.KNOWLEDGE;
+  let done = false;
+  const once = async (): Promise<void> => {
+    if (!done) {
+      done = true;
+      await first();
+    }
+  };
+  const racing = (statement: D1PreparedStatement): D1PreparedStatement =>
+    // SAFETY: an object whose prototype is `statement` is a statement: it
+    // has every member, and the ones it runs by are replaced below.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    Object.assign(Object.create(statement) as D1PreparedStatement, {
+      bind: (...values: unknown[]) => racing(statement.bind(...values)),
+      first: async () => {
+        await once();
+        return await statement.first();
+      },
+      all: async () => {
+        await once();
+        return await statement.all();
+      },
+      raw: async () => {
+        await once();
+        return await statement.raw();
+      },
+      run: async () => {
+        await once();
+        return await statement.run();
+      },
+    });
+  return {
+    prepare: (query) => {
+      const statement = real.prepare(query);
+      return when.test(query) ? racing(statement) : statement;
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) =>
+      await real.batch<T>(statements),
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
 };
 
 /** What the desk last did after its call was let go (`lastAfter`). */
@@ -709,5 +800,158 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     // nothing once let go: not even a refused statistics point.
     await expect(call).resolves.not.toBe("ok");
     await expect(lastAfter(desk, admin.userId)).resolves.toBeNull();
+  });
+
+  it("stops a call down a chain of Apps once the person loses their role in the App the chain started in", async () => {
+    const admin = await personApi("admin");
+    // Granted nothing but the desk's exports, so the front desk may be
+    // shared with anyone.
+    const [desk, front] = await Promise.all([newApp(admin), newApp(admin)]);
+    await requestGranted(idp, admin, {
+      subject: { type: "app", appId: front },
+      object: { type: "app", appId: desk },
+      actions: ["write"],
+      binding: "DESK",
+    });
+    // Its data stays fine for its screens' unapproved code, as a release
+    // leaves it.
+    await ordinaryData(front);
+    const clerk = await personApi("user");
+    const team = await newTeam(admin, [clerk]);
+    await admin.api.apps.members.add(front, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    // The clerk's screen of the front desk calls the desk's export, which
+    // waits in the desk until let go.
+    const pointAfter = async (meanwhile: () => Promise<unknown>) => {
+      const call = outcome(
+        clerk.api.screens.call(front, "via", ["waitThenPoint", {}])
+      );
+      await vi.waitFor(
+        async () => {
+          await expect(
+            callApp(env, desk, as(admin.userId), "isWaiting")
+          ).resolves.toBeTruthy();
+        },
+        { timeout: 15_000, interval: 50 }
+      );
+      await meanwhile();
+      await expect(
+        callApp(env, desk, as(admin.userId), "letGo")
+      ).resolves.toBeTruthy();
+      await call;
+      return await lastAfter(desk, admin.userId);
+    };
+
+    const stays = await pointAfter(async () => {
+      // Nothing changes for them.
+    });
+    // The desk's own grant, the front desk's permission on its export,
+    // still holds: only the front desk's call, admitted again with the
+    // desk's, stops it.
+    const leaves = await pointAfter(
+      async () =>
+        await callAuth("/organization/remove-team-member", admin.session, {
+          teamId: team,
+          userId: clerk.userId,
+        })
+    );
+    expect({ stays, leaves }).toStrictEqual({
+      stays: "ok",
+      leaves: "app.not_found",
+    });
+  });
+
+  it("writes no record once what let its call in is gone, however late in the save that happens", async () => {
+    const admin = await personApi("admin");
+    const clerk = await personApi("user");
+    const team = await newTeam(admin, [clerk]);
+    const { id: collectionId } = await admin.api.knowledge.createCollection({
+      name: `Tasks ${unique()}`,
+      access: "teams",
+      teams: [team],
+    });
+    const desk = await newApp(admin, {
+      "app/records.json": taskType(collectionId),
+    });
+    await admin.api.apps.members.add(desk, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    const permissionId = permissionIdSchema.parse(
+      await requestGranted(idp, admin, {
+        subject: { type: "app", appId: desk },
+        object: { type: "collection", collectionId },
+        actions: ["read", "write"],
+        binding: "TASKS",
+      })
+    );
+    await ordinaryData(desk);
+    // A screen call of the clerk's, held, whose caller the screen gets:
+    // the save below runs as the desk's record stub runs it for that call.
+    const held = gate();
+    const call = outcome(
+      clerk.api.screens.call(desk, "holdCaller", [held.wait])
+    );
+    const caller = await entered(held, call);
+    const save = async (path: string, leave: boolean): Promise<string> => {
+      // The clerk leaves the team once the save has checked everything it
+      // checks first, and before its write.
+      const racing = beforeRead(readsDocuments, async () => {
+        if (leave) {
+          await callAuth("/organization/remove-team-member", admin.session, {
+            teamId: team,
+            userId: clerk.userId,
+          });
+        }
+      });
+      return await outcome(
+        saveRecordAsDelegate(
+          { ...env, KNOWLEDGE: racing },
+          {
+            subject: { type: "app", appId: desk },
+            onBehalfOf: clerk.userId,
+            mode: "interactive",
+            appVersion: 1,
+          },
+          { type: "app", appId: desk },
+          permissionId,
+          collectionId,
+          {
+            path,
+            ifVersion: 0,
+            record: { type: "task", status: "open" },
+            body: "",
+          },
+          undefined,
+          async () => {
+            await callerOf(env, desk, caller, "write");
+          }
+        )
+      );
+    };
+    const stays = `tasks/${unique()}.md`;
+    const leaves = `tasks/${unique()}.md`;
+    const results = {
+      stays: await save(stays, false),
+      leaves: await save(leaves, true),
+    };
+    held.release();
+    await call;
+    const written = await env.KNOWLEDGE.prepare(
+      "SELECT path FROM documents WHERE collection_id = ? ORDER BY path"
+    )
+      .bind(collectionId)
+      .all<{ path: string }>();
+    expect({
+      results,
+      written: written.results.map(({ path }) => path),
+    }).toStrictEqual({
+      results: { stays: "ok", leaves: "app.not_found" },
+      written: [stays],
+    });
   });
 });

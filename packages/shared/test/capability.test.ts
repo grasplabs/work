@@ -174,6 +174,32 @@ describe("capabilities", () => {
     ).resolves.toBe("expired");
   });
 
+  it("expire by the end of the work they were made for, if that comes first", async () => {
+    const notAfter = now + 5000;
+    const token = await signCapability(
+      key,
+      authority,
+      { ...scope, notAfter },
+      now
+    );
+    const later = await signCapability(
+      key,
+      authority,
+      { ...scope, notAfter: now + capabilityTtlMs * 2 },
+      now
+    );
+    const at = async (signed: string, time: number): Promise<string> =>
+      await refusal(
+        async () => await verifyCapability([key], signed, scope, time)
+      );
+    expect({
+      before: await at(token, notAfter - 1),
+      at: await at(token, notAfter),
+      // Its own lifetime still bounds one that ends later.
+      later: await at(later, now + capabilityTtlMs),
+    }).toStrictEqual({ before: "none", at: "expired", later: "expired" });
+  });
+
   it("cover only their own connection, resource, action and idempotency key", async () => {
     const token = await signCapability(key, authority, scope, now);
     const otherCalls: CapabilityScope[] = [

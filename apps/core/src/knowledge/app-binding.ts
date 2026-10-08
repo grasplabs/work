@@ -14,7 +14,7 @@ import type {
 import type { Authority } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-import { callerOf } from "../app-bindings.ts";
+import { callerOf, tokenOf } from "../app-bindings.ts";
 import type { InvocationKind } from "../app.ts";
 import { forSandbox } from "../bindings.ts";
 import { collectionReads, readAsDelegate } from "./binding.ts";
@@ -234,7 +234,7 @@ export class AppCollectionBinding extends WorkerEntrypoint<
     return await this.#run(
       caller,
       "write",
-      async ({ authority, setter }, grant) =>
+      async ({ authority, setter, token }, grant) =>
         await saveRecordAsDelegate(
           this.env,
           authority,
@@ -244,7 +244,7 @@ export class AppCollectionBinding extends WorkerEntrypoint<
           input,
           setter,
           async () => {
-            await callerOf(this.env, app, caller, "write");
+            await callerOf(this.env, app, { token }, "write");
           }
         )
     );
@@ -258,13 +258,21 @@ export class AppCollectionBinding extends WorkerEntrypoint<
     caller: unknown,
     use: InvocationKind,
     run: (
-      resolved: { authority: Authority; setter: Setter; readOnly: boolean },
+      resolved: {
+        authority: Authority;
+        setter: Setter;
+        readOnly: boolean;
+        token: string;
+      },
       grant: CollectionGrant
     ) => Promise<T>
   ): Promise<T> {
     const { app: _app, ...grant } = this.ctx.props;
     try {
-      return await run(await this.#callerOf(caller, use), grant);
+      // The caller is read once: its token is all that counts.
+      const token = tokenOf(caller);
+      const resolved = await this.#callerOf({ token }, use);
+      return await run({ ...resolved, token }, grant);
     } catch (error) {
       throw forSandbox(error);
     }

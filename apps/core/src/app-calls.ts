@@ -12,7 +12,7 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { callerOf } from "./app-bindings.ts";
+import { callerOf, tokenOf } from "./app-bindings.ts";
 import type { AppAnswer, CallPath } from "./app.ts";
 import { auditedBatch, keepAuditEvent, outboxed } from "./audit-outbox.ts";
 import { forSandbox } from "./bindings.ts";
@@ -95,6 +95,11 @@ export interface ExportCaller {
   attempt?: string | undefined;
   /** Where the call is: the calling App last in its chain. */
   path: CallPath;
+  /**
+   * The calling App's running call, by its token, when App code made the
+   * call: the called App's stub calls admit it again with their own.
+   */
+  from?: { app: AppId; token: string };
   /** Who the audit log says called: the App's server code, or the run. */
   actor: AuditActor;
 }
@@ -387,6 +392,7 @@ export const callExport = async (
           permissionId: grant.permissionId,
           method: name,
           access,
+          ...(caller.from === undefined ? {} : { from: caller.from }),
         },
       },
       name,
@@ -451,8 +457,11 @@ export class AppExportBinding extends WorkerEntrypoint<
     const { caller: app, ...grant } = this.ctx.props;
     try {
       let known: Awaited<ReturnType<typeof callerOf>>;
+      // The caller is read once: its token goes on with the call.
+      let token: string;
       try {
-        known = await callerOf(this.env, app, caller, "read");
+        token = tokenOf(caller);
+        known = await callerOf(this.env, app, { token }, "read");
       } catch (error) {
         // A caller this App isn't running a call of: made up, ended, or
         // another App's. Recorded by the App the stub is its, as nobody
@@ -480,6 +489,7 @@ export class AppExportBinding extends WorkerEntrypoint<
           idempotencyKey,
           attempt,
           path,
+          from: { app, token },
           actor: delegateActorOf(authority),
         },
         grant,

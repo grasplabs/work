@@ -131,7 +131,11 @@ export const requireAppRole = async (
  * has it. Whom the App is shared with, its owner and the teams `by` is in
  * are read now; their role in the organization is the session's that let
  * them in (Grasp staff are admins only by their session), which the
- * session's own checks follow within seconds.
+ * session's own checks follow within seconds. Not `appFor` (apps.ts):
+ * apps.ts imports this file, and the App's stubs (app-bindings.ts), which
+ * call this, are reached from apps.ts through its workflow imports, so it
+ * would close a cycle. The role check is the same `requireAppRole`; only
+ * the App's row is read here.
  */
 export const requireStillOpen = async (
   env: Env,

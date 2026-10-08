@@ -30,11 +30,18 @@ const callerSchema = z.object({ token: z.string().min(1).max(100) });
 /**
  * Refuses a stub call whose call has lost what let it in (`admission`),
  * since: the person's role in App `app`, for a screen's call
- * (`app.not_found`, as for any request of theirs), or the calling App's
- * permission on `app`'s export, for a call from another App
- * (`permission.denied`). A call in only on what every stub call checks
- * anyway (a workflow run's, whose person and permissions each stub checks)
- * has nothing more to lose here.
+ * (`app.not_found`, as for any request of theirs), or, for a call from
+ * another App, the calling App's permission on `app`'s export
+ * (`permission.denied`) and the calling App's own call (`from`), admitted
+ * again as its own stubs would be: so a call down a chain stops with the
+ * first one, by its deadline, its code's generation and what let it in,
+ * however many Apps deep.
+ *
+ * A workflow run's call (no admission) is not checked here for the run
+ * itself: that the run is still going and its version still approved is
+ * checked as the call starts, not again on each stub call. Its deadline
+ * bounds that, and the person and the permission each stub uses are still
+ * checked on every call.
  */
 const requireStillAdmitted = async (
   env: Env,
@@ -44,7 +51,7 @@ const requireStillAdmitted = async (
   if (admission?.type === "role") {
     await requireStillOpen(env, admission.person, app);
   } else if (admission?.type === "export") {
-    const { authority, method, access, permissionId } = admission;
+    const { authority, method, access, permissionId, from } = admission;
     await authorizeExport(
       env,
       authority,
@@ -52,6 +59,10 @@ const requireStillAdmitted = async (
       { method, access },
       permissionId
     );
+    if (from !== undefined) {
+      // oxlint-disable-next-line no-use-before-define -- each App's admission checks the one above it
+      await callerOf(env, from.app, { token: from.token }, "read");
+    }
   }
 };
 
@@ -59,7 +70,7 @@ const requireStillAdmitted = async (
  * The token App code passed as its caller: only the token is read, so
  * nothing else App code puts on it counts.
  */
-const tokenOf = (caller: unknown): string => {
+export const tokenOf = (caller: unknown): string => {
   const parsed = callerSchema.safeParse(caller);
   if (!parsed.success) {
     throw appErrors.create("app.caller_invalid");
@@ -71,9 +82,12 @@ const tokenOf = (caller: unknown): string => {
  * Admits one stub call for the call `token` names: `first` asks the host
  * (`App.admit`, or `App.claimStatistic`, which also counts the use), what
  * let the call in is checked again (`requireStillAdmitted`), and the host
- * is asked once more, last, for `use`: so what the stub then does rests on
- * a call that was still running, on code still current, within its
- * deadline, after every check above awaited.
+ * is asked once more, last, for `use`. That is not yet the act: a stub
+ * that awaits more before it acts (a permission check, a lookup) asks the
+ * host again just before (`stillAdmitted`): a connection call before it
+ * goes to connect, with a capability that expires by the call's deadline;
+ * a guest chat or a record just before its write's batch. A statistics
+ * point is written straight after, with nothing awaited between.
  */
 const admitted = async (
   env: Env,
@@ -86,6 +100,21 @@ const admitted = async (
   const { admission } = await first(host);
   await requireStillAdmitted(env, app, admission);
   return await host.admit(token, use);
+};
+
+/**
+ * Asks App `app`'s host, once more, whether the call `token` names may
+ * still do `use`: for a stub's last word before it acts, after whatever
+ * it awaited since it was admitted. No more than that: what let the call
+ * in was checked when it was.
+ */
+export const stillAdmitted = async (
+  env: Env,
+  app: AppId,
+  token: string,
+  use: InvocationKind
+): Promise<void> => {
+  await appHost(env, app).admit(token, use);
 };
 
 /**
@@ -185,20 +214,27 @@ export class AppConnectionBinding extends WorkerEntrypoint<
     return await runStubCall(
       this.env,
       async (key) => {
+        const token = tokenOf(caller);
         // Admitted as a read: whether the action changes anything is
-        // connect's to know, and a read-only call has it refuse those.
-        const { authority, idempotencyKey, kind } = await callerOf(
+        // connect's to know, and a call that may only read has it refuse
+        // every side effect.
+        const { authority, idempotencyKey, kind, path } = await callerOf(
           this.env,
           app,
-          caller,
+          { token },
           "read"
         );
         if (authority.mode === "workflow") {
           requireStepKey(key, idempotencyKey);
         }
-        // Whether the action changes anything is connect's to know: a
-        // call that may only read has it refuse every side effect.
-        return { authority, readOnly: kind === "read" };
+        return {
+          authority,
+          readOnly: kind === "read",
+          notAfter: path.deadline,
+          stillAllowed: async () => {
+            await stillAdmitted(this.env, app, token, "read");
+          },
+        };
       },
       grant,
       [action, input, options]

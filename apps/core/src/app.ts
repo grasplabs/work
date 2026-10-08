@@ -465,6 +465,13 @@ export type Admission =
       permissionId: PermissionId;
       method: string;
       access: "read" | "write";
+      /**
+       * The calling App's own running call, by its token, when App code
+       * made the call (a workflow run's call has none): admitted again
+       * with this one, so the whole chain stops with its first call, by
+       * its deadline, its code's generation and what let it in.
+       */
+      from?: { app: AppId; token: string };
     };
 
 /**
@@ -1104,6 +1111,11 @@ export class App extends DurableObject<Env> {
    */
   admit(token: string, use: InvocationKind): Admitted {
     const call = this.#calls.get(token);
+    // The deadline is defence in depth: the host lets go of a call (and
+    // its token) when the timer for its deadline fires, but a timer can
+    // fire late, and the clock moves on only with I/O. Between the deadline
+    // and that timer, nothing a test can bring about on purpose, this
+    // still says no.
     if (
       call?.version === undefined ||
       call.ranOn !== this.#server ||

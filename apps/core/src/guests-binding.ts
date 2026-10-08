@@ -8,7 +8,7 @@ import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-import { callerOf } from "./app-bindings.ts";
+import { callerOf, stillAdmitted, tokenOf } from "./app-bindings.ts";
 import type { InvocationKind } from "./app.ts";
 import { forSandbox } from "./bindings.ts";
 import { inviteGuest, listGuests, readGuest, revokeGuest } from "./guests.ts";
@@ -33,8 +33,8 @@ export class AppGuestsBinding extends WorkerEntrypoint<
     return await this.#run(
       caller,
       "write",
-      async (authority, permissionId) =>
-        await inviteGuest(this.env, authority, permissionId, input),
+      async (authority, permissionId, lastCheck) =>
+        await inviteGuest(this.env, authority, permissionId, input, lastCheck),
       { personOnly: true }
     );
   }
@@ -64,30 +64,38 @@ export class AppGuestsBinding extends WorkerEntrypoint<
     return await this.#run(
       caller,
       "write",
-      async (authority, permissionId) =>
-        await revokeGuest(this.env, authority, permissionId, id)
+      async (authority, permissionId, lastCheck) =>
+        await revokeGuest(this.env, authority, permissionId, id, lastCheck)
     );
   }
 
   /**
    * Runs `run` for `caller`, admitted for `use` (a change, or a read:
-   * `callerOf`), with errors as the sandbox sees them.
+   * `callerOf`), with errors as the sandbox sees them, and what `run` asks
+   * just before it writes (`lastCheck`): the host again, for `use`.
    */
   async #run<T>(
     caller: unknown,
     use: InvocationKind,
-    run: (authority: Authority, permissionId: PermissionId) => Promise<T>,
+    run: (
+      authority: Authority,
+      permissionId: PermissionId,
+      lastCheck: () => Promise<void>
+    ) => Promise<T>,
     { personOnly = false }: { personOnly?: boolean } = {}
   ): Promise<T> {
     const { app, permissionId } = this.ctx.props;
     try {
-      const { authority, path } = await callerOf(this.env, app, caller, use);
+      const token = tokenOf(caller);
+      const { authority, path } = await callerOf(this.env, app, { token }, use);
       const person =
         authority.mode === "interactive" && path.chain.length === 1;
       if (personOnly && !person) {
         throw guestErrors.create("guest.invalid");
       }
-      return await run(authority, permissionId);
+      return await run(authority, permissionId, async () => {
+        await stillAdmitted(this.env, app, token, use);
+      });
     } catch (error) {
       throw forSandbox(error);
     }
