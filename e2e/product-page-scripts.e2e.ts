@@ -108,14 +108,14 @@ const attempt = async (
     return { script, worker, fetch: fetched };
   }, url);
 
-test("the product page runs no screen module or package file, however its HTML is injected, and its screens still run theirs", async ({
-  browser,
-}) => {
-  const page = await pageOf(browser, builder);
-  const violations = await recordCspViolations(page);
+/**
+ * Opens the App's screen on `page` and waits for it to render, which it
+ * does only once its frame has loaded its modules from /screen-modules/;
+ * returns the address of one, token and all, from the frame's import map.
+ */
+const openScreen = async (page: Page): Promise<string> => {
   await page.goto(`/engines/${app}/apps/plain/full`);
   const screen = page.frameLocator('iframe[title="plain app"]');
-  // The screen's frame loaded its modules from /screen-modules/.
   await expect(screen.getByRole("heading", { name: "Plain" })).toBeVisible({
     timeout: 30_000,
   });
@@ -124,12 +124,21 @@ test("the product page runs no screen module or package file, however its HTML i
       (await screen.locator('script[type="importmap"]').textContent()) ?? ""
     )
   );
-  const moduleAddress = Object.values(imports).find((address) =>
-    new URL(address).pathname.startsWith("/screen-modules/")
+  const address = Object.values(imports).find((imported) =>
+    new URL(imported).pathname.startsWith("/screen-modules/")
   );
-  if (moduleAddress === undefined) {
+  if (address === undefined) {
     throw new Error("The screen's frame imports its modules");
   }
+  return address;
+};
+
+test("the product page runs no screen module or package file, however its HTML is injected, and its screens still run theirs", async ({
+  browser,
+}) => {
+  const page = await pageOf(browser, builder);
+  const violations = await recordCspViolations(page);
+  const moduleAddress = await openScreen(page);
 
   const outcomes = {
     module: await attempt(page, moduleAddress),
@@ -163,4 +172,36 @@ test("the product page runs no screen module or package file, however its HTML i
       artifact: { script: 2, worker: 1 },
     });
   expect(attacker.hits).toStrictEqual([]);
+});
+
+test("the product page runs no screen module through an escaped path under its own files", async ({
+  browser,
+}) => {
+  const page = await pageOf(browser, builder);
+  const moduleAddress = await openScreen(page);
+  // The browser matches the policy on the path as written, so this passes
+  // as one of the frontend's files; decoded, it is the module's address.
+  // Core answers no such path.
+  const escaped = moduleAddress.replace(
+    "/screen-modules/",
+    "/assets/..%2Fscreen-modules/"
+  );
+
+  const outcome = await page.evaluate(async (address) => {
+    const element = document.createElement("script");
+    element.type = "module";
+    element.src = address;
+    const { promise, resolve } = Promise.withResolvers<string>();
+    element.addEventListener("load", () => {
+      resolve("loaded");
+    });
+    element.addEventListener("error", () => {
+      resolve("refused");
+    });
+    document.head.append(element);
+    const response = await fetch(address);
+    return { script: await promise, fetch: String(response.status) };
+  }, escaped);
+
+  expect(outcome).toStrictEqual({ script: "refused", fetch: "404" });
 });

@@ -537,6 +537,41 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 
+  it("answers no module at an address under the frontend's own files, however it is escaped", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const bundle = await builder.api.screens.open(app, "notes");
+    const frame = await loadFrame(bundle);
+    const [address] = Object.values(frame?.addresses ?? {});
+    if (address === undefined) {
+      throw new Error("The screen loads modules");
+    }
+    // The product page's policy allows anything under /assets/, matched
+    // as the browser writes the path; decoded, each of these is the
+    // module's own address. Asked as the product page would ask.
+    const escapes = ["..%2F", "..%2f", "..%5C", "%2E%2E%2F", "x/..%2F..%2F"];
+    const answers = await Promise.all(
+      escapes.map(async (escape) => {
+        const response = await routed(
+          pathOf(address).replace(
+            "/screen-modules/",
+            `/assets/${escape}screen-modules/`
+          ),
+          { "sec-fetch-site": "same-origin", "sec-fetch-dest": "script" }
+        );
+        return [response.status, await response.text()] as const;
+      })
+    );
+    const served = await routed(pathOf(address));
+    const code = await served.text();
+    expect(served.status).toBe(200);
+
+    expect(answers.map(([answered]) => answered)).toStrictEqual(
+      escapes.map(() => 404)
+    );
+    expect(answers.filter(([, body]) => body === code)).toStrictEqual([]);
+  });
+
   it("keeps what a frame is handed inside its own script elements, whatever the CSS holds", async () => {
     const builder = await personApi("builder");
     const { id: app } = await builder.api.apps.create({ name: "Closing" });

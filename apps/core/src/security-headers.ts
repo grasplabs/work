@@ -31,7 +31,9 @@ const frontendTheme = "/theme.js";
  *   (which inherits this policy). A source ending in `/` matches its path
  *   as a prefix, any other exactly; browsers stop matching paths after a
  *   redirect, and nothing on the frontend's paths redirects elsewhere.
- *   Core also refuses those paths to this page's own requests
+ *   Browsers match the path as written, escapes and all, so core answers
+ *   no path that decodes to another (`/assets/..%2Fscreen-modules/…`,
+ *   entry.ts). Core also refuses those paths to this page's own requests
  *   (`isRefusedToProductPage`), in case a browser lets one through.
  * - No workers: the frontend starts none.
  * - Connections only to this origin. `'self'` covers the same-origin

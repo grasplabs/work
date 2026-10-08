@@ -42,6 +42,67 @@ import {
 const isUnder = (pathname: string, base: string): boolean =>
   pathname === base || pathname.startsWith(`${base}/`);
 
+/** An escaped `/` or `\`, which decoding turns into a path separator. */
+const escapedSeparator = /%(?:2f|5c)/iu;
+
+/**
+ * Whether `pathname` (as the URL parser left it) means another path once
+ * decoded: an escaped separator, or a segment that decodes to `.` or `..`.
+ */
+const isAmbiguousPath = (pathname: string): boolean =>
+  escapedSeparator.test(pathname) ||
+  pathname.split("/").some((segment) => {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      return true;
+    }
+    return decoded === "." || decoded === "..";
+  });
+
+/** The frontend's files; unknown paths get index.html (single-page app). */
+const pageResponse = async (
+  pathname: string,
+  request: Request,
+  env: Env
+): Promise<Response> => {
+  const page = await env.ASSETS.fetch(request);
+  if (pathname !== interviewPagePath) {
+    return page;
+  }
+  // The interview's page carries its link's secret: no referrer, whatever
+  // it links to, and no copy kept.
+  const kept = new Response(page.body, page);
+  kept.headers.set("referrer-policy", "no-referrer");
+  kept.headers.set("cache-control", "no-store");
+  return kept;
+};
+
+/**
+ * The frontend's files; unknown paths get index.html (single-page app).
+ * Never at a path the browser and the static files would read
+ * differently: the browser matches the page's policy on the path as
+ * written, so `/assets/..%2Fscreen-modules/…` passes as one of the
+ * frontend's files, while the static files decode it into another path,
+ * from which core would answer. No file of the frontend has such a path.
+ */
+const frontendResponse = async (
+  pathname: string,
+  request: Request,
+  env: Env,
+  requestId: string
+): Promise<Response> => {
+  if (isAmbiguousPath(pathname)) {
+    return errorResponse(
+      404,
+      requestErrors.create("request.not_found"),
+      requestId
+    );
+  }
+  return await pageResponse(pathname, request, env);
+};
+
 /** `/api/knowledge/uploads/<id>/original`: an upload's original. */
 const originalPath = /^\/api\/knowledge\/uploads\/(?<id>[\w-]+)\/original$/u;
 
@@ -65,22 +126,28 @@ const linkResponse = async (
   return undefined;
 };
 
-/** The frontend's files; unknown paths get index.html (single-page app). */
-const pageResponse = async (
-  pathname: string,
+/**
+ * The code screens' frames load: screens' modules and Apps' npm packages,
+ * never to the product page itself (`isRefusedToProductPage`).
+ */
+const frameCodeResponse = async (
   request: Request,
-  env: Env
-): Promise<Response> => {
-  const page = await env.ASSETS.fetch(request);
-  if (pathname !== interviewPagePath) {
-    return page;
+  env: Env,
+  url: URL,
+  requestId: string
+): Promise<Response | null> => {
+  if (isRefusedToProductPage(request)) {
+    return errorResponse(
+      403,
+      requestErrors.create("request.forbidden"),
+      requestId
+    );
   }
-  // The interview's page carries its link's secret: no referrer, whatever
-  // it links to, and no copy kept.
-  const kept = new Response(page.body, page);
-  kept.headers.set("referrer-policy", "no-referrer");
-  kept.headers.set("cache-control", "no-store");
-  return kept;
+  const screenModule = await screenModuleResponse(env, url);
+  if (screenModule !== null) {
+    return screenModule;
+  }
+  return await packageArtifactResponse(env, request);
 };
 
 /** Routes a request that has passed the router-secret check. */
@@ -106,20 +173,9 @@ const route = async (
   if (pathname === screenFramePath) {
     return await screenFrameResponse(env, url);
   }
-  if (isRefusedToProductPage(request)) {
-    return errorResponse(
-      403,
-      requestErrors.create("request.forbidden"),
-      requestId
-    );
-  }
-  const screenModule = await screenModuleResponse(env, url);
-  if (screenModule !== null) {
-    return screenModule;
-  }
-  const packageArtifact = await packageArtifactResponse(env, request);
-  if (packageArtifact !== null) {
-    return packageArtifact;
+  const frameCode = await frameCodeResponse(request, env, url, requestId);
+  if (frameCode !== null) {
+    return frameCode;
   }
   if (isUnder(pathname, authBasePath)) {
     return await handleAuthRequest(request, env, requestId);
@@ -157,7 +213,7 @@ const route = async (
       requestId
     );
   }
-  return await pageResponse(pathname, request, env);
+  return await frontendResponse(pathname, request, env, requestId);
 };
 
 /** A response, and what the request's log line says about it. */
