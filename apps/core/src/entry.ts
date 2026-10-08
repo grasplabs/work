@@ -4,6 +4,10 @@ import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { internalErrors, requestErrors } from "@grasp-os/shared/errors";
 import { guestApiPath } from "@grasp-os/shared/guests";
 import { requestIdHeader } from "@grasp-os/shared/http";
+import {
+  interviewApiPath,
+  interviewPagePath,
+} from "@grasp-os/shared/interview-links";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
@@ -19,6 +23,7 @@ import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
+import { interviewResponse } from "./onboarding/links.ts";
 import {
   packageArtifactResponse,
   withoutArtifactToken,
@@ -34,6 +39,26 @@ const isUnder = (pathname: string, base: string): boolean =>
 
 /** `/api/knowledge/uploads/<id>/original`: an upload's original. */
 const originalPath = /^\/api\/knowledge\/uploads\/(?<id>[\w-]+)\/original$/u;
+
+/**
+ * The pages a link opens, which have no session: the link's secret in the
+ * body is all they have. A guest's (src/guests.ts), and someone's own
+ * interview, with the device's key too (src/onboarding/links.ts).
+ */
+const linkResponse = async (
+  pathname: string,
+  request: Request,
+  env: Env,
+  requestId: string
+): Promise<Response | undefined> => {
+  if (pathname === guestApiPath) {
+    return await guestResponse(request, env, requestId);
+  }
+  if (pathname === interviewApiPath) {
+    return await interviewResponse(request, env, requestId);
+  }
+  return undefined;
+};
 
 /** Routes a request that has passed the router-secret check. */
 const route = async (
@@ -78,10 +103,9 @@ const route = async (
   if (pathname === auditExportPath) {
     return await auditExportResponse(request, env, requestId);
   }
-  // A guest's page, which has no session: the link's secret in the body
-  // is all it has (src/guests.ts).
-  if (pathname === guestApiPath) {
-    return await guestResponse(request, env, requestId);
+  const linked = await linkResponse(pathname, request, env, requestId);
+  if (linked !== undefined) {
+    return linked;
   }
   if (pathname === errorReportPath) {
     return await errorReportResponse(request, env, requestId);
@@ -101,7 +125,16 @@ const route = async (
     );
   }
   // The frontend's files; unknown paths get index.html (single-page app).
-  return await env.ASSETS.fetch(request);
+  const page = await env.ASSETS.fetch(request);
+  if (pathname !== interviewPagePath) {
+    return page;
+  }
+  // The interview's page carries its link's secret: no referrer, whatever
+  // it links to, and no copy kept.
+  const kept = new Response(page.body, page);
+  kept.headers.set("referrer-policy", "no-referrer");
+  kept.headers.set("cache-control", "no-store");
+  return kept;
 };
 
 /** A response, and what the request's log line says about it. */
