@@ -172,6 +172,7 @@ const cast = {
   dependencyApproval: { admin: "admin", builder: "builder", approver: "user" },
   chatPreview: { builder: "builder" },
   languages: { member: "user" },
+  iconMoves: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;
 
 type Scene = keyof typeof cast;
