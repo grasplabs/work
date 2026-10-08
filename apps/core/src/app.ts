@@ -160,37 +160,138 @@ export const isPlainData = (value: unknown): boolean => {
   }
 };
 
-/** The values an object holds: a map's keys and values, a set's members, or its own. */
-const heldBy = (value: object): Iterable<unknown> => {
-  if (value instanceof Map) {
-    const entries: unknown[] = [...value.keys(), ...value.values()];
-    return entries;
+/** Whether `value` is a boxed big integer (`Object(7n)`), whatever its prototype. */
+const isBoxedBigInt = (value: object): boolean => {
+  try {
+    // Reads the internal slot only a boxed big integer has.
+    BigInt.prototype.valueOf.call(value);
+    return true;
+  } catch {
+    return false;
   }
-  if (value instanceof Set) {
-    return value;
-  }
-  const own: unknown[] = Object.values(value);
-  return own;
 };
 
 /**
- * Whether `value` holds a big integer anywhere within it. No value of an
- * App's calls or answers may: they reach screens and workflows, whose
- * values are JSON's. Walked without recursion, so a value nested deep
- * can't exhaust the stack; each object once.
+ * A getter of every typed array's, which reads its internal slots: what
+ * kind it is, and how long. Its own properties can't stand in for them.
+ */
+const typedArrayGetter = (name: PropertyKey): ((value: object) => unknown) => {
+  const typedArray = Reflect.getPrototypeOf(Int8Array.prototype);
+  const getter =
+    typedArray === null
+      ? undefined
+      : Reflect.getOwnPropertyDescriptor(typedArray, name)?.get;
+  if (getter === undefined) {
+    throw new Error(`Typed arrays have no getter ${String(name)}`);
+  }
+  return (value) => {
+    const read: unknown = Reflect.apply(getter, value, []);
+    return read;
+  };
+};
+
+const typedArrayKind = typedArrayGetter(Symbol.toStringTag);
+const typedArrayLength = typedArrayGetter("length");
+
+/** Whether `value` is a typed array of big integers with any in it. */
+const isBigIntArray = (value: object): boolean => {
+  // The kind is `undefined` for anything but a typed array, so the length
+  // is only read of one.
+  const kind = typedArrayKind(value);
+  return (
+    (kind === "BigInt64Array" || kind === "BigUint64Array") &&
+    typedArrayLength(value) !== 0
+  );
+};
+
+/** Whether `value` is a typed array or a view of a buffer: numbers only. */
+const isNumbers = (value: object): boolean => ArrayBuffer.isView(value);
+
+/**
+ * A map's keys and values, or a set's members, read through the internal
+ * slot so a changed prototype can't hide them; `undefined` for neither.
+ */
+const collected = (value: object): unknown[] | undefined => {
+  const held: unknown[] = [];
+  try {
+    Map.prototype.forEach.call(value, (inner: unknown, key: unknown) => {
+      held.push(key, inner);
+    });
+    return held;
+  } catch {
+    // Not a map.
+  }
+  try {
+    Set.prototype.forEach.call(value, (inner: unknown) => {
+      held.push(inner);
+    });
+    return held;
+  } catch {
+    return undefined;
+  }
+};
+
+/** What `heldBy` gives for a getter: what it yields isn't known unrun. */
+const unknownYield = Symbol("unknown yield");
+
+/**
+ * The values an object holds: a map's keys and values, a set's members,
+ * or every own property's, named by a string or a symbol, enumerable or
+ * not, as `unknownYield` for a getter.
+ */
+const heldBy = (value: object): unknown[] => {
+  const members = collected(value);
+  if (members !== undefined) {
+    return members;
+  }
+  const held: unknown[] = [];
+  for (const key of Reflect.ownKeys(value)) {
+    const property = Object.getOwnPropertyDescriptor(value, key);
+    if (property !== undefined) {
+      held.push("value" in property ? property.value : unknownYield);
+    }
+  }
+  return held;
+};
+
+/**
+ * Whether `value` holds a big integer anywhere within it: a big integer, a
+ * boxed one or a typed array of them, at any depth, in a map, a set or an
+ * error's cause. No value of an App's calls or answers may: they reach
+ * screens and workflows, whose values are JSON's.
+ *
+ * What's walked is what structured clone carries of `value`, as RPC does:
+ * a getter read once into plain data, no proxy, and none of the keys it
+ * drops. Only a value it can't carry (an argument holding a stub) is
+ * walked as it is, where a getter counts as holding one. The walk runs no
+ * code of the value's and has no recursion, so a value nested deep can't
+ * exhaust the stack; it looks at each object once, and a function (a
+ * stub) holds nothing.
  */
 export const holdsBigInt = (value: unknown): boolean => {
-  const pending: unknown[] = [value];
+  let carried: unknown = value;
+  try {
+    carried = structuredClone(value);
+  } catch {
+    // Walked as it is (see above).
+  }
+  const pending: unknown[] = [carried];
   const seen = new Set<object>();
   while (pending.length > 0) {
     const next = pending.pop();
-    if (typeof next === "bigint") {
+    if (typeof next === "bigint" || next === unknownYield) {
       return true;
     }
     if (typeof next !== "object" || next === null || seen.has(next)) {
       continue;
     }
     seen.add(next);
+    if (isBoxedBigInt(next) || isBigIntArray(next)) {
+      return true;
+    }
+    if (isNumbers(next)) {
+      continue;
+    }
     // One at a time, not spread: a long array would pass too many
     // arguments at once.
     for (const inner of heldBy(next)) {
@@ -604,7 +705,9 @@ export class App extends DurableObject<Env> {
     via?: ExportCall
   ): Promise<AppAnswer> {
     requireAppMethod(method);
-    if (holdsBigInt(args)) {
+    // Each on its own: a stub among them would keep the others from being
+    // walked as structured clone carries them (`holdsBigInt`).
+    if (args.some((arg) => holdsBigInt(arg))) {
       throw appErrors.create("app.call_invalid", { method });
     }
     const ownMs = callTimeoutMs(this.env);

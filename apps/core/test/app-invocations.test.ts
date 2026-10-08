@@ -59,6 +59,33 @@ const tried = async (call: () => Promise<unknown>): Promise<unknown> => {
   }
 };
 
+// Each way a value can carry a big integer past a walk of its members.
+const carrying = (shape: string): unknown => {
+  const boxed = Object(7n);
+  switch (shape) {
+    case "boxed":
+      return boxed;
+    case "boxedDeep":
+      return { list: [{ n: boxed }] };
+    case "mapKey":
+      return new Map([[boxed, 1]]);
+    case "setMember":
+      return { set: new Set([boxed]) };
+    case "typed":
+      return new BigInt64Array([7n]);
+    case "cause":
+      return new Error("x", { cause: 7n });
+    case "hidden":
+      return Object.defineProperty({}, "n", { value: 7n, enumerable: false });
+    case "symbol":
+      return { [Symbol("n")]: 7n };
+    case "getter":
+      return { get n() { return 7n; } };
+    default:
+      return shape;
+  }
+};
+
 export class App extends DurableObject {
   stub(binding: string): Stub {
     return (this.env as Record<string, Stub>)[binding] ?? {};
@@ -107,8 +134,12 @@ export class App extends DurableObject {
     return 7n;
   }
 
+  carrying(_caller: Caller, shape: string): unknown {
+    return carrying(shape);
+  }
+
   async push(_caller: Caller, onChange: (value: unknown) => Promise<void>, value: unknown): Promise<unknown> {
-    const pushed = value === "big" ? { deep: [7n] } : value;
+    const pushed = value === "big" ? { deep: [7n] } : typeof value === "string" ? carrying(value) : value;
     return await tried(() => onChange(pushed));
   }
 
@@ -308,6 +339,118 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
       save: "app.read_only",
       point: "app.read_only",
       write: "permission.denied",
+    });
+  });
+
+  it("finds a big integer however a value carries it: boxed, in a map or set, typed, as a cause, or past a changed prototype", async () => {
+    const admin = await personApi("admin");
+    const app = await newApp(admin);
+    const screen = { userId: admin.userId, mode: "interactive" } as const;
+    const received: unknown[] = [];
+    const onChange = (value: unknown): void => {
+      received.push(value);
+    };
+    // The same shapes, built by the App (`carrying`) for its answers and
+    // pushes, and here for a call's arguments.
+    const boxed = new Object(7n);
+    const carriers = {
+      boxed,
+      boxedDeep: { list: [{ n: boxed }] },
+      mapKey: new Map([[boxed, 1]]),
+      setMember: { set: new Set([boxed]) },
+      typed: new BigInt64Array([7n]),
+      cause: new Error("x", { cause: 7n }),
+    };
+    const refused: Record<string, unknown> = Object.fromEntries(
+      await Promise.all(
+        Object.entries(carriers).map(
+          async ([shape, value]): Promise<[string, unknown]> => [
+            shape,
+            {
+              sent: await outcome(callApp(env, app, screen, "echo", [value])),
+              answered: await outcome(
+                callApp(env, app, screen, "carrying", [shape])
+              ),
+              pushed: await admin.api.screens.call(app, "push", [
+                onChange,
+                shape,
+              ]),
+            },
+          ]
+        )
+      )
+    );
+    const everywhere = {
+      sent: "app.call_invalid",
+      answered: "app.answer_invalid",
+      pushed: "app.answer_invalid",
+    };
+    expect({
+      refused,
+      // A boxed big integer whose prototype is gone is one all the same.
+      bare: await outcome(
+        callApp(env, app, screen, "echo", [
+          Object.setPrototypeOf(new Object(7n), null),
+        ])
+      ),
+      received,
+    }).toStrictEqual({
+      refused: Object.fromEntries(
+        Object.keys(carriers).map((shape) => [shape, everywhere])
+      ),
+      bare: "app.call_invalid",
+      received: [],
+    });
+  });
+
+  it("goes by what a call carries: a getter as read once, no hidden or symbol key", async () => {
+    const admin = await personApi("admin");
+    const app = await newApp(admin);
+    const screen = { userId: admin.userId, mode: "interactive" } as const;
+    const received: unknown[] = [];
+    const onChange = (value: unknown): void => {
+      received.push(value);
+    };
+    // A getter that answers a number when first read and a big integer
+    // after: what reaches the App is what it was read as, once.
+    let reads = 0;
+    const flaky = {
+      get n(): unknown {
+        reads += 1;
+        return reads === 1 ? 1 : 7n;
+      },
+    };
+    expect({
+      flaky: await callApp(env, app, screen, "echo", [flaky]),
+      hidden: await callApp(env, app, screen, "echo", [
+        Object.defineProperty({}, "n", { value: 7n, enumerable: false }),
+      ]),
+      symbol: await callApp(env, app, screen, "echo", [{ [Symbol("n")]: 7n }]),
+      // The App's getter is read as its answer leaves it: a big integer.
+      getter: await outcome(callApp(env, app, screen, "carrying", ["getter"])),
+      pushedGetter: await admin.api.screens.call(app, "push", [
+        onChange,
+        "getter",
+      ]),
+      pushedHidden: await admin.api.screens.call(app, "push", [
+        onChange,
+        "hidden",
+      ]),
+      pushedSymbol: await admin.api.screens.call(app, "push", [
+        onChange,
+        "symbol",
+      ]),
+      received,
+    }).toStrictEqual({
+      flaky: { n: 1 },
+      hidden: {},
+      symbol: {},
+      getter: "app.answer_invalid",
+      pushedGetter: "app.answer_invalid",
+      pushedHidden: "ok",
+      pushedSymbol: "ok",
+      // Neither hidden nor symbol key went with its push.
+      received: [{}, {}],
     });
   });
 
