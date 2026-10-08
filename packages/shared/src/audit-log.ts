@@ -73,6 +73,9 @@ const typeRules: readonly {
   // person confirming or declining one (or being refused that).
   { action: "connection.action.dropped", type: "action" },
   { action: "connection.action", type: "decision" },
+  // The onboarding: who works where, the plan, pausing it, the
+  // agreements, and the gate that keeps the company out until Grasp's go.
+  { action: "onboarding", type: "config" },
   { action: "knowledge.search", type: "read" },
   { action: "knowledge.read", type: "read" },
   // Knowledge usage signals: the daily computation, an owner reading those

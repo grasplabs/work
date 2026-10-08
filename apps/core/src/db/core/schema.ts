@@ -861,6 +861,19 @@ export const dependencyRequests = sqliteTable(
 );
 
 /**
+ * Whether the deployment is open to the company, in its one row (`id` is
+ * `gate`; none yet is open). Grasp's staff close it while the company is
+ * onboarding, and open it with their go: until then only the admins named
+ * in `SIGN_IN` and staff sign in (src/onboarding/gate.ts). `threshold` is
+ * how much of what Grasp needs to know (percent) makes it ready to open.
+ */
+export const onboardingGate = sqliteTable("onboarding_gate", {
+  id: text().primaryKey(),
+  closedAt: timestamp("closed_at"),
+  threshold: integer().notNull(),
+});
+
+/**
  * The dependency policy generation, in its one row (`id` is `policy`;
  * none yet counts as 0). It goes up, in the batch that makes the change,
  * each time who holds `dependencies.approve` changes. A decision lands

@@ -32,6 +32,18 @@ describe("audit event types", () => {
     ).toStrictEqual(["decision", "decision", "action", "config", "config"]);
   });
 
+  it("files the onboarding's changes, its gate among them, as configuration", () => {
+    expect(
+      [
+        "onboarding.roster.saved",
+        "onboarding.paused",
+        "onboarding.gate.closed",
+        "onboarding.gate.opened",
+        "onboarding.gate.threshold_set",
+      ].map((action) => typeOf(action))
+    ).toStrictEqual(["config", "config", "config", "config", "config"]);
+  });
+
   it("files a connector call by whether it changed something", () => {
     expect(typeOf("connection.call", { sideEffect: true })).toBe("action");
     expect(typeOf("connection.call", { sideEffect: false })).toBe("read");

@@ -10,6 +10,7 @@ import type { MembersApi } from "./members.ts";
 import type { MemoryApi } from "./memory.ts";
 import type { ModelsApi } from "./models.ts";
 import type { NotificationsApi } from "./notifications.ts";
+import type { OnboardingGateApi } from "./onboarding-gate.ts";
 import type { OnboardingApi, OnboardingStaffApi } from "./onboarding.ts";
 import type { PermissionsApi } from "./permissions.ts";
 import type { Role } from "./roles.ts";
@@ -131,6 +132,8 @@ export interface SessionApi {
   readonly onboarding: OnboardingApi;
   /** What only Grasp's staff do in the onboarding: pause it, the agreements. */
   readonly onboardingStaff: OnboardingStaffApi;
+  /** Whether the company may come in yet: Grasp's go. */
+  readonly onboardingGate: OnboardingGateApi;
 }
 
 /**
