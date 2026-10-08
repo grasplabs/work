@@ -166,6 +166,17 @@ export const events = sqliteTable("events", {
 });
 
 /**
+ * Grasp's staff's own notes on the onboarding: who wrote them and when.
+ * Only staff read them.
+ */
+export const notes = sqliteTable("notes", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  at: text().notNull(),
+  by: text().notNull(),
+  text: text().notNull(),
+});
+
+/**
  * The AI the onboarding used, by day, purpose and model: calls, tokens
  * read new and from a cache, tokens written, and seconds of voice.
  */

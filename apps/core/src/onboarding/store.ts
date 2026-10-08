@@ -18,8 +18,29 @@ import type {
   Plan,
   Roster,
 } from "@grasp-os/shared/onboarding";
+import { logPageMax } from "@grasp-os/shared/onboarding-staff";
+import type {
+  LogActor,
+  LogFilter,
+  StaffLog,
+  StaffLogEntry,
+  StaffNote,
+  StaffTranscript,
+} from "@grasp-os/shared/onboarding-staff";
 import { DurableObject } from "cloudflare:workers";
-import { asc, eq, isNotNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  like,
+  not,
+  or,
+  sql,
+} from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 
 import { drainObjectOutbox } from "../audit-outbox.ts";
@@ -33,6 +54,7 @@ import {
   interviews,
   linkCodes,
   links,
+  notes,
   onboarding,
   people,
   teamCounts,
@@ -135,6 +157,57 @@ const whoIs = (by: AuditActor): string => {
   }
   return by.type === "system" ? "grasp" : by.type;
 };
+
+/** How the log names someone who did something on their own interview link. */
+const interviewee = "interviewee";
+
+/** Who did what the log holds, as the staff's log names them. */
+const logActorOf = (by: string): LogActor => {
+  if (by.startsWith("staff:")) {
+    return "staff";
+  }
+  if (by.startsWith("person:")) {
+    return "company";
+  }
+  return by === interviewee ? "person" : "grasp";
+};
+
+/** The log's rows `actor` did, as SQL: the inverse of `logActorOf`. */
+const byActor = (actor: LogActor): SQL => {
+  const staff = like(events.by, "staff:%");
+  const company = like(events.by, "person:%");
+  const person = eq(events.by, interviewee);
+  if (actor === "staff") {
+    return staff;
+  }
+  if (actor === "company") {
+    return company;
+  }
+  return actor === "person" ? person : not(or(staff, company, person) ?? staff);
+};
+
+/**
+ * The log's rows `filter` keeps, as SQL. `what` is a dotted name or its
+ * start, compared by prefix rather than `LIKE`, where its `_` would match
+ * any character. `about` holds the people of the team.
+ */
+const logWhere = (filter: LogFilter, about: string[] | undefined) =>
+  and(
+    filter.actor === undefined ? undefined : byActor(filter.actor),
+    filter.what === undefined
+      ? undefined
+      : or(
+          eq(events.what, filter.what),
+          eq(
+            sql`substr(${events.what}, 1, ${filter.what.length + 1})`,
+            `${filter.what}.`
+          )
+        ),
+    about === undefined ? undefined : inArray(events.about, about),
+    filter.day === undefined
+      ? undefined
+      : eq(sql`substr(${events.at}, 1, 10)`, filter.day)
+  );
 
 /** A count as given, when it is one: a number from nothing up. */
 const counted = (value: number | undefined): number =>
@@ -514,7 +587,7 @@ export class Onboarding extends DurableObject<Env> {
       return refused("interview.elsewhere");
     }
     this.ctx.storage.transactionSync(() => {
-      this.#forget(person.id, now, "interview.deleted");
+      this.#forget(person.id, now, "interview.deleted", interviewee);
       this.#db
         .update(links)
         .set({ deletedAt: now, version: link.version + 1 })
@@ -540,7 +613,7 @@ export class Onboarding extends DurableObject<Env> {
     }
     const now = new Date().toISOString();
     this.ctx.storage.transactionSync(() => {
-      this.#forget(person, now, "interview.new_start");
+      this.#forget(person, now, "interview.new_start", whoIs(by));
       this.#db
         .update(links)
         .set({ keyMark: null, deletedAt: null, version: link.version + 1 })
@@ -594,6 +667,119 @@ export class Onboarding extends DurableObject<Env> {
       .from(usage)
       .orderBy(asc(usage.day), asc(usage.purpose), asc(usage.model))
       .all();
+  }
+
+  /** Where the agreements stand, as staff last said; none before they did. */
+  agreements(): Agreements | null {
+    return this.#row().agreements;
+  }
+
+  /** Grasp's notes, the newest first. */
+  notes(): StaffNote[] {
+    return this.#db.select().from(notes).orderBy(desc(notes.id)).all();
+  }
+
+  /** Keeps a note of Grasp's staff, in the log too (without its words). */
+  addNote(text: string, by: AuditActor): StaffNote {
+    const at = new Date().toISOString();
+    const byId = by.type === "staff" ? by.userId : whoIs(by);
+    return this.ctx.storage.transactionSync(() => {
+      const [note] = this.#db
+        .insert(notes)
+        .values({ at, by: byId, text })
+        .returning()
+        .all();
+      this.#db
+        .insert(events)
+        .values({ at, by: whoIs(by), what: "onboarding.note.added" })
+        .run();
+      if (note === undefined) {
+        throw new Error("A note was kept but not returned");
+      }
+      return note;
+    });
+  }
+
+  /**
+   * What happened, the newest first, at most `logPageMax`, narrowed in
+   * the query: everything the onboarding's own log holds, with the person
+   * it is about while they are on the roster; and the roster's teams to
+   * narrow it by. For Grasp's staff only.
+   */
+  staffLog(filter: LogFilter = {}): StaffLog {
+    const roster = this.#roster();
+    const onRoster = roster?.people ?? [];
+    const byId = new Map(onRoster.map((one) => [one.id, one] as const));
+    const named = (roster?.teams ?? []).map(({ id, name }) => ({ id, name }));
+    const about =
+      filter.team === undefined
+        ? undefined
+        : onRoster
+            .filter(({ team }) => team === filter.team)
+            .map(({ id }) => id);
+    if (about?.length === 0) {
+      return { entries: [], teams: named };
+    }
+    const rows = this.#db
+      .select()
+      .from(events)
+      .where(logWhere(filter, about))
+      .orderBy(desc(events.seq))
+      .limit(logPageMax)
+      .all();
+    const entries = rows.map((row): StaffLogEntry => {
+      const person = row.about === null ? undefined : byId.get(row.about);
+      return {
+        seq: row.seq,
+        at: row.at,
+        actor: logActorOf(row.by),
+        what: row.what,
+        person:
+          person === undefined ? null : { id: person.id, name: person.name },
+        team: person?.team ?? null,
+      };
+    });
+    return { entries, teams: named };
+  }
+
+  /** Someone's interview for Grasp's staff, with the link's random id to audit its read by. */
+  transcriptOf(
+    person: string
+  ): (StaffTranscript & { interviewId: string }) | null {
+    const roster = this.#roster();
+    const one = roster?.people.find(({ id }) => id === person);
+    const [code] = this.#db
+      .select({ linkId: linkCodes.linkId })
+      .from(linkCodes)
+      .where(eq(linkCodes.person, person))
+      .all();
+    if (one === undefined || code === undefined) {
+      return null;
+    }
+    const state = this.#interviews().get(person);
+    return {
+      person,
+      name: one.name,
+      team: roster?.teams.find(({ id }) => id === one.team)?.name ?? "",
+      startedAt: state?.startedAt ?? null,
+      completedAt: state?.completedAt ?? null,
+      progress: this.#held(person),
+      interviewId: code.linkId,
+    };
+  }
+
+  /** What Grasp's staff see of where the interviews stand: exact, by person. */
+  staffFacts(): {
+    sent: { person: string; sentAt: string }[];
+    interviews: InterviewState[];
+  } {
+    return {
+      sent: this.#db
+        .select({ person: links.person, sentAt: links.sentAt })
+        .from(links)
+        .all(),
+      interviews: [...this.#interviews().values()],
+    };
   }
 
   /**
@@ -783,24 +969,28 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /** Removes what someone said and where their interview stood, and notes why. */
-  #forget(person: string, now: string, what: string): void {
+  #forget(person: string, now: string, what: string, by: string): void {
     this.#db.delete(interviews).where(eq(interviews.person, person)).run();
     this.#db
       .delete(interviewStates)
       .where(eq(interviewStates.person, person))
       .run();
-    this.#noted(person, what, now);
+    this.#noted(person, what, now, by);
   }
 
   /**
-   * Records what someone did on their link in the onboarding's own log,
-   * which only Grasp's staff read: never in the audit log.
+   * Records what happened to someone's interview in the onboarding's own
+   * log, which only Grasp's staff read: never in the audit log. `by` is
+   * who did it, as the log names them: the interviewee themselves, unless
+   * said otherwise.
    */
-  #noted(person: string, what: string, at: string): void {
-    this.#db
-      .insert(events)
-      .values({ at, by: "interviewee", what, about: person })
-      .run();
+  #noted(
+    person: string,
+    what: string,
+    at: string,
+    by: string = interviewee
+  ): void {
+    this.#db.insert(events).values({ at, by, what, about: person }).run();
   }
 
   #noteState(
