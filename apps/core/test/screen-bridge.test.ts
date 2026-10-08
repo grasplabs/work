@@ -502,6 +502,76 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 
+  it("serves a module to its frame, never to the product page's own request for it", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const bundle = await builder.api.screens.open(app, "notes");
+    const frame = await loadFrame(bundle);
+    const [address] = Object.values(frame?.addresses ?? {});
+    if (address === undefined) {
+      throw new Error("The screen loads modules");
+    }
+    const asked = async (site?: string) => {
+      const response = await routed(
+        pathOf(address),
+        site === undefined ? {} : { "sec-fetch-site": site }
+      );
+      return [response.status, response.headers.get("vary")];
+    };
+
+    // The frame's origin is opaque, so a browser calls its requests
+    // cross-site; the product page's own are same-origin, valid token or
+    // not. A request that says nothing (an older browser) still has its
+    // token checked. Each answer varies on the header, so the copy the
+    // frame's load left in the browser's cache never answers the page.
+    expect({
+      frame: await asked("cross-site"),
+      productPage: await asked("same-origin"),
+      sameSite: await asked("same-site"),
+      unsaid: await asked(),
+    }).toStrictEqual({
+      frame: [200, "sec-fetch-site"],
+      productPage: [403, "sec-fetch-site"],
+      sameSite: [200, "sec-fetch-site"],
+      unsaid: [200, "sec-fetch-site"],
+    });
+  });
+
+  it("answers no module at an address under the frontend's own files, however it is escaped", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const bundle = await builder.api.screens.open(app, "notes");
+    const frame = await loadFrame(bundle);
+    const [address] = Object.values(frame?.addresses ?? {});
+    if (address === undefined) {
+      throw new Error("The screen loads modules");
+    }
+    // The product page's policy allows anything under /assets/, matched
+    // as the browser writes the path; decoded, each of these is the
+    // module's own address. Asked as the product page would ask.
+    const escapes = ["..%2F", "..%2f", "..%5C", "%2E%2E%2F", "x/..%2F..%2F"];
+    const answers = await Promise.all(
+      escapes.map(async (escape) => {
+        const response = await routed(
+          pathOf(address).replace(
+            "/screen-modules/",
+            `/assets/${escape}screen-modules/`
+          ),
+          { "sec-fetch-site": "same-origin", "sec-fetch-dest": "script" }
+        );
+        return [response.status, await response.text()] as const;
+      })
+    );
+    const served = await routed(pathOf(address));
+    const code = await served.text();
+    expect(served.status).toBe(200);
+
+    expect(answers.map(([answered]) => answered)).toStrictEqual(
+      escapes.map(() => 404)
+    );
+    expect(answers.filter(([, body]) => body === code)).toStrictEqual([]);
+  });
+
   it("keeps what a frame is handed inside its own script elements, whatever the CSS holds", async () => {
     const builder = await personApi("builder");
     const { id: app } = await builder.api.apps.create({ name: "Closing" });

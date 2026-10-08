@@ -1,4 +1,5 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { isoDurationMs } from "@grasp-os/workflow-expressions/duration";
 import type { Stage } from "@grasp-os/workflow-expressions/evaluate";
 import { parseSlot } from "@grasp-os/workflow-expressions/source";
 
@@ -55,6 +56,18 @@ export const addSlot = (
 };
 
 /**
+ * Refuses `${ … }` with whitespace around it: upstream's pattern reads it
+ * as an expression, strict mode as a literal, so it is taken as neither.
+ */
+const refusePadded = (checker: Checker, pointer: string, site: Site): void => {
+  checker.report.error(
+    "expression.expected",
+    at(site, pointer),
+    "Write the expression as ${ … } with nothing around it."
+  );
+};
+
+/**
  * A place that only takes an expression (a condition, a loop's collection):
  * a literal there is refused rather than taken as a constant.
  */
@@ -67,6 +80,10 @@ export const expressionOnly = (
   expects?: Expectation
 ): void => {
   const slot = typeof value === "string" ? parseSlot(value) : undefined;
+  if (slot?.kind === "padded") {
+    refusePadded(checker, pointer, site);
+    return;
+  }
   if (slot?.kind !== "expression") {
     checker.report.error(
       "expression.expected",
@@ -95,6 +112,10 @@ export const dataValue = (
 ): boolean => {
   if (typeof value === "string") {
     const slot = parseSlot(value);
+    if (slot.kind === "padded") {
+      refusePadded(checker, pointer, site);
+      return false;
+    }
     if (slot.kind === "expression") {
       addSlot(checker, slot.source, pointer, stage, site);
       return true;
@@ -108,7 +129,7 @@ export const dataValue = (
     checker.report.error(
       "profile.invalid_value",
       at(site, pointer),
-      "Nest literal data at most 32 levels deep.",
+      `Nest literal data at most ${profileLimits.maxDataDepth} levels deep.`,
       { reason: "literal data too deep" }
     );
     return false;
@@ -248,7 +269,7 @@ export const literalText = (
   limit: number
 ): string | undefined => {
   const text = textAt(checker, value, pointer, site, limit);
-  if (text !== undefined && parseSlot(text).kind === "expression") {
+  if (text !== undefined && parseSlot(text).kind !== "literal") {
     checker.report.error(
       "profile.invalid_value",
       at(site, pointer),
@@ -287,16 +308,6 @@ const lineBreak = /[\n\r\u2028\u2029]/u;
  */
 export const isOneLine = (text: string): boolean => !lineBreak.test(text);
 
-const msPerUnit = {
-  W: 604_800_000n,
-  D: 86_400_000n,
-  H: 3_600_000n,
-  M: 60_000n,
-  S: 1000n,
-} as const;
-const isoDuration =
-  /^P(?:(?<W>\d{1,12}(?:\.\d{1,9})?)W)?(?:(?<D>\d{1,12}(?:\.\d{1,9})?)D)?(?:T(?=\d)(?:(?<H>\d{1,12}(?:\.\d{1,9})?)H)?(?:(?<M>\d{1,12}(?:\.\d{1,9})?)M)?(?:(?<S>\d{1,12}(?:\.\d{1,9})?)S)?)?$/u;
-const calendarDuration = /^P(?:[^T]*[YM])/u;
 const durationMembers: ReadonlyMap<string, number> = new Map([
   ["days", 86_400_000],
   ["hours", 3_600_000],
@@ -306,42 +317,11 @@ const durationMembers: ReadonlyMap<string, number> = new Map([
 ]);
 
 /**
- * Whole milliseconds of an ISO 8601 duration of fixed units (weeks, days,
- * hours, minutes, seconds), computed exactly; `undefined` for a calendar
- * duration (years, months), a fraction below a millisecond, or anything
- * that isn't one.
- */
-export const isoDurationMs = (text: string): number | undefined => {
-  if (calendarDuration.test(text)) {
-    return undefined;
-  }
-  const groups = isoDuration.exec(text)?.groups;
-  if (groups === undefined) {
-    return undefined;
-  }
-  let total = 0n;
-  for (const [unit, ms] of Object.entries(msPerUnit)) {
-    const amount = groups[unit];
-    if (amount === undefined) {
-      continue;
-    }
-    const [whole = "0", fraction = ""] = amount.split(".");
-    const scale = 10n ** BigInt(fraction.length);
-    const scaled = (BigInt(whole) * scale + BigInt(fraction || "0")) * ms;
-    if (scaled % scale !== 0n) {
-      return undefined;
-    }
-    total += scaled / scale;
-  }
-  return total > 0n && total <= BigInt(Number.MAX_SAFE_INTEGER)
-    ? Number(total)
-    : undefined;
-};
-
-/**
  * A duration: upstream's `{ days, hours, minutes, seconds, milliseconds }`
  * of literal whole numbers, or a fixed ISO 8601 duration; with
- * `expression`, also a `${ … }` that returns one at run time. Its
+ * `expression`, also a `${ … }` that returns, at run time, whole
+ * milliseconds or a fixed ISO 8601 duration (the evaluator's `duration`
+ * contract). Its
  * milliseconds when literal; refuses zero, calendar units and fractions of
  * a millisecond.
  */
@@ -359,6 +339,10 @@ export const durationAt = (
   };
   if (typeof value === "string") {
     const slot = parseSlot(value);
+    if (slot.kind === "padded") {
+      refusePadded(checker, pointer, site);
+      return undefined;
+    }
     if (slot.kind === "literal") {
       const ms = isoDurationMs(value);
       if (ms === undefined) {
@@ -371,7 +355,14 @@ export const durationAt = (
     if (expression === undefined) {
       refuse("Write this duration as a literal.");
     } else if (isOneLine(value)) {
-      addSlot(checker, slot.source, pointer, expression.stage, site, "string");
+      addSlot(
+        checker,
+        slot.source,
+        pointer,
+        expression.stage,
+        site,
+        "duration"
+      );
     } else {
       refuse("Write the duration's expression on one line.");
     }

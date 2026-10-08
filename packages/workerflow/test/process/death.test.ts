@@ -714,6 +714,54 @@ describe("a run on disk-backed workerd", () => {
     });
   });
 
+  it.each([0, 1])(
+    "fails a step cut off before its deadline on the last attempt its limit of %i retries allows, rather than retry it",
+    async (limit) => {
+      const id = `cut-off-on-its-last-attempt-${limit}`;
+      const first = outside.hold(id, "cut", 1);
+      await workerd.request(
+        "/start",
+        startOf("cut-off", id, { params: { limit } })
+      );
+      await first;
+      // Killed while the attempt is out, well before its minute is up.
+      await workerd.kill();
+      if (limit === 1) {
+        // The one retry goes out at once, and is cut off the same way.
+        const second = outside.hold(id, "cut", 2);
+        await workerd.start();
+        await second;
+        await workerd.kill();
+      }
+      await workerd.start();
+      const status = await ended("cut-off", id);
+
+      const cutOff = {
+        name: "WorkflowInternalError",
+        message: "Attempt failed due to internal workflows error",
+      };
+      expect(status).toStrictEqual({ status: "errored", error: cutOff });
+      expect(timeline(id)).toStrictEqual(
+        Array.from({ length: limit + 1 }, (_, index) => ["cut", index + 1])
+      );
+      const journal = await journalOf("cut-off", id);
+      expect(journal).toMatchObject({
+        steps: [{ name: "cut", state: "failed", attempt: limit + 1 }],
+      });
+      // Each attempt but the last was retried at once, with no end of its
+      // own; the last is ended as failed, before its deadline.
+      const attempts = attemptsOf(journal);
+      expect(attempts.map((attempt) => attempt.ended)).toStrictEqual([
+        ...Array.from({ length: limit }, () => null),
+        "failed",
+      ]);
+      expect(attempts.at(-1)).toMatchObject({
+        error: JSON.stringify(cutOff),
+        retry_at: null,
+      });
+    }
+  );
+
   it("neither brings a sleep forward nor puts it back when the process restarts before its deadline", async () => {
     const id = "restarted-before-the-deadline";
     // Long enough that a restart, however slow the machine, lands before

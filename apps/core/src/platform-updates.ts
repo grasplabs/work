@@ -1,7 +1,6 @@
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import { deploymentConfig } from "@grasp-os/shared/config";
 import { requestErrors } from "@grasp-os/shared/errors";
-import { readAtMost } from "@grasp-os/shared/http";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   platformChangeSchema,
@@ -9,15 +8,13 @@ import {
   platformUpdateMaxSkewMs,
   platformUpdateNoticeSchema,
   platformUpdatePurpose,
-  platformUpdateSignatureHeader,
 } from "@grasp-os/shared/platform-change";
-import type { PlatformUpdateNotice } from "@grasp-os/shared/platform-change";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import { consoleSigned } from "./console-signed.ts";
 import { platformVersions } from "./db/core/schema.ts";
-import { derivedHmacKey } from "./derived-keys.ts";
 import { errorResponse } from "./errors.ts";
 
 // Platform updates in the client's Activity: every version the console
@@ -121,73 +118,9 @@ export const recordPlatformUpdate = async (
 
 // A platform update that made no new version, a rollback to a version
 // core has run before, never reaches the cron above: the console tells
-// core of it instead, at `platformUpdatePath`. The notice is signed with a
-// key derived from core's auth secret, which the console derives from its
-// client key, so only the console can make one; the router secret it
-// passes first only says it came through the router, as everyone's
-// request does. A notice is taken within `platformUpdateMaxSkewMs` of
-// when it was sent, so one caught on its way can't be sent again later,
-// and read up to `platformUpdateMaxBytes` of its actual body, whatever its
-// headers say. It's recorded as `platform.updated`, the way the cron
-// records a new version, with the version the rollback went back to.
-
-/** Why a notice was refused, as logged: never its body or signature. */
-type NoticeRefusal =
-  | "too_large"
-  | "unsigned"
-  | "bad_signature"
-  | "invalid"
-  | "stale";
-
-/** Signatures: 32 bytes as lowercase hex. */
-const signaturePattern = /^[0-9a-f]{64}$/u;
-
-/** Two hex characters at a time. */
-const hexPair = /../gu;
-
-/** `hex`, lowercase hex characters, as bytes. */
-const hexBytes = (hex: string): Uint8Array<ArrayBuffer> =>
-  Uint8Array.from(hex.match(hexPair) ?? [], (pair) =>
-    Number.parseInt(pair, 16)
-  );
-
-/** The notice `request` carries, checked, or why it's refused. */
-const noticeOf = async (
-  request: Request,
-  env: Pick<Env, "BETTER_AUTH_SECRET">
-): Promise<PlatformUpdateNotice | NoticeRefusal> => {
-  // SAFETY: a request's body in workerd is a byte stream, of Uint8Array
-  // chunks; its type says `any` only for streams in general.
-  const stream = request.body as ReadableStream<Uint8Array> | null;
-  const body =
-    stream === null
-      ? new Uint8Array()
-      : await readAtMost(stream, platformUpdateMaxBytes);
-  if (body === undefined) {
-    return "too_large";
-  }
-  const signature = request.headers.get(platformUpdateSignatureHeader) ?? "";
-  if (!signaturePattern.test(signature)) {
-    return "unsigned";
-  }
-  const key = await derivedHmacKey(env, platformUpdatePurpose, ["verify"]);
-  // `verify` compares in constant time.
-  if (!(await crypto.subtle.verify("HMAC", key, hexBytes(signature), body))) {
-    return "bad_signature";
-  }
-  let parsed: unknown = undefined;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(body));
-  } catch {
-    return "invalid";
-  }
-  const notice = platformUpdateNoticeSchema.safeParse(parsed);
-  if (!notice.success) {
-    return "invalid";
-  }
-  const skew = Math.abs(Date.now() - Date.parse(notice.data.sentAt));
-  return skew > platformUpdateMaxSkewMs ? "stale" : notice.data;
-};
+// core of it instead, at `platformUpdatePath`, signed (console-signed.ts).
+// It's recorded as `platform.updated`, the way the cron records a new
+// version, with the version the rollback went back to.
 
 /**
  * Takes the console's notice of a platform update that made no new
@@ -208,7 +141,12 @@ export const platformUpdateResponse = async (
       requestId
     );
   }
-  const notice = await noticeOf(request, env);
+  const notice = await consoleSigned(request, env, {
+    purpose: platformUpdatePurpose,
+    schema: platformUpdateNoticeSchema,
+    maxBytes: platformUpdateMaxBytes,
+    maxSkewMs: platformUpdateMaxSkewMs,
+  });
   if (typeof notice === "string") {
     log.info("platform.update.refused", { reason: notice });
     return errorResponse(

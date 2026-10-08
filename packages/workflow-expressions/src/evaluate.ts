@@ -3,40 +3,19 @@ import type { Json } from "@grasp-os/shared/json";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import { writeJson, writeJsonArray } from "./bounded-json.ts";
+import { durationMs } from "./duration.ts";
 import { expressionError, expressionErrors } from "./errors.ts";
 import type { ExpressionSite } from "./errors.ts";
 import { runJq } from "./jq.ts";
-import { checkSource } from "./source.ts";
+import { evaluatorLimits, sizeText } from "./limits.ts";
+import { checkSource, isBindableVariable, stageVariables } from "./source.ts";
+import type { VariablePath } from "./source.ts";
 
-/**
- * Where in a workflow's data flow an expression runs. Each stage sees the
- * variables Open Workflow 1.0 gives it (dsl.md, "Runtime expression
- * arguments"), less `$secrets` and `$authorization`, which the profile
- * doesn't have, plus Grasp's `$params` everywhere and a loop's variables
- * inside its tasks.
- */
-export const stageVariables = {
-  workflowInputFrom: ["workflow", "runtime", "params"],
-  taskIf: ["context", "task", "workflow", "runtime", "params"],
-  taskInputFrom: ["context", "task", "workflow", "runtime", "params"],
-  taskDefinition: ["context", "input", "task", "workflow", "runtime", "params"],
-  taskOutputAs: ["context", "input", "task", "workflow", "runtime", "params"],
-  taskExportAs: [
-    "context",
-    "input",
-    "output",
-    "task",
-    "workflow",
-    "runtime",
-    "params",
-  ],
-  workflowOutputAs: ["context", "workflow", "runtime", "params"],
-} as const satisfies Record<string, readonly string[]>;
-
+/** Where in a workflow's data flow an expression runs (stageVariables). */
 export type Stage = keyof typeof stageVariables;
 type StageVariable<S extends Stage> = (typeof stageVariables)[S][number];
 
-/** Stages inside a task, where a loop's variables are in scope. */
+/** Stages inside a task, where loop and catch variables are in scope. */
 const taskStages = new Set<Stage>([
   "taskIf",
   "taskInputFrom",
@@ -51,39 +30,14 @@ export const runtimeDescriptor = {
   version: "grasp-open-workflow/1",
 } as const;
 
-/** The limits on one evaluation. */
-export const evaluatorLimits = {
-  /**
-   * CPU and wall time of one evaluation. Fuel (jq.ts) enforces both
-   * deterministically, everywhere; an isolate running the evaluator gives
-   * `cpuMs` to the platform as a backstop.
-   */
-  cpuMs: 100,
-  wallMs: 1000,
-  /** The input and every variable together, as JSON. */
-  maxContextBytes: 1024 * 1024,
-  maxResultBytes: 1024 * 1024,
-  /** Of JSON values, in and out. */
-  maxJsonDepth: 32,
-  /** Of the task an expression belongs to, counting from the workflow. */
-  maxTaskScopes: 16,
-} as const;
-
-// Loop variable names: jq identifiers, never one of a stage's own names.
-const variableName = /^[A-Za-z_][A-Za-z0-9_]*$/u;
-const reservedNames = new Set<string>([
-  ...Object.values(stageVariables).flat(),
-  "secrets",
-  "authorization",
-  "ENV",
-  "ARGS",
-]);
-
 /** An expression that passed the profile, ready to evaluate. */
 export interface CompiledExpression<S extends Stage = Stage> {
   readonly source: string;
   readonly stage: S;
+  /** Variables of the loops and catches around its task, as compiled. */
   readonly loopVariables: readonly string[];
+  /** Every read of a free variable, as the profile check found it. */
+  readonly paths: readonly VariablePath[];
   readonly site: ExpressionSite;
 }
 
@@ -93,7 +47,10 @@ export interface CompileOptions<S extends Stage = Stage> {
   scope: readonly string[];
   /** Where the expression is, for errors. */
   pointer: string;
-  /** Variables of the loops around this task (`for.each`/`for.at`). */
+  /**
+   * Variables of the loops (`for.each`, `for.at`) and catches (`catch.as`)
+   * around this task.
+   */
   loopVariables?: readonly string[];
 }
 
@@ -212,6 +169,9 @@ export const compileExpression = async <S extends Stage>(
   if (taskId !== undefined) {
     site.taskId = taskId;
   }
+  if (typeof source !== "string") {
+    fail(site, "expression.invalid", "Pass the expression as text.");
+  }
   if (read.scope.length > evaluatorLimits.maxTaskScopes) {
     fail(
       site,
@@ -224,16 +184,11 @@ export const compileExpression = async <S extends Stage>(
     fail(
       site,
       "expression.unavailable_variable",
-      "Loop variables exist only in the loop's tasks."
+      "Loop and catch variables exist only in the tasks they surround."
     );
   }
   for (const name of loopVariables) {
-    const valid =
-      typeof name === "string" &&
-      variableName.test(name) &&
-      !reservedNames.has(name) &&
-      !name.startsWith("__");
-    if (!valid) {
+    if (typeof name !== "string" || !isBindableVariable(name)) {
       fail(
         site,
         "expression.unavailable_variable",
@@ -253,32 +208,41 @@ export const compileExpression = async <S extends Stage>(
       checked.problem.code === "unsupported"
         ? "Use only the profile's grammar and builtins."
         : "Shorten or simplify the expression.";
-    fail(site, `expression.${checked.problem.code}`, remedy, {
+    return fail(site, `expression.${checked.problem.code}`, remedy, {
       reason: checked.problem.reason,
     });
   }
-  if (typeof source !== "string") {
-    fail(site, "expression.invalid", "Pass the expression as text.");
+  const loopNames = loopVariables.filter((name) => typeof name === "string");
+  // As with the stage's variables (checkSource), rebinding a loop or catch
+  // variable would hide its reads from the checks that follow.
+  const rebound = checked.source.boundVariables.find((name) =>
+    loopNames.includes(name)
+  );
+  if (rebound !== undefined) {
+    fail(site, "expression.unsupported", "Bind a name of its own.", {
+      reason: `rebinding $${rebound}`,
+    });
   }
   const expression: CompiledExpression<S> = Object.freeze({
     source,
     stage: read.stage,
-    loopVariables: Object.freeze(
-      loopVariables.filter((name) => typeof name === "string")
+    loopVariables: Object.freeze(loopNames),
+    paths: Object.freeze(
+      checked.source.paths.map((path) =>
+        Object.freeze({ ...path, fields: Object.freeze([...path.fields]) })
+      )
     ),
     site: Object.freeze(site),
   });
   const available = new Set(variableNamesOf(expression));
-  if (checked.ok) {
-    for (const name of checked.source.freeVariables) {
-      if (!available.has(name)) {
-        fail(
-          site,
-          "expression.unavailable_variable",
-          `Use only the variables of this stage: ${[...available].map((variable) => `$${variable}`).join(", ")}.`,
-          { reason: `$${name}` }
-        );
-      }
+  for (const name of checked.source.freeVariables) {
+    if (!available.has(name)) {
+      fail(
+        site,
+        "expression.unavailable_variable",
+        `Use only the variables of this stage: ${[...available].map((variable) => `$${variable}`).join(", ")}.`,
+        { reason: `$${name}` }
+      );
     }
   }
   // jq compiles it against nulls; only a compile error matters here.
@@ -308,9 +272,10 @@ export interface EvaluationScope<S extends Stage = Stage> {
 
 /**
  * The type the result must have where the expression sits. A condition is
- * a boolean, a duration a safe positive integer of milliseconds, and a
+ * a boolean; a duration a positive safe integer of milliseconds or an ISO
+ * 8601 duration of fixed units, either returned as its milliseconds; and a
  * selector exactly what its schema accepts, as is. No truthiness, no
- * coercion, no defaults.
+ * coercion beyond a duration's one form, no defaults.
  */
 export type ResultContract =
   | { kind: "boolean" }
@@ -320,7 +285,8 @@ export type ResultContract =
 
 const contractNames = {
   boolean: "boolean",
-  duration: "positive safe integer (milliseconds)",
+  duration:
+    "positive safe integer (milliseconds) or ISO 8601 duration of fixed units",
   json: "one JSON value",
 } as const;
 
@@ -386,14 +352,10 @@ const isPlainObject = (value: object): boolean => {
  * Whether `value` is plain JSON the evaluator accepts: finite numbers,
  * well-formed strings, dense arrays and plain objects at most
  * `maxJsonDepth` deep, no `__proto__` key.
- * `safeIntegers` also refuses integers beyond 2^53, as jq prints them for
- * overflowing or non-finite numbers.
+ * It also refuses integers beyond 2^53, as jq prints them for overflowing
+ * or non-finite numbers.
  */
-const isAcceptedJson = (
-  value: unknown,
-  depth: number,
-  safeIntegers: boolean
-): value is Json => {
+const isAcceptedJson = (value: unknown, depth: number): value is Json => {
   if (value === null || typeof value === "boolean") {
     return true;
   }
@@ -405,19 +367,14 @@ const isAcceptedJson = (
     if (!Number.isFinite(value)) {
       return false;
     }
-    return (
-      !safeIntegers || !Number.isInteger(value) || Number.isSafeInteger(value)
-    );
+    return !Number.isInteger(value) || Number.isSafeInteger(value);
   }
   if (typeof value !== "object" || depth >= evaluatorLimits.maxJsonDepth) {
     return false;
   }
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
-      if (
-        !(index in value) ||
-        !isAcceptedJson(value[index], depth + 1, safeIntegers)
-      ) {
+      if (!(index in value) || !isAcceptedJson(value[index], depth + 1)) {
         return false;
       }
     }
@@ -428,8 +385,7 @@ const isAcceptedJson = (
   }
   for (const [key, member] of Object.entries(value)) {
     // A member set to undefined is left out, as JSON.stringify does.
-    const accepted =
-      member === undefined || isAcceptedJson(member, depth + 1, safeIntegers);
+    const accepted = member === undefined || isAcceptedJson(member, depth + 1);
     if (!key.isWellFormed() || !accepted) {
       return false;
     }
@@ -440,7 +396,7 @@ const isAcceptedJson = (
 const utf8Bytes = (text: string): number =>
   new TextEncoder().encode(text).length;
 
-/** How deep JSON text nests, without parsing it. */
+/** How deep JSON text nests, without parsing it: for jq's output. */
 const jsonTextDepth = (text: string): number => {
   let depth = 0;
   let deepest = 0;
@@ -487,9 +443,7 @@ const checkContract = async (
     return typeof result === "boolean" ? result : mismatch();
   }
   if (read.kind === "duration") {
-    const isDuration =
-      typeof result === "number" && Number.isSafeInteger(result) && result > 0;
-    return isDuration ? result : mismatch();
+    return durationMs(result) ?? mismatch();
   }
   if (read.kind === "json") {
     return result;
@@ -521,7 +475,7 @@ const checkContract = async (
     same = false;
   }
   const accepted: unknown = JSON.parse(snapshot);
-  return same && isAcceptedJson(accepted, 0, true) ? accepted : mismatch();
+  return same && isAcceptedJson(accepted, 0) ? accepted : mismatch();
 };
 
 /**
@@ -568,15 +522,11 @@ const contextText = <S extends Stage>(
     }
     values.push(provided[name] ?? null);
   }
-  const invalidContext = (): never =>
-    fail(
-      site,
-      "expression.context_invalid",
-      "Pass plain JSON at most 32 levels deep, with finite numbers and no __proto__ keys."
-    );
-  // One bounded pass writes the text jq gets and checks it is plain JSON:
-  // shared references (`[v, v]` nested) can't make it visit more than the
-  // budget, and a getter is read once, so what is checked is what is sent.
+  // One bounded pass writes the text jq gets and checks it is plain JSON
+  // (finite numbers, well-formed text, dense arrays, plain objects, no
+  // `__proto__`, within the depth): shared references (`[v, v]` nested)
+  // can't make it visit more than the budget, and a getter is read once,
+  // so what is checked is what is sent. Nothing checks the text again.
   const written = writeJsonArray(values, {
     maxBytes: evaluatorLimits.maxContextBytes,
     maxDepth: evaluatorLimits.maxJsonDepth,
@@ -584,29 +534,21 @@ const contextText = <S extends Stage>(
     sortKeys: false,
     safeIntegers: false,
   });
-  if (!written.ok) {
-    if (written.refusal === "too_large") {
-      fail(
-        site,
-        "expression.context_too_large",
-        "Keep the input and variables under 1 MiB together."
-      );
-    }
-    invalidContext();
+  if (written.ok) {
+    return written.text;
   }
-  const stdin = written.ok ? written.text : "";
-  // The text is at most 1 MiB, so checking it again is bounded too.
-  if (jsonTextDepth(stdin) > evaluatorLimits.maxJsonDepth + 1) {
-    invalidContext();
+  if (written.refusal === "too_large") {
+    return fail(
+      site,
+      "expression.context_too_large",
+      `Keep the input and variables under ${sizeText(evaluatorLimits.maxContextBytes)} together.`
+    );
   }
-  const sent: unknown = JSON.parse(stdin);
-  if (
-    !Array.isArray(sent) ||
-    !sent.every((value: unknown) => isAcceptedJson(value, 0, false))
-  ) {
-    invalidContext();
-  }
-  return stdin;
+  return fail(
+    site,
+    "expression.context_invalid",
+    `Pass plain JSON at most ${evaluatorLimits.maxJsonDepth} levels deep, with finite numbers and no __proto__ keys.`
+  );
 };
 
 /**
@@ -679,17 +621,21 @@ export const evaluateExpression = async <S extends Stage>(
     );
   }
   if (utf8Bytes(line) > evaluatorLimits.maxResultBytes) {
-    return fail(site, "expression.result_too_large", "Return less than 1 MiB.");
+    return fail(
+      site,
+      "expression.result_too_large",
+      `Return less than ${sizeText(evaluatorLimits.maxResultBytes)}.`
+    );
   }
   if (jsonTextDepth(line) > evaluatorLimits.maxJsonDepth) {
     return fail(
       site,
       "expression.result_invalid",
-      "Return JSON at most 32 levels deep."
+      `Return JSON at most ${evaluatorLimits.maxJsonDepth} levels deep.`
     );
   }
   const result: unknown = JSON.parse(line);
-  if (!isAcceptedJson(result, 0, true)) {
+  if (!isAcceptedJson(result, 0)) {
     return fail(
       site,
       "expression.result_invalid",
