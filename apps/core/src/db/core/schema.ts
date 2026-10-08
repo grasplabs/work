@@ -871,6 +871,13 @@ export const onboardingGate = sqliteTable("onboarding_gate", {
   id: text().primaryKey(),
   closedAt: timestamp("closed_at"),
   threshold: integer().notNull(),
+  /** When Grasp's go last opened it: staff with the onboarding scope keep 7 days after. */
+  openedAt: timestamp("opened_at"),
+  /**
+   * When the company's admin last ended Grasp's staff access: a staff
+   * window the console opened before then lets nobody in.
+   */
+  staffEndedAt: timestamp("staff_ended_at"),
 });
 
 /**

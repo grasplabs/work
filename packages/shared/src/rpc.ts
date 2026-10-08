@@ -37,6 +37,11 @@ export interface Identity {
   teams: { id: string; name: string }[];
   /** Grasp staff, signed in for a limited time; not a member of the organization. */
   staff: boolean;
+  /**
+   * Grasp staff who reach the onboarding alone (`SIGN_IN`'s staff scope):
+   * every other namespace and route refuses them.
+   */
+  onboardingOnly?: true;
   /** When the session ends (ISO 8601). */
   expiresAt: string;
 }

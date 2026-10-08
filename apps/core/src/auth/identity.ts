@@ -8,6 +8,7 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { accounts, members, teamMembers, teams } from "../db/core/schema.ts";
+import { staffMayStay } from "../onboarding/gate.ts";
 import { authFor, currentMembership, organizationId } from "./auth.ts";
 import { providerIds, signInConfig } from "./config.ts";
 
@@ -81,16 +82,22 @@ export const memberOf = async (
 };
 
 /**
- * A Grasp staff member's role now, from the sign-in config: `undefined`
- * once the staff window has closed, or they are no longer on the staff
- * list the console keeps (checked now, not only when they signed in).
+ * A Grasp staff member's role and scope now, from the sign-in config:
+ * `undefined` once the staff window has closed, they are no longer on the
+ * staff list the console keeps, the company's admin ended staff access,
+ * or, with the onboarding scope, 7 days after Grasp's go (all checked now,
+ * not only when they signed in).
  */
 export const staffRole = async (
   env: Env,
   userId: string
-): Promise<Role | undefined> => {
+): Promise<{ role: Role; scope: "full" | "onboarding" } | undefined> => {
   const config = signInConfig(env);
   if (!(config?.staff && staffWindowOpen(config, Date.now()))) {
+    return undefined;
+  }
+  const { scope, opened } = config.staff;
+  if (!(await staffMayStay(env, opened, scope))) {
     return undefined;
   }
   const [account] = await drizzle(env.DB)
@@ -105,7 +112,7 @@ export const staffRole = async (
   const listed = config.staff.oids.some(
     (oid) => oid.toLowerCase() === account?.oid?.toLowerCase()
   );
-  return listed ? config.staff.role : undefined;
+  return listed ? { role: config.staff.role, scope } : undefined;
 };
 
 /**
@@ -138,10 +145,17 @@ export const identify = async (
   };
 
   if (session.staff) {
-    const role = await staffRole(env, user.id);
-    return role === undefined
-      ? undefined
-      : { ...person, role, teams: [], staff: true };
+    const access = await staffRole(env, user.id);
+    if (access === undefined) {
+      return undefined;
+    }
+    return {
+      ...person,
+      role: access.role,
+      teams: [],
+      staff: true,
+      ...(access.scope === "onboarding" ? { onboardingOnly: true } : {}),
+    };
   }
 
   const member = await memberOf(env.DB, user.id);
@@ -149,4 +163,17 @@ export const identify = async (
     return undefined;
   }
   return { ...person, ...member, staff: false };
+};
+
+/**
+ * Who a request comes from, as `identify` says, for a route outside the
+ * onboarding: `undefined` for Grasp staff who reach the onboarding alone,
+ * as for nobody signed in.
+ */
+export const identifyFull = async (
+  env: Env,
+  headers: Headers
+): Promise<Identity | undefined> => {
+  const person = await identify(env, headers);
+  return person?.onboardingOnly === true ? undefined : person;
 };

@@ -49,6 +49,17 @@ export interface GateView {
   parts: KnownPart[];
   /** Grasp knows enough, or the interviews are over: staff may give the go. */
   ready: boolean;
+  /**
+   * Grasp's staff access, as the company's admin sees it: whether staff
+   * may come in now, what they reach, and until when; null when the
+   * console opened no window.
+   */
+  staff: {
+    open: boolean;
+    scope: "full" | "onboarding";
+    /** ISO 8601. */
+    until: string;
+  } | null;
 }
 
 /** The gate over `/rpc`: read by the company's admin and staff, moved by staff only. */
@@ -59,4 +70,10 @@ export interface OnboardingGateApi {
   /** Grasp's go: everyone in the company comes in. */
   open: () => Promise<GateView>;
   setThreshold: (threshold: GateThreshold) => Promise<GateView>;
+  /**
+   * Ends Grasp's staff access, as the company's admin (never staff): every
+   * staff session ends now, and the window the console opened lets nobody
+   * in again.
+   */
+  endStaffAccess: () => Promise<GateView>;
 }

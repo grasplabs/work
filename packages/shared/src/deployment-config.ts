@@ -79,6 +79,12 @@ export const signInConfigSchema = z
         domains: z.array(domainSchema).min(1),
         oids: z.array(z.guid()).min(1),
         role: roleSchema,
+        /**
+         * What they reach: everything their role allows (`full`), or the
+         * onboarding alone (`onboarding`: only its own `/rpc` namespaces,
+         * until 7 days after Grasp's go).
+         */
+        scope: z.enum(["full", "onboarding"]).default("full"),
         /** When the console opened the window. */
         opened: z.iso.datetime({ offset: true }),
         until: z.iso.datetime({ offset: true }),
