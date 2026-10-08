@@ -107,6 +107,11 @@ export class App extends DurableObject {
     return 7n;
   }
 
+  async push(_caller: Caller, onChange: (value: unknown) => Promise<void>, value: unknown): Promise<unknown> {
+    const pushed = value === "big" ? { deep: [7n] } : value;
+    return await tried(() => onChange(pushed));
+  }
+
   fail(_caller: Caller, text: string, times: number): never {
     throw new Error(text.repeat(times));
   }
@@ -306,7 +311,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     });
   });
 
-  it("takes no big integer into a call or out of one, from a screen, a workflow or another App", async () => {
+  it("takes no big integer into a call, out of one, or pushed to a screen", async () => {
     const admin = await personApi("admin");
     const app = await newApp(admin);
     const screen = { userId: admin.userId, mode: "interactive" } as const;
@@ -315,6 +320,12 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
       mode: "workflow",
       idempotencyKey: `${crypto.randomUUID()}:step`,
     } as const;
+    // What the App pushes a screen through its callback: no big integer
+    // either.
+    const received: unknown[] = [];
+    const onChange = (value: unknown): void => {
+      received.push(value);
+    };
     expect({
       sent: await outcome(callApp(env, app, screen, "echo", [7n])),
       sentDeep: await outcome(
@@ -323,12 +334,19 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
       answered: await outcome(callApp(env, app, screen, "big")),
       plain: await callApp(env, app, screen, "echo", [{ n: 7 }]),
       fromScreen: await outcome(admin.api.screens.call(app, "echo", [7n])),
+      pushedBig: await admin.api.screens.call(app, "push", [onChange, "big"]),
+      pushedPlain: await admin.api.screens.call(app, "push", [onChange, 7]),
+      received,
     }).toStrictEqual({
       sent: "app.call_invalid",
       sentDeep: "app.call_invalid",
       answered: "app.answer_invalid",
       plain: { n: 7 },
       fromScreen: "app.call_invalid",
+      pushedBig: "app.answer_invalid",
+      pushedPlain: "ok",
+      // Only the plain value reached the screen.
+      received: [7],
     });
   });
 

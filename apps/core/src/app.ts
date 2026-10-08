@@ -398,6 +398,12 @@ export interface CallPath {
  * What a call may do through the App's stubs: only read (`read`, a call
  * through an export marked `read`, or one made while serving one), or
  * change things too (`write`).
+ *
+ * Only the stubs go by it. The App's own SQLite database is not a stub:
+ * App code holds it directly, in the same object for every call, so a
+ * call that may only read can still write it. That stays so until App
+ * methods run as stateless handlers with no storage of their own, whose
+ * data goes through the host like everything else.
  */
 export type InvocationKind = "read" | "write";
 
@@ -940,7 +946,9 @@ export class App extends DurableObject<Env> {
    * is done. What the call may do is the host's, as its caller is: App
    * code passes only the token, and nothing else it puts on the caller
    * counts. A call whose code hasn't started has handed its token to no
-   * one, so no stub call can come with it.
+   * one, so no stub call can come with it. Writes to the App's own SQLite
+   * never come through here, so a read call can still make them (see
+   * `InvocationKind`).
    */
   admit(token: string, use: InvocationKind): Admitted {
     const call = this.#calls.get(token);

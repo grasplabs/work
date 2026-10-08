@@ -54,7 +54,7 @@ export class AppCollectionBinding extends WorkerEntrypoint<
   #authorityOf(caller: unknown): () => Promise<Authority> {
     const { app } = this.ctx.props;
     return async () => {
-      const resolved = await callerOf(this.env, app, caller);
+      const resolved = await callerOf(this.env, app, caller, "read");
       return resolved.authority;
     };
   }
@@ -205,7 +205,7 @@ export class AppCollectionBinding extends WorkerEntrypoint<
   async ownedTypes(caller: unknown): Promise<string[]> {
     const { app, collectionId } = this.ctx.props;
     try {
-      await callerOf(this.env, app, caller);
+      await callerOf(this.env, app, caller, "read");
       const declared = await declaredTypes(this.env, collectionId);
       return [...declared]
         .filter(([, rule]) => rule.app === app)

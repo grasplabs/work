@@ -41,7 +41,7 @@ export const callerOf = async (
   env: Env,
   app: AppId,
   caller: unknown,
-  use: InvocationKind = "read"
+  use: InvocationKind
 ): Promise<Admitted> => {
   const parsed = callerSchema.safeParse(caller);
   if (!parsed.success) {
@@ -116,10 +116,13 @@ export class AppConnectionBinding extends WorkerEntrypoint<
     return await runStubCall(
       this.env,
       async (key) => {
+        // Admitted as a read: whether the action changes anything is
+        // connect's to know, and a read-only call has it refuse those.
         const { authority, idempotencyKey, kind } = await callerOf(
           this.env,
           app,
-          caller
+          caller,
+          "read"
         );
         if (authority.mode === "workflow") {
           requireStepKey(key, idempotencyKey);

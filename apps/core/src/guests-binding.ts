@@ -32,9 +32,10 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   async invite(caller: unknown, input: unknown): Promise<GuestInvitation> {
     return await this.#run(
       caller,
+      "write",
       async (authority, permissionId) =>
         await inviteGuest(this.env, authority, permissionId, input),
-      { personOnly: true, use: "write" }
+      { personOnly: true }
     );
   }
 
@@ -42,6 +43,7 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   async list(caller: unknown): Promise<GuestChat[]> {
     return await this.#run(
       caller,
+      "read",
       async (authority, permissionId) =>
         await listGuests(this.env, authority, permissionId)
     );
@@ -51,6 +53,7 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   async read(caller: unknown, id: unknown): Promise<GuestTranscript> {
     return await this.#run(
       caller,
+      "read",
       async (authority, permissionId) =>
         await readGuest(this.env, authority, permissionId, id)
     );
@@ -60,9 +63,9 @@ export class AppGuestsBinding extends WorkerEntrypoint<
   async revoke(caller: unknown, id: unknown): Promise<GuestChat> {
     return await this.#run(
       caller,
+      "write",
       async (authority, permissionId) =>
-        await revokeGuest(this.env, authority, permissionId, id),
-      { use: "write" }
+        await revokeGuest(this.env, authority, permissionId, id)
     );
   }
 
@@ -72,11 +75,9 @@ export class AppGuestsBinding extends WorkerEntrypoint<
    */
   async #run<T>(
     caller: unknown,
+    use: InvocationKind,
     run: (authority: Authority, permissionId: PermissionId) => Promise<T>,
-    {
-      personOnly = false,
-      use = "read",
-    }: { personOnly?: boolean; use?: InvocationKind } = {}
+    { personOnly = false }: { personOnly?: boolean } = {}
   ): Promise<T> {
     const { app, permissionId } = this.ctx.props;
     try {
