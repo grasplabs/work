@@ -173,23 +173,37 @@ export const readingOf = (
   return reading;
 };
 
-/** A cue's number, or its timing line, in a `.vtt` or `.srt` file. */
+/** A header or note line, or a cue's timing line, in a `.vtt` or `.srt` file. */
 const cueLine =
-  /^(?:WEBVTT.*|NOTE(?:\s.*)?|\d+|(?:\d{1,2}:)?\d{1,2}:\d{2}[.,]\d{3}\s+-->\s+.*)$/u;
+  /^(?:WEBVTT.*|NOTE(?:\s.*)?|(?:\d{1,2}:)?\d{1,2}:\d{2}[.,]\d{3}\s+-->\s+.*)$/u;
 
-/** A subtitle file's words, without its numbers and timings. */
-const subtitleText = (text: string): string =>
-  text
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter((line) => line !== "" && !cueLine.test(line))
-    // A speaker's voice tag, `<v Anna>`, becomes their name.
-    .map((line) =>
-      line
-        .replaceAll(/<v\s+(?<speaker>[^>]+)>/gu, "$<speaker>: ")
-        .replaceAll(/<[^>]+>/gu, "")
-    )
-    .join("\n");
+/** A cue's number: a line of digits, right before its timing line. */
+const cueNumber = /^\d+$/u;
+
+/**
+ * A subtitle file's words, without its headers, cue numbers and timings.
+ * A line of digits is a cue's number only right before a timing line:
+ * anywhere else it is something said ("12").
+ */
+const subtitleText = (text: string): string => {
+  const lines = text.split(/\r?\n/u).map((line) => line.trim());
+  return (
+    lines
+      .filter(
+        (line, at) =>
+          line !== "" &&
+          !cueLine.test(line) &&
+          !(cueNumber.test(line) && cueLine.test(lines[at + 1] ?? ""))
+      )
+      // A speaker's voice tag, `<v Anna>`, becomes their name.
+      .map((line) =>
+        line
+          .replaceAll(/<v\s+(?<speaker>[^>]+)>/gu, "$<speaker>: ")
+          .replaceAll(/<[^>]+>/gu, "")
+      )
+      .join("\n")
+  );
+};
 
 /** The kind of transcript a file's name says it is, if one taken. */
 const kindOf = (name: string): TranscriptFileKind | undefined => {

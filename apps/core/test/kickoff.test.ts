@@ -245,7 +245,11 @@ describe("the kickoff", { timeout: 60_000 }, () => {
 
 1
 00:00:01.000 --> 00:00:04.000
-<v Anna>${dutch.split("\n").join("\n\n2\n00:00:05.000 --> 00:00:09.000\n")}`;
+<v Anna>${dutch.split("\n").join("\n\n2\n00:00:05.000 --> 00:00:09.000\n")}
+
+3
+00:00:10.000 --> 00:00:11.000
+12`;
     const { requests, result: view } = await answering(
       [answer(reading)],
       async () =>
@@ -256,6 +260,8 @@ describe("the kickoff", { timeout: 60_000 }, () => {
       file: view.transcript?.fileName,
       timings: sent.includes("-->"),
       speaker: sent.includes("Anna: Anna (COO)"),
+      // A number said on its own line is something said, not a cue's number.
+      spoken: sent.includes(String.raw`\n12\n</transcript>`),
       pdf: await outcome(
         staff.onboardingStaff.saveKickoff(file("kickoff.pdf", dutch))
       ),
@@ -266,6 +272,7 @@ describe("the kickoff", { timeout: 60_000 }, () => {
       file: "kickoff.vtt",
       timings: false,
       speaker: true,
+      spoken: true,
       pdf: "kickoff.unreadable",
       short: "kickoff.too_short",
     });
