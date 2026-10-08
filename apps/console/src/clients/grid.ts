@@ -3,7 +3,8 @@
  * (release, ring, last deploy), read from D1 and shown at once, and, for
  * each active one, what its account shows now: drift, whether it runs the
  * shared secrets in Secrets Store, whether the router reaches its core,
- * its errors over the last day, and what it cost this month.
+ * its errors over the last day, what it cost this month, and where its
+ * onboarding stands (onboarding.ts).
  *
  * The live columns are read after the page shows (`gridLive`): a few
  * clients at a time, each within a deadline, with what every client needs
@@ -15,6 +16,7 @@
  */
 import { deadline } from "@grasp-os/shared/deadline";
 import { log } from "@grasp-os/shared/log";
+import { onboardingSummarySchema } from "@grasp-os/shared/onboarding-summary";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
 import { asc, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -36,6 +38,7 @@ import { errorCode } from "../deploy/deploy.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { answeringVersion, mappedRoute } from "../deploy/router.ts";
 import type { RouterHosts } from "../deploy/router.ts";
+import { clientAuthSecret } from "../deploy/secrets.ts";
 import type { DeploySecrets } from "../deploy/secrets.ts";
 import { defaultLiveReadLimits, eachLimited, within } from "../live-reads.ts";
 import type { LiveReadLimits } from "../live-reads.ts";
@@ -43,6 +46,8 @@ import { driftOf } from "../rollout/drift.ts";
 import type { ManifestOf } from "../rollout/drift.ts";
 import { sharedSecretsStatus, storeCheck } from "../rollout/shared-secrets.ts";
 import type { StoreCheck } from "../rollout/shared-secrets.ts";
+import { onboardingSummaryOf } from "./onboarding.ts";
+import type { OnboardingCell } from "./onboarding.ts";
 
 /** Whether the router reaches a client's core, as its health check answers. */
 export type Reach = "reachable" | "unreachable" | "no_route" | "unknown";
@@ -65,6 +70,10 @@ const liveStatusSchema = z.object({
   day: z.object({ requests: z.number(), errors: z.number() }).nullable(),
   /** What it cost this month so far, in USD, estimated; null when unknown. */
   costUsd: z.object({ workers: z.number(), ai: z.number() }).nullable(),
+  /** Its onboarding, numbers only (`OnboardingCell`); null when unknown. */
+  onboarding: z
+    .union([onboardingSummarySchema, z.literal("unreachable")])
+    .nullable(),
 });
 export type LiveStatus = z.infer<typeof liveStatusSchema>;
 
@@ -122,6 +131,7 @@ const unknownStatus: LiveStatus = {
   reach: "unknown",
   day: null,
   costUsd: null,
+  onboarding: null,
 };
 
 /**
@@ -134,7 +144,8 @@ const allKnown = (live: LiveStatus): boolean =>
   live.sharedSecretsCurrent !== null &&
   live.reach !== "unknown" &&
   live.day !== null &&
-  live.costUsd !== null;
+  live.costUsd !== null &&
+  live.onboarding !== null;
 
 /**
  * Every client, as the console recorded it, by id: two queries, whatever
@@ -183,18 +194,17 @@ const recordedClients = async (db: ConsoleDatabase) => {
   });
 };
 
-/**
- * Whether the router reaches client `clientId`'s core at `hostname`: the
- * route its map has for the hostname, and core's health check answering a
- * request with the router secret the router would send.
- */
-const reachOf = async (
+/** What the router knows of client `clientId`'s core: its route, and the secret it sends. */
+const routeOf = async (
   hosts: RouterHosts,
   routerKey: string | null,
   clientId: string,
-  hostname: string | null,
-  signal: AbortSignal
-): Promise<Reach> => {
+  hostname: string | null
+): Promise<
+  | { coreUrl: string; generation: number; secret: string }
+  | "no_route"
+  | "unknown"
+> => {
   if (hostname === null || routerKey === null) {
     return "unknown";
   }
@@ -202,11 +212,25 @@ const reachOf = async (
   if (route === null || route.clientId !== clientId) {
     return "no_route";
   }
-  const secret = await deriveRouterSecret(
-    routerKey,
-    clientId,
-    route.generation
-  );
+  return {
+    coreUrl: route.coreUrl,
+    generation: route.generation,
+    secret: await deriveRouterSecret(routerKey, clientId, route.generation),
+  };
+};
+
+/**
+ * Whether the router reaches client `clientId`'s core by `route`: core's
+ * health check answering a request with the router secret the router
+ * would send.
+ */
+const reachOf = async (
+  route: Awaited<ReturnType<typeof routeOf>>,
+  signal: AbortSignal
+): Promise<Reach> => {
+  if (typeof route === "string") {
+    return route;
+  }
   // Its own deadline starts as it's sent; the row's stops it too.
   const fetchCore: typeof fetch = async (input, init) =>
     await fetch(input, {
@@ -219,10 +243,31 @@ const reachOf = async (
   const version = await answeringVersion(
     fetchCore,
     route.coreUrl,
-    secret,
+    route.secret,
     healthTimeoutMs
   );
   return version === undefined ? "unreachable" : "reachable";
+};
+
+/** Client `clientId`'s onboarding by `route`, as its core answers the console. */
+const onboardingOf = async (
+  route: Awaited<ReturnType<typeof routeOf>>,
+  secrets: DeploySecrets | null,
+  clientId: string,
+  signal: AbortSignal
+): Promise<OnboardingCell> => {
+  if (route === "no_route") {
+    return "unreachable";
+  }
+  if (route === "unknown" || secrets === null) {
+    return null;
+  }
+  return await onboardingSummaryOf({
+    coreUrl: route.coreUrl,
+    routerSecret: route.secret,
+    authSecret: await clientAuthSecret(secrets, clientId, route.generation),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(healthTimeoutMs)]),
+  });
 };
 
 /** What reading a client's live status takes, read once for every client: each part may be missing. */
@@ -236,6 +281,8 @@ interface LiveSources {
   apiFor: ((signal: AbortSignal) => CloudflareApi) | null;
   /** The router key; null when Secrets Store doesn't have it. */
   routerKey: string | null;
+  /** The keys clients' secrets derive from; null when Secrets Store doesn't have them. */
+  secrets: DeploySecrets | null;
   /** What Secrets Store holds, to check clients against; null when it can't be read. */
   store: StoreCheck | null;
   /** The accounts' usage; null when the analytics couldn't be read at all. */
@@ -264,7 +311,16 @@ const orElse = async <T>(
  * Its requests stop when `signal` aborts.
  */
 const liveOf = async (
-  { env, db, apiFor, routerKey, store, usage, manifestOf }: LiveSources,
+  {
+    env,
+    db,
+    apiFor,
+    routerKey,
+    secrets,
+    store,
+    usage,
+    manifestOf,
+  }: LiveSources,
   row: { id: string; accountId: string; hostname: string | null },
   signal: AbortSignal
 ): Promise<LiveStatus> => {
@@ -277,7 +333,14 @@ const liveOf = async (
           "grid.drift_unread",
           row.id
         );
-  const [sharedSecretsCurrent, reach] = await Promise.all([
+  const route = await orElse(
+    async () =>
+      await routeOf(env.ROUTER_HOSTS, routerKey, row.id, row.hostname),
+    "unknown" as const,
+    "grid.route_unread",
+    row.id
+  );
+  const [sharedSecretsCurrent, reach, onboarding] = await Promise.all([
     store === null
       ? null
       : orElse(
@@ -287,16 +350,15 @@ const liveOf = async (
           row.id
         ),
     orElse(
-      async () =>
-        await reachOf(
-          env.ROUTER_HOSTS,
-          routerKey,
-          row.id,
-          row.hostname,
-          signal
-        ),
+      async () => await reachOf(route, signal),
       "unknown" as const,
       "grid.health_unread",
+      row.id
+    ),
+    orElse(
+      async () => await onboardingOf(route, secrets, row.id, signal),
+      null,
+      "grid.onboarding_unread",
       row.id
     ),
   ]);
@@ -310,6 +372,7 @@ const liveOf = async (
         ? null
         : { requests: used.dayRequests, errors: used.dayErrors },
     costUsd: used === undefined ? null : monthCostUsd(used),
+    onboarding,
   };
 };
 
@@ -442,6 +505,7 @@ export const gridLive = async (
       db,
       apiFor,
       routerKey: secrets?.routerKey ?? null,
+      secrets,
       store: secrets === null ? null : await storeCheck(secrets),
       usage:
         apiFor === null

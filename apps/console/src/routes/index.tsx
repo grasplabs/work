@@ -1,3 +1,4 @@
+import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
@@ -98,6 +99,52 @@ const Cost = ({ cost }: { cost: LiveStatus["costUsd"] }) =>
     </div>
   );
 
+/** A stage of a client's onboarding, as its badge says it. */
+const stageBadges: Readonly<
+  Record<OnboardingSummary["stage"], { label: string; variant: BadgeVariant }>
+> = {
+  none: { label: "none", variant: "outline" },
+  preparing: { label: "preparing", variant: "secondary" },
+  interviews: { label: "interviews", variant: "secondary" },
+  waiting: { label: "waiting for the go", variant: "destructive" },
+  open: { label: "open", variant: "secondary" },
+};
+
+/** A client's onboarding: its stage, the day of the interviews, what's known and what needs Grasp. */
+const Onboarding = ({
+  onboarding,
+}: {
+  onboarding: LiveStatus["onboarding"];
+}) => {
+  if (onboarding === null) {
+    return <span className="text-muted-foreground">unknown</span>;
+  }
+  if (onboarding === "unreachable") {
+    return <span className="text-muted-foreground">not readable</span>;
+  }
+  const stage = stageBadges[onboarding.stage];
+  const day =
+    onboarding.day === null || onboarding.days === null
+      ? null
+      : `day ${onboarding.day} of ${onboarding.days}`;
+  const needs =
+    onboarding.needs === 0
+      ? null
+      : `${onboarding.needs} ${onboarding.needs === 1 ? "needs" : "need"} Grasp`;
+  return (
+    <div className="flex flex-col gap-1">
+      <Badge variant={needs === null ? stage.variant : "destructive"}>
+        {stage.label}
+      </Badge>
+      <span className="text-muted-foreground text-xs">
+        {[day, `${onboarding.known}% known`, needs]
+          .filter((part) => part !== null)
+          .join(", ")}
+      </span>
+    </div>
+  );
+};
+
 const Links = ({ row }: { row: GridRow }) => (
   <div className="flex flex-col gap-1 text-sm">
     {row.hostname === null ? null : (
@@ -137,11 +184,14 @@ const Links = ({ row }: { row: GridRow }) => (
  */
 type LiveCell = LiveStatus | "reading" | "failed" | null;
 
-/** Four cells saying the live columns aren't there yet, or won't be. */
+/** Five cells saying the live columns aren't there yet, or won't be. */
 const Pending = ({ live }: { live: "reading" | "failed" }) => {
   const words = live === "reading" ? "reading…" : "unknown";
   return (
     <>
+      <TableCell>
+        <span className="text-muted-foreground">{words}</span>
+      </TableCell>
       <TableCell>
         <span className="text-muted-foreground">{words}</span>
       </TableCell>
@@ -162,6 +212,7 @@ const LiveCells = ({ live }: { live: LiveCell }) => {
   if (live === null) {
     return (
       <>
+        <TableCell />
         <TableCell />
         <TableCell />
         <TableCell />
@@ -187,6 +238,9 @@ const LiveCells = ({ live }: { live: LiveCell }) => {
       </TableCell>
       <TableCell>
         <Cost cost={live.costUsd} />
+      </TableCell>
+      <TableCell>
+        <Onboarding onboarding={live.onboarding} />
       </TableCell>
     </>
   );
@@ -297,6 +351,7 @@ const Clients = () => {
                 <TableHead>Shared secrets</TableHead>
                 <TableHead>Health</TableHead>
                 <TableHead>Cost this month</TableHead>
+                <TableHead>Onboarding</TableHead>
                 <TableHead>Links</TableHead>
               </TableRow>
             </TableHeader>
@@ -307,13 +362,16 @@ const Clients = () => {
             </TableBody>
           </Table>
           <p className="text-muted-foreground text-sm">
-            Drift, shared secrets, health and cost are read from each active
-            client&apos;s account after the page shows, and kept for a minute; a
-            client with anything unknown is read again on the next load. Cost is
-            an estimate for the calendar month: its Workers Paid plan with
-            requests and CPU time past what it includes (which resets on its
-            billing cycle, not the 1st), and AI Gateway spend. Storage (D1, R2)
-            and Durable Objects aren&apos;t in it.
+            Drift, shared secrets, health, cost and onboarding are read from
+            each active client&apos;s account after the page shows, and kept for
+            a minute; a client with anything unknown is read again on the next
+            load. Cost is an estimate for the calendar month: its Workers Paid
+            plan with requests and CPU time past what it includes (which resets
+            on its billing cycle, not the 1st), and AI Gateway spend. Storage
+            (D1, R2) and Durable Objects aren&apos;t in it. Onboarding is
+            numbers only, from the client&apos;s core: its stage, the day of its
+            interviews, how much Grasp knows, and how many things wait on Grasp.
+            Staff open access to a deployment from its client page.
           </p>
         </>
       )}

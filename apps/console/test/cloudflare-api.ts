@@ -14,6 +14,12 @@ import { hkdfHmacKey } from "@grasp-os/shared/client-secrets";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import { toHex } from "@grasp-os/shared/encoding";
 import {
+  onboardingSummaryPath,
+  onboardingSummaryPurpose,
+  onboardingSummaryRequestSchema,
+} from "@grasp-os/shared/onboarding-summary";
+import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
+import {
   platformUpdateNoticeSchema,
   platformUpdatePath,
   platformUpdatePurpose,
@@ -83,6 +89,51 @@ const takeNotice = async (
   }
   account.notices.push(notice.data);
   return new Response(null, { status: 204 });
+};
+
+/** None begun: what a core answers that has no onboarding. */
+const noOnboarding: OnboardingSummary = {
+  stage: "none",
+  day: null,
+  days: null,
+  known: 0,
+  needs: 0,
+};
+
+/**
+ * What a client's core answers the console's onboarding summary request
+ * with, as core does (core's src/onboarding/summary.ts): the account's
+ * summary once the signature checks out, with the key its live version's
+ * auth secret gives, and the request parses; 403 otherwise; 404 from a
+ * core from before the summary.
+ */
+const answerSummary = async (
+  account: AccountState,
+  live: VersionState,
+  request: Request
+): Promise<Response> => {
+  if (account.onboarding === "absent") {
+    return new Response("Not found", { status: 404 });
+  }
+  const body = await request.text();
+  const key = await hkdfHmacKey(
+    live.secrets.get("BETTER_AUTH_SECRET") ?? "",
+    onboardingSummaryPurpose,
+    ["sign"]
+  );
+  const expected = toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
+    )
+  );
+  const asked = onboardingSummaryRequestSchema.safeParse(JSON.parse(body));
+  if (
+    request.headers.get(platformUpdateSignatureHeader) !== expected ||
+    !asked.success
+  ) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  return Response.json(account.onboarding ?? noOnboarding);
 };
 
 /**
@@ -694,6 +745,9 @@ export const mockCloudflareApi = (
     }
     if (url.pathname === platformUpdatePath && request.method === "POST") {
       return await takeNotice(account, live, request);
+    }
+    if (url.pathname === onboardingSummaryPath && request.method === "POST") {
+      return await answerSummary(account, live, request);
     }
     return url.pathname === "/health"
       ? Response.json({
