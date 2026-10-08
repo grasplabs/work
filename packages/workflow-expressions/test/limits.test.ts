@@ -315,6 +315,8 @@ describe("result contracts, with no truthiness or coercion", () => {
       isoZero: await run('"PT0S"', {}, duration),
       isoCalendar: await run('"P1M"', {}, duration),
       isoBelowMs: await run('"PT0.0001S"', {}, duration),
+      isoEarlyFraction: await run('"PT1.5H30M"', {}, duration),
+      isoLastFraction: await run('"PT1H0.5M"', {}, duration),
       null: await run("null", {}, duration),
     }).toStrictEqual({
       milliseconds: { result: 1500 },
@@ -328,6 +330,8 @@ describe("result contracts, with no truthiness or coercion", () => {
       isoZero: { error: "expression.type_mismatch" },
       isoCalendar: { error: "expression.type_mismatch" },
       isoBelowMs: { error: "expression.type_mismatch" },
+      isoEarlyFraction: { error: "expression.type_mismatch" },
+      isoLastFraction: { result: 3_630_000 },
       null: { error: "expression.type_mismatch" },
     });
   });

@@ -1,8 +1,9 @@
 /**
- * Durations as workflows write them. A literal in a definition, or what a
- * duration expression returns, is either whole milliseconds or an ISO 8601
- * duration of fixed units; both mean the same number of milliseconds, the
- * one form a run works with.
+ * Durations as workflows write them. A literal in a definition is an
+ * object of whole units (`{ days, hours, … }`, open-workflow's values.ts)
+ * or an ISO 8601 duration of fixed units; what a duration expression
+ * returns is whole milliseconds or such an ISO 8601 duration. Each means a
+ * number of milliseconds, the one form a run works with.
  */
 
 const msPerUnit = {
@@ -14,20 +15,23 @@ const msPerUnit = {
 } as const;
 const isoDuration =
   /^P(?:(?<W>\d{1,12}(?:\.\d{1,9})?)W)?(?:(?<D>\d{1,12}(?:\.\d{1,9})?)D)?(?:T(?=\d)(?:(?<H>\d{1,12}(?:\.\d{1,9})?)H)?(?:(?<M>\d{1,12}(?:\.\d{1,9})?)M)?(?:(?<S>\d{1,12}(?:\.\d{1,9})?)S)?)?$/u;
-const calendarDuration = /^P(?:[^T]*[YM])/u;
+const unitsInOrder = ["W", "D", "H", "M", "S"] as const;
 
 /**
  * Whole milliseconds of an ISO 8601 duration of fixed units (weeks, days,
  * hours, minutes, seconds), computed exactly; `undefined` for a calendar
- * duration (years, months), a fraction below a millisecond, zero, more
- * than a safe integer, or anything that isn't one.
+ * duration (years, months: the pattern has neither), a fraction on any but
+ * the lowest-order unit given (ISO 8601 allows one only there), a fraction
+ * below a millisecond, zero, more than a safe integer, or anything that
+ * isn't one.
  */
 export const isoDurationMs = (text: string): number | undefined => {
-  if (calendarDuration.test(text)) {
-    return undefined;
-  }
   const groups = isoDuration.exec(text)?.groups;
   if (groups === undefined) {
+    return undefined;
+  }
+  const given = unitsInOrder.filter((unit) => groups[unit] !== undefined);
+  if (given.slice(0, -1).some((unit) => groups[unit]?.includes(".") === true)) {
     return undefined;
   }
   let total = 0n;
