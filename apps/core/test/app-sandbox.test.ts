@@ -799,7 +799,7 @@ describe("App server code", { timeout: 60_000 }, () => {
         appHost(env, app).call(caller, "writeLater", [cutShort.wait, "short"], {
           version: 1,
           chain: [],
-          deadline: Date.now() + 1000,
+          deadline: Date.now() + 5000,
           readOnly: false,
           onPinned: async () => {},
         })
@@ -807,7 +807,7 @@ describe("App server code", { timeout: 60_000 }, () => {
       await cutShort.entered;
       // In the App's object, whose timer it is.
       await runInDurableObject(appHost(env, app), async () => {
-        await vi.advanceTimersByTimeAsync(1000);
+        await vi.advanceTimersByTimeAsync(5000);
       });
       cutShortEnded = await cutShortCall;
     } finally {
