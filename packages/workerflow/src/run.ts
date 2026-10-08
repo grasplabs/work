@@ -40,6 +40,10 @@
 //   synchronous turn, so the alarm always says what the latest write
 //   meant, whichever path wrote last.
 //
+// The host enables `nodejs_als` (or `nodejs_compat`, which includes it):
+// each call of the step API is told apart by the attempt it comes from,
+// through AsyncLocalStorage (activation.ts).
+//
 // A step's outcome is journaled before the definition sees it. A step cut
 // off after its effect left but before that write runs again, with the
 // same idempotency key (contracts.ts): at least once, not exactly once. So

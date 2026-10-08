@@ -27,13 +27,23 @@ const defaultBackoff: WorkflowBackoff = "exponential";
 const defaultTimeout = "10 minutes";
 
 /**
- * The longest an attempt may be given. An attempt runs inside the run
- * object's alarm handler, and Cloudflare ends an alarm handler after 15
- * minutes of wall time: a longer timeout would never fire, and the attempt
- * would be cut off instead. A config asking for more is refused, not run
- * with less.
+ * How much of an alarm handler's wall time attempts may take. An attempt
+ * runs inside the run object's alarm handler, and Cloudflare ends one
+ * after 15 minutes of wall time; a minute is kept for the replay that
+ * reaches the step, the attempt's commit and the alarm's write. An
+ * activation claims an attempt only if its deadline falls inside this,
+ * counted from the handler's start; one that doesn't fit is left for a
+ * fresh activation (activation.ts).
  */
-export const maxStepTimeoutMs = 15 * 60 * 1000;
+export const handlerBudgetMs = 14 * 60 * 1000;
+
+/**
+ * The longest an attempt may be given: all of a fresh handler's budget. A
+ * longer timeout would never fire, and the attempt would be cut off by
+ * the host instead. A config asking for more is refused, not run with
+ * less.
+ */
+export const maxStepTimeoutMs = handlerBudgetMs;
 
 /** How long a dynamic delay function may take to say its delay. */
 export const delayFunctionTimeoutMs = 5000;
@@ -186,7 +196,7 @@ const readTimeout = (
   const ms = parseDuration(timeout, "A step's timeout");
   if (ms === 0 || ms > maxStepTimeoutMs) {
     throw new TypeError(
-      `A step's timeout is more than 0 and at most 15 minutes, the longest an attempt can run here: ${JSON.stringify(timeout)}`
+      `A step's timeout is more than 0 and at most 14 minutes, the longest an attempt can run here: ${JSON.stringify(timeout)}`
     );
   }
   // SAFETY: parseDuration took it, so it is a number or a duration.

@@ -228,6 +228,71 @@ describe("a step that fails", () => {
 });
 
 describe("a step's delay function", () => {
+  it("is asked with a provisional retry journaled, which an activation that takes over keeps without asking again", async () => {
+    const id = newId();
+    const asking = hold(id, "delay", 1);
+    await workflow("dynamic-delay").create({ id, params: { delay: "hold" } });
+    await asking.held;
+    const provisional = await journalOf("dynamic-delay", id);
+
+    // Another activation while the function is out: the retry stands.
+    await deliverAlarm("dynamic-delay", id);
+    const takenOver = await journalOf("dynamic-delay", id);
+    // The function answers, too late to count.
+    asking.release();
+    const after = await until("the answer to be refused", async () => {
+      const journal = await journalOf("dynamic-delay", id);
+      return journal.activations[0]?.ended === null ? undefined : journal;
+    });
+
+    // Fenced at its failure: the attempt is ended, its retry provisional
+    // at the default delay until the function says otherwise.
+    expect(provisional).toMatchObject({
+      steps: [{ state: "retrying", attempt: 1 }],
+      attempts: [{ ended: "failed", error: flakyError(1) }],
+    });
+    expect(delaysIn(provisional)).toStrictEqual([10_000]);
+    expect(takenOver).toMatchObject({
+      run: { status: "waiting", wake_at: provisional.attempts[0]?.retry_at },
+      activations: [{ ended: null }, { ended: "suspended" }],
+    });
+    // Its answer found the activation that asked taken over: ignored.
+    expect({
+      activations: after.activations.map((row) => row.ended),
+      attempts: after.attempts,
+      asked: witnessed(id),
+    }).toStrictEqual({
+      activations: ["superseded", "suspended"],
+      attempts: provisional.attempts,
+      asked: ["asked-1-FlakyError", "delay-answered"],
+    });
+  });
+
+  it("has 5 seconds to answer, and fails the step with a NonRetryableDelayError after that", async () => {
+    const id = newId();
+    // Never released: the function never answers.
+    const asking = hold(id, "delay", 1);
+    await workflow("dynamic-delay").create({ id, params: { delay: "hold" } });
+    await asking.held;
+
+    const status = await ended("dynamic-delay", id);
+
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: {
+        caught: {
+          name: "NonRetryableDelayError",
+          message:
+            'The delay function for step "flaky-1" did not return within 5 seconds',
+        },
+      },
+    });
+    await expect(journalOf("dynamic-delay", id)).resolves.toMatchObject({
+      steps: [{ state: "failed" }],
+      attempts: [{ ended: "failed", retry_at: null }],
+    });
+  });
+
   it("is asked once per failure, and what it said is journaled and never asked again", async () => {
     const id = newId();
     await workflow("dynamic-delay").create({ id, params: { delay: "1 hour" } });
@@ -273,6 +338,52 @@ describe("a step's delay function", () => {
       });
     }
   );
+});
+
+describe("a callback whose attempt has ended", () => {
+  it("can't call the step API: nothing it calls is journaled or counted, or answered", async () => {
+    const id = newId();
+    const lingering = hold(id, "lingering", 1);
+    const after = hold(id, "after", 1);
+    await workflow("lingers").create({ id });
+    await lingering.held;
+    // The attempt has timed out and the author has caught that.
+    await after.held;
+
+    lingering.release();
+    await until("the late callback's calls", () =>
+      witnessed(id).includes("called") ? true : undefined
+    );
+    const afterLateCalls = await journalOf("lingers", id);
+    after.release();
+    const status = await ended("lingers", id);
+
+    expect(afterLateCalls.steps).toMatchObject([
+      { name: "lingering", state: "failed" },
+    ]);
+    // The author's own "nested" is the first of its name: the late call
+    // took no occurrence.
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: {
+        caught: {
+          name: "WorkflowTimeoutError",
+          message: "Execution timed out after 1000ms",
+        },
+        nested: effectsOf(id, "nested")[0]?.receipt,
+      },
+    });
+    await expect(journalOf("lingers", id)).resolves.toMatchObject({
+      steps: [
+        { name: "lingering", state: "failed" },
+        { name: "nested", occurrence: 1, state: "succeeded" },
+      ],
+    });
+    expect({
+      nested: effectsOf(id, "nested").length,
+      witnessed: witnessed(id),
+    }).toStrictEqual({ nested: 1, witnessed: ["called"] });
+  });
 });
 
 describe("an attempt that runs past its timeout", () => {

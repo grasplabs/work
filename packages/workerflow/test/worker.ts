@@ -285,10 +285,16 @@ export const definitions: Record<string, WorkflowDefinition> = {
             retries: {
               limit: 3,
               backoff: "constant",
-              delay: ({ ctx, error }) => {
+              delay: async ({ ctx, error }) => {
                 witness(instanceId, `asked-${ctx.attempt}-${error.name}`);
                 if (said === "throw") {
                   throw new Error("no delay today");
+                }
+                if (said === "hold") {
+                  // Held by the test: as long as it likes.
+                  await checkpoint(instanceId, "delay");
+                  witness(instanceId, "delay-answered");
+                  return "1 second";
                 }
                 // SAFETY: whatever the test passed, unchecked here: the
                 // engine is what checks it.
@@ -346,6 +352,42 @@ export const definitions: Record<string, WorkflowDefinition> = {
           return receipt;
         }
       );
+    },
+  },
+  // A step whose callback, held past its timeout, then calls the step API
+  // itself; the author catches the timeout and, once the test lets it,
+  // makes a step of the same name of its own.
+  lingers: {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      let caught: { name: string; message: string } | undefined;
+      try {
+        await step.do(
+          "lingering",
+          { retries: { limit: 0, delay: 0 }, timeout: "1 second" },
+          async (context) => {
+            await effect(instanceId, "lingering", context);
+            const late = Promise.all([
+              step.do(
+                "nested",
+                async (inner) => await effect(instanceId, "nested", inner)
+              ),
+              step.sleep("nested-nap", "1 hour"),
+            ]);
+            witness(instanceId, "called");
+            await late;
+            witness(instanceId, "late-answered");
+          }
+        );
+      } catch (error) {
+        caught = errorOf(error);
+      }
+      await checkpoint(instanceId, "after");
+      const nested = await step.do(
+        "nested",
+        async (context) => await effect(instanceId, "nested", context)
+      );
+      return { caught, nested };
     },
   },
   // Two steps at once: one fails its first attempt and retries a second

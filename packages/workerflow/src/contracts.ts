@@ -35,7 +35,10 @@ export interface WorkflowStepContext {
    * attempt was cut off before its outcome was journaled (the process
    * died, or the object was evicted or superseded). Every attempt has its
    * own number, and only the step's latest attempt can journal an outcome:
-   * one that timed out, or was cut off, can't answer for the step.
+   * one that timed out, or was cut off, can't answer for the step. Every
+   * attempt counts against the step's retries, a cut-off one too: one
+   * found past its deadline timed out and waits its backoff, one cut off
+   * before is retried at once.
    */
   readonly attempt: number;
   /**
@@ -97,7 +100,7 @@ export interface WorkflowStepConfig {
     readonly delay: WorkflowDuration | WorkflowDelayFunction;
     readonly backoff?: WorkflowBackoff;
   };
-  /** Each attempt's; more than 0 and at most 15 minutes. */
+  /** Each attempt's; more than 0 and at most 14 minutes. */
   readonly timeout?: WorkflowDuration;
 }
 

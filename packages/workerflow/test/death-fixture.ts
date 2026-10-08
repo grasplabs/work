@@ -36,6 +36,9 @@ const testLeaseMs = 1000;
  */
 const napMs = 3000;
 
+/** The `stuck` step's timeout: the kill comes within milliseconds. */
+const stuckTimeoutMs = 5000;
+
 const effect = async (
   env: FixtureEnv,
   run: string,
@@ -146,6 +149,20 @@ const definitionsFor = (
         }
       );
     },
+  },
+  // A step with one retry, a second's backoff and a timeout long enough
+  // for a test to kill the process while an attempt is out, well before
+  // its deadline.
+  stuck: {
+    run: async (event, step) =>
+      await step.do(
+        "stuck",
+        {
+          retries: { limit: 1, delay: 1000, backoff: "constant" },
+          timeout: stuckTimeoutMs,
+        },
+        async (context) => await effect(env, event.instanceId, "stuck", context)
+      ),
   },
   // A step, a wait for an "approved" event, another step.
   approval: {
