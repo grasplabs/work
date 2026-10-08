@@ -26,6 +26,8 @@ export const documentReadingMost = {
   unclear: 3,
   options: 3,
   word: 60,
+  /** A team's name, as long as the staff list lets one be. */
+  team: 80,
   question: 160,
   line: 200,
 } as const;
@@ -96,6 +98,8 @@ export const documentErrors = defineErrorFamily({
     "That kind of file can't be read. Share a PDF, Word or Excel file.",
   "document.too_large": "That file is larger than 10 MB.",
   "document.empty": "There is no text in that file to read.",
+  "document.too_complex":
+    "That file is too large or complex to read. Share a smaller or simpler one.",
   "document.not_read":
     "The document couldn't be read just now. Try again in a moment.",
   "document.not_found": "There's no such document.",

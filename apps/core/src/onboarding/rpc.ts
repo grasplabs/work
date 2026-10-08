@@ -20,6 +20,7 @@ import type {
   ShareDocumentInput,
 } from "@grasp-os/shared/onboarding-documents";
 import { requireAdmin } from "@grasp-os/shared/roles";
+import { uploadMaxBytes } from "@grasp-os/shared/uploads";
 import { RpcTarget } from "capnweb";
 import { z } from "zod";
 
@@ -105,6 +106,13 @@ export class OnboardingRpc extends RpcTarget implements OnboardingApi {
   async shareDocument(input: ShareDocumentInput): Promise<OnboardingDocument> {
     return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
+      // Its own reason, before the schema's refusal says only "invalid".
+      if (
+        input.bytes instanceof Uint8Array &&
+        input.bytes.byteLength > uploadMaxBytes
+      ) {
+        throw documentErrors.create("document.too_large");
+      }
       const parsed = documentErrors.parse(
         "document.invalid",
         shareDocumentSchema,

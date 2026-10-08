@@ -1,5 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import { collectionIdSchema } from "@grasp-os/shared/ids";
+import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import {
   documentErrors,
@@ -79,7 +80,7 @@ export const documentReadingOf = (answer: Answer): DocumentReading => {
   return {
     about,
     tools: tidied(answer.tools, most.tools, most.word),
-    teams: tidied(answer.teams, most.teams, most.word),
+    teams: tidied(answer.teams, most.teams, most.team),
     unclear: tidied(answer.unclear, most.unclear, most.line),
     ask: question !== "" && options.length >= 2 ? { question, options } : null,
   };
@@ -171,7 +172,7 @@ const keep = async (
   env: Env,
   person: Identity,
   { name, bytes }: ShareDocumentInput
-): Promise<{ id: string; collectionId: string }> => {
+): Promise<{ id: string }> => {
   const collection = await documentsCollection(env, person);
   try {
     const upload = await uploadFile(env, person, {
@@ -179,7 +180,7 @@ const keep = async (
       name,
       bytes,
     });
-    return { id: upload.id, collectionId: collection.id };
+    return { id: upload.id };
   } catch (error) {
     const code = uploadErrors.codeOf(error);
     if (code === "upload.too_large") {
@@ -196,10 +197,10 @@ const keep = async (
 const readingTimeoutMs = 60_000;
 
 /**
- * Shares a document: kept in Knowledge, its text read in the extractor's
- * sandbox (never through Workers AI: it stays in the Worker), and read
- * through the model gateway as the onboarding's, which the rules judge as
- * sensitive. Counted as reading.
+ * Shares a document: its text read in the extractor's sandbox (never
+ * through Workers AI: it stays in the Worker) and read through the model
+ * gateway as the onboarding's, which the rules judge as sensitive; then,
+ * once read, kept in Knowledge. Counted as reading.
  */
 export const shareDocument = async (
   env: Env,
@@ -212,7 +213,8 @@ export const shareDocument = async (
     throw documentErrors.create("document.not_read");
   }
   const store = onboardingStore(env);
-  const { id, collectionId } = await keep(env, person, input);
+  // Read before anything is kept: a document that can't be read leaves no
+  // file behind in Knowledge, and sharing it again makes no second one.
   let text: string;
   try {
     text = await localExtractor(env)({
@@ -220,8 +222,14 @@ export const shareDocument = async (
       mediaType: uploadTypes[extension],
       bytes: input.bytes,
     });
-  } catch {
-    throw documentErrors.create("document.not_read");
+  } catch (error) {
+    // Too large or complex stays so, however often it is tried again.
+    const permanent =
+      uploadErrors.codeOf(error) === "upload.too_complex" ||
+      knowledgeErrors.codeOf(error) === "knowledge.too_large";
+    throw documentErrors.create(
+      permanent ? "document.too_complex" : "document.not_read"
+    );
   }
   const trimmed = text.trim().slice(0, documentTextMaxLength);
   if (trimmed === "") {
@@ -248,7 +256,7 @@ export const shareDocument = async (
       timeoutMs: readingTimeoutMs,
       purpose: "onboarding.document",
       trigger: actorOf(person),
-      provenance: [collectionId],
+      provenance: [onboardingDocumentsCollection],
       work: { onboarding: true },
     });
   } catch {
@@ -263,6 +271,7 @@ export const shareDocument = async (
     seconds: 0,
   });
   const reading = documentReadingOf(answered.output);
+  const { id } = await keep(env, person, input);
   return await store.addDocument(
     { id, name: input.name, reading },
     actorOf(person)

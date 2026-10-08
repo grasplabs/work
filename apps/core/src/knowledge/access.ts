@@ -78,8 +78,9 @@ const readableBy = (
   or(
     eq(collections.access, "everyone"),
     admin ? eq(collections.access, "admins") : undefined,
-    // Its owner always, also of a team collection for teams they aren't in.
-    eq(collections.owner, userId),
+    // Its owner always, also of a team collection for teams they aren't in;
+    // but one for admins only while they are one: owning it gives nothing.
+    and(eq(collections.owner, userId), ne(collections.access, "admins")),
     teamIds.length === 0
       ? undefined
       : and(
@@ -115,6 +116,10 @@ export const mayRead = (
   { userId, teamIds, admin }: PersonAccess,
   { access, owner, teamIds: shared }: CollectionAccess
 ): boolean => {
+  // One for admins only while they are one, whoever owns it.
+  if (access === "admins") {
+    return admin;
+  }
   // Its owner always, also of a team collection for teams they aren't in.
   if (owner === userId) {
     return true;
@@ -128,9 +133,6 @@ export const mayRead = (
     }
     case "me": {
       return false;
-    }
-    case "admins": {
-      return admin;
     }
     default: {
       return access satisfies never;

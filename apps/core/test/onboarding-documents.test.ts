@@ -201,6 +201,35 @@ describe("documents shared in the onboarding", { timeout: 60_000 }, () => {
     });
   });
 
+  it("keep nothing when they can't be read, and say why when they are too large", async () => {
+    const { api: admin } = await signedInApi(idp, "admin");
+    const name = `unread-${crypto.randomUUID()}.docx`;
+    const { result } = await answering(
+      [{ status: 500, errorType: "api_error" }, { status: 500 }],
+      async () => [
+        await outcome(
+          admin.onboarding.shareDocument({ locale: "en", name, bytes: draft })
+        ),
+        await outcome(
+          admin.onboarding.shareDocument({
+            locale: "en",
+            name: "huge.pdf",
+            bytes: new Uint8Array(10 * 1024 * 1024 + 1),
+          })
+        ),
+      ]
+    );
+    const { results: kept } = await env.KNOWLEDGE.prepare(
+      "SELECT id FROM uploads WHERE path = ?"
+    )
+      .bind(name)
+      .all();
+    expect({ result, kept: kept.length }).toStrictEqual({
+      result: ["document.not_read", "document.too_large"],
+      kept: 0,
+    });
+  });
+
   it("are for admins alone, in the onboarding and in Knowledge", async () => {
     const { api: user } = await signedInApi(idp, "user");
     const { api: admin } = await signedInApi(idp, "admin");
