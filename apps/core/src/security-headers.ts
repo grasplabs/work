@@ -45,7 +45,10 @@ const frontendTheme = "/theme.js";
  *   `data:` frame would inherit this one and couldn't run its screen.
  *
  * Paths are named with `origin` as people reach it (`SIGN_IN.origin`,
- * behind the router): a policy can name a path only with its host.
+ * behind the router): a policy can name a path only with its host. So a
+ * deployment reached on a second hostname gets a blank page there, as
+ * the policy names none of its scripts; sign-in and RPC already work only
+ * on `SIGN_IN.origin`.
  */
 const contentSecurityPolicy = (origin: string): string =>
   policy({

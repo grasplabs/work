@@ -342,21 +342,27 @@ describe("serving an App's built packages", () => {
 
   it("serves no file to the product page's own request for it", async () => {
     const { address, name } = await servedBuild();
-    const asked = async (site?: string): Promise<number> => {
+    const asked = async (site?: string) => {
       const response = await routed(`${address}${name}.js`, {
         headers: site === undefined ? {} : { "sec-fetch-site": site },
       });
-      return response.status;
+      return [response.status, response.headers.get("vary")];
     };
 
     // Only screens' frames load these, from an opaque origin: cross-site
     // to a browser. The product page's own requests are same-origin,
-    // whatever token they carry.
+    // whatever token they carry. Each answer varies on the header, so a
+    // copy a frame's load left in the browser's cache never answers the
+    // page.
     expect({
       frame: await asked("cross-site"),
       productPage: await asked("same-origin"),
       unsaid: await asked(),
-    }).toStrictEqual({ frame: 200, productPage: 403, unsaid: 200 });
+    }).toStrictEqual({
+      frame: [200, "sec-fetch-site"],
+      productPage: [403, "sec-fetch-site"],
+      unsaid: [200, "sec-fetch-site"],
+    });
   });
 
   it("is the only way to an artifact's files", async () => {
