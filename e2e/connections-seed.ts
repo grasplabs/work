@@ -18,7 +18,8 @@ import { test } from "@playwright/test";
 import type { Cast } from "./people.ts";
 import { stateDir } from "./stack.ts";
 
-const quoted = (text: string): string => `'${text.replaceAll("'", "''")}'`;
+export const quoted = (text: string): string =>
+  `'${text.replaceAll("'", "''")}'`;
 
 /**
  * How often `execute` tries a write the database was too busy for (the dev
@@ -41,12 +42,21 @@ const isBusy = (error: unknown): boolean =>
   "stderr" in error &&
   busyErrors.some((text) => String(error.stderr).includes(text));
 
+/** Each Worker's wrangler config, from core's folder. */
+const configs = {
+  core: "wrangler.jsonc",
+  connect: "../connect/wrangler.jsonc",
+} as const;
+
 /**
- * Runs SQL on connect's local database, which the e2e stack keeps next to
- * core's (e2e/stack.ts), as one batch in one transaction, which
+ * Runs SQL on connect's local database (or core's), which the e2e stack
+ * keeps together (e2e/stack.ts), as one batch in one transaction, which
  * SQLite undoes whole when it can't finish: so a busy batch is tried again.
  */
-export const execute = async (sql: string): Promise<void> => {
+export const execute = async (
+  sql: string,
+  worker: keyof typeof configs = "connect"
+): Promise<void> => {
   for (let attempt = 1; ; attempt += 1) {
     try {
       execFileSync(
@@ -57,7 +67,7 @@ export const execute = async (sql: string): Promise<void> => {
           "DB",
           "--local",
           "-c",
-          "../connect/wrangler.jsonc",
+          configs[worker],
           "--persist-to",
           stateDir,
           "--command",

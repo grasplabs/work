@@ -6,6 +6,7 @@ import {
   dependencyGraphHash,
 } from "@grasp-os/shared/dependencies";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
+import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
 import {
@@ -33,6 +34,7 @@ import type { Acting } from "../auth/identity.ts";
 import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
 import { policyGenerationSql } from "../dependencies/policy.ts";
 import { admitDependencies } from "../dependencies/requests.ts";
+import { packageArtifactAddress } from "./address.ts";
 import { graphOfLock } from "./resolve.ts";
 import { verifiedTarball } from "./tarballs.ts";
 
@@ -75,11 +77,11 @@ const artifactHash = async (artifact: PackageArtifact): Promise<string> =>
   await sha256Hex(canonicalJson(artifact));
 
 /**
- * A kept artifact, if it is there whole: its description hashing to
- * `hash`, and every file's bytes to the hash it names. Anything else is
- * as good as missing.
+ * A kept artifact's description, if it is there and hashes to `hash`:
+ * anything else is as good as missing. Its files are checked one by one
+ * (`keptFile`).
  */
-const keptArtifact = async (
+export const keptDescription = async (
   env: Env,
   hash: string
 ): Promise<PackageArtifact | undefined> => {
@@ -98,25 +100,56 @@ const keptArtifact = async (
   if (!parsed.success || (await artifactHash(parsed.data)) !== hash) {
     return undefined;
   }
-  for (const [path, { sha256: expected }] of Object.entries(
-    parsed.data.files
-  )) {
-    // Each file in turn: one that doesn't match ends the check.
-    // oxlint-disable-next-line no-await-in-loop
-    const file = await env.FILES.get(fileKey(hash, path));
-    // oxlint-disable-next-line no-await-in-loop
-    const bytes = file ? new Uint8Array(await file.arrayBuffer()) : undefined;
-    // oxlint-disable-next-line no-await-in-loop
-    if (bytes === undefined || (await sha256(bytes)) !== expected) {
-      log.warn("packages.artifact_corrupt", { hash, path });
-      return undefined;
-    }
-  }
   return parsed.data;
 };
 
+/**
+ * File `path` of the kept artifact `hash`, if its bytes still hash to
+ * `expected`, the SHA-256 the artifact's description names: anything else
+ * is as good as missing.
+ */
+export const keptFile = async (
+  env: Env,
+  hash: string,
+  path: string,
+  expected: string
+): Promise<Uint8Array | undefined> => {
+  const file = await env.FILES.get(fileKey(hash, path));
+  const bytes = file ? new Uint8Array(await file.arrayBuffer()) : undefined;
+  if (bytes === undefined || (await sha256(bytes)) !== expected) {
+    log.warn("packages.artifact_corrupt", { hash, path });
+    return undefined;
+  }
+  return bytes;
+};
+
+/**
+ * A kept artifact, if it is there whole: its description hashing to
+ * `hash`, and every file's bytes to the hash it names. Anything else is
+ * as good as missing.
+ */
+const keptArtifact = async (
+  env: Env,
+  hash: string
+): Promise<PackageArtifact | undefined> => {
+  const description = await keptDescription(env, hash);
+  if (description === undefined) {
+    return undefined;
+  }
+  for (const [path, { sha256: expected }] of Object.entries(
+    description.files
+  )) {
+    // Each file in turn: one that doesn't match ends the check.
+    // oxlint-disable-next-line no-await-in-loop
+    if ((await keptFile(env, hash, path, expected)) === undefined) {
+      return undefined;
+    }
+  }
+  return description;
+};
+
 /** The lock of an App's graph, checked to still be that graph. */
-const lockOf = async (
+export const lockOf = async (
   env: Env,
   app: string,
   graphHash: string
@@ -386,6 +419,23 @@ const builtArtifact = async (env: Env, request: BuildRequest) => {
 };
 
 /**
+ * Where a build's files are served: only the browser target's, which
+ * runs in a browser; the others never leave core.
+ */
+const addressOf = async (
+  env: Env,
+  {
+    app,
+    graphHash,
+    target,
+  }: { app: AppId; graphHash: string; target: PackageArtifact["target"] },
+  hash: string
+): Promise<string | null> =>
+  target === "browser"
+    ? await packageArtifactAddress(env, { app, graphHash, hash })
+    : null;
+
+/**
  * Builds one target of an App's approved graph into an artifact, or
  * returns the one built before. For one of the App's builders, or the
  * chat's agent acting for one; never Grasp staff.
@@ -443,7 +493,13 @@ export const buildDependencies = async (
         hash: pinned.hash,
         kept: true,
       });
-      return { hash: pinned.hash, artifact: kept, approval, stats: null };
+      return {
+        hash: pinned.hash,
+        artifact: kept,
+        approval,
+        stats: null,
+        address: await addressOf(env, asked, pinned.hash),
+      };
     }
   }
   const limits = packageLimitsOf(env.PACKAGE_LIMITS);
@@ -471,16 +527,17 @@ export const buildDependencies = async (
   // string). The build refuses only what it can decide whole (Node's
   // built-ins, remote imports, imports computed at run time, CSS that
   // fetches from outside, SVGs that aren't only drawing). Run time is
-  // bounded where the artifact is served, by this Content-Security-Policy
-  // on every one of its files:
+  // bounded where the artifact is served (serve.ts), by this
+  // Content-Security-Policy on every one of its files
+  // (`packageArtifactPolicy`, security-headers.ts):
   //
   //   default-src 'none'; script-src <the artifact's own origin>;
   //   worker-src 'none'; connect-src <the host's origin>;
   //   img-src 'self' data:; font-src 'self' data:; style-src 'self'
   //
-  // with `sandbox` on SVGs (so one opened as a document runs nothing) and
-  // `X-Content-Type-Options: nosniff` on all, so a file is only ever read
-  // as the type stored here.
+  // with `sandbox` (so a file opened as a document, an SVG say, runs
+  // nothing) and `X-Content-Type-Options: nosniff` on all, so a file is
+  // only ever read as the type stored here.
   await Promise.all(
     Object.entries(files).map(
       async ([path, bytes]) =>
@@ -547,5 +604,11 @@ export const buildDependencies = async (
     inputBytes: stats.inputBytes,
     artifactBytes,
   });
-  return { hash, artifact, approval, stats };
+  return {
+    hash,
+    artifact,
+    approval,
+    stats,
+    address: await addressOf(env, asked, hash),
+  };
 };

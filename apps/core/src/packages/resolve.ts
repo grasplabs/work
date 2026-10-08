@@ -4,7 +4,6 @@ import {
   startPackageBuilder,
 } from "@grasp-os/compiler";
 import {
-  canonicalGraph,
   dependencyErrors,
   dependencyGraphHash,
   npmRegistryOrigin,
@@ -12,7 +11,6 @@ import {
 } from "@grasp-os/shared/dependencies";
 import type {
   DependencyGraph,
-  DependencyPackage,
   DependencyRequest,
 } from "@grasp-os/shared/dependencies";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -21,6 +19,7 @@ import {
   dependencyIntentSchema,
   entryPackage,
   graspLockSchema,
+  lockGraph,
   packageErrors,
   packageInspectionSchema,
   packageLimitsOf,
@@ -533,30 +532,12 @@ const resolveGraph = async (
   resolution.completeOptionalPeers();
 };
 
-/** The graph a person approves, from the lock: what its hash names. */
+/**
+ * The graph a person approves, from the lock: what its hash names, with
+ * this release's platform peers.
+ */
 export const graphOfLock = (lock: GraspLock): DependencyGraph =>
-  canonicalGraph({
-    direct: Object.entries(lock.direct).map(([name, version]) => ({
-      name,
-      version,
-    })),
-    packages: Object.values(lock.packages).map((entry): DependencyPackage => ({
-      name: entry.name,
-      version: entry.version,
-      origin: npmRegistryOrigin,
-      integrity: entry.integrity,
-      license: entry.license,
-      dependencies: Object.entries(entry.dependencies).map(
-        ([name, version]) => ({ name, version })
-      ),
-      peers: Object.entries(entry.peers).map(([name, peer]) => ({
-        name,
-        range: peer.range,
-        resolved: peer.resolved,
-      })),
-    })),
-    platformPeers: { ...platformPeers },
-  });
+  lockGraph(lock, platformPeers);
 
 /** The App's approved lock last approved, if any: what it keeps. */
 const previousLock = async (
