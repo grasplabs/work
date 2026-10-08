@@ -151,8 +151,11 @@ type StepOutcome =
       ended: "failed" | "timed_out";
       /** The step's, when it is spent: a delay function's failure, say. */
       stepError: string;
-      /** When the next attempt is due; null when there is none. */
-      retryAt: number | null;
+      /**
+       * How long after this attempt ends the next is due; null when there
+       * is none. Made an absolute time in the write that ends it.
+       */
+      retryInMs: number | null;
     };
 
 /** How a step stands once an attempt's outcome is journaled. */
@@ -649,7 +652,9 @@ export class Activation {
           claim.attempt
         );
       } else {
-        const retrying = outcome.retryAt !== null;
+        const retryAt =
+          outcome.retryInMs === null ? null : now + outcome.retryInMs;
+        const retrying = retryAt !== null;
         sql.exec(
           "UPDATE steps SET state = ?, value = NULL, error = ? WHERE ordinal = ?",
           retrying ? "retrying" : "failed",
@@ -661,7 +666,7 @@ export class Activation {
           now,
           outcome.ended,
           outcome.error,
-          outcome.retryAt,
+          retryAt,
           claim.ordinal,
           claim.attempt
         );
@@ -795,7 +800,7 @@ export class Activation {
       committing = outcome;
     } else {
       let stepError = outcome.error;
-      let retryAt: number | null = null;
+      let retryInMs: number | null = null;
       if (outcome.retryable && claim.attempt <= config.limit) {
         const delay =
           typeof config.delay === "function"
@@ -810,12 +815,12 @@ export class Activation {
                 ms: retryDelayMs(config.backoff, config.delay, claim.attempt),
               };
         if ("ms" in delay) {
-          retryAt = Date.now() + delay.ms;
+          retryInMs = delay.ms;
         } else {
           stepError = delay.error;
         }
       }
-      committing = { ...outcome, stepError, retryAt };
+      committing = { ...outcome, stepError, retryInMs };
     }
     const committed = this.#write(() => this.#commit(claim, committing));
     if (committed === failed) {
@@ -827,7 +832,7 @@ export class Activation {
     if (committing.ok) {
       return committing;
     }
-    return committing.retryAt === null
+    return committing.retryInMs === null
       ? { ok: false, error: committing.stepError }
       : "retry";
   }
