@@ -2,6 +2,8 @@
  * What the fake Cloudflare API (test/cloudflare-api.ts) is built from: an
  * account's state, the API's envelope, and how a route answers.
  */
+import type { OnboardingSummary } from "@grasp-os/shared/onboarding-summary";
+
 export const base = "https://api.cloudflare.com/client/v4";
 
 export type Json = Record<string, unknown>;
@@ -79,6 +81,12 @@ export interface AccountState {
   notices: unknown[];
   /** The status its core answers notices with instead, as an older core would. */
   noticeStatus?: number;
+  /**
+   * What its core answers the console's signed onboarding summary request
+   * with (@grasp-os/shared/onboarding-summary): none begun unless set, or
+   * `absent` for a core from before the summary, which answers 404.
+   */
+  onboarding?: OnboardingSummary | "absent";
   /**
    * What the analytics API reports for it (`/graphql`): its Workers'
    * requests and CPU time this month, its AI Gateway's spend, and its

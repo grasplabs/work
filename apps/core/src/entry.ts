@@ -10,6 +10,7 @@ import {
 } from "@grasp-os/shared/interview-links";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
+import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
@@ -24,6 +25,7 @@ import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { interviewResponse } from "./onboarding/links.ts";
+import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import {
   packageArtifactResponse,
   withoutArtifactToken,
@@ -58,6 +60,24 @@ const linkResponse = async (
     return await interviewResponse(request, env, requestId);
   }
   return undefined;
+};
+
+/** The frontend's files; unknown paths get index.html (single-page app). */
+const pageResponse = async (
+  pathname: string,
+  request: Request,
+  env: Env
+): Promise<Response> => {
+  const page = await env.ASSETS.fetch(request);
+  if (pathname !== interviewPagePath) {
+    return page;
+  }
+  // The interview's page carries its link's secret: no referrer, whatever
+  // it links to, and no copy kept.
+  const kept = new Response(page.body, page);
+  kept.headers.set("referrer-policy", "no-referrer");
+  kept.headers.set("cache-control", "no-store");
+  return kept;
 };
 
 /** Routes a request that has passed the router-secret check. */
@@ -110,6 +130,9 @@ const route = async (
   if (pathname === errorReportPath) {
     return await errorReportResponse(request, env, requestId);
   }
+  if (pathname === onboardingSummaryPath) {
+    return await onboardingSummaryResponse(request, env, requestId);
+  }
   if (pathname === platformUpdatePath) {
     return await platformUpdateResponse(request, env, requestId);
   }
@@ -124,17 +147,7 @@ const route = async (
       requestId
     );
   }
-  // The frontend's files; unknown paths get index.html (single-page app).
-  const page = await env.ASSETS.fetch(request);
-  if (pathname !== interviewPagePath) {
-    return page;
-  }
-  // The interview's page carries its link's secret: no referrer, whatever
-  // it links to, and no copy kept.
-  const kept = new Response(page.body, page);
-  kept.headers.set("referrer-policy", "no-referrer");
-  kept.headers.set("cache-control", "no-store");
-  return kept;
+  return await pageResponse(pathname, request, env);
 };
 
 /** A response, and what the request's log line says about it. */
