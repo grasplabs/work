@@ -1238,6 +1238,10 @@ msgid "Dropped a held action nobody can confirm"
 msgstr "Eine zurückgehaltene Aktion verworfen, die niemand mehr bestätigen kann"
 
 #: src/activity/audit-words.ts
+msgid "Dropped a kept build of approved packages"
+msgstr "Eine aufbewahrte Version freigegebener Pakete verworfen"
+
+#: src/activity/audit-words.ts
 msgid "Dropped an event no workflow could take"
 msgstr "Ein Ereignis verworfen, das kein Workflow annehmen konnte"
 

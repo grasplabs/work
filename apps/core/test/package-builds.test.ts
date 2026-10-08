@@ -134,6 +134,12 @@ const pinsRecorded = (events: Awaited<ReturnType<typeof auditedDuring>>) =>
     .filter(({ action }) => action === "dependency.built")
     .map(({ detail }) => detail);
 
+/** The hash of each pin a `dependency.pin_dropped` event among `events` drops. */
+const droppedRecorded = (events: Awaited<ReturnType<typeof auditedDuring>>) =>
+  events
+    .filter(({ action }) => action === "dependency.pin_dropped")
+    .map(({ detail }) => String(detail.hash));
+
 /** A property of a binding, its methods bound to it, for a proxy to pass on. */
 const bound = (target: object, property: string | symbol): unknown => {
   const value: unknown = Reflect.get(target, property);
@@ -876,8 +882,8 @@ describe("a build's durability", () => {
         app: app.app,
         graphHash: app.request.graphHash,
         targets: "browser",
-        from: `browser:${firstConfig}`,
-        to: `browser:${extraConfig}`,
+        "from.browser": firstConfig,
+        "to.browser": extraConfig,
       },
     ]);
     expect({
@@ -906,13 +912,67 @@ describe("a build's durability", () => {
           config: extraConfig,
           approval: app.request.id,
           hash: second?.hash,
-          dropped: "",
         },
       ],
       changedBack: 1,
       back: [first.hash, null],
       backRecorded: [],
       pins: [firstConfig, extraConfig].toSorted(),
+    });
+  });
+
+  it("records a resolve that changes the config of every target, and stores its lock", async () => {
+    const widgets = named("widgets");
+    await publish(
+      esm(
+        widgets,
+        {
+          "index.js": "export const main = 'main';",
+          "extra.js": "export const extra = 'extra';",
+        },
+        { exports: { ".": "./index.js", "./extra": "./extra.js" } }
+      )
+    );
+    const targets = ["browser", "server", "workflow", "computation"] as const;
+    const app = await approvedApp(
+      { [widgets]: "1" },
+      { targets: [...targets] }
+    );
+    const before = await storedLock(app);
+    const changed = await auditedDuring(async () => {
+      await app.builder.api.dependencies.resolve(
+        intentFor(
+          app.app,
+          { [widgets]: "1" },
+          { targets: [...targets], entries: [widgets, `${widgets}/extra`] }
+        )
+      );
+    });
+    const after = await storedLock(app);
+    const configs = async (lock: GraspLock, side: string) =>
+      await Promise.all(
+        targets.map(async (target): Promise<[string, string]> => [
+          `${side}.${target}`,
+          await configOf(lock, target),
+        ])
+      );
+    const from = await configs(before, "from");
+    const to = await configs(after, "to");
+    expect({
+      entries: after.targets.computation?.entries.toSorted(),
+      recorded: changed
+        .filter(({ action }) => action === "dependency.lock_targets_changed")
+        .map(({ detail }) => detail),
+    }).toStrictEqual({
+      entries: [widgets, `${widgets}/extra`].toSorted(),
+      recorded: [
+        {
+          app: app.app,
+          graphHash: app.request.graphHash,
+          targets: targets.join(" "),
+          ...Object.fromEntries([...from, ...to]),
+        },
+      ],
     });
   });
 
@@ -978,15 +1038,73 @@ describe("a build's durability", () => {
     expect({
       compilers: Object.keys(after.artifacts ?? {}).toSorted(),
       pins: Object.keys(after.artifacts?.[compilerVersion] ?? {}).toSorted(),
-      dropped: pinsRecorded(events).map(({ dropped }) => dropped),
+      recorded: pinsRecorded(events).length,
+      dropped: droppedRecorded(events).toSorted(),
     }).toStrictEqual({
       compilers: [compilerVersion, "release-newer"].toSorted(),
       pins: [hashOf("2"), hashOf("3"), hashOf("4"), config].toSorted(),
-      dropped: [`${hashOf("c")} ${hashOf("a")}`],
+      recorded: 1,
+      dropped: [hashOf("a"), hashOf("c")],
     });
     expect(after.artifacts?.[compilerVersion]?.[config]?.hash).toBe(
       built?.hash
     );
+  });
+
+  it("pins and records a build that drops every pin another release kept, as many as a lock holds", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const lock = await storedLock(app);
+    const day = 24 * 60 * 60 * 1000;
+    const targets = ["browser", "server", "workflow", "computation"] as const;
+    const pinOf = (
+      target: (typeof targets)[number],
+      hash: string,
+      daysAgo: number
+    ) => ({
+      target,
+      hash,
+      exports: {},
+      pinnedAt: new Date(Date.now() - daysAgo * day).toISOString(),
+    });
+    // The oldest of two other releases kept four configs of every target:
+    // a build of a third release drops them all, and one of its own.
+    const older = targets.flatMap((target, t) =>
+      [0, 1, 2, 3].map((c) => ({
+        config: `${"0".repeat(62)}${t}${c}`,
+        pin: pinOf(target, `${"abcd"[t]?.repeat(63)}${c}`, 9),
+      }))
+    );
+    await storeLock(app, {
+      ...lock,
+      artifacts: {
+        "release-older": Object.fromEntries(
+          older.map(({ config, pin }) => [config, pin])
+        ),
+        "release-newer": { [hashOf("e")]: pinOf("browser", hashOf("e"), 1) },
+        [compilerVersion]: {
+          [hashOf("1")]: pinOf("browser", hashOf("1"), 8),
+          [hashOf("2")]: pinOf("browser", hashOf("2"), 7),
+          [hashOf("3")]: pinOf("browser", hashOf("3"), 6),
+          [hashOf("4")]: pinOf("browser", hashOf("4"), 5),
+        },
+      },
+    });
+    let built: PackageBuild | undefined;
+    const events = await auditedDuring(async () => {
+      built = await buildOf(app, "browser");
+    });
+    const after = await storedLock(app);
+    const config = await configOf(after, "browser");
+    expect({
+      pinned: after.artifacts?.[compilerVersion]?.[config]?.hash,
+      compilers: Object.keys(after.artifacts ?? {}).toSorted(),
+      dropped: droppedRecorded(events).toSorted(),
+    }).toStrictEqual({
+      pinned: built?.hash,
+      compilers: [compilerVersion, "release-newer"].toSorted(),
+      dropped: [hashOf("1"), ...older.map(({ pin }) => pin.hash)].toSorted(),
+    });
   });
 
   it("refuses a build that makes other bytes than the lock pinned", async () => {

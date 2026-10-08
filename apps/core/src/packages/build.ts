@@ -4,7 +4,7 @@ import {
   startPackageBuilder,
 } from "@grasp-os/compiler";
 import type { BuildRequest } from "@grasp-os/compiler";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import {
   dependencyErrors,
@@ -36,7 +36,12 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { appFor } from "../apps.ts";
-import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
+import {
+  auditedBatch,
+  outboxedEventWhere,
+  outboxedWhere,
+  storedEvent,
+} from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
 import { policyGenerationSql } from "../dependencies/policy.ts";
@@ -310,10 +315,9 @@ const stillAdmitted = ({ approval, policyGeneration }: Admitted): SQL =>
 
 /**
  * The audit entry of a pin a build writes: which App, graph, target config
- * and artifact, the approval it relied on, and the pins writing it
- * dropped. Only for a pin written: a build that hands out an artifact
- * pinned before records nothing, so asking again and again adds nothing
- * to the trail.
+ * and artifact, and the approval it relied on. Only for a pin written: a
+ * build that hands out an artifact pinned before records nothing, so
+ * asking again and again adds nothing to the trail.
  */
 const pinEntry = (
   by: Acting,
@@ -324,13 +328,27 @@ const pinEntry = (
     config: string;
     approval: string;
     hash: string;
-    dropped: string[];
   }
 ): AuditEntry => ({
   actor: by.actor ?? actorOf(by),
   action: "dependency.built",
   target: { type: "app", id: pinned.app },
-  detail: { ...pinned, dropped: pinned.dropped.join(" ") },
+  detail: pinned,
+});
+
+/**
+ * The audit entry of a pin that writing another (`pinned`) dropped, one
+ * each: a build of a third release drops every pin of the oldest other
+ * one, more hashes than one detail value holds.
+ */
+const droppedEntry = (
+  by: Acting,
+  dropped: { app: string; graphHash: string; hash: string; pinned: string }
+): AuditEntry => ({
+  actor: by.actor ?? actorOf(by),
+  action: "dependency.pin_dropped",
+  target: { type: "app", id: dropped.app },
+  detail: dropped,
 });
 
 /** How often pinning starts over when another write changed the lock first. */
@@ -398,9 +416,20 @@ const pin = async (
         limit: limits.lockBytes,
       });
     }
+    const built = createAuditEvent(
+      pinEntry(by, {
+        app,
+        graphHash,
+        target: pinning.target,
+        config: pinning.config,
+        approval: admitted.approval,
+        hash: pinning.hash,
+      }),
+      "core"
+    );
     // In turn: each attempt writes on the lock the one before read. The
-    // pin and its audit event land together or not at all: the event only
-    // if this update changed the lock, as the batch runs.
+    // pin and its audit events land together or not at all: the events
+    // only if this update changed the lock, as the batch runs.
     // oxlint-disable-next-line no-await-in-loop
     const [updated] = await auditedBatch(env, db, [
       db
@@ -417,17 +446,19 @@ const pin = async (
         .returning({ lock: dependencyLocks.lock }),
       // Only if this update changed the lock: two builds of the same bytes
       // can write the same text, and only the one that lands records it.
-      outboxedIfChanged(
-        db,
-        pinEntry(by, {
-          app,
-          graphHash,
-          target: pinning.target,
-          config: pinning.config,
-          approval: admitted.approval,
-          hash: pinning.hash,
-          dropped,
-        })
+      outboxedEventWhere(db, built, sql`changes() > 0`),
+      // Each pin it dropped, only if the pin itself was recorded.
+      ...dropped.map((hash) =>
+        outboxedWhere(
+          db,
+          droppedEntry(by, {
+            app,
+            graphHash,
+            hash,
+            pinned: pinning.hash,
+          }),
+          storedEvent(built.id)
+        )
       ),
     ]);
     if (updated.length > 0) {

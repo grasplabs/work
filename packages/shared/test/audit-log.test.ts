@@ -119,11 +119,13 @@ describe("audit event types", () => {
         "dependency.admission_refused",
         "dependency.superseded",
         "dependency.built",
+        "dependency.pin_dropped",
         "dependency.lock_targets_changed",
         "dependency.approved",
         "dependency.denied",
       ].map((action) => typeOf(action))
     ).toStrictEqual([
+      "action",
       "action",
       "action",
       "action",

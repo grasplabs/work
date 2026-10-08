@@ -1238,6 +1238,10 @@ msgid "Dropped a held action nobody can confirm"
 msgstr "Een tegengehouden actie laten vallen die niemand meer kan bevestigen"
 
 #: src/activity/audit-words.ts
+msgid "Dropped a kept build of approved packages"
+msgstr "Een bewaarde build van goedgekeurde pakketten verwijderd"
+
+#: src/activity/audit-words.ts
 msgid "Dropped an event no workflow could take"
 msgstr "Een gebeurtenis laten vallen die geen workflow kon aannemen"
 

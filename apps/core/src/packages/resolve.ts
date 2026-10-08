@@ -749,21 +749,27 @@ export const mergedLock = (
   };
 };
 
-/** Each of `targets`' config hash in `lock`, as audit detail. */
+/**
+ * Each of `targets`' config hash in `lock`, as audit detail under
+ * `<side>.<target>` (null for a target the lock has no config for): one
+ * member each, so every target changing still fits.
+ */
 const configsOf = async (
   lock: GraspLock,
-  targets: readonly DependencyTarget[]
-): Promise<string> => {
-  const hashes = await Promise.all(
-    targets.map(async (target) => {
-      const config = lock.targets[target];
-      return config === undefined
-        ? `${target}:-`
-        : `${target}:${await targetConfigHash(target, config)}`;
-    })
+  targets: readonly DependencyTarget[],
+  side: "from" | "to"
+): Promise<Record<string, string | null>> =>
+  Object.fromEntries(
+    await Promise.all(
+      targets.map(async (target) => {
+        const config = lock.targets[target];
+        return [
+          `${side}.${target}`,
+          config === undefined ? null : await targetConfigHash(target, config),
+        ] as const;
+      })
+    )
   );
-  return hashes.join(" ");
-};
 
 /**
  * Writes a lock: inserted when none was read, otherwise updated only
@@ -816,8 +822,8 @@ const writeLock = async (
     return updated.length > 0;
   }
   const [from, to] = await Promise.all([
-    configsOf(before, changed),
-    configsOf(next, changed),
+    configsOf(before, changed, "from"),
+    configsOf(next, changed, "to"),
   ]);
   const [written] = await auditedBatch(env, db, [
     update,
@@ -825,7 +831,7 @@ const writeLock = async (
       actor: by.actor ?? actorOf(by),
       action: "dependency.lock_targets_changed",
       target: { type: "app", id: app },
-      detail: { app, graphHash, targets: changed.join(" "), from, to },
+      detail: { app, graphHash, targets: changed.join(" "), ...from, ...to },
     }),
   ]);
   return written.length > 0;

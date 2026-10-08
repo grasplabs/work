@@ -1238,6 +1238,10 @@ msgid "Dropped a held action nobody can confirm"
 msgstr "A abandonné une action en attente que personne ne peut confirmer"
 
 #: src/activity/audit-words.ts
+msgid "Dropped a kept build of approved packages"
+msgstr "A supprimé une compilation conservée de paquets approuvés"
+
+#: src/activity/audit-words.ts
 msgid "Dropped an event no workflow could take"
 msgstr "A abandonné un événement qu’aucun workflow n’a pu recevoir"
 
