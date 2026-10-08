@@ -143,12 +143,15 @@ export const shadcnComponents = {
     status: "supported",
     summary: "A chat message's bubble, with reactions.",
     exports: ["Bubble", "BubbleContent", "BubbleGroup", "BubbleReactions"],
+    changes:
+      "The hovered `secondary` and `muted` bubbles and the `tinted` bubble use the theme's `secondary-hover`, `muted-hover`, `tinted` and `tinted-hover` tokens instead of colours mixed in their classes.",
   },
   button: {
     status: "supported",
     summary: "A button, or a link that looks like one.",
     exports: ["Button", "buttonVariants"],
-    changes: "Adds the `ask` variant and the `xl` size Grasp's own pages use.",
+    changes:
+      "Adds the `ask` variant and the `xl` size Grasp's own pages use. The hovered `secondary` variant uses the theme's `secondary-hover` token instead of a colour mixed in its class.",
   },
   "button-group": {
     status: "supported",
