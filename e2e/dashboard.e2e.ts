@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
+import { seedDependencyRequest } from "./dependency-request.ts";
 import { apiOf, pageOf, peopleIn } from "./people.ts";
 
 // The dashboard, from the nav: what waits on the person, what could be
@@ -61,11 +62,12 @@ test("someone given the permission approves the packages proposed for an engine,
     userId: approver.userId,
   });
   const origin = "https://registry.npmjs.org";
-  const request = await asBuilder.api.dependencies.propose({
+  const request = await seedDependencyRequest({
     app,
-    sourceRevision: "rev-1",
+    requestedBy: builder.userId,
     purpose: "Draw the monthly totals as a chart.",
     targets: ["browser"],
+    approved: false,
     graph: {
       direct: [{ name: "charts", version: "3.1.0" }],
       packages: [
@@ -90,8 +92,6 @@ test("someone given the permission approves the packages proposed for an engine,
       ],
       platformPeers: {},
     },
-    findings: [],
-    refused: [],
   });
 
   // An admin manages who approves, and is asked nothing without it.
@@ -108,12 +108,14 @@ test("someone given the permission approves the packages proposed for an engine,
   await expect(
     card.getByText("Draw the monthly totals as a chart.")
   ).toBeVisible();
-  // What it asks for, by name, and that nobody checked it yet.
+  // What it asks for, by name, and that Grasp resolved it from the registry.
   await expect(card.getByText("charts@3.1.0", { exact: true })).toBeVisible();
   await expect(
     card.getByText("2 packages in all, to run in: Browser")
   ).toBeVisible();
-  await expect(card.getByText(/are as reported by/u)).toBeVisible();
+  await expect(
+    card.getByText(/resolved these packages from the npm registry/u)
+  ).toBeVisible();
   // Approving waits for the whole graph to be shown; denying doesn't.
   const approveButton = card.getByRole("button", {
     name: "Approve the packages for Totals",

@@ -262,6 +262,72 @@ describe("a Composio tool the admin didn't mark as a read", () => {
   });
 });
 
+describe("a call core signs for work that may only read", () => {
+  it("reads, and refuses every side effect before it is held, run or replayed", async () => {
+    const anna = someone();
+    const connectionId = await hubspot();
+    const inChat = agentFor(anna.userId, "agent-chat", "interactive");
+    const readOnly = { readOnly: true, origin: chatOrigin };
+    const create = {
+      ...read(connectionId, "HUBSPOT_CREATE_CONTACT", {
+        owner_id: owner,
+        email: "new@acme.test",
+      }),
+      idempotencyKey: crypto.randomUUID(),
+    };
+    // The same side effect, run once by work that may write: its stored
+    // result isn't handed to a read under the same key either.
+    const run = agentFor(anna.userId);
+    const ranOnce = await outcome(callAs(run, create, { origin: runOrigin }));
+    const outcomes = {
+      list: await outcome(
+        callAs(
+          inChat,
+          read(connectionId, "HUBSPOT_LIST_CONTACTS", { owner_id: owner }),
+          readOnly
+        )
+      ),
+      // In chat a side effect would be held for its person.
+      held: await outcome(callAs(inChat, create, readOnly)),
+      replayed: await outcome(
+        callAs(run, create, { readOnly: true, origin: runOrigin })
+      ),
+      // A read from a restricted context is a side effect too.
+      restricted: await outcome(
+        callAs(
+          run,
+          {
+            ...read(connectionId, "HUBSPOT_LIST_CONTACTS", { owner_id: owner }),
+            idempotencyKey: crypto.randomUUID(),
+          },
+          { readOnly: true, restricted: true, origin: runOrigin }
+        )
+      ),
+    };
+    const recorded = await events();
+    expect({
+      ranOnce,
+      outcomes,
+      pending: await exports.default.listPendingActions(anna),
+      ran: composio.state.mcp.ran.map(({ tool }) => tool),
+      audited: recorded
+        .filter(({ action }) => action === "connection.call")
+        .map(({ detail }) => detail.outcome),
+    }).toStrictEqual({
+      ranOnce: "ok",
+      outcomes: {
+        list: "ok",
+        held: "connect.read_only",
+        replayed: "connect.read_only",
+        restricted: "connect.read_only",
+      },
+      pending: [],
+      ran: ["HUBSPOT_CREATE_CONTACT", "HUBSPOT_LIST_CONTACTS"],
+      audited: ["ok", "ok", "refused", "refused", "refused"],
+    });
+  });
+});
+
 /** Starts connecting HubSpot with `tools`, for an admin. */
 const start = async (
   tools: (string | ComposioToolRule)[],

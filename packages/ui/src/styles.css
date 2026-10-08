@@ -66,6 +66,20 @@
   --status-attention: #d0561c;
   /* Behind modals, at an opacity, in both themes: dims the page. */
   --scrim: #000000;
+  /*
+   * Hovered secondary and muted surfaces, a step towards the text, and a
+   * light tint of the primary (a chat bubble's `tinted` variant), with
+   * its hover. Derived from the colours above, so each theme declares
+   * them again: a value is worked out where it is declared.
+   */
+  --secondary-hover: color-mix(
+    in oklch,
+    var(--secondary),
+    var(--foreground) 5%
+  );
+  --muted-hover: color-mix(in oklch, var(--muted), var(--foreground) 5%);
+  --tinted: oklch(from var(--primary) 0.93 calc(c * 0.4) h);
+  --tinted-hover: oklch(from var(--primary) 0.88 calc(c * 0.5) h);
 }
 
 @media screen {
@@ -106,6 +120,14 @@
     --tile-foreground: oklch(0.21 0.006 285.885);
     --status-agreed: oklch(0.7 0.14 158);
     --status-attention: oklch(0.7 0.16 45);
+    --secondary-hover: color-mix(
+      in oklch,
+      var(--secondary),
+      var(--foreground) 5%
+    );
+    --muted-hover: color-mix(in oklch, var(--muted), var(--foreground) 5%);
+    --tinted: oklch(from var(--primary) 0.3 calc(c * 0.4) h);
+    --tinted-hover: oklch(from var(--primary) 0.35 calc(c * 0.5) h);
   }
 }
 
@@ -152,6 +174,10 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-scrim: var(--scrim);
+  --color-secondary-hover: var(--secondary-hover);
+  --color-muted-hover: var(--muted-hover);
+  --color-tinted: var(--tinted);
+  --color-tinted-hover: var(--tinted-hover);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);

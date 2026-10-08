@@ -4,9 +4,10 @@
 // answer ignored, and a replay that configures a step otherwise ends the
 // run. Process death during a retry delay is in test/process.
 import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { Journal } from "../src/journal.ts";
+import type { AttemptRow, Journal } from "../src/journal.ts";
 import {
   alarmOf,
   deliverAlarm,
@@ -15,6 +16,7 @@ import {
   newId,
   runObject,
   until,
+  within,
   workflow,
 } from "./helpers.ts";
 import { effectsOf, hold } from "./outside.ts";
@@ -45,6 +47,18 @@ const witnessed = (id: string): string[] =>
 
 const flakyError = (attempt: number): string =>
   JSON.stringify({ name: "FlakyError", message: `attempt ${attempt} failed` });
+
+/** The `attempt`-th attempt at the step named `name`, as journaled. */
+const attemptAt = (
+  journal: Journal,
+  name: string,
+  attempt: number
+): AttemptRow | undefined => {
+  const ordinal = journal.steps.find((step) => step.name === name)?.ordinal;
+  return journal.attempts.find(
+    (row) => row.ordinal === ordinal && row.attempt === attempt
+  );
+};
 
 describe("a step that fails", () => {
   it("retries after Cloudflare's default delay, journaled as an absolute time, with no activation alive meanwhile", async () => {
@@ -407,6 +421,47 @@ describe("a callback whose attempt has ended", () => {
       witnessed: witnessed(id),
     }).toStrictEqual({ nested: 1, witnessed: ["called"] });
   });
+
+  it("isn't handed what a step it called while its attempt was out answers after the attempt ended", async () => {
+    const id = newId();
+    const inner = hold(id, "inner");
+    const after = hold(id, "after", 1);
+    await workflow("outlived").create({ id });
+    await inner.held;
+    // The outer attempt has timed out and the author has caught that.
+    await after.held;
+
+    inner.release();
+    await until("the inner step's outcome", async () => {
+      const journal = await journalOf("outlived", id);
+      const step = journal.steps.find((row) => row.name === "inner");
+      return step?.state === "succeeded" ? true : undefined;
+    });
+    // The run goes on, and its end comes after the inner step's answer
+    // has been handed back or held back.
+    after.release();
+    const status = await ended("outlived", id);
+
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: {
+        caught: {
+          name: "WorkflowTimeoutError",
+          message: "Execution timed out after 1000ms",
+        },
+        final: effectsOf(id, "final")[0]?.receipt,
+      },
+    });
+    // The inner step ran and is journaled; its answer reached no one.
+    await expect(journalOf("outlived", id)).resolves.toMatchObject({
+      steps: [
+        { name: "outer", state: "failed" },
+        { name: "inner", state: "succeeded" },
+        { name: "final", state: "succeeded" },
+      ],
+    });
+    expect(witnessed(id)).toStrictEqual([]);
+  });
 });
 
 describe("an attempt that runs past its timeout", () => {
@@ -503,6 +558,205 @@ describe("a retry beside a step still out", () => {
     await expect(journalOf("retry-beside", id)).resolves.toMatchObject({
       activations: [{ ended: "suspended" }, { ended: "settled" }],
     });
+  });
+});
+
+describe("steps at once whose retries are due at different times", () => {
+  it("retry each at its own time: a replay that parks the later one first doesn't hold back the sooner", async () => {
+    const id = newId();
+    await workflow("staggered-retries").create({ id });
+
+    // The first activation suspends until "fast" is due. The one its alarm
+    // starts reaches "slow" first, not due for an hour, then "lead", which
+    // returns what it journaled, and only then "fast".
+    const journal = await until(
+      "the second activation to suspend",
+      async () => {
+        const now = await journalOf("staggered-retries", id);
+        return now.activations[1]?.ended === "suspended" ? now : undefined;
+      }
+    );
+
+    const fastDue = attemptAt(journal, "fast", 1)?.retry_at ?? Number.NaN;
+    const slowDue = attemptAt(journal, "slow", 1)?.retry_at ?? Number.NaN;
+    const fastRetry = attemptAt(journal, "fast", 2);
+    const alarm = await alarmOf("staggered-retries", id);
+    expect(journal).toMatchObject({
+      run: { status: "waiting", wake_at: slowDue },
+      steps: [
+        { name: "slow", state: "retrying", attempt: 1 },
+        { name: "lead", state: "succeeded", attempt: 1 },
+        { name: "fast", state: "succeeded", attempt: 2 },
+      ],
+    });
+    // "fast" went out again at its own time, in the activation its alarm
+    // started, long before "slow" was due; then the run waits for "slow"
+    // alone.
+    expect({
+      generation: fastRetry?.generation,
+      onTime: (fastRetry?.started_at ?? Number.NaN) >= fastDue,
+      beforeSlow: (fastRetry?.started_at ?? Number.NaN) < slowDue,
+      alarm,
+      effects: effectsOf(id).map((effect) => [effect.label, effect.attempt]),
+    }).toStrictEqual({
+      generation: 2,
+      onTime: true,
+      beforeSlow: true,
+      alarm: slowDue,
+      effects: [
+        ["slow", 1],
+        ["lead", 1],
+        ["fast", 1],
+        ["fast", 2],
+      ],
+    });
+  });
+
+  it("don't suspend while a step that has journaled its outcome is still on its way back, so the earlier retry it leads to isn't dropped", async () => {
+    const id = newId();
+    const slow = hold(id, "slow");
+    const lead = hold(id, "lead");
+    await workflow("staggered-retries").create({ id });
+    await slow.held;
+    await lead.held;
+    // The next alarm write, the watchdog renewal after "lead" commits, is
+    // issued in its real order, but its answer waits for the gate.
+    const renewing = Promise.withResolvers<true>();
+    const gate = Promise.withResolvers<true>();
+    const patched = await runInDurableObject(
+      runObject("staggered-retries", id),
+      (_, state) => {
+        const { storage } = state;
+        const setAlarm: unknown = Reflect.get(storage, "setAlarm");
+        if (typeof setAlarm !== "function") {
+          throw new TypeError("storage has no setAlarm");
+        }
+        const hadOwn = Object.hasOwn(storage, "setAlarm");
+        let first = true;
+        Reflect.set(storage, "setAlarm", async (time: number) => {
+          const written: unknown = Reflect.apply(setAlarm, storage, [time]);
+          if (first) {
+            first = false;
+            renewing.resolve(true);
+            await gate.promise;
+          }
+          return await written;
+        });
+        return { hadOwn, setAlarm };
+      }
+    );
+
+    // "lead" commits; its renewal is out, so its call hasn't returned.
+    lead.release();
+    await within("the renewal after the commit", renewing.promise);
+    // "slow" fails and parks an hour out: the parked step is the only
+    // step still without an outcome, but not the only call out.
+    slow.release();
+    await until("slow to park", async () => {
+      const journal = await journalOf("staggered-retries", id);
+      const parked = journal.steps.find((step) => step.name === "slow");
+      return parked?.state === "retrying" ? true : undefined;
+    });
+    // The quiet check the park scheduled runs before a timer set after it.
+    await runInDurableObject(runObject("staggered-retries", id), async () => {
+      await scheduler.wait(0);
+    });
+    const whileOut = await journalOf("staggered-retries", id);
+    // The renewal answers; "lead" is handed back and its continuation
+    // reaches "fast", whose retry is due long before "slow"'s.
+    gate.resolve(true);
+    const journal = await until("the first activation to suspend", async () => {
+      const now = await journalOf("staggered-retries", id);
+      return now.activations[0]?.ended === "suspended" ? now : undefined;
+    });
+    await runInDurableObject(runObject("staggered-retries", id), (_, state) => {
+      if (patched.hadOwn) {
+        Reflect.set(state.storage, "setAlarm", patched.setAlarm);
+      } else {
+        Reflect.deleteProperty(state.storage, "setAlarm");
+      }
+    });
+
+    const fastDue = attemptAt(journal, "fast", 1)?.retry_at;
+    expect(whileOut.activations).toMatchObject([{ ended: null }]);
+    expect(journal).toMatchObject({
+      run: { status: "waiting", wake_at: fastDue },
+      steps: [
+        { name: "slow", state: "retrying", attempt: 1 },
+        { name: "lead", state: "succeeded", attempt: 1 },
+        { name: "fast", state: "retrying", attempt: 1 },
+      ],
+    });
+    expect(attemptAt(journal, "fast", 1)?.generation).toBe(1);
+    expect(fastDue).toBeLessThan(
+      attemptAt(journal, "slow", 1)?.retry_at ?? Number.NaN
+    );
+    // The earlier retry goes out at its own time, in the activation its
+    // alarm starts; then the run waits for "slow" alone.
+    const retried = await until(
+      "the second activation to suspend",
+      async () => {
+        const now = await journalOf("staggered-retries", id);
+        return now.activations[1]?.ended === "suspended" ? now : undefined;
+      }
+    );
+    expect({
+      wake: retried.run.wake_at,
+      fast: attemptAt(retried, "fast", 2),
+    }).toMatchObject({
+      wake: attemptAt(journal, "slow", 1)?.retry_at,
+      fast: { generation: 2, ended: "succeeded" },
+    });
+  });
+});
+
+describe("an attempt that doesn't fit what is left of its handler's wall time", () => {
+  it("is left for a fresh activation, which runs it first, once the step still out has landed", async () => {
+    const id = newId();
+    const first = hold(id, "first");
+    await workflow("pair", env.BUDGETED_RUNS).create({ id });
+    await first.held;
+    // "first" is out; "second", claimed after it, wouldn't fit.
+    const parked = await journalOf("pair", id, env.BUDGETED_RUNS);
+
+    first.release();
+    const status = await ended("pair", id, env.BUDGETED_RUNS);
+
+    expect(parked).toMatchObject({
+      run: { status: "running" },
+      activations: [{ generation: 1, ended: null }],
+      steps: [{ name: "first", state: "running" }],
+    });
+    expect(parked.steps).toHaveLength(1);
+    expect(status).toStrictEqual({
+      status: "complete",
+      output: [
+        effectsOf(id, "first")[0]?.receipt,
+        effectsOf(id, "second")[0]?.receipt,
+      ],
+    });
+    // The activation suspended once "first" landed, due at once; the next
+    // one ran "second" as its first attempt.
+    await expect(
+      journalOf("pair", id, env.BUDGETED_RUNS)
+    ).resolves.toMatchObject({
+      activations: [
+        { generation: 1, ended: "suspended" },
+        { generation: 2, ended: "settled" },
+      ],
+      steps: [
+        { name: "first", state: "succeeded", attempt: 1 },
+        { name: "second", state: "succeeded", attempt: 1 },
+      ],
+      attempts: [
+        { ordinal: 1, attempt: 1, generation: 1, ended: "succeeded" },
+        { ordinal: 2, attempt: 1, generation: 2, ended: "succeeded" },
+      ],
+    });
+    expect(effectsOf(id).map((effect) => effect.label)).toStrictEqual([
+      "first",
+      "second",
+    ]);
   });
 });
 

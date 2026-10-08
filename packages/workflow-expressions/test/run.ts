@@ -1,12 +1,9 @@
 import type { Json } from "@grasp-os/shared/json";
 
 import { expressionErrors } from "../src/errors.ts";
-import {
-  compileExpression,
-  evaluateExpression,
-  stageVariables,
-} from "../src/evaluate.ts";
+import { compileExpression, evaluateExpression } from "../src/evaluate.ts";
 import type { ResultContract, Stage } from "../src/evaluate.ts";
+import { stageVariables } from "../src/source.ts";
 
 /** What an expression runs on; any stage variable left out is null. */
 export interface Values {

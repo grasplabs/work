@@ -6,9 +6,12 @@ import { env, exports } from "cloudflare:workers";
 // the frame's document for a build, its policy, and each module it names.
 
 /** A request to core as the router sends it, for `path`. */
-export const routed = async (path: string): Promise<Response> =>
+export const routed = async (
+  path: string,
+  headers: Record<string, string> = {}
+): Promise<Response> =>
   await exports.default.fetch(`https://core${path}`, {
-    headers: { [routerSecretHeader]: env.ROUTER_SECRET },
+    headers: { ...headers, [routerSecretHeader]: env.ROUTER_SECRET },
   });
 
 const whitespace = /\s+/u;

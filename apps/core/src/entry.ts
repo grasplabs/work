@@ -10,6 +10,7 @@ import {
 } from "@grasp-os/shared/interview-links";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
+import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
@@ -24,6 +25,7 @@ import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
 import { originalResponse } from "./knowledge/uploads.ts";
 import { interviewResponse } from "./onboarding/links.ts";
+import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import {
   packageArtifactResponse,
   withoutArtifactToken,
@@ -32,10 +34,74 @@ import { platformUpdateResponse } from "./platform-updates.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
 import { screenFrameResponse, screenModuleResponse } from "./screen-frame.ts";
-import { setSecurityHeaders } from "./security-headers.ts";
+import {
+  isRefusedToProductPage,
+  setSecurityHeaders,
+} from "./security-headers.ts";
 
 const isUnder = (pathname: string, base: string): boolean =>
   pathname === base || pathname.startsWith(`${base}/`);
+
+/** An escaped `/` or `\`, which decoding turns into a path separator. */
+const escapedSeparator = /%(?:2f|5c)/iu;
+
+/**
+ * Whether `pathname` (as the URL parser left it) means another path once
+ * decoded: an escaped separator, or a segment that decodes to `.` or `..`.
+ */
+const isAmbiguousPath = (pathname: string): boolean =>
+  escapedSeparator.test(pathname) ||
+  pathname.split("/").some((segment) => {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      return true;
+    }
+    return decoded === "." || decoded === "..";
+  });
+
+/** The frontend's files; unknown paths get index.html (single-page app). */
+const pageResponse = async (
+  pathname: string,
+  request: Request,
+  env: Env
+): Promise<Response> => {
+  const page = await env.ASSETS.fetch(request);
+  if (pathname !== interviewPagePath) {
+    return page;
+  }
+  // The interview's page carries its link's secret: no referrer, whatever
+  // it links to, and no copy kept.
+  const kept = new Response(page.body, page);
+  kept.headers.set("referrer-policy", "no-referrer");
+  kept.headers.set("cache-control", "no-store");
+  return kept;
+};
+
+/**
+ * The frontend's files; unknown paths get index.html (single-page app).
+ * Never at a path the browser and the static files would read
+ * differently: the browser matches the page's policy on the path as
+ * written, so `/assets/..%2Fscreen-modules/…` passes as one of the
+ * frontend's files, while the static files decode it into another path,
+ * from which core would answer. No file of the frontend has such a path.
+ */
+const frontendResponse = async (
+  pathname: string,
+  request: Request,
+  env: Env,
+  requestId: string
+): Promise<Response> => {
+  if (isAmbiguousPath(pathname)) {
+    return errorResponse(
+      404,
+      requestErrors.create("request.not_found"),
+      requestId
+    );
+  }
+  return await pageResponse(pathname, request, env);
+};
 
 /** `/api/knowledge/uploads/<id>/original`: an upload's original. */
 const originalPath = /^\/api\/knowledge\/uploads\/(?<id>[\w-]+)\/original$/u;
@@ -58,6 +124,30 @@ const linkResponse = async (
     return await interviewResponse(request, env, requestId);
   }
   return undefined;
+};
+
+/**
+ * The code screens' frames load: screens' modules and Apps' npm packages,
+ * never to the product page itself (`isRefusedToProductPage`).
+ */
+const frameCodeResponse = async (
+  request: Request,
+  env: Env,
+  url: URL,
+  requestId: string
+): Promise<Response | null> => {
+  if (isRefusedToProductPage(request)) {
+    return errorResponse(
+      403,
+      requestErrors.create("request.forbidden"),
+      requestId
+    );
+  }
+  const screenModule = await screenModuleResponse(env, url);
+  if (screenModule !== null) {
+    return screenModule;
+  }
+  return await packageArtifactResponse(env, request);
 };
 
 /** Routes a request that has passed the router-secret check. */
@@ -83,13 +173,9 @@ const route = async (
   if (pathname === screenFramePath) {
     return await screenFrameResponse(env, url);
   }
-  const screenModule = await screenModuleResponse(env, url);
-  if (screenModule !== null) {
-    return screenModule;
-  }
-  const packageArtifact = await packageArtifactResponse(env, request);
-  if (packageArtifact !== null) {
-    return packageArtifact;
+  const frameCode = await frameCodeResponse(request, env, url, requestId);
+  if (frameCode !== null) {
+    return frameCode;
   }
   if (isUnder(pathname, authBasePath)) {
     return await handleAuthRequest(request, env, requestId);
@@ -110,6 +196,9 @@ const route = async (
   if (pathname === errorReportPath) {
     return await errorReportResponse(request, env, requestId);
   }
+  if (pathname === onboardingSummaryPath) {
+    return await onboardingSummaryResponse(request, env, requestId);
+  }
   if (pathname === platformUpdatePath) {
     return await platformUpdateResponse(request, env, requestId);
   }
@@ -124,17 +213,7 @@ const route = async (
       requestId
     );
   }
-  // The frontend's files; unknown paths get index.html (single-page app).
-  const page = await env.ASSETS.fetch(request);
-  if (pathname !== interviewPagePath) {
-    return page;
-  }
-  // The interview's page carries its link's secret: no referrer, whatever
-  // it links to, and no copy kept.
-  const kept = new Response(page.body, page);
-  kept.headers.set("referrer-policy", "no-referrer");
-  kept.headers.set("cache-control", "no-store");
-  return kept;
+  return await frontendResponse(pathname, request, env, requestId);
 };
 
 /** A response, and what the request's log line says about it. */
