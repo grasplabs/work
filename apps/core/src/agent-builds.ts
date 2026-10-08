@@ -14,7 +14,6 @@ import type {
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { PreviewProblem } from "@grasp-os/shared/chat";
-import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import { messageOf } from "@grasp-os/shared/errors";
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -41,7 +40,6 @@ import {
   proposeDraft,
 } from "./apps.ts";
 import type { Acting, Member } from "./auth/identity.ts";
-import { proposeDependencies } from "./dependencies/requests.ts";
 import { workspace } from "./durable-objects.ts";
 import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
@@ -814,36 +812,6 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   }
 
   /**
-   * Proposes npm packages for `app`, as its builders do: one exact graph,
-   * as a request that waits for a person who holds `dependencies.approve`
-   * and allows nothing until they approve it (dependencies/requests.ts).
-   * Proposing is all the agent does with dependencies: nothing here, or
-   * anywhere it reaches, approves one or gives anyone the permission to.
-   */
-  async proposeDependencies(
-    app: unknown,
-    proposal: unknown
-  ): Promise<DependencyRequest> {
-    return await this.#build(
-      "build.proposeDependencies",
-      async (by) => {
-        const id = await this.#buildable(by, app);
-        return await proposeDependencies(
-          this.env,
-          by,
-          typeof proposal === "object" && proposal !== null
-            ? { ...proposal, app: id }
-            : proposal
-        );
-      },
-      (requested) => ({
-        app: typeof app === "string" ? app : null,
-        request: requested.id,
-      })
-    );
-  }
-
-  /**
    * Resolves what `app`'s package.json asks for (`intent`: its
    * dependencies, the targets they run on, the entries the App imports)
    * into an exact graph from the npm registry, checks every package's
@@ -1160,46 +1128,30 @@ build: {
     binding: string;
   }): Promise<{ id: string; status: string }>;
   /**
-   * Proposes npm packages for the App: one exact, fully resolved graph. A
-   * person who was given the permission to approve dependencies approves or
-   * denies it as a whole; until then nothing may use the packages, and you
-   * can't approve it or give anyone that permission. Another proposal for
-   * the App replaces one still waiting. Report only what you resolved: the
-   * person is told the packages are as you reported them, unchecked.
+   * Resolves the App's npm packages: what its package.json asks for, into
+   * one exact graph from the npm registry, with every package's bytes
+   * checked without running them, proposed as one request. A person who was
+   * given the permission to approve dependencies approves or denies it as a
+   * whole; until then nothing may use the packages, and you can't approve it
+   * or give anyone that permission. Another request for the App replaces one
+   * still waiting. A package that needs install scripts, native code or
+   * another React is refused, with every reason.
    */
-  proposeDependencies(app: string, proposal: {
-    /** The revision of the source the graph was resolved from. */
+  resolveDependencies(app: string, intent: {
+    /** The revision of the source package.json was read from. */
     sourceRevision: string;
     /** Why the App needs them. */
     purpose: string;
     targets: ("browser" | "server" | "workflow" | "computation")[];
-    graph: {
-      /** The packages the source asks for; each is one of \`packages\`. */
-      direct: { name: string; version: string }[];
-      /** Every package, direct and transitive, by exact version. */
-      packages: {
-        name: string;
-        version: string;
-        origin: "https://registry.npmjs.org";
-        /** \`sha512-…\`, as the registry gives it. */
-        integrity: string;
-        license: string | null;
-        dependencies: { name: string; version: string }[];
-        peers: { name: string; range: string; resolved: string | null }[];
-      }[];
-      /** The exact versions the platform provides (React, the SDK, the UI kit). */
-      platformPeers: Record<string, string>;
-    };
-    findings: {
-      kind: "license" | "security";
-      package: { name: string; version: string };
-      severity: "info" | "low" | "moderate" | "high" | "critical";
-      id: string | null;
-      summary: string;
-    }[];
-    /** What a package needs that the platform refuses, such as an install script. */
-    refused: { package: { name: string; version: string }; requirement: string }[];
-  }): Promise<{ id: string; status: "pending" | "approved" | "denied"; graphHash: string }>;
+    /** package.json's dependencies: each name and its version range on the npm registry. */
+    dependencies: Record<string, string>;
+    /** What the App imports of them, each a package or one of its subpaths; each dependency's own name when left out. */
+    entries?: string[];
+  }): Promise<{
+    request: { id: string; status: "pending" | "approved" | "denied"; graphHash: string };
+    /** The exact version each dependency resolved to, by name, among the rest of the lock. */
+    lock: { direct: Record<string, string> };
+  }>;
 };`;
 
 /** `env.build`. */

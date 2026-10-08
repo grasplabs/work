@@ -29,10 +29,10 @@ import { useCoreAction } from "../use-core-action.ts";
 
 // npm packages proposed for an engine, waiting on someone who was given
 // the permission to approve them: each request with who asks, why, where
-// the packages would run and what was reported of them, the whole graph
-// on asking, and the decision. Core lists them only to those who hold the
-// permission, and checks it again as the decision lands. What a package
-// says of itself (a licence, a finding) is shown as text.
+// the packages would run and what core's resolver found of them, the
+// whole graph on asking, and the decision. Core lists them only to those
+// who hold the permission, and checks it again as the decision lands.
+// What a package says of itself (a licence, a finding) is shown as text.
 
 const targetNames: Record<DependencyTarget, MessageDescriptor> = {
   browser: msg({ message: "Browser", context: "where a package runs" }),
@@ -79,7 +79,7 @@ const Findings = ({ findings }: { findings: readonly DependencyFinding[] }) => {
   );
 };
 
-/** Every package of a request, as its proposer reported each. */
+/** Every package of a request, as core's resolver read each from the registry. */
 const Packages = ({ review }: { review: DependencyReview }) => {
   const { t } = useLingui();
   const { previous } = review;
@@ -295,8 +295,9 @@ const RequestCard = ({
         </p>
         <p className="text-muted-foreground">
           <Trans>
-            The packages, their licences and the findings are as reported by{" "}
-            {requester}. Grasp hasn&apos;t checked them against the registry.
+            Grasp resolved these packages from the npm registry and checked each
+            one&apos;s files against the registry&apos;s hash. A licence is as
+            the package states it.
           </Trans>
         </p>
         <div className="flex flex-wrap gap-2">

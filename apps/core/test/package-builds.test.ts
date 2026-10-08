@@ -1,12 +1,16 @@
 import { compilerVersion } from "@grasp-os/compiler";
-import type { DependencyIntent, PackageBuild } from "@grasp-os/shared/packages";
-import { graspLockSchema } from "@grasp-os/shared/packages";
+import type {
+  DependencyIntent,
+  GraspLock,
+  PackageBuild,
+} from "@grasp-os/shared/packages";
+import { graspLockSchema, targetConfigHash } from "@grasp-os/shared/packages";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { buildDependencies } from "../src/packages/build.ts";
+import { buildDependencies, withPin } from "../src/packages/build.ts";
 import { mockIdp } from "./idp.ts";
 import {
   failure,
@@ -86,6 +90,55 @@ const buildOf = async (
     policyGeneration,
   });
 };
+
+/** The App's lock, as core stores it. */
+const storedLock = async ({ app, request }: Resolved): Promise<GraspLock> => {
+  const row = await env.DB.prepare(
+    "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+  )
+    .bind(app, request.graphHash)
+    .first<{ lock: string }>();
+  return graspLockSchema.parse(JSON.parse(row?.lock ?? "null"));
+};
+
+/** Stores `lock` as the App's, as if core had written it. */
+const storeLock = async (
+  { app, request }: Resolved,
+  lock: GraspLock
+): Promise<void> => {
+  await env.DB.prepare(
+    "UPDATE dependency_locks SET lock = ? WHERE app_id = ? AND graph_hash = ?"
+  )
+    .bind(JSON.stringify(lock), app, request.graphHash)
+    .run();
+};
+
+/** The hash of `target`'s config in `lock`, which its pins are keyed by. */
+const configOf = async (
+  lock: GraspLock,
+  target: PackageBuild["artifact"]["target"]
+): Promise<string> => {
+  const config = lock.targets[target];
+  if (config === undefined) {
+    throw new Error(`The lock has no ${target} target`);
+  }
+  return await targetConfigHash(target, config);
+};
+
+/** A made-up SHA-256: `char`, 64 times. */
+const hashOf = (char: string): string => char.repeat(64);
+
+/** The detail of each `dependency.built` event among `events`. */
+const pinsRecorded = (events: Awaited<ReturnType<typeof auditedDuring>>) =>
+  events
+    .filter(({ action }) => action === "dependency.built")
+    .map(({ detail }) => detail);
+
+/** The hash of each pin a `dependency.pin_dropped` event among `events` drops. */
+const droppedRecorded = (events: Awaited<ReturnType<typeof auditedDuring>>) =>
+  events
+    .filter(({ action }) => action === "dependency.pin_dropped")
+    .map(({ detail }) => String(detail.hash));
 
 /** A property of a binding, its methods bound to it, for a proxy to pass on. */
 const bound = (target: object, property: string | symbol): unknown => {
@@ -230,32 +283,26 @@ describe("building an App's approved packages", () => {
     ]);
   });
 
-  it("pins each target's artifact in the lock, and builds the same bytes again from it", async () => {
+  it("pins each target config's artifact in the lock, and hands it out again from the pin", async () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const first = await buildOf(app, "browser");
     const again = await buildOf(app, "browser");
-    const row = await env.DB.prepare(
-      "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
-    )
-      .bind(app.app, app.request.graphHash)
-      .first<{ lock: string }>();
-    const lock = graspLockSchema.parse(JSON.parse(row?.lock ?? "null"));
-    // A kept file no longer what was built: built again, to the pin.
-    const [path] = Object.keys(first.artifact.files);
-    await env.FILES.put(`package-builds/${first.hash}/${path}`, "tampered");
-    const rebuilt = await buildOf(app, "browser");
+    const lock = await storedLock(app);
+    const pinned =
+      lock.artifacts?.[compilerVersion]?.[await configOf(lock, "browser")];
     expect({
-      pinned: lock.artifacts?.[compilerVersion]?.browser,
-      again: [again.hash, again.stats],
-      rebuilt: rebuilt.hash,
+      pinned: { ...pinned, pinnedAt: typeof pinned?.pinnedAt },
+      again: [again.hash, again.stats, again.address === null],
     }).toStrictEqual({
       pinned: {
+        target: "browser",
         hash: first.hash,
         exports: { [ui]: `${ui}@1.0.0/browser.js` },
+        pinnedAt: "string",
       },
-      again: [first.hash, null],
-      rebuilt: first.hash,
+      // Handed out from the pin: nothing built again.
+      again: [first.hash, null, false],
     });
   });
 
@@ -789,37 +836,274 @@ describe("a build's durability", () => {
     ]);
   });
 
-  it("builds a target again once a resolve changes its entries", async () => {
-    const { ui } = await badgeLibrary();
-    const app = await approvedApp({ [ui]: "^1.0.0" });
-    await buildOf(app, "browser");
-    const { lock } = await app.builder.api.dependencies.resolve(
-      intentFor(app.app, { [ui]: "^1.0.0" }, { entries: [ui, `${ui}/extra`] })
+  it("keeps a target's pin when a resolve sets other entries, records the change, and pins the new entries' build on its own", async () => {
+    const widgets = named("widgets");
+    await publish(
+      esm(
+        widgets,
+        {
+          "index.js": "export const main = 'main';",
+          "extra.js": "export const extra = 'extra';",
+        },
+        { exports: { ".": "./index.js", "./extra": "./extra.js" } }
+      )
     );
-    expect(lock.artifacts?.[compilerVersion]?.browser).toBeUndefined();
+    const app = await approvedApp({ [widgets]: "1" });
+    const first = await buildOf(app, "browser");
+    const firstConfig = await configOf(await storedLock(app), "browser");
+    const reresolve = async (entries: string[]) =>
+      await auditedDuring(async () => {
+        await app.builder.api.dependencies.resolve(
+          intentFor(app.app, { [widgets]: "1" }, { entries })
+        );
+      });
+
+    const changed = await reresolve([widgets, `${widgets}/extra`]);
+    const afterResolve = await storedLock(app);
+    const extraConfig = await configOf(afterResolve, "browser");
+    let second: PackageBuild | undefined;
+    const secondPinned = await auditedDuring(async () => {
+      second = await buildOf(app, "browser");
+    });
+    // Back to the first entries: their pin's bytes, never others.
+    const changedBack = await reresolve([widgets]);
+    let back: PackageBuild | undefined;
+    const backPinned = await auditedDuring(async () => {
+      back = await buildOf(app, "browser");
+    });
+    const finalLock = await storedLock(app);
+
+    expect(
+      changed
+        .filter(({ action }) => action === "dependency.lock_targets_changed")
+        .map(({ detail }) => detail)
+    ).toStrictEqual([
+      {
+        app: app.app,
+        graphHash: app.request.graphHash,
+        targets: "browser",
+        "from.browser": firstConfig,
+        "to.browser": extraConfig,
+      },
+    ]);
+    expect({
+      // The resolve leaves the first config's pin as it was.
+      kept: afterResolve.artifacts?.[compilerVersion]?.[firstConfig]?.hash,
+      unpinned: afterResolve.artifacts?.[compilerVersion]?.[extraConfig],
+      secondEntries: Object.keys(second?.artifact.entries ?? {}).toSorted(),
+      secondRecorded: pinsRecorded(secondPinned),
+      changedBack: changedBack.filter(
+        ({ action }) => action === "dependency.lock_targets_changed"
+      ).length,
+      back: [back?.hash, back?.stats],
+      backRecorded: pinsRecorded(backPinned),
+      pins: Object.keys(
+        finalLock.artifacts?.[compilerVersion] ?? {}
+      ).toSorted(),
+    }).toStrictEqual({
+      kept: first.hash,
+      unpinned: undefined,
+      secondEntries: [widgets, `${widgets}/extra`].toSorted(),
+      secondRecorded: [
+        {
+          app: app.app,
+          graphHash: app.request.graphHash,
+          target: "browser",
+          config: extraConfig,
+          approval: app.request.id,
+          hash: second?.hash,
+        },
+      ],
+      changedBack: 1,
+      back: [first.hash, null],
+      backRecorded: [],
+      pins: [firstConfig, extraConfig].toSorted(),
+    });
   });
 
-  it("pins one artifact when two builds race to pin it", async () => {
+  it("records a resolve that changes the config of every target, and stores its lock", async () => {
+    const widgets = named("widgets");
+    await publish(
+      esm(
+        widgets,
+        {
+          "index.js": "export const main = 'main';",
+          "extra.js": "export const extra = 'extra';",
+        },
+        { exports: { ".": "./index.js", "./extra": "./extra.js" } }
+      )
+    );
+    const targets = ["browser", "server", "workflow", "computation"] as const;
+    const app = await approvedApp(
+      { [widgets]: "1" },
+      { targets: [...targets] }
+    );
+    const before = await storedLock(app);
+    const changed = await auditedDuring(async () => {
+      await app.builder.api.dependencies.resolve(
+        intentFor(
+          app.app,
+          { [widgets]: "1" },
+          { targets: [...targets], entries: [widgets, `${widgets}/extra`] }
+        )
+      );
+    });
+    const after = await storedLock(app);
+    const configs = async (lock: GraspLock, side: string) =>
+      await Promise.all(
+        targets.map(async (target): Promise<[string, string]> => [
+          `${side}.${target}`,
+          await configOf(lock, target),
+        ])
+      );
+    const from = await configs(before, "from");
+    const to = await configs(after, "to");
+    expect({
+      entries: after.targets.computation?.entries.toSorted(),
+      recorded: changed
+        .filter(({ action }) => action === "dependency.lock_targets_changed")
+        .map(({ detail }) => detail),
+    }).toStrictEqual({
+      entries: [widgets, `${widgets}/extra`].toSorted(),
+      recorded: [
+        {
+          app: app.app,
+          graphHash: app.request.graphHash,
+          targets: targets.join(" "),
+          ...Object.fromEntries([...from, ...to]),
+        },
+      ],
+    });
+  });
+
+  it("pins one artifact, and records one pin, when two builds race to pin it", async () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
-    const [first, second] = await Promise.all([
-      buildOf(app, "browser"),
-      buildOf(app, "browser"),
-    ]);
-    const row = await env.DB.prepare(
-      "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
-    )
-      .bind(app.app, app.request.graphHash)
-      .first<{ lock: string }>();
-    const lock = graspLockSchema.parse(JSON.parse(row?.lock ?? "null"));
+    let builds: PackageBuild[] = [];
+    const events = await auditedDuring(async () => {
+      builds = await Promise.all([
+        buildOf(app, "browser"),
+        buildOf(app, "browser"),
+      ]);
+    });
+    const [first, second] = builds;
+    const lock = await storedLock(app);
     expect({
-      same: first.hash === second.hash,
-      pinned: lock.artifacts?.[compilerVersion]?.browser?.hash,
+      same: first?.hash === second?.hash,
+      pinned:
+        lock.artifacts?.[compilerVersion]?.[await configOf(lock, "browser")]
+          ?.hash,
       versions: Object.keys(lock.artifacts ?? {}),
+      recorded: pinsRecorded(events).length,
     }).toStrictEqual({
       same: true,
-      pinned: first.hash,
+      pinned: first?.hash,
       versions: [compilerVersion],
+      recorded: 1,
+    });
+  });
+
+  it("keeps the pins of the two compilers that pinned last, and of a target's newest configs, recording what it drops", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const lock = await storedLock(app);
+    const config = await configOf(lock, "browser");
+    const day = 24 * 60 * 60 * 1000;
+    const pinOf = (hash: string, daysAgo: number) => ({
+      target: "browser" as const,
+      hash,
+      exports: {},
+      pinnedAt: new Date(Date.now() - daysAgo * day).toISOString(),
+    });
+    // Two other releases pinned this config before; this compiler pinned
+    // four other configs of the target, and none of this one yet.
+    await storeLock(app, {
+      ...lock,
+      artifacts: {
+        "release-older": { [config]: pinOf(hashOf("a"), 9) },
+        "release-newer": { [config]: pinOf(hashOf("b"), 1) },
+        [compilerVersion]: {
+          [hashOf("1")]: pinOf(hashOf("c"), 8),
+          [hashOf("2")]: pinOf(hashOf("d"), 7),
+          [hashOf("3")]: pinOf(hashOf("e"), 6),
+          [hashOf("4")]: pinOf(hashOf("f"), 5),
+        },
+      },
+    });
+    let built: PackageBuild | undefined;
+    const events = await auditedDuring(async () => {
+      built = await buildOf(app, "browser");
+    });
+    const after = await storedLock(app);
+    expect({
+      compilers: Object.keys(after.artifacts ?? {}).toSorted(),
+      pins: Object.keys(after.artifacts?.[compilerVersion] ?? {}).toSorted(),
+      recorded: pinsRecorded(events).length,
+      dropped: droppedRecorded(events).toSorted(),
+    }).toStrictEqual({
+      compilers: [compilerVersion, "release-newer"].toSorted(),
+      pins: [hashOf("2"), hashOf("3"), hashOf("4"), config].toSorted(),
+      recorded: 1,
+      dropped: [hashOf("a"), hashOf("c")],
+    });
+    expect(after.artifacts?.[compilerVersion]?.[config]?.hash).toBe(
+      built?.hash
+    );
+  });
+
+  it("pins and records a build that drops every pin another release kept, as many as a lock holds", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const lock = await storedLock(app);
+    const day = 24 * 60 * 60 * 1000;
+    const targets = ["browser", "server", "workflow", "computation"] as const;
+    const pinOf = (
+      target: (typeof targets)[number],
+      hash: string,
+      daysAgo: number
+    ) => ({
+      target,
+      hash,
+      exports: {},
+      pinnedAt: new Date(Date.now() - daysAgo * day).toISOString(),
+    });
+    // The oldest of two other releases kept four configs of every target:
+    // a build of a third release drops them all, and one of its own.
+    const older = targets.flatMap((target, t) =>
+      [0, 1, 2, 3].map((c) => ({
+        config: `${"0".repeat(62)}${t}${c}`,
+        pin: pinOf(target, `${"abcd"[t]?.repeat(63)}${c}`, 9),
+      }))
+    );
+    await storeLock(app, {
+      ...lock,
+      artifacts: {
+        "release-older": Object.fromEntries(
+          older.map(({ config, pin }) => [config, pin])
+        ),
+        "release-newer": { [hashOf("e")]: pinOf("browser", hashOf("e"), 1) },
+        [compilerVersion]: {
+          [hashOf("1")]: pinOf("browser", hashOf("1"), 8),
+          [hashOf("2")]: pinOf("browser", hashOf("2"), 7),
+          [hashOf("3")]: pinOf("browser", hashOf("3"), 6),
+          [hashOf("4")]: pinOf("browser", hashOf("4"), 5),
+        },
+      },
+    });
+    let built: PackageBuild | undefined;
+    const events = await auditedDuring(async () => {
+      built = await buildOf(app, "browser");
+    });
+    const after = await storedLock(app);
+    const config = await configOf(after, "browser");
+    expect({
+      pinned: after.artifacts?.[compilerVersion]?.[config]?.hash,
+      compilers: Object.keys(after.artifacts ?? {}).toSorted(),
+      dropped: droppedRecorded(events).toSorted(),
+    }).toStrictEqual({
+      pinned: built?.hash,
+      compilers: [compilerVersion, "release-newer"].toSorted(),
+      dropped: [hashOf("1"), ...older.map(({ pin }) => pin.hash)].toSorted(),
     });
   });
 
@@ -827,59 +1111,36 @@ describe("a build's durability", () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
     await buildOf(app, "browser");
-    const row = await env.DB.prepare(
-      "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
-    )
-      .bind(app.app, app.request.graphHash)
-      .first<{ lock: string }>();
-    const lock = graspLockSchema.parse(JSON.parse(row?.lock ?? "null"));
-    const pinned = lock.artifacts?.[compilerVersion]?.browser;
-    const forged = {
+    const lock = await storedLock(app);
+    const config = await configOf(lock, "browser");
+    const pinned = lock.artifacts?.[compilerVersion]?.[config];
+    if (pinned === undefined) {
+      throw new Error("No pin");
+    }
+    await storeLock(app, {
       ...lock,
       artifacts: {
-        [compilerVersion]: {
-          browser: { exports: pinned?.exports ?? {}, hash: "0".repeat(64) },
-        },
+        [compilerVersion]: { [config]: { ...pinned, hash: "0".repeat(64) } },
       },
-    };
-    await env.DB.prepare(
-      "UPDATE dependency_locks SET lock = ? WHERE app_id = ? AND graph_hash = ?"
-    )
-      .bind(JSON.stringify(forged), app.app, app.request.graphHash)
-      .run();
+    });
     const { code } = await failure(buildOf(app, "browser"));
     expect(code).toBe("package.artifact_mismatch");
   });
 
-  it("records in the audit trail the approval each build relied on, kept or built", async () => {
+  it("records in the audit trail the pin a build writes and the approval it relied on, once", async () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const events = await auditedDuring(async () => {
       await buildOf(app, "browser");
+      // Handed out from the pin, again and again: nothing more recorded.
+      await buildOf(app, "browser");
       await buildOf(app, "browser");
     });
-    const built = events
-      .filter(({ action }) => action === "dependency.built")
-      .map(({ detail }) =>
-        z
-          .object({
-            approval: z.string(),
-            kept: z.boolean(),
-            graphHash: z.string(),
-          })
-          .parse(detail)
-      );
+    const built = pinsRecorded(events).map((detail) =>
+      z.object({ approval: z.string(), graphHash: z.string() }).parse(detail)
+    );
     expect(built).toStrictEqual([
-      {
-        approval: app.request.id,
-        kept: false,
-        graphHash: app.request.graphHash,
-      },
-      {
-        approval: app.request.id,
-        kept: true,
-        graphHash: app.request.graphHash,
-      },
+      { approval: app.request.id, graphHash: app.request.graphHash },
     ]);
   });
 });
@@ -1021,43 +1282,7 @@ describe("what a build names and keeps", () => {
     ]);
   });
 
-  it("re-admits after reading a kept artifact: a change while it was read wins", async () => {
-    const { ui } = await badgeLibrary();
-    const app = await approvedApp({ [ui]: "^1.0.0" });
-    await buildOf(app, "browser");
-    const admin = await personApi("admin");
-    const identity = await app.builder.api.whoami();
-    const { policyGeneration } = await app.builder.api.dependencies.status(
-      app.app
-    );
-    let changed = false;
-    const files = new Proxy(env.FILES, {
-      get: (target, property): unknown =>
-        property === "get"
-          ? async (key: string) => {
-              if (!changed && key.endsWith(".json")) {
-                changed = true;
-                await admin.api.dependencies.grantApprover({
-                  type: "person",
-                  userId: identity.userId,
-                });
-              }
-              return await target.get(key);
-            }
-          : bound(target, property),
-    });
-    const { code } = await failure(
-      buildDependencies({ ...env, FILES: files }, identity, {
-        app: app.app,
-        graphHash: app.request.graphHash,
-        target: "browser",
-        policyGeneration,
-      })
-    );
-    expect(code).toBe("dependency.policy_changed");
-  });
-
-  it("never pins a build onto a target a resolve changed while it built", async () => {
+  it("pins a build under the config it built, when a resolve changes the target while it builds", async () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const identity = await app.builder.api.whoami();
@@ -1088,30 +1313,33 @@ describe("what a build names and keeps", () => {
             }
           : bound(target, property),
     });
-    const { code } = await failure(
-      buildDependencies({ ...env, FILES: files }, identity, {
-        app: app.app,
-        graphHash: app.request.graphHash,
-        target: "browser",
-        policyGeneration,
-      })
-    );
-    const row = await env.DB.prepare(
-      "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
-    )
-      .bind(app.app, app.request.graphHash)
-      .first<{ lock: string }>();
-    const lock = graspLockSchema.parse(JSON.parse(row?.lock ?? "null"));
-    expect([code, lock.artifacts?.[compilerVersion]?.browser]).toStrictEqual([
-      "dependency.stale",
-      undefined,
-    ]);
+    const configBefore = await configOf(await storedLock(app), "browser");
+    const built = await buildDependencies({ ...env, FILES: files }, identity, {
+      app: app.app,
+      graphHash: app.request.graphHash,
+      target: "browser",
+      policyGeneration,
+    });
+    const lock = await storedLock(app);
+    const configNow = await configOf(lock, "browser");
+    expect({
+      raced,
+      // The entries it built: the target's config as it read it.
+      entries: Object.keys(built.artifact.entries),
+      pinnedBefore: lock.artifacts?.[compilerVersion]?.[configBefore]?.hash,
+      pinnedNow: lock.artifacts?.[compilerVersion]?.[configNow],
+    }).toStrictEqual({
+      raced: true,
+      entries: [ui],
+      pinnedBefore: built.hash,
+      pinnedNow: undefined,
+    });
   });
 
-  it("returns a kept artifact only while its pin holds: a resolve while it is read makes the build stale", async () => {
+  it("hands out the kept artifact of the config it read, when a resolve changes the target as it is read", async () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
-    await buildOf(app, "browser");
+    const first = await buildOf(app, "browser");
     const identity = await app.builder.api.whoami();
     const { policyGeneration } = await app.builder.api.dependencies.status(
       app.app
@@ -1137,18 +1365,25 @@ describe("what a build names and keeps", () => {
             }
           : bound(target, property),
     });
-    const { code } = await failure(
-      buildDependencies({ ...env, FILES: files }, identity, {
-        app: app.app,
-        graphHash: app.request.graphHash,
-        target: "browser",
-        policyGeneration,
-      })
+    const kept = await buildDependencies({ ...env, FILES: files }, identity, {
+      app: app.app,
+      graphHash: app.request.graphHash,
+      target: "browser",
+      policyGeneration,
+    });
+    // Still pinned, under the config it was built for.
+    const lock = await storedLock(app);
+    const pinned = Object.values(lock.artifacts?.[compilerVersion] ?? {}).map(
+      ({ hash }) => hash
     );
-    expect([raced, code]).toStrictEqual([true, "dependency.stale"]);
+    expect({ raced, hash: kept.hash, pinned }).toStrictEqual({
+      raced: true,
+      hash: first.hash,
+      pinned: [first.hash],
+    });
   });
 
-  it("returns an artifact built again under a pin only while the pin holds: a resolve while it builds makes the build stale", async () => {
+  it("makes a corrupt artifact again to its pin, recording nothing new, when a resolve changes the target while it builds", async () => {
     const { ui } = await badgeLibrary();
     const app = await approvedApp({ [ui]: "^1.0.0" });
     const first = await buildOf(app, "browser");
@@ -1181,14 +1416,127 @@ describe("what a build names and keeps", () => {
             }
           : bound(target, property),
     });
-    const { code } = await failure(
-      buildDependencies({ ...env, FILES: files }, identity, {
+    let again: PackageBuild | undefined;
+    const events = await auditedDuring(async () => {
+      again = await buildDependencies({ ...env, FILES: files }, identity, {
         app: app.app,
         graphHash: app.request.graphHash,
         target: "browser",
         policyGeneration,
-      })
+      });
+    });
+    expect({
+      raced,
+      hash: again?.hash,
+      rebuilt: again?.stats !== null,
+      recorded: pinsRecorded(events),
+    }).toStrictEqual({
+      raced: true,
+      hash: first.hash,
+      rebuilt: true,
+      recorded: [],
+    });
+  });
+});
+
+describe("what a pin keeps and records", () => {
+  it("records a pin with the write that makes it: a request that dies right after still leaves its event", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
     );
-    expect([raced, code]).toStrictEqual([true, "dependency.stale"]);
+    const lockText = async (): Promise<string | null> =>
+      await env.DB.prepare(
+        "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+      )
+        .bind(app.app, app.request.graphHash)
+        .first<string>("lock");
+    // The request dies right after the batch that changes the lock lands.
+    const dying = new Proxy(env.DB, {
+      get: (target, property): unknown =>
+        property === "batch"
+          ? async (statements: D1PreparedStatement[]) => {
+              const before = await lockText();
+              const results = await target.batch(statements);
+              if ((await lockText()) !== before) {
+                throw new Error("The request died");
+              }
+              return results;
+            }
+          : bound(target, property),
+    });
+    let died = false;
+    const events = await auditedDuring(async () => {
+      try {
+        await buildDependencies({ ...env, DB: dying }, identity, {
+          app: app.app,
+          graphHash: app.request.graphHash,
+          target: "browser",
+          policyGeneration,
+        });
+      } catch (error) {
+        died = error instanceof Error && error.message === "The request died";
+      }
+    });
+    const lock = await storedLock(app);
+    const pinned =
+      lock.artifacts?.[compilerVersion]?.[await configOf(lock, "browser")];
+    expect({
+      died,
+      recorded: pinsRecorded(events).map(({ hash }) => hash),
+    }).toStrictEqual({ died: true, recorded: [pinned?.hash] });
+  });
+
+  it("keeps the config a target names now, and moves a pin's time on as it is handed out", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    await buildOf(app, "browser");
+    const lock = await storedLock(app);
+    const config = await configOf(lock, "browser");
+    const pinned = lock.artifacts?.[compilerVersion]?.[config];
+    if (pinned === undefined) {
+      throw new Error("No pin");
+    }
+    const day = 24 * 60 * 60 * 1000;
+    const pinOf = (hash: string, daysAgo: number) => ({
+      target: "browser" as const,
+      hash,
+      exports: {},
+      pinnedAt: new Date(Date.now() - daysAgo * day).toISOString(),
+    });
+    // The config in use was pinned first of five: adding one more drops
+    // the oldest of the others, never it.
+    const { dropped } = withPin(
+      {
+        [compilerVersion]: {
+          [config]: pinOf(hashOf("a"), 9),
+          [hashOf("1")]: pinOf(hashOf("b"), 4),
+          [hashOf("2")]: pinOf(hashOf("c"), 3),
+          [hashOf("3")]: pinOf(hashOf("d"), 2),
+        },
+      },
+      compilerVersion,
+      hashOf("4"),
+      pinOf(hashOf("e"), 0),
+      config
+    );
+    // Handed out two days after it was pinned: its time moves on.
+    await storeLock(app, {
+      ...lock,
+      artifacts: {
+        [compilerVersion]: {
+          [config]: { ...pinned, pinnedAt: pinOf("", 2).pinnedAt },
+        },
+      },
+    });
+    await buildOf(app, "browser");
+    const after = await storedLock(app);
+    const touched = after.artifacts?.[compilerVersion]?.[config];
+    expect({
+      dropped,
+      touched: Date.now() - Date.parse(touched?.pinnedAt ?? "") < day,
+    }).toStrictEqual({ dropped: [hashOf("b")], touched: true });
   });
 });

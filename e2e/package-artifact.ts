@@ -5,13 +5,13 @@
  * (connections-seed.ts says the same of Microsoft and Composio), so this
  * leaves behind what resolving, approving and building would have:
  *
- * - the App's request for the graph, through core's own `propose`, then
- *   marked approved in core's database as a person's decision leaves it.
+ * - the App's request for the graph, approved, in core's database as the
+ *   resolver and a person's decision leave it (dependency-request.ts).
  *   Deciding through the product would first need someone given the
  *   permission to approve, which moves the deployment's policy generation
  *   under every other test approving at the same time (dashboard.e2e.ts);
  * - the App's lock for that graph, pinning the artifact for the running
- *   compiler, in core's database;
+ *   compiler and the browser target's config, in core's database;
  * - the artifact's description and files, in core's local R2 bucket.
  *
  * Then the builder asks core to build, as the product would: core finds
@@ -34,11 +34,13 @@ import {
   lockGraph,
   packageArtifactSchema,
   targetConditions,
+  targetConfigHash,
 } from "@grasp-os/shared/packages";
 import type { GraspLock, PackageArtifact } from "@grasp-os/shared/packages";
 import { z } from "zod";
 
 import { execute, quoted, whileBusy } from "./connections-seed.ts";
+import { seedDependencyRequest } from "./dependency-request.ts";
 import { apiOf } from "./people.ts";
 import type { Person } from "./people.ts";
 import { stateDir } from "./stack.ts";
@@ -244,19 +246,14 @@ export const seedHostileArtifact = async (
         },
       },
     };
-    const request = await api.dependencies.propose({
+    const request = await seedDependencyRequest({
       app,
-      sourceRevision: "rev-1",
+      requestedBy: builder.userId,
       purpose: "Show a widget.",
       targets: ["browser"],
-      graph: lockGraph(lock, lock.platformPeers),
-      findings: [],
-      refused: [],
+      graph: lockGraph(lock),
+      approved: true,
     });
-    await execute(
-      `UPDATE dependency_requests SET status = 'approved', decided_by = ${quoted(builder.userId)}, decided_at = ${Date.now()}, decided_generation = policy_generation WHERE id = ${quoted(request.id)}`,
-      "core"
-    );
 
     const files = artifactFiles(attacker);
     const fileEntries: PackageArtifact["files"] = {};
@@ -283,13 +280,19 @@ export const seedHostileArtifact = async (
     });
     const hash = await sha256Hex(canonicalJson(described));
     const compiler = await compilerVersion();
+    const { browser } = lock.targets;
+    if (browser === undefined) {
+      throw new Error("The lock has no browser target");
+    }
     const pinned: GraspLock = {
       ...lock,
       artifacts: {
         [compiler]: {
-          browser: {
+          [await targetConfigHash("browser", browser)]: {
+            target: "browser",
             hash,
             exports: { [hostileName]: `${hostileName}@${version}/index.js` },
+            pinnedAt: new Date().toISOString(),
           },
         },
       },

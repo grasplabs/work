@@ -4,7 +4,6 @@ import type {
   DependencyApprover,
   DependencyApproverSubject,
   DependencyDecision,
-  DependencyProposal,
   DependencyRequest,
   DependencyReview,
   DependencyStatus,
@@ -26,7 +25,6 @@ import {
   decideDependency,
   dependencyReview,
   dependencyStatus,
-  proposeDependencies,
   waitingDependencies,
   waitingDependencyCount,
 } from "./requests.ts";
@@ -45,13 +43,6 @@ export class DependenciesRpc extends RpcTarget implements DependenciesApi {
     super();
     this.#env = env;
     this.#check = check;
-  }
-
-  async propose(proposal: DependencyProposal): Promise<DependencyRequest> {
-    return await withPerson(
-      this.#check,
-      async (by) => await proposeDependencies(this.#env, by, proposal)
-    );
   }
 
   async resolve(intent: DependencyIntent): Promise<Resolved> {

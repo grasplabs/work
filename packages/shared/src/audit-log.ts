@@ -125,8 +125,12 @@ const typeRules: readonly {
   { action: "dependency.requested", type: "action" },
   { action: "dependency.admission_refused", type: "action" },
   { action: "dependency.superseded", type: "action" },
-  // A build of an approved graph, and the approval it relied on.
+  // A build pinning an artifact of an approved graph, and the approval it
+  // relied on, and each pin that dropped; and a resolve changing what a
+  // target of a graph's lock is built for (its conditions or entries).
   { action: "dependency.built", type: "action" },
+  { action: "dependency.pin_dropped", type: "action" },
+  { action: "dependency.lock_targets_changed", type: "action" },
   { action: "dependency", type: "decision" },
   // A run reading an attachment of a message its email trigger kept.
   { action: "workflow.email.read", type: "read" },

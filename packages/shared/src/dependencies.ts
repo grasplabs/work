@@ -14,14 +14,14 @@ import type {
 } from "./packages.ts";
 
 // npm packages an App wants to use, and a person's approval of them. An
-// agent or a builder proposes one exact graph: every package it would
-// bring, direct and transitive, each by exact version and integrity hash.
-// It is a request, and allows nothing. A person who holds
-// `dependencies.approve` approves or denies the graph as a whole. Nothing
-// here fetches, installs or runs a package: the graph is data its proposer
-// supplies, which nothing has checked against the registry yet, and a
-// package's own words in it (a licence, a finding's summary) are shown as
-// text, never followed.
+// agent or a builder asks core to resolve what the App's package.json
+// names, and core's resolver proposes one exact graph: every package it
+// brings, direct and transitive, each by exact version and integrity hash,
+// as the registry has them. It is a request, and allows nothing. A person
+// who holds `dependencies.approve` approves or denies the graph as a
+// whole. Nothing here fetches, installs or runs a package; a package's own
+// words in a graph (a licence, a finding's summary) are shown as text,
+// never followed.
 
 /** Where a package's code may run. A graph is approved for some, never all by default. */
 export const dependencyTargetSchema = z.enum([
@@ -265,7 +265,10 @@ const uniqueTargets = z
     message: "Each target once",
   });
 
-/** What is proposed: one graph, for one App at one source revision. */
+/**
+ * What core's resolver proposes: one graph, for one App at one source
+ * revision. Never taken from a client.
+ */
 export const dependencyProposalSchema = z
   .strictObject({
     app: appIdSchema,
@@ -300,7 +303,7 @@ export const dependencyProposalSchema = z
       refused.map((entry) => entry.package)
     );
   });
-/** A proposal as a client sends it, with a plain string App ID. */
+/** A proposal as the resolver makes it, with a plain string App ID. */
 export type DependencyProposal = z.input<typeof dependencyProposalSchema>;
 
 const byPackage = (a: DependencyPackageRef, b: DependencyPackageRef): number =>
@@ -376,9 +379,9 @@ export interface DependencyRequest {
   /** What a list shows of its packages and findings. */
   summary: DependencySummary;
   /**
-   * Who asked, and when (ISO 8601). Everything the request says of its
-   * packages (versions, hashes, licences, peers, findings) is as they
-   * reported it: nothing has checked it against the registry.
+   * Who asked, and when (ISO 8601). What the request says of its packages
+   * (versions, hashes, peers) is what core's resolver read from the
+   * registry; a licence is as the package states it.
    */
   requestedBy: { userId: string; name: string };
   requestedAt: string;
@@ -497,15 +500,12 @@ export interface DependencyApprover {
  */
 export interface DependenciesApi {
   /**
-   * Proposes a graph for an App, as one of its builders: a request that
-   * waits for a decision and allows nothing. The same proposal again is
-   * the same request; another one for the App takes a waiting one's place.
-   */
-  propose: (proposal: DependencyProposal) => Promise<DependencyRequest>;
-  /**
    * Resolves what an App's package.json asks for into an exact graph
    * from the npm registry, checks every package's bytes without running
-   * them, and proposes it, as `propose` does: for one of its builders.
+   * them, and proposes it, for one of its builders: a request that waits
+   * for a decision and allows nothing. The same graph again is the same
+   * request; another one for the App takes a waiting one's place. The only
+   * way a request is made: none is taken as a client states it.
    */
   resolve: (intent: DependencyIntent) => Promise<{
     request: DependencyRequest;

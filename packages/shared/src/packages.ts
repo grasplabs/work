@@ -14,8 +14,10 @@ import type {
   DependencyPackage,
   DependencyTarget,
 } from "./dependencies.ts";
+import { sha256Hex } from "./encoding.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { appIdSchema } from "./ids.ts";
+import { canonicalJson } from "./json.ts";
 
 // npm packages as the registry has them, as connect fetches them for core.
 // Connect is the only part of Grasp that talks to the registry: core asks
@@ -132,6 +134,8 @@ export const packageErrors = defineErrorFamily({
     "A package needs something Grasp doesn't run: install scripts, native code, links or files outside itself.",
   "package.artifact_mismatch":
     "Building the packages made other files than the lock pinned for them.",
+  "package.platform_changed":
+    "The platform's React changed since these packages were resolved. Resolve them again.",
 });
 
 /**
@@ -265,6 +269,8 @@ export const dependencyIntentSchema = z.strictObject({
 });
 export type DependencyIntent = z.input<typeof dependencyIntentSchema>;
 
+const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
+
 /** One package of the lock, by `name@version`. */
 const lockedPackageSchema = z.strictObject({
   name: packageNameSchema,
@@ -290,6 +296,26 @@ const lockedPackageSchema = z.strictObject({
 });
 export type LockedPackage = z.infer<typeof lockedPackageSchema>;
 
+/** What a target is built for: its export conditions and its entries. */
+const targetConfigSchema = z.strictObject({
+  conditions: z.array(z.string().max(32)).max(16),
+  entries: z.array(packageEntrySchema).min(1).max(256),
+});
+export type TargetConfig = z.infer<typeof targetConfigSchema>;
+
+/**
+ * What one compiler built one target config to: the artifact's hash, the
+ * file each entry resolved to, and when it was pinned (which pins are the
+ * oldest, when there are too many to keep).
+ */
+const artifactPinSchema = z.strictObject({
+  target: dependencyTargetSchema,
+  hash: sha256Schema,
+  exports: z.record(packageEntrySchema, z.string().max(1024)),
+  pinnedAt: z.iso.datetime({ offset: true }),
+});
+export type ArtifactPin = z.infer<typeof artifactPinSchema>;
+
 /**
  * `grasp.lock.json`: the exact graph an App's package.json resolved to.
  * Every package by exact version and integrity, each edge and peer
@@ -304,43 +330,52 @@ export const graspLockSchema = z.strictObject({
   /** Each direct dependency's exact version. */
   direct: z.record(packageNameSchema, exactVersionSchema),
   platformPeers: z.record(packageNameSchema, exactVersionSchema),
-  targets: z.partialRecord(
-    dependencyTargetSchema,
-    z.strictObject({
-      conditions: z.array(z.string().max(32)).max(16),
-      entries: z.array(packageEntrySchema).min(1).max(256),
-    })
-  ),
+  /**
+   * Each target's config as the last resolve asked for it: what the next
+   * build of the target builds.
+   */
+  targets: z.partialRecord(dependencyTargetSchema, targetConfigSchema),
   packages: z.record(z.string(), lockedPackageSchema),
   /**
-   * What each target was built to, by the compiler version that built it:
-   * the artifact's hash, and the file each entry resolved to. Pinned the
-   * first time a compiler builds the target, and checked on every build
-   * after: the same lock and compiler never make other bytes silently.
+   * What each target config was built to, by the compiler version that
+   * built it and the config's hash (`targetConfigHash`, over the target,
+   * its conditions and its entries). Pinned the first time a compiler
+   * builds that config, and checked on every build of it after: the same
+   * lock, config and compiler never make other bytes. A resolve that asks
+   * for another config leaves every pin as it is; the new config gets its
+   * own pin when it is built. Pins are dropped only when there are too
+   * many to keep (build.ts), and the build that drops one records which.
    */
   artifacts: z
-    .record(
-      z.string().max(64),
-      z.partialRecord(
-        dependencyTargetSchema,
-        z.strictObject({
-          hash: z.string().regex(/^[0-9a-f]{64}$/u),
-          exports: z.record(packageEntrySchema, z.string().max(1024)),
-        })
-      )
-    )
+    .record(z.string().max(64), z.record(sha256Schema, artifactPinSchema))
     .optional(),
 });
 export type GraspLock = z.infer<typeof graspLockSchema>;
 
 /**
- * The graph a person approves, from a lock, with the platform peers of the
- * release that reads it (`platformPeers`): what its hash names.
+ * The hash that names a target's config: of the target, its export
+ * conditions and its entries, so a pin is only ever for the config it was
+ * built from.
  */
-export const lockGraph = (
-  lock: GraspLock,
-  platformPeers: Readonly<Record<string, string>>
-): DependencyGraph =>
+export const targetConfigHash = async (
+  target: DependencyTarget,
+  config: TargetConfig
+): Promise<string> =>
+  await sha256Hex(
+    canonicalJson({
+      target,
+      conditions: config.conditions,
+      entries: config.entries,
+    })
+  );
+
+/**
+ * The graph a person approves, from a lock: what its hash names. With the
+ * platform peers the lock itself names, the ones it was resolved against,
+ * so a lock always hashes to the graph that was approved; whether those
+ * are still this release's is the build's to check (`package.platform_changed`).
+ */
+export const lockGraph = (lock: GraspLock): DependencyGraph =>
   canonicalGraph({
     direct: Object.entries(lock.direct).map(([name, version]) => ({
       name,
@@ -361,7 +396,7 @@ export const lockGraph = (
         resolved: peer.resolved,
       })),
     })),
-    platformPeers: { ...platformPeers },
+    platformPeers: { ...lock.platformPeers },
   });
 
 /**
@@ -399,8 +434,6 @@ export interface PackageTarball {
   integrity: string;
   tarball: Uint8Array;
 }
-
-const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 
 /**
  * What a build of one target made, as the builder describes it: each

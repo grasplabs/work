@@ -1,6 +1,11 @@
-import { compilerVersion, startPackageBuilder } from "@grasp-os/compiler";
+import {
+  compilerVersion,
+  platformPeers,
+  startPackageBuilder,
+} from "@grasp-os/compiler";
 import type { BuildRequest } from "@grasp-os/compiler";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import type { AuditEntry } from "@grasp-os/shared/audit";
 import {
   dependencyErrors,
   dependencyGraphHash,
@@ -8,7 +13,7 @@ import {
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   graspLockSchema,
   packageArtifactSchema,
@@ -16,8 +21,10 @@ import {
   packageBuildRequestSchema,
   packageErrors,
   packageLimitsOf,
+  targetConfigHash,
 } from "@grasp-os/shared/packages";
 import type {
+  ArtifactPin,
   GraspLock,
   PackageArtifact,
   PackageBuild,
@@ -29,7 +36,12 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { appFor } from "../apps.ts";
-import { auditedBatch, outboxed } from "../audit-outbox.ts";
+import {
+  auditedBatch,
+  outboxedEventWhere,
+  outboxedWhere,
+  storedEvent,
+} from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
 import { policyGenerationSql } from "../dependencies/policy.ts";
@@ -46,19 +58,37 @@ import { verifiedTarball } from "./tarballs.ts";
 //
 // - Building what nobody approved, or more of it: every build asks
 //   `admitDependencies` first, for this App, graph and target under the
-//   policy generation the caller read, and records the approval it relied
-//   on. The lock is checked to still hash to the approved graph.
+//   policy generation the caller read, and the pin it writes records the
+//   approval it relied on. The lock is checked to still hash to the
+//   approved graph.
 // - Other bytes than approved: each tarball is checked against the lock's
 //   integrity in core and again in the builder.
 // - An artifact that changes under the same lock: the first build of a
-//   target by a compiler pins its artifact's hash in the lock; a later
-//   build that makes anything else is refused, never swapped in
-//   (`package.artifact_mismatch`). A kept artifact is read only after
-//   every file's hash is checked again; a corrupt one is built again and
-//   must match the pin.
+//   target config (its conditions and entries, `targetConfigHash`) by a
+//   compiler pins its artifact's hash in the lock, under that config; a
+//   later build of it that makes anything else is refused, never swapped
+//   in (`package.artifact_mismatch`). A resolve that sets other entries
+//   changes the target's config, audited as it does
+//   (`dependency.lock_targets_changed`, resolve.ts): the new config gets a
+//   pin of its own, recorded as it is written (`dependency.built`), and
+//   the old config's pin stays as it was. A kept artifact is handed out by
+//   its description, whose hash is checked; its files' bytes are checked
+//   each time one is served (serve.ts), and a corrupt one makes the next
+//   build make it again, to the pin.
+// - A platform that moved on: a lock is the graph it was resolved
+//   against, React included, and hashes with the lock's own platform
+//   peers. A release with another React builds nothing of it
+//   (`package.platform_changed`): resolve again, for a new approval.
+// - Releases side by side, each with its own compiler: each pins its own
+//   builds, and a lock keeps the pins of the two compilers that pinned
+//   last, so neither erases the other's while both serve.
 // - What the builder answers: its code is Grasp's, but it handled hostile
 //   bytes, so its answer is checked like any input: its shape, every
 //   file's SHA-256 against the bytes, and the artifact's size.
+//
+// Not here yet: taking an approval back, or retiring an artifact. Until
+// GRA-359, an approval holds until the policy generation moves on, and a
+// pin until it is dropped as one too many (`withPin`).
 
 /** How the runtime says it stopped an isolate over its limits. */
 const overLimit = /exceeded (?:its )?(?:CPU|memory)/iu;
@@ -124,31 +154,26 @@ export const keptFile = async (
 };
 
 /**
- * A kept artifact, if it is there whole: its description hashing to
- * `hash`, and every file's bytes to the hash it names. Anything else is
- * as good as missing.
+ * Forgets kept artifact `hash`'s description, once one of its files is
+ * found not to be the bytes it names: the next build of it makes it
+ * again, and must match its pin.
  */
-const keptArtifact = async (
-  env: Env,
-  hash: string
-): Promise<PackageArtifact | undefined> => {
-  const description = await keptDescription(env, hash);
-  if (description === undefined) {
-    return undefined;
-  }
-  for (const [path, { sha256: expected }] of Object.entries(
-    description.files
-  )) {
-    // Each file in turn: one that doesn't match ends the check.
-    // oxlint-disable-next-line no-await-in-loop
-    if ((await keptFile(env, hash, path, expected)) === undefined) {
-      return undefined;
-    }
-  }
-  return description;
+export const forgetArtifact = async (env: Env, hash: string): Promise<void> => {
+  await env.FILES.delete(artifactKey(hash));
 };
 
-/** The lock of an App's graph, checked to still be that graph. */
+/** Whether two sets of platform peers name the same packages and versions. */
+const samePlatform = (
+  a: Readonly<Record<string, string>>,
+  b: Readonly<Record<string, string>>
+): boolean => canonicalJson({ ...a }) === canonicalJson({ ...b });
+
+/**
+ * The lock of an App's graph, checked to still be that graph, and to be
+ * for this release's platform: one resolved against another React is
+ * `package.platform_changed` (resolve again), logged as a warning, since a
+ * release that moves React on does that to every lock.
+ */
 export const lockOf = async (
   env: Env,
   app: string,
@@ -176,36 +201,102 @@ export const lockOf = async (
     log.error("packages.lock_changed", { app, graphHash });
     throw dependencyErrors.create("dependency.approval_required");
   }
+  if (!samePlatform(lock.platformPeers, platformPeers)) {
+    log.warn("packages.platform_changed", {
+      app,
+      graphHash,
+      locked: canonicalJson({ ...lock.platformPeers }),
+      platform: canonicalJson({ ...platformPeers }),
+    });
+    throw packageErrors.create("package.platform_changed");
+  }
   return { lock, stored: row.lock };
 };
 
-/** What a target is built for: its conditions and entries, as one text. */
-const targetOf = (lock: GraspLock, target: PackageArtifact["target"]): string =>
-  JSON.stringify(lock.targets[target] ?? null);
+/** Most configs of one target a compiler's pins keep: the newest. */
+const maxTargetConfigs = 4;
 
 /**
- * Stops a build that returns an existing pin's artifact unless the pin
- * still holds as it returns: the lock read again has the target's entries
- * and conditions as they were read, and the same pin. A resolve may have
- * changed the target (and its pin) while the artifact was read or built;
- * then the artifact is for a target that no longer exists, and the build
- * is stale (`dependency.stale`), never returned.
+ * Most compilers whose pins a lock keeps: the two that pinned last, so two
+ * releases running side by side (a rollout, ring by ring) each keep their
+ * own pins instead of erasing the other's.
  */
-const checkPinHolds = async (
-  env: Env,
-  app: string,
-  graphHash: string,
-  read: GraspLock,
-  target: PackageArtifact["target"],
-  hash: string
-): Promise<void> => {
-  const now = await lockOf(env, app, graphHash);
-  if (
-    targetOf(now.lock, target) !== targetOf(read, target) ||
-    now.lock.artifacts?.[compilerVersion]?.[target]?.hash !== hash
-  ) {
-    throw dependencyErrors.create("dependency.stale");
+const maxCompilers = 2;
+
+/** When a compiler's pins were last written: its newest pin's time. */
+const lastPinned = (pins: Record<string, ArtifactPin>): string => {
+  let latest = "";
+  for (const { pinnedAt } of Object.values(pins)) {
+    if (pinnedAt > latest) {
+      latest = pinnedAt;
+    }
   }
+  return latest;
+};
+
+/** Newest first, by when each was pinned. */
+const newestFirst = (a: string, b: string): number => {
+  if (a === b) {
+    return 0;
+  }
+  return a < b ? 1 : -1;
+};
+
+/**
+ * A lock's pins once `added` is pinned for `compiler` under `config`, and
+ * the hashes of the pins that drops: a config of the same target past the
+ * newest {@link maxTargetConfigs} (by when each was last pinned or handed
+ * out, `touchPin`), and every pin of a compiler past the
+ * {@link maxCompilers} that pinned last. Never the config the lock names
+ * for the target now (`inUse`), which a build may have read before a
+ * resolve set it back. Nothing else is dropped: a pin of another config,
+ * another target or another kept compiler stays.
+ */
+export const withPin = (
+  artifacts: GraspLock["artifacts"],
+  compiler: string,
+  config: string,
+  added: ArtifactPin,
+  inUse?: string
+): { artifacts: NonNullable<GraspLock["artifacts"]>; dropped: string[] } => {
+  const pins: Record<string, ArtifactPin> = {
+    ...artifacts?.[compiler],
+    [config]: added,
+  };
+  // Kept whatever their time: the config pinned now, and the one in use.
+  const keptAnyway =
+    inUse !== undefined && inUse !== config && pins[inUse] !== undefined
+      ? 2
+      : 1;
+  const tooMany = new Set(
+    Object.entries(pins)
+      .filter(
+        ([key, { target }]) =>
+          key !== config && key !== inUse && target === added.target
+      )
+      .toSorted(([, a], [, b]) => newestFirst(a.pinnedAt, b.pinnedAt))
+      .slice(maxTargetConfigs - keptAnyway)
+      .map(([key]) => key)
+  );
+  const others = Object.entries(artifacts ?? {})
+    .filter(([version]) => version !== compiler)
+    .toSorted(([, a], [, b]) => newestFirst(lastPinned(a), lastPinned(b)));
+  return {
+    artifacts: {
+      ...Object.fromEntries(others.slice(0, maxCompilers - 1)),
+      [compiler]: Object.fromEntries(
+        Object.entries(pins).filter(([key]) => !tooMany.has(key))
+      ),
+    },
+    dropped: [
+      ...Object.entries(pins)
+        .filter(([key]) => tooMany.has(key))
+        .map(([, { hash }]) => hash),
+      ...others
+        .slice(maxCompilers - 1)
+        .flatMap(([, gone]) => Object.values(gone).map(({ hash }) => hash)),
+    ],
+  };
 };
 
 /** What a build was admitted under: re-checked in the write that pins. */
@@ -215,118 +306,222 @@ interface Admitted {
 }
 
 /**
- * Whether `admitted` still holds as a statement runs: its approval still
- * approved, under the same policy generation.
+ * Whether `admitted` still holds as a statement runs: under the same
+ * policy generation, and its approval still approved (nothing takes one
+ * back until GRA-359, so today the generation is what moves).
  */
 const stillAdmitted = ({ approval, policyGeneration }: Admitted): SQL =>
   sql`EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.id} = ${approval} AND ${dependencyRequests.status} = 'approved') AND ${policyGenerationSql} = ${policyGeneration}`;
 
 /**
- * Pins `hash` as what `compilerVersion` builds `target` of the lock to,
- * unless a build pinned something first; returns the pin that holds. One
- * conditional update on the lock as it was read, which lands only while
- * the build's approval holds. A retry after another write re-reads the
- * lock and stops if the target is no longer the one built (a resolve set
- * other entries or conditions): that build is stale, never pinned.
+ * The audit entry of a pin a build writes: which App, graph, target config
+ * and artifact, and the approval it relied on. Only for a pin written: a
+ * build that hands out an artifact pinned before records nothing, so
+ * asking again and again adds nothing to the trail.
+ */
+const pinEntry = (
+  by: Acting,
+  pinned: {
+    app: string;
+    graphHash: string;
+    target: PackageArtifact["target"];
+    config: string;
+    approval: string;
+    hash: string;
+  }
+): AuditEntry => ({
+  actor: by.actor ?? actorOf(by),
+  action: "dependency.built",
+  target: { type: "app", id: pinned.app },
+  detail: pinned,
+});
+
+/**
+ * The audit entry of a pin that writing another (`pinned`) dropped, one
+ * each: a build of a third release drops every pin of the oldest other
+ * one, more hashes than one detail value holds.
+ */
+const droppedEntry = (
+  by: Acting,
+  dropped: { app: string; graphHash: string; hash: string; pinned: string }
+): AuditEntry => ({
+  actor: by.actor ?? actorOf(by),
+  action: "dependency.pin_dropped",
+  target: { type: "app", id: dropped.app },
+  detail: dropped,
+});
+
+/** How often pinning starts over when another write changed the lock first. */
+const pinTries = 3;
+
+/** What a build pins: its artifact, for one target config. */
+interface Pinning {
+  target: PackageArtifact["target"];
+  config: string;
+  hash: string;
+  exports: Record<string, string>;
+}
+
+/**
+ * Pins `pinning.hash` as what `compilerVersion` builds the target config
+ * to, unless a build pinned that config first; returns the pin that
+ * holds, and, if this call wrote it, the pins writing it dropped
+ * (`withPin`). One conditional update on the lock as it was read, which
+ * lands only while the build's approval holds; after another write, the
+ * lock is read again and checked again (`lockOf`), size included.
  */
 const pin = async (
   env: Env,
+  by: Acting,
   app: string,
   graphHash: string,
   read: { lock: GraspLock; stored: string },
-  built: { target: PackageArtifact["target"]; for: string },
-  pinned: { hash: string; exports: Record<string, string> },
+  pinning: Pinning,
   limits: PackageLimits,
   admitted: Admitted,
   admit: () => Promise<unknown>
 ): Promise<string> => {
-  const { target } = built;
-  if (targetOf(read.lock, target) !== built.for) {
-    throw dependencyErrors.create("dependency.stale");
-  }
-  // Only this compiler's pins are kept: another compiler's artifacts are
-  // another release's, which builds its own.
-  const next: GraspLock = {
-    ...read.lock,
-    artifacts: {
-      [compilerVersion]: {
-        ...read.lock.artifacts?.[compilerVersion],
-        [target]: pinned,
-      },
-    },
-  };
-  const stored = canonicalJson(next);
-  if (new TextEncoder().encode(stored).byteLength > limits.lockBytes) {
-    throw packageErrors.create("package.quota", {
-      quota: "lockBytes",
-      limit: limits.lockBytes,
-    });
-  }
   const db = drizzle(env.DB);
-  const updated = await db
-    .update(dependencyLocks)
-    .set({ lock: stored })
-    .where(
-      and(
-        eq(dependencyLocks.appId, app),
-        eq(dependencyLocks.graphHash, graphHash),
-        eq(dependencyLocks.lock, read.stored),
-        stillAdmitted(admitted)
-      )
-    )
-    .returning({ lock: dependencyLocks.lock });
-  if (updated.length > 0) {
-    return pinned.hash;
+  let current = read;
+  for (let attempt = 0; attempt < pinTries; attempt += 1) {
+    const existing =
+      current.lock.artifacts?.[compilerVersion]?.[pinning.config];
+    if (existing) {
+      return existing.hash;
+    }
+    const named = current.lock.targets[pinning.target];
+    const inUse =
+      named === undefined
+        ? undefined
+        : // oxlint-disable-next-line no-await-in-loop
+          await targetConfigHash(pinning.target, named);
+    const { artifacts, dropped } = withPin(
+      current.lock.artifacts,
+      compilerVersion,
+      pinning.config,
+      {
+        target: pinning.target,
+        hash: pinning.hash,
+        exports: pinning.exports,
+        pinnedAt: new Date().toISOString(),
+      },
+      inUse
+    );
+    const stored = canonicalJson(
+      graspLockSchema.parse({ ...current.lock, artifacts })
+    );
+    if (new TextEncoder().encode(stored).byteLength > limits.lockBytes) {
+      throw packageErrors.create("package.quota", {
+        quota: "lockBytes",
+        limit: limits.lockBytes,
+      });
+    }
+    const built = createAuditEvent(
+      pinEntry(by, {
+        app,
+        graphHash,
+        target: pinning.target,
+        config: pinning.config,
+        approval: admitted.approval,
+        hash: pinning.hash,
+      }),
+      "core"
+    );
+    // In turn: each attempt writes on the lock the one before read. The
+    // pin and its audit events land together or not at all: the events
+    // only if this update changed the lock, as the batch runs.
+    // oxlint-disable-next-line no-await-in-loop
+    const [updated] = await auditedBatch(env, db, [
+      db
+        .update(dependencyLocks)
+        .set({ lock: stored })
+        .where(
+          and(
+            eq(dependencyLocks.appId, app),
+            eq(dependencyLocks.graphHash, graphHash),
+            eq(dependencyLocks.lock, current.stored),
+            stillAdmitted(admitted)
+          )
+        )
+        .returning({ lock: dependencyLocks.lock }),
+      // Only if this update changed the lock: two builds of the same bytes
+      // can write the same text, and only the one that lands records it.
+      outboxedEventWhere(db, built, sql`changes() > 0`),
+      // Each pin it dropped, only if the pin itself was recorded.
+      ...dropped.map((hash) =>
+        outboxedWhere(
+          db,
+          droppedEntry(by, {
+            app,
+            graphHash,
+            hash,
+            pinned: pinning.hash,
+          }),
+          storedEvent(built.id)
+        )
+      ),
+    ]);
+    if (updated.length > 0) {
+      return pinning.hash;
+    }
+    // The admission no longer holds (this throws), or another write
+    // changed the lock first: read it as it is now.
+    // oxlint-disable-next-line no-await-in-loop
+    await admit();
+    // oxlint-disable-next-line no-await-in-loop
+    current = await lockOf(env, app, graphHash);
   }
-  // The approval no longer holds (this throws, audited), or another write
-  // changed the lock first.
-  await admit();
-  const now = await lockOf(env, app, graphHash);
-  if (targetOf(now.lock, target) !== built.for) {
-    throw dependencyErrors.create("dependency.stale");
-  }
-  return (
-    now.lock.artifacts?.[compilerVersion]?.[target]?.hash ??
-    (await pin(
-      env,
-      app,
-      graphHash,
-      now,
-      built,
-      pinned,
-      limits,
-      admitted,
-      admit
-    ))
-  );
+  throw dependencyErrors.create("dependency.stale");
 };
 
+/** How long a pin handed out goes before its time is moved on. */
+const touchAfterMs = 24 * 60 * 60 * 1000;
+
 /**
- * Records in the audit trail that a build used an approval: which App,
- * graph, target and artifact, and whether it was built now or kept from
- * before. Each use, so what relied on which approval can be found.
+ * Moves a pin's time on when it is handed out and its time is a day old,
+ * so the pins kept for a target are the ones in use, not the ones pinned
+ * first (`withPin`). One conditional write on the lock as it was read; a
+ * write that loses to another, or fails, changes nothing and is only
+ * logged: handing the artifact out doesn't depend on it.
  */
-const recordUse = async (
+const touchPin = async (
   env: Env,
-  by: Acting,
-  used: {
-    app: string;
-    graphHash: string;
-    target: PackageArtifact["target"];
-    approval: string;
-    hash: string;
-    kept: boolean;
-  }
+  app: string,
+  graphHash: string,
+  read: { lock: GraspLock; stored: string },
+  config: string,
+  pinned: ArtifactPin
 ): Promise<void> => {
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    outboxed(db, {
-      actor: by.actor ?? actorOf(by),
-      action: "dependency.built",
-      target: { type: "app", id: used.app },
-      detail: { ...used },
-    }),
-  ]);
+  if (Date.now() - Date.parse(pinned.pinnedAt) < touchAfterMs) {
+    return;
+  }
+  const pins = read.lock.artifacts?.[compilerVersion] ?? {};
+  const stored = canonicalJson(
+    graspLockSchema.parse({
+      ...read.lock,
+      artifacts: {
+        ...read.lock.artifacts,
+        [compilerVersion]: {
+          ...pins,
+          [config]: { ...pinned, pinnedAt: new Date().toISOString() },
+        },
+      },
+    })
+  );
+  try {
+    await drizzle(env.DB)
+      .update(dependencyLocks)
+      .set({ lock: stored })
+      .where(
+        and(
+          eq(dependencyLocks.appId, app),
+          eq(dependencyLocks.graphHash, graphHash),
+          eq(dependencyLocks.lock, read.stored)
+        )
+      );
+  } catch (error) {
+    log.warn("packages.pin_touch_failed", { app, ...errorFields(error) });
+  }
 };
 
 /** Every tarball of the lock, checked, counting bytes as they come. */
@@ -437,8 +632,9 @@ const addressOf = async (
 
 /**
  * Builds one target of an App's approved graph into an artifact, or
- * returns the one built before. For one of the App's builders, or the
- * chat's agent acting for one; never Grasp staff.
+ * returns the one built and pinned before for the target's config. For
+ * one of the App's builders, or the chat's agent acting for one; never
+ * Grasp staff.
  */
 export const buildDependencies = async (
   env: Env,
@@ -465,34 +661,21 @@ export const buildDependencies = async (
   const { approval } = admitted;
   const read = await lockOf(env, asked.app, asked.graphHash);
   const { lock } = read;
-  if (lock.targets[asked.target] === undefined) {
+  const config = lock.targets[asked.target];
+  if (config === undefined) {
     throw dependencyErrors.create("dependency.invalid", {
       issues: [`target: the lock has no ${asked.target} target`],
     });
   }
-  const pinned = lock.artifacts?.[compilerVersion]?.[asked.target];
+  const configHash = await targetConfigHash(asked.target, config);
+  const pinned = lock.artifacts?.[compilerVersion]?.[configHash];
   if (pinned) {
-    const kept = await keptArtifact(env, pinned.hash);
+    // Built and pinned before: handed out by its description alone, with
+    // nothing recorded and no file read. Each file's bytes are checked as
+    // it is served (serve.ts), every time.
+    const kept = await keptDescription(env, pinned.hash);
     if (kept) {
-      // Reading it took time: what decides now wins, and the pin must
-      // still be the target's.
-      await admit();
-      await checkPinHolds(
-        env,
-        asked.app,
-        asked.graphHash,
-        lock,
-        asked.target,
-        pinned.hash
-      );
-      await recordUse(env, by, {
-        app: asked.app,
-        graphHash: asked.graphHash,
-        target: asked.target,
-        approval,
-        hash: pinned.hash,
-        kept: true,
-      });
+      await touchPin(env, asked.app, asked.graphHash, read, configHash, pinned);
       return {
         hash: pinned.hash,
         artifact: kept,
@@ -506,9 +689,10 @@ export const buildDependencies = async (
   const packages = await lockedTarballs(env, lock, limits);
   const { artifact, stats, artifactBytes, builtMs, files } =
     await builtArtifact(env, { limits, lock, target: asked.target, packages });
-  // The approval may have gone while the build ran: what decides now
-  // wins, and nothing is kept or pinned for a graph no longer approved.
-  // The pin's own write checks it again as it lands.
+  // The policy may have moved on while the build ran (and, once GRA-359
+  // lets an approval be taken back, the approval with it): what decides
+  // now wins, and nothing is kept or pinned for a graph no longer
+  // admitted. The pin's own write checks it again as it lands.
   await admit();
   const hash = await artifactHash(artifact);
   if (pinned && pinned.hash !== hash) {
@@ -547,27 +731,19 @@ export const buildDependencies = async (
     )
   );
   await env.FILES.put(artifactKey(hash), canonicalJson(artifact));
-  if (pinned) {
-    // Built again under an existing pin: returned only while the pin
-    // still holds for the target as it was read.
-    await checkPinHolds(
-      env,
-      asked.app,
-      asked.graphHash,
-      lock,
-      asked.target,
-      pinned.hash
-    );
-  }
+  // Made again under its pin (the kept one was corrupt): the same bytes,
+  // and nothing new to record.
   const holds = pinned
     ? pinned.hash
     : await pin(
         env,
+        by,
         asked.app,
         asked.graphHash,
         read,
-        { target: asked.target, for: targetOf(lock, asked.target) },
         {
+          target: asked.target,
+          config: configHash,
           hash,
           exports: Object.fromEntries(
             Object.entries(artifact.entries).map(([entry, { resolved }]) => [
@@ -583,14 +759,6 @@ export const buildDependencies = async (
   if (holds !== hash) {
     throw packageErrors.create("package.artifact_mismatch");
   }
-  await recordUse(env, by, {
-    app: asked.app,
-    graphHash: asked.graphHash,
-    target: asked.target,
-    approval,
-    hash,
-    kept: false,
-  });
   log.info("packages.built", {
     app: asked.app,
     approval,

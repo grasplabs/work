@@ -28,6 +28,7 @@ import type {
 import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
+import { log } from "@grasp-os/shared/log";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -49,6 +50,7 @@ import type { Acting } from "../auth/identity.ts";
 import {
   apps,
   auditOutbox,
+  dependencyAdmissionRefusals,
   dependencyPolicy,
   dependencyRequests,
   users,
@@ -68,10 +70,19 @@ import { policyGeneration, policyGenerationSql } from "./policy.ts";
 //   answers yes for exactly what a person approved: this App, this graph
 //   (by its hash, which core computes itself from the packages, never
 //   takes from the request) and these targets. Anything else is refused,
-//   and the refusal is audited.
-// - An agent, a workflow or App code approving. They propose
-//   (agent-builds.ts) and nothing more: deciding is only on a person's own
-//   `/rpc` session, and takes the session's identity, never one handed in.
+//   and the refusal is audited once per App, graph, targets, policy
+//   generation and reason, for a graph some request names; any other hash
+//   a caller makes up is refused and logged, so asking again and again
+//   can't flood the audit trail.
+// - An agent, a workflow or App code approving. They resolve
+//   (agent-builds.ts, packages/resolve.ts), which proposes, and nothing
+//   more: deciding is only on a person's own `/rpc` session, and takes the
+//   session's identity, never one handed in.
+// - A graph whose packages are whatever its proposer says. Nobody hands
+//   in a graph: the resolver is the only proposer (packages/resolve.ts),
+//   and every version, integrity hash, licence and edge in a request is
+//   what it read from the registry through connect, with every tarball's
+//   bytes checked against its integrity and unpacked in quarantine.
 // - A role standing in for the permission, or someone deciding after they
 //   lost it, left, or were taken off the team. Whether the person holds
 //   `dependencies.approve` is part of the one update that takes the
@@ -101,12 +112,10 @@ import { policyGeneration, policyGenerationSql } from "./policy.ts";
 //   sensitive data, and every use still runs under the App's own
 //   permissions.
 //
-// Not stopped here: what a request says of its packages (versions,
-// integrity hashes, licences, peers, findings) is what its proposer
-// reported. Nothing has checked it against the registry: that is the
-// resolver's, which doesn't exist yet. The person who decides is told so,
-// and what they approve is the graph as stated, by its hash, so what is
-// later fetched must match it byte for byte to be admitted.
+// Not stopped here: a licence is what the package states of itself, and
+// a request reports no findings yet (no advisory source is read). What a
+// person approves is the graph by its hash, so what is later fetched must
+// match it byte for byte to be admitted.
 
 type Row = typeof dependencyRequests.$inferSelect;
 
@@ -367,15 +376,12 @@ const gravity: Record<DependencyFinding["severity"], number> = {
 };
 
 /**
- * Proposes a graph for an App, as one of its builders or the chat's agent
- * acting for one: a pending request, which allows nothing. Never Grasp
- * staff, who neither ask for nor decide what a client's Apps may use.
- *
- * The graph is what the proposer says it is: its versions, integrity
- * hashes, licences, peers and findings are checked for shape and for
- * being whole, never against the registry. Nothing here can check them;
- * the request is shown as its proposer's report, and the approval names
- * the graph by its hash, so what is later fetched has to match it.
+ * Proposes a graph the resolver made for an App (packages/resolve.ts, its
+ * only caller), as one of its builders or the chat's agent acting for
+ * one: a pending request, which allows nothing. Never Grasp staff, who
+ * neither ask for nor decide what a client's Apps may use. Not offered to
+ * anyone directly: a graph handed in would be whatever its sender says,
+ * where the resolver's is what the registry has.
  *
  * What is already there decides what happens. The same graph already
  * approved for these targets, at any revision of the source: that
@@ -792,6 +798,10 @@ export type Admission =
       reason: "policy_changed" | "not_approved";
       /** A request waiting for a decision on the App, if any. */
       waiting: string | undefined;
+      /** Whether any request of the App's names the graph, decided or not. */
+      requested: boolean;
+      /** The policy generation in force, whichever the caller read. */
+      generation: number;
     };
 
 /**
@@ -822,7 +832,7 @@ export const admissionOf = async (
         and(
           eq(dependencyRequests.appId, asked.app),
           eq(dependencyRequests.graphHash, asked.graphHash),
-          inArray(dependencyRequests.status, ["approved", "pending"])
+          inArray(dependencyRequests.status, ["approved", "pending", "denied"])
         )
       ),
   ]);
@@ -844,6 +854,8 @@ export const admissionOf = async (
     admitted: false,
     reason: policyChanged ? "policy_changed" : "not_approved",
     waiting: candidates.find((row) => row.status === "pending")?.id,
+    requested: candidates.length > 0,
+    generation,
   };
 };
 
@@ -862,9 +874,16 @@ export const admissionOf = async (
  * Refused with `dependency.policy_changed` when the generation moved on
  * since the caller read it (read the status again), and with
  * `dependency.approval_required` for anything not approved as asked: its
- * details name the request waiting for that graph, if one is. Each refusal
- * is audited as `actor`'s. An admission that succeeds records nothing
- * here: what uses it records the approval it relied on.
+ * details name the request waiting for that graph, if one is. A refusal
+ * is audited as `actor`'s the first time it is made for this App, graph,
+ * set of targets, policy generation in force and reason, and only for a
+ * graph some request of the App's names: the same refusal again records
+ * nothing more, and one of a hash nobody proposed is logged instead, so a
+ * caller can't fill the audit trail by asking. Each part of that key is
+ * one core decides or a handful of values (never the generation the
+ * caller says it read), so the rows it keeps are bounded too. An
+ * admission that succeeds records nothing here: what uses it records the
+ * approval it relied on.
  */
 export const admitDependencies = async (
   env: Env,
@@ -880,22 +899,43 @@ export const admitDependencies = async (
       policyGeneration: decided.policyGeneration,
     };
   }
-  const { reason, waiting } = decided;
-  await auditedBatch(env, db, [
-    outboxed(db, {
-      actor,
-      action: "dependency.admission_refused",
-      target: { type: "app", id: asked.app },
-      detail: {
-        app: asked.app,
-        graphHash: asked.graphHash,
-        targets: asked.targets.toSorted().join(" "),
-        policyGeneration: asked.policyGeneration,
-        reason,
-        ...(waiting === undefined ? {} : { request: waiting }),
-      },
-    }),
-  ]);
+  const { reason, waiting, requested, generation } = decided;
+  const targets = [...new Set(asked.targets)].toSorted().join(" ");
+  if (requested) {
+    await auditedBatch(env, db, [
+      db
+        .insert(dependencyAdmissionRefusals)
+        .values({
+          appId: asked.app,
+          graphHash: asked.graphHash,
+          targets,
+          policyGeneration: generation,
+          reason,
+          createdAt: new Date(),
+        })
+        .onConflictDoNothing(),
+      outboxedIfChanged(db, {
+        actor,
+        action: "dependency.admission_refused",
+        target: { type: "app", id: asked.app },
+        detail: {
+          app: asked.app,
+          graphHash: asked.graphHash,
+          targets,
+          policyGeneration: asked.policyGeneration,
+          reason,
+          ...(waiting === undefined ? {} : { request: waiting }),
+        },
+      }),
+    ]);
+  } else {
+    log.warn("dependencies.admission_refused", {
+      app: asked.app,
+      graphHash: asked.graphHash,
+      targets,
+      reason,
+    });
+  }
   throw reason === "policy_changed"
     ? dependencyErrors.create("dependency.policy_changed")
     : dependencyErrors.create(
