@@ -800,8 +800,11 @@ describe("App server code", { timeout: 60_000 }, () => {
         await vi.advanceTimersByTimeAsync(5000);
       });
       cutShortEnded = await cutShortCall;
-      // The next call runs in the same code, which wasn't stopped.
-      countAfter = await callApp(env, app, caller, "count");
+      // The next call waits for the cut-off code to settle, then runs in
+      // the same code, which wasn't stopped.
+      const counting = callApp(env, app, caller, "count");
+      cutShort.release();
+      countAfter = await counting;
     } finally {
       vi.useRealTimers();
       cutShort.release();

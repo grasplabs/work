@@ -282,7 +282,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     const app = await appWith(builder, {
       // The first attempt hangs at the mail server, outside the App, until
       // the engine gave up on it and the second began; then it calls on,
-      // late, while the second waits for it.
+      // late.
       ...workflowFiles(
         "late",
         `  return await step.do(
@@ -294,11 +294,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       if (attempt === 1) {
         await env.MAIL.call("mail.search", { query: "hold late" });
         await env.APP.call("point", "late");
-        await env.APP.call("hit", "late:done");
         return "first";
-      }
-      while ((await env.APP.call("hits", "late:done")) === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
       return "second";
     }
@@ -329,16 +325,19 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
   return attempt;`,
         { count: 1 }
       ),
-      // The one attempt's App call waits at the mail server until the test
-      // lets it go, once the engine gave up on it and the run ended; it
-      // records a point then.
+      // The first attempt's App call waits at the mail server until the
+      // test lets it go, once the engine gave up on it and the run ended;
+      // it tries to record a point then. The second attempt's call waits
+      // for the App behind it, and gives up with its attempt.
       ...workflowFiles(
         "outlived",
         `  return await step.do(
     "count",
-    { description: "Count", timeout: "${attemptTimeout}", retries: { limit: 0 } },
+    { description: "Count", timeout: "${attemptTimeout}", retries: { limit: 1, delay: 10 } },
     async () => {
-      await env.APP.call("pointAfter", "outlived");
+      if ((await env.APP.call("hit", "outlived")) === 1) {
+        await env.APP.call("pointAfter", "outlived");
+      }
       return null;
     }
   );`,
@@ -428,7 +427,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     await vi.waitFor(
       async () => {
         await expect(
-          hitsOf(app, builder.userId, "outlived:recorded")
+          hitsOf(app, builder.userId, "outlived:refused")
         ).resolves.toBe(1);
       },
       { timeout: 10_000, interval: 100 }
@@ -485,8 +484,8 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
         over: await count("over"),
       },
     }).toMatchObject({
-      // Both attempts recorded `tried`, and the first, given up on,
-      // recorded `late` while the second ran: only the second's count.
+      // Both attempts recorded `tried`: only the second's counts. The
+      // first, given up on, records no `late`: its App call ends with it.
       abandoned: {
         status: { status: "completed", output: "second" },
         attempts: 2,
@@ -499,13 +498,65 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       // Completed without a point: what it records when run anew isn't
       // added either.
       silent: 0,
-      // Recorded once its run had ended: taken, but neither counted nor
-      // kept.
+      // Tried once its run had ended: refused, its call's caller gone with
+      // its attempt, so neither counted nor kept.
       outlived: { counted: 0, kept: [] },
       // The point in a row the day has, and the first new row, which
       // fits; the next is left out, and the step completes all the same.
       bounded: { status: { status: "completed" }, known: 1, fits: 1, over: 0 },
     });
+  });
+
+  it("give up a step's App call that waits behind another past its attempt's time, never running it", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "queued",
+        `  return await step.do(
+    "count",
+    { description: "Count", timeout: "${attemptTimeout}", retries: { limit: 0 } },
+    async () => await env.APP.call("hit", "queued")
+  );`,
+        { count: 1 }
+      )
+    );
+    const mail = await mailConnection([], mailWithSearch);
+    await requestGranted(idp, builder, {
+      subject: { type: "app", appId: app },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.search"],
+      binding: "MAIL",
+    });
+    await serverBuilt(app, 1);
+    // A screen's call holds the App, waiting at the mail server.
+    const holding = callApp(
+      env,
+      appIdSchema.parse(app),
+      { userId: builder.userId, mode: "interactive" },
+      "pointAfter",
+      ["held"]
+    ).catch(() => null);
+    let status: unknown;
+    try {
+      await vi.waitFor(
+        async () => {
+          await expect(mail.holding()).resolves.toBeTruthy();
+        },
+        { timeout: 15_000, interval: 100 }
+      );
+      const run = await builder.api.workflows.start(app, "queued");
+      await finished(run.id);
+      ({ status } = await builder.api.workflows.status(run.id));
+    } finally {
+      await mail.release();
+      await holding;
+    }
+    expect({
+      status,
+      // The step's call gave up with its attempt, before the App was free.
+      queued: await hitsOf(app, builder.userId, "queued"),
+    }).toStrictEqual({ status: "failed", queued: 0 });
   });
 
   it("go on after a crash without running finished steps again, also when resumed at once, and retry a step killed mid-way", async () => {

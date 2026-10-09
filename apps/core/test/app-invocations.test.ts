@@ -1297,43 +1297,113 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     });
   });
 
-  it("lets the next call in however a call ends: answered, failed, or cut short while its code goes on", async () => {
+  it("lets the next call in however a call ends: answered or failed", async () => {
     const admin = await personApi("admin");
     const desk = await newApp(admin);
     const host = appHost(env, desk);
     const caller = as(admin.userId);
-    const failed = await outcome(host.call(caller, "fail", ["No total.", 1]));
-    const afterFailed = await host.call(caller, "tick", []);
-    // A call through an export from a call with a moment left, cut short
-    // by that call's deadline while its method still waits. Its deadline's
-    // timer is held until its method has started, then let go.
-    const cutShort = gate();
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    let cutShortEnded: string;
-    let afterCutShort: unknown;
-    try {
-      const call = outcome(
-        host.call(caller, "keepAndHold", [cutShort.wait], exportCall(5000))
-      );
-      await entered(cutShort, call);
-      // In the App's object, whose timer it is.
+    expect({
+      failed: await outcome(host.call(caller, "fail", ["No total.", 1])),
+      afterFailed: await host.call(caller, "tick", []),
+      afterAnswered: await host.call(caller, "tick", []),
+    }).toStrictEqual({
+      failed: "app.failed",
+      afterFailed: 1,
+      afterAnswered: 2,
+    });
+  });
+
+  it("keeps a call cut short in the App until its code settles, and gives a call that waited its turn the App's own time from then", async () => {
+    const admin = await personApi("admin");
+    const desk = await newApp(admin);
+    const host = appHost(env, desk);
+    const caller = as(admin.userId);
+    // Started ahead, so the first call's code runs at once.
+    await host.call(caller, "ran", []);
+    const first = gate();
+    const second = gate();
+    // The deadlines' timers are held, and let go in the App's object,
+    // whose timers they are.
+    const advance = async (ms: number) => {
       await runInDurableObject(host, async () => {
-        await vi.advanceTimersByTimeAsync(5000);
+        await vi.advanceTimersByTimeAsync(ms);
       });
-      cutShortEnded = await call;
-      afterCutShort = await host.call(caller, "tick", []);
+    };
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let waited: string;
+    let meanwhile: string;
+    try {
+      const holding = host.call(caller, "keepAndHold", [first.wait]);
+      await entered(first, holding);
+      // Waits six of its ten seconds for its turn, then has four left of
+      // its deadline: its caller hears it timed out, but its code had
+      // nowhere near the App's own time, so it isn't stopped.
+      const waiting = outcome(host.call(caller, "keepAndHold", [second.wait]));
+      await advance(6000);
+      first.release();
+      await holding;
+      await entered(second, waiting);
+      await advance(4001);
+      waited = await waiting;
+      // Its code still runs: the App takes no other call until it settles.
+      const queued = outcome(host.call(caller, "tick", [], exportCall(500)));
+      await advance(500);
+      meanwhile = await queued;
     } finally {
       vi.useRealTimers();
-      cutShort.release();
+      first.release();
+      second.release();
     }
-    expect({ failed, afterFailed, cutShortEnded, afterCutShort }).toStrictEqual(
-      {
-        failed: "app.failed",
-        afterFailed: 1,
-        cutShortEnded: "app.timed_out",
-        afterCutShort: 2,
-      }
-    );
+    expect({
+      waited,
+      meanwhile,
+      // The cut-off code ticked once it was let go, before this call, in
+      // code that wasn't restarted.
+      next: await host.call(caller, "tick", []),
+    }).toStrictEqual({
+      waited: "app.timed_out",
+      meanwhile: "app.busy",
+      next: 3,
+    });
+  });
+
+  it("stops a call cut short in the App whose code never settles, at the App's own time from its turn, then lets the next in", async () => {
+    const admin = await personApi("admin");
+    const desk = await newApp(admin);
+    const host = appHost(env, desk);
+    const caller = as(admin.userId);
+    const countBefore = await host.call(caller, "tick", []);
+    const held = gate();
+    const advance = async (ms: number) => {
+      await runInDurableObject(host, async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let cutShort: string;
+    try {
+      // Through an export from a call with five seconds left.
+      const call = outcome(
+        host.call(caller, "keepAndHold", [held.wait], exportCall(5000))
+      );
+      await entered(held, call);
+      await advance(5000);
+      cutShort = await call;
+      // Its code never settles: at the App's own time, it is stopped.
+      await advance(10_000);
+    } finally {
+      vi.useRealTimers();
+    }
+    try {
+      expect({
+        countBefore,
+        cutShort,
+        // In code started afresh: the count starts again.
+        next: await host.call(caller, "tick", []),
+      }).toStrictEqual({ countBefore: 1, cutShort: "app.timed_out", next: 1 });
+    } finally {
+      held.release();
+    }
   });
 
   it("refuses a call at once with app.busy while as many calls wait as an App takes", async () => {

@@ -9,7 +9,12 @@ interface Waiter {
  * turn in the order they came (`App.call`, app.ts). The App's code runs in
  * one isolate shared by every call, so any of its code can use any caller
  * token it has seen while that token's call runs: with one call at a time,
- * the only live token is the running call's own.
+ * the only live token is the running call's own. A turn lasts until the
+ * call's code settled, not only until its caller had an answer (see
+ * `App.call`). Work the App's code leaves running detached from its call
+ * (a promise it doesn't await, a timer) isn't held to the turn, and can
+ * still use a later call's token: never more than that App's own code
+ * may. Only an isolate per call closes that.
  *
  * A waiter gives up once its deadline passes, and is never let in after;
  * past `limit` waiting, a call is refused at once. Both are the caller's
@@ -44,6 +49,8 @@ export class CallQueue {
       throw busy();
     }
     const waited = Promise.withResolvers<boolean>();
+    // Made before anything can call for it, so giving up only rejects.
+    const refusal = busy();
     // Both run in one turn of the event loop, and each takes the waiter
     // out of the queue first: a waiter that gave up is never let in, and
     // one let in no longer gives up.
@@ -55,7 +62,7 @@ export class CallQueue {
       },
       giveUp: () => {
         this.#waiting.delete(waiter);
-        waited.reject(busy());
+        waited.reject(refusal);
       },
     };
     this.#waiting.add(waiter);
