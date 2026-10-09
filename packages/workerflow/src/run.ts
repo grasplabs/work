@@ -50,6 +50,43 @@
 //   synchronous turn, so the alarm always says what the latest write
 //   meant, whichever path wrote last.
 //
+// Lifecycle commands (pause, resume, terminate, restart, delete) are RPC
+// calls on this object, so they are serialized with each other, with
+// events and with the activation's own writes: each reads the run and
+// writes its decision in one transaction, its alarm in the same turn.
+//
+// - `pause` while an activation runs asks it to stop at a safe boundary:
+//   the run is `waitingForPause`, the activation claims no new attempt and
+//   reaches no new wait, and once nothing it had out is still out it lets
+//   go of the run, `paused`, with no alarm. A run asleep or waiting has no
+//   activation, and is `paused` at once. A paused run's deadlines don't
+//   come due: `resume` moves each one on by as long as the run was paused,
+//   as the reference engine does, and sets the alarm to run it now. That
+//   counts for an attempt left open by an activation that died before the
+//   pause, too: its deadline moves on, so paused time doesn't make it a
+//   timed-out attempt, and it is retried at once, as one cut off in time.
+// - `terminate` ends the run as `terminated` and takes a new generation in
+//   the same write: an activation still out is fenced, so whatever its
+//   steps answer later is ignored, and it starts nothing more.
+// - `restart` keeps the run's identity and params, takes a new generation
+//   and a new execution, and runs the run again from its start, or from a
+//   step it has started: that step and every step started after it (and
+//   any started before that hadn't come to an outcome) are forgotten, with
+//   their attempts, results and the events their waits took; the steps
+//   before it keep their outcomes, which replay returns. A step it runs
+//   again goes out under a key of the new execution (identity.ts).
+// - `terminate({ rollback: true })` of a run with steps to roll back
+//   fences the activation as `terminate` does, and rolls the run back:
+//   it is `rollingBack`, its alarm set to now, and a compensating
+//   activation runs its steps' rollbacks (activation.ts) before it ends as
+//   `terminated`. A definition that throws, with steps to roll back, is
+//   rolled back the same way before it ends as `errored`. A run rolling
+//   back can't be paused (as on the reference), terminated or restarted:
+//   what undoes its effects isn't cut short by a command.
+// - `delete` removes the run, its journal and its alarm. A stale
+//   activation of it is fenced by the run's identity: it can't act on the
+//   run, nor on one created again under the same ID.
+//
 // The host enables `nodejs_als` (or `nodejs_compat`, which includes it):
 // each call of the step API is told apart by the attempt it comes from,
 // through AsyncLocalStorage (activation.ts).
@@ -71,10 +108,16 @@ import { DurableObject } from "cloudflare:workers";
 import { Activation, superseded, suspended } from "./activation.ts";
 import type { Settlement } from "./activation.ts";
 import { decode, equivalent, streamResultOf } from "./codec.ts";
-import { handlerBudgetMs as defaultHandlerBudgetMs } from "./config.ts";
+import {
+  defaultRollbackReplays,
+  handlerBudgetMs as defaultHandlerBudgetMs,
+  maxRollbackReplayMs,
+  rollbackReplayCapMs,
+} from "./config.ts";
 import type {
   DefinitionIdentity,
   InstanceStatus,
+  RollbackOutcome,
   WorkflowDefinition,
 } from "./contracts.ts";
 import { errorRecord, namedError, parseError } from "./errors.ts";
@@ -86,13 +129,14 @@ import {
   JournalSchemaError,
   journalSchemaVersion,
   readJournal,
+  readRollbackWorklist,
   maxEventPayloadBytes,
   maxInboxBytes,
   maxInboxEvents,
   readRun,
   readStep,
 } from "./journal.ts";
-import type { Journal, RunRow } from "./journal.ts";
+import type { Journal, RunRow, StepType } from "./journal.ts";
 import { warnRecovered } from "./log.ts";
 import {
   defaultMaxRunStreamBytes,
@@ -170,7 +214,99 @@ export type StepOutput =
  */
 export type StartOutcome = "created" | "existing" | "collision" | "conflict";
 
+/**
+ * `pausing`: an activation runs the run, and stops at its next safe
+ * boundary. `paused`: the run had no activation, and is paused now.
+ * `ignored`: the run is queued, pausing or paused already, or has ended,
+ * and a pause does nothing, as on the reference engine.
+ */
+export type PauseOutcome = "pausing" | "paused" | "ignored" | "missing";
+
+/**
+ * `resumed`: the run was paused, or still pausing, and runs again.
+ * `ignored`: it was neither, and a resume does nothing.
+ */
+export type ResumeOutcome = "resumed" | "ignored" | "missing";
+
+/**
+ * `ended`: the run has ended already, and can't be terminated.
+ * `rolling_back`: it is rolling back, which a command doesn't cut short.
+ */
+export type TerminateOutcome =
+  | "terminated"
+  | "ended"
+  | "rolling_back"
+  | "missing";
+
+/** Whether a termination rolls the run's steps back first. */
+export interface TerminateCommand {
+  rollback: boolean;
+}
+
+/**
+ * `no_such_step`: the run has started no step `from` names.
+ * `nested_step`: the step was called from inside another step's callback.
+ * `rolling_back`: it is rolling back, which a command doesn't cut short.
+ */
+export type RestartOutcome =
+  | "restarted"
+  | "no_such_step"
+  | "nested_step"
+  | "rolling_back"
+  | "missing";
+
+export type DeleteOutcome = "deleted" | "missing";
+
+/** Which step a restart starts from; null for the run's start. */
+export interface RestartCommand {
+  from: { name: string; count: number; type: StepType } | null;
+}
+
+/**
+ * What a command decided, in the transaction that read the run: its
+ * outcome, and the alarm it leaves (a time, null for none, or undefined
+ * to leave the alarm as it is).
+ */
+interface CommandDecision<Outcome> {
+  outcome: Outcome;
+  alarm?: number | null;
+}
+
+/** Why a run terminated with `rollback: true` rolls back, as Cloudflare says. */
+const terminatedTrigger = JSON.stringify(
+  errorRecord(namedError("Terminated", "Instance terminated during rollback"))
+);
+
+/** How a run's rolling back ended, as its journal keeps it. */
+const rollbackOf = (text: string): RollbackOutcome => {
+  const parsed: unknown = JSON.parse(text);
+  if (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    "status" in parsed &&
+    parsed.status === "complete"
+  ) {
+    return { status: "complete" };
+  }
+  if (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    "status" in parsed &&
+    parsed.status === "errored" &&
+    "error" in parsed
+  ) {
+    return {
+      status: "errored",
+      error: parseError(JSON.stringify(parsed.error)),
+    };
+  }
+  throw new Error(
+    `The journal holds a rollback this engine can't read: ${text}`
+  );
+};
+
 const statusOf = (run: RunRow): InstanceStatus => {
+  const rollback = run.rollback === null ? undefined : rollbackOf(run.rollback);
   switch (run.status) {
     case "complete": {
       return {
@@ -179,17 +315,25 @@ const statusOf = (run: RunRow): InstanceStatus => {
       };
     }
     case "errored": {
-      return {
-        status: "errored",
-        error:
-          run.error === null
-            ? { name: "Error", message: "" }
-            : parseError(run.error),
-      };
+      const error =
+        run.error === null
+          ? { name: "Error", message: "" }
+          : parseError(run.error);
+      return rollback === undefined
+        ? { status: "errored", error }
+        : { status: "errored", error, rollback };
+    }
+    case "terminated": {
+      return rollback === undefined
+        ? { status: "terminated" }
+        : { status: "terminated", rollback };
     }
     case "queued":
     case "running":
-    case "waiting": {
+    case "waiting":
+    case "waitingForPause":
+    case "paused":
+    case "rollingBack": {
       return { status: run.status };
     }
     default: {
@@ -200,8 +344,100 @@ const statusOf = (run: RunRow): InstanceStatus => {
   }
 };
 
+/** A settlement's error, as an Error. */
+const errorOf = (settlement: Settlement): Error => {
+  const error = settlement.ok ? undefined : settlement.error;
+  return error instanceof Error ? error : new Error(String(error));
+};
+
 const hasEnded = (run: RunRow): boolean =>
-  run.status === "complete" || run.status === "errored";
+  run.status === "complete" ||
+  run.status === "errored" ||
+  run.status === "terminated";
+
+/**
+ * Takes the run from whatever activation holds it: a new generation, and
+ * every activation still open journaled as superseded. Called inside the
+ * transaction of the command that does it.
+ */
+const supersedeIn = (sql: SqlStorage, now: number): void => {
+  sql.exec("UPDATE run SET generation = generation + 1");
+  sql.exec(
+    "UPDATE activations SET ended_at = ?, ended = 'superseded' WHERE ended_at IS NULL",
+    now
+  );
+};
+
+/**
+ * Pauses a run with no activation alive: in the transaction of the command
+ * or the alarm that found it so. The run keeps no alarm while paused.
+ */
+const pauseIn = (sql: SqlStorage, now: number): void => {
+  sql.exec(
+    "UPDATE run SET status = 'paused', paused_at = ?, lease_until = NULL, wake_at = NULL",
+    now
+  );
+};
+
+/**
+ * Moves each of the run's pending deadlines on by `ms`, the time it was
+ * paused: a sleep's or a wait's, a retry's, and that of an attempt cut
+ * off, its step's latest with no outcome journaled: one still open (its
+ * activation died before the pause) or one whose answer came back
+ * superseded, which the next activation ends as cut off by its deadline
+ * (activation.ts). Paused time doesn't count against them, as on the
+ * reference engine.
+ */
+const shiftDeadlinesIn = (sql: SqlStorage, ms: number): void => {
+  sql.exec(
+    "UPDATE steps SET deadline = deadline + ? WHERE state = 'waiting' AND deadline IS NOT NULL",
+    ms
+  );
+  sql.exec(
+    "UPDATE attempts SET retry_at = retry_at + ? WHERE retry_at IS NOT NULL AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'retrying')",
+    ms
+  );
+  sql.exec(
+    "UPDATE attempts SET deadline = deadline + ? WHERE ended_at IS NULL OR (ended = 'superseded' AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'running'))",
+    ms
+  );
+};
+
+/**
+ * Forgets the steps a restart runs again (`forget`, a condition on
+ * `steps`): their observers' history, stream chunks, attempts and rows,
+ * and every event no step it keeps took, as the reference engine drops
+ * its event buffer. The run's counts of its events and stream bytes are
+ * counted again from what is left. Called inside the restart's
+ * transaction.
+ */
+const forgetIn = (
+  sql: SqlStorage,
+  forget: { clause: string; values: SqlStorageValue[] }
+): void => {
+  const forgotten = `SELECT ordinal FROM steps WHERE ${forget.clause}`;
+  sql.exec(
+    `DELETE FROM history WHERE ordinal IN (${forgotten})`,
+    ...forget.values
+  );
+  sql.exec(
+    `DELETE FROM stream_chunks WHERE ordinal IN (${forgotten})`,
+    ...forget.values
+  );
+  sql.exec(
+    `DELETE FROM attempts WHERE ordinal IN (${forgotten})`,
+    ...forget.values
+  );
+  sql.exec(
+    `DELETE FROM events WHERE consumed_by IS NULL OR consumed_by IN (${forgotten})`,
+    ...forget.values
+  );
+  sql.exec(`DELETE FROM steps WHERE ${forget.clause}`, ...forget.values);
+  // Bytes as the inbox counts them: the payload's UTF-8 encoding.
+  sql.exec(
+    "UPDATE run SET event_count = (SELECT COUNT(*) FROM events), event_bytes = (SELECT COALESCE(SUM(LENGTH(CAST(payload AS BLOB))), 0) FROM events), stream_bytes = (SELECT COALESCE(SUM(LENGTH(bytes)), 0) FROM stream_chunks)"
+  );
+};
 
 /**
  * A workflow run. Subclass it to say which definition a run executes, and
@@ -219,10 +455,49 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   protected readonly maxRunStreamBytes: number = defaultMaxRunStreamBytes;
 
   /**
+   * How long a compensating replay may take before a later activation
+   * tries again (config.ts): at most what the handler budget allows
+   * (`rollbackReplayCapMs`), which a longer setting is cut to.
+   */
+  protected readonly rollbackReplayMs: number = maxRollbackReplayMs;
+
+  /**
+   * How many compensating replays in a row may end without the rollbacks
+   * still to run before the rolling back ends as errored (config.ts).
+   */
+  protected readonly rollbackReplays: number = defaultRollbackReplays;
+
+  /**
+   * The rollback settings, checked: a replay bound that isn't a time above
+   * 0, or a count that isn't a whole number from 1, is the host's mistake,
+   * never run with: refused at a run's start, and logged at an alarm,
+   * which leaves the run to its watchdog as it was.
+   */
+  #rollbackLimits(): { rollbackReplayMs: number; rollbackReplays: number } {
+    const ms = this.rollbackReplayMs;
+    const replays = this.rollbackReplays;
+    if (!Number.isFinite(ms) || ms <= 0) {
+      throw new TypeError(
+        `A run's rollbackReplayMs is a time above 0: ${String(ms)}`
+      );
+    }
+    if (!Number.isSafeInteger(replays) || replays < 1) {
+      throw new TypeError(
+        `A run's rollbackReplays is a whole number from 1: ${String(replays)}`
+      );
+    }
+    return {
+      rollbackReplayMs: Math.min(ms, rollbackReplayCapMs(this.handlerBudgetMs)),
+      rollbackReplays: replays,
+    };
+  }
+
+  /**
    * How much of an alarm handler's wall time a run's attempts may take
    * (config.ts). A host whose handlers get less than Cloudflare's 15
    * minutes says so here; a test, to see an attempt left for a fresh
-   * activation without waiting minutes.
+   * activation without waiting minutes. The compensating replay's bound
+   * scales with it.
    */
   protected readonly handlerBudgetMs: number = defaultHandlerBudgetMs;
 
@@ -256,6 +531,8 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * caller hears `created` or `existing`, the run will execute.
    */
   async start(command: StartCommand): Promise<StartOutcome> {
+    // Refused before any run exists, rather than at its first alarm.
+    this.#rollbackLimits();
     const existing = this.#run();
     if (existing !== undefined) {
       const sameStart =
@@ -279,7 +556,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     const now = Date.now();
     createJournal(storage.sql);
     storage.sql.exec(
-      "INSERT INTO run (singleton, schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0)",
+      "INSERT INTO run (singleton, schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)",
       journalSchemaVersion,
       crypto.randomUUID(),
       command.definition,
@@ -287,7 +564,8 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       command.instanceId,
       command.key,
       command.params,
-      now
+      now,
+      crypto.randomUUID()
     );
     // No await between the insert and this: one write.
     await storage.setAlarm(now);
@@ -301,7 +579,8 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * brings an alarm forward, and an extra activation is fenced.
    */
   async #ensureWake(run: RunRow): Promise<void> {
-    if (hasEnded(run)) {
+    // A paused run has no alarm until it is resumed.
+    if (hasEnded(run) || run.status === "paused") {
       return;
     }
     if ((await this.ctx.storage.getAlarm()) === null) {
@@ -416,8 +695,46 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     }
   }
 
+  /**
+   * Pauses a run whose pausing activation died first (an alarm comes only
+   * once no alarm handler runs): nothing of it is out any more, so the run
+   * is paused now. One still out somehow is fenced.
+   */
+  async #pauseNow(): Promise<void> {
+    const { storage } = this.ctx;
+    const now = Date.now();
+    try {
+      storage.transactionSync(() => {
+        supersedeIn(storage.sql, now);
+        pauseIn(storage.sql, now);
+      });
+    } catch (error) {
+      // Nothing was written: the watchdog's alarm finds it pausing still.
+      await this.#leaveToWatchdog("workflow_pause_failed", error);
+      return;
+    }
+    try {
+      await storage.deleteAlarm();
+    } catch (error) {
+      // The run is paused: the alarm left behind finds it so, and does
+      // nothing.
+      warnRecovered("workflow_alarm_delete_failed", error);
+    }
+  }
+
   /** One activation: replays the definition under a new generation. */
   override async alarm(): Promise<void> {
+    // The host's settings first, before the run is read or a generation
+    // taken: a mistake in them touches no run. It is logged, and the run
+    // is left to a watchdog a lease away, the settings fixed by then or
+    // not.
+    let limits: { rollbackReplayMs: number; rollbackReplays: number };
+    try {
+      limits = this.#rollbackLimits();
+    } catch (error) {
+      await this.#leaveToWatchdog("workflow_settings_invalid", error);
+      return;
+    }
     let run: RunRow | undefined;
     try {
       run = this.#run();
@@ -439,18 +756,26 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       }
       return;
     }
-    if (run === undefined || hasEnded(run)) {
+    if (run === undefined || hasEnded(run) || run.status === "paused") {
       // A duplicate or late alarm: what it would do is journaled already.
+      // A paused run waits for `resume`, which sets its alarm.
       return;
     }
     const { storage } = this.ctx;
+    if (run.status === "waitingForPause") {
+      await this.#pauseNow();
+      return;
+    }
     const generation = run.generation + 1;
     const now = Date.now();
+    // A run rolling back stays so: this activation runs its rollbacks.
+    const compensating = run.status === "rollingBack";
     try {
       storage.transactionSync(() => {
         storage.sql.exec(
-          "UPDATE run SET generation = ?, status = 'running', lease_until = ?, wake_at = NULL",
+          "UPDATE run SET generation = ?, status = ?, lease_until = ?, wake_at = NULL",
           generation,
+          compensating ? "rollingBack" : "running",
           now + this.leaseMs
         );
         storage.sql.exec(
@@ -494,12 +819,25 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         handlerBudgetMs: this.handlerBudgetMs,
         maxStreamBytes: this.maxStreamOutputBytes,
         maxRunStreamBytes: this.maxRunStreamBytes,
+        ...limits,
       },
-      () => this.clock()
+      () => this.clock(),
+      compensating
     );
     const resolved = this.#resolve(run);
     if (!("run" in resolved)) {
-      await activation.settle(resolved);
+      // No definition to run, nor to get its rollbacks back from: the run
+      // ends, rolling back nothing.
+      await (compensating
+        ? activation.endCompensation({
+            status: "errored",
+            error: errorOf(resolved),
+          })
+        : activation.settle(resolved));
+      return;
+    }
+    if (compensating) {
+      await this.#compensate(activation, resolved);
       return;
     }
     const settlement = await Promise.race([
@@ -527,6 +865,224 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       return;
     }
     await activation.settle(settlement);
+  }
+
+  /** A compensating activation, from its replay to the run's end. */
+  // oxlint-disable-next-line class-methods-use-this -- beside alarm(), whose part it is
+  async #compensate(
+    activation: Activation,
+    definition: WorkflowDefinition
+  ): Promise<void> {
+    const result = await Promise.race([
+      activation.compensate(definition),
+      activation.stopped,
+    ]);
+    if (result === superseded || result === suspended) {
+      // A later activation owns the run, or a rollback waits for its
+      // retry, the run still rolling back.
+      return;
+    }
+    if ("fault" in result) {
+      // The watchdog brings the run back, its rolling back as journaled.
+      return;
+    }
+    // A replay that strayed, or a result that can't be read back, ends the
+    // rolling back: replaying again would only reach the same.
+    await activation.endCompensation(
+      "halt" in result ? { status: "errored", error: result.halt } : result
+    );
+  }
+
+  /**
+   * Reads the run and writes a command's decision in one transaction, and
+   * the alarm it leaves in the same turn: commands are serialized with
+   * each other and with every activation's writes.
+   */
+  async #command<Outcome extends string>(
+    decide: (run: RunRow, now: number) => CommandDecision<Outcome>
+  ): Promise<Outcome | "missing"> {
+    const { storage } = this.ctx;
+    if (!hasJournal(storage.sql)) {
+      return "missing";
+    }
+    const now = Date.now();
+    const decision = storage.transactionSync(
+      (): CommandDecision<Outcome | "missing"> => {
+        const run = readRun(storage.sql);
+        return run === undefined ? { outcome: "missing" } : decide(run, now);
+      }
+    );
+    // With the write that decided it: no await between.
+    if (decision.alarm === null) {
+      await storage.deleteAlarm();
+    } else if (decision.alarm !== undefined) {
+      await storage.setAlarm(decision.alarm);
+    }
+    return decision.outcome;
+  }
+
+  /**
+   * Pauses the run: at once if no activation runs it (it waits, asleep or
+   * for an event), otherwise at the activation's next safe boundary.
+   */
+  async pause(): Promise<PauseOutcome> {
+    const { sql } = this.ctx.storage;
+    return await this.#command((run, now): CommandDecision<PauseOutcome> => {
+      if (run.status === "running") {
+        sql.exec("UPDATE run SET status = 'waitingForPause'");
+        return { outcome: "pausing" };
+      }
+      if (run.status === "waiting") {
+        // No activation is alive: a suspended one is over.
+        pauseIn(sql, now);
+        return { outcome: "paused", alarm: null };
+      }
+      return { outcome: "ignored" };
+    });
+  }
+
+  /**
+   * Resumes a paused run, its deadlines moved on by the time it was
+   * paused, or lets a run still pausing go on as it was.
+   */
+  async resume(): Promise<ResumeOutcome> {
+    const { sql } = this.ctx.storage;
+    const outcome = await this.#command(
+      (run, now): CommandDecision<ResumeOutcome> => {
+        if (run.status === "waitingForPause") {
+          // Its activation goes on; what it parked for the pause comes due
+          // at once when it suspends (activation.ts).
+          sql.exec("UPDATE run SET status = 'running'");
+          return { outcome: "resumed" };
+        }
+        if (run.status !== "paused") {
+          return { outcome: "ignored" };
+        }
+        if (run.paused_at === null) {
+          throw new Error("The journal holds a paused run with no pause time");
+        }
+        shiftDeadlinesIn(sql, Math.max(0, now - run.paused_at));
+        sql.exec(
+          "UPDATE run SET status = 'running', paused_at = NULL, wake_at = ?",
+          now
+        );
+        return { outcome: "resumed", alarm: now };
+      }
+    );
+    if (outcome === "ignored") {
+      // A resume sent again, after an answer that never came, repairs an
+      // alarm a run still to end has lost, as a repeated start does.
+      const run = this.#run();
+      if (run !== undefined) {
+        await this.#ensureWake(run);
+      }
+    }
+    return outcome;
+  }
+
+  /**
+   * Ends the run as terminated, fencing any activation still out; with
+   * `rollback`, rolls its steps back first, if any registered a rollback.
+   */
+  async terminate(command: TerminateCommand): Promise<TerminateOutcome> {
+    const { sql } = this.ctx.storage;
+    return await this.#command(
+      (run, now): CommandDecision<TerminateOutcome> => {
+        if (hasEnded(run)) {
+          return { outcome: "ended" };
+        }
+        if (run.status === "rollingBack") {
+          return { outcome: "rolling_back" };
+        }
+        supersedeIn(sql, now);
+        if (command.rollback && readRollbackWorklist(sql).length > 0) {
+          sql.exec(
+            "UPDATE run SET status = 'rollingBack', rollback_trigger = ?, rollback_end = 'terminated', lease_until = NULL, wake_at = ?, paused_at = NULL",
+            terminatedTrigger,
+            now
+          );
+          return { outcome: "terminated", alarm: now };
+        }
+        sql.exec(
+          "UPDATE run SET status = 'terminated', ended_at = ?, lease_until = NULL, wake_at = NULL, paused_at = NULL",
+          now
+        );
+        return { outcome: "terminated", alarm: null };
+      }
+    );
+  }
+
+  /**
+   * Runs the run again under a new generation and a new execution, from
+   * its start or from a step it has started; whatever state it is in.
+   */
+  async restart(command: RestartCommand): Promise<RestartOutcome> {
+    const { sql } = this.ctx.storage;
+    return await this.#command((run, now): CommandDecision<RestartOutcome> => {
+      if (run.status === "rollingBack") {
+        return { outcome: "rolling_back" };
+      }
+      let forget: { clause: string; values: SqlStorageValue[] } = {
+        clause: "1 = 1",
+        values: [],
+      };
+      if (command.from !== null) {
+        const target = readStep(sql, {
+          type: command.from.type,
+          name: command.from.name,
+          occurrence: command.from.count,
+        });
+        if (target === undefined) {
+          return { outcome: "no_such_step" };
+        }
+        if (target.nested === 1) {
+          // Its enclosing step, started before it, keeps its outcome, which
+          // replay returns without calling its callback: the target would
+          // never run again. The reference engine has no such guard (it
+          // wipes from the target's start on, as here); refusing is the
+          // narrower choice, and restarting from the enclosing step reruns
+          // both.
+          return { outcome: "nested_step" };
+        }
+        // The target and every step started after it run again, and so
+        // does any started before it that hadn't come to its outcome: the
+        // steps kept are the outcomes replay can return.
+        forget = {
+          clause: "ordinal >= ? OR state NOT IN ('succeeded', 'failed')",
+          values: [target.ordinal],
+        };
+      }
+      supersedeIn(sql, now);
+      forgetIn(sql, forget);
+      sql.exec(
+        "UPDATE run SET status = 'queued', execution_uid = ?, output = NULL, error = NULL, ended_at = NULL, lease_until = NULL, paused_at = NULL, rollback_trigger = NULL, rollback_end = NULL, rollback = NULL, rollback_replays = 0, wake_at = ?",
+        crypto.randomUUID(),
+        now
+      );
+      return { outcome: "restarted", alarm: now };
+    });
+  }
+
+  /**
+   * Removes the run: its journal, its stream chunks and its alarm. Nothing
+   * of the definition runs for it; a step still out answers no one.
+   */
+  async deleteRun(): Promise<DeleteOutcome> {
+    const { storage } = this.ctx;
+    // Not read through readRun: a journal of a layout this engine doesn't
+    // read can be deleted too.
+    if (
+      !hasJournal(storage.sql) ||
+      storage.sql.exec("SELECT 1 FROM run").toArray().length === 0
+    ) {
+      return "missing";
+    }
+    // The journal first: should the alarm outlive it (the process dies in
+    // between), it finds no run, and does nothing. The other way round, a
+    // run would be left with no alarm to run it.
+    await storage.deleteAll();
+    await storage.deleteAlarm();
+    return "deleted";
   }
 
   /**

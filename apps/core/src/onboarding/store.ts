@@ -24,6 +24,10 @@ import type {
   Plan,
   Roster,
 } from "@grasp-os/shared/onboarding";
+import type {
+  DocumentReading,
+  OnboardingDocument,
+} from "@grasp-os/shared/onboarding-documents";
 import { logPageMax } from "@grasp-os/shared/onboarding-staff";
 import type {
   LogActor,
@@ -59,6 +63,7 @@ import {
   interviewStates,
   interviews,
   linkCodes,
+  documents,
   kickoff,
   links,
   notes,
@@ -69,6 +74,7 @@ import {
   usage,
 } from "../db/onboarding/schema.ts";
 import { inJurisdiction } from "../durable-objects.ts";
+import { storedDocumentReadingSchema } from "./document-reading.ts";
 import {
   kickoffBrief,
   storedAnswersSchema,
@@ -169,6 +175,21 @@ const whoIs = (by: AuditActor): string => {
   }
   return by.type === "system" ? "grasp" : by.type;
 };
+
+/** A shared document's row, as the admin reads it. */
+const documentOf = (row: {
+  id: string;
+  name: string;
+  at: string;
+  reading: string;
+  answer: string | null;
+}): OnboardingDocument => ({
+  id: row.id,
+  name: row.name,
+  at: row.at,
+  reading: storedDocumentReadingSchema.parse(JSON.parse(row.reading)),
+  answer: row.answer,
+});
 
 /** How the log names someone who did something on their own interview link. */
 const interviewee = "interviewee";
@@ -684,6 +705,101 @@ export class Onboarding extends DurableObject<Env> {
   /** Where the agreements stand, as staff last said; none before they did. */
   agreements(): Agreements | null {
     return this.#row().agreements;
+  }
+
+  /** The documents the admin shared, the newest first. */
+  documents(): OnboardingDocument[] {
+    return this.#db
+      .select()
+      .from(documents)
+      .orderBy(desc(documents.at))
+      .all()
+      .map(documentOf);
+  }
+
+  /** Keeps a shared document's reading; in the log and the audit log without its words. */
+  addDocument(
+    kept: { id: string; name: string; reading: DocumentReading },
+    by: AuditActor
+  ): OnboardingDocument {
+    const row = {
+      id: kept.id,
+      name: kept.name,
+      at: new Date().toISOString(),
+      by: whoIs(by),
+      reading: JSON.stringify(kept.reading),
+      answer: null,
+    };
+    this.ctx.storage.transactionSync(() => {
+      this.#db.insert(documents).values(row).run();
+      this.#changed(by, "onboarding.document.read", {
+        upload: kept.id,
+        asks: kept.reading.ask !== null,
+      });
+    });
+    this.#deliverAudit();
+    return documentOf(row);
+  }
+
+  /** Keeps the admin's answer to a document's question; null for no such document. */
+  answerDocument(
+    id: string,
+    answer: string,
+    by: AuditActor
+  ): OnboardingDocument | null {
+    const [row] = this.#db
+      .select()
+      .from(documents)
+      .where(eq(documents.id, id))
+      .all();
+    if (row === undefined) {
+      return null;
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(documents)
+        .set({ answer })
+        .where(eq(documents.id, id))
+        .run();
+      this.#changed(by, "onboarding.document.answered", { upload: id });
+    });
+    this.#deliverAudit();
+    return documentOf({ ...row, answer });
+  }
+
+  /**
+   * What the documents give Stephen's context for an interview with
+   * `team` (by its name): each document about it, or about no team in
+   * particular, with what it leaves open and the admin's answer.
+   */
+  documentsBrief(team: string): string {
+    const about = this.documents().filter(
+      ({ reading }) =>
+        reading.teams.length === 0 ||
+        reading.teams.some((each) => each.toLowerCase() === team.toLowerCase())
+    );
+    if (about.length === 0) {
+      return "";
+    }
+    const parts = about.map(({ name, reading, answer }) =>
+      [
+        `## ${name}`,
+        reading.about,
+        ...(reading.tools.length === 0
+          ? []
+          : [`Tools it names: ${reading.tools.join(", ")}.`]),
+        ...(reading.unclear.length === 0
+          ? []
+          : [
+              "What it leaves open, to ask the people who do the work:",
+              ...reading.unclear.map((each) => `- ${each}`),
+            ]),
+        ...(answer === null || reading.ask === null
+          ? []
+          : [`Asked "${reading.ask.question}", the admin said: ${answer}`]),
+      ].join("\n")
+    );
+    return `# Documents the company shared\n\n${parts.join("\n\n")}`;
   }
 
   /** The kickoff as staff see it: when it came in, its reading, the answers. */

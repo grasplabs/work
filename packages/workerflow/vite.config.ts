@@ -24,6 +24,7 @@ export default defineProject({
         durableObjects: {
           RUNS: { className: "TestRuns", useSQLite: true },
           BUDGETED_RUNS: { className: "BudgetedRuns", useSQLite: true },
+          MISCONFIGURED: { className: "MisconfiguredRuns", useSQLite: true },
         },
       },
     }),
