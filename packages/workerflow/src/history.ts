@@ -347,9 +347,43 @@ const shownConfig = (
 };
 
 /**
+ * A stream of `stream`'s bytes that logs a failure to read them before it
+ * fails its reader with it: a stored chunk whose bytes changed (its size
+ * and digest as committed) is found only as it is read, each chunk being
+ * checked against its digest then, after the event went out.
+ */
+const loggingFailures = (
+  stream: ReadableStream<Uint8Array>
+): ReadableStream<Uint8Array> => {
+  const reader = stream.getReader();
+  return new ReadableStream<Uint8Array>({
+    pull: async (controller): Promise<void> => {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.close();
+        } else {
+          controller.enqueue(value);
+        }
+      } catch (error) {
+        warnRecovered("workflow_event_output_unreadable", error);
+        controller.error(error);
+      }
+    },
+    cancel: async (reason: unknown): Promise<void> => {
+      await reader.cancel(reason);
+    },
+  });
+};
+
+/**
  * A completed step's output as observers see it. One that can't be read
- * back (a stream's stored bytes corrupt) is left out and logged, rather
- * than stop every subscription at this event.
+ * back is left out and logged, rather than stop every subscription at
+ * this event: a stream whose stored chunks don't match the commit (one
+ * missing, its digest changed). A stream whose chunk changed only in its
+ * bytes is found as it is read: its reader fails, and that is logged too
+ * (loggingFailures). Checking every byte before the event goes out would
+ * read up to the stream bound (256 MiB) twice for each delivery.
  */
 const outputOf = async (
   sql: SqlStorage,
@@ -371,7 +405,7 @@ const outputOf = async (
     if ("corrupt" in replay) {
       throw replay.corrupt;
     }
-    return { output: replay.stream };
+    return { output: loggingFailures(replay.stream) };
   } catch (error) {
     warnRecovered("workflow_event_output_unreadable", error);
     return {};

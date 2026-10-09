@@ -901,3 +901,81 @@ describe("a host's subscription wait", () => {
     );
   });
 });
+
+describe("a pending read", () => {
+  it("is closed at its one deadline, however many writes its filter leaves out meanwhile", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await suspendedOn("napper", id, "nap");
+    const instance = await workflow("napper").get(id);
+    using subscription = await instance.subscribe({
+      filter: ["workflow_completed"],
+    });
+    const startedAt = Date.now();
+    const read: { closedAt?: number } = {};
+    const pending = (async (): Promise<string> => {
+      const refusal = await refusalOf(subscription);
+      read.closedAt = Date.now();
+      return refusal;
+    })();
+
+    // Writes the filter leaves out, for well past the deadline.
+    while (
+      read.closedAt === undefined &&
+      Date.now() - startedAt < testSubscriptionWaitMs * 2
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- one write after another
+      await instance.pause();
+      // oxlint-disable-next-line no-await-in-loop -- one write after another
+      await instance.resume();
+      // oxlint-disable-next-line no-await-in-loop -- one write after another
+      await suspendedOn("napper", id, "nap");
+    }
+    const refusal = await within("the read to close", pending);
+
+    expect(refusal).toBe(
+      `instance.subscription_closed: no event came within ${testSubscriptionWaitMs} ms; subscribe again from the last event ID handled`
+    );
+    expect(
+      (read.closedAt ?? Number.POSITIVE_INFINITY) - startedAt
+    ).toBeLessThan(testSubscriptionWaitMs * 1.5);
+  });
+});
+
+describe("a stream output whose bytes changed in storage", () => {
+  it("fails its reader, and is logged as unreadable", async () => {
+    const id = newId();
+    await workflow("streamed").create({ id, params: { sizes: [300 * 1024] } });
+    await ended("streamed", id);
+    // Same length, other bytes, digest left as it was.
+    await runInDurableObject(runObject("streamed", id), (_, state) => {
+      state.storage.sql.exec(
+        "UPDATE stream_chunks SET bytes = ? WHERE chunk_index = 1",
+        new Uint8Array(300 * 1024 - 256 * 1024)
+      );
+    });
+
+    let read = "not read";
+    const warnings = await warningsDuring(async () => {
+      const [exported] = await eventsOf("streamed", id, {
+        filter: ["step_completed"],
+      });
+      const output =
+        exported?.type === "step_completed" ? exported.output : undefined;
+      if (!(output instanceof ReadableStream)) {
+        throw new TypeError("the output isn't a stream");
+      }
+      try {
+        await within("the stream to end", new Response(output).arrayBuffer());
+        read = "read to its end";
+      } catch {
+        read = "failed";
+      }
+    });
+
+    expect(read).toBe("failed");
+    expect(warnings.map((warning) => eventOf(warning))).toContain(
+      "workflow_event_output_unreadable"
+    );
+  });
+});

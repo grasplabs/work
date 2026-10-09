@@ -999,20 +999,27 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
-   * Waits for the next write, at most `subscriptionWaitMs`: past that the
+   * Waits for the next write, until `deadline`: the one deadline of the
+   * `next` call it waits for, however many writes wake it meanwhile with
+   * nothing it takes (its filter leaves them out). Past it the
    * subscription is closed, and its caller takes it up again from its
    * cursor, so no waiter outlives a caller that went away for long.
    */
-  async #waitForWrite(observer: Observer): Promise<void> {
+  async #waitForWrite(
+    observer: Observer,
+    deadline: { at: number; waitMs: number }
+  ): Promise<void> {
     const next = Promise.withResolvers<boolean>();
     observer.wake = () => {
       next.resolve(true);
     };
-    const waitMs = this.#subscriptionWait();
-    const timer = setTimeout(() => {
-      observer.failure = `no event came within ${waitMs} ms`;
-      this.#close(observer);
-    }, waitMs);
+    const timer = setTimeout(
+      () => {
+        observer.failure = `no event came within ${deadline.waitMs} ms`;
+        this.#close(observer);
+      },
+      Math.max(0, deadline.at - Date.now())
+    );
     try {
       await next.promise;
     } finally {
@@ -1030,6 +1037,8 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    */
   async #nextEvent(observer: Observer): Promise<SubscriptionResult> {
     const { sql } = this.ctx.storage;
+    // One deadline for this call, from when it began to wait.
+    let deadline: { at: number; waitMs: number } | undefined;
     while (!observer.closed) {
       const run = this.#run();
       if (run?.run_uid !== observer.runUid) {
@@ -1047,8 +1056,12 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       const row = readNextEvent(sql, observer.cursor, observer.filter);
       if (row === undefined) {
         observer.cursor = Math.max(observer.cursor, lastEventId(sql));
+        if (deadline === undefined) {
+          const waitMs = this.#subscriptionWait();
+          deadline = { at: Date.now() + waitMs, waitMs };
+        }
         // oxlint-disable-next-line no-await-in-loop -- one event at a time, waited for
-        await this.#waitForWrite(observer);
+        await this.#waitForWrite(observer, deadline);
         continue;
       }
       observer.cursor = row.seq;
