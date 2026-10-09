@@ -325,10 +325,9 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
   return attempt;`,
         { count: 1 }
       ),
-      // The first attempt's App call waits at the mail server until the
-      // test lets it go, once the engine gave up on it and the run ended;
-      // it tries to record a point then. The second attempt's call waits
-      // for the App behind it, and gives up with its attempt.
+      // The first attempt's App call waits at the mail server past the
+      // attempt's time: its code is stopped then, and the second
+      // attempt's call, waiting for the App behind it, runs.
       ...workflowFiles(
         "outlived",
         `  return await step.do(
@@ -432,16 +431,17 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
 
     const outlived = await builder.api.workflows.start(app, "outlived");
     await finished(outlived.id);
-    // The run has ended: the call its attempt left waiting goes on.
+    // The run has ended; the search its first attempt's code left waiting
+    // goes, but that code was stopped.
     await mail.release();
-    await vi.waitFor(
-      async () => {
-        await expect(
-          hitsOf(app, builder.userId, "outlived:refused")
-        ).resolves.toBe(1);
-      },
-      { timeout: 10_000, interval: 100 }
+    const { status: outlivedStatus } = await builder.api.workflows.status(
+      outlived.id
     );
+    const outlivedEnded = {
+      status: outlivedStatus,
+      recorded: await hitsOf(app, builder.userId, "outlived:recorded"),
+      refused: await hitsOf(app, builder.userId, "outlived:refused"),
+    };
 
     const ended = await builder.api.workflows.start(app, "ended");
     await vi.waitFor(
@@ -507,7 +507,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       abandoned,
       anew,
       silent: await count("anew"),
-      outlived: { counted: await count("outlived"), kept },
+      outlived: { ...outlivedEnded, counted: await count("outlived"), kept },
       ended: await count("ended"),
       bounded: {
         status: await builder.api.workflows.status(bounded.id),
@@ -530,9 +530,15 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       // Completed without a point: what it records when run anew isn't
       // added either.
       silent: 0,
-      // Tried once its run had ended: refused, its call's caller gone with
-      // its attempt, so neither counted nor kept.
-      outlived: { counted: 0, kept: [] },
+      // Its first attempt's code stopped with the attempt, before it got
+      // to its point; the second completed the run.
+      outlived: {
+        status: "completed",
+        recorded: 0,
+        refused: 0,
+        counted: 0,
+        kept: [],
+      },
       // Recorded once its run had ended: taken, but neither counted nor
       // kept (`kept` above holds no row of it either).
       ended: 0,
