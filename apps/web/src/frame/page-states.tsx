@@ -106,14 +106,21 @@ export const NotFound = ({
   );
 };
 
-/** Asks for the page again (its loaders read from core once more), while not already `trying`. */
-const TryAgain = ({ trying }: { trying: boolean }) => {
+/**
+ * Asks for the page again (its loaders read from core once more), while
+ * not already `trying`; or, to `reload`, loads Grasp anew.
+ */
+const TryAgain = ({ trying, reload }: { trying: boolean; reload: boolean }) => {
   const router = useRouter();
   const { t } = useLingui();
   return (
     <Button
       disabled={trying}
       onClick={() => {
+        if (reload) {
+          window.location.reload();
+          return;
+        }
         void router.invalidate();
       }}
       variant="outline"
@@ -128,12 +135,15 @@ export const ErrorState = ({
   reason,
   title,
   heading: Heading = "h1",
+  reload = false,
 }: {
   reason: string | undefined;
   /** What failed; "This page didn't load" without it. */
   title?: string;
   /** Its title's level: the page's own heading unless it sits in a section that has one. */
   heading?: StateHeading;
+  /** Whether trying again loads Grasp anew: the page's file is gone after a new release. */
+  reload?: boolean;
 }) => {
   const { t } = useLingui();
   const trying = useRouterState({ select: (state) => state.isLoading });
@@ -152,7 +162,7 @@ export const ErrorState = ({
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <TryAgain trying={trying} />
+        <TryAgain reload={reload} trying={trying} />
       </EmptyContent>
     </Empty>
   );
@@ -167,15 +177,18 @@ export const PageError = ({
   crumbs,
   reason,
   title,
+  reload,
 }: {
   crumbs?: readonly Crumb[];
   reason: string | undefined;
   title?: string;
+  /** Whether trying again loads Grasp anew. */
+  reload?: boolean;
 }) => {
   const { t } = useLingui();
   return (
     <Place crumbs={crumbs ?? [{ label: title ?? t`This page didn't load` }]}>
-      <ErrorState reason={reason} title={title} />
+      <ErrorState reason={reason} reload={reload} title={title} />
     </Place>
   );
 };

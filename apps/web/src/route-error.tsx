@@ -3,7 +3,7 @@ import { useLingui } from "@lingui/react/macro";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
-import { isPageFault, reportError } from "./error-reports.ts";
+import { isFileGone, isPageFault, reportError } from "./error-reports.ts";
 import { PageError } from "./frame/page-states.tsx";
 
 /**
@@ -32,6 +32,9 @@ export const useRouteErrorReason = (error: unknown): string | undefined => {
       current = false;
     };
   }, [error]);
+  if (isFileGone(error)) {
+    return t`Grasp was updated while this page was open. Try again to load the new version.`;
+  }
   return isPageFault(error)
     ? withReference(
         t`Something went wrong.`,
@@ -42,7 +45,10 @@ export const useRouteErrorReason = (error: unknown): string | undefined => {
     : failureText(error);
 };
 
-/** What a page shows in place of itself when it failed, whatever the route. */
+/**
+ * What a page shows in place of itself when it failed, whatever the
+ * route. Trying again loads Grasp anew when the page's file is gone.
+ */
 export const RouteError = ({ error }: ErrorComponentProps) => (
-  <PageError reason={useRouteErrorReason(error)} />
+  <PageError reason={useRouteErrorReason(error)} reload={isFileGone(error)} />
 );
