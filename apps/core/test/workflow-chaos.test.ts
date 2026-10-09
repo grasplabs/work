@@ -6,10 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
 import { runEngine } from "../src/workflows/engine.ts";
-import { serverBuilt } from "./apps.ts";
+import { requestGranted, serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { mailConnection } from "./mail-connection.ts";
+import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import {
   endLiveRuns,
   finished,
@@ -280,9 +280,9 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
   it("add a step's statistics points up once, as it completes: never an abandoned attempt's, nor when the engine runs the step anew, nor past the day's rows, and keep none for an ended run", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, {
-      // The first attempt hangs in an App call until the engine gave up on
-      // it and the second opened its gate; then it calls on, late, while
-      // the second still runs.
+      // The first attempt hangs at the mail server, outside the App, until
+      // the engine gave up on it and the second began; then it calls on,
+      // late, while the second waits for it.
       ...workflowFiles(
         "late",
         `  return await step.do(
@@ -292,13 +292,14 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       const attempt = await env.APP.call("hit", "late");
       await env.APP.call("point", "tried");
       if (attempt === 1) {
-        await env.APP.call("waitFor", "second");
+        await env.MAIL.call("mail.search", { query: "hold late" });
         await env.APP.call("point", "late");
-        await env.APP.call("open", "late");
+        await env.APP.call("hit", "late:done");
         return "first";
       }
-      await env.APP.call("open", "second");
-      await env.APP.call("waitFor", "late");
+      while ((await env.APP.call("hits", "late:done")) === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
       return "second";
     }
   );`,
@@ -328,17 +329,16 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
   return attempt;`,
         { count: 1 }
       ),
-      // The first attempt's App call waits at a gate the test opens once
-      // the run has ended, and records a point then.
+      // The one attempt's App call waits at the mail server until the test
+      // lets it go, once the engine gave up on it and the run ended; it
+      // records a point then.
       ...workflowFiles(
         "outlived",
         `  return await step.do(
     "count",
-    { description: "Count", timeout: "${attemptTimeout}", retries: { limit: 1, delay: 10 } },
+    { description: "Count", timeout: "${attemptTimeout}", retries: { limit: 0 } },
     async () => {
-      if ((await env.APP.call("hit", "outlived")) === 1) {
-        await env.APP.call("pointAfter", "ended", "outlived");
-      }
+      await env.APP.call("pointAfter", "outlived");
       return null;
     }
   );`,
@@ -353,11 +353,28 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
         { count: null }
       ),
     });
+    // A shared connection's search, where a call is held until let go.
+    const mail = await mailConnection([], mailWithSearch);
+    await requestGranted(idp, builder, {
+      subject: { type: "app", appId: app },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.search"],
+      binding: "MAIL",
+    });
     await serverBuilt(app, 1);
     const count = async (measure: string) =>
       await pointsOf(app, builder.userId, measure);
 
     const late = await builder.api.workflows.start(app, "late");
+    // The first attempt held, and the second begun.
+    await vi.waitFor(
+      async () => {
+        await expect(mail.searched()).resolves.toStrictEqual(["hold late"]);
+        await expect(hitsOf(app, builder.userId, "late")).resolves.toBe(2);
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    await mail.release();
     await finished(late.id);
     const abandoned = {
       status: await builder.api.workflows.status(late.id),
@@ -406,14 +423,8 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
 
     const outlived = await builder.api.workflows.start(app, "outlived");
     await finished(outlived.id);
-    // The run has ended: the call its first attempt left waiting goes on.
-    await callApp(
-      env,
-      appIdSchema.parse(app),
-      { userId: builder.userId, mode: "interactive" },
-      "open",
-      ["ended"]
-    );
+    // The run has ended: the call its attempt left waiting goes on.
+    await mail.release();
     await vi.waitFor(
       async () => {
         await expect(
