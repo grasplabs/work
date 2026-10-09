@@ -70,13 +70,18 @@ const drawn = (name: string): { icon: string; parts: number } => {
   return { icon, parts: markup.match(shapes)?.length ?? 0 };
 };
 
-const moveRule = /^\.lucide-(?<icon>[a-z0-9-]+)(?<selector>[^{]*)\{/gmu;
+const moveRule =
+  /^\.lucide-(?<icon>[a-z0-9-]+)(?<selector>[^{]*)\{(?<rules>[^}]*)\}/gmu;
 const nthChild = /:nth-child\((?<part>\d+)\)/gu;
 
-/** The parts each icon's move names, by number; 0 stands for the icon itself or all of its parts. */
+/** The parts each icon's moves name, by number; 0 stands for the icon itself or all of its parts. Only rules that set a move count. */
 const moved = (): Map<string, Set<number>> => {
   const icons = new Map<string, Set<number>>();
   for (const { groups } of table.matchAll(moveRule)) {
+    // A rule that sets no move (`overflow: visible`, say) is none.
+    if (!(groups?.rules ?? "").includes("--icon-move:")) {
+      continue;
+    }
     const icon = groups?.icon ?? "";
     const parts = icons.get(icon) ?? new Set<number>();
     const numbers = [...(groups?.selector ?? "").matchAll(nthChild)].map(
