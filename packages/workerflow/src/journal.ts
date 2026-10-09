@@ -18,6 +18,14 @@
 //   events       the inbox: each event the run accepted, in order, and the
 //                wait that took it
 //
+// Beside the journal, and outliving it, `tombstones` keeps the start key
+// of each removed run whose start can be delivered again (`admit`, a
+// schedule), and when it was removed, nothing else: a start delivered
+// again finds that, and creates no second run to repeat the first one's
+// effects. A tombstone holds for the run object's tombstone horizon (30
+// days by default, run.ts), then expires: a start delivered after that is
+// a new start. A run `create` made leaves none: no one has its key.
+//
 // Values and errors are kept as codec text (codec.ts), never as live
 // objects; a step's stream result as chunks beside them (streams.ts). What
 // observers are shown is the run's history (history.ts).
@@ -35,11 +43,11 @@ export class JournalSchemaError extends Error {
 
 /**
  * The journal's own layout; a change to it is a new version. No journal
- * predates version 4 (nothing earlier was released), so a run of any other
+ * predates version 5 (nothing earlier was released), so a run of any other
  * version is refused when it is read; a later layout that changes it
  * brings its own upgrade.
  */
-export const journalSchemaVersion = 4;
+export const journalSchemaVersion = 5;
 
 /**
  * The largest event payload a run accepts, as the encoded text it keeps:
@@ -151,6 +159,17 @@ export interface RunRow extends Record<string, SqlStorageValue> {
    * rollbacks still to run; reset by one that does.
    */
   rollback_replays: number;
+  /**
+   * The schedule occurrence that started the run (a Schedule, as JSON);
+   * null for a run started otherwise.
+   */
+  schedule: string | null;
+  /**
+   * 1 when the start can be delivered again (`admit`, a schedule's
+   * occurrence), so removing the run leaves its key as a tombstone; 0 for
+   * a `create`, whose key no one else has.
+   */
+  redeliverable: number;
 }
 
 /**
@@ -319,7 +338,9 @@ export const createJournal = (sql: SqlStorage): void => {
       rollback_trigger TEXT,
       rollback_end TEXT CHECK (rollback_end IN ('errored', 'terminated')),
       rollback TEXT,
-      rollback_replays INTEGER NOT NULL DEFAULT 0
+      rollback_replays INTEGER NOT NULL DEFAULT 0,
+      schedule TEXT,
+      redeliverable INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS activations (
       generation INTEGER PRIMARY KEY,
@@ -391,6 +412,134 @@ export const hasJournal = (sql: SqlStorage): boolean =>
     .exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run'")
     .toArray().length > 0;
 
+/**
+ * The journal's tables, those that refer to others first, so dropping
+ * them in this order never leaves a reference dangling.
+ */
+const journalTables = [
+  "history",
+  "stream_chunks",
+  "attempts",
+  "events",
+  "steps",
+  "activations",
+  "run",
+];
+
+/** Tables that aren't the journal's: SQLite's and the host's own. */
+const internalTable = /^(?:sqlite_|_cf_)/u;
+
+/**
+ * Removes the run's journal (every table of it, its stream chunks and
+ * history too) and, for a start that can be delivered again, leaves its
+ * key as a tombstone, in the caller's transaction: there is never a moment
+ * with neither. The tombstone holds the key and when it was left, nothing
+ * else: no params, no outputs, nothing a deletion should have taken.
+ * `null`: no tombstone (a `create`'s start, never delivered again).
+ * Tombstones left before stay, each until it expires.
+ */
+export const removeJournal = (
+  sql: SqlStorage,
+  tombstone: { key: string; at: number } | null
+): void => {
+  const present = new Set(
+    sql
+      .exec<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+      )
+      .toArray()
+      .map((table) => table.name)
+      .filter((name) => !internalTable.test(name) && name !== "tombstones")
+  );
+  // Any table a later layout adds goes too, after the known ones.
+  const order = [
+    ...journalTables.filter((name) => present.has(name)),
+    ...[...present].filter((name) => !journalTables.includes(name)),
+  ];
+  for (const name of order) {
+    sql.exec(`DROP TABLE "${name.replaceAll('"', '""')}"`);
+  }
+  if (tombstone === null) {
+    return;
+  }
+  sql.exec(
+    "CREATE TABLE IF NOT EXISTS tombstones (start_key TEXT PRIMARY KEY, removed_at INTEGER NOT NULL)"
+  );
+  sql.exec(
+    "INSERT OR REPLACE INTO tombstones (start_key, removed_at) VALUES (?, ?)",
+    tombstone.key,
+    tombstone.at
+  );
+};
+
+const hasTombstones = (sql: SqlStorage): boolean =>
+  sql
+    .exec(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tombstones'"
+    )
+    .toArray().length > 0;
+
+/**
+ * Whether a run started under `key` was here and was removed after
+ * `since`: a tombstone left at or before it has expired, and holds no
+ * longer, whether or not it has been dropped yet.
+ */
+export const isTombstoned = (
+  sql: SqlStorage,
+  key: string,
+  since: number
+): boolean =>
+  hasTombstones(sql) &&
+  sql
+    .exec(
+      "SELECT 1 FROM tombstones WHERE start_key = ? AND removed_at > ?",
+      key,
+      since
+    )
+    .toArray().length > 0;
+
+/**
+ * When the oldest tombstone expires, `horizon` after it was left, or null
+ * when there is none.
+ */
+export const nextTombstoneExpiry = (
+  sql: SqlStorage,
+  horizon: number
+): number | null => {
+  if (!hasTombstones(sql)) {
+    return null;
+  }
+  const [oldest] = sql
+    .exec<{ at: number | null }>("SELECT MIN(removed_at) AS at FROM tombstones")
+    .toArray();
+  return oldest?.at === null || oldest === undefined
+    ? null
+    : oldest.at + horizon;
+};
+
+/**
+ * Drops the tombstones left at or before `since`, in the caller's
+ * transaction, and the table once none is left. Returns when the oldest
+ * left was left, or null when none is.
+ */
+export const expireTombstones = (
+  sql: SqlStorage,
+  since: number
+): number | null => {
+  if (!hasTombstones(sql)) {
+    return null;
+  }
+  sql.exec("DELETE FROM tombstones WHERE removed_at <= ?", since);
+  const [oldest] = sql
+    .exec<{ at: number | null }>("SELECT MIN(removed_at) AS at FROM tombstones")
+    .toArray();
+  if (oldest?.at === null || oldest === undefined) {
+    sql.exec("DROP TABLE tombstones");
+    return null;
+  }
+  return oldest.at;
+};
+
 export const readRun = (sql: SqlStorage): RunRow | undefined => {
   // A run deleted (its tables with it) is no run: a stale activation of it
   // reads that, and is fenced, rather than fail on a missing table.
@@ -413,7 +562,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
   }
   return sql
     .exec<RunRow>(
-      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays FROM run"
+      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable FROM run"
     )
     .toArray()[0];
 };

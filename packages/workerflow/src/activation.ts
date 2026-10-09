@@ -113,7 +113,12 @@ import {
 } from "./durations.ts";
 import { errorRecord, isNonRetryable, namedError, rebuild } from "./errors.ts";
 import { recordStepCompleted } from "./history.ts";
-import { assertEventType, assertStepName, stepKey } from "./identity.ts";
+import {
+  assertEventType,
+  assertStepName,
+  scheduleOf,
+  stepKey,
+} from "./identity.ts";
 import {
   readAttempt,
   readConsumedEvent,
@@ -2602,6 +2607,11 @@ export class Activation {
         payload: decode(this.#run.params),
         timestamp: new Date(this.#run.created_at),
         instanceId: this.#run.instance_id,
+        workflowName: this.#run.definition,
+        // Only a run a schedule started has it, as on the reference.
+        ...(this.#run.schedule === null
+          ? {}
+          : { schedule: scheduleOf(this.#run.schedule) }),
       };
       return { ok: true, output: await definition.run(event, this.step) };
     } catch (error) {

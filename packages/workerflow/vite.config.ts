@@ -25,6 +25,10 @@ export default defineProject({
           RUNS: { className: "TestRuns", useSQLite: true },
           BUDGETED_RUNS: { className: "BudgetedRuns", useSQLite: true },
           MISCONFIGURED: { className: "MisconfiguredRuns", useSQLite: true },
+          SHORT_TOMBSTONES: {
+            className: "ShortTombstoneRuns",
+            useSQLite: true,
+          },
         },
       },
     }),

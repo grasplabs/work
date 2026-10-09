@@ -11,6 +11,7 @@ import type {
 } from "../src/contracts.ts";
 import { NonRetryableError, namedError } from "../src/errors.ts";
 import { WorkflowRun } from "../src/run.ts";
+import type { DeleteOutcome, StartCommand, StartOutcome } from "../src/run.ts";
 import {
   busyFor,
   checkpoint,
@@ -409,7 +410,24 @@ export const definitions: Record<string, WorkflowDefinition> = {
         payload: event.payload,
         timestamp: event.timestamp,
         instanceId: event.instanceId,
+        workflowName: event.workflowName,
+        // Whether the event has the field at all, as a run a schedule
+        // didn't start has none.
+        scheduled: "schedule" in event,
+        schedule: event.schedule ?? null,
       }),
+  },
+  // As many `do` steps as the params' `steps` say, one after another.
+  "many-steps": {
+    run: async (event, step) => {
+      const steps = paramOf(event.payload, "steps");
+      let done = 0;
+      for (let index = 0; index < Number(steps); index += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- steps run one after another
+        done += await step.do(`step ${index}`, () => 1);
+      }
+      return done;
+    },
   },
   // A step called with the config in the params, as an author passing
   // whatever they were given would: refused or run, never run otherwise.
@@ -971,6 +989,17 @@ export const testRollbackReplayMs = 200;
 /** How many test replays in a row may end without the rollbacks. */
 export const testRollbackReplays = 3;
 
+/** A run with an ID that starts with this is counted while it starts. */
+export const countedPrefix = "counted-";
+const countedStartMs = 20;
+/** How many counted starts are out now, and the most ever at once. */
+export const startsOut = { now: 0, most: 0 };
+
+/** A run with an ID that starts with this fails to be created. */
+export const unstartablePrefix = "unstartable-";
+/** A run with an ID that starts with this fails to be deleted. */
+export const undeletablePrefix = "undeletable-";
+
 export class TestRuns extends WorkflowRun {
   protected override readonly maxStreamOutputBytes = testMaxStreamBytes;
   protected override readonly maxRunStreamBytes = testMaxRunStreamBytes;
@@ -998,6 +1027,34 @@ export class TestRuns extends WorkflowRun {
       handled.push(this.ctx.id.toString());
     }
   }
+
+  /** Fails, as storage might, for an instance ID that asks it to. */
+  override async start(command: StartCommand): Promise<StartOutcome> {
+    if (command.instanceId.startsWith(unstartablePrefix)) {
+      throw new Error("storage failed as the run was created");
+    }
+    if (!command.instanceId.startsWith(countedPrefix)) {
+      return await super.start(command);
+    }
+    // Held a moment, so starts a batch has out at once overlap.
+    startsOut.now += 1;
+    startsOut.most = Math.max(startsOut.most, startsOut.now);
+    try {
+      await scheduler.wait(countedStartMs);
+      return await super.start(command);
+    } finally {
+      startsOut.now -= 1;
+    }
+  }
+
+  /** Fails, as storage might, for a run whose ID asks it to. */
+  override async deleteRun(): Promise<DeleteOutcome> {
+    const run = this.journal()?.run;
+    if (run?.instance_id.startsWith(undeletablePrefix) === true) {
+      throw new Error("storage failed as the run was deleted");
+    }
+    return await super.deleteRun();
+  }
 }
 
 /**
@@ -1010,6 +1067,14 @@ export const budgetedHandlerMs = 1000;
 
 export class BudgetedRuns extends TestRuns {
   protected override readonly handlerBudgetMs = budgetedHandlerMs;
+}
+
+/** How long ShortTombstoneRuns keep a tombstone. */
+export const shortTombstoneMs = 1000;
+
+/** Run objects whose tombstones expire after a second, not 30 days. */
+export class ShortTombstoneRuns extends TestRuns {
+  protected override readonly tombstoneMs = shortTombstoneMs;
 }
 
 // The run object of a host that misconfigured it, bound as MISCONFIGURED.
