@@ -6,9 +6,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { SerializationError } from "../src/codec.ts";
 import { maxErrorMessageBytes } from "../src/errors.ts";
 import { JournalSchemaError, journalSchemaVersion } from "../src/journal.ts";
+import { defaultRetentionMs } from "../src/retention.ts";
 import { WorkflowRun } from "../src/run.ts";
 import {
-  alarmOf,
+  wakeOf,
   ended,
   journalOf,
   newId,
@@ -61,13 +62,18 @@ describe("a workflow run", () => {
         },
       ],
     });
-    // An ended run has nothing left to wake for.
+    // An ended run has nothing left to wake for but its purge, 30 days
+    // after its end when nothing says otherwise.
+    const { ended_at: endedAt } = journal.run;
+    expect(journal.run.purge_at).toBe(
+      endedAt === null ? null : endedAt + defaultRetentionMs
+    );
     await expect(
       runInDurableObject(
         runObject("orders", id),
         async (_, state) => await state.storage.getAlarm()
       )
-    ).resolves.toBeNull();
+    ).resolves.toBe(journal.run.purge_at);
   });
 
   it("journals a step's failure by name and message, and lets the definition catch it", async () => {
@@ -374,7 +380,7 @@ describe("a thrown value the journal can't keep as it is", () => {
         status: "errored",
         error: { name: "Error", message: "unprintable thrown value" },
       });
-      await expect(alarmOf(definition, id)).resolves.toBeNull();
+      await expect(wakeOf(definition, id)).resolves.toBeNull();
     }
   );
 
@@ -391,7 +397,7 @@ describe("a thrown value the journal can't keep as it is", () => {
       expect(error?.name).toBe("7");
       expect(bytes).toBeGreaterThan(maxErrorMessageBytes - 4);
       expect(bytes).toBeLessThanOrEqual(maxErrorMessageBytes);
-      await expect(alarmOf(definition, id)).resolves.toBeNull();
+      await expect(wakeOf(definition, id)).resolves.toBeNull();
     }
   );
 });
@@ -438,6 +444,6 @@ describe("a journal of another schema", () => {
     await expect(exec("SELECT * FROM activations")).resolves.toStrictEqual(
       before
     );
-    await expect(alarmOf("napper", id)).resolves.toBeNull();
+    await expect(wakeOf("napper", id)).resolves.toBeNull();
   });
 });

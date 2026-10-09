@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { batchCodes, batchConcurrency, maxBatchBytes } from "../src/binding.ts";
 import { decode, encode } from "../src/codec.ts";
 import type { WorkflowInstance } from "../src/instance.ts";
+import { defaultRetentionMs } from "../src/retention.ts";
 import { defaultTombstoneMs, WorkflowRun } from "../src/run.ts";
 import {
   ended,
@@ -152,7 +153,6 @@ describe("creating a run", () => {
   });
 
   it.each([
-    ["retention", { retention: { successRetention: "1 day" } }],
     ["a location hint", { locationHint: "weur" }],
     ["a misspelled setting", { param: { order: 7 } }],
   ])("refuses %s rather than create the run without it", async (_, options) => {
@@ -344,7 +344,10 @@ describe("createBatch refuses the whole call, creating nothing,", () => {
       "instances that aren't an array",
       ([a]: string[]): unknown => ({ instances: { id: a } }),
     ],
-    ["a setting it doesn't know", (): unknown => ({ count: 1, retention: {} })],
+    [
+      "a setting it doesn't know",
+      (): unknown => ({ count: 1, locationHint: "weur" }),
+    ],
     [
       "an entry with params the journal can't keep",
       ([a, b]: string[]): unknown => ({
@@ -723,7 +726,8 @@ describe("a tombstone beside a run created under its ID", () => {
     const left = await tombstoneGone("orders", id);
 
     const journal = await journalOf("orders", id, runs);
-    expect(left.alarm).toBeNull();
+    // What is left to wake for is the new run's purge alone.
+    expect(left.alarm).toBe(journal.run.purge_at);
     expect(journal).toMatchObject({
       run: { status: "complete" },
       steps: [
@@ -785,6 +789,7 @@ describe("a start delivered again beside a tombstone", () => {
       key: `trigger-${newId()}`,
       schedule: null,
       redeliverable: true,
+      retention: { successMs: defaultRetentionMs, errorMs: defaultRetentionMs },
     };
 
     // The run created, then its alarm lost but for the tombstone's, and

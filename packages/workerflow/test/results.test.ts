@@ -11,7 +11,7 @@ import { journalSchemaVersion } from "../src/journal.ts";
 import type { StepOutput } from "../src/run.ts";
 import { patterned, sha256 } from "./bytes.ts";
 import {
-  alarmOf,
+  wakeOf,
   deliverAlarm,
   ended,
   journalOf,
@@ -526,7 +526,7 @@ describe("a stream the step can't keep ends the run, and the definition can't ca
     // Neither its catch nor its finally ran; nothing of the upload is left.
     expect(effectsOf(id)).toStrictEqual([]);
     await expect(chunksOf("invalid-stream", id)).resolves.toStrictEqual([]);
-    await expect(alarmOf("invalid-stream", id)).resolves.toBeNull();
+    await expect(wakeOf("invalid-stream", id)).resolves.toBeNull();
   });
 });
 

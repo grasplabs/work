@@ -7,9 +7,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { decode, encode } from "../src/codec.ts";
 import type { InstanceStatus } from "../src/contracts.ts";
 import type { WorkflowInstance } from "../src/instance.ts";
+import { defaultRetentionMs } from "../src/retention.ts";
 import { defaultLeaseMs, WorkflowRun } from "../src/run.ts";
 import {
   alarmOf,
+  wakeOf,
   deliverAlarm,
   ended,
   journalOf,
@@ -324,6 +326,10 @@ describe("pause", () => {
             key,
             schedule: null,
             redeliverable: true,
+            retention: {
+              successMs: defaultRetentionMs,
+              errorMs: defaultRetentionMs,
+            },
           });
           return { outcome, alarm: await state.storage.getAlarm() };
         })
@@ -503,7 +509,7 @@ describe("terminate", () => {
     await run.terminate();
     expect({
       status: await run.status(),
-      alarm: await alarmOf("orders", id),
+      alarm: await wakeOf("orders", id),
     }).toStrictEqual({ status: { status: "terminated" }, alarm: null });
     charge.release();
 
@@ -536,7 +542,7 @@ describe("terminate", () => {
     expect({
       terminated,
       after: await run.status(),
-      alarm: await alarmOf("napper", id),
+      alarm: await wakeOf("napper", id),
     }).toStrictEqual({
       terminated: { status: "terminated" },
       after: { status: "terminated" },
@@ -822,7 +828,7 @@ describe("delete", () => {
       /instance\.not_found/u
     );
     await expect(run.delete()).rejects.toThrow(/instance\.not_found/u);
-    await expect(alarmOf("orders", id)).resolves.toBeNull();
+    await expect(wakeOf("orders", id)).resolves.toBeNull();
 
     // Created again under the same ID, whose generations count afresh: the
     // first run's activation, generation 1 too, still can't act on it.
@@ -1008,7 +1014,7 @@ describe("commands at once", () => {
     expect({
       status: await run.status(),
       ship: seen(id, "ship").times,
-      alarm: await alarmOf("orders", id),
+      alarm: await wakeOf("orders", id),
     }).toStrictEqual({
       status: { status: "terminated" },
       ship: 0,

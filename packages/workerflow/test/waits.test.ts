@@ -15,6 +15,7 @@ import {
 import { WorkflowRun } from "../src/run.ts";
 import {
   alarmOf,
+  wakeOf,
   deliverAlarm,
   ended,
   holdAlarmUntil,
@@ -630,7 +631,7 @@ describe("a replay that strays from its journal", () => {
       { ended: "suspended" },
       { ended: "settled" },
     ]);
-    await expect(alarmOf("drifts", id)).resolves.toBeNull();
+    await expect(wakeOf("drifts", id)).resolves.toBeNull();
   });
 
   it("ends the run with a WorkflowReplayMismatchError: a new wait while the step it suspended on waits to retry", async () => {
@@ -663,7 +664,7 @@ describe("a replay that strays from its journal", () => {
       { ended: "suspended" },
       { ended: "settled" },
     ]);
-    await expect(alarmOf("drifts", id)).resolves.toBeNull();
+    await expect(wakeOf("drifts", id)).resolves.toBeNull();
   });
 });
 
@@ -679,7 +680,7 @@ describe("waits raced against each other", () => {
       error: { name: "WorkflowParallelWaitError" },
     });
     expect(witnessed(id)).toStrictEqual([]);
-    await expect(alarmOf("races", id)).resolves.toBeNull();
+    await expect(wakeOf("races", id)).resolves.toBeNull();
   });
 
   it.each(["step", "sleep"])(
@@ -695,7 +696,7 @@ describe("waits raced against each other", () => {
         error: { name: "WorkflowParallelWaitError" },
       });
       expect(effectsOf(id, "work")).toStrictEqual([]);
-      await expect(alarmOf("mixes", id)).resolves.toBeNull();
+      await expect(wakeOf("mixes", id)).resolves.toBeNull();
     }
   );
 });

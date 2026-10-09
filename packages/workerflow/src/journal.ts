@@ -43,11 +43,11 @@ export class JournalSchemaError extends Error {
 
 /**
  * The journal's own layout; a change to it is a new version. No journal
- * predates version 5 (nothing earlier was released), so a run of any other
+ * predates version 6 (nothing earlier was released), so a run of any other
  * version is refused when it is read; a later layout that changes it
  * brings its own upgrade.
  */
-export const journalSchemaVersion = 5;
+export const journalSchemaVersion = 6;
 
 /**
  * The largest event payload a run accepts, as the encoded text it keeps:
@@ -60,7 +60,7 @@ export { maxStoredTextBytes as maxEventPayloadBytes } from "./codec.ts";
  * What one run's inbox holds at most, taken and untaken events alike, so
  * no sender can fill a run's storage. Taken events aren't pruned: each is
  * what its wait returns on every replay, for as long as the run lives.
- * They go with the rest of the journal when retention (a later slice)
+ * They go with the rest of the journal when retention (run.ts)
  * removes it; an ended run takes no events, so its inbox no longer grows.
  */
 export const maxInboxEvents = 10_000;
@@ -170,6 +170,21 @@ export interface RunRow extends Record<string, SqlStorageValue> {
    * a `create`, whose key no one else has.
    */
   redeliverable: number;
+  /**
+   * How long the run is kept once it has ended, in milliseconds: after it
+   * completed or was terminated, and after it errored. Resolved by the
+   * binding when it was created (its own setting, or the binding's
+   * default), and never changed.
+   */
+  success_retention_ms: number;
+  error_retention_ms: number;
+  /**
+   * When the ended run is purged: its end plus its retention, written in
+   * the transaction that wrote the end. Null while it hasn't ended, and
+   * cleared by a restart, so no run that runs, waits, is paused or rolls
+   * back is ever purged.
+   */
+  purge_at: number | null;
 }
 
 /**
@@ -340,7 +355,10 @@ export const createJournal = (sql: SqlStorage): void => {
       rollback TEXT,
       rollback_replays INTEGER NOT NULL DEFAULT 0,
       schedule TEXT,
-      redeliverable INTEGER NOT NULL
+      redeliverable INTEGER NOT NULL,
+      success_retention_ms INTEGER NOT NULL,
+      error_retention_ms INTEGER NOT NULL,
+      purge_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS activations (
       generation INTEGER PRIMARY KEY,
@@ -472,6 +490,20 @@ export const removeJournal = (
   );
 };
 
+/**
+ * Starts the run's retention clock, in the transaction that wrote its end
+ * (`ended_at` and the status it ended with): it is purged its retention
+ * after that, the success retention for a run that completed or was
+ * terminated, the error retention for one that errored, as on the
+ * reference. Returns when, for the alarm set in the same turn.
+ */
+export const startRetentionIn = (sql: SqlStorage): number =>
+  sql
+    .exec<{ purge_at: number }>(
+      "UPDATE run SET purge_at = ended_at + CASE status WHEN 'errored' THEN error_retention_ms ELSE success_retention_ms END RETURNING purge_at"
+    )
+    .one().purge_at;
+
 const hasTombstones = (sql: SqlStorage): boolean =>
   sql
     .exec(
@@ -562,7 +594,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
   }
   return sql
     .exec<RunRow>(
-      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable FROM run"
+      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable, success_retention_ms, error_retention_ms, purge_at FROM run"
     )
     .toArray()[0];
 };

@@ -98,6 +98,28 @@ export const alarmOf = async (
     async (_, state) => await state.storage.getAlarm()
   );
 
+/**
+ * The run's alarm, unless all it is for is the ended run's purge (its
+ * retention after its end): null then, as for no alarm. What an ended run
+ * has left to wake for is its purge alone.
+ */
+export const wakeOf = async (
+  definition: string,
+  id: string
+): Promise<number | null> =>
+  await runInDurableObject(runObject(definition, id), async (_, state) => {
+    const alarm = await state.storage.getAlarm();
+    let purgeAt: SqlStorageValue = null;
+    try {
+      purgeAt = state.storage.sql
+        .exec<{ purge_at: SqlStorageValue }>("SELECT purge_at FROM run")
+        .one().purge_at;
+    } catch {
+      // No run, or one of a layout with no purge time.
+    }
+    return alarm === purgeAt ? null : alarm;
+  });
+
 /** Waits until the run is suspended, and returns its journal then. */
 export const suspendedOn = async (
   definition: string,

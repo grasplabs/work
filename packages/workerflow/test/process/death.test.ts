@@ -546,6 +546,37 @@ describe("a run on disk-backed workerd", () => {
     expect(keysOf(id, "charge").size).toBe(2);
   });
 
+  it("purges an ended run its retention after its end though the process died in between, tombstone kept", async () => {
+    const id = "purged-after-death";
+    const retentionMs = 2000;
+    await workerd.request("/start", startOf("orders", id, { retentionMs }));
+    await ended("orders", id);
+    const journal = await journalOf("orders", id);
+    // Killed with the purge still to come: only its alarm, stored with the
+    // run, can bring it.
+    await workerd.kill();
+    await workerd.start();
+
+    await until("the run to be purged", async () => {
+      const { status } = await statusOf("orders", id);
+      return status === 404 ? true : undefined;
+    });
+    const again = await workerd.request(
+      "/start",
+      startOf("orders", id, { retentionMs })
+    );
+
+    expect(journal).toMatchObject({
+      run: { status: "complete", success_retention_ms: retentionMs },
+    });
+    expect(again).toStrictEqual({ status: 200, body: { created: false } });
+    await expect(journalOf("orders", id)).resolves.toBeNull();
+    expect(timeline(id)).toStrictEqual([
+      ["charge", 1],
+      ["ship", 1],
+    ]);
+  });
+
   it("still runs the run, once, when the process dies after the start commits; the start delivered again finds it", async () => {
     const id = "after-the-start-commit";
     const chargeHeld = outside.hold(id, "charge", 1);
