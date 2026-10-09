@@ -1,7 +1,7 @@
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveChoice } from "./model-choice.ts";
+import { resolveChoice, switchModel } from "./model-choice.ts";
 
 // The model and effort a question names, from what the person last chose
 // and what core offers now: pure logic, so tested on its own. Storage is
@@ -60,5 +60,23 @@ describe("the model and effort a question names", () => {
       effort: undefined,
       levels: [],
     });
+  });
+
+  it("keeps the effort shown when the person picks a model that takes it", () => {
+    const shown = resolveChoice(models, efforts, { model: glm, effort: "max" });
+    expect(switchModel(efforts, shown, opus)).toStrictEqual({
+      model: opus,
+      effort: "max",
+    });
+  });
+
+  it("never brings back an effort chosen for another model, out of sight since", () => {
+    // Max on GLM, then Llama, which doesn't think: Opus starts at its own default.
+    const onGlm = resolveChoice(models, efforts, { model: glm, effort: "max" });
+    const onLlama = switchModel(efforts, onGlm, llama);
+    const shown = resolveChoice(models, efforts, onLlama);
+    expect(
+      resolveChoice(models, efforts, switchModel(efforts, shown, opus))
+    ).toMatchObject({ model: opus, effort: "medium" });
   });
 });

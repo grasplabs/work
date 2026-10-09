@@ -22,7 +22,8 @@ export interface ResolvedChoice {
   levels: readonly ModelEffort[];
 }
 
-const isEffort = (value: unknown): value is ModelEffort =>
+/** Whether `value` is one of the efforts, as a stored or picked value may not be. */
+export const isEffort = (value: unknown): value is ModelEffort =>
   modelEfforts.some((effort) => effort === value);
 
 /**
@@ -46,6 +47,22 @@ export const resolveChoice = (
       ? choice.effort
       : (offered?.default ?? undefined);
   return { model, effort, levels };
+};
+
+/**
+ * The choice once the person picks `model`: the effort they see now goes
+ * with it where that model takes it, and none otherwise, so a model never
+ * brings back an effort chosen for another, out of sight since.
+ */
+export const switchModel = (
+  efforts: Readonly<Record<string, ModelEfforts>>,
+  shown: ResolvedChoice,
+  model: string
+): ModelChoice => {
+  const levels = Object.hasOwn(efforts, model) ? efforts[model]?.levels : [];
+  return shown.effort !== undefined && levels?.includes(shown.effort) === true
+    ? { model, effort: shown.effort }
+    : { model };
 };
 
 const keyOf = (userId: string): string => `grasp.chat.choice.${userId}`;
