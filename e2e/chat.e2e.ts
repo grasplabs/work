@@ -335,7 +335,7 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   await page.keyboard.press("Escape");
   await expect(choices).toHaveCount(0);
   await expect(control).toHaveAccessibleName(
-    "Model: glm-5.3-flash, thinking Max. Change model or thinking"
+    "Model: glm-5.3-flash, thinking max. Change model or thinking"
   );
 
   const question = `Think hard ${tag}.`;
@@ -355,7 +355,7 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   // Kept for the person in this browser.
   await page.reload();
   await expect(control).toHaveAccessibleName(
-    "Model: glm-5.3-flash, thinking Max. Change model or thinking"
+    "Model: glm-5.3-flash, thinking max. Change model or thinking"
   );
 
   // Back on the model that doesn't think, the effort goes.

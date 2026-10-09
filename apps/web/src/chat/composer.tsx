@@ -16,7 +16,7 @@ import {
   InputGroupTextarea,
 } from "@grasp-os/ui/components/input-group";
 import { Spinner } from "@grasp-os/ui/components/spinner";
-import { msg } from "@lingui/core/macro";
+import { msg, select } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import {
   ArrowUpIcon,
@@ -27,6 +27,7 @@ import {
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { isEffort } from "./model-choice.ts";
 
 // Where a question is written, in the prototype's look
 // (grasplabs/prototype `components/chat/chat-composer.tsx`): a box that
@@ -73,9 +74,8 @@ const EffortChoice = ({
       <DropdownMenuLabel>{t`How hard it thinks`}</DropdownMenuLabel>
       <DropdownMenuRadioGroup
         onValueChange={(value: unknown) => {
-          const chosen = efforts.find((each) => each === value);
-          if (chosen !== undefined) {
-            onEffort(chosen);
+          if (isEffort(value) && efforts.includes(value)) {
+            onEffort(value);
           }
         }}
         value={effort ?? ""}
@@ -128,13 +128,18 @@ const ModelPicker = ({
   const { t } = useLingui();
   const name = modelName(model);
   const thinks = efforts.length > 0 && onEffort !== undefined;
-  const level = effort === undefined ? undefined : t(effortNames[effort]);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={
-          thinks && level !== undefined
-            ? t`Model: ${name}, thinking ${level}. Change model or thinking`
+          thinks && effort !== undefined
+            ? t`Model: ${name}, thinking ${select(effort, {
+                low: "low",
+                medium: "medium",
+                high: "high",
+                xhigh: "extra high",
+                other: "max",
+              })}. Change model or thinking`
             : t`Model: ${name}. Change model`
         }
         render={<InputGroupButton size="sm" variant="ghost" />}
@@ -320,7 +325,7 @@ const QuestionField = ({
 const noModels: readonly string[] = [];
 
 /** Where the model doesn't think, or nobody picks how hard. */
-const noEfforts: readonly ModelEffort[] = [];
+const noLevels: readonly ModelEffort[] = [];
 
 /** The box to ask in. Controlled: the page keeps the text and the model. */
 export const Composer = ({
@@ -329,7 +334,7 @@ export const Composer = ({
   models = noModels,
   model,
   onModel,
-  efforts = noEfforts,
+  efforts = noLevels,
   effort,
   onEffort,
   running,

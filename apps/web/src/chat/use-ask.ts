@@ -8,7 +8,12 @@ import { useRef, useState } from "react";
 
 import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
-import { readChoice, resolveChoice, writeChoice } from "./model-choice.ts";
+import {
+  readChoice,
+  resolveChoice,
+  switchModel,
+  writeChoice,
+} from "./model-choice.ts";
 import type { ModelChoice } from "./model-choice.ts";
 
 // Asking in a chat, from the chat page or the chat dock on any other page:
@@ -22,7 +27,7 @@ const titleOf = (question: string): string => {
 };
 
 /** No model takes an effort, as before core says which do. */
-const noEfforts: Readonly<Record<string, ModelEfforts>> = {};
+const noModelEfforts: Readonly<Record<string, ModelEfforts>> = {};
 
 /**
  * What the box to ask in needs: the text, model and effort, and asking in
@@ -32,7 +37,7 @@ export const useAsk = (
   chatId: string | undefined,
   models: readonly string[],
   /** The efforts each of `models` takes (`chats.efforts()`). */
-  efforts: Readonly<Record<string, ModelEfforts>> = noEfforts,
+  efforts: Readonly<Record<string, ModelEfforts>> = noModelEfforts,
   /** Where a new chat opens: on the chat page, or where the person is (the dock). */
   opens: "page" | "here" = "page"
 ) => {
@@ -46,7 +51,8 @@ export const useAsk = (
   const [choice, setChoice] = useState<ModelChoice>(() =>
     readChoice(identity.userId)
   );
-  const { model, effort, levels } = resolveChoice(models, efforts, choice);
+  const shown = resolveChoice(models, efforts, choice);
+  const { model, effort, levels } = shown;
   const choose = (chosen: ModelChoice): void => {
     setChoice(chosen);
     writeChoice(identity.userId, chosen);
@@ -116,9 +122,8 @@ export const useAsk = (
       onText: setText,
       models,
       model,
-      // A new model keeps the effort chosen, where it takes it.
       onModel: (chosen: string) => {
-        choose({ ...choice, model: chosen });
+        choose(switchModel(efforts, shown, chosen));
       },
       efforts: levels,
       effort,

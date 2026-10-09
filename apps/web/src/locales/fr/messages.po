@@ -2123,8 +2123,8 @@ msgid "Model cost"
 msgstr "Coût du modèle"
 
 #: src/chat/composer.tsx
-msgid "Model: {name}, thinking {level}. Change model or thinking"
-msgstr "Modèle : {name}, réflexion {level}. Changer de modèle ou de réflexion"
+msgid "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
+msgstr "Modèle : {name}, réflexion {effort, select, low {faible} medium {moyenne} high {élevée} xhigh {très élevée} other {maximale}}. Changer de modèle ou de réflexion"
 
 #: src/chat/composer.tsx
 msgid "Model: {name}. Change model"
