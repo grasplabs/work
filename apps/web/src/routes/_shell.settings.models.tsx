@@ -3,7 +3,6 @@ import type {
   ModelBudgetScope,
   ModelRulesSettings,
   ModelSettings,
-  ModelSpender,
 } from "@grasp-os/shared/models";
 import { Badge } from "@grasp-os/ui/components/badge";
 import {
@@ -18,13 +17,14 @@ import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import { dollars, percent } from "../settings/money.ts";
 import {
   SettingsBody,
   SettingsError,
@@ -32,27 +32,12 @@ import {
   SettingsSection,
 } from "../settings/settings-parts.tsx";
 
-// Models, for admins: the models the deployment allows, the client's rules
-// for model calls (EU routing, which models take sensitive data, budgets),
-// and this month's spend against each budget. They are deployment config
-// that Grasp sets as agreed with the client, so the page only shows them,
-// as core reads them; core checks the role.
-
-/** An amount in US dollars, the gateway's currency, as the page's language writes it. */
-const dollars = (amount: number): string =>
-  new Intl.NumberFormat(i18n.locale, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  }).format(amount);
-
-/** A share given in percent (80 for 80 %), as the page's language writes it. */
-const percent = (value: number): string =>
-  new Intl.NumberFormat(i18n.locale, {
-    style: "percent",
-    maximumFractionDigits: 0,
-  }).format(value / 100);
+// Models, for admins: the models the deployment allows and the client's
+// rules for model calls (EU routing, which models take sensitive data,
+// budgets). They are deployment config that Grasp sets as agreed with the
+// client, so the page only shows them, as core reads them; core checks
+// the role. What was spent against the budgets is AI spend's
+// (`_shell.settings.spend.tsx`).
 
 /** A list of IDs for a sentence, or `none`. */
 const listed = (ids: readonly string[]): string =>
@@ -183,84 +168,24 @@ const scopeTitles: Record<ModelBudgetScope, MessageDescriptor> = {
   user: msg`Each person`,
 };
 
-const spenderName = (of: ModelSpender): string => {
-  if (of.type === "deployment") {
-    return i18n._(msg`All calls`);
-  }
-  if (of.type === "workflow") {
-    const { workflowId } = of;
-    const engine = of.appName ?? of.appId;
-    return i18n._(msg`${workflowId} in ${engine}`);
-  }
-  return of.name ?? of.userId;
-};
-
-const BudgetTable = ({ budget }: { budget: ModelBudget }) => {
-  const { t } = useLingui();
-  const title = i18n._(scopeTitles[budget.scope]);
+/** One budget's rule: its limit, and when admins are alerted. */
+const BudgetRule = ({ budget }: { budget: ModelBudget }) => {
   const limit = dollars(budget.limit);
   const alertAt = percent(budget.alertAt);
-  const top = budget.spent.length;
   return (
-    <div className="flex flex-col gap-2">
-      <h3 className="font-medium">{title}</h3>
+    <div className="flex flex-col gap-1">
+      <h3 className="font-medium">{i18n._(scopeTitles[budget.scope])}</h3>
       <p className="text-muted-foreground text-sm">
         <Trans>
           {limit} a month, admins alerted at {alertAt}. Calls stop once
           it&apos;s used up.
         </Trans>
       </p>
-      {budget.more ? (
-        <p className="text-sm">
-          <Trans>The {top} who spent most; more spent less.</Trans>
-        </p>
-      ) : null}
-      {budget.spent.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
-          <Trans>Nothing spent yet.</Trans>
-        </p>
-      ) : (
-        <Table aria-label={t`Spend: ${title}`}>
-          <TableHeader>
-            <TableRow>
-              <TableHead>
-                <Trans>Spent by</Trans>
-              </TableHead>
-              <TableHead>
-                <Trans>Spent</Trans>
-              </TableHead>
-              <TableHead>
-                <Trans>Of the limit</Trans>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {budget.spent.map(({ of, amount }) => (
-              <TableRow key={JSON.stringify(of)}>
-                <TableCell>{spenderName(of)}</TableCell>
-                <TableCell>{dollars(amount)}</TableCell>
-                <TableCell>
-                  {/* A limit of nothing is used up by any spend at all. */}
-                  {budget.limit > 0
-                    ? percent((amount / budget.limit) * 100)
-                    : percent(100)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
     </div>
   );
 };
 
-const Budgets = ({
-  budgets,
-  month,
-}: {
-  budgets: ModelBudget[];
-  month: string;
-}) => {
+const Budgets = ({ budgets }: { budgets: ModelBudget[] }) => {
   if (budgets.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
@@ -272,12 +197,18 @@ const Budgets = ({
   }
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm">
-        <Trans>Spend this month ({month}, UTC).</Trans>
-      </p>
       {budgets.map((budget) => (
-        <BudgetTable budget={budget} key={budget.scope} />
+        <BudgetRule budget={budget} key={budget.scope} />
       ))}
+      <p className="text-sm">
+        <Trans>
+          What was spent this month is under{" "}
+          <Link className="underline underline-offset-4" to="/settings/spend">
+            AI spend
+          </Link>
+          .
+        </Trans>
+      </p>
     </div>
   );
 };
@@ -325,7 +256,7 @@ const Settings = ({ settings }: { settings: ModelSettings }) => {
             <DataRules sensitive={on.sensitive} />
           </Section>
           <Section title={t`Budgets`}>
-            <Budgets budgets={on.budgets} month={settings.month} />
+            <Budgets budgets={on.budgets} />
           </Section>
         </>
       )}

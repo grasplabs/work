@@ -5,9 +5,10 @@ import { test } from "./csp.ts";
 import { pageOf, peopleIn } from "./people.ts";
 
 // The Models page: an admin reads the models the deployment allows, its
-// EU routing and data rules, and its budgets with this month's spend, as
-// the stack's gateway config sets them (playwright.config.ts). The spend
-// itself, which only model calls add to, is core's test.
+// EU routing and data rules, and its budgets, as the stack's gateway config
+// sets them (playwright.config.ts). AI spend, beside it, shows this month's
+// spend against those budgets. The spend itself, which only model calls
+// add to, is core's test.
 
 /** A section of the page, by its heading. */
 const sectionOf = (page: Page, name: string) =>
@@ -43,6 +44,10 @@ test("an admin reads the allowed models, the rules and the budgets, and nobody e
     "$250.00 a month, admins alerted at 80%."
   );
   await expect(budgets).toContainText("$20.00 a month, admins alerted at 80%.");
+  await expect(budgets.getByRole("link", { name: "AI spend" })).toHaveAttribute(
+    "href",
+    "/settings/spend"
+  );
   // Nothing to change: the page's only button is the sidebar's trigger.
   await expect(page.getByRole("main").getByRole("button")).toHaveText([
     "Show or hide the sidebar",
@@ -53,4 +58,39 @@ test("an admin reads the allowed models, the rules and the budgets, and nobody e
   await expect(refused.getByRole("alert")).toHaveText(
     "Your role doesn't allow that."
   );
+});
+
+test("an admin reads this month's AI spend against the budgets, and nobody else does", async ({
+  browser,
+}) => {
+  const { admin, builder } = peopleIn("models");
+  const page = await pageOf(browser, admin);
+  await page.goto("/settings/models");
+  await page
+    .getByRole("navigation", { name: "Settings" })
+    .getByRole("link", { name: "AI spend" })
+    .click();
+  await expect(page).toHaveURL(/\/settings\/spend$/u);
+
+  const spend = sectionOf(page, "AI spend");
+  await expect(spend).toContainText(/\d{4}-\d{2}, UTC/u);
+  await expect(spend.getByText("This month so far")).toBeVisible();
+  await expect(spend).toContainText(/ of the \$250\.00 budget/u);
+  await expect(spend.getByText("By the end of the month")).toBeVisible();
+  await expect(sectionOf(page, "By person")).toContainText(
+    "$20.00 a month for each, admins alerted at 80%."
+  );
+  // The stack sets no budget for each workflow.
+  await expect(sectionOf(page, "By workflow")).toHaveCount(0);
+
+  const refused = await pageOf(browser, builder);
+  await refused.goto("/settings/spend");
+  await expect(refused.getByRole("alert")).toHaveText(
+    "Your role doesn't allow that."
+  );
+  await expect(
+    refused
+      .getByRole("navigation", { name: "Settings" })
+      .getByRole("link", { name: "AI spend" })
+  ).toHaveCount(0);
 });

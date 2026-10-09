@@ -267,7 +267,13 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     admin: {
       nav,
       menu,
-      settings: ["Members and roles", "Models", "Audit trail", "Profile"],
+      settings: [
+        "Members and roles",
+        "Models",
+        "AI spend",
+        "Audit trail",
+        "Profile",
+      ],
     },
     builder: { nav, menu, settings: ["Profile"] },
     user: { nav, menu, settings: ["Profile"] },
