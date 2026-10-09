@@ -1683,6 +1683,10 @@ msgstr "Grasp staff can't connect accounts or change what is offered here: that 
 msgid "Grasp staff signed in"
 msgstr "Grasp staff signed in"
 
+#: src/route-error.tsx
+msgid "Grasp was updated while this page was open. Try again to load the new version."
+msgstr "Grasp was updated while this page was open. Try again to load the new version."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp won't run what {about} needs: {requirement}"
 msgstr "Grasp won't run what {about} needs: {requirement}"

@@ -1683,6 +1683,10 @@ msgstr "L’équipe Grasp ne peut pas connecter de comptes ni modifier ce qui es
 msgid "Grasp staff signed in"
 msgstr "Le personnel de Grasp s’est connecté"
 
+#: src/route-error.tsx
+msgid "Grasp was updated while this page was open. Try again to load the new version."
+msgstr "Grasp a été mis à jour pendant que cette page était ouverte. Réessayez pour charger la nouvelle version."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp won't run what {about} needs: {requirement}"
 msgstr "Grasp n’exécutera pas ce dont {about} a besoin : {requirement}"
