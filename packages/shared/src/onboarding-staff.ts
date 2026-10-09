@@ -1,6 +1,9 @@
 import { z } from "zod";
 
 import type { InterviewProgress } from "./interview-links.ts";
+import { answerMaxLength, kickoffTeamNameMaxLength } from "./kickoff.ts";
+import { interviewLocaleSchema } from "./onboarding.ts";
+import type { Agreements } from "./onboarding.ts";
 
 // Grasp's onboarding area (core's onboarding/staff-area.ts): what a Grasp
 // consultant in a client's deployment sees of its onboarding. Where it
@@ -134,3 +137,66 @@ export interface StaffTranscript {
 
 /** The longest note. */
 export const noteMaxLength = 2000;
+
+/** Where the agreements stand, as Grasp's staff keep them. */
+export interface StaffAgreements {
+  /** As staff last said; null before they said anything. */
+  agreements: Agreements | null;
+  /** All are in: links open and go out by the plan. */
+  agreed: boolean;
+  /**
+   * The team is told: links went out, so what was agreed stays as it was.
+   * Staff pause the interviews instead.
+   */
+  told: boolean;
+  /** How many links went out, and how many wait (taking part, not out yet). */
+  out: number;
+  waiting: number;
+}
+
+/**
+ * The most lines in each of Stephen's lists, and the longest line: as long
+ * as what the kickoff suggests can be (the sponsor's answer, a team's
+ * name), so a suggestion is kept whole, never cut, when staff save it.
+ */
+export const stephenLimitsMax = 30;
+export const stephenTermsMax = 100;
+export const stephenLimitMaxLength = answerMaxLength;
+export const stephenTermMaxLength = kickoffTeamNameMaxLength;
+
+const linesOf = (most: number, longest: number) =>
+  z
+    .array(z.string().trim().min(1).max(longest))
+    .max(most)
+    .refine((lines) => new Set(lines).size === lines.length, {
+      message: "A line twice",
+    });
+
+/**
+ * How Stephen is set up for this deployment, in every interview he holds:
+ * the languages he interviews in, what he leaves alone, and the words he
+ * has to know to hear them right (tools, products, the company's terms).
+ */
+export const stephenSetupSchema = z.strictObject({
+  languages: z
+    .array(interviewLocaleSchema)
+    .min(1)
+    .refine((languages) => new Set(languages).size === languages.length, {
+      message: "A language twice",
+    }),
+  limits: linesOf(stephenLimitsMax, stephenLimitMaxLength),
+  terms: linesOf(stephenTermsMax, stephenTermMaxLength),
+});
+export type StephenSetup = z.output<typeof stephenSetupSchema>;
+
+/** Stephen's setup as staff see it. */
+export interface StephenSetupView {
+  /** What holds in every interview: staff's, or else what the kickoff suggests. */
+  setup: StephenSetup;
+  /** Staff changed it; null-saving takes it back to `suggested`. */
+  changed: boolean;
+  /** What the kickoff suggests: its limits, and the teams it named as words. */
+  suggested: StephenSetup;
+  /** What the kickoff said of the languages and the tools, to set him by. */
+  kickoff: { languages: string | null; systems: string | null };
+}

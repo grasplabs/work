@@ -196,6 +196,8 @@ export const gateView = async (
     known,
     parts,
     ready: known >= threshold || over,
+    over,
+    openedAt: openedAt?.toISOString() ?? null,
     staff:
       staff === undefined || config === undefined
         ? null

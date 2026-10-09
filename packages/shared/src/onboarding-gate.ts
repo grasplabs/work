@@ -49,6 +49,13 @@ export interface GateView {
   parts: KnownPart[];
   /** Grasp knows enough, or the interviews are over: staff may give the go. */
   ready: boolean;
+  /** The interviews are over: the go may be given whatever is known. */
+  over: boolean;
+  /**
+   * When Grasp first gave its go (ISO 8601), or null before it did. A go
+   * taken back since may be given again without waiting to be ready.
+   */
+  openedAt: string | null;
   /**
    * Grasp's staff access, as the company's admin sees it: whether staff
    * may come in now, what they reach, and until when; null when the

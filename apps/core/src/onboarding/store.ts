@@ -28,14 +28,20 @@ import type {
   DocumentReading,
   OnboardingDocument,
 } from "@grasp-os/shared/onboarding-documents";
-import { logPageMax } from "@grasp-os/shared/onboarding-staff";
+import {
+  logPageMax,
+  stephenSetupSchema,
+} from "@grasp-os/shared/onboarding-staff";
 import type {
   LogActor,
   LogFilter,
+  StaffAgreements,
   StaffLog,
   StaffLogEntry,
   StaffNote,
   StaffTranscript,
+  StephenSetup,
+  StephenSetupView,
 } from "@grasp-os/shared/onboarding-staff";
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -92,6 +98,7 @@ import {
   takingPart,
 } from "./rules.ts";
 import type { InterviewState, TeamCount } from "./rules.ts";
+import { interviewBrief, setupView } from "./stephen-setup.ts";
 
 // The onboarding's store: one Durable Object per deployment holds who works
 // where, the plan, everyone's link and where each interview stands, the log
@@ -404,13 +411,21 @@ export class Onboarding extends DurableObject<Env> {
 
   /** Records where the agreements stand. */
   setAgreements(agreements: Agreements, by: AuditActor): OnboardingView {
+    const { processing, assessment, council } = agreements;
     this.ctx.storage.transactionSync(() => {
       this.#db
         .update(onboarding)
         .set({ agreements: JSON.stringify(agreements) })
         .where(eq(onboarding.id, 1))
         .run();
-      this.#changed(by, "onboarding.agreements.set", { ...agreements });
+      this.#changed(by, "onboarding.agreements.set", {
+        processing,
+        assessment,
+        council,
+        processingOn: agreements.processingOn ?? null,
+        assessmentOn: agreements.assessmentOn ?? null,
+        councilOn: agreements.councilOn ?? null,
+      });
     });
     this.#deliverAudit();
     this.ctx.waitUntil(this.#armLinks());
@@ -705,6 +720,73 @@ export class Onboarding extends DurableObject<Env> {
   /** Where the agreements stand, as staff last said; none before they did. */
   agreements(): Agreements | null {
     return this.#row().agreements;
+  }
+
+  /**
+   * Where the agreements stand for Grasp's staff: whether the team is
+   * told (a link ever went out, even to someone since taken off the
+   * roster), and how many links are out and wait.
+   */
+  staffAgreements(): StaffAgreements {
+    const { agreements } = this.#row();
+    const roster = this.#roster();
+    const { sent } = this.#linkFacts();
+    const [row] = this.#db
+      .select({ toldAt: onboarding.toldAt })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
+    const taking =
+      roster?.people.filter((person) => takingPart(roster, person)) ?? [];
+    return {
+      agreements,
+      agreed: agreementsIn(agreements),
+      // Links sent before the store kept when the first went out count too.
+      told: (row?.toldAt ?? null) !== null || sent.size > 0,
+      out: sent.size,
+      waiting: taking.filter(({ id }) => !sent.has(id)).length,
+    };
+  }
+
+  /** How Stephen is set up, and what the kickoff suggests. */
+  stephen(): StephenSetupView {
+    return setupView(this.#stephen(), this.kickoff());
+  }
+
+  /**
+   * Sets how Stephen is set up, from the next turn on; null takes him back
+   * to what the kickoff suggests. In the log and the audit log by how
+   * many lines, never their words.
+   */
+  saveStephen(setup: StephenSetup | null, by: AuditActor): StephenSetupView {
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(onboarding)
+        .set({ stephen: setup === null ? null : JSON.stringify(setup) })
+        .where(eq(onboarding.id, 1))
+        .run();
+      this.#changed(
+        by,
+        setup === null ? "onboarding.stephen.reset" : "onboarding.stephen.set",
+        setup === null
+          ? {}
+          : {
+              languages: setup.languages.join(" "),
+              limits: setup.limits.length,
+              terms: setup.terms.length,
+            }
+      );
+    });
+    this.#deliverAudit();
+    return this.stephen();
+  }
+
+  /**
+   * What every interview turn's context holds of the company: how Stephen
+   * is set up, and what the kickoff brought (stephen-setup.ts).
+   */
+  interviewBrief(): string {
+    return interviewBrief(this.#stephen(), this.kickoff());
   }
 
   /** The documents the admin shared, the newest first. */
@@ -1035,6 +1117,12 @@ export class Onboarding extends DurableObject<Env> {
       return [];
     }
     this.ctx.storage.transactionSync(() => {
+      // The first link out tells the team, for good.
+      this.#db
+        .update(onboarding)
+        .set({ toldAt: sql`coalesce(${onboarding.toldAt}, ${now})` })
+        .where(eq(onboarding.id, 1))
+        .run();
       for (const person of due) {
         this.#db.insert(links).values({ person, sentAt: now }).run();
         const team = roster.people.find(({ id }) => id === person)?.team;
@@ -1282,6 +1370,18 @@ export class Onboarding extends DurableObject<Env> {
           : agreementsSchema.parse(JSON.parse(agreements)),
       pausedAt: row?.pausedAt ?? null,
     };
+  }
+
+  #stephen(): StephenSetup | null {
+    const [row] = this.#db
+      .select({ stephen: onboarding.stephen })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
+    const stored = row?.stephen ?? null;
+    return stored === null
+      ? null
+      : stephenSetupSchema.parse(JSON.parse(stored));
   }
 
   #roster(): Roster | null {

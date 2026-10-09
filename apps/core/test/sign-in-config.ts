@@ -54,10 +54,18 @@ export const localIdpOrigin = `http://localhost:${localIdpPort}`;
 export const localAdmin = "admin@acme.test";
 
 /**
+ * The one Grasp staff member of a local stack: the fake IdP gives them
+ * the staff object id when they sign in through Grasp's tenant.
+ */
+export const localStaff = "staff@grasp.test";
+
+/**
  * Core's sign-in vars for a local stack at `origin`: the client's Entra
  * tenant, answered by the fake IdP (test/idp-worker.ts) at `idpOrigin`, so
- * people sign in through the product as they do in production. Only test
- * values.
+ * people sign in through the product as they do in production; and a
+ * staff window, open from a day ago for three days from when the stack
+ * starts, for Grasp's staff ({@link localStaff}) through Grasp's own
+ * tenant. Only test values.
  */
 export const localSignIn = (origin: string, idpOrigin = localIdpOrigin) => ({
   SIGN_IN: {
@@ -65,6 +73,15 @@ export const localSignIn = (origin: string, idpOrigin = localIdpOrigin) => ({
     domains: ["acme.test"],
     admins: [localAdmin],
     entra: { tenantId: acmeTenant, clientId: entraClient.id },
+    staff: {
+      tenantId: graspTenant,
+      clientId: entraClient.id,
+      domains: ["grasp.test"],
+      oids: [staffOid],
+      role: "admin",
+      opened: new Date(Date.now() - day).toISOString(),
+      until: new Date(Date.now() + 3 * day).toISOString(),
+    },
   },
   ENTRA_CLIENT_SECRET: entraClient.secret,
   DEV_IDP_ORIGIN: idpOrigin,

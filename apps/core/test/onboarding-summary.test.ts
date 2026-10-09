@@ -148,6 +148,8 @@ const closed = (known: number, ready = false): GateView => ({
   known,
   parts: [],
   ready,
+  over: false,
+  openedAt: null,
   staff: null,
 });
 

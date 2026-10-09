@@ -33,6 +33,8 @@ const gate: GateView = {
   known: 0,
   parts: [],
   ready: false,
+  over: false,
+  openedAt: null,
   staff: null,
 };
 

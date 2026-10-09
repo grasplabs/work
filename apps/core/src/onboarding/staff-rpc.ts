@@ -23,13 +23,17 @@ import type {
 import {
   logFilterSchema,
   noteMaxLength,
+  stephenSetupSchema,
 } from "@grasp-os/shared/onboarding-staff";
 import type {
   LogFilter,
+  StaffAgreements,
   StaffLog,
   StaffNote,
   StaffOverview,
   StaffTranscript,
+  StephenSetup,
+  StephenSetupView,
 } from "@grasp-os/shared/onboarding-staff";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { RpcTarget } from "capnweb";
@@ -50,9 +54,11 @@ import { onboardingStore } from "./store.ts";
 // (staff-area.ts): where it stands, what needs Grasp, notes, the log, and
 // someone's interview, whose every read is in the audit log; and the
 // kickoff, brought in, read for what Stephen needs (kickoff.ts), and the
-// sponsor's answers to what it left open.
+// sponsor's answers to what it left open; and how Stephen is set up for
+// this deployment (stephen-setup.ts), in every interview turn's context.
 // Until the agreements are in and while the interviews are paused, no link
-// opens and none goes out. The client's admin sees both (`view()`), and
+// opens and none goes out; once they are in and the interviews run, the
+// links that are due go out at once, not at the store's next alarm. The client's admin sees both (`view()`), and
 // the audit log has every change, as the staff member who made it.
 
 const noteSchema = z.string().trim().min(1).max(noteMaxLength);
@@ -92,6 +98,13 @@ export class OnboardingStaffRpc
     return await this.#paused(false);
   }
 
+  async agreements(): Promise<StaffAgreements> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      return await onboardingStore(this.#env).staffAgreements();
+    });
+  }
+
   async setAgreements(agreements: Agreements): Promise<OnboardingView> {
     return await withPerson(this.#check, async (person) => {
       requireStaff(person);
@@ -100,7 +113,29 @@ export class OnboardingStaffRpc
         agreementsSchema,
         agreements
       );
-      return await onboardingStore(this.#env).setAgreements(
+      const store = onboardingStore(this.#env);
+      await store.setAgreements(parsed, actorOf(person));
+      await store.releaseDue();
+      return await store.view();
+    });
+  }
+
+  async stephen(): Promise<StephenSetupView> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      return await onboardingStore(this.#env).stephen();
+    });
+  }
+
+  async saveStephen(setup: StephenSetup | null): Promise<StephenSetupView> {
+    return await withPerson(this.#check, async (person) => {
+      requireStaff(person);
+      const parsed = onboardingErrors.parse(
+        "onboarding.invalid",
+        stephenSetupSchema.nullable(),
+        setup
+      );
+      return await onboardingStore(this.#env).saveStephen(
         parsed,
         actorOf(person)
       );
@@ -246,10 +281,12 @@ export class OnboardingStaffRpc
   async #paused(paused: boolean): Promise<OnboardingView> {
     return await withPerson(this.#check, async (person) => {
       requireStaff(person);
-      return await onboardingStore(this.#env).setPaused(
-        paused,
-        actorOf(person)
-      );
+      const store = onboardingStore(this.#env);
+      await store.setPaused(paused, actorOf(person));
+      if (!paused) {
+        await store.releaseDue();
+      }
+      return await store.view();
     });
   }
 }

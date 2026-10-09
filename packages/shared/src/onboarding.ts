@@ -5,10 +5,13 @@ import type { KickoffApi } from "./kickoff.ts";
 import type { OnboardingDocumentsApi } from "./onboarding-documents.ts";
 import type {
   LogFilter,
+  StaffAgreements,
   StaffLog,
   StaffNote,
   StaffOverview,
   StaffTranscript,
+  StephenSetup,
+  StephenSetupView,
 } from "./onboarding-staff.ts";
 
 // The onboarding's interviews: Stephen, or Claire if the person prefers,
@@ -189,12 +192,17 @@ export type PlanInput = z.input<typeof planSchema>;
 /**
  * The agreements that must be in place before any link opens or goes out:
  * the data processing agreement, the company's risk assessment, and the
- * works council's yes, or that the company has none.
+ * works council's yes, or that the company has none. Each with the day it
+ * was signed, signed off or heard, once it was (`…On`): optional, as
+ * agreements kept before they had one have none.
  */
 export const agreementsSchema = z.strictObject({
   processing: z.boolean(),
   assessment: z.boolean(),
   council: z.enum(["agreed", "none", "waiting"]),
+  processingOn: z.iso.date().optional(),
+  assessmentOn: z.iso.date().optional(),
+  councilOn: z.iso.date().optional(),
 });
 export type Agreements = z.output<typeof agreementsSchema>;
 
@@ -252,7 +260,14 @@ export interface OnboardingStaffApi extends KickoffApi {
   /** Stops the interviews: no link opens and none goes out. */
   pause: () => Promise<OnboardingView>;
   resume: () => Promise<OnboardingView>;
+  /** Where the agreements stand, and the links that wait for them. */
+  agreements: () => Promise<StaffAgreements>;
+  /** Records where the agreements stand; once all are in, the links due go out. */
   setAgreements: (agreements: Agreements) => Promise<OnboardingView>;
+  /** How Stephen is set up for this deployment, and what the kickoff suggests. */
+  stephen: () => Promise<StephenSetupView>;
+  /** Sets how Stephen is set up; null takes him back to what the kickoff suggests. */
+  saveStephen: (setup: StephenSetup | null) => Promise<StephenSetupView>;
   /**
    * A new start for someone who lost the device their interview was on:
    * what they said goes, and their link opens on the next device.

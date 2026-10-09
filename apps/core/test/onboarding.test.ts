@@ -305,8 +305,9 @@ describe("Grasp's staff in the onboarding", () => {
     await expect(store.releaseDue()).resolves.toStrictEqual([]);
 
     await staff.onboardingStaff.resume();
-    // The lead's, and a team without a lead; Sales waits for its lead.
-    await expect(store.releaseDue()).resolves.toStrictEqual([
+    // At once: the lead's, and a team without a lead; Sales waits for its lead.
+    const sent = await store.sentLinks();
+    expect(sent.map(({ person: id }) => id)).toStrictEqual([
       "lea",
       "oli",
       "ona",

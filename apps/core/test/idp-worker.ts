@@ -4,10 +4,11 @@
  * Microsoft (`DEV_IDP_ORIGIN`, src/auth/config.ts). Whoever signs in is a
  * member of the tenant they sign in to, with the email they give: the
  * `login_hint` core passes on, or else one typed into the form here.
+ * Grasp's staff sign in as `localStaff`.
  */
 import { createIdp } from "./fake-idp.ts";
 import type { Idp } from "./fake-idp.ts";
-import { localAdmin } from "./sign-in-config.ts";
+import { localAdmin, localStaff, staffOid } from "./sign-in-config.ts";
 
 /** An IdP for each origin the Worker is reached at, created on first use. */
 const idps = new Map<string, Idp>();
@@ -65,7 +66,8 @@ export default {
       }
       const callback = idp.authorize(url, {
         sub: `sub-${email}`,
-        oid: `oid-${email}`,
+        // Grasp's staff member by the object id the staff window lists.
+        oid: email === localStaff ? staffOid : `oid-${email}`,
         tid: tenant,
         // A member of the tenant, not a B2B guest.
         acct: 0,

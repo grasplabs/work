@@ -34,6 +34,8 @@ export const transcriptMinLength = 200;
 export const transcriptFileMaxBytes = 5 * 1024 * 1024;
 /** The longest answer from the sponsor kept for one field. */
 export const answerMaxLength = 2000;
+/** The longest team name kept from a kickoff. */
+export const kickoffTeamNameMaxLength = 60;
 
 /** The kinds of transcript file taken, by extension. */
 export const transcriptFileKinds = ["txt", "vtt", "srt", "docx"] as const;
