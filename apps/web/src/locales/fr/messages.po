@@ -145,6 +145,14 @@ msgstr "{doc} dans {where} a dépassé sa date de révision de {late, plural, on
 msgid "{engine} already keeps {type} records here: this engine's won't apply."
 msgstr "{engine} conserve déjà ici des enregistrements de type {type} : ceux de ce moteur ne s’appliqueront pas."
 
+#: src/dashboard/dependency-requests.tsx
+msgid "{engine} doesn't get these packages."
+msgstr "{engine} ne reçoit pas ces paquets."
+
+#: src/dashboard/dependency-requests.tsx
+msgid "{engine} may use exactly these packages from now on."
+msgstr "{engine} peut désormais utiliser exactement ces paquets."
+
 #: src/activity/audit-log.tsx
 msgid "{engine}: run of {workflowId}"
 msgstr "{engine} : exécution de {workflowId}"
@@ -278,6 +286,10 @@ msgstr "{path}, qui ne s’exécuterait plus"
 msgid "{people, plural, one {# person has access. Members join by signing in with your organization’s account; there are no invitations to send.} other {# people have access. Members join by signing in with your organization’s account; there are no invitations to send.}}"
 msgstr "{people, plural, one {# personne a accès. Les membres arrivent en se connectant avec le compte de votre organisation ; il n’y a pas d’invitation à envoyer.} other {# personnes ont accès. Les membres arrivent en se connectant avec le compte de votre organisation ; il n’y a pas d’invitation à envoyer.}}"
 
+#: src/dashboard/todo-pile.tsx
+msgid "{place} of {count}"
+msgstr "{place} sur {count}"
+
 #. A length of time, said short: 21 seconds.
 #: src/chat/thread.tsx
 msgid "{rest}s"
@@ -303,7 +315,11 @@ msgstr "Application {screen}"
 msgid "{share} of the {limit} budget"
 msgstr "{share} du budget de {limit}"
 
-#: src/activity/pending.tsx
+#: src/dashboard/pile-cards.tsx
+msgid "{subject} gets this permission from now on."
+msgstr "{subject} obtient cette autorisation dès maintenant."
+
+#: src/dashboard/pile-cards.tsx
 msgid "{subject}: {actions} on {object}"
 msgstr "{subject} : {actions} sur {object}"
 
@@ -339,7 +355,7 @@ msgstr "{waiting, plural, one {# exécution en attente} other {# exécutions en 
 msgid "{waiting, plural, one {# waiting} other {# waiting}}"
 msgstr "{waiting, plural, one {# en attente} other {# en attente}}"
 
-#: src/activity/pending.tsx
+#: src/dashboard/pile-cards.tsx
 msgid "{who} can't be granted later: it has to ask again."
 msgstr "{who} ne pourra pas être accordé plus tard : il faudra le redemander."
 
@@ -441,10 +457,6 @@ msgstr "Compte"
 #: src/activity/audit-log.tsx
 msgid "Action"
 msgstr "Action"
-
-#: src/activity/pending.tsx
-msgid "Actions"
-msgstr "Actions"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Actions for {who}"
@@ -660,13 +672,13 @@ msgstr "Approbation"
 msgid "Approval taken back"
 msgstr "Approbation retirée"
 
-#: src/activity/pending.tsx
 #: src/dashboard/dependency-requests.tsx
+#: src/dashboard/pile-cards.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Approve"
 msgstr "Approuver"
 
-#: src/activity/pending.tsx
+#: src/dashboard/pile-cards.tsx
 msgid "Approve {who}"
 msgstr "Approuver {who}"
 
@@ -694,7 +706,8 @@ msgstr "Approuvé par {name} le {date}."
 msgid "Approved packages"
 msgstr "A approuvé des paquets"
 
-#: src/activity/pending.tsx
+#: src/dashboard/dependency-requests.tsx
+#: src/dashboard/pile-cards.tsx
 msgid "Approved: {who}."
 msgstr "Approuvé : {who}."
 
@@ -710,7 +723,7 @@ msgstr "Apps en cours de création dans ce chat"
 msgid "Apps to approve"
 msgstr "Applications à approuver"
 
-#: src/activity/pending.tsx
+#: src/dashboard/pile-cards.tsx
 msgid "as {binding}"
 msgstr "en tant que {binding}"
 
@@ -748,10 +761,6 @@ msgid "Ask the sponsor: {ask}"
 msgstr "Demandez au sponsor : {ask}"
 
 #: src/activity/pending.tsx
-msgid "Asked"
-msgstr "Demandé"
-
-#: src/activity/pending.tsx
 msgid "Asked again (previously granted by {person} on {date})"
 msgstr "Redemandé (accordé auparavant par {person} le {date})"
 
@@ -759,9 +768,9 @@ msgstr "Redemandé (accordé auparavant par {person} le {date})"
 msgid "Asked again after version {version} was made current (previously granted by {person} on {date})"
 msgstr "Redemandé après que la version {version} est devenue actuelle (accordé auparavant par {person} le {date})"
 
-#: src/activity/pending.tsx
-msgid "Asked by"
-msgstr "Demandé par"
+#: src/dashboard/pile-cards.tsx
+msgid "Asked by {requester} on {date}"
+msgstr "Demandé par {requester} le {date}"
 
 #: src/chat/held-writes.tsx
 #: src/dashboard/dependency-requests.tsx
@@ -772,17 +781,13 @@ msgstr "Demandé le <0>{asked}</0>"
 msgid "Asked for a permission"
 msgstr "A demandé une autorisation"
 
-#: src/activity/pending.tsx
+#: src/dashboard/pile-cards.tsx
 msgid "asked for by the agent, in their chat"
 msgstr "demandé par l’agent, dans son chat"
 
 #: src/activity/audit-words.ts
 msgid "Asked the agent to fix a run"
 msgstr "A demandé à l’agent de corriger une exécution"
-
-#: src/activity/pending.tsx
-msgid "Asks for"
-msgstr "Demande"
 
 #: src/workflows/runs.tsx
 msgid "At {step}: {error}"
@@ -977,10 +982,6 @@ msgstr "modifie les données du moteur"
 #: src/chat/builds.tsx
 msgid "Changes the engine's data"
 msgstr "Modifie les données du moteur"
-
-#: src/dashboard/to-do.tsx
-msgid "Changes to confirm"
-msgstr "Modifications à confirmer"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
@@ -1248,7 +1249,6 @@ msgid "Decided on a held action"
 msgstr "A statué sur une action en attente"
 
 #: src/activity/audit-log.tsx
-#: src/activity/pending.tsx
 #: src/labels.ts
 #: src/routes/decisions.$decision.tsx
 msgid "Decision"
@@ -1281,14 +1281,6 @@ msgstr "A supprimé des entrées après leur durée de conservation"
 #: src/activity/audit-words.ts
 msgid "Denied packages"
 msgstr "A refusé des paquets"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Deny"
-msgstr "Refuser"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Deny the packages for {engine}"
-msgstr "Refuser les paquets pour {engine}"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Depends on"
@@ -1621,10 +1613,6 @@ msgstr "Replier la navigation"
 msgid "Fold the sections"
 msgstr "Replier les sections"
 
-#: src/activity/pending.tsx
-msgid "For"
-msgstr "Pour"
-
 #: src/connections/connect-dialog.tsx
 #: src/connections/integration-row.tsx
 msgid "For everyone"
@@ -1690,6 +1678,10 @@ msgstr "Grasp dans votre langue. Les nombres, les dates et les montants la suive
 msgctxt "who did it, in the log"
 msgid "Grasp itself"
 msgstr "Grasp lui-même"
+
+#: src/dashboard/pile-cards.tsx
+msgid "Grasp makes this change on {connection}, with exactly what is shown."
+msgstr "Grasp effectue cette modification dans {connection}, avec exactement ce qui est affiché."
 
 #: src/sign-in-errors.ts
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
@@ -1785,6 +1777,10 @@ msgstr "Si {condition} :"
 #: src/routes/_shell.settings.spend.tsx
 msgid "If the rest of the month goes like the days so far"
 msgstr "Si le reste du mois se passe comme les jours précédents"
+
+#: src/dashboard/pile-cards.tsx
+msgid "In one chat only, for {requester}"
+msgstr "Dans une seule conversation, pour {requester}"
 
 #: src/chat/builds.tsx
 msgid "In the proposer's words"
@@ -2413,9 +2409,9 @@ msgstr "Rien n’a encore été exécuté."
 msgid "Nothing here yet."
 msgstr "Rien ici pour l’instant."
 
-#: src/activity/pending.tsx
-msgid "Nothing is waiting for approval."
-msgstr "Rien n’attend d’approbation."
+#: src/dashboard/pile-cards.tsx
+msgid "Nothing is sent or changed on {connection}."
+msgstr "Rien n’est envoyé ni modifié dans {connection}."
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Nothing matched."
@@ -2436,10 +2432,6 @@ msgstr "Rien ne s’exécute encore : ce serait la première version actuelle du
 #: src/routes/_shell.settings.spend.tsx
 msgid "Nothing spent yet."
 msgstr "Rien de dépensé pour l’instant."
-
-#: src/dashboard/to-do.tsx
-msgid "Nothing waits on you."
-msgstr "Rien ne vous attend."
 
 #: src/routes/_shell.onboarding.index.tsx
 msgctxt "onboarding stage status"
@@ -2510,10 +2502,6 @@ msgstr "Sections de l’onboarding"
 #: src/routes/_shell.settings.models.tsx
 msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, engine or run that read one."
 msgstr "Seuls les modèles marqués comme acceptant des données sensibles peuvent recevoir des données d’une collection sensible (marquée dans Connaissances) ou d’une connexion sensible, ou d’un chat, d’un moteur ou d’une exécution qui en a lu une."
-
-#: src/activity/pending.tsx
-msgid "Only the organization's own admins decide permissions."
-msgstr "Seuls les admins de l’organisation décident des autorisations."
 
 #: src/knowledge/collection-markers.tsx
 msgid "Only the owner"
@@ -2630,10 +2618,6 @@ msgstr "Paquet"
 msgid "Packages for {engine}"
 msgstr "Paquets pour {engine}"
 
-#: src/dashboard/to-do.tsx
-msgid "Packages to approve"
-msgstr "Paquets à approuver"
-
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
 msgid "Parameters"
@@ -2683,10 +2667,6 @@ msgstr "Par jour"
 #: src/activity/audit-log.tsx
 msgid "Permission"
 msgstr "Autorisation"
-
-#: src/dashboard/to-do.tsx
-msgid "Permission requests"
-msgstr "Demandes d’autorisation"
 
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
@@ -2852,8 +2832,9 @@ msgstr "Discussions récentes"
 msgid "Registry and hash"
 msgstr "Registre et empreinte"
 
-#: src/activity/pending.tsx
 #: src/chat/held-writes.tsx
+#: src/dashboard/dependency-requests.tsx
+#: src/dashboard/pile-cards.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Reject"
 msgstr "Rejeter"
@@ -2862,7 +2843,7 @@ msgstr "Rejeter"
 msgid "Reject {what}"
 msgstr "Rejeter {what}"
 
-#: src/activity/pending.tsx
+#: src/dashboard/pile-cards.tsx
 msgid "Reject {who}"
 msgstr "Rejeter {who}"
 
@@ -2870,7 +2851,11 @@ msgstr "Rejeter {who}"
 msgid "Reject all"
 msgstr "Tout rejeter"
 
-#: src/activity/pending.tsx
+#: src/dashboard/dependency-requests.tsx
+msgid "Reject the packages for {engine}"
+msgstr "Rejeter les paquets pour {engine}"
+
+#: src/dashboard/pile-cards.tsx
 msgid "Reject this request?"
 msgstr "Rejeter cette demande ?"
 
@@ -2878,7 +2863,8 @@ msgstr "Rejeter cette demande ?"
 msgid "Rejected by {name} on {date}."
 msgstr "Rejeté par {name} le {date}."
 
-#: src/activity/pending.tsx
+#: src/dashboard/dependency-requests.tsx
+#: src/dashboard/pile-cards.tsx
 msgid "Rejected: {who}."
 msgstr "Rejeté : {who}."
 
@@ -3104,10 +3090,6 @@ msgctxt "kind of finding"
 msgid "Security"
 msgstr "Sécurité"
 
-#: src/activity/pending.tsx
-msgid "See it in the log"
-msgstr "Le voir dans le journal"
-
 #: src/chat/composer.tsx
 msgctxt "send the question"
 msgid "Send"
@@ -3279,6 +3261,11 @@ msgstr "La connexion se fait chez {app}. Elle prend environ une minute."
 #: src/labels.ts
 msgid "Skill"
 msgstr "Skill"
+
+#: src/dashboard/todo-pile.tsx
+msgctxt "put a to-do card at the back of the pile"
+msgid "Skip"
+msgstr "Passer"
 
 #: src/onboarding/staff-words.ts
 msgctxt "who did it, in the log"
@@ -3590,10 +3577,18 @@ msgstr "L’appel au modèle a échoué."
 msgid "The most pressing first."
 msgstr "Le plus urgent d’abord."
 
+#: src/dashboard/todo-pile.tsx
+msgid "The next one"
+msgstr "La suivante"
+
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter: what"
 msgid "The onboarding"
 msgstr "L’onboarding"
+
+#: src/dashboard/todo-pile.tsx
+msgid "The one before"
+msgstr "La précédente"
 
 #: src/onboarding/staff-words.ts
 msgid "The risk assessment isn't done"
@@ -3763,7 +3758,7 @@ msgstr "Via le connecteur de Grasp, qui conserve l’accès dans votre déploiem
 msgid "To"
 msgstr "Au"
 
-#: src/dashboard/to-do.tsx
+#: src/dashboard/todo-pile.tsx
 msgctxt "dashboard: what waits on you"
 msgid "To do"
 msgstr "À faire"
@@ -3889,9 +3884,9 @@ msgstr "Version {number}, actuelle"
 msgid "Version {version}"
 msgstr "Version {version}"
 
-#: src/activity/pending.tsx
-msgid "Version to review"
-msgstr "Version à relire"
+#: src/dashboard/pile-cards.tsx
+msgid "Version to review: {version}"
+msgstr "Version à examiner : {version}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -3905,6 +3900,11 @@ msgstr "Via Composio"
 #: src/chat/studio.tsx
 msgid "View app"
 msgstr "Voir l’app"
+
+#: src/dashboard/to-do.tsx
+msgctxt "dashboard: what waits on you, settled on its own page"
+msgid "Waiting elsewhere"
+msgstr "En attente ailleurs"
 
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
@@ -3922,6 +3922,10 @@ msgstr "En attente de vous"
 #: src/chat/held-writes.tsx
 msgid "Waiting for you: {title}"
 msgstr "En attente de vous : {title}"
+
+#: src/dashboard/pile-card.tsx
+msgid "Waiting on you"
+msgstr "Vous attend"
 
 #: src/activity/audit-words.ts
 msgid "Was called by another engine"

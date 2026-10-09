@@ -4,6 +4,7 @@ import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { toCard } from "./pile.ts";
 
 // The Activity page: an admin approves one App's permission request and
 // rejects another, finds the approval in the audit log with its details,
@@ -42,29 +43,32 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   // Settings link leads there.
   await page.goto("/settings/approvals");
   await expect(page).toHaveURL(/\/dashboard$/u);
-  // Other tests' requests wait here too: only this App's rows count.
-  const rows = page.getByRole("row").filter({ hasText: appName });
-  await expect(rows).toHaveCount(2);
-  const reading = rows.filter({
-    has: page.getByRole("cell", { name: "read", exact: true }),
-  });
-  await expect(reading).toContainText("Collection playbook");
-  await expect(reading).toContainText("None current");
+  // Other tests' requests wait in the pile too: it is gone through to this
+  // App's cards.
+  const reading = await toCard(page, `${appName}: read on Collection playbook`);
+  await expect(reading).toContainText("as PLAYBOOK");
+  await expect(reading).toContainText("Version to review: None current");
   await reading.getByRole("button", { name: /^Approve /u }).click();
   await expect(
-    page.getByRole("region", { name: "To do" }).getByRole("status")
-  ).toContainText(`Approved: ${appName}: read on Collection playbook.`);
-  await expect(rows).toHaveCount(1);
+    page
+      .getByRole("status")
+      .filter({ hasText: `Approved: ${appName}: read on Collection playbook.` })
+  ).toHaveCount(1);
+  await expect(reading).toHaveCount(0);
 
-  await rows.getByRole("button", { name: /^Reject /u }).click();
+  const writing = await toCard(
+    page,
+    `${appName}: write on Collection playbook`
+  );
+  await writing.getByRole("button", { name: /^Reject /u }).click();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Reject", exact: true })
     .click();
   await expect(
-    page.getByRole("region", { name: "To do" }).getByRole("status")
-  ).toContainText(`Rejected: ${appName}`);
-  await expect(rows).toHaveCount(0);
+    page.getByRole("status").filter({ hasText: `Rejected: ${appName}` })
+  ).toHaveCount(1);
+  await expect(writing).toHaveCount(0);
 
   // The approval is in the log, found by what it granted, once the log has
   // taken its events from core's outbox, which it does in the background.
@@ -175,33 +179,31 @@ test("an admin sees a grant asked for again after a new version, and approves on
     // An old link to them leads there too.
     await page.goto("/activity?tab=pending");
     await expect(page).toHaveURL(/\/dashboard$/u);
-    const row = page.getByRole("row").filter({ hasText: appName });
-    await expect(row).toContainText(
+    const card = await toCard(page, `${appName}: write on Collection playbook`);
+    await expect(card).toContainText(
       /Asked again after version 2 was made current \(previously granted by .+ on .+\)/u
     );
-    await expect(row.getByRole("cell", { name: "2", exact: true })).toHaveCount(
-      1
-    );
+    await expect(card).toContainText("Version to review: 2");
 
     // Another version is made current while the admin looks at version 2.
     await release(builds.api, appId, { "README.md": "Three" }, "Third");
-    await row.getByRole("button", { name: /^Approve /u }).click();
-    await expect(row.getByRole("alert")).toHaveText(
+    await card.getByRole("button", { name: /^Approve /u }).click();
+    await expect(card.getByRole("alert")).toHaveText(
       "Another version of this engine was made current since this list was read. The list now shows it: review that version, then approve again."
     );
-    await expect(row.getByRole("cell", { name: "3", exact: true })).toHaveCount(
-      1
-    );
-    await expect(row).toContainText("Asked again after version 3");
+    await expect(card).toContainText("Version to review: 3");
+    await expect(card).toContainText("Asked again after version 3");
     await expect(
-      page.getByRole("region", { name: "To do" }).getByRole("status")
+      page.getByRole("status").filter({ hasText: "Approved:" })
     ).toHaveCount(0);
 
-    await row.getByRole("button", { name: /^Approve /u }).click();
+    await card.getByRole("button", { name: /^Approve /u }).click();
     await expect(
-      page.getByRole("region", { name: "To do" }).getByRole("status")
-    ).toContainText(`Approved: ${appName}: write on Collection playbook.`);
-    await expect(row).toHaveCount(0);
+      page.getByRole("status").filter({
+        hasText: `Approved: ${appName}: write on Collection playbook.`,
+      })
+    ).toHaveCount(1);
+    await expect(card).toHaveCount(0);
   } finally {
     builds.core[Symbol.dispose]();
   }
