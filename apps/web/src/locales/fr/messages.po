@@ -1478,6 +1478,11 @@ msgstr "Exports"
 msgid "Exports of {engine}: {covered}"
 msgstr "Exports de {engine} : {covered}"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Extra high"
+msgstr "Très élevé"
+
 #: src/knowledge/uploads.tsx
 msgid "Extracting"
 msgstr "Extraction"
@@ -1688,6 +1693,11 @@ msgctxt "severity of a finding"
 msgid "High"
 msgstr "Élevée"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "High"
+msgstr "Élevé"
+
 #: src/knowledge/timeline.tsx
 msgid "History"
 msgstr "Historique"
@@ -1695,6 +1705,10 @@ msgstr "Historique"
 #: src/routes/_shell.settings.models.tsx
 msgid "Hosted in the EU"
 msgstr "Hébergé dans l’UE"
+
+#: src/chat/composer.tsx
+msgid "How hard it thinks"
+msgstr "Niveau de réflexion"
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
@@ -1962,6 +1976,11 @@ msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Faible"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Low"
+msgstr "Faible"
+
 #: src/frame/app-sidebar.tsx
 msgid "Main"
 msgstr "Principal"
@@ -1994,9 +2013,19 @@ msgstr "Gérer {app}, connecté pour vous"
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Max"
+msgstr "Maximal"
+
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
 msgstr "Peut modifier quelque chose en dehors de Grasp"
+
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Medium"
+msgstr "Moyen"
 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "Members"
@@ -2028,6 +2057,10 @@ msgstr "Appel de modèle"
 #: src/dashboard/signals.tsx
 msgid "Model cost"
 msgstr "Coût du modèle"
+
+#: src/chat/composer.tsx
+msgid "Model: {name}, thinking {level}. Change model or thinking"
+msgstr "Modèle : {name}, réflexion {level}. Changer de modèle ou de réflexion"
 
 #: src/chat/composer.tsx
 msgid "Model: {name}. Change model"

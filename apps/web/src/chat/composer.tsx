@@ -1,3 +1,4 @@
+import type { ModelEffort } from "@grasp-os/shared/models";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -5,6 +6,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
 import {
@@ -14,6 +16,7 @@ import {
   InputGroupTextarea,
 } from "@grasp-os/ui/components/input-group";
 import { Spinner } from "@grasp-os/ui/components/spinner";
+import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import {
   ArrowUpIcon,
@@ -30,7 +33,8 @@ import { ErrorText } from "../error-text.tsx";
 // grows with what is typed, the model that answers below it on the left,
 // and send, or stop while Grasp answers, on the right. Enter sends;
 // Shift+Enter starts a new line. The models are core's: no keys or
-// providers are set here.
+// providers are set here. One control picks the model and, for a model
+// that thinks, how hard (grasplabs/prototype `model-picker.tsx`).
 
 /** How a model is named in the box: the last part of its ID. */
 
@@ -44,26 +48,99 @@ const maxQuestionLength = 100_000;
 export const modelName = (model: string): string =>
   model.split("/").at(-1) ?? model;
 
-/** Which model answers the next question. */
+/** How each effort is called, least first. */
+const effortNames = {
+  low: msg({ message: "Low", context: "thinking effort" }),
+  medium: msg({ message: "Medium", context: "thinking effort" }),
+  high: msg({ message: "High", context: "thinking effort" }),
+  xhigh: msg({ message: "Extra high", context: "thinking effort" }),
+  max: msg({ message: "Max", context: "thinking effort" }),
+} as const;
+
+/** How hard the model thinks, for a model that takes an effort. */
+const EffortChoice = ({
+  efforts,
+  effort,
+  onEffort,
+}: {
+  efforts: readonly ModelEffort[];
+  effort: ModelEffort | undefined;
+  onEffort: (effort: ModelEffort) => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <DropdownMenuGroup>
+      <DropdownMenuLabel>{t`How hard it thinks`}</DropdownMenuLabel>
+      <DropdownMenuRadioGroup
+        onValueChange={(value: unknown) => {
+          const chosen = efforts.find((each) => each === value);
+          if (chosen !== undefined) {
+            onEffort(chosen);
+          }
+        }}
+        value={effort ?? ""}
+      >
+        {efforts.map((each) => (
+          <DropdownMenuRadioItem key={each} value={each}>
+            {t(effortNames[each])}
+          </DropdownMenuRadioItem>
+        ))}
+      </DropdownMenuRadioGroup>
+    </DropdownMenuGroup>
+  );
+};
+
+/** What the control reads: the model, and how hard it thinks where it does. */
+const ChoiceLabel = ({
+  name,
+  effort,
+}: {
+  name: string;
+  effort: ModelEffort | undefined;
+}) => {
+  const { t } = useLingui();
+  return (
+    <>
+      <span className="max-w-48 truncate">{name}</span>
+      {effort === undefined ? null : (
+        <span className="text-muted-foreground">{t(effortNames[effort])}</span>
+      )}
+    </>
+  );
+};
+
+/** Which model answers the next question, and how hard it thinks first. */
 const ModelPicker = ({
   models,
   model,
   onModel,
+  efforts,
+  effort,
+  onEffort,
 }: {
   models: readonly string[];
   model: string;
   onModel: (model: string) => void;
+  efforts: readonly ModelEffort[];
+  effort: ModelEffort | undefined;
+  onEffort: ((effort: ModelEffort) => void) | undefined;
 }) => {
   const { t } = useLingui();
   const name = modelName(model);
+  const thinks = efforts.length > 0 && onEffort !== undefined;
+  const level = effort === undefined ? undefined : t(effortNames[effort]);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label={t`Model: ${name}. Change model`}
+        aria-label={
+          thinks && level !== undefined
+            ? t`Model: ${name}, thinking ${level}. Change model or thinking`
+            : t`Model: ${name}. Change model`
+        }
         render={<InputGroupButton size="sm" variant="ghost" />}
       >
         <SparklesIcon className="text-status-attention" />
-        <span className="max-w-48 truncate">{name}</span>
+        <ChoiceLabel effort={thinks ? effort : undefined} name={name} />
         <ChevronDownIcon className="text-muted-foreground size-3.5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72">
@@ -89,6 +166,16 @@ const ModelPicker = ({
             ))}
           </DropdownMenuRadioGroup>
         </DropdownMenuGroup>
+        {thinks ? (
+          <>
+            <DropdownMenuSeparator />
+            <EffortChoice
+              effort={effort}
+              efforts={efforts}
+              onEffort={onEffort}
+            />
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -141,16 +228,29 @@ const ModelChoice = ({
   models,
   model,
   onModel,
+  efforts,
+  effort,
+  onEffort,
 }: {
   models: readonly string[];
   model: string | undefined;
   onModel: ((model: string) => void) | undefined;
+  efforts: readonly ModelEffort[];
+  effort: ModelEffort | undefined;
+  onEffort: ((effort: ModelEffort) => void) | undefined;
 }) => (
   <div className="flex min-w-0 items-center gap-1">
     {models.length === 0 ||
     model === undefined ||
     onModel === undefined ? null : (
-      <ModelPicker model={model} models={models} onModel={onModel} />
+      <ModelPicker
+        effort={effort}
+        efforts={efforts}
+        model={model}
+        models={models}
+        onEffort={onEffort}
+        onModel={onModel}
+      />
     )}
   </div>
 );
@@ -219,6 +319,9 @@ const QuestionField = ({
 /** Where nobody picks a model. */
 const noModels: readonly string[] = [];
 
+/** Where the model doesn't think, or nobody picks how hard. */
+const noEfforts: readonly ModelEffort[] = [];
+
 /** The box to ask in. Controlled: the page keeps the text and the model. */
 export const Composer = ({
   text,
@@ -226,6 +329,9 @@ export const Composer = ({
   models = noModels,
   model,
   onModel,
+  efforts = noEfforts,
+  effort,
+  onEffort,
   running,
   busy,
   failure,
@@ -247,6 +353,14 @@ export const Composer = ({
   models?: readonly string[];
   model?: string;
   onModel?: (model: string) => void;
+  /**
+   * The efforts `model` takes, least first, and the one the question
+   * names; none for a model that doesn't think, which shows the model
+   * alone.
+   */
+  efforts?: readonly ModelEffort[];
+  effort?: ModelEffort;
+  onEffort?: (effort: ModelEffort) => void;
   /** Whether Grasp is answering in this chat now. */
   running: boolean;
   /** Whether a question or a stop is on its way to core. */
@@ -303,7 +417,14 @@ export const Composer = ({
             {compact ? (
               children
             ) : (
-              <ModelChoice model={model} models={models} onModel={onModel} />
+              <ModelChoice
+                effort={effort}
+                efforts={efforts}
+                model={model}
+                models={models}
+                onEffort={onEffort}
+                onModel={onModel}
+              />
             )}
             <SendOrStop
               busy={busy}

@@ -1,12 +1,19 @@
-import { useNavigate, useRouter } from "@tanstack/react-router";
+import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
+import {
+  useNavigate,
+  useRouteContext,
+  useRouter,
+} from "@tanstack/react-router";
 import { useRef, useState } from "react";
 
 import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
+import { readChoice, resolveChoice, writeChoice } from "./model-choice.ts";
+import type { ModelChoice } from "./model-choice.ts";
 
 // Asking in a chat, from the chat page or the chat dock on any other page:
-// the box's text and model, and asking in the open chat, or in a new one
-// named after the question.
+// the box's text, model and effort, and asking in the open chat, or in a
+// new one named after the question.
 
 /** A new chat's title: the start of its first question. */
 const titleOf = (question: string): string => {
@@ -14,24 +21,36 @@ const titleOf = (question: string): string => {
   return line.length > 80 ? `${line.slice(0, 79)}…` : line;
 };
 
+/** No model takes an effort, as before core says which do. */
+const noEfforts: Readonly<Record<string, ModelEfforts>> = {};
+
 /**
- * What the box to ask in needs: the text and model, and asking in
+ * What the box to ask in needs: the text, model and effort, and asking in
  * `chatId`, or in a new chat named after the question.
  */
 export const useAsk = (
   chatId: string | undefined,
   models: readonly string[],
+  /** The efforts each of `models` takes (`chats.efforts()`). */
+  efforts: Readonly<Record<string, ModelEfforts>> = noEfforts,
   /** Where a new chat opens: on the chat page, or where the person is (the dock). */
   opens: "page" | "here" = "page"
 ) => {
   const router = useRouter();
   const navigate = useNavigate();
+  const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
   const [text, setText] = useState("");
-  // The person's choice; until they make one, the default, once the
-  // models are known.
-  const [chosenModel, setChosenModel] = useState<string>();
-  const model = chosenModel ?? models[0] ?? "";
+  // The person's last choice in this browser, against what core offers
+  // now: until they make one, the default model at its default effort.
+  const [choice, setChoice] = useState<ModelChoice>(() =>
+    readChoice(identity.userId)
+  );
+  const { model, effort, levels } = resolveChoice(models, efforts, choice);
+  const choose = (chosen: ModelChoice): void => {
+    setChoice(chosen);
+    writeChoice(identity.userId, chosen);
+  };
   // One question at a time: a second click on Send or Try again while one
   // is on its way would ask it twice. A ref, as `busy` is only seen on the
   // next render.
@@ -53,7 +72,11 @@ export const useAsk = (
         ({ id } = await session.chats.create(titleOf(question)));
         created = id;
       }
-      await session.chats.send(id, { text: question, model });
+      await session.chats.send(id, {
+        text: question,
+        model,
+        ...(effort === undefined ? {} : { effort }),
+      });
       return id;
     });
     sending.current = false;
@@ -93,7 +116,15 @@ export const useAsk = (
       onText: setText,
       models,
       model,
-      onModel: setChosenModel,
+      // A new model keeps the effort chosen, where it takes it.
+      onModel: (chosen: string) => {
+        choose({ ...choice, model: chosen });
+      },
+      efforts: levels,
+      effort,
+      onEffort: (chosen: ModelEffort) => {
+        choose({ model, effort: chosen });
+      },
       busy,
       failure,
       onSend: () => {

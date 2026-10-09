@@ -1478,6 +1478,11 @@ msgstr "Exports"
 msgid "Exports of {engine}: {covered}"
 msgstr "Exports van {engine}: {covered}"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Extra high"
+msgstr "Extra hoog"
+
 #: src/knowledge/uploads.tsx
 msgid "Extracting"
 msgstr "Wordt uitgelezen"
@@ -1688,6 +1693,11 @@ msgctxt "severity of a finding"
 msgid "High"
 msgstr "Hoog"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "High"
+msgstr "Hoog"
+
 #: src/knowledge/timeline.tsx
 msgid "History"
 msgstr "Geschiedenis"
@@ -1695,6 +1705,10 @@ msgstr "Geschiedenis"
 #: src/routes/_shell.settings.models.tsx
 msgid "Hosted in the EU"
 msgstr "Gehost in de EU"
+
+#: src/chat/composer.tsx
+msgid "How hard it thinks"
+msgstr "Hoe grondig het nadenkt"
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
@@ -1962,6 +1976,11 @@ msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Laag"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Low"
+msgstr "Laag"
+
 #: src/frame/app-sidebar.tsx
 msgid "Main"
 msgstr "Hoofdmenu"
@@ -1994,9 +2013,19 @@ msgstr "{app} beheren, gekoppeld voor jou"
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Max"
+msgstr "Maximaal"
+
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
 msgstr "Kan iets buiten Grasp wijzigen"
+
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Medium"
+msgstr "Gemiddeld"
 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "Members"
@@ -2028,6 +2057,10 @@ msgstr "Modelaanroep"
 #: src/dashboard/signals.tsx
 msgid "Model cost"
 msgstr "Modelkosten"
+
+#: src/chat/composer.tsx
+msgid "Model: {name}, thinking {level}. Change model or thinking"
+msgstr "Model: {name}, nadenken {level}. Model of nadenken wijzigen"
 
 #: src/chat/composer.tsx
 msgid "Model: {name}. Change model"
