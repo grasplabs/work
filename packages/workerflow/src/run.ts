@@ -589,6 +589,25 @@ interface DeliveryLimits {
 }
 
 /**
+ * Whether an alarm now runs an activation of the run: it is queued, runs
+ * (an activation died), rolls back with its next step due, or waits and
+ * its wake has come.
+ */
+const activatesNow = (run: RunRow): boolean => {
+  if (
+    run.status === "queued" ||
+    run.status === "running" ||
+    run.status === "waitingForPause"
+  ) {
+    return true;
+  }
+  if (run.status === "waiting" || run.status === "rollingBack") {
+    return run.wake_at === null || run.wake_at <= Date.now();
+  }
+  return false;
+};
+
+/**
  * Whether the run's outbox is due: at once whenever it holds anything,
  * whatever time it was stamped with, but not in a failed host's backoff,
  * unless `force`.
@@ -826,9 +845,31 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     } catch {
       return;
     }
+    // One follow-up at most: writes while a delivery is out (or while the
+    // follow-up waits for it) are all taken by the follow-up's read.
+    if (this.#followUp) {
+      return;
+    }
+    this.#followUp = true;
     queueMicrotask(() => {
-      void this.#deliver({ batches: Number.POSITIVE_INFINITY, force: false });
+      void this.#deliverFollowUp();
     });
+  }
+
+  /** Whether a delivery is queued for the writes since the last began. */
+  #followUp = false;
+
+  /**
+   * The follow-up delivery: once the one out has ended, it reads the
+   * outbox afresh; writes from its start on queue the next.
+   */
+  async #deliverFollowUp(): Promise<void> {
+    while (this.#delivery !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one delivery at a time
+      await this.#delivery;
+    }
+    this.#followUp = false;
+    await this.#deliver({ batches: Number.POSITIVE_INFINITY, force: false });
   }
 
   /**
@@ -904,7 +945,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         }
       } catch (error) {
         warnRecovered("workflow_notify_failed", error);
-        this.#putOff();
+        this.#putOff(last?.runId ?? "");
         return;
       }
       try {
@@ -969,14 +1010,16 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
-   * Puts the next delivery off after the host failed; the delivery's end
-   * then sets the alarm to it (#settleAlarm).
+   * Puts the next delivery off after the host failed to take the batch of
+   * the run `runId`; the delivery's end then sets the alarm to it
+   * (#settleAlarm). A run created since under the same ID isn't put off
+   * for another run's failure.
    */
-  #putOff(): void {
+  #putOff(runId: string): void {
     const storage = this.#store;
     try {
       storage.transactionSync(() => {
-        if (this.#run() !== undefined) {
+        if (this.#run()?.run_uid === runId) {
           failedIn(storage.sql, Date.now());
         }
       });
@@ -1524,6 +1567,14 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   async #afterNotifying(
     run: RunRow
   ): Promise<{ run: RunRow; notified: boolean } | undefined> {
+    // An alarm that runs an activation hands the host nothing first: the
+    // activation's first write starts a delivery beside it (#deliverSoon),
+    // so no delivery time comes out of the handler's wall time before a
+    // first attempt, which always runs (activation.ts), and whose deadline
+    // a delivery first could push past the handler's limit.
+    if (activatesNow(run)) {
+      return { run, notified: false };
+    }
     // An ended run whose purge is due gets its outbox tried once more.
     const purgeDue =
       hasEnded(run) && run.purge_at !== null && run.purge_at <= Date.now();

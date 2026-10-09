@@ -679,6 +679,15 @@ export const definitions: Record<string, WorkflowDefinition> = {
   },
   // Two steps at once, for a host whose handlers have little wall time.
   // Two steps side by side, each with a timeout of half a second.
+  // One step whose timeout takes most of a budgeted handler's second.
+  "near-budget": {
+    run: async (event, step) =>
+      await step.do(
+        "long",
+        { timeout: 900 },
+        async (context) => await effect(event.instanceId, "long", context)
+      ),
+  },
   "quick-pair": {
     run: async (event, step) => {
       const { instanceId } = event;

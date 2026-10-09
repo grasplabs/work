@@ -23,7 +23,6 @@ import {
 import {
   checkpointsReached,
   handled,
-  effectsOf,
   eventOf,
   hold,
   notifiedOf,
@@ -173,24 +172,33 @@ describe("a run's host", () => {
     expect(statusesOf(id)).toStrictEqual(["queued", "running", "complete"]);
   });
 
-  it("can't let a run terminated while its alarm hands the host the run's notifications run on", async () => {
+  it("can't leave a run resumed while its alarm hands the host the run's notifications without running it", async () => {
     const id = newId();
-    // The first alarm's delivery, before its activation reads the run.
-    const delivery = hold(id, "notify", 1);
-    await workflow("orders").create({ id });
-    await within("the delivery to be held", delivery.held);
-    const instance = await workflow("orders").get(id);
-
-    await instance.terminate();
-    delivery.release();
-    await notifiedWith(id, "terminated");
-    await outboxEmpty("orders", id);
-
-    await expect(instance.status()).resolves.toStrictEqual({
-      status: "terminated",
+    await workflow("napper").create({ id, params: { duration: 300 } });
+    await suspendedOn("napper", id, "nap");
+    await outboxEmpty("napper", id);
+    const instance = await workflow("napper").get(id);
+    // The pause's delivery fails; the alarm's after the backoff is held.
+    notifyFailures.set(id, 1);
+    const alarmDelivery = hold(
+      id,
+      "notify",
+      checkpointsReached(id, "notify") + 2
+    );
+    await warningsDuring(async () => {
+      await instance.pause();
+      await alarmDelivery.held;
     });
-    expect(statusesOf(id)).toStrictEqual(["queued", "terminated"]);
-    expect(effectsOf(id)).toStrictEqual([]);
+
+    // A stub of its own: one made before the hold, in another context,
+    // can't be used from here.
+    const resumer = await workflow("napper").get(id);
+    await resumer.resume();
+    alarmDelivery.release();
+
+    await expect(ended("napper", id)).resolves.toMatchObject({
+      status: "complete",
+    });
   });
 
   it("is given up on when it doesn't answer, and handed it all again", async () => {
@@ -298,26 +306,26 @@ describe("a delivery to the host", () => {
     expect(statusesOf(id).at(-1)).toBe("paused");
   });
 
-  it("before the activation leaves the activation its whole wall time, counted from the alarm", async () => {
+  it("goes out beside an activation, not before it: the activation keeps its handler's whole wall time", async () => {
     const id = newId();
+    // The delivery of the run's start, held as long as the host likes.
     const delivery = hold(id, "notify", 1);
-    await workflow("quick-pair", env.BUDGETED_RUNS).create({ id });
+    await workflow("near-budget", env.BUDGETED_RUNS).create({ id });
     await within("the first delivery to be held", delivery.held);
-    // The alarm's delivery takes most of a handler's second.
-    await within("a while", scheduler.wait(budgetedHandlerMs * 0.7));
+    await ended("near-budget", id, env.BUDGETED_RUNS);
     delivery.release();
-    await ended("quick-pair", id, env.BUDGETED_RUNS);
 
-    // "first" ran, its half second fitting; "second" didn't fit what was
-    // left, and a fresh activation ran it.
-    await expect(
-      journalOf("quick-pair", id, env.BUDGETED_RUNS)
-    ).resolves.toMatchObject({
-      attempts: [
-        { ordinal: 1, generation: 1 },
-        { ordinal: 2, generation: 2 },
-      ],
+    // The step's 900 ms ran in the first activation, which started at once,
+    // the delivery beside it: not after the delivery, held past its timeout.
+    const journal = await journalOf("near-budget", id, env.BUDGETED_RUNS);
+    expect(journal).toMatchObject({
+      activations: [{ generation: 1, ended: "settled" }],
+      attempts: [{ ordinal: 1, attempt: 1, generation: 1 }],
     });
+    expect(
+      (journal.activations[0]?.started_at ?? Number.POSITIVE_INFINITY) -
+        journal.run.created_at
+    ).toBeLessThan(budgetedHandlerMs);
   });
 
   it("from an alarm is one batch: the rest go out after it, not in its handler's time", async () => {
@@ -416,6 +424,30 @@ describe("a delivery to the host", () => {
     });
 
     expect(statusesOf(id)).toStrictEqual(["queued", "running", "complete"]);
+  });
+
+  it("before a purge, doesn't let the purge remove a run restarted meanwhile", async () => {
+    const id = newId();
+    notifyFailures.set(id, 2);
+    const purging = new Workflow(env.RUNS, "orders", {
+      retentionLimits: { minMs: 1, maxMs: 60_000 },
+      retention: { successRetention: 60_000, errorRetention: 60_000 },
+    });
+    // Two deliveries fail; the third, before the purge, is held.
+    const beforePurge = hold(id, "notify", 3);
+
+    await warningsDuring(async () => {
+      await purging.create({ id, retention: { successRetention: 2500 } });
+      await beforePurge.held;
+    });
+    // A stub of its own: one made before the hold can't be used from here.
+    const restarter = await purging.get(id);
+    await restarter.restart();
+    beforePurge.release();
+
+    await expect(ended("orders", id)).resolves.toMatchObject({
+      status: "complete",
+    });
   });
 });
 
@@ -543,5 +575,78 @@ describe("a host that fails", () => {
 
     expect(checkpointsReached(id, "notify")).toBe(1);
     expect(run.notify_at ?? 0).toBeGreaterThanOrEqual(run.created_at + 1000);
+  });
+});
+
+describe("a delivery that fails after its run was deleted", () => {
+  it("doesn't put off the run created again under the ID", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await suspendedOn("napper", id, "nap");
+    await outboxEmpty("napper", id);
+    const held = hold(id, "notify", checkpointsReached(id, "notify") + 1);
+    const instance = await workflow("napper").get(id);
+    await instance.pause();
+    await within("the delivery to be held", held.held);
+    await instance.delete();
+    await workflow("napper").create({ id });
+    // The held delivery, of the deleted run, fails once it is let go.
+    notifyFailures.set(id, 1);
+    const releasedAt = Date.now();
+    await warningsDuring(async () => {
+      held.release();
+      await until("the new run's start to be taken", () =>
+        notifiedOf(id).filter(
+          (notification) => notification.status === "queued"
+        ).length === 2
+          ? true
+          : undefined
+      );
+    });
+
+    // At once: not after a backoff the deleted run's failure put on it.
+    expect(Date.now() - releasedAt).toBeLessThan(500);
+  });
+});
+
+describe("writes while a delivery is out", () => {
+  it("lead to one more delivery after it, and one alarm write each", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await suspendedOn("napper", id, "nap");
+    await outboxEmpty("napper", id);
+    const held = hold(id, "notify", checkpointsReached(id, "notify") + 1);
+    const instance = await workflow("napper").get(id);
+    await instance.pause();
+    await within("the delivery to be held", held.held);
+    for (let write = 0; write < 10; write += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one write after another
+      await instance.sendEvent({ type: "nudge", payload: write });
+    }
+    // The alarm writes from here on, in the run object.
+    const writes = { count: 0 };
+    await runInDurableObject(runObject("napper", id), (_, state) => {
+      const { storage } = state;
+      for (const name of ["setAlarm", "deleteAlarm"] as const) {
+        const original: unknown = Reflect.get(storage, name);
+        if (typeof original !== "function") {
+          throw new TypeError(`storage has no ${name}`);
+        }
+        Reflect.set(storage, name, async (...args: unknown[]) => {
+          writes.count += 1;
+          await Reflect.apply(original, storage, args);
+        });
+      }
+    });
+
+    held.release();
+    await notifiedWith(id, "paused");
+    await within("a while", scheduler.wait(300));
+    await runInDurableObject(runObject("napper", id), (_, state) => {
+      Reflect.deleteProperty(state.storage, "setAlarm");
+      Reflect.deleteProperty(state.storage, "deleteAlarm");
+    });
+
+    expect(writes.count).toBeLessThanOrEqual(2);
   });
 });
