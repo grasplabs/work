@@ -375,8 +375,8 @@ export const PackagesCard = ({
         label: t`Reject`,
         name: t`Reject the packages for ${engine}`,
         does: t`${engine} doesn't get these packages.`,
-        onPress: () => {
-          void decide(false, t`Rejected: ${who}.`);
+        onPress: async () => {
+          await decide(false, t`Rejected: ${who}.`);
         },
       }}
       pile={pile}
@@ -386,8 +386,8 @@ export const PackagesCard = ({
         does: t`${engine} may use exactly these packages from now on.`,
         disabled: review === undefined,
         describedBy: review === undefined ? hintId : undefined,
-        onPress: () => {
-          void decide(true, t`Approved: ${who}.`);
+        onPress: async () => {
+          await decide(true, t`Approved: ${who}.`);
         },
       }}
     />

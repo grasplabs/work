@@ -47,13 +47,32 @@ export type PileItem =
 // so the pile stands the same after a look at another page, and no longer.
 // Core never hears of it.
 let turned: Turned = untouched;
+// The cards whose answer is still on its way: the pile is not gone
+// through until it is, so a card turned away from and back to can't be
+// answered twice.
+let deciding: ReadonlySet<string> = new Set();
 const listeners = new Set<() => void>();
 
-const setTurned = (next: Turned): void => {
-  turned = next;
+const tell = (): void => {
   for (const listener of listeners) {
     listener();
   }
+};
+
+const setTurned = (next: Turned): void => {
+  turned = next;
+  tell();
+};
+
+const setDeciding = (id: string, on: boolean): void => {
+  const next = new Set(deciding);
+  if (on) {
+    next.add(id);
+  } else {
+    next.delete(id);
+  }
+  deciding = next;
+  tell();
 };
 
 const subscribe = (listener: () => void) => {
@@ -64,6 +83,8 @@ const subscribe = (listener: () => void) => {
 };
 
 const readTurned = (): Turned => turned;
+
+const readDeciding = (): ReadonlySet<string> => deciding;
 
 /** Where this browser tab keeps that the pile was pointed out: once a session, not on every visit. */
 const pointedOutKey = "grasp.todo.pointed-out";
@@ -161,9 +182,12 @@ const PileCorner = ({
   onBack,
   onward,
   onSkip,
+  held,
 }: {
   place: number;
   count: number;
+  /** An answer is on its way: the pile stays where it is. */
+  held: boolean;
   onBack: () => void;
   onward: () => void;
   onSkip: () => void;
@@ -174,6 +198,7 @@ const PileCorner = ({
       <div className="absolute top-3 left-3 z-10 flex items-center gap-0.5">
         <Button
           aria-label={t`The one before`}
+          disabled={held}
           onClick={onBack}
           size="icon-sm"
           variant="ghost"
@@ -187,6 +212,7 @@ const PileCorner = ({
         </span>
         <Button
           aria-label={t`The next one`}
+          disabled={held}
           onClick={onward}
           size="icon-sm"
           variant="ghost"
@@ -197,6 +223,7 @@ const PileCorner = ({
       {/* Skipping is no answer: it stands apart from the yes and the no, in the other corner. */}
       <Button
         className="absolute top-3 right-3 z-10"
+        disabled={held}
         onClick={onSkip}
         size="sm"
         variant="ghost"
@@ -210,6 +237,10 @@ const PileCorner = ({
 /** A card that stands in for the last one while it goes: there to be seen, not to be pressed or read. */
 const still: Pile = {
   answering: () => false,
+  settled: () => {
+    // Nothing is pressed on it.
+  },
+  deciding: false,
   answered: () => {
     // Nothing is pressed on it.
   },
@@ -231,6 +262,9 @@ export const TodoPile = ({
 }) => {
   const { t } = useLingui();
   const now = useSyncExternalStore(subscribe, readTurned);
+  const pending = useSyncExternalStore(subscribe, readDeciding);
+  /** An answer is on its way: the pile stays on its card until it is through. */
+  const held = pending.size > 0;
   const ids = items.map(({ id }) => id);
   const order = orderOf(ids, now.skipped);
   const place = placeIn(order, now.at);
@@ -327,25 +361,31 @@ export const TodoPile = ({
   }
 
   const go = (by: 1 | -1 | "skip") => {
-    if (!more) {
+    if (!more || held) {
       return;
     }
     follow.current = onCard(frame.current);
     setMoved(true);
     setTurned(by === "skip" ? skip(ids, turned) : turn(ids, turned, by));
   };
+  const { id } = top;
   const pile: Pile = {
-    answering: () => {
-      if (performance.now() - cameUp.current < guardMs) {
+    answering: (keys) => {
+      if (performance.now() - cameUp.current < guardMs || held) {
         return false;
       }
-      follow.current = onCard(frame.current);
+      setDeciding(id, true);
+      follow.current = keys === true || onCard(frame.current);
       setMoved(true);
       if (count === 1) {
         setPrinted(printOf(frame.current));
       }
       return true;
     },
+    settled: () => {
+      setDeciding(id, false);
+    },
+    deciding: pending.has(id),
     answered: onSaid,
   };
   /** The pile's keys: the arrow right goes on to the next card, the arrow left back to the one before. */
@@ -414,6 +454,7 @@ export const TodoPile = ({
         {more ? (
           <PileCorner
             count={count}
+            held={held}
             onBack={() => {
               go(-1);
             }}

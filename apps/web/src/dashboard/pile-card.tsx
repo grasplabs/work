@@ -34,9 +34,18 @@ export interface Pile {
   /**
    * Says a press is meant for this card, and the pile notes that a card
    * may leave; false for one that comes too soon after the last card came
-   * up, the second of a double press meant for the card before.
+   * up, the second of a double press meant for the card before. `keys`:
+   * the keys go on with the next card, as for a press made in a dialog
+   * the card opened, which stands outside the card.
    */
-  answering: () => boolean;
+  answering: (keys?: boolean) => boolean;
+  /** Says the answer the card gave is through, however it went. */
+  settled: () => void;
+  /**
+   * Whether an answer this card gave is still on its way: kept by the
+   * pile, so it holds while the card is turned away from and back to.
+   */
+  deciding: boolean;
   /** Says what was done, for a screen reader: the pile itself only shows the next card. */
   answered: (said: string) => void;
 }
@@ -49,7 +58,8 @@ export interface Answer {
   name: string;
   /** What it does, in a sentence. */
   does: string;
-  onPress: () => void;
+  /** Resolves once the answer is through, however it went. */
+  onPress: () => Promise<void> | void;
   disabled?: boolean;
   /** The id of a line that says why it waits. */
   describedBy?: string;
@@ -64,21 +74,28 @@ const rests = 450;
 const AnswerButton = ({
   answer,
   busy,
-  answering,
+  pile,
   first = false,
   variant,
 }: {
   answer: Answer;
   busy: boolean;
-  answering: Pile["answering"];
+  pile: Pile;
   first?: boolean;
   variant: "default" | "outline";
 }) => {
   const [confirming, setConfirming] = useState(false);
-  const press = () => {
-    if (answering()) {
-      answer.onPress();
+  const press = async (keys?: boolean): Promise<void> => {
+    if (!pile.answering(keys)) {
+      return;
     }
+    try {
+      await answer.onPress();
+    } catch (error) {
+      pile.settled();
+      throw error;
+    }
+    pile.settled();
   };
   const button = (
     <Button
@@ -87,7 +104,13 @@ const AnswerButton = ({
       className="min-w-28"
       data-first={first ? "" : undefined}
       disabled={busy || answer.disabled === true}
-      onClick={answer.confirm === undefined ? press : undefined}
+      onClick={
+        answer.confirm === undefined
+          ? () => {
+              void press();
+            }
+          : undefined
+      }
       size="lg"
       variant={variant}
     />
@@ -118,7 +141,9 @@ const AnswerButton = ({
             disabled={busy}
             onClick={() => {
               setConfirming(false);
-              press();
+              // Pressed in the dialog, outside the card: the keys go on
+              // with the next card all the same.
+              void press(true);
             }}
             variant="destructive"
           >
@@ -186,15 +211,15 @@ export const PileCard = ({
         <div className="flex min-w-0 flex-wrap items-center justify-center gap-2">
           <AnswerButton
             answer={yes}
-            answering={pile.answering}
-            busy={busy}
+            busy={busy || pile.deciding}
             first
+            pile={pile}
             variant="default"
           />
           <AnswerButton
             answer={no}
-            answering={pile.answering}
-            busy={busy}
+            busy={busy || pile.deciding}
+            pile={pile}
             variant="outline"
           />
         </div>

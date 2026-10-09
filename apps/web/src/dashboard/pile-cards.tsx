@@ -94,8 +94,8 @@ export const HeldCard = ({
         label: t`Reject`,
         name: t`Reject ${who}`,
         does: t`Nothing is sent or changed on ${connection}.`,
-        onPress: () => {
-          void decide(declineHeld(action), t`Rejected: ${who}.`);
+        onPress: async () => {
+          await decide(declineHeld(action), t`Rejected: ${who}.`);
         },
       }}
       pile={pile}
@@ -105,8 +105,8 @@ export const HeldCard = ({
         does: t`Grasp makes this change on ${connection}, with exactly what is shown.`,
         disabled: shown.unseen,
         describedBy: shown.unseen ? shown.unseenId : undefined,
-        onPress: () => {
-          void decide(confirmHeld(action), t`Approved: ${who}.`);
+        onPress: async () => {
+          await decide(confirmHeld(action), t`Approved: ${who}.`);
         },
       }}
     />
@@ -197,8 +197,8 @@ export const RequestCard = ({
           title: t`Reject this request?`,
           description: t`${who} can't be granted later: it has to ask again.`,
         },
-        onPress: () => {
-          void decide(
+        onPress: async () => {
+          await decide(
             async (permissions) => await permissions.revoke(request.id),
             t`Rejected: ${who}.`
           );
@@ -209,8 +209,8 @@ export const RequestCard = ({
         label: t`Approve`,
         name: t`Approve ${who}`,
         does: t`${subject} gets this permission from now on.`,
-        onPress: () => {
-          void decide(
+        onPress: async () => {
+          await decide(
             async (permissions) =>
               await grantReviewed(
                 permissions,
