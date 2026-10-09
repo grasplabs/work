@@ -3545,6 +3545,10 @@ msgstr "El contrato de encargo del tratamiento no está firmado"
 msgid "The default, {each}"
 msgstr "Predeterminado, {each}"
 
+#: src/chat/builds.tsx
+msgid "The engines this chat builds didn't load."
+msgstr "Los motores que crea este chat no se cargaron."
+
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
 msgstr "La exportación no ha funcionado. Inténtalo de nuevo."
@@ -3793,6 +3797,7 @@ msgstr "Herramientas permitidas: ninguna registrada"
 msgid "Tools to allow"
 msgstr "Herramientas que permitir"
 
+#: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
@@ -3801,6 +3806,7 @@ msgstr "Herramientas que permitir"
 msgid "Try again"
 msgstr "Reintentar"
 
+#: src/chat/builds.tsx
 #: src/frame/page-states.tsx
 msgid "Trying again…"
 msgstr "Reintentando…"

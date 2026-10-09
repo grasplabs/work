@@ -15,7 +15,7 @@ import {
 import { i18n } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { HammerIcon } from "lucide-react";
+import { HammerIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -613,10 +613,22 @@ const PendingVersion = ({
   );
 };
 
+/** A read of the builds that came back without them. */
+type BuildsFailed = Exclude<Loaded<Builds>, { state: "ready" }>;
+
 /** What the chat's builds read, and what was made current here since. */
 export interface ChatBuildsRead {
-  /** Undefined until the first read ends. */
-  builds: Loaded<Builds> | undefined;
+  /**
+   * The latest builds read; undefined until a read succeeds. A read that
+   * fails later leaves them, so the App being built stays beside the chat.
+   */
+  builds: Builds | undefined;
+  /** Why the latest read failed; undefined once one succeeds. */
+  failure: BuildsFailed | undefined;
+  /** Whether a read the person asked for is under way. */
+  retrying: boolean;
+  /** Reads the builds again, as after a failed read. */
+  retry: () => void;
   /** Versions made current here (`versionKey`): gone from the panel at once. */
   madeCurrent: ReadonlySet<string>;
   /** A version was made current here: read again, whatever the agent does. */
@@ -626,24 +638,27 @@ export interface ChatBuildsRead {
 /**
  * The person's Apps and the chat's drafts, read again whenever the agent
  * stops working (`running` turns false) or writes or drops a draft
- * (`drafts` changes), and after a version is made current here, whatever
- * the agent does. The chat page reads them once, for the studio and the
- * side panel both.
+ * (`drafts` changes), and after a version is made current here or the
+ * person asks again, whatever the agent does. The chat page reads them
+ * once, for the studio and the side panel both.
  */
 export const useChatBuilds = (
   chatId: string,
   running: boolean,
   drafts: number
 ): ChatBuildsRead => {
-  const [builds, setBuilds] = useState<Loaded<Builds>>();
+  const [builds, setBuilds] = useState<Builds>();
+  const [failure, setFailure] = useState<BuildsFailed>();
   const [reads, setReads] = useState(0);
+  // The read the person asked for last, until it ends.
+  const [retried, setRetried] = useState<number>();
   const [madeCurrent, setMadeCurrent] = useState<ReadonlySet<string>>(
     new Set()
   );
   // Only the latest read shows, whichever ends last.
   const latest = useRef(0);
-  // The reads asked for (after making a version current) done so far:
-  // those go whether the agent works or not.
+  // The reads asked for (after making a version current, or again after
+  // a failure) done so far: those go whether the agent works or not.
   const handledReads = useRef(0);
   // The drafts' changes read so far: those go whether the agent works or
   // not, so a preview follows each write.
@@ -663,23 +678,64 @@ export const useChatBuilds = (
     const read = latest.current;
     const load = async (): Promise<void> => {
       const found = await readBuilds(core, chatId);
-      if (latest.current === read) {
-        setBuilds(found);
-        if (found.state === "ready") {
-          setMadeCurrent((made) => stillMadeCurrent(made, found.data.apps));
-        }
+      if (latest.current !== read) {
+        return;
+      }
+      setRetried(undefined);
+      if (found.state === "ready") {
+        setBuilds(found.data);
+        setFailure(undefined);
+        setMadeCurrent((made) => stillMadeCurrent(made, found.data.apps));
+      } else {
+        setFailure(found);
       }
     };
     void load();
   }, [core, chatId, running, reads, drafts]);
   return {
     builds,
+    failure,
+    retrying: retried !== undefined,
+    retry: () => {
+      setRetried(reads + 1);
+      setReads(reads + 1);
+    },
     madeCurrent,
     onMadeCurrent: (made) => {
       setMadeCurrent((before) => new Set([...before, made]));
       setReads(reads + 1);
     },
   };
+};
+
+/**
+ * Why the builds didn't load, beside the chat, and a way to read them
+ * again: the App being built would otherwise be missing without a word.
+ */
+export const BuildsFailure = ({ read }: { read: ChatBuildsRead }) => {
+  const { t } = useLingui();
+  const { failure, retrying, retry } = read;
+  if (failure === undefined) {
+    return null;
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3.5 py-3 text-sm">
+      <TriangleAlertIcon
+        aria-hidden="true"
+        className="text-destructive size-4 flex-none"
+      />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <p className="font-medium">
+          <Trans>The engines this chat builds didn&apos;t load.</Trans>
+        </p>
+        {/* Gone while trying, so the alert is announced again if it fails again. */}
+        {retrying ? null : <NotLoaded page={failure} />}
+      </div>
+      <Button disabled={retrying} onClick={retry} size="sm" variant="outline">
+        {retrying ? t`Trying again…` : t`Try again`}
+      </Button>
+    </div>
+  );
 };
 
 /** A draft the chat's agent is writing, with its App's name. */
@@ -689,15 +745,15 @@ export interface NamedDraft {
   name: string;
 }
 
-/** The chat's drafts, newest write first as core lists them; none until read. */
+/** The chat's drafts, as core lists them in the latest builds read; none until one succeeds. */
 export const draftsOf = ({ builds }: ChatBuildsRead): NamedDraft[] => {
-  if (builds?.state !== "ready") {
+  if (builds === undefined) {
     return [];
   }
   const names = new Map<string, string>(
-    builds.data.apps.map((app) => [app.id, app.name])
+    builds.apps.map((app) => [app.id, app.name])
   );
-  return builds.data.drafts.map((draft) => ({
+  return builds.drafts.map((draft) => ({
     draft,
     name: names.get(draft.app) ?? draft.app,
   }));
@@ -710,19 +766,15 @@ export const draftsOf = ({ builds }: ChatBuildsRead): NamedDraft[] => {
  */
 export const ChatBuilds = ({ read }: { read: ChatBuildsRead }) => {
   const { t } = useLingui();
-  const { builds, madeCurrent, onMadeCurrent } = read;
-  if (builds === undefined) {
-    return null;
-  }
-  if (builds.state !== "ready") {
-    return <NotLoaded page={builds} />;
-  }
-  const pending = pendingToShow(builds.data.apps, madeCurrent);
+  const { builds, failure, madeCurrent, onMadeCurrent } = read;
+  const pending =
+    builds === undefined ? [] : pendingToShow(builds.apps, madeCurrent);
   if (pending.length === 0) {
-    return null;
+    return failure === undefined ? null : <NotLoaded page={failure} />;
   }
   return (
     <section aria-label={t`Being built`} className="flex flex-col gap-3">
+      {failure === undefined ? null : <NotLoaded page={failure} />}
       <h3 className="flex items-center gap-2 text-sm font-medium">
         <HammerIcon
           aria-hidden="true"

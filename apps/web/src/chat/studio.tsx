@@ -1,6 +1,5 @@
 import type { ChatDraft } from "@grasp-os/shared/chat";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
-import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { EyeIcon } from "lucide-react";
@@ -142,30 +141,39 @@ const DraftPicker = ({
 
 type View = "chat" | "app";
 
-/** On a narrow window, which of the two shows: the chat or the App. */
-const ViewTabs = ({
+/**
+ * On a narrow window, which of the two shows: the chat or the App. Two
+ * toggle buttons rather than tabs: the other pane stays in the page,
+ * hidden, so the preview doesn't start again when it comes back.
+ */
+const ViewToggle = ({
   view,
   onView,
 }: {
   view: View;
   onView: (view: View) => void;
 }) => (
-  <div className="flex-none border-b p-2">
-    <Tabs
-      onValueChange={(value: View) => {
-        onView(value);
+  <div className="flex flex-none gap-1 border-b p-2">
+    <Button
+      aria-pressed={view === "chat"}
+      onClick={() => {
+        onView("chat");
       }}
-      value={view}
+      size="sm"
+      variant={view === "chat" ? "secondary" : "ghost"}
     >
-      <TabsList>
-        <TabsTrigger value="chat">
-          <Trans context="the chat beside an App being built">Chat</Trans>
-        </TabsTrigger>
-        <TabsTrigger value="app">
-          <Trans context="the App being built, beside its chat">App</Trans>
-        </TabsTrigger>
-      </TabsList>
-    </Tabs>
+      <Trans context="the chat beside an App being built">Chat</Trans>
+    </Button>
+    <Button
+      aria-pressed={view === "app"}
+      onClick={() => {
+        onView("app");
+      }}
+      size="sm"
+      variant={view === "app" ? "secondary" : "ghost"}
+    >
+      <Trans context="the App being built, beside its chat">App</Trans>
+    </Button>
   </div>
 );
 
@@ -204,7 +212,7 @@ export const ChatStudio = ({
   // losing where it was scrolled to, when the first draft comes.
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {studio && !wide ? <ViewTabs onView={setView} view={view} /> : null}
+      {studio && !wide ? <ViewToggle onView={setView} view={view} /> : null}
       <div className="flex min-h-0 flex-1">
         <div className={chatClass}>{children}</div>
         {studio ? (

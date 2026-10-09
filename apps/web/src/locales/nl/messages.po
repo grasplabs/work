@@ -3545,6 +3545,10 @@ msgstr "De verwerkersovereenkomst is niet getekend"
 msgid "The default, {each}"
 msgstr "Standaard, {each}"
 
+#: src/chat/builds.tsx
+msgid "The engines this chat builds didn't load."
+msgstr "De engines die deze chat bouwt, zijn niet geladen."
+
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
 msgstr "Het exporteren is niet gelukt. Probeer het opnieuw."
@@ -3793,6 +3797,7 @@ msgstr "Toegestane tools: geen vastgelegd"
 msgid "Tools to allow"
 msgstr "Toe te staan tools"
 
+#: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
@@ -3801,6 +3806,7 @@ msgstr "Toe te staan tools"
 msgid "Try again"
 msgstr "Opnieuw proberen"
 
+#: src/chat/builds.tsx
 #: src/frame/page-states.tsx
 msgid "Trying again…"
 msgstr "Opnieuw proberen…"

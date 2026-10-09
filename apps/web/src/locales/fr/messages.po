@@ -3545,6 +3545,10 @@ msgstr "L’accord de sous-traitance des données n’est pas signé"
 msgid "The default, {each}"
 msgstr "Par défaut, {each}"
 
+#: src/chat/builds.tsx
+msgid "The engines this chat builds didn't load."
+msgstr "Les moteurs que ce chat crée n’ont pas été chargés."
+
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
 msgstr "L’export n’a pas fonctionné. Réessayez."
@@ -3793,6 +3797,7 @@ msgstr "Outils autorisés : aucun enregistré"
 msgid "Tools to allow"
 msgstr "Outils à autoriser"
 
+#: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
@@ -3801,6 +3806,7 @@ msgstr "Outils à autoriser"
 msgid "Try again"
 msgstr "Réessayer"
 
+#: src/chat/builds.tsx
 #: src/frame/page-states.tsx
 msgid "Trying again…"
 msgstr "Nouvel essai…"

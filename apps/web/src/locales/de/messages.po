@@ -3545,6 +3545,10 @@ msgstr "Der Auftragsverarbeitungsvertrag ist nicht unterschrieben"
 msgid "The default, {each}"
 msgstr "Standard, {each}"
 
+#: src/chat/builds.tsx
+msgid "The engines this chat builds didn't load."
+msgstr "Die Engines, die dieser Chat erstellt, wurden nicht geladen."
+
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
 msgstr "Der Export hat nicht funktioniert. Versuchen Sie es erneut."
@@ -3793,6 +3797,7 @@ msgstr "Erlaubte Werkzeuge: keine erfasst"
 msgid "Tools to allow"
 msgstr "Zu erlaubende Werkzeuge"
 
+#: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
@@ -3801,6 +3806,7 @@ msgstr "Zu erlaubende Werkzeuge"
 msgid "Try again"
 msgstr "Erneut versuchen"
 
+#: src/chat/builds.tsx
 #: src/frame/page-states.tsx
 msgid "Trying again…"
 msgstr "Neuer Versuch…"

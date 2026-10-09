@@ -5,10 +5,11 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { PanelLeftIcon, PanelRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
-import { draftsOf, useChatBuilds } from "../chat/builds.tsx";
+import { BuildsFailure, draftsOf, useChatBuilds } from "../chat/builds.tsx";
 import { ChatList, ChatSidebar } from "../chat/chat-list.tsx";
 import { chatMarkdown } from "../chat/chat-markdown.ts";
 import { useFollowedChat } from "../chat/chat-watch.ts";
@@ -127,6 +128,37 @@ const fileNameOf = (title: string): string =>
     .slice(0, 80) || "grasp-chat";
 
 /**
+ * The one element the side panel draws itself in, and what puts it in a
+ * container: beside the chat or in a sheet over it. Moving the element
+ * rather than drawing the panel anew in the other keeps what it holds (an
+ * App open, an approval under way) when the first draft of an App, or a
+ * narrower window, moves it.
+ */
+const usePanelNode = (): [
+  HTMLDivElement | undefined,
+  (container: HTMLElement | null) => void,
+] => {
+  // Made the first time a container is there for it, then kept.
+  const [node, setNode] = useState<HTMLDivElement>();
+  return [
+    node,
+    (container) => {
+      if (container === null) {
+        return;
+      }
+      if (node !== undefined) {
+        container.append(node);
+        return;
+      }
+      const element = document.createElement("div");
+      element.className = "flex flex-1 flex-col";
+      container.append(element);
+      setNode(element);
+    },
+  ];
+};
+
+/**
  * One chat, followed as it streams, in the studio with the App its agent
  * builds (`onBuilding` says whether one stands beside it), and with the
  * side panel beside it.
@@ -160,7 +192,13 @@ const OpenChat = ({
       onBuilding(false);
     };
   }, [building, onBuilding]);
-  const sidePanel = <SidePanel builds={builds} />;
+  const [panelNode, holdPanel] = usePanelNode();
+  // Drawn from the first time it opens on, so it keeps its state while
+  // closed too, and a sheet that closes still shows it on its way out.
+  const [panelUsed, setPanelUsed] = useState(panel);
+  if (panel && !panelUsed) {
+    setPanelUsed(true);
+  }
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
       <ChatStudio chatId={chat.id} drafts={drafts} wide={wide}>
@@ -227,6 +265,7 @@ const OpenChat = ({
             <ConnectionRequests chatId={chat.id} version={view.held} />
           </ChatThread>
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 pb-4 md:px-6">
+            <BuildsFailure read={builds} />
             <ChatSources names={sourceNames} provenance={view.provenance} />
             <Composer running={view.running} {...composer} />
             <p className="text-muted-foreground text-center text-xs">
@@ -245,9 +284,8 @@ const OpenChat = ({
         <aside
           aria-label={t`Side panel`}
           className="bg-background flex w-72 flex-none flex-col overflow-y-auto border-l p-4"
-        >
-          {sidePanel}
-        </aside>
+          ref={holdPanel}
+        />
       ) : null}
       {wide && !building ? null : (
         <Sheet onOpenChange={onPanel} open={panel}>
@@ -255,12 +293,16 @@ const OpenChat = ({
             <SheetTitle className="sr-only">
               <Trans>Side panel</Trans>
             </SheetTitle>
-            <div className="flex flex-1 flex-col overflow-y-auto p-4">
-              {sidePanel}
-            </div>
+            <div
+              className="flex flex-1 flex-col overflow-y-auto p-4"
+              ref={holdPanel}
+            />
           </SheetContent>
         </Sheet>
       )}
+      {panelUsed && panelNode !== undefined
+        ? createPortal(<SidePanel builds={builds} />, panelNode)
+        : null}
     </div>
   );
 };

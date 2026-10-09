@@ -3545,6 +3545,10 @@ msgstr "The data processing agreement isn't signed"
 msgid "The default, {each}"
 msgstr "The default, {each}"
 
+#: src/chat/builds.tsx
+msgid "The engines this chat builds didn't load."
+msgstr "The engines this chat builds didn't load."
+
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
 msgstr "The export didn't work. Try again."
@@ -3793,6 +3797,7 @@ msgstr "Tools allowed: none recorded"
 msgid "Tools to allow"
 msgstr "Tools to allow"
 
+#: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
@@ -3801,6 +3806,7 @@ msgstr "Tools to allow"
 msgid "Try again"
 msgstr "Try again"
 
+#: src/chat/builds.tsx
 #: src/frame/page-states.tsx
 msgid "Trying again…"
 msgstr "Trying again…"

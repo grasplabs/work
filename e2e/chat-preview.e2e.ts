@@ -147,6 +147,21 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
 
     // Nothing built yet: the chat alone, the chats' sidebar open beside it.
     const page = await pageOf(browser, builder);
+    // While `failDrafts` holds, reading the chat's drafts goes to an API
+    // this stack has switched off (improvement signals), which core
+    // refuses: as a read that fails.
+    let failDrafts = false;
+    await page.routeWebSocket("**/rpc", (socket) => {
+      const toCore = socket.connectToServer();
+      socket.onMessage((message) => {
+        const text = String(message);
+        toCore.send(
+          failDrafts
+            ? text.replaceAll('["chats","drafts"]', '["signals","list"]')
+            : text
+        );
+      });
+    });
     await page.goto(`/?chat=${chat.id}`);
     const thread = page.getByRole("region", {
       name: `Build ${tag}`,
@@ -164,9 +179,21 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     await writeDraft(builder.userId, chat.id, app.id, version, {
       "app/server.ts": server("in the preview"),
     });
+    // A read of it that fails says so beside the chat, and is tried again
+    // from there.
+    failDrafts = true;
     await page.reload();
+    await expect(
+      thread.getByText("The engines this chat builds didn't load.")
+    ).toBeVisible();
+    await expect(studio).toHaveCount(0);
+    failDrafts = false;
+    await thread.getByRole("button", { name: "Try again" }).click();
     // Named by its top row's heading: the App's name.
     await expect(studio).toBeVisible();
+    await expect(
+      thread.getByText("The engines this chat builds didn't load.")
+    ).toHaveCount(0);
     await expect(studio).toContainText(
       "1 file changed in this chat, not proposed yet"
     );
@@ -194,6 +221,37 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     // The App's own storage has none of it.
     const counted = await api.screens.call(app.id, "count", []);
     expect(counted).toBe("0 in the App");
+
+    // A phone: the chat and the App take turns, the App first. The
+    // preview keeps what it shows through the turns: it isn't loaded anew.
+    await page.setViewportSize({ width: 390, height: 844 });
+    const showChat = page.getByRole("button", { name: "Chat", exact: true });
+    const showApp = page.getByRole("button", { name: "App", exact: true });
+    await expect(showApp).toHaveAttribute("aria-pressed", "true");
+    await expect(studio).toBeVisible();
+    await expect(thread).toBeHidden();
+    await frame.getByRole("button", { name: "Add one" }).click();
+    await expect(frame.getByRole("status")).toHaveText("3 in the preview");
+    await showChat.click();
+    await expect(showChat).toHaveAttribute("aria-pressed", "true");
+    await expect(thread).toBeVisible();
+    await expect(studio).toBeHidden();
+    await showApp.click();
+    await expect(studio).toBeVisible();
+    await expect(frame.getByRole("status")).toHaveText("3 in the preview");
+
+    // Wider than lg the two stand side by side again, with no turns to
+    // take; narrower again, the App is where it was. The preview stays.
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await expect(showApp).toHaveCount(0);
+    await expect(thread).toBeVisible();
+    await expect(studio).toBeVisible();
+    await expect(frame.getByRole("status")).toHaveText("3 in the preview");
+    await page.setViewportSize({ width: 900, height: 900 });
+    await expect(showApp).toHaveAttribute("aria-pressed", "true");
+    await expect(thread).toBeHidden();
+    await expect(frame.getByRole("status")).toHaveText("3 in the preview");
+    await page.setViewportSize({ width: 1280, height: 720 });
 
     // View app opens the App itself.
     await studio.getByRole("link", { name: "View app" }).click();
