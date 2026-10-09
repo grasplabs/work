@@ -2,6 +2,7 @@ import type {
   WorkflowRollbackContext,
   WorkflowStepContext,
 } from "../src/contracts.ts";
+import type { RunNotification } from "../src/notifications.ts";
 
 /** One effect as the outside system received it. */
 export interface Effect {
@@ -109,6 +110,21 @@ export const effect = async (
   }
   return receipt;
 };
+
+/**
+ * What the run objects' host took of their notifications, in the order it
+ * took them (worker.ts).
+ */
+export const hostNotifications: RunNotification[] = [];
+
+/** How many more deliveries the host fails, by instance ID. */
+export const notifyFailures = new Map<string, number>();
+
+/** Instance IDs whose next delivery the host never answers. */
+export const notifyHangs = new Set<string>();
+
+export const notifiedOf = (run: string): RunNotification[] =>
+  hostNotifications.filter((notification) => notification.instanceId === run);
 
 /** Each run object whose alarm handler has returned, by its ID. */
 export const handled: string[] = [];

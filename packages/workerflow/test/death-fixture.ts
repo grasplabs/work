@@ -15,7 +15,12 @@ import type {
 import { namedError } from "../src/errors.ts";
 import { runObjectName } from "../src/identity.ts";
 import { WorkflowRun } from "../src/run.ts";
-import type { DeleteOutcome, StartCommand, StartOutcome } from "../src/run.ts";
+import type {
+  DeleteOutcome,
+  RunNotification,
+  StartCommand,
+  StartOutcome,
+} from "../src/run.ts";
 
 interface FixtureEnv {
   RUNS: DurableObjectNamespace<Runs>;
@@ -352,6 +357,37 @@ export class Runs extends WorkflowRun<FixtureEnv> {
     definition,
   }: DefinitionIdentity): WorkflowDefinition | undefined {
     return definitionsFor(this.env)[definition];
+  }
+
+  /**
+   * The host: takes the run's notifications by telling the outside world,
+   * as `notify:<the batch's last status>`, keyed by what the batch holds,
+   * so a test can hold a given status's delivery and kill meanwhile.
+   */
+  protected override async notify(
+    notifications: readonly RunNotification[]
+  ): Promise<void> {
+    const last = notifications.at(-1);
+    if (last === undefined) {
+      return;
+    }
+    const response = await this.env.EFFECTS.fetch("http://effects/notify", {
+      method: "POST",
+      body: JSON.stringify({
+        run: last.instanceId,
+        label: `notify:${last.status}`,
+        key: JSON.stringify(
+          notifications.map(({ sequence, status, generation, runId }) => ({
+            sequence,
+            status,
+            generation,
+            runId,
+          }))
+        ),
+        attempt: 1,
+      }),
+    });
+    await response.text();
   }
 
   override async start(command: StartCommand): Promise<StartOutcome> {

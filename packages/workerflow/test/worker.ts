@@ -10,6 +10,7 @@ import type {
   WorkflowStepRollbackOptions,
 } from "../src/contracts.ts";
 import { NonRetryableError, namedError } from "../src/errors.ts";
+import type { RunNotification } from "../src/notifications.ts";
 import { WorkflowRun } from "../src/run.ts";
 import type { DeleteOutcome, StartCommand, StartOutcome } from "../src/run.ts";
 import {
@@ -18,6 +19,9 @@ import {
   effect,
   handled,
   measuredClock,
+  hostNotifications,
+  notifyFailures,
+  notifyHangs,
   undone,
   witness,
 } from "./outside.ts";
@@ -989,6 +993,9 @@ export const testRollbackReplayMs = 200;
 
 /** How long a subscription to a test run may wait for its next event. */
 export const testSubscriptionWaitMs = 2000;
+
+/** How long the test host may take to take notifications. */
+export const testNotifyTimeoutMs = 300;
 /** How many test replays in a row may end without the rollbacks. */
 export const testRollbackReplays = 3;
 
@@ -1026,6 +1033,31 @@ export class TestRuns extends WorkflowRun {
   /** Short, so a subscription that waits too long is closed soon. */
   protected override readonly subscriptionWaitMs: number =
     testSubscriptionWaitMs;
+
+  /** Short, so a host that never answers is given up on soon. */
+  protected override readonly notifyTimeoutMs = testNotifyTimeoutMs;
+
+  /**
+   * The host: takes the run's notifications into `hostNotifications`, held at the
+   * checkpoint "notify" if the test holds it, failing as many times as
+   * `notifyFailures` says, or not answering once if `notifyHangs` says.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- the host's state is the test's, shared through outside.ts
+  protected override async notify(
+    notifications: readonly RunNotification[]
+  ): Promise<void> {
+    const id = notifications[0]?.instanceId ?? "";
+    await checkpoint(id, "notify");
+    const failures = notifyFailures.get(id) ?? 0;
+    if (failures > 0) {
+      notifyFailures.set(id, failures - 1);
+      throw new Error("the host is down");
+    }
+    if (notifyHangs.delete(id)) {
+      await Promise.withResolvers<never>().promise;
+    }
+    hostNotifications.push(...notifications);
+  }
 
   override async alarm(): Promise<void> {
     try {

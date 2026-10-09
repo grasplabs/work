@@ -205,6 +205,44 @@ const sha256Of = (bytes: Uint8Array): string =>
 const keysOf = (id: string, label: string): Set<string> =>
   new Set(outside.of(id, label).map((effect) => effect.key));
 
+/** The run row of a journal, as far as these tests read it. */
+const runOf = (
+  journal: unknown
+): { status: unknown; notify_at: unknown } | undefined =>
+  typeof journal === "object" &&
+  journal !== null &&
+  "run" in journal &&
+  typeof journal.run === "object" &&
+  journal.run !== null &&
+  "status" in journal.run &&
+  "notify_at" in journal.run
+    ? { status: journal.run.status, notify_at: journal.run.notify_at }
+    : undefined;
+
+/** The host's deliveries for the run, in the order they arrived. */
+const deliveriesOf = (
+  id: string,
+  label?: string
+): { key: string; label: string }[] =>
+  outside.notifications.filter(
+    (delivery) =>
+      delivery.run === id && (label === undefined || delivery.label === label)
+  );
+
+/** The sequences a delivery to the host held, from its key. */
+const sequencesIn = (key: string): unknown[] => {
+  const parsed: unknown = JSON.parse(key);
+  return Array.isArray(parsed)
+    ? parsed.map((notification: unknown) =>
+        typeof notification === "object" &&
+        notification !== null &&
+        "sequence" in notification
+          ? notification.sequence
+          : undefined
+      )
+    : [];
+};
+
 /** An event as a subscriber outside the process reads it. */
 interface ObservedEvent {
   eventId: number;
@@ -732,6 +770,45 @@ describe("a run on disk-backed workerd", () => {
         )
         .map((event) => event.stepName ?? event.type)
     ).toStrictEqual(["before-1", "after-1", "workflow_completed"]);
+  });
+
+  it("hands the host a run's end again after the process died before the host took it, and empties the outbox once it has", async () => {
+    const id = "notified-through-death";
+    const endHeld = outside.hold(id, "notify:complete", 1);
+    await workerd.request("/start", startOf("orders", id));
+    // The end reached the host; its answer hasn't left.
+    await endHeld;
+    const cutOff = await journalOf("orders", id);
+
+    await workerd.kill();
+    await workerd.start();
+    await until("the end to reach the host again", () =>
+      deliveriesOf(id, "notify:complete").length >= 2 ? true : undefined
+    );
+    const after = await until("the outbox to empty", async () => {
+      const journal = await journalOf("orders", id);
+      return runOf(journal)?.notify_at === null ? journal : undefined;
+    });
+
+    const [first, again] = deliveriesOf(id, "notify:complete");
+    const delivered = deliveriesOf(id).flatMap((delivery) =>
+      sequencesIn(delivery.key)
+    );
+    const cutOffRun = runOf(cutOff);
+    expect({
+      cutOff: {
+        status: cutOffRun?.status,
+        pending: typeof cutOffRun?.notify_at === "number",
+      },
+      after: runOf(after),
+      again: again?.key,
+    }).toStrictEqual({
+      cutOff: { status: "complete", pending: true },
+      after: { status: "complete", notify_at: null },
+      again: first?.key,
+    });
+    // In order, each status at least once: only the held one twice.
+    expect(delivered).toStrictEqual([1, 2, 3, 3]);
   });
 
   it("recovers an object evicted mid-step from its journal, with no request reaching it", async () => {
