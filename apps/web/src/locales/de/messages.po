@@ -274,6 +274,10 @@ msgstr "{name}: {shown} des Limits"
 msgid "{name}: version {version} waiting for review"
 msgstr "{name}: Version {version} wartet auf Prüfung"
 
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "{out, plural, one {All in place: # link is out, the rest go by the plan.} other {All in place: # links are out, the rest go by the plan.}}"
+msgstr "{out, plural, one {Alles steht: # Link ist raus, die übrigen gehen nach Plan.} other {Alles steht: # Links sind raus, die übrigen gehen nach Plan.}}"
+
 #: src/chat/builds-state.ts
 msgid "{path}, as it would run"
 msgstr "{path}, wie es laufen würde"
@@ -289,6 +293,10 @@ msgstr "{people, plural, one {# Person hat Zugriff. Mitglieder kommen hinzu, ind
 #: src/dashboard/todo-pile.tsx
 msgid "{place} of {count}"
 msgstr "{place} von {count}"
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "{points} of {weight}"
+msgstr "{points} von {weight}"
 
 #. A length of time, said short: 21 seconds.
 #: src/chat/thread.tsx
@@ -354,6 +362,10 @@ msgstr "{waiting, plural, one {# wartender Lauf} other {# wartende Läufe}} von 
 #: src/workflows/workflows-table.tsx
 msgid "{waiting, plural, one {# waiting} other {# waiting}}"
 msgstr "{waiting, plural, one {# wartet} other {# warten}}"
+
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "{waiting, plural, one {All three in place, or no link goes out: # link waits.} other {All three in place, or no link goes out: # links wait.}}"
+msgstr "{waiting, plural, one {Erst wenn alle drei stehen, geht ein Link raus: # Link wartet.} other {Erst wenn alle drei stehen, geht ein Link raus: # Links warten.}}"
 
 #: src/dashboard/pile-cards.tsx
 msgid "{who} can't be granted later: it has to ask again."
@@ -481,9 +493,17 @@ msgstr "Aktivität"
 msgid "Actor ID"
 msgstr "Akteur-ID"
 
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "Add a word"
+msgstr "Ein Wort hinzufügen"
+
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "Add note"
 msgstr "Notiz hinzufügen"
+
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "Add something he leaves alone"
+msgstr "Etwas hinzufügen, das er auslässt"
 
 #: src/chat/builds.tsx
 msgid "Added"
@@ -538,6 +558,15 @@ msgstr "Agent {agent}"
 #: src/activity/audit-log.tsx
 msgid "Agent {agentId} for {person}"
 msgstr "Agent {agentId} für {person}"
+
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Agreed before the first interview"
+msgstr "Vereinbart vor dem ersten Interview"
+
+#: src/routes/_shell.onboarding.tsx
+msgctxt "onboarding area section"
+msgid "Agreements"
+msgstr "Vereinbarungen"
 
 #: src/onboarding/staff-words.ts
 msgctxt "onboarding stage"
@@ -730,6 +759,10 @@ msgstr "als {binding}"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "As the company named them, until the staff list is in."
 msgstr "Wie das Unternehmen sie genannt hat, bis die Personalliste vorliegt."
+
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "As the kickoff suggests"
+msgstr "Wie der Kickoff es vorschlägt"
 
 #: src/chat/thread.tsx
 msgid "Ask again"
@@ -1025,6 +1058,10 @@ msgstr "Schließen"
 msgid "Close {name}"
 msgstr "{name} schließen"
 
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Close it for the onboarding"
+msgstr "Für das Onboarding schließen"
+
 #: src/chat/thread.tsx
 msgid "Code"
 msgstr "Code"
@@ -1227,7 +1264,12 @@ msgstr "Kritisch"
 msgid "Dashboard"
 msgstr "Dashboard"
 
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Data processing agreement"
+msgstr "Auftragsverarbeitungsvertrag"
+
 #: src/onboarding/staff-words.ts
+#: src/routes/_shell.onboarding.agreements.tsx
 msgid "Data processing agreement signed"
 msgstr "Auftragsverarbeitungsvertrag unterschrieben"
 
@@ -1239,6 +1281,18 @@ msgstr "Datenregeln"
 msgctxt "log filter"
 msgid "Day"
 msgstr "Tag"
+
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Day the data processing agreement was signed"
+msgstr "Tag, an dem der Auftragsverarbeitungsvertrag unterschrieben wurde"
+
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Day the risk assessment was signed off"
+msgstr "Tag, an dem die Risikobewertung freigegeben wurde"
+
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Day the works council said yes, or it was found there is none"
+msgstr "Tag, an dem der Betriebsrat zugestimmt hat oder feststand, dass es keinen gibt"
 
 #: src/workflows/runs.tsx
 msgid "Decide"
@@ -1344,6 +1398,11 @@ msgstr "Dokument"
 msgid "Document not found"
 msgstr "Dokument nicht gefunden"
 
+#: src/onboarding/staff-words.ts
+msgctxt "what Grasp knows, by source"
+msgid "Documents shared"
+msgstr "Geteilte Dokumente"
+
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Documents written here, and files uploaded to it, show up here for Grasp and its agents to read."
 msgstr "Hier geschriebene Dokumente und hochgeladene Dateien erscheinen hier, damit Grasp und seine Agenten sie lesen können."
@@ -1447,6 +1506,10 @@ msgstr "Engines und Agenten mit einer Berechtigung"
 msgid "Enough is known ({known}% of {threshold}%): the company waits for Grasp's go"
 msgstr "Es ist genug bekannt ({known} % von {threshold} %): Das Unternehmen wartet auf das Go von Grasp"
 
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Enough is known: it is past {threshold}%. The company comes in the moment Grasp gives its go."
+msgstr "Genug ist bekannt: Es sind über {threshold} %. Das Unternehmen kommt herein, sobald Grasp das Go gibt."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Enter a number."
 msgstr "Geben Sie eine Zahl ein."
@@ -1474,6 +1537,10 @@ msgstr "Jeder Aufruf bleibt in der EU: nein."
 #: src/routes/_shell.settings.models.tsx
 msgid "Every call stays in the EU: yes."
 msgstr "Jeder Aufruf bleibt in der EU: ja."
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Every source adds its own share, and only once it is in."
+msgstr "Jede Quelle trägt ihren eigenen Anteil bei, und erst, wenn sie da ist."
 
 #: src/onboarding/staff-words.ts
 msgid "Every team has its lead"
@@ -1631,9 +1698,21 @@ msgctxt "where a decision comes from"
 msgid "From"
 msgstr "Von"
 
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "From the kickoff with the sponsor. What is changed here holds from the next interview turn on."
+msgstr "Aus dem Kickoff mit dem Sponsor. Was hier geändert wird, gilt ab dem nächsten Gesprächszug im Interview."
+
 #: src/activity/audit-words.ts
 msgid "Gave consent for a connection"
 msgstr "Einer Verbindung zugestimmt"
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Give the go"
+msgstr "Das Go geben"
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Give the go again"
+msgstr "Das Go wieder geben"
 
 #: src/routes/decisions.$decision.tsx
 msgid "Go to Grasp"
@@ -1683,6 +1762,10 @@ msgstr "Grasp selbst"
 msgid "Grasp makes this change on {connection}, with exactly what is shown."
 msgstr "Grasp nimmt diese Änderung in {connection} vor, mit genau dem, was angezeigt wird."
 
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Grasp opens"
+msgstr "Grasp öffnet"
+
 #: src/sign-in-errors.ts
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 msgstr "Grasp öffnet bald für alle, sobald Stephen mit den Teams gesprochen hat. Wenn Sie einen Interviewlink haben, finden Sie ihn in Ihrer E-Mail."
@@ -1720,6 +1803,10 @@ msgstr "Grasp führt nicht aus, was {about} braucht: {requirement}"
 msgid "Grasp's first conversation with the sponsor, read for the ten things Stephen needs before his first interview."
 msgstr "Das erste Gespräch von Grasp mit dem Sponsor, gelesen auf die zehn Dinge, die Stephen vor seinem ersten Interview braucht."
 
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Grasp's go was taken back: only the admins and Grasp's staff come in until it is given again."
+msgstr "Das Go von Grasp wurde zurückgenommen: Bis es wieder gegeben wird, kommen nur die Admins und das Team von Grasp herein."
+
 #: src/onboarding/staff-words.ts
 msgctxt "who did it, in the log"
 msgid "Grasp's staff"
@@ -1740,6 +1827,10 @@ msgstr "Gast von {engine}, eingeladen für {person}"
 #: src/activity/audit-log.tsx
 msgid "Hash"
 msgstr "Hash"
+
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "He doesn't ask about it, and moves on when somebody brings it up."
+msgstr "Er fragt nicht danach und geht weiter, wenn jemand es anspricht."
 
 #: src/routes/guest.tsx
 msgid "Hi {name}"
@@ -1765,6 +1856,14 @@ msgstr "Verlauf"
 #: src/routes/_shell.settings.models.tsx
 msgid "Hosted in the EU"
 msgstr "In der EU gehostet"
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "How much has to be known before it opens"
+msgstr "Wie viel bekannt sein muss, bevor es öffnet"
+
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "How Stephen is set up here"
+msgstr "Wie Stephen hier eingestellt ist"
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
@@ -1951,6 +2050,10 @@ msgctxt "kickoff field"
 msgid "Languages"
 msgstr "Sprachen"
 
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "Languages he interviews in"
+msgstr "Sprachen, in denen er interviewt"
+
 #: src/chat/chat-list.tsx
 msgctxt "chats from the past week"
 msgid "Last 7 days"
@@ -1989,6 +2092,10 @@ msgstr "Leitungen gesprochen: {count} von {of}"
 #: src/knowledge/uploads.tsx
 msgid "Let go to add them"
 msgstr "Loslassen, um sie hinzuzufügen"
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Let the interviews run again"
+msgstr "Die Interviews wieder laufen lassen"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Licence"
@@ -2286,6 +2393,10 @@ msgstr "Keine Workflows zu testen."
 msgid "No workflows yet"
 msgstr "Noch keine Workflows"
 
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "No works council"
+msgstr "Kein Betriebsrat"
+
 #: src/activity/audit-log.tsx
 msgid "No: its hash or its link to the event before it doesn't match."
 msgstr "Nein: Sein Hash oder seine Verknüpfung zum vorherigen Ereignis stimmt nicht."
@@ -2346,6 +2457,10 @@ msgstr "Nicht genehmigt"
 msgid "Not connected"
 msgstr "Nicht verbunden"
 
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Not enough is known yet. It can open once it is past {threshold}%, or once the interviews are over."
+msgstr "Noch ist nicht genug bekannt. Es kann öffnen, sobald es über {threshold} % sind oder die Interviews vorbei sind."
+
 #: src/frame/page-states.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -2370,6 +2485,14 @@ msgstr "Nicht angeboten"
 #: src/routes/_shell.engines.index.tsx
 msgid "Not released"
 msgstr "Nicht veröffentlicht"
+
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Not signed off yet"
+msgstr "Noch nicht freigegeben"
+
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Not signed yet"
+msgstr "Noch nicht unterschrieben"
 
 #: src/activity/audit-log.tsx
 msgid "Not verified"
@@ -2446,6 +2569,10 @@ msgstr "Läuft jetzt {how}"
 msgid "Now runs {how}, {times}"
 msgstr "Läuft jetzt {how}, {times}"
 
+#: src/routes/_shell.onboarding.open.tsx
+msgid "of what Grasp needs is known"
+msgstr "dessen, was Grasp braucht, ist bekannt"
+
 #: src/connections/offer-switch.tsx
 msgid "Off, nobody can connect it, admins included. Connections already made go on."
 msgstr "Aus: Niemand kann es verbinden, auch Admins nicht. Bestehende Verbindungen laufen weiter."
@@ -2511,6 +2638,10 @@ msgstr "Nur die Eigentümerperson"
 msgid "Only the people this decision is from can answer it."
 msgstr "Nur die Personen, an die sich diese Entscheidung richtet, können sie beantworten."
 
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Only the works council can agree to this, not the sponsor. It often takes several weeks."
+msgstr "Zustimmen kann nur der Betriebsrat, nicht der Sponsor. Das dauert oft mehrere Wochen."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Only when a condition holds:"
 msgstr "Nur wenn eine Bedingung erfüllt ist:"
@@ -2555,6 +2686,14 @@ msgstr "Als ganze Seite öffnen"
 msgid "Open in chat"
 msgstr "Im Chat öffnen"
 
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Open it anyway"
+msgstr "Trotzdem öffnen"
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Open since Grasp's go on {since}."
+msgstr "Offen seit dem Go von Grasp am {since}."
+
 #: src/chat/chat-dock.tsx
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
@@ -2572,6 +2711,10 @@ msgstr "Offen bis"
 #: src/routes/guest.tsx
 msgid "Opening the chat…"
 msgstr "Chat wird geöffnet…"
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Opens at {threshold}%"
+msgstr "Öffnet bei {threshold} %"
 
 #: src/knowledge/uploads.tsx
 msgid "or choose them from your computer"
@@ -2639,9 +2782,17 @@ msgstr "Eingefügt am {when}. Bringen Sie es erneut ein, um es neu lesen zu lass
 msgid "Path"
 msgstr "Pfad"
 
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Pause the interviews"
+msgstr "Die Interviews pausieren"
+
 #: src/workflows/runs.tsx
 msgid "Paused"
 msgstr "Pausiert"
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
+msgstr "Pausiert: Kein Link öffnet sich, und keiner geht raus. Die fälligen Links gehen raus, sobald sie wieder laufen."
 
 #: src/export/export-menu.tsx
 msgid "PDF"
@@ -2880,6 +3031,10 @@ msgstr "Entfernen"
 msgid "Remove {name}?"
 msgstr "{name} entfernen?"
 
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "Remove: {item}"
+msgstr "Entfernen: {item}"
+
 #: src/chat/builds.tsx
 msgid "Removed"
 msgstr "Entfernt"
@@ -2982,9 +3137,17 @@ msgstr "Berechtigung von {holder} widerrufen"
 msgid "Revoked a permission"
 msgstr "Eine Berechtigung entzogen"
 
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Risk assessment"
+msgstr "Risikobewertung"
+
 #: src/onboarding/staff-words.ts
 msgid "Risk assessment done"
 msgstr "Risikobewertung erledigt"
+
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Risk assessment signed off"
+msgstr "Risikobewertung freigegeben"
 
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.settings.profile.tsx
@@ -3036,6 +3199,10 @@ msgstr "Läuft jetzt"
 msgid "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 msgstr "Führt die eigenen Testfälle des Workflows mit den aktuell gesetzten Werten aus. Es wird nichts geändert: Was er ändern würde, wird stattdessen aufgelistet."
 
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Said yes"
+msgstr "Hat zugestimmt"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Same version, different contents: {changed}"
 msgstr "Gleiche Version, anderer Inhalt: {changed}"
@@ -3044,6 +3211,10 @@ msgstr "Gleiche Version, anderer Inhalt: {changed}"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Save"
 msgstr "Speichern"
+
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Save the agreements"
+msgstr "Vereinbarungen speichern"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Saved."
@@ -3250,9 +3421,18 @@ msgstr "Die Anmeldung hat nicht funktioniert. Versuchen Sie es erneut oder frage
 msgid "Sign-in timed out or was started elsewhere. Try again."
 msgstr "Die Anmeldung ist abgelaufen oder wurde anderswo gestartet. Versuchen Sie es erneut."
 
+#: src/routes/_shell.onboarding.agreements.tsx
+msgctxt "state of a data processing agreement"
+msgid "Signed"
+msgstr "Unterschrieben"
+
 #: src/activity/audit-words.ts
 msgid "Signed in to a connection again"
 msgstr "Bei einer Verbindung erneut angemeldet"
+
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Signed off"
+msgstr "Freigegeben"
 
 #: src/connections/connect-dialog.tsx
 msgid "Signing in happens at {app}. It takes about a minute."
@@ -3271,6 +3451,10 @@ msgstr "Überspringen"
 msgctxt "who did it, in the log"
 msgid "Someone at the company"
 msgstr "Jemand im Unternehmen"
+
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "Someone chooses their own language when they open their link."
+msgstr "Jede Person wählt ihre Sprache, wenn sie ihren Link öffnet."
 
 #: src/workflows/runs.tsx
 msgid "Someone else"
@@ -3332,6 +3516,11 @@ msgstr "Status"
 msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "Schritt {step} von {about} ist {days, plural, one {am letzten Tag} other {in den letzten # Tagen}} in {failures} von {runs, plural, one {# Durchlauf} other {# Durchläufen}} fehlgeschlagen."
 
+#: src/routes/_shell.onboarding.tsx
+msgctxt "onboarding area section"
+msgid "Stephen"
+msgstr "Stephen"
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Stephen is reading it. This takes a minute."
 msgstr "Stephen liest es. Das dauert eine Minute."
@@ -3344,6 +3533,10 @@ msgstr "Schritte"
 #: src/knowledge/uploads.tsx
 msgid "Still being read. It shows in the file list once it's ready."
 msgstr "Wird noch gelesen. Sie erscheint in der Dateiliste, sobald sie fertig ist."
+
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Still deciding"
+msgstr "Entscheidet noch"
 
 #: src/chat/composer.tsx
 msgctxt "stop the answer"
@@ -3374,6 +3567,10 @@ msgstr "Zurücknehmen"
 #: src/engines/screen-approval.tsx
 msgid "Take back the approval of {screen}"
 msgstr "Die Genehmigung von {screen} zurücknehmen"
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Take the go back"
+msgstr "Das Go zurücknehmen"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Takes sensitive data"
@@ -3481,6 +3678,10 @@ msgstr "Der Agent hat etwas nachgeschlagen"
 msgid "The agent wasn't asked: {reason}"
 msgstr "Der Agent wurde nicht gefragt: {reason}"
 
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "The agreement between the company and Grasp on handling data, signed in the first talk."
+msgstr "Die Vereinbarung zwischen dem Unternehmen und Grasp über den Umgang mit Daten, unterschrieben im ersten Gespräch."
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The answer was cut off at the model's limit."
@@ -3520,6 +3721,14 @@ msgctxt "who did it, in the log"
 msgid "The company"
 msgstr "Das Unternehmen"
 
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "The company's look at the risks to its people, the data protection impact assessment. Grasp brings it filled in, and the company signs it off."
+msgstr "Der Blick des Unternehmens auf die Risiken für seine Leute, die Datenschutz-Folgenabschätzung. Grasp bringt sie ausgefüllt mit, und das Unternehmen gibt sie frei."
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "The company's platform stays closed until Grasp gives its go. Closing it signs out everyone but its admins and Grasp's staff."
+msgstr "Die Plattform des Unternehmens bleibt geschlossen, bis Grasp das Go gibt. Beim Schließen werden alle außer den Admins und dem Team von Grasp abgemeldet."
+
 #: src/onboarding/kickoff-errors.ts
 msgid "The conversation couldn't be read just now. Try again in a moment."
 msgstr "Das Gespräch konnte gerade nicht gelesen werden. Versuchen Sie es gleich noch einmal."
@@ -3544,9 +3753,27 @@ msgstr "Der Export hat nicht funktioniert. Versuchen Sie es erneut."
 msgid "The full audit trail"
 msgstr "Der vollständige Audit-Trail"
 
+#: src/routes/_shell.onboarding.tsx
+msgctxt "onboarding area section"
+msgid "The go"
+msgstr "Das Go"
+
 #: src/onboarding/staff-words.ts
 msgid "The interview days are set"
 msgstr "Die Interviewtage stehen fest"
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "The interviews"
+msgstr "Die Interviews"
+
+#: src/onboarding/staff-words.ts
+msgctxt "what Grasp knows, by source"
+msgid "The interviews"
+msgstr "Die Interviews"
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "The interviews are over and it stayed below {threshold}%. Grasp can open it anyway, with what isn't known shown as still open."
+msgstr "Die Interviews sind vorbei, und es blieb unter {threshold} %. Grasp kann trotzdem öffnen; was nicht bekannt ist, erscheint als noch offen."
 
 #: src/onboarding/staff-words.ts
 msgid "The interviews are over with {known}% known, short of {threshold}%: Grasp decides"
@@ -3561,12 +3788,25 @@ msgid "The kickoff"
 msgstr "Das Kickoff"
 
 #: src/onboarding/staff-words.ts
+msgctxt "what Grasp knows, by source"
+msgid "The kickoff and the website"
+msgstr "Der Kickoff und die Website"
+
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "The kickoff said: {text}"
+msgstr "Der Kickoff sagte: {text}"
+
+#: src/onboarding/staff-words.ts
 msgid "The kickoff with the company"
 msgstr "Das Kickoff mit dem Unternehmen"
 
 #: src/routes/guest.tsx
 msgid "The link works until {until}."
 msgstr "Der Link funktioniert bis {until}."
+
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "The list is full: remove a line to add another."
+msgstr "Die Liste ist voll: Entfernen Sie eine Zeile, um eine weitere hinzuzufügen."
 
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
@@ -3590,6 +3830,10 @@ msgstr "Das Onboarding"
 msgid "The one before"
 msgstr "Die vorherige"
 
+#: src/routes/_shell.onboarding.open.tsx
+msgid "The platform is open to everyone at the company: it was never closed for the onboarding."
+msgstr "Die Plattform ist für alle im Unternehmen offen: Sie wurde für das Onboarding nie geschlossen."
+
 #: src/onboarding/staff-words.ts
 msgid "The risk assessment isn't done"
 msgstr "Die Risikobewertung ist nicht erledigt"
@@ -3607,10 +3851,19 @@ msgstr "Die Antwort des Sponsors"
 msgid "The steps can't be read from this workflow's code: {message}"
 msgstr "Die Schritte lassen sich nicht aus dem Code dieses Workflows lesen: {message}"
 
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "The team is told, so this stays as it was agreed. To stop the interviews, pause them."
+msgstr "Das Team ist informiert, also bleibt es, wie vereinbart. Um die Interviews zu stoppen, pausieren Sie sie."
+
 #: src/onboarding/staff-words.ts
 msgctxt "kickoff field"
 msgid "The teams"
 msgstr "Die Teams"
+
+#: src/onboarding/staff-words.ts
+msgctxt "what Grasp knows, by source"
+msgid "The tools in use"
+msgstr "Die genutzten Tools"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "The transcript"
@@ -3792,6 +4045,10 @@ msgstr "Erlaubte Werkzeuge: keine erfasst"
 msgid "Tools to allow"
 msgstr "Zu erlaubende Werkzeuge"
 
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "Tools, products and the company's own words, so he hears them right."
+msgstr "Tools, Produkte und die eigenen Begriffe des Unternehmens, damit er sie richtig versteht."
+
 #: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
@@ -3971,6 +4228,10 @@ msgstr "Was Grasp nicht ausführt"
 msgid "What happened at the company and what Grasp's staff did, the newest first."
 msgstr "Was im Unternehmen passiert ist und was das Grasp-Team getan hat, das Neueste zuerst."
 
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "What he leaves alone"
+msgstr "Was er auslässt"
+
 #: src/onboarding/staff-words.ts
 msgctxt "kickoff field"
 msgid "What is sensitive now"
@@ -4038,6 +4299,15 @@ msgstr "Wann"
 msgid "when someone starts it"
 msgstr "wenn ihn jemand startet"
 
+#: src/routes/_shell.onboarding.open.tsx
+msgid "Where it comes from"
+msgstr "Woher es kommt"
+
+#: src/onboarding/staff-words.ts
+msgctxt "what Grasp knows, by source"
+msgid "Where the documents live"
+msgstr "Wo die Dokumente liegen"
+
 #: src/routes/_shell.onboarding.index.tsx
 msgid "Where the onboarding stands, stage by stage."
 msgstr "Wo das Onboarding steht, Phase für Phase."
@@ -4045,6 +4315,10 @@ msgstr "Wo das Onboarding steht, Phase für Phase."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which engines and agents hold permissions: {why}"
 msgstr "Welche Engines und Agenten Berechtigungen haben: {why}"
+
+#: src/routes/_shell.onboarding.open.tsx
+msgid "While paused, no link opens and none goes out, whatever was agreed."
+msgstr "Solange pausiert ist, öffnet sich kein Link und keiner geht raus, egal was vereinbart wurde."
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
@@ -4056,13 +4330,31 @@ msgctxt "kickoff field"
 msgid "Who decides, who can block"
 msgstr "Wer entscheidet, wer blockieren kann"
 
+#: src/onboarding/staff-words.ts
+msgctxt "what Grasp knows, by source"
+msgid "Who leads which team"
+msgstr "Wer welches Team leitet"
+
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
 msgstr "Wer es nutzt"
 
 #: src/onboarding/staff-words.ts
+msgctxt "what Grasp knows, by source"
+msgid "Who works where"
+msgstr "Wer wo arbeitet"
+
+#: src/onboarding/staff-words.ts
 msgid "Who works where is in"
 msgstr "Wer wo arbeitet, liegt vor"
+
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Without all three, nobody is invited: the admin's links wait, and go out once all are in place."
+msgstr "Ohne alle drei wird niemand eingeladen: Die Links des Admins warten und gehen raus, sobald alle stehen."
+
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "Words he has to know"
+msgstr "Wörter, die er kennen muss"
 
 #: src/onboarding/staff-words.ts
 msgctxt "kickoff field"
@@ -4125,6 +4417,11 @@ msgstr "Workflows und mehr"
 msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it into an engine."
 msgstr "Workflows entstehen im Chat: Beschreiben Sie, was von selbst laufen soll, und Grasp baut es in eine Engine."
 
+#: src/onboarding/staff-words.ts
+msgctxt "what Grasp knows, by source"
+msgid "Workflows known"
+msgstr "Bekannte Workflows"
+
 #: src/dashboard/failed-workflows.tsx
 #: src/dashboard/to-do.tsx
 msgid "Workflows that failed"
@@ -4137,6 +4434,10 @@ msgstr "Workflows, deren KI-Schritte in der EU bleiben: {workflows}."
 #: src/chat/thread.tsx
 msgid "Working on it"
 msgstr "Arbeitet daran"
+
+#: src/routes/_shell.onboarding.agreements.tsx
+msgid "Works council"
+msgstr "Betriebsrat"
 
 #: src/onboarding/staff-words.ts
 msgid "Works council heard, where there is one"
