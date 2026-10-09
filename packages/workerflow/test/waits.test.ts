@@ -895,9 +895,8 @@ describe("a journal write that fails while a run reaches a wait", () => {
     // The failed write took the wait's row with it: no deadline was
     // journaled, so the activation that reaches it next journals one.
     expect(faulted.steps.map((step) => step.name)).toStrictEqual(["before"]);
-    // The watchdog the last step armed, a lease after its journal write.
-    expect(watchdog).toBeGreaterThanOrEqual(faulted.run.lease_until ?? 0);
-    expect(watchdog).toBeLessThan((faulted.run.lease_until ?? 0) + 1000);
+    // The watchdog the last step armed, at the lease it journaled.
+    expect(watchdog).toBe(faulted.run.lease_until);
     await expect(journalOf("guarded", id)).resolves.toMatchObject({
       run: { status: "waiting" },
       steps: [{ name: "before" }, { name: "held", state: "waiting" }],

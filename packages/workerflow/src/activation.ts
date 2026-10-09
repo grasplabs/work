@@ -899,15 +899,26 @@ export class Activation {
   }
 
   /**
-   * Moves the watchdog alarm to a lease from now, unless the activation is
-   * over: then the alarm is what its end set (a suspension's wake, or none
-   * once settled), and a renewal issued after that would replace it.
+   * Moves the run's lease, and the watchdog alarm with it, to a lease from
+   * now, unless the activation is over: then the alarm is what its end set
+   * (a suspension's wake, or none once settled), and a renewal issued after
+   * that would replace it. Both come from one reading of the clock, which
+   * moves on with I/O: the watchdog comes when the journal says it does.
    */
   async #renewWatchdog(): Promise<void> {
     if (this.#over) {
       return;
     }
-    await this.#arm(Date.now() + this.#limits.leaseMs);
+    const now = Date.now();
+    const renewed = this.#write(() => {
+      if (this.#holdsGeneration()) {
+        this.#renewLease(now);
+      }
+    });
+    if (renewed === failed) {
+      return await never();
+    }
+    await this.#arm(now + this.#limits.leaseMs);
   }
 
   /**
