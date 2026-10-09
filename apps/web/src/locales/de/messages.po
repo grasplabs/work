@@ -197,6 +197,11 @@ msgstr "{link} in {appName} ist fehlgeschlagen"
 msgid "{link} in {appName} failed {failures, plural, one {once} other {# times}}"
 msgstr "{link} in {appName} ist {failures, plural, one {einmal} other {#-mal}} fehlgeschlagen"
 
+#. A length of time, said short: 4 minutes and 21 seconds.
+#: src/chat/thread.tsx
+msgid "{minutes}m {rest}s"
+msgstr "{minutes} Min. {rest} Sek."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
 msgstr "{more, plural, one {{shown} und # weiteres} other {{shown} und # weitere}}"
@@ -272,6 +277,11 @@ msgstr "{path}, das nicht mehr laufen würde"
 #: src/routes/_shell.settings.members.tsx
 msgid "{people, plural, one {# person has access. Members join by signing in with your organization’s account; there are no invitations to send.} other {# people have access. Members join by signing in with your organization’s account; there are no invitations to send.}}"
 msgstr "{people, plural, one {# Person hat Zugriff. Mitglieder kommen hinzu, indem sie sich mit dem Konto Ihrer Organisation anmelden; Einladungen gibt es nicht.} other {# Personen haben Zugriff. Mitglieder kommen hinzu, indem sie sich mit dem Konto Ihrer Organisation anmelden; Einladungen gibt es nicht.}}"
+
+#. A length of time, said short: 21 seconds.
+#: src/chat/thread.tsx
+msgid "{rest}s"
+msgstr "{rest} Sek."
 
 #: src/frame/person-menu.tsx
 msgid "{role}, Grasp staff"
@@ -536,6 +546,11 @@ msgctxt "filter: every integration"
 msgid "All"
 msgstr "Alle"
 
+#: src/routes/_shell.workflows.index.tsx
+msgctxt "tab listing every workflow"
+msgid "All"
+msgstr "Alle"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "All calls"
 msgstr "Alle Aufrufe"
@@ -772,6 +787,10 @@ msgstr "Fragt nach"
 #: src/workflows/runs.tsx
 msgid "At {step}: {error}"
 msgstr "Bei {step}: {error}"
+
+#: src/workflows/workflows-table.tsx
+msgid "At work"
+msgstr "Im Einsatz"
 
 #: src/routes/_shell.settings.audit.tsx
 #: src/routes/_shell.settings.tsx
@@ -2142,6 +2161,11 @@ msgstr "Braucht daneben"
 msgid "Needs attention"
 msgstr "Braucht Aufmerksamkeit"
 
+#: src/routes/_shell.workflows.index.tsx
+msgctxt "tab listing the workflows that need a person"
+msgid "Needs attention"
+msgstr "Braucht Aufmerksamkeit"
+
 #: src/connections/integration-row.tsx
 msgid "Needs signing in again"
 msgstr "Erneute Anmeldung nötig"
@@ -2252,6 +2276,10 @@ msgstr "Keine Teams"
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "No workflow in this engine yet."
 msgstr "In dieser Engine gibt es noch keinen Workflow."
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "No workflow needs attention: nothing waits for a decision, nothing failed lately."
+msgstr "Kein Workflow braucht Aufmerksamkeit: Nichts wartet auf eine Entscheidung, nichts ist zuletzt fehlgeschlagen."
 
 #: src/chat/builds.tsx
 msgid "No workflows to test."
@@ -2466,6 +2494,10 @@ msgstr "bei E-Mail an {address}@"
 msgid "on the event {event}, filtered"
 msgstr "beim Ereignis {event}, gefiltert"
 
+#: src/workflows/workflows-table.tsx
+msgid "On the way"
+msgstr "Unterwegs"
+
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.onboarding.tsx
 msgid "Onboarding"
@@ -2539,6 +2571,10 @@ msgstr "Im Chat öffnen"
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Chat öffnen"
+
+#: src/workflows/workflows-table.tsx
+msgid "Open the engine {name}"
+msgstr "Engine {name} öffnen"
 
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
@@ -3614,6 +3650,10 @@ msgstr "Es gibt keine Datenregel: Jedes erlaubte Modell darf sensible Daten erha
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "Die Person wird überall abgemeldet, ihre persönlichen Verbindungen werden getrennt, und sie kann sich nicht mehr anmelden."
 
+#: src/chat/thread.tsx
+msgid "Thinking"
+msgstr "Denkt nach"
+
 #: src/screens/screen-frame.tsx
 msgid "This app didn't start in time."
 msgstr "Diese App ist nicht rechtzeitig gestartet."
@@ -4019,6 +4059,10 @@ msgctxt "kickoff field"
 msgid "Work that costs too much time"
 msgstr "Arbeit, die zu viel Zeit kostet"
 
+#: src/chat/thread.tsx
+msgid "Worked for {time}"
+msgstr "Hat {time} gearbeitet"
+
 #: src/dashboard/signals.tsx
 msgid "Worked out daily, last on {date}"
 msgstr "Täglich ermittelt, zuletzt am {date}"
@@ -4079,6 +4123,10 @@ msgstr "Fehlgeschlagene Workflows"
 #: src/routes/_shell.settings.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."
 msgstr "Workflows, deren KI-Schritte in der EU bleiben: {workflows}."
+
+#: src/chat/thread.tsx
+msgid "Working on it"
+msgstr "Arbeitet daran"
 
 #: src/onboarding/staff-words.ts
 msgid "Works council heard, where there is one"

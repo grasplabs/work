@@ -21,18 +21,29 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/ui/components/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
 import { plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon, WorkflowIcon } from "lucide-react";
 import type { ReactElement, ReactNode } from "react";
 
+import { EngineIcon } from "../engines/engine-icon.tsx";
 import { formatDateTime } from "../format.ts";
+import { listsOf } from "./lists.ts";
 import { RunResult } from "./runs.tsx";
 
-// The workflows table, as the prototype draws it
-// (`components/workflows-table.tsx`): on the Workflows page, every
-// workflow the person can open; on an engine's page, that engine's.
+// The workflows table, one line a workflow, as the prototype draws it
+// (`components/workflows-overview.tsx`, `workflows-table.tsx`): on the
+// Workflows page, every workflow the person can open, in two lists; on an
+// engine's page, that engine's. A line on the Workflows page begins with
+// its engine's icon, which names the engine when pointed at and opens it.
+// The prototype begins it with the business process's icon: core knows no
+// process of a workflow yet, so the engine stands in.
 
 /** When a workflow last ran, or that it never did. */
 const LastRun = ({ workflow }: { workflow: WorkflowSummary }) =>
@@ -116,6 +127,29 @@ const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
   );
 };
 
+/** Where a line begins: its engine's icon, which says the engine's name and opens it. */
+const Lead = ({ workflow }: { workflow: WorkflowSummary }) => {
+  const { t } = useLingui();
+  const name = workflow.appName;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Link
+            aria-label={t`Open the engine ${name}`}
+            className="focus-visible:ring-ring/50 relative z-10 flex-none rounded-lg outline-none focus-visible:ring-3"
+            params={{ engine: workflow.app }}
+            to="/engines/$engine"
+          />
+        }
+      >
+        <EngineIcon />
+      </TooltipTrigger>
+      <TooltipContent>{name}</TooltipContent>
+    </Tooltip>
+  );
+};
+
 /**
  * A workflow's row: its name, the App it is in and its version under it,
  * when it last ran and where it stands. The whole row opens it.
@@ -131,33 +165,36 @@ const WorkflowRow = ({
   return (
     <TableRow className="relative">
       <TableCell variant="roomy">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="flex min-w-0 items-center gap-2">
-            <Link
-              className="truncate outline-none after:absolute after:inset-0 focus-visible:underline"
-              params={{ app: workflow.app, workflow: workflow.workflow }}
-              to="/workflows/$app/$workflow"
-            >
-              {workflow.workflow}
-            </Link>
-            {workflow.scheduleStopped ? (
-              <Badge variant="destructive">
-                <Trans>Schedule stopped</Trans>
-              </Badge>
-            ) : null}
-          </span>
-          {/* Narrow, the engine's cell is hidden: its name and version here. */}
-          {withEngine ? (
-            <span className="text-muted-foreground truncate @lg:hidden">
-              <Trans>
-                {appName} · Version {version}
-              </Trans>
+        <div className="flex min-w-0 items-center gap-3">
+          {withEngine ? <Lead workflow={workflow} /> : null}
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="flex min-w-0 items-center gap-2">
+              <Link
+                className="truncate outline-none after:absolute after:inset-0 focus-visible:underline"
+                params={{ app: workflow.app, workflow: workflow.workflow }}
+                to="/workflows/$app/$workflow"
+              >
+                {workflow.workflow}
+              </Link>
+              {workflow.scheduleStopped ? (
+                <Badge variant="destructive">
+                  <Trans>Schedule stopped</Trans>
+                </Badge>
+              ) : null}
             </span>
-          ) : (
-            <span className="text-muted-foreground">
-              <Trans>Version {version}</Trans>
-            </span>
-          )}
+            {/* Narrow, the engine's cell is hidden: its name and version here. */}
+            {withEngine ? (
+              <span className="text-muted-foreground truncate @lg:hidden">
+                <Trans>
+                  {appName} · Version {version}
+                </Trans>
+              </span>
+            ) : (
+              <span className="text-muted-foreground">
+                <Trans>Version {version}</Trans>
+              </span>
+            )}
+          </div>
         </div>
       </TableCell>
       {withEngine ? (
@@ -281,6 +318,41 @@ export const WorkflowsTable = ({
           ))}
         </TableBody>
       </Table>
+    </div>
+  );
+};
+
+/** One of the overview's lists: its name over its table, left out while empty. */
+const List = ({
+  title,
+  rows,
+}: {
+  title: ReactNode;
+  rows: WorkflowSummary[];
+}) =>
+  rows.length === 0 ? null : (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-muted-foreground">{title}</h2>
+      <WorkflowsTable rows={rows} />
+    </section>
+  );
+
+/**
+ * The Workflows page's list, as the prototype tells it
+ * (`components/workflows-overview.tsx`): made for many workflows, in two
+ * lists. At work, those that have run, the ones waiting on a person first;
+ * on the way, those that haven't run yet. The prototype's numbers on top
+ * (runs a week, what comes back a month) are counts core doesn't keep.
+ */
+export const WorkflowsOverview = ({ rows }: { rows: WorkflowSummary[] }) => {
+  if (rows.length === 0) {
+    return <WorkflowsTable rows={rows} />;
+  }
+  const { atWork, onTheWay } = listsOf(rows);
+  return (
+    <div className="flex flex-col gap-8">
+      <List rows={atWork} title={<Trans>At work</Trans>} />
+      <List rows={onTheWay} title={<Trans>On the way</Trans>} />
     </div>
   );
 };
