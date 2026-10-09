@@ -16,10 +16,23 @@ const build = import.meta.env.VITE_GRASP_BUILD.slice(
 );
 
 /**
+ * How each browser says a page's own script file couldn't be fetched
+ * (Chromium, Firefox, Safari): after a new release, the files of the one
+ * still open are gone.
+ */
+const fileGone =
+  /dynamically imported module|importing a module script failed/iu;
+
+/** Whether `error` is a page's script file gone after a new release. */
+export const isFileGone = (error: unknown): boolean =>
+  fileGone.test(String(error));
+
+/**
  * Whether `error` is a fault of the page's own, worth core's logs: not an
  * answer core gave (any error with a code, where an unplanned one is in
- * core's logs already under its request ID), and not core being out of
- * reach, which the page says to the person and isn't a fault.
+ * core's logs already under its request ID), not core being out of
+ * reach, which the page says to the person and isn't a fault, and not a
+ * file a new release took away, which loading Grasp anew mends.
  */
 export const isPageFault = (error: unknown): boolean => {
   const coded =
@@ -27,7 +40,7 @@ export const isPageFault = (error: unknown): boolean => {
     error !== null &&
     "code" in error &&
     typeof error.code === "string";
-  return !(coded || error instanceof CoreTimeoutError);
+  return !(coded || error instanceof CoreTimeoutError || isFileGone(error));
 };
 
 /**

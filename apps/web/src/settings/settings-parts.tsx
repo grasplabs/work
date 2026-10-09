@@ -3,6 +3,7 @@ import type { ErrorComponentProps } from "@tanstack/react-router";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
+import { isFileGone } from "../error-reports.ts";
 import { ErrorState, LoadingLines } from "../frame/page-states.tsx";
 import { useRouteErrorReason } from "../route-error.tsx";
 
@@ -96,6 +97,10 @@ export const SettingsLoading = () => (
  */
 export const SettingsError = ({ error }: ErrorComponentProps) => (
   <div className="bg-card overflow-hidden rounded-xl border text-sm">
-    <ErrorState heading="h2" reason={useRouteErrorReason(error)} />
+    <ErrorState
+      heading="h2"
+      reason={useRouteErrorReason(error)}
+      reload={isFileGone(error)}
+    />
   </div>
 );
