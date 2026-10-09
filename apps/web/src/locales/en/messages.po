@@ -181,6 +181,10 @@ msgstr "{kind}, {severity}, {about}: {summary}"
 msgid "{label}: {count}"
 msgstr "{label}: {count}"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{limit} a month for each, admins alerted at {alertAt}."
+msgstr "{limit} a month for each, admins alerted at {alertAt}."
+
 #: src/routes/_shell.settings.models.tsx
 msgid "{limit} a month, admins alerted at {alertAt}. Calls stop once it's used up."
 msgstr "{limit} a month, admins alerted at {alertAt}. Calls stop once it's used up."
@@ -254,6 +258,10 @@ msgstr "{name} now changes the engine's data (read → write)"
 msgid "{name}, per {key}"
 msgstr "{name}, per {key}"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{name}: {shown} of the limit"
+msgstr "{name}: {shown} of the limit"
+
 #: src/chat/builds.tsx
 msgid "{name}: version {version} waiting for review"
 msgstr "{name}: version {version} waiting for review"
@@ -290,6 +298,10 @@ msgstr "{run}: failed"
 #: src/screens/screen-frame.tsx
 msgid "{screen} app"
 msgstr "{screen} app"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "{share} of the {limit} budget"
+msgstr "{share} of the {limit} budget"
 
 #: src/activity/pending.tsx
 msgid "{subject}: {actions} on {object}"
@@ -335,7 +347,7 @@ msgstr "{who} can't be granted later: it has to ask again."
 msgid "{who} consented to this before connecting it:"
 msgstr "{who} consented to this before connecting it:"
 
-#: src/routes/_shell.settings.models.tsx
+#: src/routes/_shell.settings.spend.tsx
 msgid "{workflowId} in {engine}"
 msgstr "{workflowId} in {engine}"
 
@@ -416,6 +428,10 @@ msgstr "A run of a workflow waits for this answer."
 #: src/dashboard/signals.tsx
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "About {ending}"
+msgstr "About {ending}"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -516,6 +532,11 @@ msgctxt "onboarding stage"
 msgid "Agreements"
 msgstr "Agreements"
 
+#: src/routes/_shell.settings.spend.tsx
+#: src/routes/_shell.settings.tsx
+msgid "AI spend"
+msgstr "AI spend"
+
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
 msgstr "All"
@@ -525,7 +546,7 @@ msgctxt "filter: every integration"
 msgid "All"
 msgstr "All"
 
-#: src/routes/_shell.settings.models.tsx
+#: src/routes/_shell.settings.spend.tsx
 msgid "All calls"
 msgstr "All calls"
 
@@ -802,6 +823,18 @@ msgstr "Builder"
 #: src/activity/audit-words.ts
 msgid "Built approved packages"
 msgstr "Built approved packages"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "By person"
+msgstr "By person"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "By the end of the month"
+msgstr "By the end of the month"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "By workflow"
+msgstr "By workflow"
 
 #: src/activity/audit-words.ts
 msgid "Called a model"
@@ -1614,6 +1647,10 @@ msgstr "Granted a permission"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp can't be reached right now. Try again in a moment."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
+msgstr "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
+
 #: src/onboarding/staff-words.ts
 msgid "Grasp gave its go"
 msgstr "Grasp gave its go"
@@ -1655,6 +1692,10 @@ msgstr "Grasp staff can't connect accounts or change what is offered here: that 
 #: src/activity/audit-words.ts
 msgid "Grasp staff signed in"
 msgstr "Grasp staff signed in"
+
+#: src/route-error.tsx
+msgid "Grasp was updated while this page was open. Try again to load the new version."
+msgstr "Grasp was updated while this page was open. Try again to load the new version."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp won't run what {about} needs: {requirement}"
@@ -1717,6 +1758,10 @@ msgstr "How you appear in Grasp: on workflows you own, and in the audit trail."
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "If {condition}:"
 msgstr "If {condition}:"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "If the rest of the month goes like the days so far"
+msgstr "If the rest of the month goes like the days so far"
 
 #: src/chat/builds.tsx
 msgid "In the proposer's words"
@@ -2356,7 +2401,7 @@ msgstr "Nothing needs Grasp right now."
 msgid "Nothing runs yet: this would be the engine's first current version."
 msgstr "Nothing runs yet: this would be the engine's first current version."
 
-#: src/routes/_shell.settings.models.tsx
+#: src/routes/_shell.settings.spend.tsx
 msgid "Nothing spent yet."
 msgstr "Nothing spent yet."
 
@@ -2376,10 +2421,6 @@ msgstr "Now runs {how}"
 #: src/chat/builds-state.ts
 msgid "Now runs {how}, {times}"
 msgstr "Now runs {how}, {times}"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Of the limit"
-msgstr "Of the limit"
 
 #: src/connections/offer-switch.tsx
 msgid "Off, nobody can connect it, admins included. Connections already made go on."
@@ -3225,22 +3266,6 @@ msgstr "Something went wrong."
 msgid "Sources"
 msgstr "Sources"
 
-#: src/routes/_shell.settings.models.tsx
-msgid "Spend this month ({month}, UTC)."
-msgstr "Spend this month ({month}, UTC)."
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Spend: {title}"
-msgstr "Spend: {title}"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Spent"
-msgstr "Spent"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Spent by"
-msgstr "Spent by"
-
 #: src/sign-in-errors.ts
 msgid "Staff access to this organization isn't open."
 msgstr "Staff access to this organization isn't open."
@@ -3422,7 +3447,7 @@ msgstr "That transcript is too long. Bring in the conversation itself, without a
 msgid "That way of signing in isn't set up here."
 msgstr "That way of signing in isn't set up here."
 
-#: src/routes/_shell.settings.models.tsx
+#: src/routes/_shell.settings.spend.tsx
 msgid "The {top} who spent most; more spent less."
 msgstr "The {top} who spent most; more spent less."
 
@@ -3536,6 +3561,7 @@ msgid "The risk assessment isn't done"
 msgstr "The risk assessment isn't done"
 
 #: src/routes/_shell.settings.models.tsx
+#: src/routes/_shell.settings.spend.tsx
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."
 msgstr "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."
 
@@ -3677,6 +3703,10 @@ msgstr "This link doesn't work. Ask whoever sent it for a new one."
 #: src/routes/guest.tsx
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "This link has expired. Ask whoever sent it for a new one."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "This month so far"
+msgstr "This month so far"
 
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
@@ -3938,9 +3968,17 @@ msgstr "What Stephen takes into every interview. What the conversation left open
 msgid "What the engine holds"
 msgstr "What the engine holds"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
+msgstr "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
+
 #: src/routes/_shell.dashboard.tsx
 msgid "What waits on you, each with its next step, and what could be better."
 msgstr "What waits on you, each with its next step, and what could be better."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "What was spent this month is under <0>AI spend</0>."
+msgstr "What was spent this month is under <0>AI spend</0>."
 
 #: src/workflows/runs.tsx
 msgctxt "column: when a run happened"
