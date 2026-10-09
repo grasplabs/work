@@ -5,13 +5,11 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Link, useRouter } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { KeyRoundIcon, ShieldCheckIcon } from "lucide-react";
 import { useState } from "react";
 
-import { PendingApprovals } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
-import { HeldWrite } from "../chat/held-writes.tsx";
 import { canReconnect } from "../connections/connect-dialog.tsx";
 import type { Integration } from "../connections/integrations.ts";
 import { NotLoaded } from "../load-from-core.tsx";
@@ -22,20 +20,22 @@ import {
   DashboardGroup,
   ItemMark,
 } from "./dashboard-card.tsx";
-import { DependencyRequests } from "./dependency-requests.tsx";
 import { FailedWorkflows } from "./failed-workflows.tsx";
 import type { NotificationsPage, OlderFailures } from "./failed-workflows.tsx";
+import { TodoPile } from "./todo-pile.tsx";
+import type { PileItem } from "./todo-pile.tsx";
 
-// What waits on the person, as the prototype's To do
-// (`components/dashboard/action-panel.tsx`): each thing with what it is
-// about and its next step, by kind. Changes an agent wants to make wait
-// for them to confirm or reject; permission requests wait for an admin,
-// and so do the current apps of engines whose code nobody approved;
-// packages proposed for an engine wait for someone given the permission
-// to approve them;
-// workflows failed while acting for them, with a way to ask the agent to
-// fix it; connections they can sign in to again ran out. Decisions a run
-// waits on aren't here: core can't list a person's decisions yet (they
+// What waits on the person, on top of the dashboard. What can be settled
+// on its card is a pile of cards, gone through one at a time
+// (`todo-pile.tsx`): changes an agent wants to make, which wait for them to
+// approve or reject; permission requests, which wait for an admin;
+// packages proposed for an engine, which wait for someone given the
+// permission to approve them. The rest is settled on its own page, and is
+// listed under the pile with the way there, not counted on it: the current
+// apps of engines whose code nobody approved (read on the engine's page),
+// workflows failed while acting for the person, with a way to ask the
+// agent to fix it, and connections they can sign in to again. Decisions a
+// run waits on aren't here: core can't list a person's decisions yet (they
 // come by mail and link).
 
 /** What the dashboard read of what waits on the person, each part on its own. */
@@ -79,33 +79,6 @@ export const toReconnect = (
 export const decidesRequests = ({ role, staff }: Viewer): boolean =>
   isAdmin(role) && !staff;
 
-/**
- * How many things the page lists as waiting on the person, of what was
- * read: every failed workflow listed, read or not and older ones shown on
- * asking too, so the number matches the rows. (The nav counts only unread
- * ones: counting there never marks anything read, and one already seen
- * here is no longer news.)
- */
-export const waitingCount = (
-  { held, failed, integrations, requests, dependencies, screens }: Waiting,
-  identity: Viewer,
-  olderShown = 0
-): number =>
-  (screens?.state === "ready" && decidesRequests(identity)
-    ? screens.data.length
-    : 0) +
-  (held.state === "ready" ? held.data.length : 0) +
-  (failed.state === "ready"
-    ? failed.data.page.notifications.length + olderShown
-    : 0) +
-  (integrations.state === "ready"
-    ? toReconnect(integrations.data, identity).length
-    : 0) +
-  (requests?.state === "ready" && decidesRequests(identity)
-    ? requests.data.requests.length
-    : 0) +
-  (dependencies.state === "ready" ? dependencies.data.requests.length : 0);
-
 /** An account to sign in to again: its next step opens its account on its integration's page. */
 const ReconnectRow = ({ ranOut }: { ranOut: RanOut }) => {
   const { t } = useLingui();
@@ -146,74 +119,6 @@ const PartNotLoaded = ({ part }: { part: Loaded<unknown> }) =>
       <NotLoaded page={part} />
     </div>
   );
-
-const HeldGroup = ({ held }: { held: Loaded<PendingAction[]> }) => {
-  const router = useRouter();
-  const { t } = useLingui();
-  if (held.state !== "ready") {
-    return <PartNotLoaded part={held} />;
-  }
-  if (held.data.length === 0) {
-    return null;
-  }
-  return (
-    <DashboardGroup title={t`Changes to confirm`}>
-      <div className="flex flex-col gap-3 border-t px-4 py-3">
-        {held.data.map((action) => (
-          <HeldWrite
-            action={action}
-            key={action.id}
-            onDecided={() => {
-              void router.invalidate();
-            }}
-          />
-        ))}
-      </div>
-    </DashboardGroup>
-  );
-};
-
-const RequestsGroup = ({ requests }: { requests: Loaded<PendingRequests> }) => {
-  const { t } = useLingui();
-  if (requests.state !== "ready") {
-    return <PartNotLoaded part={requests} />;
-  }
-  if (requests.data.requests.length === 0) {
-    return null;
-  }
-  return (
-    <DashboardGroup title={t`Permission requests`}>
-      <div className="border-t px-4 py-3">
-        <PendingApprovals decides pending={requests.data} />
-      </div>
-    </DashboardGroup>
-  );
-};
-
-const DependenciesGroup = ({
-  dependencies,
-}: {
-  dependencies: Loaded<DependenciesWaiting>;
-}) => {
-  const router = useRouter();
-  const { t } = useLingui();
-  if (dependencies.state !== "ready") {
-    return <PartNotLoaded part={dependencies} />;
-  }
-  if (dependencies.data.requests.length === 0) {
-    return null;
-  }
-  return (
-    <DashboardGroup title={t`Packages to approve`}>
-      <DependencyRequests
-        onDecided={() => {
-          void router.invalidate();
-        }}
-        waiting={dependencies.data}
-      />
-    </DashboardGroup>
-  );
-};
 
 /** An engine with apps to approve: its next step is the engine's page, where their code is approved. */
 const ScreensRow = ({ waiting }: { waiting: ScreensWaiting }) => {
@@ -315,10 +220,40 @@ const ReconnectGroup = ({
   );
 };
 
+/** The cards of the pile, of what was read: core's order, kind by kind. */
+const pileOf = (
+  { held, requests, dependencies }: Waiting,
+  identity: Viewer
+): PileItem[] => [
+  ...(held.state === "ready"
+    ? held.data.map((action): PileItem => ({
+        kind: "held",
+        id: `held:${action.id}`,
+        action,
+      }))
+    : []),
+  ...(requests?.state === "ready" && decidesRequests(identity)
+    ? requests.data.requests.map((request): PileItem => ({
+        kind: "request",
+        id: `request:${request.id}`,
+        request,
+        pending: requests.data,
+      }))
+    : []),
+  ...(dependencies.state === "ready"
+    ? dependencies.data.requests.map((request): PileItem => ({
+        kind: "packages",
+        id: `packages:${request.id}`,
+        request,
+        policyGeneration: dependencies.data.policyGeneration,
+      }))
+    : []),
+];
+
 /**
- * What waits on the person, grouped by kind, each with its next step. It
- * keeps the older failures shown on asking, for the read they followed: a
- * new read of the failures starts them again.
+ * What waits on the person: the pile, and under it what is settled on its
+ * own page. It keeps the older failures shown on asking, for the read they
+ * followed: a new read of the failures starts them again.
  */
 export const ToDo = ({
   waiting,
@@ -328,48 +263,60 @@ export const ToDo = ({
   identity: Identity;
 }) => {
   const { t } = useLingui();
+  const [said, setSaid] = useState("");
   const [kept, setKept] = useState<{
     after: Waiting["failed"];
     older: OlderFailures;
   }>();
   const older: OlderFailures =
     kept?.after === waiting.failed ? kept.older : { rows: [], more: undefined };
-  const count = waitingCount(waiting, identity, older.rows.length);
-  const loaded =
-    waiting.held.state === "ready" &&
-    waiting.failed.state === "ready" &&
-    waiting.integrations.state === "ready" &&
-    waiting.dependencies.state === "ready" &&
-    (waiting.requests === undefined || waiting.requests.state === "ready") &&
-    (waiting.screens === undefined || waiting.screens.state === "ready");
+  const { failed, integrations, screens } = waiting;
+  // A part of the pile that couldn't be read says so below it.
+  const notLoaded = (
+    [
+      ["held", waiting.held],
+      ["requests", waiting.requests],
+      ["dependencies", waiting.dependencies],
+    ] as const
+  ).flatMap(([key, part]) =>
+    part === undefined || part.state === "ready" ? [] : [{ key, part }]
+  );
+  const elsewhere =
+    notLoaded.length > 0 ||
+    failed.state !== "ready" ||
+    failed.data.page.notifications.length > 0 ||
+    integrations.state !== "ready" ||
+    toReconnect(integrations.data, identity).length > 0 ||
+    (screens !== undefined &&
+      (screens.state !== "ready" || screens.data.length > 0));
   return (
-    <DashboardCard id="dashboard-to-do">
-      <DashboardCardHeader
-        count={count}
-        id="dashboard-to-do"
-        title={t({ message: "To do", context: "dashboard: what waits on you" })}
-      />
-      <HeldGroup held={waiting.held} />
-      {waiting.requests === undefined ? null : (
-        <RequestsGroup requests={waiting.requests} />
-      )}
-      <DependenciesGroup dependencies={waiting.dependencies} />
-      {waiting.screens === undefined ? null : (
-        <ScreensGroup screens={waiting.screens} />
-      )}
-      <FailedGroup
-        failed={waiting.failed}
-        older={older}
-        onOlder={(next) => {
-          setKept({ after: waiting.failed, older: next });
-        }}
-      />
-      <ReconnectGroup identity={identity} integrations={waiting.integrations} />
-      {loaded && count === 0 ? (
-        <p className="text-muted-foreground border-t px-4 py-10 text-center">
-          <Trans>Nothing waits on you.</Trans>
-        </p>
+    <>
+      <TodoPile items={pileOf(waiting, identity)} onSaid={setSaid} />
+      {/* Outside the pile, so what was done with its last card is still said once it is gone. */}
+      <output className="sr-only">{said}</output>
+      {elsewhere ? (
+        <DashboardCard id="dashboard-elsewhere">
+          <DashboardCardHeader
+            id="dashboard-elsewhere"
+            title={t({
+              message: "Waiting elsewhere",
+              context: "dashboard: what waits on you, settled on its own page",
+            })}
+          />
+          {notLoaded.map(({ key, part }) => (
+            <PartNotLoaded key={key} part={part} />
+          ))}
+          {screens === undefined ? null : <ScreensGroup screens={screens} />}
+          <FailedGroup
+            failed={failed}
+            older={older}
+            onOlder={(next) => {
+              setKept({ after: failed, older: next });
+            }}
+          />
+          <ReconnectGroup identity={identity} integrations={integrations} />
+        </DashboardCard>
       ) : null}
-    </DashboardCard>
+    </>
   );
 };

@@ -1,6 +1,5 @@
 import { packageKey } from "@grasp-os/shared/dependencies";
 import type {
-  DependenciesWaiting,
   DependencyFinding,
   DependencyRequest,
   DependencyReview,
@@ -20,19 +19,21 @@ import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { PackageIcon } from "lucide-react";
+import { Link, useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import { formatDateTime, formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { PileCard } from "./pile-card.tsx";
+import type { Pile } from "./pile-card.tsx";
 
 // npm packages proposed for an engine, waiting on someone who was given
-// the permission to approve them: each request with who asks, why, where
-// the packages would run and what core's resolver found of them, the
-// whole graph on asking, and the decision. Core lists them only to those
-// who hold the permission, and checks it again as the decision lands.
-// What a package says of itself (a licence, a finding) is shown as text.
+// the permission to approve them, on the dashboard's pile: each request
+// with who asks, why, where the packages would run and what core's
+// resolver found of them, the whole graph on asking, and the decision.
+// Core lists them only to those who hold the permission, and checks it
+// again as the decision lands. What a package says of itself (a licence,
+// a finding) is shown as text.
 
 const targetNames: Record<DependencyTarget, MessageDescriptor> = {
   browser: msg({ message: "Browser", context: "where a package runs" }),
@@ -199,15 +200,23 @@ const Packages = ({ review }: { review: DependencyReview }) => {
   );
 };
 
-const RequestCard = ({
+/**
+ * A request on the dashboard's pile: who asks, why, where the packages
+ * would run and what core's resolver found of them, the whole graph on
+ * asking, and the decision. Approving waits until the whole graph was
+ * shown; it names the graph shown, so core refuses it once the request or
+ * the policy changed since.
+ */
+export const PackagesCard = ({
   request,
   policyGeneration,
-  onDecided,
+  pile,
 }: {
   request: DependencyRequest;
   policyGeneration: number;
-  onDecided: () => void;
+  pile: Pile;
 }) => {
+  const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const [review, setReview] = useState<DependencyReview>();
   const hintId = useId();
@@ -222,182 +231,165 @@ const RequestCard = ({
   const more = request.counts.direct - request.summary.direct.length;
   const moreFindings =
     request.counts.findings - request.summary.findings.length;
+  const who = t`Packages for ${engine}`;
   // Read again once it is decided. A refused decision stays, with why:
   // reading again would take the card, and the reason, away.
-  const decide = async (approved: boolean): Promise<void> => {
-    const decided = await run(
-      async (session) =>
-        await session.dependencies.decide(request.id, {
-          approved,
-          // The graph the person was shown in full, once they were.
-          reviewed: {
-            graphHash: review?.graphHash ?? request.graphHash,
-            policyGeneration,
-          },
-        })
-    );
-    if (decided !== undefined) {
-      onDecided();
-    }
+  const decide = async (approved: boolean, said: string): Promise<void> => {
+    await run(async (session) => {
+      await session.dependencies.decide(request.id, {
+        approved,
+        // The graph the person was shown in full, once they were.
+        reviewed: {
+          graphHash: review?.graphHash ?? request.graphHash,
+          policyGeneration,
+        },
+      });
+      pile.answered(said);
+      // `sync` waits for the read, so the buttons stay off until the card goes.
+      await router.invalidate({ sync: true });
+    });
   };
   return (
-    <article
-      aria-label={t`Packages for ${engine}`}
-      className="bg-card flex w-full flex-col gap-4 rounded-xl border p-4 text-sm"
-    >
-      <h3 className="flex items-start gap-2 font-medium">
-        <PackageIcon
-          aria-hidden="true"
-          className="text-status-attention mt-0.5 size-4 flex-none"
-        />
-        <span>
-          <Trans>Packages for {engine}</Trans>
-        </span>
-      </h3>
-      <div className="flex flex-col gap-2">
-        <p>{request.purpose}</p>
-        <p className="text-muted-foreground">
-          <Plural
-            value={request.counts.direct}
-            one={`${requester} asks for # package`}
-            other={`${requester} asks for # packages`}
-          />
-        </p>
-        <p>
-          {more > 0 ? (
-            <Plural
-              value={more}
-              one={`${shown} and # more`}
-              other={`${shown} and # more`}
-            />
-          ) : (
-            shown
-          )}
-        </p>
-        <p className="text-muted-foreground">
-          <Plural
-            value={request.counts.packages}
-            one={`# package in all, to run in: ${targets}`}
-            other={`# packages in all, to run in: ${targets}`}
-          />
-        </p>
-        <p className="text-muted-foreground">
-          {request.requestedVia === null ? (
-            <Trans>
-              Asked for <time dateTime={request.requestedAt}>{asked}</time>
-            </Trans>
-          ) : (
-            <Trans>
-              Proposed by the agent, in their chat,{" "}
-              <time dateTime={request.requestedAt}>{asked}</time>
-            </Trans>
-          )}
-        </p>
-        <p className="text-muted-foreground">
-          <Trans>
-            Grasp resolved these packages from the npm registry and checked each
-            one&apos;s files against the registry&apos;s hash. A licence is as
-            the package states it.
-          </Trans>
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {request.counts.findings === 0 ? null : (
-            <Badge variant="destructive">
+    <PileCard
+      busy={busy}
+      details={
+        <>
+          <p>{request.purpose}</p>
+          <div className="text-muted-foreground flex flex-col gap-1">
+            <p>
               <Plural
-                value={request.counts.findings}
-                one="# finding reported"
-                other="# findings reported"
-              />
-            </Badge>
-          )}
-          {request.counts.refused === 0 ? null : (
-            <Badge variant="outline">
-              <Plural
-                value={request.counts.refused}
-                one="Needs # thing Grasp refuses to run"
-                other="Needs # things Grasp refuses to run"
-              />
-            </Badge>
-          )}
-        </div>
-      </div>
-      {review === undefined && request.summary.findings.length > 0 ? (
-        <div className="flex flex-col gap-1">
-          <Findings findings={request.summary.findings} />
-          {moreFindings > 0 ? (
-            <p className="text-muted-foreground">
-              <Plural
-                value={moreFindings}
-                one="And # more finding: show every package to read it."
-                other="And # more findings: show every package to read them."
+                value={request.counts.direct}
+                one={`${requester} asks for # package`}
+                other={`${requester} asks for # packages`}
               />
             </p>
+            <p className="text-foreground">
+              {more > 0 ? (
+                <Plural
+                  value={more}
+                  one={`${shown} and # more`}
+                  other={`${shown} and # more`}
+                />
+              ) : (
+                shown
+              )}
+            </p>
+            <p>
+              <Plural
+                value={request.counts.packages}
+                one={`# package in all, to run in: ${targets}`}
+                other={`# packages in all, to run in: ${targets}`}
+              />
+            </p>
+            <p>
+              {request.requestedVia === null ? (
+                <Trans>
+                  Asked for <time dateTime={request.requestedAt}>{asked}</time>
+                </Trans>
+              ) : (
+                <Trans>
+                  Proposed by the agent, in their chat,{" "}
+                  <time dateTime={request.requestedAt}>{asked}</time>
+                </Trans>
+              )}
+            </p>
+            <p>
+              <Trans>
+                Grasp resolved these packages from the npm registry and checked
+                each one&apos;s files against the registry&apos;s hash. A
+                licence is as the package states it.
+              </Trans>
+            </p>
+          </div>
+          {request.counts.findings === 0 &&
+          request.counts.refused === 0 ? null : (
+            <div className="flex flex-wrap gap-2">
+              {request.counts.findings === 0 ? null : (
+                <Badge variant="destructive">
+                  <Plural
+                    value={request.counts.findings}
+                    one="# finding reported"
+                    other="# findings reported"
+                  />
+                </Badge>
+              )}
+              {request.counts.refused === 0 ? null : (
+                <Badge variant="outline">
+                  <Plural
+                    value={request.counts.refused}
+                    one="Needs # thing Grasp refuses to run"
+                    other="Needs # things Grasp refuses to run"
+                  />
+                </Badge>
+              )}
+            </div>
+          )}
+          {review === undefined && request.summary.findings.length > 0 ? (
+            <div className="flex flex-col gap-1">
+              <Findings findings={request.summary.findings} />
+              {moreFindings > 0 ? (
+                <p className="text-muted-foreground">
+                  <Plural
+                    value={moreFindings}
+                    one="And # more finding: show every package to read it."
+                    other="And # more findings: show every package to read them."
+                  />
+                </p>
+              ) : null}
+            </div>
           ) : null}
-        </div>
-      ) : null}
-      {review === undefined ? null : <Packages review={review} />}
-      <div className="flex flex-wrap gap-2">
-        {review === undefined ? (
-          <Button
-            aria-label={t`Show the packages for ${engine}`}
-            disabled={busy}
-            onClick={() => {
-              void run(async (session) => {
-                setReview(await session.dependencies.get(request.id));
-              });
-            }}
-            variant="outline"
-          >
-            <Trans>Show every package</Trans>
-          </Button>
-        ) : null}
-        <Button
-          aria-describedby={review === undefined ? hintId : undefined}
-          aria-label={t`Approve the packages for ${engine}`}
-          disabled={busy || review === undefined}
-          onClick={() => {
-            void decide(true);
-          }}
+          {review === undefined ? (
+            <div className="flex flex-col items-start gap-1">
+              <Button
+                aria-label={t`Show the packages for ${engine}`}
+                disabled={busy}
+                onClick={() => {
+                  void run(async (session) => {
+                    setReview(await session.dependencies.get(request.id));
+                  });
+                }}
+                variant="outline"
+              >
+                <Trans>Show every package</Trans>
+              </Button>
+              <p className="text-muted-foreground" id={hintId}>
+                <Trans>Show every package before you approve them.</Trans>
+              </p>
+            </div>
+          ) : (
+            <Packages review={review} />
+          )}
+        </>
+      }
+      failure={failure}
+      name={
+        <Link
+          className="hover:underline focus-visible:underline"
+          params={{ engine: request.app.id }}
+          to="/engines/$engine"
         >
-          <Trans>Approve</Trans>
-        </Button>
-        <Button
-          aria-label={t`Deny the packages for ${engine}`}
-          disabled={busy}
-          onClick={() => {
-            void decide(false);
-          }}
-          variant="destructive"
-        >
-          <Trans>Deny</Trans>
-        </Button>
-      </div>
-      {review === undefined ? (
-        <p className="text-muted-foreground" id={hintId}>
-          <Trans>Show every package before you approve them.</Trans>
-        </p>
-      ) : null}
-      <ErrorText>{failure}</ErrorText>
-    </article>
+          {who}
+        </Link>
+      }
+      no={{
+        label: t`Reject`,
+        name: t`Reject the packages for ${engine}`,
+        does: t`${engine} doesn't get these packages.`,
+        onPress: () => {
+          void decide(false, t`Rejected: ${who}.`);
+        },
+      }}
+      pile={pile}
+      yes={{
+        label: t`Approve`,
+        name: t`Approve the packages for ${engine}`,
+        does: t`${engine} may use exactly these packages from now on.`,
+        disabled: review === undefined,
+        describedBy: review === undefined ? hintId : undefined,
+        onPress: () => {
+          void decide(true, t`Approved: ${who}.`);
+        },
+      }}
+    />
   );
 };
-
-/** The requests waiting on the person, each with its decision. */
-export const DependencyRequests = ({
-  waiting: { requests, policyGeneration },
-  onDecided,
-}: {
-  waiting: DependenciesWaiting;
-  onDecided: () => void;
-}) => (
-  <div className="flex flex-col gap-3 border-t px-4 py-3">
-    {requests.map((request) => (
-      <RequestCard
-        key={request.id}
-        onDecided={onDecided}
-        policyGeneration={policyGeneration}
-        request={request}
-      />
-    ))}
-  </div>
-);
