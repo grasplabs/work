@@ -23,11 +23,13 @@ import type { Loaded } from "../load-from-core.tsx";
 import { ScreenFrame } from "../screens/screen-frame.tsx";
 import { useCore } from "../use-core.ts";
 import { ChatBuilds } from "./builds.tsx";
+import type { ChatBuildsRead } from "./builds.tsx";
 
-// Beside the chat: a slot for what the chat is about. The Apps its agent
-// is building (builds.tsx), and one of the person's Apps, its screen
-// running beside the conversation, and a way to its workflows on the
-// App's page.
+// Beside the chat: a slot for what the chat is about. The versions up for
+// review of the Apps its agent builds (builds.tsx; the drafts themselves
+// stand in the studio, studio.tsx), and one of the person's Apps, its
+// screen running beside the conversation, and a way to its workflows on
+// the App's page.
 
 /** The App open in the panel, and what it has to show. */
 interface Opened {
@@ -71,18 +73,11 @@ const OpenedApp = ({
 };
 
 /**
- * The side panel: what the chat's agent is building, and the person's
+ * The side panel: the versions of what the chat's agent built that wait
+ * for review (`builds`, which the chat page reads), and the person's
  * Apps, one of them open.
  */
-export const SidePanel = ({
-  chatId,
-  running,
-  drafts,
-}: {
-  chatId: string;
-  running: boolean;
-  drafts: number;
-}) => {
+export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
   const [apps, setApps] = useState<Loaded<App[]>>();
   const core = useCore();
   const [opened, setOpened] = useState<Loaded<Opened>>();
@@ -133,7 +128,7 @@ export const SidePanel = ({
   }
   return (
     <div className="flex flex-col gap-6">
-      <ChatBuilds chatId={chatId} drafts={drafts} running={running} />
+      <ChatBuilds read={builds} />
       <section aria-labelledby="panel-apps" className="flex flex-col gap-2">
         <h2
           className="flex items-center gap-2 text-sm font-medium"
@@ -157,8 +152,8 @@ export const SidePanel = ({
               </EmptyTitle>
               <EmptyDescription>
                 <Trans>
-                  Ask Grasp to build one. While it works, the engine shows here
-                  to preview before it is proposed.
+                  Ask Grasp to build one. While it works, the engine stands
+                  beside the chat, to preview before it is proposed.
                 </Trans>
               </EmptyDescription>
             </EmptyHeader>

@@ -149,6 +149,7 @@ describe("who reads a collection the App read", () => {
       const reader = {
         userId: person.userId,
         teamIds: teams.map(({ id }) => id),
+        admin: false,
       };
       return {
         knowledge: made.map(({ id }) => listed.some((one) => one.id === id)),

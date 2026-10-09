@@ -1,4 +1,7 @@
-import type { WorkflowStepContext } from "../src/contracts.ts";
+import type {
+  WorkflowRollbackContext,
+  WorkflowStepContext,
+} from "../src/contracts.ts";
 
 /** One effect as the outside system received it. */
 export interface Effect {
@@ -10,6 +13,13 @@ export interface Effect {
   receipt: string;
   /** When it arrived. */
   at: number;
+  /** For an undoing: what the rollback was given of its step. */
+  undoing?: {
+    stepKey: string;
+    step: { name: string; count: number };
+    output: unknown;
+    error: { name: string; message: string };
+  };
 }
 
 /**
@@ -100,6 +110,67 @@ export const effect = async (
   return receipt;
 };
 
+/** Each run object whose alarm handler has returned, by its ID. */
+export const handled: string[] = [];
+
+/**
+ * The engine's warnings while `during` runs (log.ts writes them through
+ * console.warn): each is an object with an `event`.
+ */
+export const warningsDuring = async (
+  during: () => Promise<unknown>
+): Promise<unknown[]> => {
+  const { warn } = console;
+  const seen: unknown[] = [];
+  console.warn = (...args: unknown[]): void => {
+    seen.push(...args.slice(0, 1));
+  };
+  try {
+    await during();
+  } finally {
+    console.warn = warn;
+  }
+  return seen;
+};
+
+/** The event a warning names, if it is one of the engine's. */
+export const eventOf = (warning: unknown): unknown =>
+  typeof warning === "object" && warning !== null && "event" in warning
+    ? warning.event
+    : undefined;
+
+/**
+ * A rollback's effect, undoing `label`'s: recorded under the rollback's own
+ * key and attempt, with what it was given of its step; held as an effect
+ * is, as `undo-<label>`.
+ */
+export const undone = async (
+  run: string,
+  label: string,
+  context: WorkflowRollbackContext
+): Promise<void> => {
+  const undoing = `undo-${label}`;
+  effects.push({
+    run,
+    label: undoing,
+    key: context.idempotencyKey,
+    attempt: context.attempt,
+    receipt: `${undoing}#${effects.length + 1}`,
+    at: Date.now(),
+    undoing: {
+      stepKey: context.ctx.idempotencyKey,
+      step: { ...context.ctx.step },
+      output: context.output,
+      error: { name: context.error.name, message: context.error.message },
+    },
+  });
+  const entry = holds.get(holdKey(run, undoing, context.attempt));
+  if (entry !== undefined) {
+    entry.held.resolve(true);
+    await entry.release.promise;
+  }
+};
+
 const checkpoints = new Map<string, number>();
 
 /**
@@ -107,6 +178,10 @@ const checkpoints = new Map<string, number>();
  * test can withhold like an effect's answer: `hold(run, label, n)` holds
  * the n-th time any activation of `run` reaches it.
  */
+/** How many times any activation of `run` reached the checkpoint `label`. */
+export const checkpointsReached = (run: string, label: string): number =>
+  checkpoints.get(holdKey(run, label, 0)) ?? 0;
+
 export const checkpoint = async (
   run: string,
   label: string

@@ -39,7 +39,7 @@ export const collections = sqliteTable("collections", {
   description: text().notNull(),
   /** User ID. */
   owner: text().notNull(),
-  access: text({ enum: ["everyone", "teams", "me"] }).notNull(),
+  access: text({ enum: ["everyone", "teams", "me", "admins"] }).notNull(),
   sensitive: integer({ mode: "boolean" }).notNull().default(false),
   source: text({
     enum: ["here", "upload", "grasp", "apps"],

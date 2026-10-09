@@ -44,6 +44,35 @@
 // ends it with a WorkflowReplayMismatchError: a `Halt`, through the same
 // typed outcome, never a loop of activations.
 //
+// A pause asked for while the activation runs (the run is
+// `waitingForPause`, run.ts) is taken at the safe boundaries: no attempt is
+// claimed and no wait reached once it is asked for. A step that would
+// claim one parks, as for a retry; a wait pauses the run where it is.
+// Steps already out run to their outcome, journaled as ever. Once nothing
+// is out but parked steps, the activation lets go of the run as `paused`,
+// with no alarm, where it would otherwise suspend; should the pause be
+// called off before that, the parked steps come due at once.
+//
+// A run rolling back (`rollingBack`, run.ts) is driven by a compensating
+// activation. It replays the definition to get back the rollbacks its
+// steps registered, as closures can't be journaled; in that replay no
+// step runs. A step with a journaled outcome returns it, and one without
+// never settles. Its forward effects are never made again. The replay is
+// done once every rollback still to run is got back, or every step the
+// journal holds was reached (one called from inside another's attempt is
+// never reached again, as that attempt isn't). One not done within
+// `rollbackReplayMs` (config.ts), or whose definition settled before it
+// was (code outside any step failed this time), runs no rollback: the run
+// waits that long and a fresh activation replays it anew, as that code
+// may do otherwise later. `rollbackReplays` such replays in a row end the
+// rolling back as errored, a RollbackReplayTimedOut. Then the rollbacks run one at a time, latest
+// started step first, each as a
+// step of type `rollback`: journaled, retried, timed out and fenced like
+// any step, under a key of its own. One that succeeded isn't run again
+// after a crash; one that fails, or that a replay done without it didn't
+// get back, ends the rolling back as errored. A rollback can't call the
+// step API. Only `delete` ends a rolling back that never does (run.ts).
+//
 // A step's result is kept as codec text, or as a stream's chunks
 // (streams.ts), within the attempt: a stream's upload runs inside the
 // attempt's deadline and its async scope, and only the attempt that still
@@ -66,7 +95,7 @@ import {
   readCall,
   retryDelayMs,
 } from "./config.ts";
-import type { StepConfig, StepWork } from "./config.ts";
+import type { RollbackWork, StepConfig, StepWork } from "./config.ts";
 import type {
   WorkflowDefinition,
   WorkflowError,
@@ -89,12 +118,14 @@ import {
   readAttempt,
   readConsumedEvent,
   readNextEvent,
+  readRollbackWorklist,
   readRun,
   readStep,
 } from "./journal.ts";
 import type {
   AttemptRow,
   EventRow,
+  RollbackItem,
   RunRow,
   StepRow,
   StepType,
@@ -150,6 +181,10 @@ export interface ActivationLimits {
   readonly maxStreamBytes: number;
   /** The most bytes all of the run's stream results may hold. */
   readonly maxRunStreamBytes: number;
+  /** How long a compensating replay may take (config.ts). */
+  readonly rollbackReplayMs: number;
+  /** How many replays in a row may end without the rollbacks (config.ts). */
+  readonly rollbackReplays: number;
 }
 
 /** What a sensitive step's error message is, wherever it is kept. */
@@ -184,6 +219,8 @@ interface StepIdentity {
   type: StepType;
   name: string;
   occurrence: number;
+  /** The key its row is journaled with; drawn from the execution if absent. */
+  key?: string;
 }
 
 interface Claim {
@@ -286,6 +323,49 @@ interface AttemptScope {
   live: boolean;
 }
 
+/** How a run's rolling back came out: what its run's status says of it. */
+export type RollbackResult =
+  | { readonly status: "complete" }
+  | { readonly status: "errored"; readonly error: Error };
+
+/** What a compensating activation reads before it replays. */
+interface ReplayPlan {
+  /** How many steps the replay is to reach. */
+  total: number;
+  /** Why the run rolls back, as error text. */
+  trigger: string | null;
+  /**
+   * Whether `rollbackReplays` replays in a row began without getting the
+   * rollbacks back: then no other begins.
+   */
+  giveUp: boolean;
+  worklist: RollbackItem[];
+}
+
+/** A rollback the replay got back, with what it runs with. */
+interface Registration {
+  readonly work: RollbackWork;
+  readonly config: StepConfig;
+  /** The step's own context, as its latest attempt was given it. */
+  readonly context: WorkflowStepContext;
+  /** The step's result as journaled, if it succeeded. */
+  readonly value: string | null;
+}
+
+/** A rollback that calls the step API: the reference's error. */
+const stepInRollback = (): Error =>
+  namedError(
+    "WorkflowFatalError",
+    "Cannot execute steps during rollback phase"
+  );
+
+/** A rollback the replay didn't get back. */
+const rollbackMissing = (item: RollbackItem): Error =>
+  namedError(
+    "RollbackMissing",
+    `The rollback of step ${JSON.stringify(item.name)} (count ${item.occurrence}) wasn't registered when the run's definition was replayed`
+  );
+
 /**
  * What a step's thrown error is kept as: redacted for a sensitive step,
  * its name and code kept.
@@ -348,6 +428,7 @@ type WaitOutcome =
   | { ok: true; event: EventRow | undefined }
   | { ok: false; error: string }
   | { suspend: number }
+  | { pause: true }
   | { mismatch: string }
   | null;
 
@@ -555,6 +636,18 @@ export class Activation {
   readonly #startedAt = Date.now();
   /** Whether this activation has claimed an attempt yet. */
   #claimed = false;
+  /** Whether this activation rolls the run back rather than runs it. */
+  readonly #compensating: boolean;
+  /** The rollbacks a compensating replay got back, by their step's ordinal. */
+  readonly #registry = new Map<number, Registration>();
+  /** The journaled steps a compensating replay has reached, by ordinal. */
+  readonly #reached = new Set<number>();
+  /** How many steps a compensating replay is to reach. */
+  #replayTotal = Number.POSITIVE_INFINITY;
+  /** The steps whose rollbacks a compensating replay is to get back. */
+  readonly #awaited = new Set<number>();
+  /** Resolves once a compensating replay is done. */
+  readonly #replayed = Promise.withResolvers<true>();
 
   /** What the definition is handed as `step`. */
   readonly step: WorkflowStep;
@@ -564,13 +657,15 @@ export class Activation {
     run: RunRow,
     generation: number,
     limits: ActivationLimits,
-    clock: () => number
+    clock: () => number,
+    compensating = false
   ) {
     this.#storage = storage;
     this.#run = run;
     this.#generation = generation;
     this.#limits = limits;
     this.#clock = clock;
+    this.#compensating = compensating;
     const { promise, resolve } = Promise.withResolvers<Stop>();
     this.stopped = promise;
     this.#stop = resolve;
@@ -629,6 +724,11 @@ export class Activation {
     }
     let settled: { ok: true; value: T } | { ok: false; error: unknown };
     try {
+      // A compensating activation runs no step's attempt: a call from a
+      // live attempt is a rollback's, which can't call the step API.
+      if (this.#compensating && caller?.live === true) {
+        throw stepInRollback();
+      }
       settled = { ok: true, value: await call() };
     } catch (error) {
       settled = { ok: false, error };
@@ -656,9 +756,31 @@ export class Activation {
     return !this.#over && this.#holdsGeneration();
   }
 
-  /** Whether no later activation has taken the run over. */
+  /**
+   * Whether no later activation, and no command, has taken the run over:
+   * the generation is this activation's, of this very run (one deleted
+   * and created again under the same ID counts its generations afresh).
+   */
   #holdsGeneration(): boolean {
-    return readRun(this.#storage.sql)?.generation === this.#generation;
+    const run = readRun(this.#storage.sql);
+    return (
+      run?.generation === this.#generation && run.run_uid === this.#run.run_uid
+    );
+  }
+
+  /**
+   * Whether the run is still the one this activation was started for: not
+   * deleted, nor deleted and created again. What a stale activation
+   * records of itself is written only then, so it never lands on another
+   * run's rows.
+   */
+  #ownsRun(): boolean {
+    return readRun(this.#storage.sql)?.run_uid === this.#run.run_uid;
+  }
+
+  /** Whether a pause was asked for: the run is `waitingForPause`. */
+  #pausing(): boolean {
+    return readRun(this.#storage.sql)?.status === "waitingForPause";
   }
 
   /**
@@ -678,6 +800,9 @@ export class Activation {
 
   /** Records how this activation ended, if nothing has yet. */
   #recordEnd(ended: "superseded" | "faulted"): void {
+    if (!this.#ownsRun()) {
+      return;
+    }
     this.#storage.sql.exec(
       "UPDATE activations SET ended_at = ?, ended = ? WHERE generation = ? AND ended_at IS NULL",
       Date.now(),
@@ -774,15 +899,26 @@ export class Activation {
   }
 
   /**
-   * Moves the watchdog alarm to a lease from now, unless the activation is
-   * over: then the alarm is what its end set (a suspension's wake, or none
-   * once settled), and a renewal issued after that would replace it.
+   * Moves the run's lease, and the watchdog alarm with it, to a lease from
+   * now, unless the activation is over: then the alarm is what its end set
+   * (a suspension's wake, or none once settled), and a renewal issued after
+   * that would replace it. Both come from one reading of the clock, which
+   * moves on with I/O: the watchdog comes when the journal says it does.
    */
   async #renewWatchdog(): Promise<void> {
     if (this.#over) {
       return;
     }
-    await this.#arm(Date.now() + this.#limits.leaseMs);
+    const now = Date.now();
+    const renewed = this.#write(() => {
+      if (this.#holdsGeneration()) {
+        this.#renewLease(now);
+      }
+    });
+    if (renewed === failed) {
+      return await never();
+    }
+    await this.#arm(now + this.#limits.leaseMs);
   }
 
   /**
@@ -857,24 +993,18 @@ export class Activation {
       }
       const { sql } = this.#storage;
       const now = Date.now();
+      if (this.#pausedHere()) {
+        return { park: now };
+      }
       const step = readStep(sql, identity);
       let ordinal: number;
       let attempt = 1;
-      let key = stepKey(this.#run.run_uid, identity);
+      let key = identity.key ?? stepKey(this.#run.execution_uid, identity);
       if (step === undefined) {
         if (!this.#fits(now, config)) {
           return { park: now };
         }
-        ({ ordinal } = sql
-          .exec<{ ordinal: number }>(
-            "INSERT INTO steps (type, name, occurrence, idempotency_key, state, attempt, config) VALUES (?, ?, ?, ?, 'running', 1, ?) RETURNING ordinal",
-            identity.type,
-            identity.name,
-            identity.occurrence,
-            key,
-            config.journal
-          )
-          .one());
+        ordinal = this.#insertStep(identity, key, config);
       } else {
         const latest = readAttempt(sql, step.ordinal, step.attempt);
         if (latest === undefined) {
@@ -943,6 +1073,36 @@ export class Activation {
       this.#claimed = true;
       return { claim };
     });
+  }
+
+  /**
+   * Whether a step claiming an attempt now stops at the pause asked for:
+   * the safe boundary, where no attempt is claimed once a pause is asked
+   * for. A step called from an attempt still out is part of the work
+   * already out, and goes on.
+   */
+  #pausedHere(): boolean {
+    return attempts.getStore()?.live !== true && this.#pausing();
+  }
+
+  /**
+   * Journals a step's first attempt's row: its identity, key and config,
+   * whether it registered a rollback, and whether it was called from
+   * inside another step's attempt. Returns its ordinal.
+   */
+  #insertStep(identity: StepIdentity, key: string, config: StepConfig): number {
+    return this.#storage.sql
+      .exec<{ ordinal: number }>(
+        "INSERT INTO steps (type, name, occurrence, idempotency_key, state, attempt, config, has_rollback, nested) VALUES (?, ?, ?, ?, 'running', 1, ?, ?, ?) RETURNING ordinal",
+        identity.type,
+        identity.name,
+        identity.occurrence,
+        key,
+        config.journal,
+        config.rollback ? 1 : 0,
+        attempts.getStore()?.live === true ? 1 : 0
+      )
+      .one().ordinal;
   }
 
   /**
@@ -1037,6 +1197,11 @@ export class Activation {
 
   /** Records that the attempt's answer was ignored, and drops its upload. */
   #ignore(claim: Claim, now: number): void {
+    if (!this.#ownsRun()) {
+      // The run was deleted: its rows went with it, and what holds this
+      // ordinal now is another run's.
+      return;
+    }
     this.#storage.sql.exec(
       "UPDATE attempts SET ended_at = ?, ended = 'superseded' WHERE ordinal = ? AND attempt = ? AND ended_at IS NULL",
       now,
@@ -1053,6 +1218,7 @@ export class Activation {
    * write. With a result, the observers' record of it (history.ts).
    */
   #commit(
+    identity: StepIdentity,
     claim: Claim,
     config: StepConfig,
     outcome: Committable
@@ -1086,15 +1252,18 @@ export class Activation {
           claim.ordinal,
           claim.attempt
         );
-        recordStepCompleted(sql, {
-          ordinal: claim.ordinal,
-          at: now,
-          sensitive: config.sensitive,
-          result:
-            outcome.stream === undefined
-              ? { kind: "value", value: outcome.value }
-              : { kind: "stream", result: outcome.stream },
-        });
+        // A rollback's completion isn't a step's: observers see steps.
+        if (identity.type !== "rollback") {
+          recordStepCompleted(sql, {
+            ordinal: claim.ordinal,
+            at: now,
+            sensitive: config.sensitive,
+            result:
+              outcome.stream === undefined
+                ? { kind: "value", value: outcome.value }
+                : { kind: "stream", result: outcome.stream },
+          });
+        }
         return { ok: true, value: outcome.value, ordinal: claim.ordinal };
       }
     );
@@ -1166,6 +1335,7 @@ export class Activation {
         ordinal: claim.ordinal,
         attempt: claim.attempt,
         holds: () => this.#holds(claim),
+        owns: () => this.#ownsRun(),
         stopped: Promise.race([this.stopped, attemptEnded]),
         maxBytes: this.#limits.maxStreamBytes,
         maxRunBytes: this.#limits.maxRunStreamBytes,
@@ -1493,19 +1663,24 @@ export class Activation {
       return;
     }
     const wake = this.#parkedWake;
-    const suspendedNow = this.#write(() =>
-      this.#storage.transactionSync(() => {
+    const letGo = this.#write(() =>
+      this.#storage.transactionSync((): "suspended" | "paused" | null => {
         if (!this.#current()) {
-          return false;
+          return null;
         }
-        this.#suspendIn(this.#storage.sql, Date.now(), wake);
-        return true;
+        const now = Date.now();
+        if (this.#pausing()) {
+          this.#pauseIn(this.#storage.sql, now);
+          return "paused";
+        }
+        this.#suspendIn(this.#storage.sql, now, wake);
+        return "suspended";
       })
     );
-    if (suspendedNow === failed) {
+    if (letGo === failed) {
       return;
     }
-    if (!suspendedNow) {
+    if (letGo === null) {
       this.#letGo();
       return;
     }
@@ -1513,12 +1688,15 @@ export class Activation {
     // Issued now, in the turn of the write it goes with; `stopped` reports
     // the suspension once it is set, or the fault if it couldn't be.
     void (async (): Promise<void> => {
-      await this.#arm(wake);
+      await (letGo === "paused" ? this.#disarm() : this.#arm(wake));
       this.#stop(suspended);
     })();
   }
 
   async #do(name: string, rest: unknown[]): Promise<unknown> {
+    if (this.#compensating) {
+      return await this.#replayDo(name, rest);
+    }
     if (this.#waitPending) {
       return await this.#halt(parallelWait("step", name));
     }
@@ -1633,7 +1811,9 @@ export class Activation {
       if ("fatal" in outcome) {
         return await this.#fail(claim, outcome.fatal);
       }
-      const committed = this.#write(() => this.#commit(claim, config, outcome));
+      const committed = this.#write(() =>
+        this.#commit(identity, claim, config, outcome)
+      );
       if (committed === failed) {
         return await never();
       }
@@ -1675,8 +1855,10 @@ export class Activation {
    * transaction that found the wait not due.
    */
   #suspendIn(sql: SqlStorage, now: number, wake: number): number {
+    // A run rolling back stays so while its rollback waits for a retry.
     sql.exec(
-      "UPDATE run SET status = 'waiting', lease_until = NULL, wake_at = ?",
+      "UPDATE run SET status = ?, lease_until = NULL, wake_at = ?",
+      this.#compensating ? "rollingBack" : "waiting",
       wake
     );
     sql.exec(
@@ -1685,6 +1867,37 @@ export class Activation {
       this.#generation
     );
     return wake;
+  }
+
+  /**
+   * Lets go of the run as paused: nothing of this activation is out but
+   * parked steps, and a pause was asked for. Called in the transaction
+   * that found it so; the alarm is removed after it (#disarm).
+   */
+  #pauseIn(sql: SqlStorage, now: number): void {
+    sql.exec(
+      "UPDATE run SET status = 'paused', paused_at = ?, lease_until = NULL, wake_at = NULL",
+      now
+    );
+    sql.exec(
+      "UPDATE activations SET ended_at = ?, ended = 'paused' WHERE generation = ?",
+      now,
+      this.#generation
+    );
+  }
+
+  /**
+   * Removes the alarm, right after the write that paused the run: a paused
+   * run has none. A failure faults the activation; the watchdog left
+   * behind finds the run paused, and does nothing.
+   */
+  async #disarm(): Promise<void> {
+    try {
+      await this.#storage.deleteAlarm();
+    } catch (error) {
+      this.#fault(error);
+      await never();
+    }
   }
 
   /**
@@ -1701,6 +1914,13 @@ export class Activation {
       }
       const { sql } = this.#storage;
       const now = Date.now();
+      if (this.#pausing()) {
+        // The safe boundary, before the wait is journaled or takes an
+        // event. Waits come with no step out (#wait), so nothing of this
+        // activation is out: the run is paused here.
+        this.#pauseIn(sql, now);
+        return { pause: true };
+      }
       let step = readStep(sql, identity);
       // Checked before anything is written: a replay that strayed leaves
       // the journal as it found it.
@@ -1714,7 +1934,7 @@ export class Activation {
           identity.type,
           identity.name,
           identity.occurrence,
-          stepKey(this.#run.run_uid, identity),
+          stepKey(this.#run.execution_uid, identity),
           plan.deadline(now),
           plan.eventType,
           plan.durationMs
@@ -1775,6 +1995,9 @@ export class Activation {
 
   /** A sleep or an event wait, from the definition's call to its outcome. */
   async #wait(plan: WaitPlan): Promise<EventRow | undefined> {
+    if (this.#compensating) {
+      return await this.#replayWait(plan);
+    }
     if (this.#waitPending || this.#stepsInFlight > 0) {
       // Racing a wait against a sleep would quietly lose the sleep: the
       // first suspends the activation, and the second is never reached. A
@@ -1826,6 +2049,12 @@ export class Activation {
       this.#over = true;
       // The wake goes with the write that suspended the run.
       await this.#arm(outcome.suspend);
+      this.#stop(suspended);
+      return await never();
+    }
+    if ("pause" in outcome) {
+      this.#over = true;
+      await this.#disarm();
       this.#stop(suspended);
       return await never();
     }
@@ -1900,6 +2129,472 @@ export class Activation {
     return stepEvent<Payload>(event);
   }
 
+  /**
+   * Counts a journaled step as reached by a compensating replay; the
+   * replay is done once it has reached as many as it is to.
+   */
+  #reach(row: StepRow): void {
+    if (row.nested === 0) {
+      this.#reached.add(row.ordinal);
+    }
+    if (this.#replayDone()) {
+      this.#replayed.resolve(true);
+    }
+  }
+
+  /**
+   * Whether a compensating replay is done: every rollback still to run is
+   * got back, or it reached every step the journal holds. A rollback it
+   * hasn't got back by then it never will. A definition that settled
+   * first isn't done: what failed outside any step may not fail again.
+   */
+  #replayDone(): boolean {
+    if (this.#reached.size >= this.#replayTotal) {
+      return true;
+    }
+    for (const ordinal of this.#awaited) {
+      if (!this.#registry.has(ordinal)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * A `do` step in a compensating replay: never run. Its rollback, if it
+   * registered one when it started, is got back; its journaled outcome is
+   * returned, or thrown; one with none never settles, as one never
+   * started.
+   */
+  async #replayDo(name: string, rest: unknown[]): Promise<unknown> {
+    assertStepName(name);
+    const call = readCall(rest);
+    const identity = this.#occurrence("do", name);
+    const row = this.#write(() => readStep(this.#storage.sql, identity));
+    if (row === failed || row === undefined) {
+      return await never();
+    }
+    if (row.config !== call.config.journal) {
+      return await this.#halt(
+        replayMismatch(
+          `the do ${JSON.stringify(name)} was configured ${String(row.config)}, and is now configured ${call.config.journal}`
+        )
+      );
+    }
+    if (row.has_rollback === 1 && call.rollback !== undefined) {
+      this.#registry.set(row.ordinal, {
+        work: call.rollback.work,
+        config: call.rollback.config,
+        context: contextOf(
+          identity,
+          {
+            ordinal: row.ordinal,
+            attempt: row.attempt,
+            key: row.idempotency_key,
+            deadline: 0,
+          },
+          call.config
+        ),
+        value: row.state === "succeeded" ? row.value : null,
+      });
+    }
+    // Checks the replay done too: the registration may have been the last.
+    this.#reach(row);
+    if (row.state === "succeeded" && row.value !== null) {
+      return await this.#result(row.ordinal, row.value);
+    }
+    if (row.state === "failed" && row.error !== null) {
+      throw rebuild(row.error);
+    }
+    return await never();
+  }
+
+  /**
+   * A sleep or a wait in a compensating replay: its journaled outcome,
+   * never a new deadline, nor an event taken.
+   */
+  async #replayWait(plan: WaitPlan): Promise<EventRow | undefined> {
+    const identity = this.#occurrence(plan.type, plan.name);
+    const { sql } = this.#storage;
+    const read = this.#write(() => {
+      const row = readStep(sql, identity);
+      return row === undefined
+        ? undefined
+        : {
+            row,
+            mismatch: mismatchIn(sql, identity, row, plan),
+            event: readConsumedEvent(sql, row.ordinal),
+          };
+    });
+    if (read === failed || read === undefined) {
+      return await never();
+    }
+    if (read.mismatch !== undefined) {
+      return await this.#halt(replayMismatch(read.mismatch));
+    }
+    this.#reach(read.row);
+    if (read.row.state === "succeeded") {
+      return read.event;
+    }
+    if (read.row.state === "failed" && read.row.error !== null) {
+      throw rebuild(read.row.error);
+    }
+    return await never();
+  }
+
+  /** Resolves when the compensating replay is done, or after `ms`. */
+  async #replayedWithin(ms: number): Promise<void> {
+    const timer = new AbortController();
+    try {
+      await Promise.race([
+        this.#replayed.promise,
+        (async (): Promise<void> => {
+          try {
+            await scheduler.wait(ms, { signal: timer.signal });
+          } catch {
+            // The replay was done first.
+          }
+        })(),
+      ]);
+    } finally {
+      timer.abort();
+    }
+  }
+
+  /**
+   * Runs one step's rollback as a step of its own, `rollback`, to its
+   * outcome: its value, or its failure thrown. A retry not due parks it.
+   */
+  async #compensateOne(
+    item: RollbackItem,
+    registration: Registration,
+    trigger: string
+  ): Promise<void> {
+    const identity: StepIdentity = {
+      type: "rollback",
+      name: item.name,
+      occurrence: item.occurrence,
+      // Never the step's own: undoing an effect isn't making it again.
+      key: `rollback:${item.idempotency_key}`,
+    };
+    const work: StepWork = async (context) => {
+      const output =
+        registration.value === null
+          ? undefined
+          : await this.#result(item.ordinal, registration.value);
+      await registration.work({
+        ctx: structuredClone(registration.context),
+        error: rebuild(trigger),
+        output,
+        // oxlint-disable-next-line typescript/no-deprecated -- given as Cloudflare gives it
+        stepName: `${item.name}-${item.occurrence}`,
+        idempotencyKey: context.idempotencyKey,
+        attempt: context.attempt,
+      });
+      // What a rollback returns is nobody's: nothing of it is kept, so
+      // the work returns nothing.
+    };
+    // Counted as `#do` counts a step: a parked retry suspends the run once
+    // it is all that is out.
+    this.#stepsInFlight += 1;
+    this.#callsOut += 1;
+    let inFlight = true;
+    const land = (): void => {
+      if (inFlight) {
+        inFlight = false;
+        this.#stepsInFlight -= 1;
+      }
+    };
+    try {
+      await this.#attempts(identity, registration.config, work, land);
+    } finally {
+      land();
+      this.#callsOut -= 1;
+      this.#checkWhenQuiet();
+    }
+  }
+
+  /**
+   * Journals that a rollback the replay didn't get back failed, so every
+   * later activation finds the rolling back ended the same way. Null when
+   * this activation is no longer current.
+   */
+  #journalMissing(item: RollbackItem, error: Error): boolean | null {
+    return this.#storage.transactionSync(() => {
+      if (!this.#current()) {
+        return null;
+      }
+      this.#storage.sql.exec(
+        "INSERT INTO steps (type, name, occurrence, idempotency_key, state, attempt, error) VALUES ('rollback', ?, ?, ?, 'failed', 0, ?) ON CONFLICT (type, name, occurrence) DO UPDATE SET state = 'failed', error = excluded.error",
+        item.name,
+        item.occurrence,
+        `rollback:${item.idempotency_key}`,
+        JSON.stringify(errorRecord(error))
+      );
+      return true;
+    });
+  }
+
+  /**
+   * Lets go of a run whose replay wasn't done: it stays rolling back, and
+   * a fresh activation replays it again after `rollbackReplayMs`. Nothing
+   * is journaled of the rollbacks the replay hadn't got back; the replay
+   * itself was counted before it began (compensate).
+   */
+  async #replayLater(): Promise<never> {
+    const wake = Date.now() + this.#limits.rollbackReplayMs;
+    const letGo = this.#write(() =>
+      this.#storage.transactionSync(() => {
+        if (!this.#current()) {
+          return false;
+        }
+        this.#suspendIn(this.#storage.sql, Date.now(), wake);
+        return true;
+      })
+    );
+    if (letGo === failed) {
+      return await never();
+    }
+    if (!letGo) {
+      return await this.#refuse();
+    }
+    this.#over = true;
+    // The wake goes with the write that suspended the run.
+    await this.#arm(wake);
+    this.#stop(suspended);
+    return await never();
+  }
+
+  /**
+   * Rolls the run back: replays `definition` to get back its steps'
+   * rollbacks, then runs those still to run, latest started first, to
+   * the first that fails. Settles with how that came out; never settles
+   * when the activation stops first (a retry not due, a later generation,
+   * a fault), as `execute` doesn't.
+   */
+  async compensate(definition: WorkflowDefinition): Promise<RollbackResult> {
+    const plan = this.#write(() =>
+      this.#storage.transactionSync((): ReplayPlan | null => {
+        const { sql } = this.#storage;
+        const run = readRun(sql);
+        if (!this.#current() || run === undefined) {
+          return null;
+        }
+        const worklist = readRollbackWorklist(sql);
+        // Each replay is counted before it begins, in this write: one cut
+        // off (the process killed, the handler out of time in code outside
+        // any step) counts as surely as one that ran out of time. Past the
+        // limit, none begins. One cut short by a duplicate alarm counts too:
+        // accepted, as duplicate alarms are rare.
+        const giveUp = run.rollback_replays >= this.#limits.rollbackReplays;
+        if (worklist.length > 0 && !giveUp) {
+          sql.exec(
+            "UPDATE run SET rollback_replays = ?",
+            run.rollback_replays + 1
+          );
+        }
+        return {
+          giveUp,
+          total: sql
+            .exec<{ steps: number }>(
+              "SELECT COUNT(*) AS steps FROM steps WHERE type <> 'rollback' AND nested = 0"
+            )
+            .one().steps,
+          trigger: run.rollback_trigger,
+          worklist,
+        };
+      })
+    );
+    if (plan === failed) {
+      return await never();
+    }
+    if (plan === null) {
+      return await this.#refuse();
+    }
+    if (plan.trigger === null) {
+      return {
+        status: "errored",
+        error: new Error("The journal holds a run rolling back with no reason"),
+      };
+    }
+    if (plan.worklist.length === 0) {
+      // Every rollback ran already: nothing to replay for.
+      return { status: "complete" };
+    }
+    if (plan.giveUp) {
+      return {
+        status: "errored",
+        error: namedError(
+          "RollbackReplayTimedOut",
+          `The run's definition didn't replay to the steps to roll back in ${this.#limits.rollbackReplays} tries`
+        ),
+      };
+    }
+    const replayed = await this.#replay(definition, plan);
+    if (replayed !== null) {
+      return replayed;
+    }
+    return await this.#runWorklist(plan.worklist, plan.trigger);
+  }
+
+  /**
+   * Replays `definition` to get back the rollbacks `plan` holds still to
+   * run. Null once it did; how the rolling back ended, if replays that
+   * didn't ran out; never settles when the run waits to replay again.
+   */
+  async #replay(
+    definition: WorkflowDefinition,
+    plan: ReplayPlan
+  ): Promise<RollbackResult | null> {
+    this.#replayTotal = plan.total;
+    // The rollbacks to get back: those to run before one that ended the
+    // rolling back already, which ends it again.
+    for (const item of plan.worklist) {
+      if (item.rollback_state === "failed" || item.rollback_state === "fatal") {
+        break;
+      }
+      this.#awaited.add(item.ordinal);
+    }
+    if (this.#replayDone()) {
+      this.#replayed.resolve(true);
+    }
+    void (async (): Promise<void> => {
+      // Its outcome is nobody's: the run's end is journaled already.
+      await this.execute(definition);
+      // Done or not, there is nothing more to wait for.
+      this.#replayed.resolve(true);
+    })();
+    await this.#replayedWithin(this.#limits.rollbackReplayMs);
+    if (!this.#replayDone()) {
+      return await this.#replayLater();
+    }
+    // A replay that got the rollbacks back: the count starts again. A run
+    // whose replays alternate between done and not never reaches the
+    // limit so, but each done replay runs a rollback attempt, and those
+    // are bounded by each rollback's own retries: such a run still ends.
+    const reset = this.#write(() =>
+      this.#storage.transactionSync(() => {
+        if (!this.#current()) {
+          return false;
+        }
+        this.#storage.sql.exec("UPDATE run SET rollback_replays = 0");
+        return true;
+      })
+    );
+    if (reset === failed) {
+      return await never();
+    }
+    if (!reset) {
+      return await this.#refuse();
+    }
+    return null;
+  }
+
+  /**
+   * Runs the rollbacks still to run, latest started first, once a replay
+   * got them back: to the first that fails, or that it didn't get back.
+   */
+  async #runWorklist(
+    worklist: RollbackItem[],
+    trigger: string
+  ): Promise<RollbackResult> {
+    for (const item of worklist) {
+      if (item.rollback_state === "failed" || item.rollback_state === "fatal") {
+        // Ended the rolling back before: the same end again.
+        return {
+          status: "errored",
+          error:
+            item.rollback_error === null
+              ? rollbackMissing(item)
+              : rebuild(item.rollback_error),
+        };
+      }
+      const registration = this.#registry.get(item.ordinal);
+      if (registration === undefined) {
+        // The replay is done (#replayDone) without it: it reached every
+        // step it was to, and never will get it back, so the rolling back
+        // ends here, in every activation, as journaled, an attempt of it
+        // still open or not.
+        const missing = rollbackMissing(item);
+        const journaled = this.#write(() =>
+          this.#journalMissing(item, missing)
+        );
+        if (journaled === failed) {
+          // oxlint-disable-next-line no-await-in-loop -- ends the loop
+          return await never();
+        }
+        if (journaled === null) {
+          // oxlint-disable-next-line no-await-in-loop -- ends the loop
+          return await this.#refuse();
+        }
+        return { status: "errored", error: missing };
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one rollback at a time, in order
+        await this.#compensateOne(item, registration, trigger);
+      } catch (error) {
+        return {
+          status: "errored",
+          error: error instanceof Error ? error : new Error(String(error)),
+        };
+      }
+    }
+    return { status: "complete" };
+  }
+
+  /**
+   * Journals how the run's rolling back ended, and the run's end with it:
+   * errored or terminated, as it began, unless a later activation took
+   * over (only the generation decides: the activation may be over on a
+   * `Halt`), and removes the run's alarm. Never throws: a failed write
+   * faults the activation (journaled, if storage lets it), and the
+   * watchdog alarm, left as it was, brings a compensating activation back
+   * to the same end.
+   */
+  async endCompensation(result: RollbackResult): Promise<void> {
+    const outcome =
+      result.status === "complete"
+        ? { status: "complete" }
+        : { status: "errored", error: errorRecord(result.error) };
+    const ended = this.#write(() =>
+      this.#storage.transactionSync(() => {
+        if (!this.#holdsGeneration()) {
+          return false;
+        }
+        const now = Date.now();
+        this.#storage.sql.exec(
+          "UPDATE run SET status = COALESCE(rollback_end, 'errored'), rollback = ?, ended_at = ?, lease_until = NULL, wake_at = NULL",
+          JSON.stringify(outcome),
+          now
+        );
+        this.#storage.sql.exec(
+          "UPDATE activations SET ended_at = ?, ended = 'settled' WHERE generation = ?",
+          now,
+          this.#generation
+        );
+        return true;
+      })
+    );
+    if (ended === failed) {
+      // Faulted, logged and (if storage lets it) journaled: the watchdog
+      // alarm, left as it was, brings the run back to end it again.
+      return;
+    }
+    if (!ended) {
+      this.#letGo();
+      return;
+    }
+    this.#over = true;
+    try {
+      // In the same write as the end: nothing is left to wake for.
+      await this.#storage.deleteAlarm();
+    } catch (error) {
+      // The run's end is journaled: the alarm left behind finds the run
+      // ended when it comes, and does nothing (run.ts).
+      warnRecovered("workflow_alarm_delete_failed", error);
+    }
+  }
+
   /** Runs the definition; resolves when it returns or throws. */
   async execute(definition: WorkflowDefinition): Promise<Settlement> {
     try {
@@ -1935,11 +2630,34 @@ export class Activation {
       failure = JSON.stringify(errorRecord(settlement.error));
     }
     const settled = this.#write(() =>
-      this.#storage.transactionSync(() => {
+      this.#storage.transactionSync((): "settled" | "rollingBack" | null => {
         if (!(halted ? this.#holdsGeneration() : this.#current())) {
-          return false;
+          return null;
         }
         const now = Date.now();
+        const { sql } = this.#storage;
+        // The definition threw, and steps of it registered rollbacks: the
+        // run rolls back before it ends (a halt doesn't, as on the
+        // reference).
+        if (
+          !settlement.ok &&
+          !halted &&
+          failure !== null &&
+          readRollbackWorklist(sql).length > 0
+        ) {
+          sql.exec(
+            "UPDATE run SET status = 'rollingBack', error = ?, rollback_trigger = ?, rollback_end = 'errored', lease_until = NULL, wake_at = ?",
+            failure,
+            failure,
+            now
+          );
+          sql.exec(
+            "UPDATE activations SET ended_at = ?, ended = 'settled' WHERE generation = ?",
+            now,
+            this.#generation
+          );
+          return "rollingBack";
+        }
         this.#storage.sql.exec(
           "UPDATE run SET status = ?, output = ?, error = ?, ended_at = ?, lease_until = NULL, wake_at = NULL",
           failure === null ? "complete" : "errored",
@@ -1952,7 +2670,7 @@ export class Activation {
           now,
           this.#generation
         );
-        return true;
+        return "settled";
       })
     );
     if (settled === failed) {
@@ -1960,11 +2678,22 @@ export class Activation {
       // alarm, left as it was, brings the run back to write its end again.
       return;
     }
-    if (!settled) {
+    if (settled === null) {
       this.#letGo();
       return;
     }
     this.#over = true;
+    if (settled === "rollingBack") {
+      try {
+        // In the same write: the rolling back runs at once.
+        await this.#storage.setAlarm(Date.now());
+      } catch (error) {
+        // The run is rolling back, journaled: the watchdog alarm, left as
+        // it was, brings a compensating activation a lease from now.
+        warnRecovered("workflow_alarm_set_failed", error);
+      }
+      return;
+    }
     try {
       // In the same write as the outcome: nothing is left to wake for.
       await this.#storage.deleteAlarm();

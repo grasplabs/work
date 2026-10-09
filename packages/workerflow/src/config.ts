@@ -9,6 +9,13 @@
 //   timeout   "10 minutes", each attempt
 //   sensitive none: observers see the step's result
 //
+// A step may register a rollback with it, as its fourth argument (third,
+// with no config): `{ rollback, rollbackConfig? }`. The rollback config
+// takes `retries` and `timeout`, with the same defaults; the rollback
+// keeps the step's sensitivity, so its errors are redacted as the step's
+// are. Whether a step has a rollback, and its config, are journaled with
+// the step's own config: a replay must give them again.
+//
 // The 10-second delay is Cloudflare's documented default. The local
 // engine Wrangler ships (miniflare's) waits 1 second instead; the
 // documented value is the one this profile takes.
@@ -16,6 +23,7 @@ import type {
   WorkflowBackoff,
   WorkflowDelayFunction,
   WorkflowDuration,
+  WorkflowRollbackContext,
   WorkflowStepContext,
 } from "./contracts.ts";
 import { maxWaitMs, parseDuration } from "./durations.ts";
@@ -38,6 +46,42 @@ const defaultTimeout = "10 minutes";
  * (`WorkflowRun.handlerBudgetMs`).
  */
 export const handlerBudgetMs = 14 * 60 * 1000;
+
+/**
+ * The longest a compensating activation's replay may take to get back the
+ * rollbacks still to run (activation.ts). It comes out of the minute an
+ * alarm handler keeps beyond `handlerBudgetMs`, half of it at most: the
+ * first rollback attempt after it is claimed whatever its timeout, as an
+ * activation's first attempt always is, so the replay before it must fit
+ * in what the budget leaves. A replay that doesn't finish in it is tried
+ * again by a later activation; a host may give it less, never more.
+ */
+export const maxRollbackReplayMs = 30_000;
+
+/**
+ * The longest a compensating replay may take in a host whose attempts get
+ * `budgetMs` of a handler's wall time: as `maxRollbackReplayMs` is to
+ * Cloudflare's budget, half the margin past it, so a host with shorter
+ * handlers gets a shorter replay, never one its handler can't hold.
+ */
+export const rollbackReplayCapMs = (budgetMs: number): number =>
+  Math.max(
+    1,
+    Math.min(
+      maxRollbackReplayMs,
+      Math.floor((budgetMs * maxRollbackReplayMs) / handlerBudgetMs)
+    )
+  );
+
+/**
+ * How many replays in a row may end without getting back the rollbacks
+ * still to run (out of time, or settled before reaching every step)
+ * before the rolling back ends as errored, with a RollbackReplayTimedOut:
+ * a definition that never replays to its steps again shows so, rather
+ * than roll back for ever. Counted in the journal, so a restart doesn't
+ * reset it; a replay that gets them back does.
+ */
+export const defaultRollbackReplays = 10;
 
 /**
  * The longest an attempt may be given: all of a fresh handler's budget. A
@@ -73,20 +117,30 @@ export interface StepConfig {
   readonly journal: string;
   /** What the step's callback is told, as Cloudflare tells it. */
   readonly context: WorkflowStepContext["config"];
+  /** Whether the step registered a rollback. */
+  readonly rollback: boolean;
 }
+
+/** A rollback as a step registers it. */
+export type RollbackWork = (context: WorkflowRollbackContext) => unknown;
 
 export interface StepCall {
   readonly work: StepWork;
   readonly config: StepConfig;
+  /** The step's rollback, and the config it runs with; absent if none. */
+  readonly rollback?: {
+    readonly work: RollbackWork;
+    readonly config: StepConfig;
+  };
 }
 
 const isWork = (value: unknown): value is StepWork =>
   typeof value === "function";
 
-const describe = (value: unknown): string =>
+export const describe = (value: unknown): string =>
   typeof value === "string" ? JSON.stringify(value) : `a ${typeof value}`;
 
-const isPlainObject = (value: unknown): value is object =>
+export const isPlainObject = (value: unknown): value is object =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
@@ -95,7 +149,7 @@ const isPlainObject = (value: unknown): value is object =>
  * on the object or its prototypes, is refused, as is an object that throws
  * while it is read: an unknown shape is never read as a default.
  */
-const readSettings = <Key extends string>(
+export const readSettings = <Key extends string>(
   what: string,
   value: object,
   keys: readonly Key[]
@@ -221,39 +275,78 @@ const readSensitive = (sensitive: unknown): boolean => {
   return sensitive === "output";
 };
 
-const configOf = (
+/** What the journal keeps of a config: its values, never a function. */
+interface JournalFields {
+  limit: number;
+  delay: number | "dynamic";
+  backoff: WorkflowBackoff;
+  timeout: number;
+  sensitive: boolean;
+  /** The rollback's own, when the step registered one. */
+  rollback?: JournalFields;
+}
+
+/** A config, and the fields its journal text is made of. */
+interface Built {
+  config: StepConfig;
+  fields: JournalFields;
+}
+
+const build = (
   retries: Retries,
-  timeout?: unknown,
-  sensitive = false
-): StepConfig => {
+  timeout: unknown,
+  sensitive: boolean,
+  rollback?: JournalFields
+): Built => {
   const { ms: timeoutMs, given: timeoutGiven } = readTimeout(timeout);
   const { limit, delay, backoff, given } = retries;
   const resolvedRetries =
     given === undefined ? { limit, backoff } : { limit, delay: given, backoff };
-  return {
+  const fields: JournalFields = {
     limit,
-    delay,
+    delay: typeof delay === "function" ? "dynamic" : delay,
     backoff,
-    timeoutMs,
+    timeout: timeoutMs,
     sensitive,
-    journal: JSON.stringify({
+  };
+  if (rollback !== undefined) {
+    fields.rollback = rollback;
+  }
+  return {
+    fields,
+    config: {
       limit,
-      delay: typeof delay === "function" ? "dynamic" : delay,
+      delay,
       backoff,
-      timeout: timeoutMs,
+      timeoutMs,
       sensitive,
-    }),
-    context: sensitive
-      ? {
-          retries: resolvedRetries,
-          timeout: timeoutGiven,
-          sensitive: "output",
-        }
-      : { retries: resolvedRetries, timeout: timeoutGiven },
+      rollback: rollback !== undefined,
+      journal: JSON.stringify(fields),
+      context: sensitive
+        ? {
+            retries: resolvedRetries,
+            timeout: timeoutGiven,
+            sensitive: "output",
+          }
+        : { retries: resolvedRetries, timeout: timeoutGiven },
+    },
   };
 };
 
-const readConfig = (config: unknown): StepConfig => {
+/** A step's settings, as read from its config: nothing built yet. */
+interface Settings {
+  retries: Retries;
+  timeout: unknown;
+  sensitive: boolean;
+}
+
+const defaultSettings: Settings = {
+  retries: defaultRetries,
+  timeout: undefined,
+  sensitive: false,
+};
+
+const readConfig = (config: unknown): Settings => {
   if (!isPlainObject(config)) {
     throw new TypeError(
       `A step's config is an object, not ${config === null ? "null" : describe(config)}`
@@ -264,25 +357,101 @@ const readConfig = (config: unknown): StepConfig => {
     config,
     ["retries", "timeout", "sensitive"] as const
   );
-  return configOf(readRetries(retries), timeout, readSensitive(sensitive));
+  return {
+    retries: readRetries(retries),
+    timeout,
+    sensitive: readSensitive(sensitive),
+  };
+};
+
+const isRollbackWork = (value: unknown): value is RollbackWork =>
+  typeof value === "function";
+
+/**
+ * A step's rollback options, read once each: `{ rollback, rollbackConfig? }`,
+ * Cloudflare's shape. `sensitive` is the step's own, which its rollback
+ * keeps.
+ */
+const readRollback = (
+  options: unknown,
+  sensitive: boolean
+): { work: RollbackWork; built: Built } | undefined => {
+  if (options === undefined) {
+    return undefined;
+  }
+  if (!isPlainObject(options)) {
+    throw new TypeError(
+      `A step's rollback options are { rollback, rollbackConfig? }, not ${options === null ? "null" : describe(options)}`
+    );
+  }
+  const { rollback, rollbackConfig } = readSettings(
+    "A step's rollback options",
+    options,
+    ["rollback", "rollbackConfig"] as const
+  );
+  if (!isRollbackWork(rollback)) {
+    throw new TypeError(
+      `A step's rollback is a function, not ${rollback === null ? "null" : describe(rollback)}`
+    );
+  }
+  if (rollbackConfig === undefined) {
+    return {
+      work: rollback,
+      built: build(defaultRetries, undefined, sensitive),
+    };
+  }
+  if (!isPlainObject(rollbackConfig)) {
+    throw new TypeError(
+      `A rollback's config is { retries?, timeout? }, not ${rollbackConfig === null ? "null" : describe(rollbackConfig)}`
+    );
+  }
+  const { retries, timeout } = readSettings(
+    "A rollback's config",
+    rollbackConfig,
+    ["retries", "timeout"] as const
+  );
+  return {
+    work: rollback,
+    built: build(readRetries(retries), timeout, sensitive),
+  };
+};
+
+const callOf = (
+  work: StepWork,
+  settings: Settings,
+  rollbackOptions: unknown
+): StepCall => {
+  const rollback = readRollback(rollbackOptions, settings.sensitive);
+  const { config } = build(
+    settings.retries,
+    settings.timeout,
+    settings.sensitive,
+    rollback?.built.fields
+  );
+  return rollback === undefined
+    ? { work, config }
+    : {
+        work,
+        config,
+        rollback: { work: rollback.work, config: rollback.built.config },
+      };
 };
 
 /**
- * `step.do(name, callback)` or `step.do(name, config, callback)`. A config
- * that isn't valid is a TypeError to the definition, before anything is
- * journaled.
+ * `step.do(name, callback, rollback?)` or `step.do(name, config, callback,
+ * rollback?)`. A config or rollback that isn't valid is a TypeError to the
+ * definition, before anything is journaled.
  */
 export const readCall = (rest: unknown[]): StepCall => {
-  const [first, second] = rest;
-  if (rest.length === 1 && isWork(first)) {
-    return { work: first, config: configOf(defaultRetries) };
+  const [first, second, third] = rest;
+  if (isWork(first) && rest.length <= 2) {
+    return callOf(first, defaultSettings, second);
   }
-  if (rest.length === 2 && isWork(second)) {
-    return { work: second, config: readConfig(first) };
+  if (isWork(second) && rest.length >= 2 && rest.length <= 3) {
+    return callOf(second, readConfig(first), third);
   }
-  // A rollback (`do(name, callback, rollback)`) comes with rollbacks.
   throw new TypeError(
-    "step.do takes a name, an optional config and a callback; rollbacks aren't supported yet"
+    "step.do takes a name, an optional config, a callback and optional rollback options"
   );
 };
 

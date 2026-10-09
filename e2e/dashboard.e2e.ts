@@ -3,13 +3,16 @@ import { expect } from "@playwright/test";
 import { test } from "./csp.ts";
 import { seedDependencyRequest } from "./dependency-request.ts";
 import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { pileOf, toCard } from "./pile.ts";
 
 // The dashboard, from the nav: what waits on the person, what could be
 // better (only for someone with signals), and, for admins, the latest of
-// the audit trail. What fills To do is the failed-run, held-write and
-// approval journeys' (notifications, chat, activity).
+// the audit trail. What waits is a pile of cards gone through one at a
+// time, and what is settled on its own page under it; what fills them is
+// the failed-run, held-write and approval journeys' (notifications, chat,
+// activity, screen approval).
 
-test("someone with nothing waiting is told so, and sees no signals or activity", async ({
+test("someone with nothing waiting sees no pile, and no signals or activity", async ({
   browser,
 }) => {
   const { user } = peopleIn("dashboard");
@@ -23,8 +26,11 @@ test("someone with nothing waiting is told so, and sees no signals or activity",
   await expect(
     page.getByRole("heading", { level: 1, name: "Dashboard" })
   ).toBeVisible();
-  const toDo = page.getByRole("region", { name: "To do" });
-  await expect(toDo.getByText("Nothing waits on you.")).toBeVisible();
+  // A pile nothing is on isn't there at all.
+  await expect(page.getByRole("region", { name: "To do" })).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "Waiting elsewhere" })
+  ).toHaveCount(0);
   await expect(
     page.getByRole("region", { name: "Could be better" })
   ).toHaveCount(0);
@@ -93,18 +99,61 @@ test("someone given the permission approves the packages proposed for an engine,
       platformPeers: {},
     },
   });
+  // A second request, so the pile has more than one card to go through.
+  const { id: other } = await asBuilder.api.apps.create({ name: "Ledger" });
+  await seedDependencyRequest({
+    app: other,
+    requestedBy: builder.userId,
+    purpose: "Format the ledger's amounts.",
+    targets: ["browser"],
+    approved: false,
+    graph: {
+      direct: [{ name: "money", version: "1.0.0" }],
+      packages: [
+        {
+          name: "money",
+          version: "1.0.0",
+          origin,
+          integrity: `sha512-${"C".repeat(86)}==`,
+          license: "MIT",
+          dependencies: [],
+          peers: [],
+        },
+      ],
+      platformPeers: {},
+    },
+  });
 
   // An admin manages who approves, and is asked nothing without it.
   const adminPage = await pageOf(browser, admin);
   await adminPage.goto("/dashboard");
-  await expect(adminPage.getByRole("region", { name: "To do" })).toBeVisible();
+  await expect(
+    adminPage.getByRole("heading", { level: 1, name: "Dashboard" })
+  ).toBeVisible();
   await expect(
     adminPage.getByRole("article", { name: "Packages for Totals" })
   ).toHaveCount(0);
 
   const page = await pageOf(browser, approver);
   await page.goto("/dashboard");
-  const card = page.getByRole("article", { name: "Packages for Totals" });
+  let card = await toCard(page, "Packages for Totals");
+  // Skipped, it goes to the back of the pile, and is still there to do.
+  const pile = pileOf(page);
+  await pile.getByRole("button", { name: "Skip" }).click();
+  await expect(card).toHaveCount(0);
+  card = await toCard(page, "Packages for Totals");
+  await expect(pile.getByText(/^\d+ of \d+$/u)).toHaveText(
+    /^(?<count>\d+) of \k<count>$/u
+  );
+  // The arrow keys go to the card before and after, round the pile.
+  await card
+    .getByRole("button", { name: "Show the packages for Totals" })
+    .focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(card).toHaveCount(0);
+  await page.keyboard.press("ArrowLeft");
+  await expect(card).toBeVisible();
+
   await expect(
     card.getByText("Draw the monthly totals as a chart.")
   ).toBeVisible();
@@ -116,13 +165,13 @@ test("someone given the permission approves the packages proposed for an engine,
   await expect(
     card.getByText(/resolved these packages from the npm registry/u)
   ).toBeVisible();
-  // Approving waits for the whole graph to be shown; denying doesn't.
+  // Approving waits for the whole graph to be shown; rejecting doesn't.
   const approveButton = card.getByRole("button", {
     name: "Approve the packages for Totals",
   });
   await expect(approveButton).toBeDisabled();
   await expect(
-    card.getByRole("button", { name: "Deny the packages for Totals" })
+    card.getByRole("button", { name: "Reject the packages for Totals" })
   ).toBeEnabled();
   await card
     .getByRole("button", { name: "Show the packages for Totals" })
@@ -134,6 +183,11 @@ test("someone given the permission approves the packages proposed for an engine,
   await approveButton.click();
 
   await expect(card).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "Approved: Packages for Totals." })
+  ).toHaveCount(1);
   await expect
     .poll(async () => {
       const { approved } = await asBuilder.api.dependencies.status(app);

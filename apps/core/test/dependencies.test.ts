@@ -23,7 +23,7 @@ import {
 import {
   admitDependencies,
   decideDependency,
-  proposeDependencies,
+  proposeForTests,
 } from "../src/dependencies/requests.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
@@ -123,7 +123,7 @@ const proposeAs = async (
   person: Person,
   proposal: DependencyProposal
 ): Promise<DependencyRequest> =>
-  await proposeDependencies(env, await person.api.whoami(), proposal);
+  await proposeForTests(env, await person.api.whoami(), proposal);
 
 /** Calls `method` of an RPC stub whatever its type says, as any client can. */
 const callAnyway = async (
@@ -728,7 +728,7 @@ describe("dependency approval", () => {
 
     let back: DependencyRequest | undefined;
     const events = await auditedDuring(async () => {
-      back = await proposeDependencies(
+      back = await proposeForTests(
         { ...env, DB: db },
         identity,
         proposalFor(app)
