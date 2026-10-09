@@ -117,7 +117,7 @@ export const objectOf = (
   if (object.type === "app") {
     const engine = appName(directory, object.appId);
     const covered = coveredExports(actions, exports.get(object.appId));
-    return i18n._(msg`Exports of ${engine}: ${covered}`);
+    return i18n._(msg`Exports of ${ph({ domain: engine })}: ${covered}`);
   }
   if (object.type === "platform" && actions.includes("guests")) {
     // Consent in plain words: who reaches what, and at whose cost.
@@ -134,7 +134,7 @@ export const objectOf = (
   }
   const { workflowId } = object;
   const engine = appName(directory, object.appId);
-  return i18n._(msg`Workflow ${workflowId} of ${engine}`);
+  return i18n._(msg`Workflow ${workflowId} of ${ph({ domain: engine })}`);
 };
 
 /**

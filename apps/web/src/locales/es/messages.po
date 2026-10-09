@@ -146,16 +146,16 @@ msgid "{domain} already keeps {type} records here: this domain's won't apply."
 msgstr "{domain} ya guarda aquí registros de tipo {type}: los de este dominio no se aplicarán."
 
 #: src/dashboard/dependency-requests.tsx
-msgid "{engine} doesn't get these packages."
-msgstr "{engine} no recibe estos paquetes."
+msgid "{domain} doesn't get these packages."
+msgstr "{domain} no recibe estos paquetes."
 
 #: src/dashboard/dependency-requests.tsx
-msgid "{engine} may use exactly these packages from now on."
-msgstr "{engine} podrá usar exactamente estos paquetes a partir de ahora."
+msgid "{domain} may use exactly these packages from now on."
+msgstr "{domain} podrá usar exactamente estos paquetes a partir de ahora."
 
 #: src/activity/audit-log.tsx
-msgid "{engine}: run of {workflowId}"
-msgstr "{engine}: ejecución de {workflowId}"
+msgid "{domain}: run of {workflowId}"
+msgstr "{domain}: ejecución de {workflowId}"
 
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
@@ -687,8 +687,8 @@ msgid "Approve the apps of version {version}"
 msgstr "Aprobar las aplicaciones de la versión {version}"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Approve the packages for {engine}"
-msgstr "Aprobar los paquetes para {engine}"
+msgid "Approve the packages for {domain}"
+msgstr "Aprobar los paquetes para {domain}"
 
 #: src/engines/screen-approval.tsx
 msgid "Approved"
@@ -1537,8 +1537,8 @@ msgid "Exports"
 msgstr "Exportaciones"
 
 #: src/activity/pending.tsx
-msgid "Exports of {engine}: {covered}"
-msgstr "Exportaciones de {engine}: {covered}"
+msgid "Exports of {domain}: {covered}"
+msgstr "Exportaciones de {domain}: {covered}"
 
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
@@ -1739,8 +1739,8 @@ msgid "Guest chats. This domain can invite people who aren't members to a short 
 msgstr "Chats de invitados. Este dominio puede invitar a personas que no son miembros a un chat breve con un modelo mediante un enlace, y leer lo que escriben. Los invitados no acceden a nada más; sus chats gastan el presupuesto de modelos de quien los invita"
 
 #: src/activity/audit-log.tsx
-msgid "Guest of {engine}, invited for {person}"
-msgstr "Invitado de {engine}, invitado para {person}"
+msgid "Guest of {domain}, invited for {person}"
+msgstr "Invitado de {domain}, invitado para {person}"
 
 #: src/activity/audit-log.tsx
 msgid "Hash"
@@ -2648,8 +2648,8 @@ msgid "Package"
 msgstr "Paquete"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Packages for {engine}"
-msgstr "Paquetes para {engine}"
+msgid "Packages for {domain}"
+msgstr "Paquetes para {domain}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -2885,8 +2885,8 @@ msgid "Reject all"
 msgstr "Rechazar todo"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Reject the packages for {engine}"
-msgstr "Rechazar los paquetes para {engine}"
+msgid "Reject the packages for {domain}"
+msgstr "Rechazar los paquetes para {domain}"
 
 #: src/dashboard/pile-cards.tsx
 msgid "Reject this request?"
@@ -3204,8 +3204,8 @@ msgid "Show or hide the sidebar"
 msgstr "Mostrar u ocultar la barra lateral"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Show the packages for {engine}"
-msgstr "Mostrar los paquetes para {engine}"
+msgid "Show the packages for {domain}"
+msgstr "Mostrar los paquetes para {domain}"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Showing the first {count} of {total}. Refine your search to find others."
@@ -4125,8 +4125,8 @@ msgid "Workflow"
 msgstr "Flujo de trabajo"
 
 #: src/activity/pending.tsx
-msgid "Workflow {workflowId} of {engine}"
-msgstr "Flujo de trabajo {workflowId} de {engine}"
+msgid "Workflow {workflowId} of {domain}"
+msgstr "Flujo de trabajo {workflowId} de {domain}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Workflow not found"

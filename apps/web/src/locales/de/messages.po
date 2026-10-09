@@ -143,19 +143,19 @@ msgstr "Die Prüfung von {doc} in {where} ist seit {late, plural, one {# Tag} ot
 
 #: src/activity/pending.tsx
 msgid "{domain} already keeps {type} records here: this domain's won't apply."
-msgstr "{domain} führt hier bereits Datensätze vom Typ {type}: die dieses Bereichs gelten nicht."
+msgstr "{domain} führt hier bereits Datensätze vom Typ {type}: die dieser Domäne gelten nicht."
 
 #: src/dashboard/dependency-requests.tsx
-msgid "{engine} doesn't get these packages."
-msgstr "{engine} erhält diese Pakete nicht."
+msgid "{domain} doesn't get these packages."
+msgstr "{domain} erhält diese Pakete nicht."
 
 #: src/dashboard/dependency-requests.tsx
-msgid "{engine} may use exactly these packages from now on."
-msgstr "{engine} darf ab jetzt genau diese Pakete verwenden."
+msgid "{domain} may use exactly these packages from now on."
+msgstr "{domain} darf ab jetzt genau diese Pakete verwenden."
 
 #: src/activity/audit-log.tsx
-msgid "{engine}: run of {workflowId}"
-msgstr "{engine}: Lauf von {workflowId}"
+msgid "{domain}: run of {workflowId}"
+msgstr "{domain}: Lauf von {workflowId}"
 
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
@@ -256,11 +256,11 @@ msgstr "{name} ist überall abgemeldet."
 
 #: src/chat/builds-state.ts
 msgid "{name} no longer changes the domain's data (write → read)"
-msgstr "{name} ändert die Daten des Bereichs nicht mehr (schreiben → lesen)"
+msgstr "{name} ändert die Daten der Domäne nicht mehr (schreiben → lesen)"
 
 #: src/chat/builds-state.ts
 msgid "{name} now changes the domain's data (read → write)"
-msgstr "{name} ändert jetzt die Daten des Bereichs (lesen → schreiben)"
+msgstr "{name} ändert jetzt die Daten der Domäne (lesen → schreiben)"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{name}, per {key}"
@@ -431,7 +431,7 @@ msgstr "Ein Modellaufruf wurde abgelehnt"
 
 #: src/screens/screen-frame.tsx
 msgid "A new version of this domain is available."
-msgstr "Eine neue Version dieses Bereichs ist verfügbar."
+msgstr "Eine neue Version dieser Domäne ist verfügbar."
 
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow asked for this answer."
@@ -491,7 +491,7 @@ msgstr "Hinzugefügt"
 
 #: src/activity/audit-words.ts
 msgid "Added a member to a domain"
-msgstr "Ein Mitglied zu einem Bereich hinzugefügt"
+msgstr "Ein Mitglied zu einer Domäne hinzugefügt"
 
 #: src/chat/builds.tsx
 msgid "Added parameter {name}"
@@ -511,7 +511,7 @@ msgstr "Workflow hinzugefügt:"
 
 #: src/chat/builds.tsx
 msgid "Added: it acts for whoever uses the domain, with everything the domain holds"
-msgstr "Hinzugefügt: Er handelt für jeden, der den Bereich nutzt, mit allem, was der Bereich hat"
+msgstr "Hinzugefügt: Er handelt für jeden, der die Domäne nutzt, mit allem, was die Domäne hat"
 
 #: src/labels.ts
 msgid "Admin"
@@ -573,7 +573,7 @@ msgstr "Alle Aufrufe zusammen"
 
 #: src/chat/side-panel.tsx
 msgid "All domains"
-msgstr "Alle Bereiche"
+msgstr "Alle Domänen"
 
 #: src/chat/builds.tsx
 msgid "All workflow tests pass."
@@ -601,7 +601,7 @@ msgstr "Ein Admin hat das Unternehmensgedächtnis noch nicht eingerichtet."
 
 #: src/engines/screen-approval.tsx
 msgid "An admin said this domain's data may go to apps nobody approved, so its apps run without approval, unless their approval was taken back."
-msgstr "Ein Admin hat festgelegt, dass die Daten dieses Bereichs an Apps gehen dürfen, die niemand freigegeben hat. Seine Apps laufen daher ohne Freigabe, außer ihre Freigabe wurde zurückgenommen."
+msgstr "Ein Admin hat festgelegt, dass die Daten dieser Domäne an Apps gehen dürfen, die niemand freigegeben hat. Ihre Apps laufen daher ohne Freigabe, außer ihre Freigabe wurde zurückgenommen."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "An amount in {currency} has at most {digits, plural, one {# decimal} other {# decimals}}."
@@ -613,23 +613,23 @@ msgstr "Ein Betrag in {currency} hat keine Nachkommastellen."
 
 #: src/engines/screen-approval.tsx
 msgid "An app is code that runs in people's browsers. It gets this domain's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
-msgstr "Eine App ist Code, der im Browser der Nutzer läuft. Sie erhält die Daten dieses Bereichs erst, wenn ein Admin genau diesen Code genehmigt hat, und eine Änderung am Code braucht eine neue Genehmigung. Lesen Sie zuerst den Code: Genehmigter Code kann das, was er erhält, weiterhin anderswohin senden. Mit der Genehmigung sagen Sie also, dass Sie ihm vertrauen."
+msgstr "Eine App ist Code, der im Browser der Nutzer läuft. Sie erhält die Daten dieser Domäne erst, wenn ein Admin genau diesen Code genehmigt hat, und eine Änderung am Code braucht eine neue Genehmigung. Lesen Sie zuerst den Code: Genehmigter Code kann das, was er erhält, weiterhin anderswohin senden. Mit der Genehmigung sagen Sie also, dass Sie ihm vertrauen."
 
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "An app is what this domain's team works in, standing on its workflows and integrations. Ask Grasp in chat to build one."
-msgstr "In einer App arbeitet das Team dieses Bereichs, gestützt auf seine Workflows und Integrationen. Bitten Sie Grasp im Chat, eine zu bauen."
+msgstr "In einer App arbeitet das Team dieser Domäne, gestützt auf ihre Workflows und Integrationen. Bitten Sie Grasp im Chat, eine zu bauen."
 
 #: src/activity/audit-words.ts
 msgid "An app nobody approved was refused the domain's data"
-msgstr "Einer App, die niemand genehmigt hat, wurden die Daten des Bereichs verweigert"
+msgstr "Einer App, die niemand genehmigt hat, wurden die Daten der Domäne verweigert"
 
 #: src/activity/pending.tsx
 msgid "Another domain already keeps {type} records here: this domain's won't apply."
-msgstr "Ein anderer Bereich führt hier bereits Datensätze vom Typ {type}: die dieses Bereichs gelten nicht."
+msgstr "Eine andere Domäne führt hier bereits Datensätze vom Typ {type}: die dieser Domäne gelten nicht."
 
 #: src/activity/pending.tsx
 msgid "Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again."
-msgstr "Seit diese Liste geladen wurde, ist eine andere Version dieses Bereichs aktuell geworden. Die Liste zeigt sie jetzt: Prüfen Sie diese Version und genehmigen Sie dann erneut."
+msgstr "Seit diese Liste geladen wurde, ist eine andere Version dieser Domäne aktuell geworden. Die Liste zeigt sie jetzt: Prüfen Sie diese Version und genehmigen Sie dann erneut."
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter: team"
@@ -687,8 +687,8 @@ msgid "Approve the apps of version {version}"
 msgstr "Die Apps von Version {version} genehmigen"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Approve the packages for {engine}"
-msgstr "Die Pakete für {engine} genehmigen"
+msgid "Approve the packages for {domain}"
+msgstr "Die Pakete für {domain} genehmigen"
 
 #: src/engines/screen-approval.tsx
 msgid "Approved"
@@ -746,7 +746,7 @@ msgstr "Grasp fragen"
 
 #: src/chat/side-panel.tsx
 msgid "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
-msgstr "Bitten Sie Grasp, eine zu erstellen. Während es daran arbeitet, steht der Bereich neben dem Chat zur Vorschau, bevor er vorgeschlagen wird."
+msgstr "Bitten Sie Grasp, eine zu erstellen. Während es daran arbeitet, steht die Domäne neben dem Chat zur Vorschau, bevor sie vorgeschlagen wird."
 
 #: src/workflows/fix-in-chat.tsx
 msgid "Ask the agent to fix"
@@ -865,7 +865,7 @@ msgstr "Ein Modell aufgerufen"
 
 #: src/activity/audit-words.ts
 msgid "Called another domain"
-msgstr "Einen anderen Bereich aufgerufen"
+msgstr "Eine andere Domäne aufgerufen"
 
 #: src/chat/builds.tsx
 msgid "Calls {tools} (any of their methods): may change things"
@@ -901,7 +901,7 @@ msgstr "Eine Verbindung geändert"
 
 #: src/activity/audit-words.ts
 msgid "Changed a domain"
-msgstr "Einen Bereich geändert"
+msgstr "Eine Domäne geändert"
 
 #: src/activity/audit-words.ts
 msgid "Changed a member"
@@ -953,7 +953,7 @@ msgstr "Geändert, was aus freigegebenen Paketen gebaut wird"
 
 #: src/activity/audit-words.ts
 msgid "Changed whether a domain's data needs approved apps"
-msgstr "Geändert, ob die Daten eines Bereichs genehmigte Apps erfordern"
+msgstr "Geändert, ob die Daten einer Domäne genehmigte Apps erfordern"
 
 #: src/activity/audit-words.ts
 msgid "Changed which integrations are offered"
@@ -965,7 +965,7 @@ msgstr "Workflow geändert:"
 
 #: src/chat/builds.tsx
 msgid "Changed: it acts for whoever uses the domain, with everything the domain holds"
-msgstr "Geändert: Er handelt für jeden, der den Bereich nutzt, mit allem, was der Bereich hat"
+msgstr "Geändert: Er handelt für jeden, der die Domäne nutzt, mit allem, was die Domäne hat"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
@@ -977,11 +977,11 @@ msgstr "Ändert etwas"
 
 #: src/chat/builds-state.ts
 msgid "changes the domain's data"
-msgstr "ändert die Daten des Bereichs"
+msgstr "ändert die Daten der Domäne"
 
 #: src/chat/builds.tsx
 msgid "Changes the domain's data"
-msgstr "Ändert die Daten des Bereichs"
+msgstr "Ändert die Daten der Domäne"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
@@ -1199,7 +1199,7 @@ msgstr "konnte nicht gelesen werden"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "Couldn't load this domain's workflows."
-msgstr "Die Workflows dieses Bereichs konnten nicht geladen werden."
+msgstr "Die Workflows dieser Domäne konnten nicht geladen werden."
 
 #: src/activity/audit-words.ts
 msgid "Created a collection"
@@ -1357,20 +1357,20 @@ msgstr "Lässt sich gerade nicht bauen"
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Domain"
-msgstr "Bereich"
+msgstr "Domäne"
 
 #: src/connections/connection-list.tsx
 msgid "Domain {domain}"
-msgstr "Bereich {domain}"
+msgstr "Domäne {domain}"
 
 #: src/screens/screen-frame.tsx
 msgid "Domain app"
-msgstr "Bereichs-App"
+msgstr "Domänen-App"
 
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Domain not found"
-msgstr "Bereich nicht gefunden"
+msgstr "Domäne nicht gefunden"
 
 #: src/chat/side-panel.tsx
 #: src/frame/app-sidebar.tsx
@@ -1378,11 +1378,11 @@ msgstr "Bereich nicht gefunden"
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "Domains"
-msgstr "Bereiche"
+msgstr "Domänen"
 
 #: src/connections/connection-list.tsx
 msgid "Domains and agents with a permission"
-msgstr "Bereiche und Agenten mit einer Berechtigung"
+msgstr "Domänen und Agenten mit einer Berechtigung"
 
 #: src/routes/_shell.onboarding.index.tsx
 msgctxt "onboarding stage status"
@@ -1416,7 +1416,7 @@ msgstr "Ein Ereignis verworfen, das kein Workflow annehmen konnte"
 
 #: src/routes/_shell.domains.index.tsx
 msgid "Each domain runs one part of the business: its workflows, apps and connections."
-msgstr "Jeder Bereich steuert einen Teil des Geschäfts: seine Workflows, Apps und Verbindungen."
+msgstr "Jede Domäne steuert einen Teil des Geschäfts: ihre Workflows, Apps und Verbindungen."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Each person"
@@ -1537,8 +1537,8 @@ msgid "Exports"
 msgstr "Exporte"
 
 #: src/activity/pending.tsx
-msgid "Exports of {engine}: {covered}"
-msgstr "Exporte von {engine}: {covered}"
+msgid "Exports of {domain}: {covered}"
+msgstr "Exporte von {domain}: {covered}"
 
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
@@ -1736,11 +1736,11 @@ msgstr "Gastkonten können sich nicht anmelden. Verwenden Sie ein eigenes Konto 
 
 #: src/activity/pending.tsx
 msgid "Guest chats. This domain can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
-msgstr "Gast-Chats. Dieser Bereich kann Personen, die keine Mitglieder sind, über einen Link zu einem kurzen Chat mit einem Modell einladen und lesen, was sie schreiben. Gäste erreichen sonst nichts; ihre Chats verbrauchen das Modellbudget der einladenden Person"
+msgstr "Gast-Chats. Diese Domäne kann Personen, die keine Mitglieder sind, über einen Link zu einem kurzen Chat mit einem Modell einladen und lesen, was sie schreiben. Gäste erreichen sonst nichts; ihre Chats verbrauchen das Modellbudget der einladenden Person"
 
 #: src/activity/audit-log.tsx
-msgid "Guest of {engine}, invited for {person}"
-msgstr "Gast von {engine}, eingeladen für {person}"
+msgid "Guest of {domain}, invited for {person}"
+msgstr "Gast von {domain}, eingeladen für {person}"
 
 #: src/activity/audit-log.tsx
 msgid "Hash"
@@ -1883,7 +1883,7 @@ msgstr "Ihr Zugriff ist abgelaufen. Das Grasp-Team kann sie nicht neu verbinden:
 
 #: src/connections/connection-list.tsx
 msgid "Its access ran out. Sign in again with the same account: domains and agents keep their permissions for it."
-msgstr "Der Zugriff ist abgelaufen. Melden Sie sich mit demselben Konto erneut an: Bereiche und Agenten behalten ihre Berechtigungen dafür."
+msgstr "Der Zugriff ist abgelaufen. Melden Sie sich mit demselben Konto erneut an: Domänen und Agenten behalten ihre Berechtigungen dafür."
 
 #: src/routes/_shell.domains.index.tsx
 msgid "Its contents couldn't be read."
@@ -1899,7 +1899,7 @@ msgstr "Seine Parameter lassen sich nicht aus seinem Code lesen."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
-msgstr "Sein Zeitplan wurde gestoppt: Sein Lauf konnte {maxFailedStarts}-mal hintereinander nicht starten. Er startet wieder, wenn der Zeitplan unter Parameter gesetzt wird oder eine neue Version des Bereichs aktuell wird."
+msgstr "Sein Zeitplan wurde gestoppt: Sein Lauf konnte {maxFailedStarts}-mal hintereinander nicht starten. Er startet wieder, wenn der Zeitplan unter Parameter gesetzt wird oder eine neue Version der Domäne aktuell wird."
 
 #: src/chat/builds.tsx
 msgid "Its steps can't be read from its code, so any step may do anything its code does, calling {tools}."
@@ -1911,7 +1911,7 @@ msgstr "Die Schritte lassen sich nicht aus dem Code lesen, also kann jeder Schri
 
 #: src/connections/connection-list.tsx
 msgid "Its tokens are deleted, every domain and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
-msgstr "Ihre Tokens werden gelöscht, jeder Bereich und jeder Agent verliert sie, und Aktionen, die auf sie warten, werden verworfen. Verbinden Sie sie erneut, um sie wieder zu nutzen."
+msgstr "Ihre Tokens werden gelöscht, jede Domäne und jeder Agent verliert sie, und Aktionen, die auf sie warten, werden verworfen. Verbinden Sie sie erneut, um sie wieder zu nutzen."
 
 #: src/chat/thread.tsx
 msgid "Jump to the newest message"
@@ -2242,7 +2242,7 @@ msgstr "Kein Aufruf muss in der EU bleiben."
 #: src/chat/side-panel.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "No domains yet"
-msgstr "Noch keine Bereiche"
+msgstr "Noch keine Domänen"
 
 #: src/activity/audit-log.tsx
 msgid "No events match in the latest stretch of the log."
@@ -2284,7 +2284,7 @@ msgstr "Für diese Instanz ist noch kein Modell eingerichtet."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "No packages were approved for this domain before."
-msgstr "Für diesen Bereich wurden bisher keine Pakete genehmigt."
+msgstr "Für diese Domäne wurden bisher keine Pakete genehmigt."
 
 #: src/chat/builds.tsx
 msgid "No permissions."
@@ -2304,7 +2304,7 @@ msgstr "Keine Teams"
 
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "No workflow in this domain yet."
-msgstr "In diesem Bereich gibt es noch keinen Workflow."
+msgstr "In dieser Domäne gibt es noch keinen Workflow."
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "No workflow needs attention: nothing waits for a decision, nothing failed lately."
@@ -2329,7 +2329,7 @@ msgstr "Niemand hat rechtzeitig geantwortet, daher ist diese Entscheidung geschl
 
 #: src/screens/screen-frame.tsx
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
-msgstr "Noch hat niemand den Code dieser App für die Daten des Bereichs genehmigt. Ein Admin kann das auf der Seite des Bereichs tun."
+msgstr "Noch hat niemand den Code dieser App für die Daten der Domäne genehmigt. Ein Admin kann das auf der Seite der Domäne tun."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Nobody matches."
@@ -2460,7 +2460,7 @@ msgstr "Gerade braucht nichts Grasp."
 
 #: src/chat/builds.tsx
 msgid "Nothing runs yet: this would be the domain's first current version."
-msgstr "Noch läuft nichts: Dies wäre die erste aktuelle Version des Bereichs."
+msgstr "Noch läuft nichts: Dies wäre die erste aktuelle Version der Domäne."
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "Nothing spent yet."
@@ -2534,7 +2534,7 @@ msgstr "Bereiche des Onboardings"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
-msgstr "Nur die als geeignet für sensible Daten markierten Modelle dürfen Daten aus einer sensiblen Sammlung (markiert unter Wissen) oder einer sensiblen Verbindung erhalten, oder aus einem Chat, einem Bereich oder einem Lauf, der eine davon gelesen hat."
+msgstr "Nur die als geeignet für sensible Daten markierten Modelle dürfen Daten aus einer sensiblen Sammlung (markiert unter Wissen) oder einer sensiblen Verbindung erhalten, oder aus einem Chat, einer Domäne oder einem Lauf, der eine davon gelesen hat."
 
 #: src/knowledge/collection-markers.tsx
 msgid "Only the owner"
@@ -2595,7 +2595,7 @@ msgstr "Chat öffnen"
 
 #: src/workflows/workflows-table.tsx
 msgid "Open the domain {name}"
-msgstr "Bereich {name} öffnen"
+msgstr "Domäne {name} öffnen"
 
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
@@ -2612,15 +2612,15 @@ msgstr "oder wählen Sie sie auf Ihrem Computer aus"
 
 #: src/chat/builds-state.ts
 msgid "Other domains may no longer call {name}"
-msgstr "Andere Bereiche dürfen {name} nicht mehr aufrufen"
+msgstr "Andere Domänen dürfen {name} nicht mehr aufrufen"
 
 #: src/chat/builds-state.ts
 msgid "Other domains may now call {name}"
-msgstr "Andere Bereiche dürfen jetzt {name} aufrufen"
+msgstr "Andere Domänen dürfen jetzt {name} aufrufen"
 
 #: src/chat/builds-state.ts
 msgid "Other domains may now call {name}, which {does}"
-msgstr "Andere Bereiche dürfen jetzt {name} aufrufen, das {does}"
+msgstr "Andere Domänen dürfen jetzt {name} aufrufen, das {does}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
@@ -2648,8 +2648,8 @@ msgid "Package"
 msgstr "Paket"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Packages for {engine}"
-msgstr "Pakete für {engine}"
+msgid "Packages for {domain}"
+msgstr "Pakete für {domain}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -2712,7 +2712,7 @@ msgstr "Person"
 
 #: src/activity/pending.tsx
 msgid "Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it"
-msgstr "Plattformstatistiken. Dieser Bereich kann die Anzahl der Läufe und Signale jedes Bereichs lesen und sie allen zeigen, die ihn nutzen"
+msgstr "Plattformstatistiken. Diese Domäne kann die Anzahl der Läufe und Signale jeder Domäne lesen und sie allen zeigen, die sie nutzen"
 
 #: src/activity/audit-log.tsx
 msgid "Platform update"
@@ -2781,7 +2781,7 @@ msgstr "Lesen"
 
 #: src/activity/audit-words.ts
 msgid "Read a domain's statistics"
-msgstr "Die Statistiken eines Bereichs gelesen"
+msgstr "Die Statistiken einer Domäne gelesen"
 
 #: src/activity/audit-words.ts
 msgid "Read a knowledge document"
@@ -2830,7 +2830,7 @@ msgstr "Nur lesen"
 
 #: src/connections/connect-dialog.tsx
 msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "„Nur lesen“ ist angehakt, wo Composio angibt, dass ein Werkzeug nur liest; Grasp prüft das nicht. Ein Werkzeug, das nur liest, läuft ohne Nachfrage. Ein Aufruf jedes anderen Werkzeugs aus einem Chat oder durch eine Person, die einen Bereich nutzt, wartet auf deren Bestätigung; ein Workflow-Lauf führt ihn als einen seiner Schritte aus. Markieren Sie ein Werkzeug nur als „Nur lesen“, wenn es nichts ändert: Falsch markiert, ändert es Dinge ohne Nachfrage."
+msgstr "„Nur lesen“ ist angehakt, wo Composio angibt, dass ein Werkzeug nur liest; Grasp prüft das nicht. Ein Werkzeug, das nur liest, läuft ohne Nachfrage. Ein Aufruf jedes anderen Werkzeugs aus einem Chat oder durch eine Person, die eine Domäne nutzt, wartet auf deren Bestätigung; ein Workflow-Lauf führt ihn als einen seiner Schritte aus. Markieren Sie ein Werkzeug nur als „Nur lesen“, wenn es nichts ändert: Falsch markiert, ändert es Dinge ohne Nachfrage."
 
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
@@ -2850,7 +2850,7 @@ msgstr "Liest"
 
 #: src/chat/builds-state.ts
 msgid "reads the domain's data"
-msgstr "liest die Daten des Bereichs"
+msgstr "liest die Daten der Domäne"
 
 #: src/knowledge/uploads.tsx
 msgid "Ready"
@@ -2885,8 +2885,8 @@ msgid "Reject all"
 msgstr "Alle ablehnen"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Reject the packages for {engine}"
-msgstr "Die Pakete für {engine} ablehnen"
+msgid "Reject the packages for {domain}"
+msgstr "Die Pakete für {domain} ablehnen"
 
 #: src/dashboard/pile-cards.tsx
 msgid "Reject this request?"
@@ -2935,7 +2935,7 @@ msgstr "Workflow entfernt:"
 
 #: src/chat/builds.tsx
 msgid "Removed: it acts for whoever uses the domain, with everything the domain holds"
-msgstr "Entfernt: Er handelte für jeden, der den Bereich nutzt, mit allem, was der Bereich hat"
+msgstr "Entfernt: Er handelte für jeden, der die Domäne nutzt, mit allem, was die Domäne hat"
 
 #: src/chat/chat-list.tsx
 msgid "Rename"
@@ -3204,8 +3204,8 @@ msgid "Show or hide the sidebar"
 msgstr "Seitenleiste ein- oder ausblenden"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Show the packages for {engine}"
-msgstr "Die Pakete für {engine} anzeigen"
+msgid "Show the packages for {domain}"
+msgstr "Die Pakete für {domain} anzeigen"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Showing the first {count} of {total}. Refine your search to find others."
@@ -3525,7 +3525,7 @@ msgstr "Die App konnte nicht geladen werden."
 
 #: src/screens/screen-frame.tsx
 msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
-msgstr "Die Genehmigung für den Code dieser App wurde zurückgenommen, und die App wurde gestoppt. Ein Admin kann ihn auf der Seite des Bereichs erneut genehmigen."
+msgstr "Die Genehmigung für den Code dieser App wurde zurückgenommen, und die App wurde gestoppt. Ein Admin kann ihn auf der Seite der Domäne erneut genehmigen."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
@@ -3567,7 +3567,7 @@ msgstr "Standard, {each}"
 
 #: src/chat/builds.tsx
 msgid "The domains this chat builds didn't load."
-msgstr "Die Bereiche, die dieser Chat erstellt, wurden nicht geladen."
+msgstr "Die Domänen, die dieser Chat erstellt, wurden nicht geladen."
 
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
@@ -3672,7 +3672,7 @@ msgstr "Es gibt noch keine Sammlungen, die Sie lesen können."
 
 #: src/routes/_shell.domains.index.tsx
 msgid "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
-msgstr "Es gibt noch keine Bereiche, die Sie öffnen können. Bereiche entstehen im Chat: Beschreiben Sie einen Teil Ihrer Arbeit, und Grasp baut die Workflows und Apps dazu."
+msgstr "Es gibt noch keine Domänen, die Sie öffnen können. Domänen entstehen im Chat: Beschreiben Sie einen Teil Ihrer Arbeit, und Grasp baut die Workflows und Apps dazu."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "There is no data rule: any allowed model may take sensitive data."
@@ -3748,16 +3748,16 @@ msgstr "Dieses Dokument ist leer."
 
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "This domain doesn't use an integration yet."
-msgstr "Dieser Bereich nutzt noch keine Integration."
+msgstr "Diese Domäne nutzt noch keine Integration."
 
 #: src/screens/screen-frame.tsx
 msgid "This domain has no such app."
-msgstr "Dieser Bereich hat keine solche App."
+msgstr "Diese Domäne hat keine solche App."
 
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/screens/screen-frame.tsx
 msgid "This domain has no version to run yet."
-msgstr "Dieser Bereich hat noch keine Version zum Ausführen."
+msgstr "Diese Domäne hat noch keine Version zum Ausführen."
 
 #: src/connections/connection-list.tsx
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
@@ -3962,11 +3962,11 @@ msgstr "Wartet auf Sie"
 
 #: src/activity/audit-words.ts
 msgid "Was called by another domain"
-msgstr "Wurde von einem anderen Bereich aufgerufen"
+msgstr "Wurde von einer anderen Domäne aufgerufen"
 
 #: src/activity/audit-words.ts
 msgid "Was refused adding a member to a domain"
-msgstr "Durfte kein Mitglied zu einem Bereich hinzufügen"
+msgstr "Durfte kein Mitglied zu einer Domäne hinzufügen"
 
 #: src/activity/audit-words.ts
 msgid "Was refused packages nobody approved"
@@ -4015,7 +4015,7 @@ msgstr "Was es gebracht hat"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What its tools do, as its provider declares them. Domains and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
-msgstr "Was die Tools tun, wie der Anbieter sie angibt. Bereiche und Agenten nutzen nur, was ihnen erlaubt ist, und ein Tool, das etwas ändert, wartet auf die Bestätigung seiner Person."
+msgstr "Was die Tools tun, wie der Anbieter sie angibt. Domänen und Agenten nutzen nur, was ihnen erlaubt ist, und ein Tool, das etwas ändert, wartet auf die Bestätigung seiner Person."
 
 #: src/chat/builds.tsx
 msgid "What makes it run on its own can't be read from its code."
@@ -4027,7 +4027,7 @@ msgstr "Was Grasp braucht"
 
 #: src/chat/builds.tsx
 msgid "What other domains may call"
-msgstr "Was andere Bereiche aufrufen dürfen"
+msgstr "Was andere Domänen aufrufen dürfen"
 
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "What should the next person at Grasp know?"
@@ -4048,7 +4048,7 @@ msgstr "Was Stephen in jedes Interview mitnimmt. Was das Gespräch offen ließ, 
 
 #: src/chat/builds.tsx
 msgid "What the domain holds"
-msgstr "Was der Bereich hat"
+msgstr "Was die Domäne hat"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
@@ -4077,7 +4077,7 @@ msgstr "Wo das Onboarding steht, Phase für Phase."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
-msgstr "Welche Bereiche und Agenten Berechtigungen haben: {why}"
+msgstr "Welche Domänen und Agenten Berechtigungen haben: {why}"
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
@@ -4125,8 +4125,8 @@ msgid "Workflow"
 msgstr "Workflow"
 
 #: src/activity/pending.tsx
-msgid "Workflow {workflowId} of {engine}"
-msgstr "Workflow {workflowId} von {engine}"
+msgid "Workflow {workflowId} of {domain}"
+msgstr "Workflow {workflowId} von {domain}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Workflow not found"
@@ -4156,7 +4156,7 @@ msgstr "Workflows und mehr"
 
 #: src/workflows/workflows-table.tsx
 msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it into a domain."
-msgstr "Workflows entstehen im Chat: Beschreiben Sie, was von selbst laufen soll, und Grasp baut es in einen Bereich."
+msgstr "Workflows entstehen im Chat: Beschreiben Sie, was von selbst laufen soll, und Grasp baut es in eine Domäne."
 
 #: src/dashboard/failed-workflows.tsx
 #: src/dashboard/to-do.tsx
@@ -4217,7 +4217,7 @@ msgstr "Sie sind als Grasp-Mitarbeiter angemeldet, für begrenzte Zeit."
 
 #: src/screens/screen-frame.tsx
 msgid "You can't open this domain's apps: your role doesn't allow it, or the domain has read data you can't read."
-msgstr "Sie können die Apps dieses Bereichs nicht öffnen: Ihre Rolle erlaubt es nicht, oder der Bereich hat Daten gelesen, die Sie nicht lesen dürfen."
+msgstr "Sie können die Apps dieser Domäne nicht öffnen: Ihre Rolle erlaubt es nicht, oder die Domäne hat Daten gelesen, die Sie nicht lesen dürfen."
 
 #: src/connections/connect-dialog.tsx
 msgid "You come back to {app}’s page here."

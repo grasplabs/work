@@ -146,16 +146,16 @@ msgid "{domain} already keeps {type} records here: this domain's won't apply."
 msgstr "{domain} houdt hier al records van het type {type} bij: die van dit domein gelden niet."
 
 #: src/dashboard/dependency-requests.tsx
-msgid "{engine} doesn't get these packages."
-msgstr "{engine} krijgt deze pakketten niet."
+msgid "{domain} doesn't get these packages."
+msgstr "{domain} krijgt deze pakketten niet."
 
 #: src/dashboard/dependency-requests.tsx
-msgid "{engine} may use exactly these packages from now on."
-msgstr "{engine} mag vanaf nu precies deze pakketten gebruiken."
+msgid "{domain} may use exactly these packages from now on."
+msgstr "{domain} mag vanaf nu precies deze pakketten gebruiken."
 
 #: src/activity/audit-log.tsx
-msgid "{engine}: run of {workflowId}"
-msgstr "{engine}: run van {workflowId}"
+msgid "{domain}: run of {workflowId}"
+msgstr "{domain}: run van {workflowId}"
 
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
@@ -687,8 +687,8 @@ msgid "Approve the apps of version {version}"
 msgstr "De apps van versie {version} goedkeuren"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Approve the packages for {engine}"
-msgstr "De pakketten voor {engine} goedkeuren"
+msgid "Approve the packages for {domain}"
+msgstr "De pakketten voor {domain} goedkeuren"
 
 #: src/engines/screen-approval.tsx
 msgid "Approved"
@@ -1537,8 +1537,8 @@ msgid "Exports"
 msgstr "Exports"
 
 #: src/activity/pending.tsx
-msgid "Exports of {engine}: {covered}"
-msgstr "Exports van {engine}: {covered}"
+msgid "Exports of {domain}: {covered}"
+msgstr "Exports van {domain}: {covered}"
 
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
@@ -1739,8 +1739,8 @@ msgid "Guest chats. This domain can invite people who aren't members to a short 
 msgstr "Gastchats. Dit domein kan mensen die geen lid zijn via een link uitnodigen voor een korte chat met een model, en teruglezen wat ze schrijven. Gasten bereiken verder niets; hun chats gaan ten koste van het modelbudget van wie hen uitnodigt"
 
 #: src/activity/audit-log.tsx
-msgid "Guest of {engine}, invited for {person}"
-msgstr "Gast van {engine}, uitgenodigd voor {person}"
+msgid "Guest of {domain}, invited for {person}"
+msgstr "Gast van {domain}, uitgenodigd voor {person}"
 
 #: src/activity/audit-log.tsx
 msgid "Hash"
@@ -2648,8 +2648,8 @@ msgid "Package"
 msgstr "Pakket"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Packages for {engine}"
-msgstr "Pakketten voor {engine}"
+msgid "Packages for {domain}"
+msgstr "Pakketten voor {domain}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -2885,8 +2885,8 @@ msgid "Reject all"
 msgstr "Alles afwijzen"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Reject the packages for {engine}"
-msgstr "De pakketten voor {engine} afwijzen"
+msgid "Reject the packages for {domain}"
+msgstr "De pakketten voor {domain} afwijzen"
 
 #: src/dashboard/pile-cards.tsx
 msgid "Reject this request?"
@@ -3204,8 +3204,8 @@ msgid "Show or hide the sidebar"
 msgstr "Zijbalk tonen of verbergen"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Show the packages for {engine}"
-msgstr "De pakketten voor {engine} tonen"
+msgid "Show the packages for {domain}"
+msgstr "De pakketten voor {domain} tonen"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Showing the first {count} of {total}. Refine your search to find others."
@@ -4125,8 +4125,8 @@ msgid "Workflow"
 msgstr "Workflow"
 
 #: src/activity/pending.tsx
-msgid "Workflow {workflowId} of {engine}"
-msgstr "Workflow {workflowId} van {engine}"
+msgid "Workflow {workflowId} of {domain}"
+msgstr "Workflow {workflowId} van {domain}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Workflow not found"

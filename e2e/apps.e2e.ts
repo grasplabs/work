@@ -202,12 +202,21 @@ test("a builder finds an engine in the list, opens it and uses its app with live
     page.getByRole("link", { name: "Open full page" })
   ).toHaveAttribute("href", `/domains/${app}/apps/counter/full`);
 
-  // An old link to the screen still leads to it.
+  // An old link to the screen still leads to it, from before apps were
+  // engines and from before engines were Domains, and to its full page.
   await page.goto(`/apps/${app}/screens/counter`);
   await expect(page).toHaveURL(
     new RegExp(`/domains/${app}/apps/counter$`, "u")
   );
   await counterScreen(page);
+  await page.goto(`/engines/${app}/apps/counter`);
+  await expect(page).toHaveURL(
+    new RegExp(`/domains/${app}/apps/counter$`, "u")
+  );
+  await page.goto(`/engines/${app}/apps/counter/full`);
+  await expect(page).toHaveURL(
+    new RegExp(`/domains/${app}/apps/counter/full$`, "u")
+  );
 });
 
 test("the sidebar shows everyone the sections, and Settings each person the sections they may open", async ({
