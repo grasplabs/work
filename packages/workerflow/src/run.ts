@@ -109,9 +109,10 @@
 // A step's result is kept as codec text (codec.ts) or, for a byte stream,
 // as chunks in this object's storage (streams.ts). A result the step can't
 // keep ends the run, as it does on Cloudflare: the definition doesn't get
-// to catch it, and it isn't retried. Observers read the run's history
-// (history.ts), where a sensitive step's result is redacted; the raw result
-// is for the run's own replay and the host's inspection (`stepOutput`).
+// to catch it, and it isn't retried. Observers subscribe to the run's
+// history (history.ts, subscription.ts), where a sensitive step's result
+// is redacted; the raw result is for the run's own replay and the host's
+// inspection (`stepOutput`).
 import { DurableObject } from "cloudflare:workers";
 
 import { Activation, superseded, suspended } from "./activation.ts";
@@ -130,8 +131,13 @@ import type {
   WorkflowDefinition,
 } from "./contracts.ts";
 import { errorRecord, namedError, parseError } from "./errors.ts";
-import { readHistory } from "./history.ts";
-import type { HistoryEvent } from "./history.ts";
+import {
+  buildEvent,
+  endedBy,
+  forgetHistoryIn,
+  readNextEvent,
+  recordStartIn,
+} from "./history.ts";
 import type { Schedule } from "./identity.ts";
 import {
   createJournal,
@@ -159,6 +165,8 @@ import {
   defaultMaxStreamBytes,
   replayStream,
 } from "./streams.ts";
+import { Subscription } from "./subscription.ts";
+import type { SubscriptionResult } from "./subscription.ts";
 
 /** What `WorkflowRun.journal()` returns. */
 export type { Journal } from "./journal.ts";
@@ -290,6 +298,41 @@ export type RestartOutcome =
   | "missing";
 
 export type DeleteOutcome = "deleted" | "missing";
+
+/**
+ * Where a subscription starts, and what it delivers: the binding read and
+ * checked them (instance.ts).
+ */
+export interface SubscribeCommand {
+  /** The last event ID the subscriber has; 0 for all of them. */
+  cursor: number;
+  /** The event types it takes; null for every type. */
+  filter: string[] | null;
+}
+
+/** A subscription's place in the run's history, in the run object. */
+interface Observer {
+  cursor: number;
+  /** The types it takes, or null for every type. */
+  readonly types: ReadonlySet<string> | null;
+  /** The same, as the history reads it: a JSON array, or null. */
+  readonly filter: string | null;
+  /** Set while it waits for the next write; called by that write. */
+  wake: (() => void) | undefined;
+  closed: boolean;
+  /** Closed to make room for a newer one (maxSubscriptions). */
+  cutOff: boolean;
+}
+
+/**
+ * The most subscriptions a run object keeps open. Each holds a cursor and
+ * a filter, and nothing it hasn't read yet, however far it is behind; a
+ * caller that never disposes of them (or whose session ended while one
+ * waited) would still add one each time. Past this, the oldest is cut
+ * off: its `next` fails, as an RPC failure would, and its caller takes it
+ * up again from its cursor.
+ */
+export const maxSubscriptions = 100;
 
 /** Which step a restart starts from; null for the run's start. */
 export interface RestartCommand {
@@ -500,12 +543,15 @@ const maxTombstoneMs = 365 * 24 * 60 * 60 * 1000;
  * left at that expiry while a tombstone is left. So a run created under
  * an ID after another was deleted, whatever it does (runs, waits, pauses,
  * ends), never keeps a tombstone past its horizon; alarm() expires what
- * is due, then does the run's own work. Everything else is the storage's
- * own, failures included.
+ * is due, then does the run's own work. `written` is called after each
+ * transaction commits, so subscriptions waiting for the next event read
+ * again: every write that changes the run's state after its creation is
+ * one. Everything else is the storage's own, failures included.
  */
 const sharingAlarm = (
   storage: DurableObjectStorage,
-  horizon: () => number
+  horizon: () => number,
+  written: () => void
 ): DurableObjectStorage => {
   const expiry = (): number | null =>
     nextTombstoneExpiry(storage.sql, horizon());
@@ -516,6 +562,13 @@ const sharingAlarm = (
   };
   return new Proxy(storage, {
     get: (target, property) => {
+      if (property === "transactionSync") {
+        return <T>(closure: () => T): T => {
+          const result = target.transactionSync(closure);
+          written();
+          return result;
+        };
+      }
       if (property === "setAlarm") {
         return async (time: number | Date): Promise<void> => {
           // Read with no await before the call: the same turn as the
@@ -590,13 +643,35 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * is set, so a subclass's own is the one used; one the host got wrong
    * counts as the default here, and is refused where it is checked.
    */
-  readonly #store: DurableObjectStorage = sharingAlarm(this.ctx.storage, () => {
-    try {
-      return this.#tombstoneHorizon();
-    } catch {
-      return defaultTombstoneMs;
+  readonly #store: DurableObjectStorage = sharingAlarm(
+    this.ctx.storage,
+    () => {
+      try {
+        return this.#tombstoneHorizon();
+      } catch {
+        return defaultTombstoneMs;
+      }
+    },
+    () => {
+      this.#wakeObservers();
     }
-  });
+  );
+
+  /**
+   * The subscriptions open on this object, each only its cursor and filter:
+   * what they deliver is read from the history, so an object evicted or
+   * killed loses nothing a subscriber reconnecting with its cursor needs.
+   */
+  readonly #observers = new Set<Observer>();
+
+  /** Lets every subscription waiting for an event read again. */
+  #wakeObservers(): void {
+    for (const observer of this.#observers) {
+      const { wake } = observer;
+      observer.wake = undefined;
+      wake?.();
+    }
+  }
 
   /** The tombstone horizon, checked: whole milliseconds, 1 to 365 days. */
   #tombstoneHorizon(): number {
@@ -755,6 +830,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       command.retention.successMs,
       command.retention.errorMs
     );
+    recordStartIn(storage.sql, now);
     // No await between the insert and this: one write.
     await storage.setAlarm(now);
     return "created";
@@ -816,7 +892,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
 
   /**
    * The run's whole journal, as plain data: raw, a sensitive step's result
-   * too, for the host's own inspection. Observers read `history`.
+   * too, for the host's own inspection. Observers subscribe.
    */
   journal(): Journal | undefined {
     return hasJournal(this.ctx.storage.sql)
@@ -825,13 +901,94 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
-   * What observers are shown of the run, in order: a sensitive step's
-   * result is `"[REDACTED]"`, a stream result its length and hash.
+   * A subscription to the run's events after `cursor` (subscription.ts),
+   * or undefined when there is no run. It sees what the run has done so
+   * far, then each write as it commits, and is done once the run's end
+   * has been delivered or filtered out, or the run is removed. Like every
+   * method here, only the host reaches it: the host decides who may
+   * observe a run before it subscribes for them.
    */
-  history(): HistoryEvent[] {
-    return hasJournal(this.ctx.storage.sql)
-      ? readHistory(this.ctx.storage.sql)
-      : [];
+  subscribe(command: SubscribeCommand): Subscription | undefined {
+    if (this.#run() === undefined) {
+      return undefined;
+    }
+    const observer: Observer = {
+      cursor: command.cursor,
+      types: command.filter === null ? null : new Set(command.filter),
+      filter: command.filter === null ? null : JSON.stringify(command.filter),
+      wake: undefined,
+      closed: false,
+      cutOff: false,
+    };
+    // A Set keeps the order observers were added in: the first is oldest.
+    for (const oldest of this.#observers) {
+      if (this.#observers.size < maxSubscriptions) {
+        break;
+      }
+      oldest.cutOff = true;
+      this.#close(oldest);
+    }
+    this.#observers.add(observer);
+    return new Subscription(
+      async () => await this.#nextEvent(observer),
+      () => {
+        this.#close(observer);
+      }
+    );
+  }
+
+  /** Ends `observer`'s subscription, and a `next` of it that waits. */
+  #close(observer: Observer): void {
+    observer.closed = true;
+    this.#observers.delete(observer);
+    const { wake } = observer;
+    observer.wake = undefined;
+    wake?.();
+  }
+
+  /**
+   * The next event `observer` is to see: read from the history after its
+   * cursor, or waited for until a write adds one. The read and the wait
+   * are set up in one synchronous turn, so no write falls between them.
+   */
+  async #nextEvent(observer: Observer): Promise<SubscriptionResult> {
+    const { sql } = this.ctx.storage;
+    while (!observer.closed) {
+      const run = this.#run();
+      if (run === undefined) {
+        // Deleted, or purged: there is nothing more to see.
+        return { done: true, value: undefined };
+      }
+      const row = readNextEvent(sql, observer.cursor, observer.filter);
+      if (row === undefined) {
+        if (endedBy(sql, observer.cursor)) {
+          return { done: true, value: undefined };
+        }
+        const next = Promise.withResolvers<boolean>();
+        observer.wake = () => {
+          next.resolve(true);
+        };
+        // oxlint-disable-next-line no-await-in-loop -- one event at a time, waited for
+        await next.promise;
+        continue;
+      }
+      observer.cursor = row.seq;
+      // oxlint-disable-next-line no-await-in-loop -- the one event this call answers with
+      const event = await buildEvent(sql, run, row);
+      const filtered =
+        observer.types !== null && !observer.types.has(event.type);
+      // Only a run's end is read past the filter: it ends the
+      // subscription, delivered or not, as on the reference.
+      return filtered
+        ? { done: true, value: undefined }
+        : { done: false, value: event };
+    }
+    if (observer.cutOff) {
+      throw new Error(
+        `instance.subscription_closed: this run has more than ${maxSubscriptions} subscriptions open, and this, the oldest, was closed; subscribe again from the last event ID handled`
+      );
+    }
+    return { done: true, value: undefined };
   }
 
   /**
@@ -1379,12 +1536,19 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         };
       }
       supersedeIn(sql, now);
+      // Observers see the run again from where it starts again, as on the
+      // reference: from its start, queued and started anew; from a step,
+      // with the events of the steps before it.
+      forgetHistoryIn(sql, command.from === null);
       forgetIn(sql, forget);
       sql.exec(
         "UPDATE run SET status = 'queued', execution_uid = ?, output = NULL, error = NULL, ended_at = NULL, lease_until = NULL, paused_at = NULL, rollback_trigger = NULL, rollback_end = NULL, rollback = NULL, rollback_replays = 0, purge_at = NULL, wake_at = ?",
         crypto.randomUUID(),
         now
       );
+      if (command.from === null) {
+        recordStartIn(sql, now);
+      }
       return { outcome: "restarted", alarm: now };
     });
   }
