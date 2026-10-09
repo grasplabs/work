@@ -37,6 +37,7 @@
     "./models": "./src/models.ts",
     "./notifications": "./src/notifications.ts",
     "./onboarding": "./src/onboarding.ts",
+    "./onboarding-documents": "./src/onboarding-documents.ts",
     "./onboarding-gate": "./src/onboarding-gate.ts",
     "./onboarding-staff": "./src/onboarding-staff.ts",
     "./onboarding-summary": "./src/onboarding-summary.ts",

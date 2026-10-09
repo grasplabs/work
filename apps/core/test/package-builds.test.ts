@@ -7,10 +7,11 @@ import type {
 import { graspLockSchema, targetConfigHash } from "@grasp-os/shared/packages";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { buildDependencies, withPin } from "../src/packages/build.ts";
+import { sweepPackageFiles } from "../src/packages/cleanup.ts";
 import { mockIdp } from "./idp.ts";
 import {
   failure,
@@ -22,6 +23,7 @@ import {
   refusalsOf,
 } from "./npm.ts";
 import type { Published } from "./npm.ts";
+import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
 // Building an App's approved packages (src/packages/build.ts) with
@@ -1538,5 +1540,378 @@ describe("what a pin keeps and records", () => {
       dropped,
       touched: Date.now() - Date.parse(touched?.pinnedAt ?? "") < day,
     }).toStrictEqual({ dropped: [hashOf("b")], touched: true });
+  });
+});
+
+describe("one build of an App's packages at a time", () => {
+  it("has a build asked for while another runs wait for it, then hand out what it pinned without building", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    const asked = {
+      app: app.app,
+      graphHash: app.request.graphHash,
+      target: "browser" as const,
+      policyGeneration,
+    };
+    // The second build's looks at the App's lease: the second one means it
+    // found the lease held, and waits.
+    const { promise: secondWaits, resolve: waiting } =
+      Promise.withResolvers<boolean>();
+    let leaseLooks = 0;
+    const secondDb = new Proxy(env.DB, {
+      get: (target, property): unknown =>
+        property === "prepare"
+          ? (query: string) => {
+              if (query.includes("dependency_build_leases")) {
+                leaseLooks += 1;
+                if (leaseLooks === 2) {
+                  waiting(true);
+                }
+              }
+              return target.prepare(query);
+            }
+          : bound(target, property),
+    });
+    let secondStarts = 0;
+    const secondAssets = new Proxy(env.ASSETS, {
+      get: (target, property): unknown =>
+        property === "fetch"
+          ? async (input: RequestInfo, init?: RequestInit) => {
+              secondStarts += 1;
+              return await target.fetch(input, init);
+            }
+          : bound(target, property),
+    });
+    let second: Promise<PackageBuild> | undefined;
+    // The first build, holding the lease, starts its builder: the second
+    // is asked for then, and the first goes on once the second waits.
+    let started = false;
+    const firstAssets = new Proxy(env.ASSETS, {
+      get: (target, property): unknown =>
+        property === "fetch"
+          ? async (input: RequestInfo, init?: RequestInit) => {
+              if (!started) {
+                started = true;
+                second = buildDependencies(
+                  { ...env, DB: secondDb, ASSETS: secondAssets },
+                  identity,
+                  asked
+                );
+                // A deadline well under the test's: a second build that
+                // never waits fails here, saying so, not by a timeout.
+                const waited = await Promise.race([
+                  secondWaits,
+                  scheduler.wait(10_000).then(() => false),
+                ]);
+                if (!waited) {
+                  throw new Error(
+                    "The second build never waited for the lease"
+                  );
+                }
+              }
+              return await target.fetch(input, init);
+            }
+          : bound(target, property),
+    });
+
+    const first = await buildDependencies(
+      { ...env, ASSETS: firstAssets },
+      identity,
+      asked
+    );
+    const shared = await second;
+    expect({
+      same: shared?.hash === first.hash,
+      built: [first.stats === null, shared?.stats === null],
+      secondStarts,
+    }).toStrictEqual({ same: true, built: [false, true], secondStarts: 0 });
+  });
+});
+
+describe("waiting for another build", () => {
+  it("hands out what another build pinned when it never gave its lease back, once the wait is over", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    const built = await buildOf(app, "browser");
+    const pinned = await storedLock(app);
+    await storeLock(app, { ...pinned, artifacts: {} });
+    // Another build holds the lease for minutes yet: it pins the artifact
+    // while this one waits, and dies without giving the lease back.
+    await env.DB.prepare(
+      "INSERT INTO dependency_build_leases (app_id, graph_hash, target, holder, expires_at) VALUES (?, ?, 'browser', 'died', ?)"
+    )
+      .bind(app.app, app.request.graphHash, Date.now() + 5 * 60 * 1000)
+      .run();
+    // The other build's pin lands as this one first looks at the lease,
+    // and this one's minute of waiting is over by its next look.
+    const realNow = Date.now.bind(Date);
+    let pinning: Promise<void> | undefined;
+    const waiting = new Proxy(env.DB, {
+      get: (target, property): unknown =>
+        property === "prepare"
+          ? (query: string) => {
+              if (
+                pinning === undefined &&
+                query.includes("dependency_build_leases")
+              ) {
+                pinning = storeLock(app, pinned);
+                vi.spyOn(Date, "now").mockReturnValue(realNow() + 61_000);
+              }
+              return target.prepare(query);
+            }
+          : bound(target, property),
+    });
+    let handed: PackageBuild | undefined;
+    try {
+      handed = await buildDependencies({ ...env, DB: waiting }, identity, {
+        app: app.app,
+        graphHash: app.request.graphHash,
+        target: "browser",
+        policyGeneration,
+      });
+    } finally {
+      vi.restoreAllMocks();
+      await pinning;
+    }
+    expect({
+      hash: handed.hash === built.hash,
+      built: handed.stats === null,
+    }).toStrictEqual({ hash: true, built: true });
+  });
+
+  it("refuses the artifact another build pinned while it waited when the policy moved on meanwhile", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const admin = await personApi("admin");
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    // Built and pinned once; the pin taken out again, as if no build had
+    // pinned it yet.
+    await buildOf(app, "browser");
+    const pinned = await storedLock(app);
+    await storeLock(app, { ...pinned, artifacts: {} });
+    // Another build holds the lease for a moment.
+    await env.DB.prepare(
+      "INSERT INTO dependency_build_leases (app_id, graph_hash, target, holder, expires_at) VALUES (?, ?, 'browser', 'another', ?)"
+    )
+      .bind(app.app, app.request.graphHash, Date.now() + 1500)
+      .run();
+    // While this one waits, the other pins the artifact and the policy
+    // moves on.
+    let meanwhile: Promise<void> | undefined;
+    const waiting = new Proxy(env.DB, {
+      get: (target, property): unknown =>
+        property === "prepare"
+          ? (query: string) => {
+              if (
+                meanwhile === undefined &&
+                query.includes("dependency_build_leases")
+              ) {
+                meanwhile = (async () => {
+                  await storeLock(app, pinned);
+                  await admin.api.dependencies.grantApprover({
+                    type: "person",
+                    userId: identity.userId,
+                  });
+                })();
+              }
+              return target.prepare(query);
+            }
+          : bound(target, property),
+    });
+    const outcome = await failure(
+      buildDependencies({ ...env, DB: waiting }, identity, {
+        app: app.app,
+        graphHash: app.request.graphHash,
+        target: "browser",
+        policyGeneration,
+      })
+    );
+    await meanwhile;
+    expect(outcome.code).toBe("dependency.policy_changed");
+  });
+});
+
+describe("what a build leaves behind", () => {
+  it("deletes, from the cron, the leases builds left that nobody took again, and only those", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const now = Date.now();
+    // A build of a graph nobody asks for again died holding its lease;
+    // another build holds its lease now.
+    const lease = env.DB.prepare(
+      "INSERT INTO dependency_build_leases (app_id, graph_hash, target, holder, expires_at) VALUES (?, ?, ?, ?, ?)"
+    );
+    await env.DB.batch([
+      lease.bind(app.app, hashOf("a"), "browser", "died", now - 1000),
+      lease.bind(app.app, hashOf("b"), "browser", "building", now + 60_000),
+    ]);
+    await sweepPackageFiles(env, new Date(now));
+    const { results } = await env.DB.prepare(
+      "SELECT holder FROM dependency_build_leases WHERE app_id = ?"
+    )
+      .bind(app.app)
+      .all<{ holder: string }>();
+    expect(results.map(({ holder }) => holder)).toStrictEqual(["building"]);
+  });
+
+  it("reads what the cron sweeps by index, never a whole table", async () => {
+    const recorded = await recordedQueries(async () => {
+      await sweepPackageFiles(env, new Date(Date.now() + 2 * 60 * 60 * 1000));
+    });
+    const swept = recorded.filter(({ query }) =>
+      /package_cleanups|dependency_build_leases/u.test(query)
+    );
+    const plans = await Promise.all(swept.map(planOf));
+    expect({
+      tables: [
+        swept.some(({ query }) => query.includes("package_cleanups")),
+        swept.some(({ query }) => query.includes("dependency_build_leases")),
+      ],
+      scans: plans.flat().filter((step) => fullScan.test(step)),
+    }).toStrictEqual({ tables: [true, true], scans: [] });
+  });
+
+  it("deletes, from the cron, the files of a build whose lock gives up its room right after the build pins them", async () => {
+    const name = named("evicted");
+    await publish(plain(name, "1.0.0"));
+    const app = await approvedApp({ [name]: "1.0.0" }, { targets: ["server"] });
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    const lockText = async (): Promise<string | null> =>
+      await env.DB.prepare(
+        "SELECT lock FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+      )
+        .bind(app.app, app.request.graphHash)
+        .first<string>("lock");
+    // Right after the pin lands, another resolve takes the lock's room,
+    // recording its files for cleanup as it deletes it (locks.ts).
+    let evicted: string | undefined;
+    const racing = new Proxy(env.DB, {
+      get: (target, property): unknown =>
+        property === "batch"
+          ? async (statements: D1PreparedStatement[]) => {
+              const before = await lockText();
+              const results = await target.batch(statements);
+              const after = await lockText();
+              if (evicted === undefined && after !== null && after !== before) {
+                const lock = graspLockSchema.parse(JSON.parse(after));
+                const pins = Object.values(lock.artifacts ?? {}).flatMap(
+                  (each) => Object.values(each).map(({ hash }) => hash)
+                );
+                [evicted] = pins;
+                await target.batch([
+                  target
+                    .prepare(
+                      "INSERT INTO package_cleanups (key, kind, created_at) VALUES (?, 'build', ?) ON CONFLICT (key) DO UPDATE SET created_at = excluded.created_at"
+                    )
+                    .bind(evicted ?? "", Date.now()),
+                  target
+                    .prepare(
+                      "DELETE FROM dependency_locks WHERE app_id = ? AND graph_hash = ?"
+                    )
+                    .bind(app.app, app.request.graphHash),
+                ]);
+              }
+              return results;
+            }
+          : bound(target, property),
+    });
+    const built = await buildDependencies({ ...env, DB: racing }, identity, {
+      app: app.app,
+      graphHash: app.request.graphHash,
+      target: "server",
+      policyGeneration,
+    });
+    const left = await env.FILES.list({
+      prefix: `package-builds/${built.hash}`,
+    });
+
+    const later = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    for (let run = 0; run < 20; run += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await sweepPackageFiles(env, later);
+    }
+    const after = await env.FILES.list({
+      prefix: `package-builds/${built.hash}`,
+    });
+    expect({
+      evicted: evicted === built.hash,
+      left: left.objects.length > 0,
+      after: after.objects.length,
+    }).toStrictEqual({ evicted: true, left: true, after: 0 });
+  });
+
+  it("deletes, from the cron, the files of a build that never pinned them", async () => {
+    const { ui } = await badgeLibrary();
+    const app = await approvedApp({ [ui]: "^1.0.0" });
+    const admin = await personApi("admin");
+    const identity = await app.builder.api.whoami();
+    const { policyGeneration } = await app.builder.api.dependencies.status(
+      app.app
+    );
+    // As the build writes its description, the policy moves on: its pin
+    // is refused, and its files are left.
+    let written: string | undefined;
+    const files = new Proxy(env.FILES, {
+      get: (target, property): unknown =>
+        property === "put"
+          ? async (
+              key: string,
+              value: Parameters<R2Bucket["put"]>[1],
+              options?: R2PutOptions
+            ): Promise<R2Object | null> => {
+              const put = await target.put(key, value, options);
+              if (written === undefined && key.endsWith(".json")) {
+                written = key;
+                await admin.api.dependencies.grantApprover({
+                  type: "person",
+                  userId: identity.userId,
+                });
+              }
+              return put;
+            }
+          : bound(target, property),
+    });
+    const { code } = await failure(
+      buildDependencies({ ...env, FILES: files }, identity, {
+        app: app.app,
+        graphHash: app.request.graphHash,
+        target: "browser",
+        policyGeneration,
+      })
+    );
+    const hash = /package-builds\/(?<hash>[0-9a-f]{64})\.json$/u.exec(
+      written ?? ""
+    )?.groups?.hash;
+    const left = await env.FILES.list({ prefix: `package-builds/${hash}` });
+
+    const later = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    for (let run = 0; run < 20; run += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one run at a time
+      await sweepPackageFiles(env, later);
+    }
+    const after = await env.FILES.list({ prefix: `package-builds/${hash}` });
+    expect({
+      code,
+      left: left.objects.length > 0,
+      after: after.objects.length,
+    }).toStrictEqual({
+      code: "dependency.policy_changed",
+      left: true,
+      after: 0,
+    });
   });
 });

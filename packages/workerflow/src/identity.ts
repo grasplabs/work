@@ -56,12 +56,15 @@ export const runObjectName = (definition: string, instanceId: string): string =>
   JSON.stringify(["workerflow-run", definition, instanceId]);
 
 /**
- * A step occurrence's idempotency key: the run's own random ID, drawn when
- * it was created, then the step's identity. The name is last, so the key
- * reads unambiguously whatever the name holds. A run created again under
- * the same instance ID gets another run ID, and its effects other keys.
+ * A step occurrence's idempotency key: the random ID of the run's
+ * execution the step first ran in, then the step's identity. The name is
+ * last, so the key reads unambiguously whatever the name holds. A retry
+ * keeps the key; a restart draws another execution ID, so a step it runs
+ * again gets another key, and the receiver can tell a deliberate rerun
+ * from a redelivery. A run created again under the same instance ID is
+ * another execution too.
  */
 export const stepKey = (
-  runUid: string,
+  executionUid: string,
   step: { type: string; name: string; occurrence: number }
-): string => `${runUid}:${step.type}:${step.occurrence}:${step.name}`;
+): string => `${executionUid}:${step.type}:${step.occurrence}:${step.name}`;

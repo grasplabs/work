@@ -84,11 +84,15 @@ const share = (some: number, of: number): number => (of === 0 ? 0 : some / of);
 /**
  * What Grasp knows of the company, part by part, from what the onboarding
  * holds; the kickoff by how much of what Stephen needs from it is in
- * (`kickoff`, 0 to 1). The documents, where they live, Pulse and the
- * review come in with their own issues (GRA-299, GRA-300, GRA-304) and
- * count nothing until then.
+ * (`kickoff`, 0 to 1), and the documents once any is shared (`documents`).
+ * Where they live, Pulse and the review come in with their own issues
+ * (GRA-299, GRA-300, GRA-304) and count nothing until then.
  */
-export const knownParts = (view: OnboardingView, kickoff = 0): KnownPart[] => {
+export const knownParts = (
+  view: OnboardingView,
+  kickoff = 0,
+  documents = 0
+): KnownPart[] => {
   const { roster, progress } = view;
   const taking = roster?.teams.filter((team) => !team.off) ?? [];
   const conversations =
@@ -100,7 +104,7 @@ export const knownParts = (view: OnboardingView, kickoff = 0): KnownPart[] => {
     part("kickoff", kickoff),
     part("people", roster === null ? 0 : 1),
     part("sources", 0),
-    part("documents", 0),
+    part("documents", documents),
     part("tools", 0),
     part(
       "leads",
@@ -170,7 +174,13 @@ export const gateView = async (
   now: string = new Date().toISOString()
 ): Promise<GateView> => {
   const { closedAt, openedAt, threshold } = await stored(env);
-  const parts = knownParts(view, await onboardingStore(env).kickoffKnown());
+  const store = onboardingStore(env);
+  const shared = await store.documents();
+  const parts = knownParts(
+    view,
+    await store.kickoffKnown(),
+    shared.length > 0 ? 1 : 0
+  );
   let sum = 0;
   for (const { weight, known } of parts) {
     sum += weight * known;
