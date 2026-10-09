@@ -184,6 +184,20 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
   await expect(
     row.getByRole("link", { name: "1 waiting run of approval" })
   ).toBeVisible();
+  // It has run, so it is at work; its line begins with its engine, which opens it.
+  await expect(page.getByRole("heading", { name: "At work" })).toBeVisible();
+  await expect(
+    row.getByRole("link", { name: `Open the engine ${name}` })
+  ).toHaveAttribute("href", `/engines/${app}`);
+  // A run waits for a decision: it needs attention.
+  await page.getByRole("tab", { name: "Needs attention" }).click();
+  await expect(page).toHaveURL(/tab=needs/u);
+  await expect(
+    page
+      .getByRole("row")
+      .filter({ hasText: name })
+      .getByRole("link", { name: "approval", exact: true })
+  ).toBeVisible();
 
   // The waiting run comes first on the Runs tab, with where to decide it.
   await page.getByRole("tab", { name: "Runs" }).click();
