@@ -345,6 +345,9 @@ export const maxSubscriptions = 100;
 /** How long a subscription's `next` waits for an event by default: 60 s. */
 export const defaultSubscriptionWaitMs = 60_000;
 
+/** The longest a host may let a subscription wait: 10 minutes. */
+export const maxSubscriptionWaitMs = 10 * 60_000;
+
 /** Which step a restart starts from; null for the run's start. */
 export interface RestartCommand {
   from: { name: string; count: number; type: StepType } | null;
@@ -677,6 +680,22 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   protected readonly subscriptionWaitMs: number = defaultSubscriptionWaitMs;
 
   /**
+   * The subscription wait, checked: whole milliseconds from 1 to
+   * `maxSubscriptionWaitMs`. One the host got wrong refuses a run's start,
+   * and closes a subscription that would wait under it, never waits by a
+   * value no timer keeps.
+   */
+  #subscriptionWait(): number {
+    const ms = this.subscriptionWaitMs;
+    if (!Number.isSafeInteger(ms) || ms < 1 || ms > maxSubscriptionWaitMs) {
+      throw new TypeError(
+        `A run's subscriptionWaitMs is a whole number of milliseconds from 1 to ${maxSubscriptionWaitMs}: ${String(ms)}`
+      );
+    }
+    return ms;
+  }
+
+  /**
    * The subscriptions open on this object, each only its cursor and filter:
    * what they deliver is read from the history, so an object evicted or
    * killed loses nothing a subscriber reconnecting with its cursor needs.
@@ -788,6 +807,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   async start(command: StartCommand): Promise<StartOutcome> {
     // Refused before any run exists, rather than at its first alarm.
     this.#rollbackLimits();
+    this.#subscriptionWait();
     const horizon = this.#tombstoneHorizon();
     // The binding resolved and bounded these; this method is the run's
     // boundary, so it refuses anything that isn't a time above 0 and within
@@ -988,7 +1008,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     observer.wake = () => {
       next.resolve(true);
     };
-    const waitMs = this.subscriptionWaitMs;
+    const waitMs = this.#subscriptionWait();
     const timer = setTimeout(() => {
       observer.failure = `no event came within ${waitMs} ms`;
       this.#close(observer);

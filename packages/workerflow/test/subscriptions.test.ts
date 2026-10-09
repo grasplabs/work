@@ -3,13 +3,19 @@
 // a filter, live and after the fact, and how a subscription ends. Process
 // death and reconnecting across it are in test/process.
 import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { Workflow } from "../src/binding.ts";
 import type {
   WorkflowInstanceEvent,
   WorkflowInstanceSubscription,
 } from "../src/contracts.ts";
-import { maxSubscriptions, WorkflowRun } from "../src/run.ts";
+import {
+  maxSubscriptionWaitMs,
+  maxSubscriptions,
+  WorkflowRun,
+} from "../src/run.ts";
 import {
   deliverAlarm,
   ended,
@@ -848,5 +854,50 @@ describe("a deleted run's subscriptions", () => {
     for (const subscription of opened) {
       subscription[Symbol.dispose]();
     }
+  });
+});
+
+describe("a host's subscription wait", () => {
+  it("is a whole number of milliseconds from 1 to 10 minutes: a run object given another starts no run", async () => {
+    const outcome = await new Workflow(env.MISWAITED, "orders")
+      .create({ id: newId() })
+      .then(
+        () => "created",
+        (error: unknown) => (error instanceof Error ? error.message : "?")
+      );
+
+    expect(outcome).toBe(
+      `A run's subscriptionWaitMs is a whole number of milliseconds from 1 to ${maxSubscriptionWaitMs}: 0`
+    );
+  });
+
+  it("over 10 minutes closes a subscription about to wait under it, saying why", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await suspendedOn("napper", id, "nap");
+
+    const refusal = await runInDurableObject(
+      runObject("napper", id),
+      async (run) => {
+        if (!(run instanceof WorkflowRun)) {
+          throw new TypeError("the object isn't a run object");
+        }
+        // As a host that set it so would have.
+        Reflect.set(run, "subscriptionWaitMs", maxSubscriptionWaitMs + 1);
+        const subscription = run.subscribe({ cursor: 0, filter: [] });
+        try {
+          await subscription?.next();
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        } finally {
+          Reflect.set(run, "subscriptionWaitMs", testSubscriptionWaitMs);
+        }
+        return "waited";
+      }
+    );
+
+    expect(refusal).toBe(
+      `A run's subscriptionWaitMs is a whole number of milliseconds from 1 to ${maxSubscriptionWaitMs}: ${maxSubscriptionWaitMs + 1}`
+    );
   });
 });

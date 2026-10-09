@@ -23,7 +23,8 @@
 //             attempt it is of, and what it copied (`detail`)
 //
 // Every event's time is SQLite's clock in the trigger that writes it, one
-// clock for all of them, so they never go back in the order written.
+// clock for all of them, so, per host, they never go back in the order
+// written (a run object moved to another host has that host's clock).
 //
 // A sensitive step's output is redacted as its event is built: no observer
 // gets it, the history never held it, and the raw result stays in the

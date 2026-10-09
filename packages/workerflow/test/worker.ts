@@ -1024,7 +1024,8 @@ export class TestRuns extends WorkflowRun {
   }
 
   /** Short, so a subscription that waits too long is closed soon. */
-  protected override readonly subscriptionWaitMs = testSubscriptionWaitMs;
+  protected override readonly subscriptionWaitMs: number =
+    testSubscriptionWaitMs;
 
   override async alarm(): Promise<void> {
     try {
@@ -1081,6 +1082,11 @@ export const shortTombstoneMs = 1000;
 /** Run objects whose tombstones expire after a second, not 30 days. */
 export class ShortTombstoneRuns extends TestRuns {
   protected override readonly tombstoneMs = shortTombstoneMs;
+}
+
+/** Run objects whose host let a subscription wait no time at all. */
+export class MiswaitedRuns extends TestRuns {
+  protected override readonly subscriptionWaitMs: number = 0;
 }
 
 // The run object of a host that misconfigured it, bound as MISCONFIGURED.
