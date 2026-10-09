@@ -100,7 +100,7 @@ const StudioBar = ({
     <Link
       className={buttonVariants({ variant: "outline" })}
       params={{ engine: draft.app }}
-      to="/engines/$engine"
+      to="/domains/$engine"
     >
       <EyeIcon data-icon="inline-start" />
       <Trans>View app</Trans>

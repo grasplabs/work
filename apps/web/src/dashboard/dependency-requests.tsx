@@ -96,7 +96,7 @@ const Packages = ({ review }: { review: DependencyReview }) => {
     <div className="flex flex-col gap-3">
       {previous === null ? (
         <p className="text-muted-foreground">
-          <Trans>No packages were approved for this engine before.</Trans>
+          <Trans>No packages were approved for this domain before.</Trans>
         </p>
       ) : (
         <div className="text-muted-foreground flex flex-col gap-1">
@@ -366,7 +366,7 @@ export const PackagesCard = ({
         <Link
           className="hover:underline focus-visible:underline"
           params={{ engine: request.app.id }}
-          to="/engines/$engine"
+          to="/domains/$engine"
         >
           {who}
         </Link>

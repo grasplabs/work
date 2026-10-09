@@ -78,7 +78,7 @@ const HeldNotLoaded = ({
     return null;
   }
   return (
-    <ErrorText>{t`Which engines and agents hold permissions: ${why}`}</ErrorText>
+    <ErrorText>{t`Which domains and agents hold permissions: ${why}`}</ErrorText>
   );
 };
 
@@ -265,7 +265,7 @@ const Overview = ({
           </h2>
           <p className="text-muted-foreground">
             <Trans>
-              What its tools do, as its provider declares them. Engines and
+              What its tools do, as its provider declares them. Domains and
               agents use only what they are granted, and a tool that changes
               something waits for its person to confirm it.
             </Trans>

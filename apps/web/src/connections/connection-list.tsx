@@ -69,7 +69,7 @@ const holderOf = (
 ): string =>
   subject.type === "app"
     ? i18n._(
-        msg`Engine ${ph({ engine: appNames.get(subject.appId) ?? subject.appId })}`
+        msg`Domain ${ph({ domain: appNames.get(subject.appId) ?? subject.appId })}`
       )
     : i18n._(msg`Agent ${ph({ agent: subject.agentId })}`);
 
@@ -138,7 +138,7 @@ const Holders = ({
   return (
     <div className="flex flex-col gap-1 text-sm">
       <h4 className="font-medium">
-        <Trans>Engines and agents with a permission</Trans>
+        <Trans>Domains and agents with a permission</Trans>
       </h4>
       {holding.length === 0 ? (
         <p className="text-muted-foreground">
@@ -306,7 +306,7 @@ const Disconnect = ({
             </DialogTitle>
             <DialogDescription>
               <Trans>
-                Its tokens are deleted, every engine and agent loses it, and
+                Its tokens are deleted, every domain and agent loses it, and
                 actions waiting on it are dropped. Connect it again to use it
                 again.
               </Trans>
@@ -417,7 +417,7 @@ const ConnectionItem = ({
       {ranOut && reconnectable ? (
         <p className="text-muted-foreground">
           <Trans>
-            Its access ran out. Sign in again with the same account: engines and
+            Its access ran out. Sign in again with the same account: domains and
             agents keep their permissions for it.
           </Trans>
         </p>

@@ -173,7 +173,7 @@ describe("the Being built section", () => {
     ]);
   });
 
-  it("says what other Apps may call, and highlights what now changes the engine's data", () => {
+  it("says what other Apps may call, and highlights what now changes the domain's data", () => {
     expect([
       exportChangeText({
         name: "book",
@@ -213,21 +213,21 @@ describe("the Being built section", () => {
       }),
     ]).toStrictEqual([
       {
-        text: "Other engines may now call book, which changes the engine's data",
+        text: "Other domains may now call book, which changes the domain's data",
         widens: true,
       },
       {
-        text: "Other engines may now call totals, which reads the engine's data",
+        text: "Other domains may now call totals, which reads the domain's data",
         widens: false,
       },
-      { text: "Other engines may no longer call purge", widens: false },
+      { text: "Other domains may no longer call purge", widens: false },
       {
-        text: "totals now changes the engine's data (read → write)",
+        text: "totals now changes the domain's data (read → write)",
         widens: true,
       },
-      { text: "totals changed: it reads the engine's data", widens: false },
+      { text: "totals changed: it reads the domain's data", widens: false },
       {
-        text: "purge no longer changes the engine's data (write → read)",
+        text: "purge no longer changes the domain's data (write → read)",
         widens: false,
       },
     ]);

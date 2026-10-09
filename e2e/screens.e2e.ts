@@ -65,7 +65,7 @@ const releaseApp = async (
  * takes longer than the default 5 seconds.
  */
 const openScreen = async (page: Page, app: string) => {
-  await page.goto(`/engines/${app}/apps/notes/full`);
+  await page.goto(`/domains/${app}/apps/notes/full`);
   const screen = page.frameLocator('iframe[title="notes app"]');
   await expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible({
     timeout: 20_000,
@@ -102,7 +102,7 @@ test("two people see each other's notes live, in their theme, and a failing scre
   ]);
 
   // The page marks what the App draws as the App's, around the frame.
-  await expect(first.getByText("Engine app", { exact: true })).toBeVisible();
+  await expect(first.getByText("Domain app", { exact: true })).toBeVisible();
   await expect(first.getByRole("heading", { name: "Notes" })).toBeVisible();
 
   // The screen follows its page's theme.
@@ -225,7 +225,7 @@ test("a screen whose open core never answers is given up on in its time, and ope
       server.send(message);
     });
   });
-  await page.goto(`/engines/${app}/apps/notes/full`);
+  await page.goto(`/domains/${app}/apps/notes/full`);
   await stalled.promise;
   await expect(page.getByText(timedOut)).toHaveCount(0);
 
@@ -265,7 +265,7 @@ test("moving to another App's screen never shows the App it left in the chrome",
     sample();
   });
   // Within the page, as a link would: a new document would start afresh.
-  const otherPath = `/engines/${other}/apps/notes/full`;
+  const otherPath = `/domains/${other}/apps/notes/full`;
   await page.evaluate((path) => {
     history.pushState(null, "", path);
     dispatchEvent(new PopStateEvent("popstate"));
@@ -322,6 +322,6 @@ test("a new current version is offered while the screen is open", async ({
 
   await page.clock.fastForward(30_000);
   await expect(
-    page.getByText("A new version of this engine is available.")
+    page.getByText("A new version of this domain is available.")
   ).toBeVisible();
 });

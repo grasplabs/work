@@ -39,7 +39,7 @@ interface Section {
   to:
     | "/"
     | "/knowledge"
-    | "/engines"
+    | "/domains"
     | "/workflows"
     | "/integrations"
     | "/onboarding";
@@ -50,7 +50,7 @@ interface Section {
 const sections: readonly Section[] = [
   { to: "/", label: msg`Chat`, icon: MessagesSquareIcon },
   { to: "/knowledge", label: msg`Knowledge`, icon: BookOpenIcon },
-  { to: "/engines", label: msg`Engines`, icon: CogIcon },
+  { to: "/domains", label: msg`Domains`, icon: CogIcon },
   { to: "/workflows", label: msg`Workflows`, icon: WorkflowIcon },
   { to: "/integrations", label: msg`Integrations`, icon: BlocksIcon },
 ];

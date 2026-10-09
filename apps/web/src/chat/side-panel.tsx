@@ -51,12 +51,12 @@ const OpenedApp = ({
       <div className="flex items-center gap-2">
         <Button onClick={onClose} size="sm" variant="ghost">
           <ArrowLeftIcon data-icon="inline-start" />
-          <Trans>All engines</Trans>
+          <Trans>All domains</Trans>
         </Button>
         <Link
           className="text-sm underline"
           params={{ engine: app.id }}
-          to="/engines/$engine"
+          to="/domains/$engine"
         >
           <Trans>Workflows and more</Trans>
         </Link>
@@ -138,7 +138,7 @@ export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
             aria-hidden="true"
             className="text-muted-foreground size-4"
           />
-          <Trans>Engines</Trans>
+          <Trans>Domains</Trans>
         </h2>
         {opened === undefined ? null : <NotLoaded page={opened} />}
         {apps.data.length === 0 ? (
@@ -148,11 +148,11 @@ export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
                 <CogIcon />
               </EmptyMedia>
               <EmptyTitle>
-                <Trans>No engines yet</Trans>
+                <Trans>No domains yet</Trans>
               </EmptyTitle>
               <EmptyDescription>
                 <Trans>
-                  Ask Grasp to build one. While it works, the engine stands
+                  Ask Grasp to build one. While it works, the domain stands
                   beside the chat, to preview before it is proposed.
                 </Trans>
               </EmptyDescription>
