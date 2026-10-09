@@ -4,7 +4,7 @@ import type { ChatDraft } from "@grasp-os/shared/chat";
 import { failureText } from "@grasp-os/shared/errors";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
   CardContent,
@@ -14,9 +14,8 @@ import {
 } from "@grasp-os/ui/components/card";
 import { i18n } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import { ArrowUpRightIcon, EyeIcon, HammerIcon } from "lucide-react";
+import { Trans, useLingui } from "@lingui/react/macro";
+import { HammerIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -26,7 +25,6 @@ import { formatList } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { PreviewFrame } from "../screens/screen-frame.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import {
@@ -38,19 +36,15 @@ import {
   serverFileLabels,
   serverFileOf,
   versionKey,
-  changedScreens,
-  previewedScreen,
 } from "./builds-state.ts";
 import type { ServerFile } from "./builds-state.ts";
 
-// In the side panel, while the chat's agent builds Apps (`app_builder`):
-// the Apps it is still changing in the chat's own drafts, and the Apps the
-// person builds with a version up for review, which they review (what
-// core says it changes, never the proposer's word) and make current here.
-// The draft written last (or the one the person picks) runs as a preview
-// (`app_preview`), whose server code changes nothing and reads no real
-// data; what goes wrong in it goes to the agent's next check of the draft.
-// Functional only.
+// While the chat's agent builds Apps (`app_builder`): what the chat page
+// reads of them (`useChatBuilds`), the Apps it is still changing in the
+// chat's own drafts, which stand in the studio beside the chat
+// (studio.tsx), and, in the side panel, the Apps the person builds with a
+// version up for review, which they review (what core says it changes,
+// never the proposer's word) and make current there.
 
 /** What the panel read: the person's Apps, and the chat's drafts. */
 interface Builds {
@@ -619,88 +613,57 @@ const PendingVersion = ({
   );
 };
 
-/**
- * The preview of a draft: its first screen, or one it changes the person
- * picks. Loaded afresh at each of the draft's writes, as its key says.
- */
-const DraftPreview = ({
-  chatId,
-  draft,
-  name,
-}: {
-  chatId: string;
-  draft: ChatDraft;
-  name: string;
-}) => {
-  const [picked, setPicked] = useState<string>();
-  const { t } = useLingui();
-  const screens = changedScreens(draft);
-  const screen = previewedScreen(screens, picked);
-  return (
-    <section
-      aria-label={t`Preview of ${name}`}
-      className="flex h-96 flex-col gap-2"
-    >
-      {screens.length > 1 ? (
-        <div className="flex flex-wrap gap-1">
-          {screens.map((one) => (
-            <Button
-              key={one}
-              onClick={() => {
-                setPicked(one);
-              }}
-              size="sm"
-              variant={one === screen ? "secondary" : "ghost"}
-            >
-              {one}
-            </Button>
-          ))}
-        </div>
-      ) : null}
-      <PreviewFrame
-        app={draft.app}
-        chatId={chatId}
-        key={`${draft.app}:${draft.revision}:${screen ?? ""}`}
-        {...(screen === undefined ? {} : { screen })}
-      />
-    </section>
-  );
-};
+/** A read of the builds that came back without them. */
+type BuildsFailed = Exclude<Loaded<Builds>, { state: "ready" }>;
+
+/** What the chat's builds read, and what was made current here since. */
+export interface ChatBuildsRead {
+  /**
+   * The latest builds read; undefined until a read succeeds. A read that
+   * fails later leaves them, so the App being built stays beside the chat.
+   */
+  builds: Builds | undefined;
+  /** Why the latest read failed; undefined once one succeeds. */
+  failure: BuildsFailed | undefined;
+  /** Whether a read the person asked for is under way. */
+  retrying: boolean;
+  /** Reads the builds again, as after a failed read. */
+  retry: () => void;
+  /** Versions made current here (`versionKey`): gone from the panel at once. */
+  madeCurrent: ReadonlySet<string>;
+  /** A version was made current here: read again, whatever the agent does. */
+  onMadeCurrent: (made: string) => void;
+}
 
 /**
- * The Apps being built: the chat's drafts, and versions up for review.
- * Read again whenever the agent stops working (`running` turns false) or
- * writes or drops a draft (`drafts` changes), and after a version is made
- * current here, whatever the agent does. The draft written last, or the
- * one the person picks, shows its preview.
+ * The person's Apps and the chat's drafts, read again whenever the agent
+ * stops working (`running` turns false) or writes or drops a draft
+ * (`drafts` changes), and after a version is made current here or the
+ * person asks again, whatever the agent does. The chat page reads them
+ * once, for the studio and the side panel both.
  */
-export const ChatBuilds = ({
-  chatId,
-  running,
-  drafts,
-}: {
-  chatId: string;
-  running: boolean;
-  drafts: number;
-}) => {
-  // The draft whose preview shows, by App; the latest when none is picked.
-  const [previewing, setPreviewing] = useState<string>();
-  const [builds, setBuilds] = useState<Loaded<Builds>>();
+export const useChatBuilds = (
+  chatId: string,
+  running: boolean,
+  drafts: number
+): ChatBuildsRead => {
+  const [builds, setBuilds] = useState<Builds>();
+  const [failure, setFailure] = useState<BuildsFailed>();
   const [reads, setReads] = useState(0);
-  // Versions made current here: gone from the section at once.
+  // The read the person asked for last, until it ends.
+  const [retried, setRetried] = useState<number>();
   const [madeCurrent, setMadeCurrent] = useState<ReadonlySet<string>>(
     new Set()
   );
   // Only the latest read shows, whichever ends last.
   const latest = useRef(0);
-  // The reads asked for (after making a version current) done so far:
-  // those go whether the agent works or not.
+  // The reads asked for (after making a version current, or again after
+  // a failure) done so far: those go whether the agent works or not.
   const handledReads = useRef(0);
   // The drafts' changes read so far: those go whether the agent works or
   // not, so a preview follows each write.
   const handledDrafts = useRef(-1);
   const core = useCore();
-  const { t } = useLingui();
   useEffect(() => {
     if (
       running &&
@@ -715,33 +678,103 @@ export const ChatBuilds = ({
     const read = latest.current;
     const load = async (): Promise<void> => {
       const found = await readBuilds(core, chatId);
-      if (latest.current === read) {
-        setBuilds(found);
-        if (found.state === "ready") {
-          setMadeCurrent((made) => stillMadeCurrent(made, found.data.apps));
-        }
+      if (latest.current !== read) {
+        return;
+      }
+      setRetried(undefined);
+      if (found.state === "ready") {
+        setBuilds(found.data);
+        setFailure(undefined);
+        setMadeCurrent((made) => stillMadeCurrent(made, found.data.apps));
+      } else {
+        setFailure(found);
       }
     };
     void load();
   }, [core, chatId, running, reads, drafts]);
-  if (builds === undefined) {
+  return {
+    builds,
+    failure,
+    retrying: retried !== undefined,
+    retry: () => {
+      setRetried(reads + 1);
+      setReads(reads + 1);
+    },
+    madeCurrent,
+    onMadeCurrent: (made) => {
+      setMadeCurrent((before) => new Set([...before, made]));
+      setReads(reads + 1);
+    },
+  };
+};
+
+/**
+ * Why the builds didn't load, beside the chat, and a way to read them
+ * again: the App being built would otherwise be missing without a word.
+ */
+export const BuildsFailure = ({ read }: { read: ChatBuildsRead }) => {
+  const { t } = useLingui();
+  const { failure, retrying, retry } = read;
+  if (failure === undefined) {
     return null;
   }
-  if (builds.state !== "ready") {
-    return <NotLoaded page={builds} />;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3.5 py-3 text-sm">
+      <TriangleAlertIcon
+        aria-hidden="true"
+        className="text-destructive size-4 flex-none"
+      />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <p className="font-medium">
+          <Trans>The engines this chat builds didn&apos;t load.</Trans>
+        </p>
+        {/* Gone while trying, so the alert is announced again if it fails again. */}
+        {retrying ? null : <NotLoaded page={failure} />}
+      </div>
+      <Button disabled={retrying} onClick={retry} size="sm" variant="outline">
+        {retrying ? t`Trying again…` : t`Try again`}
+      </Button>
+    </div>
+  );
+};
+
+/** A draft the chat's agent is writing, with its App's name. */
+export interface NamedDraft {
+  draft: ChatDraft;
+  /** The App's name; its ID where the person can't see the App. */
+  name: string;
+}
+
+/** The chat's drafts, as core lists them in the latest builds read; none until one succeeds. */
+export const draftsOf = ({ builds }: ChatBuildsRead): NamedDraft[] => {
+  if (builds === undefined) {
+    return [];
   }
   const names = new Map<string, string>(
-    builds.data.apps.map((app) => [app.id, app.name])
+    builds.apps.map((app) => [app.id, app.name])
   );
-  const pending = pendingToShow(builds.data.apps, madeCurrent);
-  if (builds.data.drafts.length === 0 && pending.length === 0) {
-    return null;
+  return builds.drafts.map((draft) => ({
+    draft,
+    name: names.get(draft.app) ?? draft.app,
+  }));
+};
+
+/**
+ * The side panel's part of the builds: the Apps the person builds with a
+ * version up for review. The drafts themselves stand in the studio, beside
+ * the chat (studio.tsx).
+ */
+export const ChatBuilds = ({ read }: { read: ChatBuildsRead }) => {
+  const { t } = useLingui();
+  const { builds, failure, madeCurrent, onMadeCurrent } = read;
+  const pending =
+    builds === undefined ? [] : pendingToShow(builds.apps, madeCurrent);
+  if (pending.length === 0) {
+    return failure === undefined ? null : <NotLoaded page={failure} />;
   }
-  const previewed =
-    builds.data.drafts.find(({ app }) => app === previewing) ??
-    builds.data.drafts[0];
   return (
     <section aria-label={t`Being built`} className="flex flex-col gap-3">
+      {failure === undefined ? null : <NotLoaded page={failure} />}
       <h3 className="flex items-center gap-2 text-sm font-medium">
         <HammerIcon
           aria-hidden="true"
@@ -749,69 +782,11 @@ export const ChatBuilds = ({
         />
         <Trans>Being built</Trans>
       </h3>
-      {builds.data.drafts.map((draft) => {
-        const engine = names.get(draft.app) ?? draft.app;
-        return (
-          <div
-            className="bg-card flex flex-col gap-3 rounded-xl border p-4 text-sm"
-            key={draft.app}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="truncate font-medium">{engine}</span>
-                <span className="text-muted-foreground">
-                  <Plural
-                    value={draft.changed.length}
-                    one={`${engine}: # file changed in this chat, not proposed yet`}
-                    other={`${engine}: # files changed in this chat, not proposed yet`}
-                  />
-                </span>
-              </div>
-              <div className="flex flex-none items-center gap-1">
-                {draft === previewed ? null : (
-                  <Button
-                    onClick={() => {
-                      setPreviewing(draft.app);
-                    }}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <EyeIcon data-icon="inline-start" />
-                    <Trans>Preview</Trans>
-                  </Button>
-                )}
-                <Link
-                  aria-label={t`Open ${ph({ name: engine })}`}
-                  className={buttonVariants({
-                    size: "icon-sm",
-                    variant: "ghost",
-                  })}
-                  params={{ engine: draft.app }}
-                  to="/engines/$engine"
-                >
-                  <ArrowUpRightIcon />
-                </Link>
-              </div>
-            </div>
-            {draft === previewed ? (
-              <DraftPreview
-                chatId={chatId}
-                draft={previewed}
-                key={previewed.app}
-                name={engine}
-              />
-            ) : null}
-          </div>
-        );
-      })}
       {pending.map((app) => (
         <PendingVersion
           app={app}
           key={versionKey(app.id, app.pendingVersion)}
-          onDone={(made) => {
-            setMadeCurrent((before) => new Set([...before, made]));
-            setReads(reads + 1);
-          }}
+          onDone={onMadeCurrent}
           version={app.pendingVersion}
         />
       ))}

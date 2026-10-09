@@ -157,7 +157,7 @@ const FramedScreen = ({
     onReload?.();
   };
   return (
-    <div className="flex flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex items-center gap-2 border-b p-3 print:hidden">
         <Badge variant="secondary">{label}</Badge>
         <Title className="text-sm font-medium">{appName}</Title>

@@ -14,7 +14,7 @@ import type {
 import { namedError } from "../src/errors.ts";
 import { runObjectName } from "../src/identity.ts";
 import { WorkflowRun } from "../src/run.ts";
-import type { StartCommand, StartOutcome } from "../src/run.ts";
+import type { DeleteOutcome, StartCommand, StartOutcome } from "../src/run.ts";
 
 interface FixtureEnv {
   RUNS: DurableObjectNamespace<Runs>;
@@ -29,8 +29,23 @@ interface FixtureEnv {
  */
 const reportCommitPrefix = "report-commit-";
 
+/**
+ * Runs whose ID starts with this tell the outside world after their
+ * deletion committed and before its answer leaves.
+ */
+const reportDeletePrefix = "report-delete-";
+
+/** Grasp's 30 days, the default retention the fixture keeps. */
+const maxFixtureRetentionMs = 30 * 24 * 60 * 60 * 1000;
+
 /** Short, so recovery after a kill takes about a second, not a minute. */
 const testLeaseMs = 1000;
+
+/**
+ * A tombstone's horizon: long enough for a test to kill and restart
+ * within it, short enough to wait out.
+ */
+const testTombstoneMs = 5000;
 
 /**
  * Long enough for a test to see the run asleep and kill or evict it, short
@@ -330,6 +345,7 @@ const definitionsFor = (
 
 export class Runs extends WorkflowRun<FixtureEnv> {
   protected override readonly leaseMs = testLeaseMs;
+  protected override readonly tombstoneMs = testTombstoneMs;
 
   protected definition({
     definition,
@@ -346,6 +362,36 @@ export class Runs extends WorkflowRun<FixtureEnv> {
       });
     }
     return outcome;
+  }
+
+  override async deleteRun(): Promise<DeleteOutcome> {
+    const instanceId = this.#instanceId();
+    const outcome = await super.deleteRun();
+    if (instanceId?.startsWith(reportDeletePrefix) === true) {
+      await this.env.EFFECTS.fetch("http://effects/deleted", {
+        method: "POST",
+        body: JSON.stringify({ run: instanceId }),
+      });
+    }
+    return outcome;
+  }
+
+  #instanceId(): string | undefined {
+    try {
+      return this.journal()?.run.instance_id;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Test-only: the tables the object holds, the host's own left out. */
+  tables(): string[] {
+    return this.ctx.storage.sql
+      .exec<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name"
+      )
+      .toArray()
+      .map((table) => table.name);
   }
 
   /** Test-only: the stream chunks storage holds, by step and attempt. */
@@ -376,6 +422,8 @@ interface StartBody {
   params?: unknown;
   /** Tell the outside world first, so a test can kill before the start. */
   announce?: boolean;
+  /** The run's own retention, in milliseconds after it completes. */
+  retentionMs?: number;
 }
 
 const start = async (env: FixtureEnv, body: StartBody): Promise<Response> => {
@@ -385,16 +433,24 @@ const start = async (env: FixtureEnv, body: StartBody): Promise<Response> => {
       body: JSON.stringify({ run: body.id }),
     });
   }
-  const workflow = new Workflow(env.RUNS, body.definition);
+  // Limits from a millisecond, so a test can see a purge come due.
+  const workflow = new Workflow(env.RUNS, body.definition, {
+    retentionLimits: { minMs: 1, maxMs: maxFixtureRetentionMs },
+  });
+  const retention =
+    body.retentionMs === undefined
+      ? undefined
+      : { successRetention: body.retentionMs };
   try {
     if (body.key === undefined) {
-      await workflow.create({ id: body.id, params: body.params });
+      await workflow.create({ id: body.id, params: body.params, retention });
       return json({ created: true });
     }
     const { created } = await workflow.admit({
       id: body.id,
       key: body.key,
       params: body.params,
+      retention,
     });
     return json({ created });
   } catch (error) {
@@ -477,6 +533,19 @@ export default {
       }
       case "/journal": {
         return json(await stub.journal());
+      }
+      case "/tables": {
+        return json(await stub.tables());
+      }
+      case "/delete": {
+        try {
+          const result = await new Workflow(env.RUNS, definition).deleteBatch([
+            id,
+          ]);
+          return json(result);
+        } catch (error) {
+          return json({ error: errorText(error) }, 409);
+        }
       }
       case "/evict": {
         try {

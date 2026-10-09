@@ -113,7 +113,12 @@ import {
 } from "./durations.ts";
 import { errorRecord, isNonRetryable, namedError, rebuild } from "./errors.ts";
 import { recordStepCompleted } from "./history.ts";
-import { assertEventType, assertStepName, stepKey } from "./identity.ts";
+import {
+  assertEventType,
+  assertStepName,
+  scheduleOf,
+  stepKey,
+} from "./identity.ts";
 import {
   readAttempt,
   readConsumedEvent,
@@ -121,6 +126,7 @@ import {
   readRollbackWorklist,
   readRun,
   readStep,
+  startRetentionIn,
 } from "./journal.ts";
 import type {
   AttemptRow,
@@ -2557,9 +2563,9 @@ export class Activation {
         ? { status: "complete" }
         : { status: "errored", error: errorRecord(result.error) };
     const ended = this.#write(() =>
-      this.#storage.transactionSync(() => {
+      this.#storage.transactionSync((): number | null => {
         if (!this.#holdsGeneration()) {
-          return false;
+          return null;
         }
         const now = Date.now();
         this.#storage.sql.exec(
@@ -2572,7 +2578,7 @@ export class Activation {
           now,
           this.#generation
         );
-        return true;
+        return startRetentionIn(this.#storage.sql);
       })
     );
     if (ended === failed) {
@@ -2580,18 +2586,25 @@ export class Activation {
       // alarm, left as it was, brings the run back to end it again.
       return;
     }
-    if (!ended) {
+    if (ended === null) {
       this.#letGo();
       return;
     }
     this.#over = true;
+    await this.#armPurge(ended);
+  }
+
+  /**
+   * Sets the alarm to purge the ended run, in the same turn as the write
+   * that ended it. Never throws: the run's end is journaled, and an alarm
+   * left as it was (the watchdog) finds it ended and sets this one again
+   * (run.ts).
+   */
+  async #armPurge(purgeAt: number): Promise<void> {
     try {
-      // In the same write as the end: nothing is left to wake for.
-      await this.#storage.deleteAlarm();
+      await this.#storage.setAlarm(purgeAt);
     } catch (error) {
-      // The run's end is journaled: the alarm left behind finds the run
-      // ended when it comes, and does nothing (run.ts).
-      warnRecovered("workflow_alarm_delete_failed", error);
+      warnRecovered("workflow_alarm_set_failed", error);
     }
   }
 
@@ -2602,6 +2615,11 @@ export class Activation {
         payload: decode(this.#run.params),
         timestamp: new Date(this.#run.created_at),
         instanceId: this.#run.instance_id,
+        workflowName: this.#run.definition,
+        // Only a run a schedule started has it, as on the reference.
+        ...(this.#run.schedule === null
+          ? {}
+          : { schedule: scheduleOf(this.#run.schedule) }),
       };
       return { ok: true, output: await definition.run(event, this.step) };
     } catch (error) {
@@ -2630,7 +2648,7 @@ export class Activation {
       failure = JSON.stringify(errorRecord(settlement.error));
     }
     const settled = this.#write(() =>
-      this.#storage.transactionSync((): "settled" | "rollingBack" | null => {
+      this.#storage.transactionSync((): number | "rollingBack" | null => {
         if (!(halted ? this.#holdsGeneration() : this.#current())) {
           return null;
         }
@@ -2670,7 +2688,7 @@ export class Activation {
           now,
           this.#generation
         );
-        return "settled";
+        return startRetentionIn(sql);
       })
     );
     if (settled === failed) {
@@ -2694,13 +2712,7 @@ export class Activation {
       }
       return;
     }
-    try {
-      // In the same write as the outcome: nothing is left to wake for.
-      await this.#storage.deleteAlarm();
-    } catch (error) {
-      // The run's end is journaled: the alarm left behind finds the run
-      // ended when it comes, and does nothing (run.ts).
-      warnRecovered("workflow_alarm_delete_failed", error);
-    }
+    // In the same write as the outcome: what is left is its purge.
+    await this.#armPurge(settled);
   }
 }

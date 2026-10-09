@@ -14,6 +14,7 @@ import type { WorkflowInstance } from "../src/instance.ts";
 import { defaultLeaseMs, WorkflowRun } from "../src/run.ts";
 import {
   alarmOf,
+  wakeOf,
   deliverAlarm,
   ended,
   journalOf,
@@ -121,7 +122,7 @@ describe("a definition that throws", () => {
     expect(
       labels(id).filter((label) => label.startsWith("undo-"))
     ).toStrictEqual(["undo-ship", "undo-charge"]);
-    await expect(alarmOf("compensated", id)).resolves.toBeNull();
+    await expect(wakeOf("compensated", id)).resolves.toBeNull();
   });
 
   it("retries a rollback under its one key, and refuses it the step API", async () => {

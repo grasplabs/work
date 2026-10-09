@@ -23,11 +23,13 @@ import type { Loaded } from "../load-from-core.tsx";
 import { ScreenFrame } from "../screens/screen-frame.tsx";
 import { useCore } from "../use-core.ts";
 import { ChatBuilds } from "./builds.tsx";
+import type { ChatBuildsRead } from "./builds.tsx";
 
-// Beside the chat: a slot for what the chat is about. The Apps its agent
-// is building (builds.tsx), and one of the person's Apps, its screen
-// running beside the conversation, and a way to its workflows on the
-// App's page.
+// Beside the chat: a slot for what the chat is about. The versions up for
+// review of the Apps its agent builds (builds.tsx; the drafts themselves
+// stand in the studio, studio.tsx), and one of the person's Apps, its
+// screen running beside the conversation, and a way to its workflows on
+// the App's page.
 
 /** The App open in the panel, and what it has to show. */
 interface Opened {
@@ -71,21 +73,29 @@ const OpenedApp = ({
 };
 
 /**
- * The side panel: what the chat's agent is building, and the person's
- * Apps, one of them open.
+ * The side panel: the versions of what the chat's agent built that wait
+ * for review (`builds`, which the chat page reads), and the person's
+ * Apps, one of them open. Which one (`opened`, said back through
+ * `onOpened`) is kept by the chat page, so a panel drawn anew where a
+ * window crossing lg puts it opens the same App again. The Apps are read
+ * each time the panel opens.
  */
 export const SidePanel = ({
-  chatId,
-  running,
-  drafts,
+  builds,
+  opened: openedId,
+  onOpened,
 }: {
-  chatId: string;
-  running: boolean;
-  drafts: number;
+  builds: ChatBuildsRead;
+  opened: string | undefined;
+  onOpened: (app?: string) => void;
 }) => {
   const [apps, setApps] = useState<Loaded<App[]>>();
   const core = useCore();
   const [opened, setOpened] = useState<Loaded<Opened>>();
+  // Only the App opened last shows, whichever read ends last.
+  const latest = useRef<App | null>(null);
+  /** The App open when this panel was drawn: it opens again. */
+  const reopen = useRef(openedId);
   useEffect(() => {
     let current = true;
     const read = async (): Promise<void> => {
@@ -93,8 +103,25 @@ export const SidePanel = ({
         core,
         async (session) => await session.apps.list()
       );
-      if (current) {
-        setApps(found);
+      if (!current) {
+        return;
+      }
+      setApps(found);
+      // One that is gone no longer opens, nor one opened meanwhile.
+      const app =
+        found.state === "ready"
+          ? found.data.find(({ id }) => id === reopen.current)
+          : undefined;
+      if (app === undefined || latest.current !== null) {
+        return;
+      }
+      latest.current = app;
+      const again = await loadFromCore(core, async (session) => ({
+        app,
+        contents: await session.apps.contents(app.id),
+      }));
+      if (current && latest.current === app) {
+        setOpened(again);
       }
     };
     void read();
@@ -102,10 +129,9 @@ export const SidePanel = ({
       current = false;
     };
   }, [core]);
-  // Only the App opened last shows, whichever read ends last.
-  const latest = useRef<App | null>(null);
   const open = async (app: App): Promise<void> => {
     latest.current = app;
+    onOpened(app.id);
     const found = await loadFromCore(core, async (session) => ({
       app,
       contents: await session.apps.contents(app.id),
@@ -120,6 +146,7 @@ export const SidePanel = ({
         onClose={() => {
           latest.current = null;
           setOpened(undefined);
+          onOpened();
         }}
         opened={opened.data}
       />
@@ -133,7 +160,7 @@ export const SidePanel = ({
   }
   return (
     <div className="flex flex-col gap-6">
-      <ChatBuilds chatId={chatId} drafts={drafts} running={running} />
+      <ChatBuilds read={builds} />
       <section aria-labelledby="panel-apps" className="flex flex-col gap-2">
         <h2
           className="flex items-center gap-2 text-sm font-medium"
@@ -157,8 +184,8 @@ export const SidePanel = ({
               </EmptyTitle>
               <EmptyDescription>
                 <Trans>
-                  Ask Grasp to build one. While it works, the engine shows here
-                  to preview before it is proposed.
+                  Ask Grasp to build one. While it works, the engine stands
+                  beside the chat, to preview before it is proposed.
                 </Trans>
               </EmptyDescription>
             </EmptyHeader>
