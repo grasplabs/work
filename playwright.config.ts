@@ -83,6 +83,10 @@ export default defineConfig({
       testMatch: onboardingTests,
       dependencies: ["chromium", "playbook", "firefox", "webkit"],
       workers: 1,
+      // Not tried again: once a link is out the team is told, and nothing
+      // undoes that (the agreements stay as they were), so a second try
+      // would only fail on what the first one did. A failure shows as itself.
+      retries: 0,
     },
   ],
   // Never a server already running: on this checkout's ports (e2e/stack.ts)
