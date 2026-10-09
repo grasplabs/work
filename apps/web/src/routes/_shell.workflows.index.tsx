@@ -23,10 +23,10 @@ import type { Session } from "../core.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import { needsAttention } from "../workflows/lists.ts";
 import { listRuns, listWorkflows, openableApps } from "../workflows/reads.ts";
 import { RunsLog } from "../workflows/runs.tsx";
 import {
-  needsAttention,
   WorkflowsOverview,
   WorkflowsTable,
 } from "../workflows/workflows-table.tsx";

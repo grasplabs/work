@@ -34,6 +34,7 @@ import type { ReactElement, ReactNode } from "react";
 
 import { EngineIcon } from "../engines/engine-icon.tsx";
 import { formatDateTime } from "../format.ts";
+import { listsOf } from "./lists.ts";
 import { RunResult } from "./runs.tsx";
 
 // The workflows table, one line a workflow, as the prototype draws it
@@ -321,10 +322,6 @@ export const WorkflowsTable = ({
   );
 };
 
-/** Whether a workflow needs a person now: runs wait for a decision, failed lately, or its schedule stopped. */
-export const needsAttention = (workflow: WorkflowSummary): boolean =>
-  workflow.waiting > 0 || workflow.failed > 0 || workflow.scheduleStopped;
-
 /** One of the overview's lists: its name over its table, left out while empty. */
 const List = ({
   title,
@@ -351,13 +348,7 @@ export const WorkflowsOverview = ({ rows }: { rows: WorkflowSummary[] }) => {
   if (rows.length === 0) {
     return <WorkflowsTable rows={rows} />;
   }
-  const atWork = rows
-    .filter(({ lastRun }) => lastRun !== null)
-    .toSorted(
-      (one, other) =>
-        Number(needsAttention(other)) - Number(needsAttention(one))
-    );
-  const onTheWay = rows.filter(({ lastRun }) => lastRun === null);
+  const { atWork, onTheWay } = listsOf(rows);
   return (
     <div className="flex flex-col gap-8">
       <List rows={atWork} title={<Trans>At work</Trans>} />
