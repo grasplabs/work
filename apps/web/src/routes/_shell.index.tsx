@@ -8,6 +8,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
+import { BuildsFailure, draftsOf, useChatBuilds } from "../chat/builds.tsx";
 import { ChatList, ChatSidebar } from "../chat/chat-list.tsx";
 import { chatMarkdown } from "../chat/chat-markdown.ts";
 import { useFollowedChat } from "../chat/chat-watch.ts";
@@ -17,6 +18,7 @@ import { HeldWrites } from "../chat/held-writes.tsx";
 import { SidePanel } from "../chat/side-panel.tsx";
 import { ChatSources } from "../chat/sources.tsx";
 import type { SourceName } from "../chat/sources.tsx";
+import { ChatStudio } from "../chat/studio.tsx";
 import { ChatThread } from "../chat/thread.tsx";
 import { useAsk } from "../chat/use-ask.ts";
 import type { Session } from "../core.ts";
@@ -30,8 +32,11 @@ import { loadFromCore } from "../load-from-core.tsx";
 // (grasplabs/prototype `routes/index.tsx`): the person's chats in the page
 // sidebar, and the open one beside them, its answers streaming in as the
 // agent writes them, the changes it holds for the person to confirm, and a
-// side panel with the Apps it builds. A new chat starts on Grasp's buddy
-// and the question "What should we look at today?".
+// side panel with the versions it built up for review. A new chat starts on
+// Grasp's buddy and the question "What should we look at today?", in the
+// middle of the page; once its agent writes a draft of an App, the chat
+// moves left and the App's preview stands on the right (chat/studio.tsx),
+// and the chats' sidebar folds to its rail to give it the room.
 
 interface ChatPage {
   chats: ChatSummary[];
@@ -121,106 +126,138 @@ const fileNameOf = (title: string): string =>
     .replaceAll(/^-+|-+$/gu, "")
     .slice(0, 80) || "grasp-chat";
 
-/** One chat, followed as it streams, with the side panel beside it. */
+/**
+ * One chat, followed as it streams, in the studio with the App its agent
+ * builds (`onBuilding` says whether one stands beside it), and with the
+ * side panel beside it.
+ */
 const OpenChat = ({
   chat,
   models,
   sourceNames,
   panel,
   onPanel,
+  onBuilding,
 }: {
   chat: ChatSummary;
   models: string[];
   sourceNames: ReadonlyMap<string, SourceName>;
   panel: boolean;
   onPanel: (open: boolean) => void;
+  onBuilding: (building: boolean) => void;
 }) => {
   const { view, failure } = useFollowedChat(chat.id);
   const { i18n, t } = useLingui();
   const { composer, ask } = useAsk(chat.id, models);
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   const wide = useSyncExternalStore(onWide, isWide);
+  const builds = useChatBuilds(chat.id, view.running, view.drafts);
+  const drafts = draftsOf(builds);
+  const building = drafts.length > 0;
+  useEffect(() => {
+    onBuilding(building);
+    return () => {
+      onBuilding(false);
+    };
+  }, [building, onBuilding]);
+  // Where the panel opened, beside the chat or in a sheet, holds until it
+  // closes: an App running in it is never moved, which would load it anew,
+  // when the first draft of an App comes. Only a window narrowing past lg
+  // moves it into the sheet, and then the App open in it (`openedApp`)
+  // opens again.
+  const [placed, setPlaced] = useState<"aside" | "sheet">();
+  if (panel && placed === undefined) {
+    setPlaced(wide && !building ? "aside" : "sheet");
+  } else if (!panel && placed !== undefined) {
+    setPlaced(undefined);
+  }
+  const aside = wide && (panel ? placed === "aside" : !building);
+  const [openedApp, setOpenedApp] = useState<string>();
   const sidePanel = (
-    <SidePanel chatId={chat.id} drafts={view.drafts} running={view.running} />
+    <SidePanel builds={builds} onOpened={setOpenedApp} opened={openedApp} />
   );
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
-      <section
-        aria-label={chat.title}
-        className="relative flex min-w-0 flex-1 flex-col"
-      >
-        <h1 className="sr-only">{chat.title}</h1>
-        {/* In a row of its own above the thread, so no message scrolls under it. */}
-        {view.messages.length === 0 ? null : (
-          <div className="flex flex-none justify-end px-4 pt-2">
-            <ExportMenu
-              file={{
-                name: fileNameOf(chat.title),
-                title: chat.title,
-                markdown: () =>
-                  chatMarkdown({
-                    title: chat.title,
-                    messages: view.messages,
-                    partial: view.partial,
-                    provenance: view.provenance,
-                    names: sourceNames,
-                    i18n,
-                  }),
-              }}
-              label={t`Export this chat`}
-            />
-          </div>
-        )}
-        <ChatThread
-          loaded={view.loaded}
-          messages={view.messages}
-          onRetry={() => {
-            if (lastQuestion?.role === "user") {
-              void ask(lastQuestion.text);
-            }
-          }}
-          partial={view.partial}
-          running={view.running}
+      <ChatStudio chatId={chat.id} drafts={drafts} wide={wide}>
+        <section
+          aria-label={chat.title}
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col"
         >
-          {failure === undefined && view.stopped === null ? null : (
-            <div className="flex flex-col gap-2">
-              <ErrorText>{failure}</ErrorText>
-              <ErrorText>{view.stopped ?? undefined}</ErrorText>
-              {/* A question stopped before the agent answered (a deploy, say)
-                  is asked again from here: it may be the chat's first. */}
-              {view.stopped !== null &&
-              !view.running &&
-              lastQuestion?.role === "user" ? (
-                <Button
-                  className="self-start"
-                  onClick={() => {
-                    void ask(lastQuestion.text);
-                  }}
-                  size="sm"
-                  variant="outline"
-                >
-                  <Trans>Try again</Trans>
-                </Button>
-              ) : null}
+          <h1 className="sr-only">{chat.title}</h1>
+          {/* In a row of its own above the thread, so no message scrolls under it. */}
+          {view.messages.length === 0 ? null : (
+            <div className="flex flex-none justify-end px-4 pt-2">
+              <ExportMenu
+                file={{
+                  name: fileNameOf(chat.title),
+                  title: chat.title,
+                  markdown: () =>
+                    chatMarkdown({
+                      title: chat.title,
+                      messages: view.messages,
+                      partial: view.partial,
+                      provenance: view.provenance,
+                      names: sourceNames,
+                      i18n,
+                    }),
+                }}
+                label={t`Export this chat`}
+              />
             </div>
           )}
-          <HeldWrites chatId={chat.id} version={view.held} />
-          <ConnectionRequests chatId={chat.id} version={view.held} />
-        </ChatThread>
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 pb-4 md:px-6">
-          <ChatSources names={sourceNames} provenance={view.provenance} />
-          <Composer running={view.running} {...composer} />
-          <p className="text-muted-foreground text-center text-xs">
-            <Trans>
-              Grasp holds every change to an outside system until you confirm
-              it.
-            </Trans>
-          </p>
-        </div>
-      </section>
+          <ChatThread
+            loaded={view.loaded}
+            messages={view.messages}
+            onRetry={() => {
+              if (lastQuestion?.role === "user") {
+                void ask(lastQuestion.text);
+              }
+            }}
+            partial={view.partial}
+            running={view.running}
+          >
+            {failure === undefined && view.stopped === null ? null : (
+              <div className="flex flex-col gap-2">
+                <ErrorText>{failure}</ErrorText>
+                <ErrorText>{view.stopped ?? undefined}</ErrorText>
+                {/* A question stopped before the agent answered (a deploy, say)
+                  is asked again from here: it may be the chat's first. */}
+                {view.stopped !== null &&
+                !view.running &&
+                lastQuestion?.role === "user" ? (
+                  <Button
+                    className="self-start"
+                    onClick={() => {
+                      void ask(lastQuestion.text);
+                    }}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <Trans>Try again</Trans>
+                  </Button>
+                ) : null}
+              </div>
+            )}
+            <HeldWrites chatId={chat.id} version={view.held} />
+            <ConnectionRequests chatId={chat.id} version={view.held} />
+          </ChatThread>
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 pb-4 md:px-6">
+            <BuildsFailure read={builds} />
+            <ChatSources names={sourceNames} provenance={view.provenance} />
+            <Composer running={view.running} {...composer} />
+            <p className="text-muted-foreground text-center text-xs">
+              <Trans>
+                Grasp holds every change to an outside system until you confirm
+                it.
+              </Trans>
+            </p>
+          </div>
+        </section>
+      </ChatStudio>
       {/* Beside the chat on a wide window, as wide as a page sidebar; over it,
-          in a sheet, on a narrower one. */}
-      {wide && panel ? (
+          in a sheet, on a narrower one, and beside an App being built,
+          which takes the room, unless it was already open beside the chat. */}
+      {panel && aside ? (
         <aside
           aria-label={t`Side panel`}
           className="bg-background flex w-72 flex-none flex-col overflow-y-auto border-l p-4"
@@ -228,7 +265,7 @@ const OpenChat = ({
           {sidePanel}
         </aside>
       ) : null}
-      {wide ? null : (
+      {aside ? null : (
         <Sheet onOpenChange={onPanel} open={panel}>
           <SheetContent closeLabel={t`Close`} side="right">
             <SheetTitle className="sr-only">
@@ -251,6 +288,8 @@ const Chat = () => {
   const [listOpen, setListOpen] = useState(false);
   // Open from the start where the dock's "Open in chat" asked for it.
   const [panel, setPanel] = useState(Route.useSearch().panel === true);
+  // Whether the open chat's agent has an App to show beside it.
+  const [building, setBuilding] = useState(false);
   // The open chat: the chat dock carries it on on every other page.
   useEffect(() => {
     if (open !== undefined) {
@@ -325,7 +364,11 @@ const Chat = () => {
       />
       {/* Held to the window, so a tall box at the bottom makes the thread shorter, never the page longer. */}
       <div className="flex min-h-0 flex-1 text-sm">
-        <ChatSidebar activeId={chat?.id} chats={chats} />
+        <ChatSidebar
+          activeId={chat?.id}
+          building={chat !== undefined && building}
+          chats={chats}
+        />
         {chat === undefined ? (
           <NewChat models={models} />
         ) : (
@@ -333,6 +376,7 @@ const Chat = () => {
             chat={chat}
             key={chat.id}
             models={models}
+            onBuilding={setBuilding}
             onPanel={setPanel}
             panel={panel}
             sourceNames={sourceNames}

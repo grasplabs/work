@@ -480,16 +480,36 @@ export const ChatList = ({
   );
 };
 
-/** The chats in the page sidebar, open or folded to its rail. */
+/**
+ * The chats in the page sidebar, open or folded to its rail, kept as the
+ * person left it. While an App being built stands beside the chat
+ * (`building`) it is the rail, to give the App the room, as the
+ * prototype's studio has it: opened there, it stays open for that chat
+ * only, and folding it again keeps nothing.
+ */
 export const ChatSidebar = ({
   chats,
   activeId,
+  building = false,
 }: {
   chats: readonly ChatSummary[];
   activeId: string | undefined;
+  building?: boolean;
 }) => {
   const { t } = useLingui();
-  const [folded, setFolded] = usePageSidebarFold("chat");
+  const [browsingFolded, setBrowsingFolded] = usePageSidebarFold("chat");
+  // The chat beside whose App the person opened the sidebar.
+  const [openedBeside, setOpenedBeside] = useState<string>();
+  const folded = building
+    ? openedBeside === undefined || openedBeside !== activeId
+    : browsingFolded;
+  const setFolded = (next: boolean): void => {
+    if (building) {
+      setOpenedBeside(next ? undefined : activeId);
+    } else {
+      setBrowsingFolded(next);
+    }
+  };
   if (folded) {
     return (
       <PageSidebar folded label={t`Chats`}>

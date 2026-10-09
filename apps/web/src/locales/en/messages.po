@@ -15,15 +15,15 @@ msgstr "(company)"
 msgid "(yours)"
 msgstr "(yours)"
 
-#. placeholder {0}: draft.changed.length
-#: src/chat/builds.tsx
-msgid "{0, plural, one {{engine}: # file changed in this chat, not proposed yet} other {{engine}: # files changed in this chat, not proposed yet}}"
-msgstr "{0, plural, one {{engine}: # file changed in this chat, not proposed yet} other {{engine}: # files changed in this chat, not proposed yet}}"
-
 #. placeholder {0}: request.counts.direct
 #: src/dashboard/dependency-requests.tsx
 msgid "{0, plural, one {{requester} asks for # package} other {{requester} asks for # packages}}"
 msgstr "{0, plural, one {{requester} asks for # package} other {{requester} asks for # packages}}"
+
+#. placeholder {0}: draft.changed.length
+#: src/chat/studio.tsx
+msgid "{0, plural, one {# file changed in this chat, not proposed yet} other {# files changed in this chat, not proposed yet}}"
+msgstr "{0, plural, one {# file changed in this chat, not proposed yet} other {# files changed in this chat, not proposed yet}}"
 
 #. placeholder {0}: request.counts.findings
 #: src/dashboard/dependency-requests.tsx
@@ -654,6 +654,11 @@ msgstr "Anything"
 msgid "App"
 msgstr "App"
 
+#: src/chat/studio.tsx
+msgctxt "the App being built, beside its chat"
+msgid "App"
+msgstr "App"
+
 #: src/dashboard/to-do.tsx
 msgctxt "kind of thing that waits"
 msgid "App approval"
@@ -710,6 +715,10 @@ msgstr "Approved: {who}."
 msgid "Apps"
 msgstr "Apps"
 
+#: src/chat/studio.tsx
+msgid "Apps being built in this chat"
+msgstr "Apps being built in this chat"
+
 #: src/dashboard/to-do.tsx
 msgid "Apps to approve"
 msgstr "Apps to approve"
@@ -736,8 +745,8 @@ msgid "Ask Grasp"
 msgstr "Ask Grasp"
 
 #: src/chat/side-panel.tsx
-msgid "Ask Grasp to build one. While it works, the engine shows here to preview before it is proposed."
-msgstr "Ask Grasp to build one. While it works, the engine shows here to preview before it is proposed."
+msgid "Ask Grasp to build one. While it works, the engine stands beside the chat, to preview before it is proposed."
+msgstr "Ask Grasp to build one. While it works, the engine stands beside the chat, to preview before it is proposed."
 
 #: src/workflows/fix-in-chat.tsx
 msgid "Ask the agent to fix"
@@ -976,6 +985,11 @@ msgstr "Changes the engine's data"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
+msgid "Chat"
+msgstr "Chat"
+
+#: src/chat/studio.tsx
+msgctxt "the chat beside an App being built"
 msgid "Chat"
 msgstr "Chat"
 
@@ -2519,7 +2533,6 @@ msgctxt "onboarding stage"
 msgid "Open"
 msgstr "Open"
 
-#: src/chat/builds.tsx
 #: src/knowledge/nav.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -2676,11 +2689,7 @@ msgstr "Platform update"
 msgid "Position"
 msgstr "Position"
 
-#: src/chat/builds.tsx
-msgid "Preview"
-msgstr "Preview"
-
-#: src/chat/builds.tsx
+#: src/chat/studio.tsx
 msgid "Preview of {name}"
 msgstr "Preview of {name}"
 
@@ -3523,6 +3532,10 @@ msgstr "The data processing agreement isn't signed"
 msgid "The default, {each}"
 msgstr "The default, {each}"
 
+#: src/chat/builds.tsx
+msgid "The engines this chat builds didn't load."
+msgstr "The engines this chat builds didn't load."
+
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
 msgstr "The export didn't work. Try again."
@@ -3779,6 +3792,7 @@ msgstr "Tools allowed: none recorded"
 msgid "Tools to allow"
 msgstr "Tools to allow"
 
+#: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
@@ -3787,6 +3801,7 @@ msgstr "Tools to allow"
 msgid "Try again"
 msgstr "Try again"
 
+#: src/chat/builds.tsx
 #: src/frame/page-states.tsx
 msgid "Trying again…"
 msgstr "Trying again…"
@@ -3881,6 +3896,10 @@ msgstr "Versions"
 #: src/connections/source-badge.tsx
 msgid "Via Composio"
 msgstr "Via Composio"
+
+#: src/chat/studio.tsx
+msgid "View app"
+msgstr "View app"
 
 #: src/dashboard/to-do.tsx
 msgctxt "dashboard: what waits on you, settled on its own page"

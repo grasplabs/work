@@ -5,8 +5,8 @@ import type { TriggerDeclaration } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 
-// What the side panel's "Being built" section decides (builds.tsx): pure
-// logic, so tested on its own.
+// What the side panel's "Being built" section (builds.tsx) and the studio
+// beside the chat (studio.tsx) decide: pure logic, so tested on its own.
 
 /** A workflow's trigger added or removed, as a version's review says. */
 type TriggerChange = NonNullable<
