@@ -15,15 +15,15 @@ msgstr "(empresa)"
 msgid "(yours)"
 msgstr "(tuya)"
 
-#. placeholder {0}: draft.changed.length
-#: src/chat/builds.tsx
-msgid "{0, plural, one {{engine}: # file changed in this chat, not proposed yet} other {{engine}: # files changed in this chat, not proposed yet}}"
-msgstr "{0, plural, one {{engine}: # archivo cambiado en este chat, aún sin proponer} other {{engine}: # archivos cambiados en este chat, aún sin proponer}}"
-
 #. placeholder {0}: request.counts.direct
 #: src/dashboard/dependency-requests.tsx
 msgid "{0, plural, one {{requester} asks for # package} other {{requester} asks for # packages}}"
 msgstr "{0, plural, one {{requester} pide # paquete} other {{requester} pide # paquetes}}"
+
+#. placeholder {0}: draft.changed.length
+#: src/chat/studio.tsx
+msgid "{0, plural, one {# file changed in this chat, not proposed yet} other {# files changed in this chat, not proposed yet}}"
+msgstr "{0, plural, one {# archivo cambiado en este chat, aún sin proponer} other {# archivos cambiados en este chat, aún sin proponer}}"
 
 #. placeholder {0}: request.counts.findings
 #: src/dashboard/dependency-requests.tsx
@@ -654,6 +654,11 @@ msgstr "Todo"
 msgid "App"
 msgstr "Aplicación"
 
+#: src/chat/studio.tsx
+msgctxt "the App being built, beside its chat"
+msgid "App"
+msgstr "App"
+
 #: src/dashboard/to-do.tsx
 msgctxt "kind of thing that waits"
 msgid "App approval"
@@ -710,6 +715,10 @@ msgstr "Aprobado: {who}."
 msgid "Apps"
 msgstr "Aplicaciones"
 
+#: src/chat/studio.tsx
+msgid "Apps being built in this chat"
+msgstr "Apps que se crean en este chat"
+
 #: src/dashboard/to-do.tsx
 msgid "Apps to approve"
 msgstr "Aplicaciones por aprobar"
@@ -736,8 +745,8 @@ msgid "Ask Grasp"
 msgstr "Pregunta a Grasp"
 
 #: src/chat/side-panel.tsx
-msgid "Ask Grasp to build one. While it works, the engine shows here to preview before it is proposed."
-msgstr "Pide a Grasp que cree uno. Mientras trabaja, el motor aparece aquí para previsualizarlo antes de proponerlo."
+msgid "Ask Grasp to build one. While it works, the engine stands beside the chat, to preview before it is proposed."
+msgstr "Pide a Grasp que cree uno. Mientras trabaja, el motor aparece junto al chat, para previsualizarlo antes de proponerlo."
 
 #: src/workflows/fix-in-chat.tsx
 msgid "Ask the agent to fix"
@@ -976,6 +985,11 @@ msgstr "Cambia los datos del motor"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
+msgid "Chat"
+msgstr "Chat"
+
+#: src/chat/studio.tsx
+msgctxt "the chat beside an App being built"
 msgid "Chat"
 msgstr "Chat"
 
@@ -2519,7 +2533,6 @@ msgctxt "onboarding stage"
 msgid "Open"
 msgstr "Abierto"
 
-#: src/chat/builds.tsx
 #: src/knowledge/nav.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -2676,11 +2689,7 @@ msgstr "Actualización de la plataforma"
 msgid "Position"
 msgstr "Posición"
 
-#: src/chat/builds.tsx
-msgid "Preview"
-msgstr "Vista previa"
-
-#: src/chat/builds.tsx
+#: src/chat/studio.tsx
 msgid "Preview of {name}"
 msgstr "Vista previa de {name}"
 
@@ -3523,6 +3532,10 @@ msgstr "El contrato de encargo del tratamiento no está firmado"
 msgid "The default, {each}"
 msgstr "Predeterminado, {each}"
 
+#: src/chat/builds.tsx
+msgid "The engines this chat builds didn't load."
+msgstr "Los motores que crea este chat no se cargaron."
+
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
 msgstr "La exportación no ha funcionado. Inténtalo de nuevo."
@@ -3779,6 +3792,7 @@ msgstr "Herramientas permitidas: ninguna registrada"
 msgid "Tools to allow"
 msgstr "Herramientas que permitir"
 
+#: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
@@ -3787,6 +3801,7 @@ msgstr "Herramientas que permitir"
 msgid "Try again"
 msgstr "Reintentar"
 
+#: src/chat/builds.tsx
 #: src/frame/page-states.tsx
 msgid "Trying again…"
 msgstr "Reintentando…"
@@ -3881,6 +3896,10 @@ msgstr "Versiones"
 #: src/connections/source-badge.tsx
 msgid "Via Composio"
 msgstr "A través de Composio"
+
+#: src/chat/studio.tsx
+msgid "View app"
+msgstr "Ver app"
 
 #: src/dashboard/to-do.tsx
 msgctxt "dashboard: what waits on you, settled on its own page"

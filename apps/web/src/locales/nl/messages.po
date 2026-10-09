@@ -15,15 +15,15 @@ msgstr "(bedrijf)"
 msgid "(yours)"
 msgstr "(van jou)"
 
-#. placeholder {0}: draft.changed.length
-#: src/chat/builds.tsx
-msgid "{0, plural, one {{engine}: # file changed in this chat, not proposed yet} other {{engine}: # files changed in this chat, not proposed yet}}"
-msgstr "{0, plural, one {{engine}: # bestand gewijzigd in deze chat, nog niet voorgesteld} other {{engine}: # bestanden gewijzigd in deze chat, nog niet voorgesteld}}"
-
 #. placeholder {0}: request.counts.direct
 #: src/dashboard/dependency-requests.tsx
 msgid "{0, plural, one {{requester} asks for # package} other {{requester} asks for # packages}}"
 msgstr "{0, plural, one {{requester} vraagt om # pakket} other {{requester} vraagt om # pakketten}}"
+
+#. placeholder {0}: draft.changed.length
+#: src/chat/studio.tsx
+msgid "{0, plural, one {# file changed in this chat, not proposed yet} other {# files changed in this chat, not proposed yet}}"
+msgstr "{0, plural, one {# bestand gewijzigd in deze chat, nog niet voorgesteld} other {# bestanden gewijzigd in deze chat, nog niet voorgesteld}}"
 
 #. placeholder {0}: request.counts.findings
 #: src/dashboard/dependency-requests.tsx
@@ -654,6 +654,11 @@ msgstr "Alles"
 msgid "App"
 msgstr "App"
 
+#: src/chat/studio.tsx
+msgctxt "the App being built, beside its chat"
+msgid "App"
+msgstr "App"
+
 #: src/dashboard/to-do.tsx
 msgctxt "kind of thing that waits"
 msgid "App approval"
@@ -710,6 +715,10 @@ msgstr "Goedgekeurd: {who}."
 msgid "Apps"
 msgstr "Apps"
 
+#: src/chat/studio.tsx
+msgid "Apps being built in this chat"
+msgstr "Apps die in deze chat worden gebouwd"
+
 #: src/dashboard/to-do.tsx
 msgid "Apps to approve"
 msgstr "Apps om goed te keuren"
@@ -736,8 +745,8 @@ msgid "Ask Grasp"
 msgstr "Vraag het Grasp"
 
 #: src/chat/side-panel.tsx
-msgid "Ask Grasp to build one. While it works, the engine shows here to preview before it is proposed."
-msgstr "Vraag Grasp er een te bouwen. Terwijl het werkt, staat de engine hier om te bekijken voordat die wordt voorgesteld."
+msgid "Ask Grasp to build one. While it works, the engine stands beside the chat, to preview before it is proposed."
+msgstr "Vraag Grasp er een te bouwen. Terwijl het werkt, staat de engine naast de chat, om te bekijken voordat hij wordt voorgesteld."
 
 #: src/workflows/fix-in-chat.tsx
 msgid "Ask the agent to fix"
@@ -976,6 +985,11 @@ msgstr "Wijzigt de gegevens van de engine"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
+msgid "Chat"
+msgstr "Chat"
+
+#: src/chat/studio.tsx
+msgctxt "the chat beside an App being built"
 msgid "Chat"
 msgstr "Chat"
 
@@ -2519,7 +2533,6 @@ msgctxt "onboarding stage"
 msgid "Open"
 msgstr "Open"
 
-#: src/chat/builds.tsx
 #: src/knowledge/nav.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -2676,11 +2689,7 @@ msgstr "Platformupdate"
 msgid "Position"
 msgstr "Positie"
 
-#: src/chat/builds.tsx
-msgid "Preview"
-msgstr "Voorbeeld"
-
-#: src/chat/builds.tsx
+#: src/chat/studio.tsx
 msgid "Preview of {name}"
 msgstr "Voorbeeld van {name}"
 
@@ -3523,6 +3532,10 @@ msgstr "De verwerkersovereenkomst is niet getekend"
 msgid "The default, {each}"
 msgstr "Standaard, {each}"
 
+#: src/chat/builds.tsx
+msgid "The engines this chat builds didn't load."
+msgstr "De engines die deze chat bouwt, zijn niet geladen."
+
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
 msgstr "Het exporteren is niet gelukt. Probeer het opnieuw."
@@ -3779,6 +3792,7 @@ msgstr "Toegestane tools: geen vastgelegd"
 msgid "Tools to allow"
 msgstr "Toe te staan tools"
 
+#: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
@@ -3787,6 +3801,7 @@ msgstr "Toe te staan tools"
 msgid "Try again"
 msgstr "Opnieuw proberen"
 
+#: src/chat/builds.tsx
 #: src/frame/page-states.tsx
 msgid "Trying again…"
 msgstr "Opnieuw proberen…"
@@ -3881,6 +3896,10 @@ msgstr "Versies"
 #: src/connections/source-badge.tsx
 msgid "Via Composio"
 msgstr "Via Composio"
+
+#: src/chat/studio.tsx
+msgid "View app"
+msgstr "App bekijken"
 
 #: src/dashboard/to-do.tsx
 msgctxt "dashboard: what waits on you, settled on its own page"
