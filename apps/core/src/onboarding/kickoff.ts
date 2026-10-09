@@ -334,13 +334,18 @@ const briefHeadings: Record<VisionField, string> = {
 /**
  * What the kickoff gives Stephen's context before an interview: each field
  * it said, or the sponsor's answer to it, under its heading. Nothing it
- * left open goes in. Empty before the kickoff is in.
+ * left open goes in, nor the fields in `without` (what staff set him up
+ * with instead, stephen-setup.ts). Empty before the kickoff is in.
  */
 export const kickoffBrief = (
   reading: KickoffReading | null,
-  answers: Partial<Record<VisionField, string>>
+  answers: Partial<Record<VisionField, string>>,
+  without: readonly VisionField[] = []
 ): string => {
   const parts = visionFields.flatMap((field) => {
+    if (without.includes(field)) {
+      return [];
+    }
     const said = [reading?.fields[field]?.text, answers[field]]
       .map((each) => each?.trim() ?? "")
       .filter((each) => each !== "");

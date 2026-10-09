@@ -12,6 +12,12 @@ const playbookTests = /(?:board-page|intake|workflow-map)\.e2e\.ts$/u;
  * of screen modules and package files.
  */
 const browserPolicyTests = /(?:screen-attacks|product-page-scripts)\.e2e\.ts$/u;
+/**
+ * Grasp's go (e2e/onboarding.e2e.ts): taking it back closes the deployment,
+ * which signs out everyone the other tests signed in. So it runs last, in
+ * a project of its own after all the others, one test at a time.
+ */
+const onboardingTests = /onboarding\.e2e\.ts$/u;
 const ci = process.env.CI === "true";
 
 /**
@@ -47,7 +53,7 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: playbookTests,
+      testIgnore: [playbookTests, onboardingTests],
     },
     // The Playbook's built-ins: one copy of each has the Playbook's record
     // types (core's knowledge/record-types.ts), so their tests hand it from
@@ -70,6 +76,13 @@ export default defineConfig({
       name: "webkit",
       use: { ...devices["Desktop Safari"] },
       testMatch: browserPolicyTests,
+    },
+    {
+      name: "onboarding",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: onboardingTests,
+      dependencies: ["chromium", "playbook", "firefox", "webkit"],
+      workers: 1,
     },
   ],
   // Never a server already running: on this checkout's ports (e2e/stack.ts)

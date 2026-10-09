@@ -128,6 +128,19 @@ describe("Grasp's go", () => {
     ]);
   });
 
+  it("keeps when it was first given, through taking it back and giving it again", async () => {
+    const staff = await asStaff();
+    await staff.onboardingGate.close();
+    const given = await staff.onboardingGate.open();
+    const takenBack = await staff.onboardingGate.close();
+    const again = await staff.onboardingGate.open();
+    expect({
+      given: given.openedAt !== null,
+      takenBack: [takenBack.open, takenBack.openedAt === given.openedAt],
+      again: again.openedAt === given.openedAt,
+    }).toStrictEqual({ given: true, takenBack: [false, true], again: true });
+  });
+
   it("is staff's alone: the company's admin reads the gate but can't move it", async () => {
     const { api } = await signedInApi(idp, "admin");
     const view = await api.onboardingGate.view();
@@ -185,8 +198,8 @@ describe("Grasp's go", () => {
     expect({
       known: lastDay.known,
       parts: lastDay.parts.map(({ source, known }) => [source, known]),
-      lastDay: lastDay.ready,
-      over: over.ready,
+      lastDay: [lastDay.ready, lastDay.over],
+      over: [over.ready, over.over],
     }).toStrictEqual({
       known: 48,
       parts: [
@@ -199,8 +212,8 @@ describe("Grasp's go", () => {
         ["conversations", 0.75],
         ["review", 0],
       ],
-      lastDay: false,
-      over: true,
+      lastDay: [false, false],
+      over: [true, true],
     });
   });
 

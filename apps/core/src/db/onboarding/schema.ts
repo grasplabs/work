@@ -27,6 +27,11 @@ export const onboarding = sqliteTable(
     agreements: text(),
     /** When Grasp paused the interviews (ISO 8601); `null` while they run. */
     pausedAt: text("paused_at"),
+    /**
+     * How Stephen is set up, as JSON (`stephenSetupSchema`), or `null`
+     * while he is as the kickoff suggests.
+     */
+    stephen: text(),
   },
   (table) => [check("onboarding_one_row", sql`${table.id} = 1`)]
 );
