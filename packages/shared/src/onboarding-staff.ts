@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { InterviewProgress } from "./interview-links.ts";
+import { answerMaxLength, kickoffTeamNameMaxLength } from "./kickoff.ts";
 import { interviewLocaleSchema } from "./onboarding.ts";
 import type { Agreements } from "./onboarding.ts";
 
@@ -153,11 +154,15 @@ export interface StaffAgreements {
   waiting: number;
 }
 
-/** The most lines in each of Stephen's lists, and the longest line. */
+/**
+ * The most lines in each of Stephen's lists, and the longest line: as long
+ * as what the kickoff suggests can be (the sponsor's answer, a team's
+ * name), so a suggestion is kept whole, never cut, when staff save it.
+ */
 export const stephenLimitsMax = 30;
 export const stephenTermsMax = 100;
-export const stephenLimitMaxLength = 200;
-export const stephenTermMaxLength = 40;
+export const stephenLimitMaxLength = answerMaxLength;
+export const stephenTermMaxLength = kickoffTeamNameMaxLength;
 
 const linesOf = (most: number, longest: number) =>
   z

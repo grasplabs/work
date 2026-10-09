@@ -1,7 +1,9 @@
 import { interviewLocales } from "@grasp-os/shared/onboarding";
 import {
   stephenLimitMaxLength,
+  stephenLimitsMax,
   stephenTermMaxLength,
+  stephenTermsMax,
 } from "@grasp-os/shared/onboarding-staff";
 import type {
   StephenSetup,
@@ -46,6 +48,7 @@ const Lines = ({
   description,
   add,
   items,
+  most,
   longest,
   short = false,
   disabled,
@@ -55,20 +58,26 @@ const Lines = ({
   description: string;
   add: string;
   items: string[];
+  /** The most lines the list takes, and the longest line (the shared schema's). */
+  most: number;
   longest: number;
   short?: boolean;
   disabled: boolean;
-  onChange: (items: string[]) => void;
+  /** Saves the list; whether it was saved. */
+  onChange: (items: string[]) => Promise<boolean>;
 }) => {
   const { t } = useLingui();
   const [draft, setDraft] = useState("");
   const next = draft.replaceAll(spaces, " ").trim();
-  const keep = (): void => {
-    if (next === "" || items.includes(next)) {
+  const full = items.length >= most;
+  const keep = async (): Promise<void> => {
+    if (full || next === "" || items.includes(next)) {
       return;
     }
-    onChange([...items, next]);
-    setDraft("");
+    // What was typed stays until it is saved: a failed save keeps it.
+    if (await onChange([...items, next])) {
+      setDraft("");
+    }
   };
   return (
     <div className="flex flex-col gap-3 border-t px-5 py-4">
@@ -91,7 +100,7 @@ const Lines = ({
                 aria-label={t`Remove: ${item}`}
                 disabled={disabled}
                 onClick={() => {
-                  onChange(items.filter((each) => each !== item));
+                  void onChange(items.filter((each) => each !== item));
                 }}
                 size="icon-xs"
                 variant="ghost"
@@ -106,13 +115,13 @@ const Lines = ({
         className="max-w-lg"
         onSubmit={(event) => {
           event.preventDefault();
-          keep();
+          void keep();
         }}
       >
         <InputGroup>
           <InputGroupInput
             aria-label={add}
-            disabled={disabled}
+            disabled={disabled || full}
             maxLength={longest}
             onChange={(event) => {
               setDraft(event.target.value);
@@ -123,7 +132,7 @@ const Lines = ({
           <InputGroupAddon align="inline-end">
             <InputGroupButton
               aria-label={add}
-              disabled={disabled || next === "" || items.includes(next)}
+              disabled={disabled || full || next === "" || items.includes(next)}
               size="icon-xs"
               type="submit"
             >
@@ -132,6 +141,11 @@ const Lines = ({
           </InputGroupAddon>
         </InputGroup>
       </form>
+      {full ? (
+        <p className="text-muted-foreground">
+          <Trans>The list is full: remove a line to add another.</Trans>
+        </p>
+      ) : null}
     </div>
   );
 };
@@ -149,8 +163,9 @@ const Setup = ({ view }: { view: StephenSetupView }) => {
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const { setup } = view;
-  const save = async (next: StephenSetup | null): Promise<void> => {
-    await run(async (session) => {
+  /** Saves `next`; whether it was saved. */
+  const save = async (next: StephenSetup | null): Promise<boolean> => {
+    const saved = await run(async (session) => {
       await changeThenRefresh(
         async () => {
           await session.onboardingStaff.saveStephen(next);
@@ -159,7 +174,9 @@ const Setup = ({ view }: { view: StephenSetupView }) => {
           await router.invalidate({ sync: true });
         }
       );
+      return true;
     });
+    return saved === true;
   };
   const languagesLabel = t`Languages he interviews in`;
   return (
@@ -224,9 +241,8 @@ const Setup = ({ view }: { view: StephenSetupView }) => {
         items={setup.limits}
         label={t`What he leaves alone`}
         longest={stephenLimitMaxLength}
-        onChange={(limits) => {
-          void save({ ...setup, limits });
-        }}
+        most={stephenLimitsMax}
+        onChange={async (limits) => await save({ ...setup, limits })}
       />
       <Lines
         add={t`Add a word`}
@@ -235,9 +251,8 @@ const Setup = ({ view }: { view: StephenSetupView }) => {
         items={setup.terms}
         label={t`Words he has to know`}
         longest={stephenTermMaxLength}
-        onChange={(terms) => {
-          void save({ ...setup, terms });
-        }}
+        most={stephenTermsMax}
+        onChange={async (terms) => await save({ ...setup, terms })}
         short
       />
       {view.kickoff.systems === null ? null : (

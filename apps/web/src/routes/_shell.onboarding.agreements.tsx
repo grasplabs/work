@@ -84,19 +84,25 @@ const Tile = ({
   </div>
 );
 
-/** The day an agreement was, once it is in. */
+/**
+ * The day an agreement was, once it is in; empty for one put in place
+ * before the area kept days, to be filled in.
+ */
 const Day = ({
   label,
+  shown,
   value,
   disabled,
   onChange,
 }: {
   label: string;
+  /** The agreement is in place. */
+  shown: boolean;
   value: string | undefined;
   disabled: boolean;
   onChange: (day: string) => void;
 }) =>
-  value === undefined ? null : (
+  shown ? (
     <Input
       aria-label={label}
       className="w-40"
@@ -106,9 +112,17 @@ const Day = ({
       }}
       required
       type="date"
-      value={value}
+      value={value ?? ""}
     />
-  );
+  ) : null;
+
+type DayKey = "processingOn" | "assessmentOn" | "councilOn";
+
+/** The agreements with `key`'s day set, or without one when it is emptied. */
+const withDay = (draft: Agreements, key: DayKey, day: string): Agreements => {
+  const { [key]: _, ...rest } = draft;
+  return day === "" ? rest : { ...rest, [key]: day };
+};
 
 /** The agreements with `on` in place or not, its day today when it comes in. */
 const withProcessing = (draft: Agreements, on: boolean): Agreements => {
@@ -215,8 +229,9 @@ const AgreementsForm = ({ state }: { state: StaffAgreements }) => {
               disabled={off}
               label={t`Day the data processing agreement was signed`}
               onChange={(day) => {
-                setDraft({ ...draft, processingOn: day });
+                setDraft(withDay(draft, "processingOn", day));
               }}
+              shown={draft.processing}
               value={draft.processingOn}
             />
           }
@@ -248,8 +263,9 @@ const AgreementsForm = ({ state }: { state: StaffAgreements }) => {
               disabled={off}
               label={t`Day the risk assessment was signed off`}
               onChange={(day) => {
-                setDraft({ ...draft, assessmentOn: day });
+                setDraft(withDay(draft, "assessmentOn", day));
               }}
+              shown={draft.assessment}
               value={draft.assessmentOn}
             />
           }
@@ -288,8 +304,9 @@ const AgreementsForm = ({ state }: { state: StaffAgreements }) => {
               disabled={off}
               label={t`Day the works council said yes, or it was found there is none`}
               onChange={(day) => {
-                setDraft({ ...draft, councilOn: day });
+                setDraft(withDay(draft, "councilOn", day));
               }}
+              shown={draft.council !== "waiting"}
               value={draft.councilOn}
             />
           }

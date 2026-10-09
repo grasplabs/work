@@ -1,6 +1,7 @@
 import type { AuditActor } from "@grasp-os/shared/audit";
 import {
   kickoffErrors,
+  kickoffTeamNameMaxLength,
   transcriptFileKinds,
   transcriptMaxLength,
   transcriptMinLength,
@@ -130,7 +131,7 @@ const teamsMax = 30;
 const teamOf =
   (said: string) =>
   (team: Answer["teams"][number]): KickoffTeam[] => {
-    const called = tidy(team.name, 60);
+    const called = tidy(team.name, kickoffTeamNameMaxLength);
     const named = plain(called);
     if (named.length < 2 || !` ${said} `.includes(` ${named} `)) {
       return [];

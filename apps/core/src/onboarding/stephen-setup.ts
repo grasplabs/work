@@ -1,11 +1,5 @@
 import type { KickoffView, VisionField } from "@grasp-os/shared/kickoff";
 import { interviewLocales } from "@grasp-os/shared/onboarding";
-import {
-  stephenLimitMaxLength,
-  stephenLimitsMax,
-  stephenTermMaxLength,
-  stephenTermsMax,
-} from "@grasp-os/shared/onboarding-staff";
 import type {
   StephenSetup,
   StephenSetupView,
@@ -24,19 +18,17 @@ import { NAMED } from "./stephen.ts";
 // kickoff's own word on languages and on what to leave alone. Pure, so
 // tested through the store that calls it.
 
-/** One line as a list takes it: whitespace as one space, cut to `most`. */
-const line = (text: string, most: number): string =>
-  text.replaceAll(/\s+/gu, " ").trim().slice(0, most);
+/** One line as a list takes it: whitespace as one space. */
+const line = (text: string): string => text.replaceAll(/\s+/gu, " ").trim();
 
-/** `lines`, without empty ones or repeats, at most `count` of them. */
-const listOf = (
-  lines: (string | undefined)[],
-  count: number,
-  longest: number
-): string[] =>
-  [
-    ...new Set(lines.map((each) => line(each ?? "", longest)).filter(Boolean)),
-  ].slice(0, count);
+/**
+ * `lines`, without empty ones or repeats. Never cut: the setup's lists
+ * take a whole sponsor's answer and every team a kickoff names, so what
+ * staff save unchanged is what the kickoff said.
+ */
+const listOf = (lines: (string | undefined)[]): string[] => [
+  ...new Set(lines.map((each) => line(each ?? "")).filter(Boolean)),
+];
 
 /**
  * What the kickoff suggests: every language he speaks (someone chooses
@@ -48,16 +40,8 @@ export const suggestedSetup = ({
   answers,
 }: Pick<KickoffView, "reading" | "answers">): StephenSetup => ({
   languages: [...interviewLocales],
-  limits: listOf(
-    [reading?.fields.limits?.text, answers.limits],
-    stephenLimitsMax,
-    stephenLimitMaxLength
-  ),
-  terms: listOf(
-    (reading?.teams ?? []).map(({ name }) => name),
-    stephenTermsMax,
-    stephenTermMaxLength
-  ),
+  limits: listOf([reading?.fields.limits?.text, answers.limits]),
+  terms: listOf((reading?.teams ?? []).map(({ name }) => name)),
 });
 
 /** What the kickoff said of `field`, or the sponsor's answer to it. */

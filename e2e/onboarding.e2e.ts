@@ -15,7 +15,8 @@ test.describe.configure({ mode: "serial" });
 const today = (): string => new Date().toISOString().slice(0, 10);
 
 test("staff put the agreements in place, and the links that waited go out", async ({
-  browser,
+  page,
+  cspViolations,
 }) => {
   const staff = await signInStaff();
   // People of their own each attempt: saving them takes the links of
@@ -45,9 +46,8 @@ test("staff put the agreements in place, and the links that waited go out", asyn
     core[Symbol.dispose]();
   }
 
-  const context = await browser.newContext();
-  await signInTo(context, staff);
-  const page = await context.newPage();
+  // The test's own page, whose CSP violations are recorded (e2e/csp.ts).
+  await signInTo(page.context(), staff);
   await page.goto("/onboarding");
   await page
     .getByRole("complementary", { name: "Onboarding sections" })
@@ -82,11 +82,12 @@ test("staff put the agreements in place, and the links that waited go out", asyn
 
   await page.goto("/onboarding");
   await expect(page.getByText("Links out: 2 of 3")).toBeVisible();
-  await context.close();
+  expect(cspViolations).toStrictEqual([]);
 });
 
 test("staff give the go, and the company's people sign in", async ({
-  browser,
+  page,
+  cspViolations,
 }) => {
   const staff = await signInStaff();
   const { core, api } = apiOf(staff);
@@ -100,9 +101,8 @@ test("staff give the go, and the company's people sign in", async ({
     core[Symbol.dispose]();
   }
 
-  const context = await browser.newContext();
-  await signInTo(context, staff);
-  const page = await context.newPage();
+  // The test's own page, whose CSP violations are recorded (e2e/csp.ts).
+  await signInTo(page.context(), staff);
   await page.goto("/onboarding/open");
   await page.getByRole("button", { name: "Take the go back" }).click();
   await expect(page.getByText("Grasp's go was taken back")).toBeVisible();
@@ -126,5 +126,5 @@ test("staff give the go, and the company's people sign in", async ({
   } finally {
     signedIn.core[Symbol.dispose]();
   }
-  await context.close();
+  expect(cspViolations).toStrictEqual([]);
 });

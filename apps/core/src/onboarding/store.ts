@@ -724,18 +724,25 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * Where the agreements stand for Grasp's staff: whether the team is
-   * told (a link went out), and how many links are out and wait.
+   * told (a link ever went out, even to someone since taken off the
+   * roster), and how many links are out and wait.
    */
   staffAgreements(): StaffAgreements {
     const { agreements } = this.#row();
     const roster = this.#roster();
     const { sent } = this.#linkFacts();
+    const [row] = this.#db
+      .select({ toldAt: onboarding.toldAt })
+      .from(onboarding)
+      .where(eq(onboarding.id, 1))
+      .all();
     const taking =
       roster?.people.filter((person) => takingPart(roster, person)) ?? [];
     return {
       agreements,
       agreed: agreementsIn(agreements),
-      told: sent.size > 0,
+      // Links sent before the store kept when the first went out count too.
+      told: (row?.toldAt ?? null) !== null || sent.size > 0,
       out: sent.size,
       waiting: taking.filter(({ id }) => !sent.has(id)).length,
     };
@@ -1110,6 +1117,12 @@ export class Onboarding extends DurableObject<Env> {
       return [];
     }
     this.ctx.storage.transactionSync(() => {
+      // The first link out tells the team, for good.
+      this.#db
+        .update(onboarding)
+        .set({ toldAt: sql`coalesce(${onboarding.toldAt}, ${now})` })
+        .where(eq(onboarding.id, 1))
+        .run();
       for (const person of due) {
         this.#db.insert(links).values({ person, sentAt: now }).run();
         const team = roster.people.find(({ id }) => id === person)?.team;

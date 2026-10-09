@@ -3804,6 +3804,10 @@ msgstr "Das Kickoff mit dem Unternehmen"
 msgid "The link works until {until}."
 msgstr "Der Link funktioniert bis {until}."
 
+#: src/routes/_shell.onboarding.stephen.tsx
+msgid "The list is full: remove a line to add another."
+msgstr "Die Liste ist voll: Entfernen Sie eine Zeile, um eine weitere hinzuzufügen."
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The model call failed."

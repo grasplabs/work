@@ -1,5 +1,6 @@
 import type { KickoffReading } from "@grasp-os/shared/kickoff";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
+import { stephenTermMaxLength } from "@grasp-os/shared/onboarding-staff";
 import type { StephenSetup } from "@grasp-os/shared/onboarding-staff";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -142,6 +143,24 @@ describe("how Stephen is set up", () => {
     });
   });
 
+  it("keeps a long limit from the sponsor whole when staff change only a language", async () => {
+    await kickoffIn();
+    const staff = await asStaff();
+    const long = `Niets over de reorganisatie van de afdeling ${"Financiën, ".repeat(150)}einde.`;
+    await staff.onboardingStaff.answerKickoff("limits", long);
+    const { setup } = await staff.onboardingStaff.stephen();
+    const saved = await staff.onboardingStaff.saveStephen({
+      ...setup,
+      languages: ["nl"],
+    });
+    const brief = await onboardingStore(env).interviewBrief();
+    expect({
+      long: long.length > 1000,
+      kept: saved.setup.limits.includes(long),
+      inBrief: brief.includes(`- ${long}`),
+    }).toStrictEqual({ long: true, kept: true, inBrief: true });
+  });
+
   it("holds before any kickoff is in", async () => {
     const staff = await asStaff();
     await staff.onboardingStaff.saveStephen(staffs);
@@ -175,7 +194,7 @@ describe("how Stephen is set up", () => {
       { ...staffs, languages: [] },
       { ...staffs, languages: ["pt"] },
       { ...staffs, languages: ["nl", "nl"] },
-      { ...staffs, terms: ["x".repeat(41)] },
+      { ...staffs, terms: ["x".repeat(stephenTermMaxLength + 1)] },
       { ...staffs, limits: [" "] },
       { ...staffs, extra: true },
     ];
@@ -262,6 +281,26 @@ describe("the agreements, as staff put them in place", () => {
         waiting: 1,
       },
     });
+  });
+
+  it("stay as they were once the team is told, even when everyone with a link leaves the roster", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const staff = await asStaff();
+    await api.onboarding.saveRoster(roster);
+    await api.onboarding.savePlan({
+      start: new Date().toISOString().slice(0, 10),
+    });
+    await staff.onboardingStaff.setAgreements({
+      processing: true,
+      assessment: true,
+      council: "none",
+    });
+    await api.onboarding.saveRoster({
+      teams: [{ id: "new", name: "New", lead: null }],
+      people: [{ id: "neo", name: "Neo", team: "new" }],
+    });
+    const { told, out } = await staff.onboardingStaff.agreements();
+    expect({ told, out }).toStrictEqual({ told: true, out: 0 });
   });
 
   it("refuse a day that isn't one", async () => {

@@ -32,6 +32,12 @@ export const onboarding = sqliteTable(
      * while he is as the kickoff suggests.
      */
     stephen: text(),
+    /**
+     * When the first link went out (ISO 8601): the team is told, and the
+     * agreements stay as they were. Never cleared, whoever leaves the
+     * roster with their link; `null` before any link went out.
+     */
+    toldAt: text("told_at"),
   },
   (table) => [check("onboarding_one_row", sql`${table.id} = 1`)]
 );
