@@ -7,6 +7,7 @@ import { Workflow } from "../src/binding.ts";
 import type {
   DefinitionIdentity,
   WorkflowDefinition,
+  WorkflowInstanceSubscription,
   WorkflowRollbackContext,
   WorkflowStepContext,
   WorkflowStepRollbackOptions,
@@ -483,8 +484,77 @@ const sendEvent = async (
   }
 };
 
+/** A step's raw result: JSON, or a stream's bytes with what they are. */
+const outputOf = async (
+  stub: DurableObjectStub<Runs>,
+  name: string
+): Promise<Response> => {
+  const output = await stub.stepOutput({ name, count: 1 });
+  if (output?.kind !== "stream") {
+    return json(output);
+  }
+  return new Response(output.stream, {
+    headers: {
+      "x-length": String(output.length),
+      "x-sha256": output.sha256,
+      "x-encoding": output.encoding,
+    },
+  });
+};
+
+/**
+ * The run's events from `cursor` on, one JSON line each as the
+ * subscription delivers it, the body ending when the subscription is
+ * done: a subscriber outside the process, which the test cuts off by
+ * killing workerd.
+ */
+const events = async (
+  env: FixtureEnv,
+  definition: string,
+  id: string,
+  cursor: number,
+  ctx: ExecutionContext
+): Promise<Response> => {
+  let subscription: WorkflowInstanceSubscription;
+  try {
+    const instance = await new Workflow(env.RUNS, definition).get(id);
+    subscription = await instance.subscribe({ cursor });
+  } catch (error) {
+    return json({ error: errorText(error) }, 404);
+  }
+  const { readable, writable } = new TransformStream<Uint8Array>();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const pump = async (): Promise<void> => {
+    try {
+      for (;;) {
+        // oxlint-disable-next-line no-await-in-loop -- one event a call
+        const result = await subscription.next();
+        if (result.done === true) {
+          break;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- written in order
+        await writer.write(encoder.encode(`${JSON.stringify(result.value)}\n`));
+      }
+      await writer.close();
+    } catch (error) {
+      await writer.abort(error);
+    } finally {
+      subscription[Symbol.dispose]();
+    }
+  };
+  ctx.waitUntil(pump());
+  return new Response(readable, {
+    headers: { "content-type": "application/x-ndjson" },
+  });
+};
+
 export default {
-  fetch: async (request: Request, env: FixtureEnv): Promise<Response> => {
+  fetch: async (
+    request: Request,
+    env: FixtureEnv,
+    ctx: ExecutionContext
+  ): Promise<Response> => {
     const url = new URL(request.url);
     if (url.pathname === "/ready") {
       // Answers without touching any run object.
@@ -516,23 +586,19 @@ export default {
         return json(await stub.chunks());
       }
       case "/output": {
-        const output = await stub.stepOutput({
-          name: url.searchParams.get("name") ?? "",
-          count: 1,
-        });
-        if (output?.kind !== "stream") {
-          return json(output);
-        }
-        return new Response(output.stream, {
-          headers: {
-            "x-length": String(output.length),
-            "x-sha256": output.sha256,
-            "x-encoding": output.encoding,
-          },
-        });
+        return await outputOf(stub, url.searchParams.get("name") ?? "");
       }
       case "/journal": {
         return json(await stub.journal());
+      }
+      case "/events": {
+        return await events(
+          env,
+          definition,
+          id,
+          Number(url.searchParams.get("cursor") ?? "0"),
+          ctx
+        );
       }
       case "/tables": {
         return json(await stub.tables());

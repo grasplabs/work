@@ -8,7 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { Workflow } from "../src/binding.ts";
 import type { WorkflowOptions } from "../src/binding.ts";
 import { maxRetentionLimitMs } from "../src/retention.ts";
-import { defaultTombstoneMs } from "../src/run.ts";
+import { defaultTombstoneMs, maxSubscriptions } from "../src/run.ts";
 import {
   deliverAlarm,
   ended,
@@ -112,6 +112,44 @@ describe("an ended run's retention", () => {
     );
     expect(again.created).toBeFalsy();
     expect(effectsOf(id, "charge")).toHaveLength(1);
+  });
+
+  it("ends the run's subscriptions with its purge: none counts against a run created again under the ID", async () => {
+    const id = newId();
+    await binding("orders").create({
+      id,
+      retention: { successRetention: purgeAfterMs },
+    });
+    await ended("orders", id);
+    const instance = await binding("orders").get(id);
+    const opened = await Promise.all(
+      Array.from(
+        { length: maxSubscriptions },
+        async () => await instance.subscribe()
+      )
+    );
+
+    await until("the run to be purged", async () =>
+      (await exists("orders", id)) ? undefined : true
+    );
+    await binding("orders").create({ id });
+    const again = await binding("orders").get(id);
+    using newer = await again.subscribe();
+    const [oldest] = opened;
+    let oldestNext: unknown = "none";
+    try {
+      oldestNext = await oldest?.next();
+    } catch (error) {
+      oldestNext = error instanceof Error ? error.message : error;
+    }
+
+    expect(oldestNext).toStrictEqual({ done: true, value: undefined });
+    await expect(newer.next()).resolves.toMatchObject({
+      value: { type: "workflow_queued" },
+    });
+    for (const subscription of opened) {
+      subscription[Symbol.dispose]();
+    }
   });
 
   it("empties the object of a run create made once it is purged: no tombstone, no alarm", async () => {

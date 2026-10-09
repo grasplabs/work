@@ -17,6 +17,9 @@
 //                is due
 //   events       the inbox: each event the run accepted, in order, and the
 //                wait that took it
+//   history      what observers are shown: one row per change of the
+//                above, written by triggers in the same statement
+//                (history.ts)
 //
 // Beside the journal, and outliving it, `tombstones` keeps the start key
 // of each removed run whose start can be delivered again (`admit`, a
@@ -27,8 +30,7 @@
 // a new start. A run `create` made leaves none: no one has its key.
 //
 // Values and errors are kept as codec text (codec.ts), never as live
-// objects; a step's stream result as chunks beside them (streams.ts). What
-// observers are shown is the run's history (history.ts).
+// objects; a step's stream result as chunks beside them (streams.ts).
 import { createHistory } from "./history.ts";
 import { createStreamChunks } from "./streams.ts";
 
@@ -43,11 +45,11 @@ export class JournalSchemaError extends Error {
 
 /**
  * The journal's own layout; a change to it is a new version. No journal
- * predates version 6 (nothing earlier was released), so a run of any other
+ * predates version 7 (nothing earlier was released), so a run of any other
  * version is refused when it is read; a later layout that changes it
  * brings its own upgrade.
  */
-export const journalSchemaVersion = 6;
+export const journalSchemaVersion = 7;
 
 /**
  * The largest event payload a run accepts, as the encoded text it keeps:

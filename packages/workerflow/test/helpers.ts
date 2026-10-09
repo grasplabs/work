@@ -2,7 +2,11 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
 import { Workflow } from "../src/binding.ts";
-import type { InstanceStatus } from "../src/contracts.ts";
+import type {
+  InstanceStatus,
+  WorkflowInstanceEvent,
+  WorkflowInstanceSubscribeOptions,
+} from "../src/contracts.ts";
 import { runObjectName } from "../src/identity.ts";
 import type { Journal } from "../src/journal.ts";
 import { WorkflowRun } from "../src/run.ts";
@@ -87,6 +91,29 @@ export const ended = async (
 };
 
 export const newId = (): string => crypto.randomUUID();
+
+/**
+ * Every event a subscription to the run delivers, through the binding,
+ * until it is done: for a run that ends, or ended, within the deadline.
+ */
+export const eventsOf = async (
+  definition: string,
+  id: string,
+  options?: WorkflowInstanceSubscribeOptions,
+  runs: Runs = env.RUNS
+): Promise<WorkflowInstanceEvent[]> => {
+  const instance = await workflow(definition, runs).get(id);
+  using subscription = await instance.subscribe(options);
+  const events: WorkflowInstanceEvent[] = [];
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a subscription answers one event at a time
+    const result = await within(`the events of run ${id}`, subscription.next());
+    if (result.done === true) {
+      return events;
+    }
+    events.push(result.value);
+  }
+};
 
 /** When the run's alarm is due, or null when it has none. */
 export const alarmOf = async (

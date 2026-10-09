@@ -410,12 +410,14 @@ describe("a journal of another schema", () => {
       const journal = await journalOf("napper", id);
       return journal.run.status === "waiting" ? journal : undefined;
     });
-    // As a version-1 journal would be: its version, and no step config.
+    // As a version-1 journal would be: its version, no step config, and no
+    // trigger that reads one.
     const exec = async (query: string): Promise<unknown[]> =>
       await runInDurableObject(runObject("napper", id), (_, state) =>
         state.storage.sql.exec(query).toArray()
       );
     await exec("UPDATE run SET schema = 1");
+    await exec("DROP TRIGGER history_attempt_ended");
     await exec("ALTER TABLE steps DROP COLUMN config");
     const before = await exec("SELECT * FROM activations");
 

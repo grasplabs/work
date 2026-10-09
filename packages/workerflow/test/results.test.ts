@@ -5,8 +5,8 @@
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
 
+import type { WorkflowInstanceEvent } from "../src/contracts.ts";
 import { errorRecord } from "../src/errors.ts";
-import type { HistoryEvent } from "../src/history.ts";
 import { journalSchemaVersion } from "../src/journal.ts";
 import type { StepOutput } from "../src/run.ts";
 import { patterned, sha256 } from "./bytes.ts";
@@ -14,6 +14,7 @@ import {
   wakeOf,
   deliverAlarm,
   ended,
+  eventsOf,
   journalOf,
   newId,
   runObject,
@@ -47,23 +48,28 @@ const chunksOf = async (definition: string, id: string): Promise<ChunkRow[]> =>
       .toArray()
   );
 
-/**
- * The run's history, read in the object itself: Workers RPC types drop a
- * value typed `unknown`, which an event's output is.
- */
-const historyOf = async (
+/** The step completions observers of the run are shown, in order. */
+const completionsOf = async (
   definition: string,
   id: string
-): Promise<HistoryEvent[]> =>
-  await runInDurableObject(runObject(definition, id), (run) =>
-    run instanceof TestRuns ? run.history() : []
-  );
+): Promise<WorkflowInstanceEvent[]> =>
+  await eventsOf(definition, id, { filter: ["step_completed"] });
 
 /** The bytes of a stream, read to its end within the deadline. */
 const read = async (stream: ReadableStream<Uint8Array>): Promise<Uint8Array> =>
   new Uint8Array(
     await within("the stream to end", new Response(stream).arrayBuffer())
   );
+
+/** The bytes of an event's output, which must be a stream. */
+const streamedBytes = async (output: unknown): Promise<Uint8Array> => {
+  if (!(output instanceof ReadableStream)) {
+    throw new TypeError("the output isn't a stream");
+  }
+  return new Uint8Array(
+    await within("the stream to end", new Response(output).arrayBuffer())
+  );
+};
 
 const outputOf = async (
   definition: string,
@@ -188,23 +194,19 @@ describe("a step's stream result", () => {
         length: content.byteLength - 512 * kib,
       },
     ]);
-    // Observers are told its length and hash, never its bytes.
-    await expect(historyOf("streamed", id)).resolves.toMatchObject([
-      {
-        step: { name: "export", count: 1 },
-        streamOutput: {
-          length: content.byteLength,
-          sha256: hash,
-          encoding: "identity",
-        },
-      },
-      {
-        step: { name: "digest", count: 1 },
-        output: status.status === "complete" ? status.output : undefined,
-      },
-    ]);
-    const [exported] = await historyOf("streamed", id);
-    expect(exported).not.toHaveProperty("output");
+    // Observers get a fresh stream of its bytes, as the reference gives.
+    const [exported, digest] = await completionsOf("streamed", id);
+    expect(digest).toMatchObject({
+      stepName: "digest-1",
+      output: status.status === "complete" ? status.output : undefined,
+    });
+    await expect(
+      streamedBytes(
+        exported?.type === "step_completed" && exported.stepName === "export-1"
+          ? exported.output
+          : undefined
+      )
+    ).resolves.toStrictEqual(content);
   });
 
   it("gives the host a fresh stream of the result, with its length, hash and encoding, each time it asks", async () => {
@@ -290,11 +292,10 @@ describe("a step's stream result", () => {
       ["digest", 1],
       ["digest", 2],
     ]);
-    const history = await historyOf("streamed", id);
-    expect(history.map((event) => event.step.name)).toStrictEqual([
-      "export",
-      "digest",
-    ]);
+    const completions = await completionsOf("streamed", id);
+    expect(
+      completions.map((event) => ("stepName" in event ? event.stepName : ""))
+    ).toStrictEqual(["export-1", "digest-1"]);
   });
 
   it("can't be completed by an upload superseded midway; the attempt that took over keeps its own", async () => {
@@ -734,13 +735,10 @@ describe("a sensitive step's result", () => {
       status: "complete",
       output: { token: secret, visible: "shown to observers" },
     });
-    await expect(historyOf("secret", id)).resolves.toMatchObject([
-      { step: { name: "token", count: 1 }, output: "[REDACTED]" },
-      { step: { name: "visible", count: 1 }, output: "shown to observers" },
-      {
-        step: { name: "use", count: 1 },
-        output: effectsOf(id, "use")[0]?.receipt,
-      },
+    await expect(completionsOf("secret", id)).resolves.toMatchObject([
+      { stepName: "token-1", output: "[REDACTED]" },
+      { stepName: "visible-1", output: "shown to observers" },
+      { stepName: "use-1", output: effectsOf(id, "use")[0]?.receipt },
     ]);
     // Not anywhere in what was written for observers.
     const rows = await runInDurableObject(runObject("secret", id), (_, state) =>
@@ -768,9 +766,11 @@ describe("a sensitive step's result", () => {
       status: "complete",
       output: { token: `secret-${id}` },
     });
-    const history = await historyOf("secret", id);
+    const completions = await completionsOf("secret", id);
     expect(
-      history.filter((event) => event.step.name === "token")
+      completions.filter(
+        (event) => "stepName" in event && event.stepName === "token-1"
+      )
     ).toMatchObject([{ output: "[REDACTED]" }]);
   });
 
@@ -786,9 +786,8 @@ describe("a sensitive step's result", () => {
         fresh: true,
       },
     });
-    const [file] = await historyOf("secret-stream", id);
+    const [file] = await completionsOf("secret-stream", id);
     expect(file).toMatchObject({ output: "[REDACTED]" });
-    expect(file).not.toHaveProperty("streamOutput");
   });
 });
 
@@ -1041,8 +1040,8 @@ describe("a step's config read as JavaScript reads it", () => {
       status: "complete",
       output: `secret-${id}`,
     });
-    await expect(historyOf("class-config", id)).resolves.toMatchObject([
-      { step: { name: "token" }, output: "[REDACTED]" },
+    await expect(completionsOf("class-config", id)).resolves.toMatchObject([
+      { stepName: "token-1", output: "[REDACTED]" },
     ]);
     const { steps } = await journalOf("class-config", id);
     expect(steps[0]?.config).toContain('"sensitive":true');

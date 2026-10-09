@@ -112,7 +112,6 @@ import {
   waitTimedOut,
 } from "./durations.ts";
 import { errorRecord, isNonRetryable, namedError, rebuild } from "./errors.ts";
-import { recordStepCompleted } from "./history.ts";
 import {
   assertEventType,
   assertStepName,
@@ -959,12 +958,7 @@ export class Activation {
     }
     assertTime(retryAt);
     discardChunks(sql, claim.ordinal, claim.attempt);
-    sql.exec(
-      "UPDATE steps SET state = ?, value = NULL, error = ? WHERE ordinal = ?",
-      retryAt === null ? "failed" : "retrying",
-      retryAt === null ? failure.error : null,
-      claim.ordinal
-    );
+    // The attempt's end first, then its step's (history.ts).
     sql.exec(
       "UPDATE attempts SET ended_at = ?, ended = ?, error = ?, retry_at = ? WHERE ordinal = ? AND attempt = ?",
       now,
@@ -973,6 +967,12 @@ export class Activation {
       retryAt,
       claim.ordinal,
       claim.attempt
+    );
+    sql.exec(
+      "UPDATE steps SET state = ?, value = NULL, error = ? WHERE ordinal = ?",
+      retryAt === null ? "failed" : "retrying",
+      retryAt === null ? failure.error : null,
+      claim.ordinal
     );
     return landing;
   }
@@ -1247,29 +1247,19 @@ export class Activation {
         ) {
           return "incomplete";
         }
-        sql.exec(
-          "UPDATE steps SET state = 'succeeded', value = ?, error = NULL WHERE ordinal = ?",
-          outcome.value,
-          claim.ordinal
-        );
+        // The attempt's end first, then its step's: observers see them in
+        // that order (history.ts).
         sql.exec(
           "UPDATE attempts SET ended_at = ?, ended = 'succeeded' WHERE ordinal = ? AND attempt = ?",
           now,
           claim.ordinal,
           claim.attempt
         );
-        // A rollback's completion isn't a step's: observers see steps.
-        if (identity.type !== "rollback") {
-          recordStepCompleted(sql, {
-            ordinal: claim.ordinal,
-            at: now,
-            sensitive: config.sensitive,
-            result:
-              outcome.stream === undefined
-                ? { kind: "value", value: outcome.value }
-                : { kind: "stream", result: outcome.stream },
-          });
-        }
+        sql.exec(
+          "UPDATE steps SET state = 'succeeded', value = ?, error = NULL WHERE ordinal = ?",
+          outcome.value,
+          claim.ordinal
+        );
         return { ok: true, value: outcome.value, ordinal: claim.ordinal };
       }
     );
@@ -1298,16 +1288,16 @@ export class Activation {
           detail: fatal.detail,
         });
         sql.exec(
-          "UPDATE steps SET state = 'fatal', value = NULL, error = ? WHERE ordinal = ?",
-          error,
-          claim.ordinal
-        );
-        sql.exec(
           "UPDATE attempts SET ended_at = ?, ended = 'failed', error = ?, retry_at = NULL WHERE ordinal = ? AND attempt = ?",
           now,
           error,
           claim.ordinal,
           claim.attempt
+        );
+        sql.exec(
+          "UPDATE steps SET state = 'fatal', value = NULL, error = ? WHERE ordinal = ?",
+          error,
+          claim.ordinal
         );
         return true;
       })
