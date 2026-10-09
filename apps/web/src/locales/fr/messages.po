@@ -197,6 +197,11 @@ msgstr "{link} dans {appName} a échoué"
 msgid "{link} in {appName} failed {failures, plural, one {once} other {# times}}"
 msgstr "{link} dans {appName} a échoué {failures, plural, one {une fois} other {# fois}}"
 
+#. A length of time, said short: 4 minutes and 21 seconds.
+#: src/chat/thread.tsx
+msgid "{minutes}m {rest}s"
+msgstr "{minutes} min {rest} s"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
 msgstr "{more, plural, one {{shown} et # autre} other {{shown} et # autres}}"
@@ -272,6 +277,11 @@ msgstr "{path}, qui ne s’exécuterait plus"
 #: src/routes/_shell.settings.members.tsx
 msgid "{people, plural, one {# person has access. Members join by signing in with your organization’s account; there are no invitations to send.} other {# people have access. Members join by signing in with your organization’s account; there are no invitations to send.}}"
 msgstr "{people, plural, one {# personne a accès. Les membres arrivent en se connectant avec le compte de votre organisation ; il n’y a pas d’invitation à envoyer.} other {# personnes ont accès. Les membres arrivent en se connectant avec le compte de votre organisation ; il n’y a pas d’invitation à envoyer.}}"
+
+#. A length of time, said short: 21 seconds.
+#: src/chat/thread.tsx
+msgid "{rest}s"
+msgstr "{rest} s"
 
 #: src/frame/person-menu.tsx
 msgid "{role}, Grasp staff"
@@ -3631,6 +3641,10 @@ msgstr "Il n’y a pas de règle de données : tout modèle autorisé peut recev
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "La personne est déconnectée partout, ses connexions personnelles sont coupées et elle ne peut plus se connecter."
 
+#: src/chat/thread.tsx
+msgid "Thinking"
+msgstr "Réflexion"
+
 #: src/screens/screen-frame.tsx
 msgid "This app didn't start in time."
 msgstr "Cette application n'a pas démarré à temps."
@@ -4032,6 +4046,10 @@ msgctxt "kickoff field"
 msgid "Work that costs too much time"
 msgstr "Le travail qui prend trop de temps"
 
+#: src/chat/thread.tsx
+msgid "Worked for {time}"
+msgstr "A travaillé pendant {time}"
+
 #: src/dashboard/signals.tsx
 msgid "Worked out daily, last on {date}"
 msgstr "Calculé chaque jour, dernière fois le {date}"
@@ -4092,6 +4110,10 @@ msgstr "Workflows en échec"
 #: src/routes/_shell.settings.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."
 msgstr "Workflows dont les étapes d’IA restent dans l’UE : {workflows}."
+
+#: src/chat/thread.tsx
+msgid "Working on it"
+msgstr "Travail en cours"
 
 #: src/onboarding/staff-words.ts
 msgid "Works council heard, where there is one"
