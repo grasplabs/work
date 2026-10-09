@@ -28,8 +28,8 @@ export const isEffort = (value: unknown): value is ModelEffort =>
 
 /**
  * `choice` against what core offers: its model while it is allowed, else
- * the default (the first); its effort while that model takes it, else the
- * model's own default.
+ * the default (the first); its effort while it is that model's and the
+ * model takes it, else the model's own default.
  */
 export const resolveChoice = (
   models: readonly string[],
@@ -42,8 +42,12 @@ export const resolveChoice = (
       : (models[0] ?? "");
   const offered = Object.hasOwn(efforts, model) ? efforts[model] : undefined;
   const levels = offered?.levels ?? [];
+  // The effort goes with the model it was chosen for: a model that falls
+  // back to the default starts at that model's own default.
   const effort =
-    choice.effort !== undefined && levels.includes(choice.effort)
+    choice.model === model &&
+    choice.effort !== undefined &&
+    levels.includes(choice.effort)
       ? choice.effort
       : (offered?.default ?? undefined);
   return { model, effort, levels };

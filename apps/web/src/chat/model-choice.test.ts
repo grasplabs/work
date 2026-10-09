@@ -54,6 +54,15 @@ describe("the model and effort a question names", () => {
     ).toMatchObject({ model: llama, effort: undefined });
   });
 
+  it("starts the model it falls back to at that model's default, not the effort chosen for the one gone", () => {
+    expect(
+      resolveChoice([opus, glm], efforts, {
+        model: "openai/gone",
+        effort: "max",
+      })
+    ).toMatchObject({ model: opus, effort: "medium" });
+  });
+
   it("names no effort before core says which models take one", () => {
     expect(resolveChoice(models, {}, { model: opus })).toStrictEqual({
       model: opus,
