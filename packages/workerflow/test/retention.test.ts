@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { Workflow } from "../src/binding.ts";
 import type { WorkflowOptions } from "../src/binding.ts";
+import { maxRetentionLimitMs } from "../src/retention.ts";
 import { defaultTombstoneMs } from "../src/run.ts";
 import {
   deliverAlarm,
@@ -367,7 +368,10 @@ describe("a retention outside the limits", () => {
 
   it("is refused by the run object itself, its own boundary, creating nothing", async () => {
     const id = newId();
-    const start = async (successMs: number): Promise<unknown> =>
+    const start = async (
+      successMs: number,
+      errorMs = 60_000
+    ): Promise<unknown> =>
       await runObject("orders", id).start({
         definition: "orders",
         version: null,
@@ -376,11 +380,17 @@ describe("a retention outside the limits", () => {
         key: `start-${id}`,
         schedule: null,
         redeliverable: true,
-        retention: { successMs, errorMs: 60_000 },
+        retention: { successMs, errorMs },
       });
 
     await expect(start(0)).rejects.toThrow(/retention/u);
     await expect(start(1.5)).rejects.toThrow(/retention/u);
+    // Past the greatest limit any host may set: an end plus it may not be
+    // a time an alarm takes, nor a safe integer.
+    await expect(start(Number.MAX_SAFE_INTEGER)).rejects.toThrow(/retention/u);
+    await expect(start(60_000, maxRetentionLimitMs + 1)).rejects.toThrow(
+      /retention/u
+    );
     await expect(exists("orders", id)).resolves.toBeFalsy();
   });
 

@@ -153,6 +153,7 @@ import {
 } from "./journal.ts";
 import type { Journal, RunRow, StepType } from "./journal.ts";
 import { warnRecovered } from "./log.ts";
+import { maxRetentionLimitMs } from "./retention.ts";
 import {
   defaultMaxRunStreamBytes,
   defaultMaxStreamBytes,
@@ -695,11 +696,13 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     this.#rollbackLimits();
     const horizon = this.#tombstoneHorizon();
     // The binding resolved and bounded these; this method is the run's
-    // boundary, so it refuses anything that isn't a time above 0.
+    // boundary, so it refuses anything that isn't a time above 0 and within
+    // the greatest limit any host may set: the run's end plus it is then
+    // always a time an alarm takes.
     for (const ms of [command.retention.successMs, command.retention.errorMs]) {
-      if (!Number.isSafeInteger(ms) || ms <= 0) {
+      if (!Number.isSafeInteger(ms) || ms <= 0 || ms > maxRetentionLimitMs) {
         throw new TypeError(
-          `A run's retention is a whole number of milliseconds above 0: ${String(ms)}`
+          `A run's retention is a whole number of milliseconds above 0, at most 365 days: ${String(ms)}`
         );
       }
     }

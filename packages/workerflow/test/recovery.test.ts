@@ -19,7 +19,7 @@ import {
   until,
   workflow,
 } from "./helpers.ts";
-import { effectsOf, hold } from "./outside.ts";
+import { effectsOf, eventOf, hold, warningsDuring } from "./outside.ts";
 
 const exec = async (
   definition: string,
@@ -59,6 +59,45 @@ const failing = async (
         Reflect.set(state.storage, name, original.call);
       } else {
         Reflect.deleteProperty(state.storage, name);
+      }
+    });
+  };
+};
+
+/**
+ * Makes the run object's `setAlarm` fail for a time past `after` only, as
+ * storage that fails would; the returned function puts it back.
+ */
+const failingPast = async (
+  definition: string,
+  id: string,
+  after: number
+): Promise<() => Promise<void>> => {
+  const original = await runInDurableObject(
+    runObject(definition, id),
+    (_, state) => {
+      const { storage } = state;
+      const hadOwn = Object.hasOwn(storage, "setAlarm");
+      const call: unknown = Reflect.get(storage, "setAlarm");
+      Reflect.set(storage, "setAlarm", async (time: number | Date) => {
+        const at = typeof time === "number" ? time : time.getTime();
+        if (at > after) {
+          throw new Error("injected storage failure");
+        }
+        if (typeof call !== "function") {
+          throw new TypeError("storage has no setAlarm");
+        }
+        await Reflect.apply(call, storage, [time]);
+      });
+      return { hadOwn, call };
+    }
+  );
+  return async () => {
+    await runInDurableObject(runObject(definition, id), (_, state) => {
+      if (original.hadOwn) {
+        Reflect.set(state.storage, "setAlarm", original.call);
+      } else {
+        Reflect.deleteProperty(state.storage, "setAlarm");
       }
     });
   };
@@ -439,38 +478,44 @@ describe("storage that fails around an activation", () => {
     await expect(wakeOf("tail", id)).resolves.toBeNull();
   });
 
-  it("ends the run when its alarm can't be removed, and the alarm left behind changes nothing", async () => {
+  it("ends the run when its purge alarm can't be set, and the watchdog left behind keeps the end and sets the purge", async () => {
     const id = newId();
     const first = hold(id, "end", 1);
     await workflow("tail").create({ id });
     await first.held;
-    const restore = await failing("tail", id, "deleteAlarm");
+    // Only the purge's alarm fails, days away: the watchdog's, a lease
+    // away, is set as ever.
+    const restore = await failingPast("tail", id, Date.now() + 60 * 60_000);
 
-    const outcome = await outcomeOf(deliverAlarm("tail", id));
+    const warnings = await warningsDuring(async () => {
+      await outcomeOf(deliverAlarm("tail", id));
+    });
     const settled = await journalOf("tail", id);
     const leftOver = await alarmOf("tail", id);
     await restore();
-    // The alarm left behind comes.
+    // The watchdog left behind comes.
     await deliverAlarm("tail", id);
+    const after = await journalOf("tail", id);
+    const purge = await alarmOf("tail", id);
     first.release();
-    const journal = await firstActivationEnded("tail", id);
-    const status = await ended("tail", id);
+    await firstActivationEnded("tail", id);
 
-    expect({ outcome, status, alarmLeft: leftOver !== null }).toStrictEqual({
-      outcome: "returned",
-      status: { status: "complete", output: 2 },
-      alarmLeft: true,
+    expect({
+      status: settled.run.status,
+      events: warnings.map((warning) => eventOf(warning)),
+      // What was left is a watchdog, a lease away, not the purge.
+      watchdog: leftOver !== null && leftOver < (settled.run.purge_at ?? 0),
+      purge: purge === settled.run.purge_at,
+    }).toStrictEqual({
+      status: "complete",
+      events: ["workflow_alarm_set_failed"],
+      watchdog: true,
+      purge: true,
     });
-    expect(settled.activations).toMatchObject([
-      { generation: 1, ended: null },
-      { generation: 2, ended: "settled" },
-    ]);
-    expect(journal).toMatchObject({
+    // The watchdog kept the end as it was, and replayed nothing.
+    expect({ run: after.run, activations: after.activations }).toStrictEqual({
       run: settled.run,
-      activations: [
-        { generation: 1, ended: "superseded" },
-        { generation: 2, ended: "settled" },
-      ],
+      activations: settled.activations,
     });
   });
 
