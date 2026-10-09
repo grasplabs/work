@@ -114,21 +114,23 @@ export const frameAccess = async (
   await accessToken(env, `frame:${artifact}`, now + frameAccessMs);
 
 /**
+ * When a token `windowedAccess` makes at `now` expires: the end of the
+ * next window of `moduleAccessWindowMs`.
+ */
+export const windowedAccessEnd = (now: number): number =>
+  (Math.floor(now / moduleAccessWindowMs) + 2) * moduleAccessWindowMs;
+
+/**
  * A token for `subject` that holds until the end of the next window of
- * `moduleAccessWindowMs`: the same for everything asked in one window.
- * The subject says what it is for (`module:…`, `package-artifact:…`), so
- * one never passes for another.
+ * `moduleAccessWindowMs` (`windowedAccessEnd`): the same for everything
+ * asked in one window. The subject says what it is for (`module:…`,
+ * `package-artifact:…`), so one never passes for another.
  */
 export const windowedAccess = async (
   env: Env,
   subject: string,
   now: number
-): Promise<string> =>
-  await accessToken(
-    env,
-    subject,
-    (Math.floor(now / moduleAccessWindowMs) + 2) * moduleAccessWindowMs
-  );
+): Promise<string> => await accessToken(env, subject, windowedAccessEnd(now));
 
 /** A token for the module `hash`, for a frame's import map. */
 const moduleAccess = async (

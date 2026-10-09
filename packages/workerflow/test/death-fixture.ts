@@ -7,7 +7,9 @@ import { Workflow } from "../src/binding.ts";
 import type {
   DefinitionIdentity,
   WorkflowDefinition,
+  WorkflowRollbackContext,
   WorkflowStepContext,
+  WorkflowStepRollbackOptions,
 } from "../src/contracts.ts";
 import { namedError } from "../src/errors.ts";
 import { runObjectName } from "../src/identity.ts";
@@ -56,6 +58,28 @@ const effect = async (
   });
   return await response.text();
 };
+
+/**
+ * A rollback's effect, undoing `label`'s, under the rollback's own key and
+ * attempt, as `undo-<label>`.
+ */
+const undoing = (
+  env: FixtureEnv,
+  run: string,
+  label: string
+): WorkflowStepRollbackOptions => ({
+  rollback: async (context: WorkflowRollbackContext) => {
+    await env.EFFECTS.fetch("http://effects/effect", {
+      method: "POST",
+      body: JSON.stringify({
+        run,
+        label: `undo-${label}`,
+        key: context.idempotencyKey,
+        attempt: context.attempt,
+      }),
+    });
+  },
+});
 
 /**
  * A stream of bytes from the outside world: the test can withhold the rest
@@ -232,6 +256,55 @@ const definitionsFor = (
         },
         async (context) => await effect(env, event.instanceId, "cut", context)
       );
+    },
+  },
+  // Two steps with rollbacks, then a third that fails, uncaught, after its
+  // effect: the run rolls the three back, latest first.
+  compensated: {
+    run: async (event, step) => {
+      const once = { retries: { limit: 0, delay: 0 } };
+      const charge = await step.do(
+        "charge",
+        async (context) =>
+          await effect(env, event.instanceId, "charge", context),
+        undoing(env, event.instanceId, "charge")
+      );
+      const reserve = await step.do(
+        "reserve",
+        async (context) =>
+          await effect(env, event.instanceId, "reserve", context),
+        undoing(env, event.instanceId, "reserve")
+      );
+      await step.do(
+        "ship",
+        once,
+        async (context) => {
+          await effect(env, event.instanceId, "ship", context);
+          throw namedError("ShippingError", "No courier came");
+        },
+        undoing(env, event.instanceId, "ship")
+      );
+      return { charge, reserve };
+    },
+  },
+  // A call outside any step (which the test can withhold, at any replay
+  // too: a replay can't get the rollback back before it), a step with a
+  // rollback, then a step that fails, uncaught.
+  gated: {
+    run: async (event, step) => {
+      await env.EFFECTS.fetch("http://effects/gate", {
+        method: "POST",
+        body: JSON.stringify({ run: event.instanceId }),
+      });
+      await step.do(
+        "first",
+        async (context) =>
+          await effect(env, event.instanceId, "first", context),
+        undoing(env, event.instanceId, "first")
+      );
+      await step.do("fail", { retries: { limit: 0, delay: 0 } }, () => {
+        throw namedError("ShippingError", "No courier came");
+      });
     },
   },
   // A step, a wait for an "approved" event, another step.

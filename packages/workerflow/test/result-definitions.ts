@@ -421,6 +421,28 @@ export const resultDefinitions: Record<string, WorkflowDefinition> = {
       });
     },
   },
+  // A stream whose rest waits at a checkpoint after its first part, with a
+  // step's default timeout: the test can hold an upload as long as it
+  // likes, by which reach of the checkpoint it is. Then it is read back.
+  "held-stream": {
+    run: async (event, step) => {
+      const body = await step.do(
+        "export",
+        () =>
+          new ReadableStream<Uint8Array>({
+            start: (controller) => {
+              controller.enqueue(patterned(slowStreamFirst));
+            },
+            pull: async (controller) => {
+              await checkpoint(event.instanceId, "stream");
+              controller.enqueue(patterned(slowStreamRest, 1));
+              controller.close();
+            },
+          })
+      );
+      return await digestOf(body);
+    },
+  },
   // A stream whose rest the test can hold after its first part: the step
   // is mid-upload while the test acts. Then its bytes are read back.
   "slow-stream": {
