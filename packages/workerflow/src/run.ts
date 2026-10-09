@@ -138,6 +138,7 @@ import {
   readRun,
   readStep,
   removeJournal,
+  nextTombstoneExpiry,
   expireTombstones,
 } from "./journal.ts";
 import type { Journal, RunRow, StepType } from "./journal.ts";
@@ -463,6 +464,54 @@ export const defaultTombstoneMs = 30 * 24 * 60 * 60 * 1000;
 const maxTombstoneMs = 365 * 24 * 60 * 60 * 1000;
 
 /**
+ * The object's storage, with its one alarm shared by the run and the
+ * object's tombstones: every alarm the engine sets is moved to the oldest
+ * tombstone's expiry when that comes first, and an alarm it deletes is
+ * left at that expiry while a tombstone is left. So a run created under
+ * an ID after another was deleted, whatever it does (runs, waits, pauses,
+ * ends), never keeps a tombstone past its horizon; alarm() expires what
+ * is due, then does the run's own work. Everything else is the storage's
+ * own, failures included.
+ */
+const sharingAlarm = (
+  storage: DurableObjectStorage,
+  horizon: () => number
+): DurableObjectStorage => {
+  const expiry = (): number | null =>
+    nextTombstoneExpiry(storage.sql, horizon());
+  const earliest = (time: number | Date): number => {
+    const at = typeof time === "number" ? time : time.getTime();
+    const tombstone = expiry();
+    return tombstone === null ? at : Math.min(at, tombstone);
+  };
+  return new Proxy(storage, {
+    get: (target, property) => {
+      if (property === "setAlarm") {
+        return async (time: number | Date): Promise<void> => {
+          // Read with no await before the call: the same turn as the
+          // write it goes with.
+          await target.setAlarm(earliest(time));
+        };
+      }
+      if (property === "deleteAlarm") {
+        return async (): Promise<void> => {
+          const tombstone = expiry();
+          await (tombstone === null
+            ? target.deleteAlarm()
+            : target.setAlarm(tombstone));
+        };
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      if (typeof value !== "function") {
+        return value;
+      }
+      return (...args: unknown[]): unknown =>
+        Reflect.apply(value, target, args);
+    },
+  });
+};
+
+/**
  * What removing a run left: null when nothing is left (the object can be
  * emptied), else when the oldest tombstone left expires.
  */
@@ -504,6 +553,20 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * retention is never run twice.
    */
   protected readonly tombstoneMs: number = defaultTombstoneMs;
+
+  /**
+   * The storage the engine sets its alarm through, shared with the
+   * tombstones' expiry (sharingAlarm). The horizon is read when an alarm
+   * is set, so a subclass's own is the one used; one the host got wrong
+   * counts as the default here, and is refused where it is checked.
+   */
+  readonly #store: DurableObjectStorage = sharingAlarm(this.ctx.storage, () => {
+    try {
+      return this.#tombstoneHorizon();
+    } catch {
+      return defaultTombstoneMs;
+    }
+  });
 
   /** The tombstone horizon, checked: whole milliseconds, 1 to 365 days. */
   #tombstoneHorizon(): number {
@@ -602,7 +665,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     // Refused before any run exists, rather than at its first alarm.
     this.#rollbackLimits();
     const horizon = this.#tombstoneHorizon();
-    const { storage } = this.ctx;
+    const storage = this.#store;
     // Before the run: a start delivered again after its run was deleted
     // finds the tombstone, whatever run was created under the ID since.
     // Only a start with this key could have left it, so it is this start.
@@ -661,9 +724,39 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     if (hasEnded(run) || run.status === "paused") {
       return;
     }
-    if ((await this.ctx.storage.getAlarm()) === null) {
-      await this.ctx.storage.setAlarm(Date.now());
+    // An alarm that is only the tombstones' expiry isn't the run's own.
+    const alarm = await this.#store.getAlarm();
+    if (alarm === null || alarm === this.#tombstoneExpiry()) {
+      await this.#store.setAlarm(Date.now());
     }
+  }
+
+  /** When the object's oldest tombstone expires, or null for none. */
+  #tombstoneExpiry(): number | null {
+    let horizon: number;
+    try {
+      horizon = this.#tombstoneHorizon();
+    } catch {
+      horizon = defaultTombstoneMs;
+    }
+    return nextTombstoneExpiry(this.ctx.storage.sql, horizon);
+  }
+
+  /**
+   * Drops the tombstones past the horizon beside a run, in one write.
+   * Returns whether any was due: this alarm may have been theirs.
+   */
+  #expireDueTombstones(now: number): boolean {
+    const horizon = this.#tombstoneHorizon();
+    const storage = this.#store;
+    return storage.transactionSync(() => {
+      const due = nextTombstoneExpiry(storage.sql, horizon);
+      if (due === null || due > now) {
+        return false;
+      }
+      expireTombstones(storage.sql, now - horizon);
+      return true;
+    });
   }
 
   status(): InstanceStatus | undefined {
@@ -767,7 +860,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   async #leaveToWatchdog(event: string, error: unknown): Promise<void> {
     warnRecovered(event, error);
     try {
-      await this.ctx.storage.setAlarm(Date.now() + this.leaseMs);
+      await this.#store.setAlarm(Date.now() + this.leaseMs);
     } catch {
       throw error;
     }
@@ -779,7 +872,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * is paused now. One still out somehow is fenced.
    */
   async #pauseNow(): Promise<void> {
-    const { storage } = this.ctx;
+    const storage = this.#store;
     const now = Date.now();
     try {
       storage.transactionSync(() => {
@@ -798,6 +891,44 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       // nothing.
       warnRecovered("workflow_alarm_delete_failed", error);
     }
+  }
+
+  /**
+   * An alarm's first job beside a run: the tombstones of an earlier run
+   * under this ID that are due go, whatever this run does, and none of
+   * its journal is touched. True when that is all the alarm does: the run
+   * has ended or is paused (what it would do is journaled already, and a
+   * paused run waits for `resume`; the alarm left is the next tombstone's),
+   * or it waits and the alarm was the tombstones', early for it (it only
+   * re-arms the run's wake; no activation replays it).
+   */
+  async #tombstonesBeside(run: RunRow): Promise<boolean> {
+    const storage = this.#store;
+    let due: boolean;
+    try {
+      due = this.#expireDueTombstones(Date.now());
+    } catch (error) {
+      await this.#leaveToWatchdog("workflow_tombstone_expiry_failed", error);
+      return true;
+    }
+    if (hasEnded(run) || run.status === "paused") {
+      try {
+        await storage.deleteAlarm();
+      } catch (error) {
+        warnRecovered("workflow_alarm_delete_failed", error);
+      }
+      return true;
+    }
+    const wake = run.status === "waiting" ? run.wake_at : null;
+    if (!due || wake === null || wake <= Date.now()) {
+      return false;
+    }
+    try {
+      await storage.setAlarm(wake);
+    } catch (error) {
+      await this.#leaveToWatchdog("workflow_alarm_rearm_failed", error);
+    }
+    return true;
   }
 
   /** One activation: replays the definition under a new generation. */
@@ -826,7 +957,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       // A journal this engine doesn't read: nothing here can run it, and
       // retrying would only refuse it again. No alarm is left to do so.
       try {
-        await this.ctx.storage.deleteAlarm();
+        await this.#store.deleteAlarm();
       } catch (deleteError) {
         // An alarm left behind is refused the same way when it comes, and
         // tries to remove itself again.
@@ -839,12 +970,10 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       await this.#expireTombstones();
       return;
     }
-    if (hasEnded(run) || run.status === "paused") {
-      // A duplicate or late alarm: what it would do is journaled already.
-      // A paused run waits for `resume`, which sets its alarm.
+    if (await this.#tombstonesBeside(run)) {
       return;
     }
-    const { storage } = this.ctx;
+    const storage = this.#store;
     if (run.status === "waitingForPause") {
       await this.#pauseNow();
       return;
@@ -984,7 +1113,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   async #command<Outcome extends string>(
     decide: (run: RunRow, now: number) => CommandDecision<Outcome>
   ): Promise<Outcome | "missing"> {
-    const { storage } = this.ctx;
+    const storage = this.#store;
     if (!hasJournal(storage.sql)) {
       return "missing";
     }
@@ -1153,7 +1282,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    */
   async deleteRun(): Promise<DeleteOutcome> {
     const horizon = this.#tombstoneHorizon();
-    const { storage } = this.ctx;
+    const storage = this.#store;
     const now = Date.now();
     const removed = storage.transactionSync((): Removal | "missing" => {
       // Not read through readRun: a journal of a layout this engine
@@ -1188,7 +1317,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * way round, a run would be left with no alarm to run it.
    */
   async #afterRemoval(removal: Removal): Promise<void> {
-    const { storage } = this.ctx;
+    const storage = this.#store;
     if (removal.expiresAt === null) {
       try {
         await storage.deleteAll();
@@ -1213,7 +1342,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * emptied. A failure leaves it all to an alarm a lease away.
    */
   async #expireTombstones(): Promise<void> {
-    const { storage } = this.ctx;
+    const storage = this.#store;
     let horizon: number;
     let oldest: number | null;
     try {
@@ -1239,7 +1368,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * again, and accepted once.
    */
   async sendEvent(command: EventCommand): Promise<EventOutcome> {
-    const { storage } = this.ctx;
+    const storage = this.#store;
     if (!hasJournal(storage.sql)) {
       return "missing";
     }

@@ -499,6 +499,25 @@ export const isTombstoned = (
     .toArray().length > 0;
 
 /**
+ * When the oldest tombstone expires, `horizon` after it was left, or null
+ * when there is none.
+ */
+export const nextTombstoneExpiry = (
+  sql: SqlStorage,
+  horizon: number
+): number | null => {
+  if (!hasTombstones(sql)) {
+    return null;
+  }
+  const [oldest] = sql
+    .exec<{ at: number | null }>("SELECT MIN(removed_at) AS at FROM tombstones")
+    .toArray();
+  return oldest?.at === null || oldest === undefined
+    ? null
+    : oldest.at + horizon;
+};
+
+/**
  * Drops the tombstones left at or before `since`, in the caller's
  * transaction, and the table once none is left. Returns when the oldest
  * left was left, or null when none is.

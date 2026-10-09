@@ -7,8 +7,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { batchCodes, batchConcurrency, maxBatchBytes } from "../src/binding.ts";
-import { decode } from "../src/codec.ts";
+import { decode, encode } from "../src/codec.ts";
 import type { WorkflowInstance } from "../src/instance.ts";
+import { defaultTombstoneMs, WorkflowRun } from "../src/run.ts";
 import {
   ended,
   journalOf,
@@ -691,6 +692,129 @@ describe("tombstones of different ages", () => {
     expect(withBoth.alarm).toBe((first?.removedAt ?? 0) + shortTombstoneMs);
     expect(left.map((tombstone) => tombstone.key)).toStrictEqual([newer.key]);
     expect(afterOne.alarm).toBe((left[0]?.removedAt ?? 0) + shortTombstoneMs);
+  });
+});
+
+describe("a tombstone beside a run created under its ID", () => {
+  const runs = env.SHORT_TOMBSTONES;
+
+  /** Leaves a tombstone under `id`, of an admitted run since deleted. */
+  const tombstoned = async (definition: string, id: string): Promise<void> => {
+    await workflow(definition, runs).admit({ id, key: `trigger-${newId()}` });
+    await workflow(definition, runs).deleteBatch([id]);
+  };
+
+  /** Waits until the tombstone has gone, and returns what is left. */
+  const tombstoneGone = async (
+    definition: string,
+    id: string
+  ): Promise<{ tables: string[]; alarm: number | null }> =>
+    await until("the tombstone to expire", async () => {
+      const now = await emptied(definition, id, runs);
+      return now.tables.includes("tombstones") ? undefined : now;
+    });
+
+  it("expires at its horizon though the new run completed, its journal intact", async () => {
+    const id = newId();
+    await tombstoned("orders", id);
+    await workflow("orders", runs).create({ id });
+    await ended("orders", id, runs);
+
+    const left = await tombstoneGone("orders", id);
+
+    const journal = await journalOf("orders", id, runs);
+    expect(left.alarm).toBeNull();
+    expect(journal).toMatchObject({
+      run: { status: "complete" },
+      steps: [
+        { name: "charge", state: "succeeded" },
+        { name: "ship", state: "succeeded" },
+      ],
+    });
+  });
+
+  it("expires at its horizon though the new run is paused, which stays paused with no activation", async () => {
+    const id = newId();
+    await tombstoned("approval", id);
+    await workflow("approval", runs).create({ id });
+    await until("the run to wait", async () => {
+      const journal = await journalOf("approval", id, runs);
+      return journal.run.status === "waiting" ? journal : undefined;
+    });
+    const run = await workflow("approval", runs).get(id);
+    await run.pause();
+    const paused = await journalOf("approval", id, runs);
+
+    const left = await tombstoneGone("approval", id);
+
+    await expect(run.status()).resolves.toStrictEqual({ status: "paused" });
+    const after = await journalOf("approval", id, runs);
+    expect(left.alarm).toBeNull();
+    expect(after.activations).toStrictEqual(paused.activations);
+    expect(after.steps).toStrictEqual(paused.steps);
+  });
+
+  it("expires at its horizon beside a waiting run, whose wake it only re-arms", async () => {
+    const id = newId();
+    await tombstoned("approval", id);
+    await workflow("approval", runs).create({ id });
+    const waiting = await until("the run to wait", async () => {
+      const journal = await journalOf("approval", id, runs);
+      return journal.run.status === "waiting" ? journal : undefined;
+    });
+
+    const left = await tombstoneGone("approval", id);
+
+    const after = await journalOf("approval", id, runs);
+    expect(left.alarm).toBe(waiting.run.wake_at);
+    expect(after.activations).toStrictEqual(waiting.activations);
+    expect(after.run.status).toBe("waiting");
+  });
+});
+
+describe("a start delivered again beside a tombstone", () => {
+  it("repairs the run's own alarm when all the object has left is the tombstone's expiry", async () => {
+    const id = newId();
+    await workflow("orders").admit({ id, key: `trigger-${newId()}` });
+    await workflow("orders").deleteBatch([id]);
+    const command = {
+      definition: "orders",
+      version: null,
+      instanceId: id,
+      params: encode({}),
+      key: `trigger-${newId()}`,
+      schedule: null,
+      redeliverable: true,
+    };
+
+    // The run created, then its alarm lost but for the tombstone's, and
+    // the start delivered again: no other event of the object between.
+    const repaired = await runInDurableObject(
+      runObject("orders", id),
+      async (object, state) =>
+        await state.blockConcurrencyWhile(async () => {
+          if (!(object instanceof WorkflowRun)) {
+            throw new TypeError("the object isn't a run object");
+          }
+          await object.start(command);
+          const tombstoneExpiry = state.storage.sql
+            .exec<{ at: number }>(
+              "SELECT MIN(removed_at) AS at FROM tombstones"
+            )
+            .one().at;
+          await state.storage.setAlarm(tombstoneExpiry + defaultTombstoneMs);
+          const outcome = await object.start(command);
+          return {
+            outcome,
+            alarm: await state.storage.getAlarm(),
+            now: Date.now(),
+          };
+        })
+    );
+
+    expect(repaired.outcome).toBe("existing");
+    expect(repaired.alarm).toBeLessThanOrEqual(repaired.now);
+    await ended("orders", id);
   });
 });
 
