@@ -10,7 +10,7 @@
 // older array form skips both silently. `deleteBatch` deletes each ID once
 // and answers per input position, an instance that doesn't exist as 10400.
 // Every entry is checked before anything is created or deleted: an invalid
-// one fails the whole call, as does params over 32 MiB in all. One entry's
+// one fails the whole call, as do params over 16 MiB of memory in all. One entry's
 // failure never takes the others down: each is settled on its own, ten at
 // a time, and one that failed for another reason is reported as 10001.
 import { encode } from "./codec.ts";
@@ -166,21 +166,27 @@ const assertBatchSize = (size: number, what: string): void => {
 };
 
 /**
- * The most a batch's params may take, encoded, all entries together: well
- * under an isolate's 128 MB, with room for the batch's own copies.
+ * The most heap a batch's encoded params may take, all entries together:
+ * well under an isolate's 128 MB, with room for the batch's own copies and
+ * what each RPC serializes of them.
  */
-export const maxBatchBytes = 32 * 1024 * 1024;
+export const maxBatchBytes = 16 * 1024 * 1024;
 
 /** How many runs a batch starts or deletes at once. */
 export const batchConcurrency = 10;
 
-const textBytes = (text: string): number =>
-  new TextEncoder().encode(text).byteLength;
+/**
+ * What an encoded value takes on the heap: two bytes a UTF-16 code unit,
+ * which is what a string holds once any of it is outside Latin-1 (codec
+ * text keeps non-ASCII as it is). Counting UTF-8 bytes would let text of
+ * other scripts take up to twice the cap. No copy is made to count.
+ */
+const heapBytes = (text: string): number => text.length * 2;
 
 const assertBatchBytes = (bytes: number): void => {
   if (bytes > maxBatchBytes) {
     throw workflowError(
-      `batchCreate params take at most ${maxBatchBytes} bytes encoded, all entries together`
+      `batchCreate params take at most ${maxBatchBytes} bytes of memory encoded, all entries together`
     );
   }
 };
@@ -228,7 +234,7 @@ const readEntries = (batch: readonly unknown[]): Entry[] => {
     );
     // Counted as each entry is read, so a batch over the cap is refused
     // holding little more than the cap.
-    bytes += textBytes(entry.params);
+    bytes += heapBytes(entry.params);
     assertBatchBytes(bytes);
     entries.push(entry);
   }
@@ -272,7 +278,7 @@ const readBatchOptions = (options: unknown): Entry[] => {
   }
   const encoded = encodeParams(params);
   // Every run gets its own copy of the params: counted once per run.
-  assertBatchBytes(textBytes(encoded) * count);
+  assertBatchBytes(heapBytes(encoded) * count);
   return Array.from({ length: count }, () => ({
     id: crypto.randomUUID(),
     params: encoded,

@@ -650,6 +650,50 @@ describe("a run's removal", () => {
   });
 });
 
+describe("tombstones of different ages", () => {
+  it("expire one by one: the oldest drops, and the alarm moves to the next", async () => {
+    const runs = env.SHORT_TOMBSTONES;
+    const id = newId();
+    const older = { id, key: `trigger-${newId()}` };
+    const newer = { id, key: `trigger-${newId()}` };
+    await workflow("orders", runs).admit(older);
+    await ended("orders", id, runs);
+    await workflow("orders", runs).deleteBatch([id]);
+    const tombstonesOf = async (): Promise<
+      { key: string; removedAt: number }[]
+    > =>
+      await runInDurableObject(runObject("orders", id, runs), (_, state) =>
+        state.storage.sql
+          .exec<{ start_key: string; removed_at: number }>(
+            "SELECT start_key, removed_at FROM tombstones ORDER BY removed_at"
+          )
+          .toArray()
+          .map((row) => ({ key: row.start_key, removedAt: row.removed_at }))
+      );
+    const [first] = await tombstonesOf();
+    await pastTime((first?.removedAt ?? 0) + shortTombstoneMs / 2);
+    await workflow("orders", runs).admit(newer);
+    await ended("orders", id, runs);
+    await workflow("orders", runs).deleteBatch([id]);
+    const both = await tombstonesOf();
+    const withBoth = await emptied("orders", id, runs);
+
+    const left = await until("the older tombstone to expire", async () => {
+      const now = await tombstonesOf();
+      return now.length === 1 ? now : undefined;
+    });
+    const afterOne = await emptied("orders", id, runs);
+
+    expect(both.map((tombstone) => tombstone.key)).toStrictEqual([
+      older.key,
+      newer.key,
+    ]);
+    expect(withBoth.alarm).toBe((first?.removedAt ?? 0) + shortTombstoneMs);
+    expect(left.map((tombstone) => tombstone.key)).toStrictEqual([newer.key]);
+    expect(afterOne.alarm).toBe((left[0]?.removedAt ?? 0) + shortTombstoneMs);
+  });
+});
+
 describe("a tombstone past its horizon", () => {
   it("no longer holds, though its alarm hasn't come to drop it yet", async () => {
     const runs = env.SHORT_TOMBSTONES;
@@ -676,12 +720,14 @@ describe("a tombstone past its horizon", () => {
 });
 
 describe("a batch's bounds", () => {
-  /** Params of a little under a megabyte, encoded. */
+  /** Params of a million ASCII characters: two megabytes on the heap. */
   const large = { blob: "x".repeat(1_000_000) };
 
-  it("refuses entries whose params pass the cap together, creating nothing", async () => {
-    const entries = Math.ceil(maxBatchBytes / 1_000_000) + 1;
+  it("counts the heap a string takes, two bytes a character, not its UTF-8: refused, creating nothing", async () => {
+    // Under the cap in UTF-8 bytes (one a character), over it on the heap.
+    const entries = Math.floor(maxBatchBytes / 2_000_000) + 1;
     const ids = Array.from({ length: entries }, newId);
+    expect(entries * 1_000_000).toBeLessThan(maxBatchBytes);
 
     const refusal = await refusalOf(
       workflow("orders").createBatch({
@@ -693,8 +739,24 @@ describe("a batch's bounds", () => {
     await expect(existing("orders", ids.slice(0, 3))).resolves.toBe(0);
   });
 
+  it("refuses params outside Latin-1 that pass the cap together, creating nothing", async () => {
+    // 300,000 characters of CJK: 900,000 bytes of UTF-8, 600,000 on the heap.
+    const wide = { text: "日".repeat(300_000) };
+    const entries = Math.floor(maxBatchBytes / 600_000) + 1;
+    const ids = Array.from({ length: entries }, newId);
+
+    const refusal = await refusalOf(
+      workflow("orders").createBatch({
+        instances: ids.map((id) => ({ id, params: wide })),
+      })
+    );
+
+    expect(refusal).toMatch(/^WorkflowError: batchCreate params take at most/u);
+    await expect(existing("orders", ids.slice(0, 3))).resolves.toBe(0);
+  });
+
   it("refuses a count whose shared params pass the cap once per run", async () => {
-    const count = Math.ceil(maxBatchBytes / 1_000_000) + 1;
+    const count = Math.floor(maxBatchBytes / 2_000_000) + 1;
 
     await expect(
       refusalOf(workflow("orders").createBatch({ count, params: large }))
