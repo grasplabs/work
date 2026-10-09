@@ -10,6 +10,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { AttemptRow, Journal } from "../src/journal.ts";
 import {
   alarmOf,
+  wakeOf,
   deliverAlarm,
   ended,
   journalOf,
@@ -789,7 +790,7 @@ describe("a replay that configures a step otherwise", () => {
       const after = await journalOf("reconfigured", id);
       expect(after.steps).toStrictEqual(before.steps);
       expect(after.attempts).toStrictEqual(before.attempts);
-      await expect(alarmOf("reconfigured", id)).resolves.toBeNull();
+      await expect(wakeOf("reconfigured", id)).resolves.toBeNull();
       expect(effectsOf(id, "flaky")).toHaveLength(1);
     }
   );

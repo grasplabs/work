@@ -10,8 +10,8 @@
 // step may be `sensitive`, and may register a rollback. An instance can be
 // paused, resumed, terminated (rolling back, too), restarted (from a step,
 // too) and deleted (instance.ts); created and deleted in batches, and
-// started by a schedule's occurrence (binding.ts). Retention comes in a
-// later slice; until then `create` refuses it, never silently ignores it.
+// started by a schedule's occurrence (binding.ts); an ended run is kept
+// for its retention, then purged (retention.ts).
 
 /** What a run's definition is given when it runs. */
 export interface WorkflowEvent<Params = unknown> {
