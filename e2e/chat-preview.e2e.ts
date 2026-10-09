@@ -4,9 +4,11 @@ import { test } from "./csp.ts";
 import { apiOf, ordinaryData, pageOf, peopleIn } from "./people.ts";
 import { origin } from "./stack.ts";
 
-// The side panel of a chat previews the draft its agent is writing: the
-// draft's screen, calling the draft's server code in a preview of its own,
-// which changes none of the App's data. The local stack reaches no model,
+// A chat builds an App in a studio: the chat alone until its agent writes
+// a draft, then the chat on the left and the draft's preview on the
+// right, under the App's own top row with the way to the App. The preview
+// is the draft's screen, calling the draft's server code in a preview of
+// its own, which changes none of the App's data. The local stack reaches no model,
 // so the draft is written straight into the chat's Workspace object, as
 // the agent's `env.build.write` leaves it, through the local dev server's
 // own tools (as connections-seed.ts writes into connect's database). The
@@ -125,7 +127,7 @@ export default function Tally() {
 }
 `;
 
-test("the side panel previews the chat's draft, whose server code changes none of the App's data", async ({
+test("a chat builds an App in a studio, the chat on the left and a preview that changes none of the App's data on the right", async ({
   browser,
 }) => {
   const { builder } = peopleIn("chatPreview");
@@ -141,21 +143,48 @@ test("the side panel previews the chat's draft, whose server code changes none o
     );
     await api.apps.versions.setCurrent(app.id, version);
     await ordinaryData(app.id);
-    const chat = await api.chats.create(`Preview ${tag}`);
+    const chat = await api.chats.create(`Build ${tag}`);
+
+    // Nothing built yet: the chat alone, the chats' sidebar open beside it.
+    const page = await pageOf(browser, builder);
+    await page.goto(`/?chat=${chat.id}`);
+    const thread = page.getByRole("region", {
+      name: `Build ${tag}`,
+      exact: true,
+    });
+    const studio = page.getByRole("region", { name, exact: true });
+    await expect(thread).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Fold the chats" })
+    ).toBeVisible();
+    await expect(studio).toHaveCount(0);
+
+    // Its agent writes a draft: the App stands on the right, the chat
+    // moves to its left, and the sidebar folds to give it the room.
     await writeDraft(builder.userId, chat.id, app.id, version, {
       "app/server.ts": server("in the preview"),
     });
+    await page.reload();
+    // Named by its top row's heading: the App's name.
+    await expect(studio).toBeVisible();
+    await expect(studio).toContainText(
+      "1 file changed in this chat, not proposed yet"
+    );
+    await expect(
+      page.getByRole("button", { name: "Expand the chats" })
+    ).toBeVisible();
+    const chatBox = await thread.boundingBox();
+    const appBox = await studio.boundingBox();
+    expect(chatBox).not.toBeNull();
+    expect(appBox).not.toBeNull();
+    expect((chatBox?.x ?? 0) + (chatBox?.width ?? 0)).toBeLessThanOrEqual(
+      (appBox?.x ?? 0) + 1
+    );
 
-    const page = await pageOf(browser, builder);
-    await page.goto(`/?chat=${chat.id}`);
-    await page.getByRole("button", { name: "Side panel" }).click();
-    const preview = page
-      .getByRole("complementary", { name: "Side panel" })
-      .getByRole("region", { name: `Preview of ${name}` });
+    const preview = studio.getByRole("region", { name: `Preview of ${name}` });
     await expect(preview).toContainText(
       "Preview: changes nothing, reads no real data"
     );
-    await expect(preview).toContainText(name);
     const frame = preview.frameLocator("iframe");
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("1 in the preview");
@@ -165,6 +194,13 @@ test("the side panel previews the chat's draft, whose server code changes none o
     // The App's own storage has none of it.
     const counted = await api.screens.call(app.id, "count", []);
     expect(counted).toBe("0 in the App");
+
+    // View app opens the App itself.
+    await studio.getByRole("link", { name: "View app" }).click();
+    await expect(page).toHaveURL(new RegExp(`/engines/${app.id}$`, "u"));
+    await expect(
+      page.getByRole("heading", { level: 1, name, exact: true })
+    ).toBeVisible();
   } finally {
     core[Symbol.dispose]();
   }

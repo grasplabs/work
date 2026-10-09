@@ -15,15 +15,15 @@ msgstr "(entreprise)"
 msgid "(yours)"
 msgstr "(la vôtre)"
 
-#. placeholder {0}: draft.changed.length
-#: src/chat/builds.tsx
-msgid "{0, plural, one {{engine}: # file changed in this chat, not proposed yet} other {{engine}: # files changed in this chat, not proposed yet}}"
-msgstr "{0, plural, one {{engine} : # fichier modifié dans ce chat, pas encore proposé} other {{engine} : # fichiers modifiés dans ce chat, pas encore proposés}}"
-
 #. placeholder {0}: request.counts.direct
 #: src/dashboard/dependency-requests.tsx
 msgid "{0, plural, one {{requester} asks for # package} other {{requester} asks for # packages}}"
 msgstr "{0, plural, one {{requester} demande # paquet} other {{requester} demande # paquets}}"
+
+#. placeholder {0}: draft.changed.length
+#: src/chat/studio.tsx
+msgid "{0, plural, one {# file changed in this chat, not proposed yet} other {# files changed in this chat, not proposed yet}}"
+msgstr "{0, plural, one {# fichier modifié dans ce chat, pas encore proposé} other {# fichiers modifiés dans ce chat, pas encore proposés}}"
 
 #. placeholder {0}: request.counts.findings
 #: src/dashboard/dependency-requests.tsx
@@ -627,6 +627,11 @@ msgstr "Tout"
 msgid "App"
 msgstr "Application"
 
+#: src/chat/studio.tsx
+msgctxt "the App being built, beside its chat"
+msgid "App"
+msgstr "App"
+
 #: src/dashboard/to-do.tsx
 msgctxt "kind of thing that waits"
 msgid "App approval"
@@ -682,6 +687,10 @@ msgstr "Approuvé : {who}."
 msgid "Apps"
 msgstr "Applications"
 
+#: src/chat/studio.tsx
+msgid "Apps being built in this chat"
+msgstr "Apps en cours de création dans ce chat"
+
 #: src/dashboard/to-do.tsx
 msgid "Apps to approve"
 msgstr "Applications à approuver"
@@ -708,8 +717,8 @@ msgid "Ask Grasp"
 msgstr "Demander à Grasp"
 
 #: src/chat/side-panel.tsx
-msgid "Ask Grasp to build one. While it works, the engine shows here to preview before it is proposed."
-msgstr "Demandez à Grasp d’en créer un. Pendant qu’il travaille, le moteur s’affiche ici pour un aperçu avant d’être proposé."
+msgid "Ask Grasp to build one. While it works, the engine stands beside the chat, to preview before it is proposed."
+msgstr "Demandez à Grasp d’en créer un. Pendant qu’il travaille, le moteur apparaît à côté du chat, pour un aperçu avant d’être proposé."
 
 #: src/workflows/fix-in-chat.tsx
 msgid "Ask the agent to fix"
@@ -956,6 +965,11 @@ msgstr "Modifications à confirmer"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
+msgid "Chat"
+msgstr "Chat"
+
+#: src/chat/studio.tsx
+msgctxt "the chat beside an App being built"
 msgid "Chat"
 msgstr "Chat"
 
@@ -2499,7 +2513,6 @@ msgctxt "onboarding stage"
 msgid "Open"
 msgstr "Ouvert"
 
-#: src/chat/builds.tsx
 #: src/knowledge/nav.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -2660,11 +2673,7 @@ msgstr "Mise à jour de la plateforme"
 msgid "Position"
 msgstr "Position"
 
-#: src/chat/builds.tsx
-msgid "Preview"
-msgstr "Aperçu"
-
-#: src/chat/builds.tsx
+#: src/chat/studio.tsx
 msgid "Preview of {name}"
 msgstr "Aperçu de {name}"
 
@@ -3846,6 +3855,10 @@ msgstr "Versions"
 #: src/connections/source-badge.tsx
 msgid "Via Composio"
 msgstr "Via Composio"
+
+#: src/chat/studio.tsx
+msgid "View app"
+msgstr "Voir l’app"
 
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
