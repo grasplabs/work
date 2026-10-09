@@ -123,9 +123,11 @@ import type {
 import { errorRecord, namedError, parseError } from "./errors.ts";
 import { readHistory } from "./history.ts";
 import type { HistoryEvent } from "./history.ts";
+import type { Schedule } from "./identity.ts";
 import {
   createJournal,
   hasJournal,
+  isTombstoned,
   JournalSchemaError,
   journalSchemaVersion,
   readJournal,
@@ -135,6 +137,8 @@ import {
   maxInboxEvents,
   readRun,
   readStep,
+  removeJournal,
+  expireTombstones,
 } from "./journal.ts";
 import type { Journal, RunRow, StepType } from "./journal.ts";
 import { warnRecovered } from "./log.ts";
@@ -159,6 +163,13 @@ export interface StartCommand {
   params: string;
   /** Says which start this is: the same key again is the same start. */
   key: string;
+  /** The schedule occurrence that starts the run, if one does. */
+  schedule: Schedule | null;
+  /**
+   * Whether the start can be delivered again (`admit`, a schedule): only
+   * then does removing the run leave its key as a tombstone.
+   */
+  redeliverable: boolean;
 }
 
 /** What the instance asks the run object to accept into its inbox. */
@@ -210,9 +221,15 @@ export type StepOutput =
  * `created`: this command created the run. `existing`: the run was created
  * by an earlier delivery of this same start. `collision`: another start
  * created a run under this ID. `conflict`: the same start key came with
- * other params, so it isn't the same start.
+ * other params, so it isn't the same start. `removed`: this start created
+ * a run that has since been deleted; it isn't created again.
  */
-export type StartOutcome = "created" | "existing" | "collision" | "conflict";
+export type StartOutcome =
+  | "created"
+  | "existing"
+  | "collision"
+  | "conflict"
+  | "removed";
 
 /**
  * `pausing`: an activation runs the run, and stops at its next safe
@@ -439,6 +456,36 @@ const forgetIn = (
   );
 };
 
+/** How long a tombstone holds by default: 30 days. */
+export const defaultTombstoneMs = 30 * 24 * 60 * 60 * 1000;
+
+/** The longest tombstone horizon a host may set: 365 days. */
+const maxTombstoneMs = 365 * 24 * 60 * 60 * 1000;
+
+/**
+ * What removing a run left: null when nothing is left (the object can be
+ * emptied), else when the oldest tombstone left expires.
+ */
+interface Removal {
+  expiresAt: number | null;
+}
+
+/**
+ * Removes the run's journal, in the caller's transaction, leaving `key` as
+ * a tombstone when the start can be delivered again (null: it can't), and
+ * expiring tombstones past the horizon on the way.
+ */
+const removeIn = (
+  sql: SqlStorage,
+  key: string | null,
+  now: number,
+  horizon: number
+): Removal => {
+  removeJournal(sql, key === null ? null : { key, at: now });
+  const oldest = expireTombstones(sql, now - horizon);
+  return { expiresAt: oldest === null ? null : oldest + horizon };
+};
+
 /**
  * A workflow run. Subclass it to say which definition a run executes, and
  * register the subclass as a SQLite-backed Durable Object class with no
@@ -447,6 +494,27 @@ const forgetIn = (
 export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   /** How long an activation may go quiet before the alarm recovers the run. */
   protected readonly leaseMs: number = defaultLeaseMs;
+
+  /**
+   * How long the tombstone of a removed run's redeliverable start holds
+   * (`admit`, a schedule's occurrence): a start delivered again within it
+   * creates nothing; after it, the tombstone is dropped and the same start
+   * is a new one, which creates a run. 30 days by default, Grasp's
+   * retention, so a trigger redelivered within a run's lifetime and
+   * retention is never run twice.
+   */
+  protected readonly tombstoneMs: number = defaultTombstoneMs;
+
+  /** The tombstone horizon, checked: whole milliseconds, 1 to 365 days. */
+  #tombstoneHorizon(): number {
+    const ms = this.tombstoneMs;
+    if (!Number.isSafeInteger(ms) || ms < 1 || ms > maxTombstoneMs) {
+      throw new TypeError(
+        `A run's tombstoneMs is whole milliseconds from 1 to 365 days: ${String(ms)}`
+      );
+    }
+    return ms;
+  }
 
   /** The most bytes a step's stream result may hold. */
   protected readonly maxStreamOutputBytes: number = defaultMaxStreamBytes;
@@ -533,6 +601,15 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   async start(command: StartCommand): Promise<StartOutcome> {
     // Refused before any run exists, rather than at its first alarm.
     this.#rollbackLimits();
+    const horizon = this.#tombstoneHorizon();
+    const { storage } = this.ctx;
+    // Before the run: a start delivered again after its run was deleted
+    // finds the tombstone, whatever run was created under the ID since.
+    // Only a start with this key could have left it, so it is this start.
+    // One past the horizon has expired, dropped yet or not.
+    if (isTombstoned(storage.sql, command.key, Date.now() - horizon)) {
+      return "removed";
+    }
     const existing = this.#run();
     if (existing !== undefined) {
       const sameStart =
@@ -552,11 +629,10 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       await this.#ensureWake(existing);
       return "existing";
     }
-    const { storage } = this.ctx;
     const now = Date.now();
     createJournal(storage.sql);
     storage.sql.exec(
-      "INSERT INTO run (singleton, schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)",
+      "INSERT INTO run (singleton, schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, schedule, redeliverable) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?)",
       journalSchemaVersion,
       crypto.randomUUID(),
       command.definition,
@@ -565,7 +641,9 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       command.key,
       command.params,
       now,
-      crypto.randomUUID()
+      crypto.randomUUID(),
+      command.schedule === null ? null : JSON.stringify(command.schedule),
+      command.redeliverable ? 1 : 0
     );
     // No await between the insert and this: one write.
     await storage.setAlarm(now);
@@ -756,7 +834,12 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       }
       return;
     }
-    if (run === undefined || hasEnded(run) || run.status === "paused") {
+    if (run === undefined) {
+      // No run: what may be left is tombstones, to expire.
+      await this.#expireTombstones();
+      return;
+    }
+    if (hasEnded(run) || run.status === "paused") {
       // A duplicate or late alarm: what it would do is journaled already.
       // A paused run waits for `resume`, which sets its alarm.
       return;
@@ -1064,25 +1147,88 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
-   * Removes the run: its journal, its stream chunks and its alarm. Nothing
-   * of the definition runs for it; a step still out answers no one.
+   * Removes the run: its journal, its stream chunks and its alarm, leaving
+   * only its start key as a tombstone (journal.ts). Nothing of the
+   * definition runs for it; a step still out answers no one.
    */
   async deleteRun(): Promise<DeleteOutcome> {
+    const horizon = this.#tombstoneHorizon();
     const { storage } = this.ctx;
-    // Not read through readRun: a journal of a layout this engine doesn't
-    // read can be deleted too.
-    if (
-      !hasJournal(storage.sql) ||
-      storage.sql.exec("SELECT 1 FROM run").toArray().length === 0
-    ) {
+    const now = Date.now();
+    const removed = storage.transactionSync((): Removal | "missing" => {
+      // Not read through readRun: a journal of a layout this engine
+      // doesn't read can be deleted too.
+      if (!hasJournal(storage.sql)) {
+        return "missing";
+      }
+      const [run] = storage.sql.exec("SELECT * FROM run").toArray();
+      if (run === undefined) {
+        return "missing";
+      }
+      const key = run.start_key;
+      return removeIn(
+        storage.sql,
+        run.redeliverable === 1 && typeof key === "string" ? key : null,
+        now,
+        horizon
+      );
+    });
+    if (removed === "missing") {
       return "missing";
     }
-    // The journal first: should the alarm outlive it (the process dies in
-    // between), it finds no run, and does nothing. The other way round, a
-    // run would be left with no alarm to run it.
-    await storage.deleteAll();
-    await storage.deleteAlarm();
+    await this.#afterRemoval(removed);
     return "deleted";
+  }
+
+  /**
+   * What is left once a run is removed: nothing, so the object is emptied
+   * (`deleteAll`), or tombstones, so the alarm is set to expire the oldest.
+   * The journal went first: should the process die before this, the alarm
+   * the run had finds no run, and expires what it can (alarm()). The other
+   * way round, a run would be left with no alarm to run it.
+   */
+  async #afterRemoval(removal: Removal): Promise<void> {
+    const { storage } = this.ctx;
+    if (removal.expiresAt === null) {
+      try {
+        await storage.deleteAll();
+        await storage.deleteAlarm();
+      } catch (error) {
+        // The journal is gone: an alarm left behind finds nothing, and
+        // empties the object again.
+        warnRecovered("workflow_delete_all_failed", error);
+      }
+      return;
+    }
+    try {
+      await storage.setAlarm(removal.expiresAt);
+    } catch (error) {
+      await this.#leaveToWatchdog("workflow_tombstone_alarm_failed", error);
+    }
+  }
+
+  /**
+   * An alarm with no run: tombstones past the horizon are dropped, and the
+   * alarm is set for the next to expire; once none is left, the object is
+   * emptied. A failure leaves it all to an alarm a lease away.
+   */
+  async #expireTombstones(): Promise<void> {
+    const { storage } = this.ctx;
+    let horizon: number;
+    let oldest: number | null;
+    try {
+      horizon = this.#tombstoneHorizon();
+      const since = Date.now() - horizon;
+      oldest = storage.transactionSync(() =>
+        expireTombstones(storage.sql, since)
+      );
+    } catch (error) {
+      await this.#leaveToWatchdog("workflow_tombstone_expiry_failed", error);
+      return;
+    }
+    await this.#afterRemoval({
+      expiresAt: oldest === null ? null : oldest + horizon,
+    });
   }
 
   /**

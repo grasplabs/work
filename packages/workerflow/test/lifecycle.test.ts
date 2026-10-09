@@ -305,7 +305,8 @@ describe("pause", () => {
     const run = await instance("napper", id);
     await run.pause();
 
-    const noParams: unknown = undefined;
+    // What a start with no params is given: `{}`, as on the reference.
+    const noParams = {};
     // The start again, and the alarm read, with no other event between:
     // an alarm it set can't have fired and gone first.
     const after = await runInDurableObject(
@@ -321,6 +322,8 @@ describe("pause", () => {
             instanceId: id,
             params: encode(noParams),
             key,
+            schedule: null,
+            redeliverable: true,
           });
           return { outcome, alarm: await state.storage.getAlarm() };
         })
