@@ -818,6 +818,35 @@ describe("a start delivered again beside a tombstone", () => {
   });
 });
 
+describe("a waiting run's start delivered again beside a tombstone", () => {
+  it("leaves its alarm at the tombstone's expiry, before its wake: no replay", async () => {
+    const id = newId();
+    await workflow("approval").admit({ id, key: `trigger-${newId()}` });
+    await workflow("approval").deleteBatch([id]);
+    // Its wait runs past the tombstone's 30 days.
+    const admission = {
+      id,
+      key: `trigger-${newId()}`,
+      params: { duration: "60 days" },
+    };
+    await workflow("approval").admit(admission);
+    const waiting = await until("the run to wait", async () => {
+      const journal = await journalOf("approval", id);
+      return journal.run.status === "waiting" ? journal : undefined;
+    });
+    const alarmBefore = await emptied("approval", id);
+
+    const again = await workflow("approval").admit(admission);
+
+    const alarmAfter = await emptied("approval", id);
+    const after = await journalOf("approval", id);
+    expect(again.created).toBeFalsy();
+    expect(waiting.run.wake_at).toBeGreaterThan(alarmBefore.alarm ?? 0);
+    expect(alarmAfter.alarm).toBe(alarmBefore.alarm);
+    expect(after.activations).toStrictEqual(waiting.activations);
+  });
+});
+
 describe("a tombstone past its horizon", () => {
   it("no longer holds, though its alarm hasn't come to drop it yet", async () => {
     const runs = env.SHORT_TOMBSTONES;

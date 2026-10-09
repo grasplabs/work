@@ -724,10 +724,17 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     if (hasEnded(run) || run.status === "paused") {
       return;
     }
-    // An alarm that is only the tombstones' expiry isn't the run's own.
+    // An alarm that is only the tombstones' expiry may not be the run's
+    // own. It is set again from what the run waits for: a waiting run's
+    // wake (the earlier tombstone's expiry still wins, through the shared
+    // alarm, and nothing replays), anything else now.
     const alarm = await this.#store.getAlarm();
     if (alarm === null || alarm === this.#tombstoneExpiry()) {
-      await this.#store.setAlarm(Date.now());
+      const wake =
+        run.status === "waiting" && run.wake_at !== null
+          ? run.wake_at
+          : Date.now();
+      await this.#store.setAlarm(wake);
     }
   }
 
