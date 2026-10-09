@@ -6,7 +6,6 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { PanelLeftIcon, PanelRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { createPortal } from "react-dom";
 
 import { GraspBuddy } from "../buddy/grasp-buddy.tsx";
 import { activeChat, setActiveChat } from "../chat/active-chat.ts";
@@ -137,37 +136,6 @@ const fileNameOf = (title: string): string =>
     .slice(0, 80) || "grasp-chat";
 
 /**
- * The one element the side panel draws itself in, and what puts it in a
- * container: beside the chat or in a sheet over it. Moving the element
- * rather than drawing the panel anew in the other keeps what it holds (an
- * App open, an approval under way) when the first draft of an App, or a
- * narrower window, moves it.
- */
-const usePanelNode = (): [
-  HTMLDivElement | undefined,
-  (container: HTMLElement | null) => void,
-] => {
-  // Made the first time a container is there for it, then kept.
-  const [node, setNode] = useState<HTMLDivElement>();
-  return [
-    node,
-    (container) => {
-      if (container === null) {
-        return;
-      }
-      if (node !== undefined) {
-        container.append(node);
-        return;
-      }
-      const element = document.createElement("div");
-      element.className = "flex flex-1 flex-col";
-      container.append(element);
-      setNode(element);
-    },
-  ];
-};
-
-/**
  * One chat, followed as it streams, in the studio with the App its agent
  * builds (`onBuilding` says whether one stands beside it), and with the
  * side panel beside it.
@@ -203,13 +171,22 @@ const OpenChat = ({
       onBuilding(false);
     };
   }, [building, onBuilding]);
-  const [panelNode, holdPanel] = usePanelNode();
-  // Drawn from the first time it opens on, so it keeps its state while
-  // closed too, and a sheet that closes still shows it on its way out.
-  const [panelUsed, setPanelUsed] = useState(panel);
-  if (panel && !panelUsed) {
-    setPanelUsed(true);
+  // Where the panel opened, beside the chat or in a sheet, holds until it
+  // closes: an App running in it is never moved, which would load it anew,
+  // when the first draft of an App comes. Only a window narrowing past lg
+  // moves it into the sheet, and then the App open in it (`openedApp`)
+  // opens again.
+  const [placed, setPlaced] = useState<"aside" | "sheet">();
+  if (panel && placed === undefined) {
+    setPlaced(wide && !building ? "aside" : "sheet");
+  } else if (!panel && placed !== undefined) {
+    setPlaced(undefined);
   }
+  const aside = wide && (panel ? placed === "aside" : !building);
+  const [openedApp, setOpenedApp] = useState<string>();
+  const sidePanel = (
+    <SidePanel builds={builds} onOpened={setOpenedApp} opened={openedApp} />
+  );
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
       <ChatStudio chatId={chat.id} drafts={drafts} wide={wide}>
@@ -290,30 +267,27 @@ const OpenChat = ({
       </ChatStudio>
       {/* Beside the chat on a wide window, as wide as a page sidebar; over it,
           in a sheet, on a narrower one, and beside an App being built,
-          which takes the room. */}
-      {wide && panel && !building ? (
+          which takes the room, unless it was already open beside the chat. */}
+      {panel && aside ? (
         <aside
           aria-label={t`Side panel`}
           className="bg-background flex w-72 flex-none flex-col overflow-y-auto border-l p-4"
-          ref={holdPanel}
-        />
+        >
+          {sidePanel}
+        </aside>
       ) : null}
-      {wide && !building ? null : (
+      {aside ? null : (
         <Sheet onOpenChange={onPanel} open={panel}>
           <SheetContent closeLabel={t`Close`} side="right">
             <SheetTitle className="sr-only">
               <Trans>Side panel</Trans>
             </SheetTitle>
-            <div
-              className="flex flex-1 flex-col overflow-y-auto p-4"
-              ref={holdPanel}
-            />
+            <div className="flex flex-1 flex-col overflow-y-auto p-4">
+              {sidePanel}
+            </div>
           </SheetContent>
         </Sheet>
       )}
-      {panelUsed && panelNode !== undefined
-        ? createPortal(<SidePanel builds={builds} />, panelNode)
-        : null}
     </div>
   );
 };

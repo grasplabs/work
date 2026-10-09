@@ -1,4 +1,5 @@
 import type { VisionField } from "@grasp-os/shared/kickoff";
+import type { KnownSource } from "@grasp-os/shared/onboarding-gate";
 import type {
   LogActor,
   StaffNeed,
@@ -123,4 +124,40 @@ export const visionTitles: Record<VisionField, MessageDescriptor> = {
   }),
   systems: msg({ message: "Their tools", context: "kickoff field" }),
   languages: msg({ message: "Languages", context: "kickoff field" }),
+};
+
+/** Where what Grasp knows of the company comes from, part by part. */
+export const knownSourceTitles: Record<KnownSource, MessageDescriptor> = {
+  kickoff: msg({
+    message: "The kickoff and the website",
+    context: "what Grasp knows, by source",
+  }),
+  people: msg({
+    message: "Who works where",
+    context: "what Grasp knows, by source",
+  }),
+  sources: msg({
+    message: "Where the documents live",
+    context: "what Grasp knows, by source",
+  }),
+  documents: msg({
+    message: "Documents shared",
+    context: "what Grasp knows, by source",
+  }),
+  tools: msg({
+    message: "The tools in use",
+    context: "what Grasp knows, by source",
+  }),
+  leads: msg({
+    message: "Who leads which team",
+    context: "what Grasp knows, by source",
+  }),
+  conversations: msg({
+    message: "The interviews",
+    context: "what Grasp knows, by source",
+  }),
+  review: msg({
+    message: "Workflows known",
+    context: "what Grasp knows, by source",
+  }),
 };

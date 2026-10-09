@@ -75,12 +75,27 @@ const OpenedApp = ({
 /**
  * The side panel: the versions of what the chat's agent built that wait
  * for review (`builds`, which the chat page reads), and the person's
- * Apps, one of them open.
+ * Apps, one of them open. Which one (`opened`, said back through
+ * `onOpened`) is kept by the chat page, so a panel drawn anew where a
+ * window crossing lg puts it opens the same App again. The Apps are read
+ * each time the panel opens.
  */
-export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
+export const SidePanel = ({
+  builds,
+  opened: openedId,
+  onOpened,
+}: {
+  builds: ChatBuildsRead;
+  opened: string | undefined;
+  onOpened: (app?: string) => void;
+}) => {
   const [apps, setApps] = useState<Loaded<App[]>>();
   const core = useCore();
   const [opened, setOpened] = useState<Loaded<Opened>>();
+  // Only the App opened last shows, whichever read ends last.
+  const latest = useRef<App | null>(null);
+  /** The App open when this panel was drawn: it opens again. */
+  const reopen = useRef(openedId);
   useEffect(() => {
     let current = true;
     const read = async (): Promise<void> => {
@@ -88,8 +103,25 @@ export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
         core,
         async (session) => await session.apps.list()
       );
-      if (current) {
-        setApps(found);
+      if (!current) {
+        return;
+      }
+      setApps(found);
+      // One that is gone no longer opens, nor one opened meanwhile.
+      const app =
+        found.state === "ready"
+          ? found.data.find(({ id }) => id === reopen.current)
+          : undefined;
+      if (app === undefined || latest.current !== null) {
+        return;
+      }
+      latest.current = app;
+      const again = await loadFromCore(core, async (session) => ({
+        app,
+        contents: await session.apps.contents(app.id),
+      }));
+      if (current && latest.current === app) {
+        setOpened(again);
       }
     };
     void read();
@@ -97,10 +129,9 @@ export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
       current = false;
     };
   }, [core]);
-  // Only the App opened last shows, whichever read ends last.
-  const latest = useRef<App | null>(null);
   const open = async (app: App): Promise<void> => {
     latest.current = app;
+    onOpened(app.id);
     const found = await loadFromCore(core, async (session) => ({
       app,
       contents: await session.apps.contents(app.id),
@@ -115,6 +146,7 @@ export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
         onClose={() => {
           latest.current = null;
           setOpened(undefined);
+          onOpened();
         }}
         opened={opened.data}
       />

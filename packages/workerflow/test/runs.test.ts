@@ -6,9 +6,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { SerializationError } from "../src/codec.ts";
 import { maxErrorMessageBytes } from "../src/errors.ts";
 import { JournalSchemaError, journalSchemaVersion } from "../src/journal.ts";
+import { defaultRetentionMs } from "../src/retention.ts";
 import { WorkflowRun } from "../src/run.ts";
 import {
-  alarmOf,
+  wakeOf,
   ended,
   journalOf,
   newId,
@@ -61,13 +62,18 @@ describe("a workflow run", () => {
         },
       ],
     });
-    // An ended run has nothing left to wake for.
+    // An ended run has nothing left to wake for but its purge, 30 days
+    // after its end when nothing says otherwise.
+    const { ended_at: endedAt } = journal.run;
+    expect(journal.run.purge_at).toBe(
+      endedAt === null ? null : endedAt + defaultRetentionMs
+    );
     await expect(
       runInDurableObject(
         runObject("orders", id),
         async (_, state) => await state.storage.getAlarm()
       )
-    ).resolves.toBeNull();
+    ).resolves.toBe(journal.run.purge_at);
   });
 
   it("journals a step's failure by name and message, and lets the definition catch it", async () => {
@@ -119,7 +125,7 @@ describe("a workflow run", () => {
     ).toStrictEqual(sends.map((send, index) => ["send", index + 1, send.key]));
   });
 
-  it("hands the definition its params, creation time and instance ID as they were at creation", async () => {
+  it("hands the definition its params, creation time, instance ID and workflow name as they were at creation, and no schedule", async () => {
     const id = newId();
     const params = {
       when: new Date("2026-10-07T12:00:00.000Z"),
@@ -139,6 +145,9 @@ describe("a workflow run", () => {
         payload: params,
         timestamp: new Date(run.created_at),
         instanceId: id,
+        workflowName: "echo",
+        scheduled: false,
+        schedule: null,
       },
     });
   });
@@ -328,12 +337,13 @@ describe("creating a run", () => {
   it("refuses invalid IDs, and params the journal can't keep, before any run exists", async () => {
     const id = newId();
 
+    // As the reference refuses them (batches.test.ts has the rest).
     await expect(
       workflow("orders").create({ id: "-starts-with-a-dash" })
-    ).rejects.toThrow(TypeError);
+    ).rejects.toMatchObject({ name: "WorkflowError" });
     await expect(
       workflow("orders").create({ id: "x".repeat(101) })
-    ).rejects.toThrow(TypeError);
+    ).rejects.toMatchObject({ name: "WorkflowError" });
     await expect(
       workflow("orders").create({ id, params: { callback: () => "live" } })
     ).rejects.toThrow(SerializationError);
@@ -370,7 +380,7 @@ describe("a thrown value the journal can't keep as it is", () => {
         status: "errored",
         error: { name: "Error", message: "unprintable thrown value" },
       });
-      await expect(alarmOf(definition, id)).resolves.toBeNull();
+      await expect(wakeOf(definition, id)).resolves.toBeNull();
     }
   );
 
@@ -387,7 +397,7 @@ describe("a thrown value the journal can't keep as it is", () => {
       expect(error?.name).toBe("7");
       expect(bytes).toBeGreaterThan(maxErrorMessageBytes - 4);
       expect(bytes).toBeLessThanOrEqual(maxErrorMessageBytes);
-      await expect(alarmOf(definition, id)).resolves.toBeNull();
+      await expect(wakeOf(definition, id)).resolves.toBeNull();
     }
   );
 });
@@ -434,6 +444,6 @@ describe("a journal of another schema", () => {
     await expect(exec("SELECT * FROM activations")).resolves.toStrictEqual(
       before
     );
-    await expect(alarmOf("napper", id)).resolves.toBeNull();
+    await expect(wakeOf("napper", id)).resolves.toBeNull();
   });
 });

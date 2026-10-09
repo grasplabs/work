@@ -1,6 +1,10 @@
-import type { StageView, StaffNeed } from "@grasp-os/shared/onboarding-staff";
+import type {
+  StaffNeed,
+  StaffStage,
+  StageView,
+} from "@grasp-os/shared/onboarding-staff";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { CircleCheckIcon, CircleDotIcon, CircleIcon } from "lucide-react";
 
 import { NotLoadedState } from "../frame/page-states.tsx";
@@ -15,6 +19,30 @@ import {
 // The onboarding area's overview (prototype `org-home.tsx`,
 // `org-steps.tsx`): what needs Grasp, the most pressing first, then the
 // stages, each a list of what it asks for, ticked off as it is done.
+// Each stage and need that a section of the area deals with links to it;
+// the people, the leads and the interviews are the company admin's.
+
+type Section =
+  | "/onboarding/kickoff"
+  | "/onboarding/agreements"
+  | "/onboarding/open";
+
+/** Where the area deals with each stage, when it does. */
+const stageSections: Partial<Record<StaffStage, Section>> = {
+  kickoff: "/onboarding/kickoff",
+  agreements: "/onboarding/agreements",
+  open: "/onboarding/open",
+};
+
+/** Where the area deals with a need, when it does. */
+const needSection = (need: StaffNeed): Section | undefined => {
+  if (need.kind === "agreement") {
+    return "/onboarding/agreements";
+  }
+  return need.kind === "lead" ? undefined : "/onboarding/open";
+};
+
+const linkClass = "underline-offset-4 hover:underline";
 
 const statusIcon = {
   done: CircleCheckIcon,
@@ -36,15 +64,28 @@ const Needs = ({ needs }: { needs: StaffNeed[] }) => {
           </p>
         ) : (
           <ol className="flex flex-col gap-2">
-            {needs.map((need) => (
-              <li className="flex items-start gap-2" key={JSON.stringify(need)}>
-                <span
-                  aria-hidden="true"
-                  className="bg-status-attention mt-1.5 size-1.5 flex-none rounded-full"
-                />
-                {needText(i18n, need)}
-              </li>
-            ))}
+            {needs.map((need) => {
+              const to = needSection(need);
+              const text = needText(i18n, need);
+              return (
+                <li
+                  className="flex items-start gap-2"
+                  key={JSON.stringify(need)}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="bg-status-attention mt-1.5 size-1.5 flex-none rounded-full"
+                  />
+                  {to === undefined ? (
+                    text
+                  ) : (
+                    <Link className={linkClass} to={to}>
+                      {text}
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
           </ol>
         )}
       </SettingsBody>
@@ -56,6 +97,7 @@ const Stage = ({ stage }: { stage: StageView }) => {
   const { t, i18n } = useLingui();
   const Icon = statusIcon[stage.status];
   const title = i18n._(stageTitles[stage.stage]);
+  const to = stageSections[stage.stage];
   const statusLabel = {
     done: t({ message: "done", context: "onboarding stage status" }),
     now: t({ message: "now", context: "onboarding stage status" }),
@@ -70,7 +112,15 @@ const Stage = ({ stage }: { stage: StageView }) => {
             stage.status === "later" ? "text-muted-foreground size-4" : "size-4"
           }
         />
-        <h3 className="font-medium">{title}</h3>
+        <h3 className="font-medium">
+          {to === undefined ? (
+            title
+          ) : (
+            <Link className={linkClass} to={to}>
+              {title}
+            </Link>
+          )}
+        </h3>
         <span className="text-muted-foreground text-xs">{statusLabel}</span>
       </div>
       <ul className="flex flex-col gap-1 pl-6">
