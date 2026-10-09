@@ -354,3 +354,83 @@
   page: export;
   print-color-adjust: exact;
 }
+
+/*
+ * From the prototype (packages/grasp/src/index.css), the dashboard's pile
+ * of what waits on the person (dashboard/todo-pile.tsx).
+ */
+/* The brand book's Columns pattern, in the app's own ink: six columns, each its own faint brightness, a hairline between two, fading out before the foot. A card is never an empty white field. */
+@utility field-columns {
+  --line: color-mix(in oklab, var(--foreground) 9%, transparent);
+  --lit: color-mix(in oklab, var(--foreground) 4.5%, transparent);
+  --dim: color-mix(in oklab, var(--foreground) 2%, transparent);
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 calc(100% / 6 - 1px),
+      var(--line) calc(100% / 6 - 1px) calc(100% / 6)
+    ),
+    linear-gradient(
+      90deg,
+      var(--lit) 0 16.66%,
+      var(--dim) 16.66% 33.33%,
+      var(--lit) 33.33% 50%,
+      transparent 50% 66.66%,
+      var(--lit) 66.66% 83.33%,
+      var(--dim) 83.33%
+    );
+  -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent 92%);
+  mask-image: linear-gradient(180deg, #000 30%, transparent 92%);
+}
+
+/* The next card comes up out of the pile. */
+@keyframes pile-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+}
+@utility animate-pile-up {
+  animation: pile-up 340ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+
+/* The first time in a session, a ring goes twice around the card on top and is gone. */
+@keyframes pile-point {
+  0% {
+    opacity: 0;
+    transform: scale(1);
+  }
+  15% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0;
+    transform: scale(1.012);
+  }
+  65% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.012);
+  }
+}
+@utility animate-pile-point {
+  animation: pile-point 2s ease-out 0.5s both;
+}
+
+/* The room the pile had, which closes once its last card has gone as dots. */
+@utility pile-room {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition-property: grid-template-rows, opacity, margin-bottom;
+  transition-duration: 350ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+@utility pile-room-closed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  margin-bottom: calc(var(--spacing) * -6);
+}
