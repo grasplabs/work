@@ -9,6 +9,7 @@ import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { ErrorText } from "../error-text.tsx";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { dollars, monthEnd, percent, shareOf } from "../settings/money.ts";
@@ -146,9 +147,19 @@ const SpentBy = ({
 const Spend = ({ settings }: { settings: ModelSettings }) => {
   const { t } = useLingui();
   const { month } = settings;
-  const budgets =
-    settings.rules.state === "on" ? settings.rules.budgets : undefined;
-  if (budgets === undefined || budgets.length === 0) {
+  if (settings.rules.state === "invalid") {
+    return (
+      <SettingsSection title={t`AI spend`}>
+        <SettingsBody>
+          <ErrorText>
+            {t`The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp.`}
+          </ErrorText>
+        </SettingsBody>
+      </SettingsSection>
+    );
+  }
+  const { budgets } = settings.rules;
+  if (budgets.length === 0) {
     return (
       <SettingsSection title={t`AI spend`}>
         <SettingsBody>
