@@ -1,0 +1,2926 @@
+/*
+ * How every icon moves. An icon of a control moves once when the control is pointed at, has the
+ * keys, or is the line a menu stands on (a button, a link, a menu's line, a tab), and it moves in
+ * its parts, the way the thing it shows moves: a bin's lid lifts, a check is drawn, a bell swings
+ * with its clapper a little behind, an arrow falls into its tray, a gear turns, the rays of a sun
+ * come out one by one. Never the whole icon made larger and smaller: that is no move.
+ *
+ * It works in two halves. The table below says, for each icon and each of its parts, which move it
+ * makes and how far (`--icon-move` and what goes with it); that alone changes nothing on screen.
+ * The one rule after this comment runs those moves on the icon of a control that is pointed at. So
+ * an icon needs nothing in its component: it is found by its Lucide class (`lucide-trash`), and
+ * the app's own icons by `data-moves`.
+ *
+ * The moves, all in the icon's own grid of 24 (a part's `px` is one step of that grid, whatever
+ * size the icon is shown at; the icon itself is moved in percent of its box):
+ *   icon-draw    a line is drawn from its start (`--icon-dash` its length, `--icon-from` where it
+ *                begins; negative draws it from its end)
+ *   icon-there   goes somewhere and comes back
+ *   icon-from    comes in from somewhere, to its place
+ *   icon-land    the same, and settles a little past its place first
+ *   icon-pop     comes up out of nothing, a little past its size, and settles
+ *   icon-to      turns to where it looks the same again (a plus a quarter, a gear half), so nothing
+ *                jumps back when the pointer leaves
+ *   icon-swing   swings to both sides and comes to rest
+ *   icon-wiggle  the same, along a line: a pen that writes
+ *   icon-hop     a step its way and a small step back past its place
+ *   icon-away    leaves its box one way and comes back in from the other side
+ *   icon-flash   goes dim and lights up, twice
+ *   icon-orbit   goes round a small circle: a lens that looks around
+ * with `--icon-x`, `--icon-y` (how far), `--icon-turn`, `--icon-lean`, `--icon-wide`, `--icon-tall`
+ * (how large, 1 is as it is), `--icon-fade` (how much of it shows at the far end), `--icon-time`,
+ * `--icon-wait`, `--icon-ease`, and `--icon-origin` with `--icon-box` (about which point: a part
+ * turns about its own middle unless told otherwise).
+ *
+ * Rules that hold for every icon: at rest it is exactly as Lucide draws it; a move ends where it
+ * began, or where the icon looks the same; only `transform`, `opacity` and the dashes of a stroke
+ * are touched, so an icon turned or placed with a utility stays so; nothing moves for whoever asked
+ * for less motion; an icon that is already animated (a spinner) is left alone; and only a control's
+ * own icon moves (its child, or one wrapper down), not every icon of a card that is one link.
+ *
+ * A new icon gets its move here: `icon-moves.test.ts` fails until every Lucide icon the app
+ * uses has one, and when a part is named that the icon does not have (Lucide redrew it).
+ */
+
+@property --icon-move {
+  syntax: "*";
+  inherits: false;
+}
+@property --icon-time {
+  syntax: "*";
+  inherits: false;
+}
+@property --icon-wait {
+  syntax: "*";
+  inherits: false;
+}
+@property --icon-ease {
+  syntax: "*";
+  inherits: false;
+}
+@property --icon-origin {
+  syntax: "*";
+  inherits: false;
+}
+@property --icon-box {
+  syntax: "*";
+  inherits: false;
+}
+@property --icon-dash {
+  syntax: "*";
+  inherits: false;
+}
+@property --icon-from {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --icon-x {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --icon-y {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --icon-turn {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@property --icon-lean {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@property --icon-wide {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+@property --icon-tall {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+@property --icon-fade {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :is(
+      button,
+      a,
+      summary,
+      [role="button"],
+      [role="menuitem"],
+      [role="menuitemradio"],
+      [role="menuitemcheckbox"],
+      [role="tab"],
+      [role="option"],
+      [data-slot="sidebar-menu-button"]
+    ):is(:hover, :focus-visible, [data-highlighted]):not(
+      :disabled,
+      [aria-disabled="true"],
+      [data-disabled]
+    ) {
+    & > :is(.lucide, [data-moves]):not([class*="animate-"]),
+    & > * > :is(.lucide, [data-moves]):not([class*="animate-"]) {
+      animation: var(--icon-move, none) var(--icon-time, 0.5s)
+        var(--icon-ease, ease-in-out) var(--icon-wait, 0s) both;
+      transform-origin: var(--icon-origin, center);
+
+      & > * {
+        animation: var(--icon-move, none) var(--icon-time, 0.5s)
+          var(--icon-ease, ease-in-out) var(--icon-wait, 0s) both;
+        transform-box: var(--icon-box, fill-box);
+        transform-origin: var(--icon-origin, center);
+        stroke-dasharray: var(--icon-dash, none);
+      }
+    }
+  }
+}
+
+@keyframes icon-draw {
+  from {
+    stroke-dashoffset: var(--icon-from);
+    animation-timing-function: cubic-bezier(0.3, 0.6, 0.3, 1);
+  }
+}
+@keyframes icon-there {
+  45% {
+    transform: translate(var(--icon-x), var(--icon-y)) rotate(var(--icon-turn))
+      scale(var(--icon-wide), var(--icon-tall));
+  }
+}
+@keyframes icon-from {
+  from {
+    transform: translate(var(--icon-x), var(--icon-y)) rotate(var(--icon-turn))
+      scale(var(--icon-wide), var(--icon-tall));
+    opacity: var(--icon-fade);
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+@keyframes icon-land {
+  from {
+    transform: translate(var(--icon-x), var(--icon-y)) rotate(var(--icon-turn))
+      scale(var(--icon-wide), var(--icon-tall));
+    opacity: var(--icon-fade);
+    animation-timing-function: cubic-bezier(0.3, 1.5, 0.5, 1);
+  }
+}
+@keyframes icon-pop {
+  from {
+    transform: scale(0.3);
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.3, 1.5, 0.5, 1);
+  }
+}
+@keyframes icon-to {
+  to {
+    transform: rotate(var(--icon-turn));
+  }
+}
+@keyframes icon-swing {
+  20% {
+    transform: rotate(var(--icon-turn)) skewY(var(--icon-lean));
+  }
+  45% {
+    transform: rotate(calc(var(--icon-turn) * -0.7))
+      skewY(calc(var(--icon-lean) * -0.7));
+  }
+  70% {
+    transform: rotate(calc(var(--icon-turn) * 0.35))
+      skewY(calc(var(--icon-lean) * 0.35));
+  }
+}
+@keyframes icon-wiggle {
+  20% {
+    transform: translate(var(--icon-x), var(--icon-y));
+  }
+  45% {
+    transform: translate(
+      calc(var(--icon-x) * -0.7),
+      calc(var(--icon-y) * -0.7)
+    );
+  }
+  70% {
+    transform: translate(
+      calc(var(--icon-x) * 0.35),
+      calc(var(--icon-y) * 0.35)
+    );
+  }
+}
+@keyframes icon-hop {
+  35% {
+    transform: translate(var(--icon-x), var(--icon-y));
+  }
+  65% {
+    transform: translate(
+      calc(var(--icon-x) * -0.25),
+      calc(var(--icon-y) * -0.25)
+    );
+  }
+}
+@keyframes icon-away {
+  45% {
+    transform: translate(var(--icon-x), var(--icon-y));
+    opacity: 0;
+  }
+  46% {
+    transform: translate(calc(var(--icon-x) * -1), calc(var(--icon-y) * -1));
+    opacity: 0;
+  }
+}
+@keyframes icon-flash {
+  25%,
+  75% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes icon-orbit {
+  25% {
+    transform: translate(calc(var(--icon-x) * -1), calc(var(--icon-x) * -1));
+  }
+  50% {
+    transform: translate(var(--icon-x), calc(var(--icon-x) * -1));
+  }
+  75% {
+    transform: translate(var(--icon-x), var(--icon-x));
+  }
+}
+
+/* Lucide's icons, by name. A part is counted as Lucide draws it: `:nth-child(1)` is its first line. */
+
+/* The pulse runs along its line. */
+.lucide-activity > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 51 100;
+  --icon-from: -52.5;
+  --icon-time: 0.6s;
+}
+
+/* The window's bar is drawn across and its two marks drop in. */
+.lucide-app-window > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 21 100;
+  --icon-from: 22.5;
+  --icon-time: 0.45s;
+}
+.lucide-app-window > :nth-child(4) {
+  --icon-move: icon-land;
+  --icon-y: -2px;
+  --icon-fade: 0;
+  --icon-wait: 0.15s;
+}
+.lucide-app-window > :nth-child(2) {
+  --icon-move: icon-land;
+  --icon-y: -2px;
+  --icon-fade: 0;
+  --icon-wait: 0.25s;
+}
+
+/* The lid lifts and the handle is drawn. */
+.lucide-archive > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-y: -1.5px;
+}
+.lucide-archive > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 5 100;
+  --icon-from: 6.5;
+  --icon-time: 0.3s;
+  --icon-wait: 0.15s;
+}
+
+/* The arrow rises out of the box. */
+.lucide-archive-restore > :is(:nth-child(4), :nth-child(5)) {
+  --icon-move: icon-there;
+  --icon-y: -2.5px;
+}
+
+/* The arrow leaves downwards and comes in from above. */
+.lucide-arrow-down > * {
+  --icon-move: icon-away;
+  --icon-y: 9px;
+}
+
+/* The two arrows go their own ways. */
+.lucide-arrow-down-up > :is(:nth-child(1), :nth-child(2)) {
+  --icon-move: icon-there;
+  --icon-y: 2px;
+}
+.lucide-arrow-down-up > :is(:nth-child(3), :nth-child(4)) {
+  --icon-move: icon-there;
+  --icon-y: -2px;
+}
+
+/* The arrow leaves to the left and comes in from the right. */
+.lucide-arrow-left > * {
+  --icon-move: icon-away;
+  --icon-x: -9px;
+}
+
+/* The arrow leaves to the right and comes in from the left. */
+.lucide-arrow-right > * {
+  --icon-move: icon-away;
+  --icon-x: 9px;
+}
+
+/* The two arrows go their own ways. */
+.lucide-arrow-right-left > :is(:nth-child(1), :nth-child(2)) {
+  --icon-move: icon-there;
+  --icon-x: 2px;
+}
+.lucide-arrow-right-left > :is(:nth-child(3), :nth-child(4)) {
+  --icon-move: icon-there;
+  --icon-x: -2px;
+}
+
+/* The arrow leaves upwards and comes in from below. */
+.lucide-arrow-up > * {
+  --icon-move: icon-away;
+  --icon-y: -9px;
+}
+
+/* The two arrows go their own ways. */
+.lucide-arrow-up-down > :is(:nth-child(1), :nth-child(2)) {
+  --icon-move: icon-there;
+  --icon-y: 2px;
+}
+.lucide-arrow-up-down > :is(:nth-child(3), :nth-child(4)) {
+  --icon-move: icon-there;
+  --icon-y: -2px;
+}
+
+/* The arrow leaves up to the right and comes in from the lower left. */
+.lucide-arrow-up-right > * {
+  --icon-move: icon-away;
+  --icon-x: 7px;
+  --icon-y: -7px;
+}
+
+/* The bars move with the sound, one after the other. */
+.lucide-audio-lines > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-tall: 0.3;
+  --icon-time: 0.45s;
+}
+.lucide-audio-lines > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-tall: 0.3;
+  --icon-time: 0.45s;
+  --icon-wait: 0.12s;
+}
+.lucide-audio-lines > :nth-child(5) {
+  --icon-move: icon-there;
+  --icon-tall: 0.3;
+  --icon-time: 0.45s;
+  --icon-wait: 0.24s;
+}
+.lucide-audio-lines > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-tall: 0.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.06s;
+}
+.lucide-audio-lines > :nth-child(4) {
+  --icon-move: icon-there;
+  --icon-tall: 0.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.18s;
+}
+.lucide-audio-lines > :nth-child(6) {
+  --icon-move: icon-there;
+  --icon-tall: 0.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.3s;
+}
+
+/* The medal is drawn round and its ribbon drops in. */
+.lucide-award > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 38 100;
+  --icon-from: 39.5;
+}
+.lucide-award > :nth-child(1) {
+  --icon-move: icon-land;
+  --icon-y: -3px;
+  --icon-fade: 0;
+  --icon-wait: 0.3s;
+}
+
+/* The badge turns a quarter and its check is drawn. */
+.lucide-badge-check > :nth-child(1) {
+  --icon-move: icon-to;
+  --icon-turn: 90deg;
+  --icon-time: 0.6s;
+  --icon-ease: cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+.lucide-badge-check > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 13 100;
+  --icon-from: -14.5;
+  --icon-time: 0.4s;
+  --icon-wait: 0.25s;
+}
+
+/* The ring is drawn and the stroke goes through it. */
+.lucide-ban > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 64 100;
+  --icon-from: 65.5;
+}
+.lucide-ban > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 21 100;
+  --icon-from: 22.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.3s;
+}
+
+/* The bell swings, its clapper a little behind. */
+.lucide-bell > :nth-child(2) {
+  --icon-move: icon-swing;
+  --icon-turn: 14deg;
+  --icon-origin: 12px 3px;
+  --icon-box: view-box;
+  --icon-time: 0.6s;
+}
+.lucide-bell > :nth-child(1) {
+  --icon-move: icon-swing;
+  --icon-turn: 18deg;
+  --icon-origin: 12px 3px;
+  --icon-box: view-box;
+  --icon-time: 0.6s;
+  --icon-wait: 0.06s;
+}
+
+/* The loose block falls into its place. */
+.lucide-blocks {
+  overflow: visible;
+}
+.lucide-blocks > :nth-child(2) {
+  --icon-move: icon-land;
+  --icon-x: 3px;
+  --icon-y: -3px;
+  --icon-fade: 0;
+}
+
+/* The book is drawn in one line. */
+.lucide-book > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 88 100;
+  --icon-from: 89.5;
+  --icon-time: 0.7s;
+}
+
+/* The pages close a little and open again. */
+.lucide-book-open > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-wide: 0.8;
+}
+
+/* The lid lifts and settles. */
+.lucide-box {
+  overflow: visible;
+}
+.lucide-box > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-y: -1.5px;
+}
+
+/* The braces open a little and close again. */
+.lucide-braces > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-x: -1.5px;
+}
+.lucide-braces > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: 1.5px;
+}
+
+/* The line down its middle and its fold are drawn, and both sides swell. */
+.lucide-brain > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 14 100;
+  --icon-from: 15.5;
+  --icon-time: 0.4s;
+}
+.lucide-brain > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 12 100;
+  --icon-from: 13.5;
+  --icon-time: 0.35s;
+  --icon-wait: 0.1s;
+}
+.lucide-brain > :is(:nth-child(4), :nth-child(5)) {
+  --icon-move: icon-there;
+  --icon-x: 0.8px;
+  --icon-wait: 0.1s;
+}
+.lucide-brain > :is(:nth-child(7), :nth-child(8)) {
+  --icon-move: icon-there;
+  --icon-x: -0.8px;
+  --icon-wait: 0.1s;
+}
+
+/* The handle lifts. */
+.lucide-briefcase {
+  overflow: visible;
+}
+.lucide-briefcase > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-y: -1.5px;
+}
+
+/* The windows light up, floor by floor. */
+.lucide-building > :is(:nth-child(2), :nth-child(5), :nth-child(8)) {
+  --icon-move: icon-pop;
+}
+.lucide-building > :is(:nth-child(1), :nth-child(4), :nth-child(7)) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.1s;
+}
+.lucide-building > :is(:nth-child(3), :nth-child(6), :nth-child(9)) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.2s;
+}
+
+/* The floors are drawn and the door comes up. */
+.lucide-building-complex > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 5 100;
+  --icon-from: 6.5;
+  --icon-time: 0.3s;
+}
+.lucide-building-complex > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 5 100;
+  --icon-from: 6.5;
+  --icon-time: 0.3s;
+  --icon-wait: 0.12s;
+}
+.lucide-building-complex > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: bottom;
+  --icon-wait: 0.2s;
+}
+
+/* The cable runs from one plug to the other. */
+.lucide-cable > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 49 100;
+  --icon-from: 50.5;
+  --icon-time: 0.65s;
+}
+
+/* The display is drawn and the keys are pressed one by one. */
+.lucide-calculator > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 9 100;
+  --icon-from: 10.5;
+  --icon-time: 0.35s;
+}
+.lucide-calculator > :nth-child(6) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.08s;
+}
+.lucide-calculator > :nth-child(5) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.12s;
+}
+.lucide-calculator > :nth-child(4) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.16s;
+}
+.lucide-calculator > :nth-child(8) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.2s;
+}
+.lucide-calculator > :nth-child(7) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.24s;
+}
+.lucide-calculator > :nth-child(10) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.28s;
+}
+.lucide-calculator > :nth-child(9) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.32s;
+}
+.lucide-calculator > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: top;
+  --icon-wait: 0.36s;
+}
+
+/* The two rings hop and the line under them is drawn. */
+.lucide-calendar {
+  overflow: visible;
+}
+.lucide-calendar > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-y: -1.5px;
+}
+.lucide-calendar > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-y: -1.5px;
+  --icon-wait: 0.1s;
+}
+.lucide-calendar > :nth-child(4) {
+  --icon-move: icon-draw;
+  --icon-dash: 19 100;
+  --icon-from: 20.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.1s;
+}
+
+/* The clock's hands go round. */
+.lucide-calendar-clock > :nth-child(1) {
+  --icon-move: icon-to;
+  --icon-turn: 360deg;
+  --icon-origin: 16px 16px;
+  --icon-box: view-box;
+  --icon-time: 0.7s;
+}
+
+/* The line is drawn from left to right. */
+.lucide-chart-line > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 18 100;
+  --icon-from: -19.5;
+  --icon-time: 0.45s;
+}
+
+/* The check is drawn. */
+.lucide-check > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 24 100;
+  --icon-from: -25.5;
+  --icon-time: 0.35s;
+}
+
+/* A step down and a small step back. */
+.lucide-chevron-down > :nth-child(1) {
+  --icon-move: icon-hop;
+  --icon-y: 2.5px;
+}
+
+/* A step to the left and a small step back. */
+.lucide-chevron-left > :nth-child(1) {
+  --icon-move: icon-hop;
+  --icon-x: -2.5px;
+}
+
+/* A step to the right and a small step back. */
+.lucide-chevron-right > :nth-child(1) {
+  --icon-move: icon-hop;
+  --icon-x: 2.5px;
+}
+
+/* A step up and a small step back. */
+.lucide-chevron-up > :nth-child(1) {
+  --icon-move: icon-hop;
+  --icon-y: -2.5px;
+}
+
+/* The ring is drawn round. */
+.lucide-circle > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 64 100;
+  --icon-from: 65.5;
+}
+
+/* The stroke drops in and its dot comes up after it. */
+.lucide-circle-alert > :nth-child(2) {
+  --icon-move: icon-land;
+  --icon-y: -3px;
+  --icon-fade: 0;
+}
+.lucide-circle-alert > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.22s;
+}
+
+/* The check is drawn in its ring. */
+.lucide-circle-check > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 13 100;
+  --icon-from: -14.5;
+  --icon-time: 0.4s;
+}
+
+/* The ring is drawn and the check after it. */
+.lucide-circle-check-big > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 56 100;
+  --icon-from: 57.5;
+}
+.lucide-circle-check-big > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 20 100;
+  --icon-from: -21.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.3s;
+}
+
+/* The dashes come up one by one, round the ring. */
+.lucide-circle-dashed > :nth-child(1) {
+  --icon-move: icon-from;
+  --icon-wide: 0.3;
+  --icon-tall: 0.3;
+  --icon-fade: 0;
+  --icon-time: 0.3s;
+}
+.lucide-circle-dashed > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-wide: 0.3;
+  --icon-tall: 0.3;
+  --icon-fade: 0;
+  --icon-time: 0.3s;
+  --icon-wait: 0.05s;
+}
+.lucide-circle-dashed > :nth-child(6) {
+  --icon-move: icon-from;
+  --icon-wide: 0.3;
+  --icon-tall: 0.3;
+  --icon-fade: 0;
+  --icon-time: 0.3s;
+  --icon-wait: 0.09s;
+}
+.lucide-circle-dashed > :nth-child(5) {
+  --icon-move: icon-from;
+  --icon-wide: 0.3;
+  --icon-tall: 0.3;
+  --icon-fade: 0;
+  --icon-time: 0.3s;
+  --icon-wait: 0.14s;
+}
+.lucide-circle-dashed > :nth-child(2) {
+  --icon-move: icon-from;
+  --icon-wide: 0.3;
+  --icon-tall: 0.3;
+  --icon-fade: 0;
+  --icon-time: 0.3s;
+  --icon-wait: 0.18s;
+}
+.lucide-circle-dashed > :nth-child(8) {
+  --icon-move: icon-from;
+  --icon-wide: 0.3;
+  --icon-tall: 0.3;
+  --icon-fade: 0;
+  --icon-time: 0.3s;
+  --icon-wait: 0.22s;
+}
+.lucide-circle-dashed > :nth-child(4) {
+  --icon-move: icon-from;
+  --icon-wide: 0.3;
+  --icon-tall: 0.3;
+  --icon-fade: 0;
+  --icon-time: 0.3s;
+  --icon-wait: 0.27s;
+}
+.lucide-circle-dashed > :nth-child(7) {
+  --icon-move: icon-from;
+  --icon-wide: 0.3;
+  --icon-tall: 0.3;
+  --icon-fade: 0;
+  --icon-time: 0.3s;
+  --icon-wait: 0.32s;
+}
+
+/* The dollar is written: its S, then its stroke. */
+.lucide-circle-dollar-sign > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 20 100;
+  --icon-from: 21.5;
+  --icon-time: 0.45s;
+}
+.lucide-circle-dollar-sign > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-time: 0.3s;
+  --icon-wait: 0.3s;
+}
+
+/* The dot comes up in its ring. */
+.lucide-circle-dot > :nth-child(1) {
+  --icon-move: icon-pop;
+}
+
+/* The line grows from its middle. */
+.lucide-circle-minus > :nth-child(2) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+}
+
+/* The question mark is drawn and its dot comes up. */
+.lucide-circle-question-mark > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 14 100;
+  --icon-from: 15.5;
+  --icon-time: 0.4s;
+}
+.lucide-circle-question-mark > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.3s;
+}
+
+/* The head comes up and the shoulders are drawn. */
+.lucide-circle-user > :nth-child(2) {
+  --icon-move: icon-pop;
+}
+.lucide-circle-user > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 17 100;
+  --icon-from: 18.5;
+  --icon-time: 0.4s;
+  --icon-wait: 0.15s;
+}
+
+/* The cross is drawn, stroke by stroke. */
+.lucide-circle-x > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 10 100;
+  --icon-from: 11.5;
+  --icon-time: 0.35s;
+}
+.lucide-circle-x > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 10 100;
+  --icon-from: 11.5;
+  --icon-time: 0.35s;
+  --icon-wait: 0.15s;
+}
+
+/* The check is drawn on the board. */
+.lucide-clipboard-check > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 9 100;
+  --icon-from: -10.5;
+  --icon-time: 0.35s;
+}
+
+/* The lines of the list come one by one. */
+.lucide-clipboard-list > :nth-child(5) {
+  --icon-move: icon-pop;
+}
+.lucide-clipboard-list > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 5 100;
+  --icon-from: 6.5;
+  --icon-time: 0.3s;
+  --icon-wait: 0.05s;
+}
+.lucide-clipboard-list > :nth-child(6) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.15s;
+}
+.lucide-clipboard-list > :nth-child(4) {
+  --icon-move: icon-draw;
+  --icon-dash: 5 100;
+  --icon-from: 6.5;
+  --icon-time: 0.3s;
+  --icon-wait: 0.2s;
+}
+
+/* The hands go round once. */
+.lucide-clock > :nth-child(2) {
+  --icon-move: icon-to;
+  --icon-turn: 360deg;
+  --icon-origin: 12px 12px;
+  --icon-box: view-box;
+  --icon-time: 0.7s;
+}
+
+/* The brackets step apart and back. */
+.lucide-code > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-x: 1.5px;
+}
+.lucide-code > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: -1.5px;
+}
+
+/* The cog turns a third, where it looks the same again. */
+.lucide-cog {
+  --icon-move: icon-to;
+  --icon-turn: 120deg;
+  --icon-time: 0.7s;
+  --icon-ease: cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+
+/* The two coins part and come together. */
+.lucide-coins {
+  overflow: visible;
+}
+.lucide-coins > :is(:nth-child(4), :nth-child(2)) {
+  --icon-move: icon-there;
+  --icon-y: -1.5px;
+}
+.lucide-coins > :is(:nth-child(1), :nth-child(3)) {
+  --icon-move: icon-there;
+  --icon-y: 1.5px;
+  --icon-wait: 0.08s;
+}
+
+/* The two lines between the columns are drawn. */
+.lucide-columns-3 > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 19 100;
+  --icon-from: 20.5;
+  --icon-time: 0.45s;
+}
+.lucide-columns-3 > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 19 100;
+  --icon-from: 20.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.12s;
+}
+
+/* The head comes up and the shoulders are drawn. */
+.lucide-contact-round > :nth-child(4) {
+  --icon-move: icon-pop;
+}
+.lucide-contact-round > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 20 100;
+  --icon-from: 21.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.15s;
+}
+
+/* The two sheets come together and part. */
+.lucide-copy > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: 2px;
+  --icon-y: 2px;
+}
+.lucide-copy > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-x: -1.5px;
+  --icon-y: -1.5px;
+}
+
+/* The line is drawn round the corner and its head comes in. */
+.lucide-corner-down-left > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 27 100;
+  --icon-from: 28.5;
+  --icon-time: 0.55s;
+}
+.lucide-corner-down-left > :nth-child(2) {
+  --icon-move: icon-land;
+  --icon-x: 3px;
+  --icon-fade: 0;
+  --icon-wait: 0.2s;
+}
+
+/* The card's stripe is drawn across and its chip comes up. */
+.lucide-credit-card > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 21 100;
+  --icon-from: 22.5;
+  --icon-time: 0.45s;
+}
+.lucide-credit-card > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.25s;
+}
+
+/* The top disc lifts and the ring under it is drawn. */
+.lucide-database {
+  overflow: visible;
+}
+.lucide-database > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-y: -1px;
+}
+.lucide-database > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 21 100;
+  --icon-from: 22.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.15s;
+}
+
+/* The diamond turns a quarter, where it looks the same again. */
+.lucide-diamond > :nth-child(1) {
+  --icon-move: icon-to;
+  --icon-turn: 90deg;
+  --icon-ease: cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+
+/* The dot comes up. */
+.lucide-dot > :nth-child(1) {
+  --icon-move: icon-pop;
+}
+
+/* The arrow falls into the tray. */
+.lucide-download > :is(:nth-child(1), :nth-child(3)) {
+  --icon-move: icon-land;
+  --icon-y: -6px;
+  --icon-fade: 0;
+}
+
+/* The three dots hop, from left to right. */
+.lucide-ellipsis > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-y: -2.5px;
+  --icon-time: 0.4s;
+}
+.lucide-ellipsis > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-y: -2.5px;
+  --icon-time: 0.4s;
+  --icon-wait: 0.08s;
+}
+.lucide-ellipsis > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-y: -2.5px;
+  --icon-time: 0.4s;
+  --icon-wait: 0.16s;
+}
+
+/* The three dots step aside, from top to bottom. */
+.lucide-ellipsis-vertical > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: 2.5px;
+  --icon-time: 0.4s;
+}
+.lucide-ellipsis-vertical > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-x: 2.5px;
+  --icon-time: 0.4s;
+  --icon-wait: 0.08s;
+}
+.lucide-ellipsis-vertical > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-x: 2.5px;
+  --icon-time: 0.4s;
+  --icon-wait: 0.16s;
+}
+
+/* The arrow leaves its box and comes back out of it. */
+.lucide-external-link > :is(:nth-child(1), :nth-child(2)) {
+  --icon-move: icon-away;
+  --icon-x: 6px;
+  --icon-y: -6px;
+}
+
+/* The eye blinks. */
+.lucide-eye > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-tall: 0.15;
+  --icon-time: 0.4s;
+}
+.lucide-eye > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-wide: 0.8;
+  --icon-tall: 0.1;
+  --icon-time: 0.4s;
+}
+
+/* The folded corner is drawn. */
+.lucide-file > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 13 100;
+  --icon-from: 14.5;
+  --icon-time: 0.4s;
+}
+
+/* The pen writes and its line is drawn. */
+.lucide-file-pen-line > :nth-child(1) {
+  --icon-move: icon-swing;
+  --icon-turn: -10deg;
+  --icon-origin: 13.5px 17.5px;
+  --icon-box: view-box;
+}
+.lucide-file-pen-line > :nth-child(4) {
+  --icon-move: icon-draw;
+  --icon-dash: 2 100;
+  --icon-from: 3.5;
+  --icon-time: 0.3s;
+  --icon-wait: 0.1s;
+}
+
+/* The plus grows from its middle, across and then down. */
+.lucide-file-plus > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+}
+.lucide-file-plus > :nth-child(4) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-wait: 0.12s;
+}
+
+/* The lens looks around on the page. */
+.lucide-file-search > :is(:nth-child(3), :nth-child(4)) {
+  --icon-move: icon-orbit;
+  --icon-x: 1px;
+  --icon-time: 0.7s;
+}
+
+/* The cells are filled one by one. */
+.lucide-file-spreadsheet > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.3s;
+}
+.lucide-file-spreadsheet > :nth-child(4) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.3s;
+  --icon-wait: 0.07s;
+}
+.lucide-file-spreadsheet > :nth-child(5) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.3s;
+  --icon-wait: 0.14s;
+}
+.lucide-file-spreadsheet > :nth-child(6) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.3s;
+  --icon-wait: 0.21s;
+}
+
+/* The lines are written one under the other. */
+.lucide-file-text > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.35s;
+}
+.lucide-file-text > :nth-child(4) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.35s;
+  --icon-wait: 0.09s;
+}
+.lucide-file-text > :nth-child(5) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.35s;
+  --icon-wait: 0.18s;
+}
+
+/* The arrow comes up from below. */
+.lucide-file-up > :is(:nth-child(3), :nth-child(4)) {
+  --icon-move: icon-land;
+  --icon-y: 4px;
+  --icon-fade: 0;
+}
+
+/* The flag flutters on its pole. */
+.lucide-flag > :nth-child(1) {
+  --icon-move: icon-swing;
+  --icon-lean: 7deg;
+  --icon-origin: left;
+  --icon-time: 0.6s;
+}
+
+/* What is in the flask sloshes. */
+.lucide-flask-conical > :nth-child(2) {
+  --icon-move: icon-swing;
+  --icon-turn: 12deg;
+  --icon-time: 0.6s;
+}
+
+/* The folder is drawn in one line. */
+.lucide-folder > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 70 100;
+  --icon-from: 71.5;
+  --icon-time: 0.65s;
+}
+
+/* The arrow comes into the folder. */
+.lucide-folder-input > :is(:nth-child(2), :nth-child(3)) {
+  --icon-move: icon-land;
+  --icon-x: -5px;
+  --icon-fade: 0;
+}
+
+/* The line grows from its middle. */
+.lucide-folder-minus > :nth-child(1) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+}
+
+/* The open folder is drawn in one line. */
+.lucide-folder-open > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 84 100;
+  --icon-from: 85.5;
+  --icon-time: 0.7s;
+}
+
+/* The plus grows from its middle, across and then down. */
+.lucide-folder-plus > :nth-child(2) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+}
+.lucide-folder-plus > :nth-child(1) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-wait: 0.12s;
+}
+
+/* Each line runs from its dot to its arrow, and the heads come in. */
+.lucide-git-compare-arrows > :is(:nth-child(2), :nth-child(5)) {
+  --icon-move: icon-draw;
+  --icon-dash: 17 100;
+  --icon-from: -18.5;
+  --icon-time: 0.4s;
+}
+.lucide-git-compare-arrows > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-x: 2px;
+  --icon-fade: 0;
+  --icon-wait: 0.25s;
+}
+.lucide-git-compare-arrows > :nth-child(6) {
+  --icon-move: icon-from;
+  --icon-x: -2px;
+  --icon-fade: 0;
+  --icon-wait: 0.25s;
+}
+
+/* The branch is drawn into the dot it ends in. */
+.lucide-git-merge > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 28 100;
+  --icon-from: 29.5;
+}
+.lucide-git-merge > :nth-child(1) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.3s;
+}
+
+/* The globe turns: its meridian narrows and widens. */
+.lucide-globe > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-wide: 0.15;
+  --icon-time: 0.6s;
+}
+
+/* The two columns of dots shift against each other. */
+.lucide-grip-vertical > :is(:nth-child(1), :nth-child(2), :nth-child(3)) {
+  --icon-move: icon-there;
+  --icon-y: -1.5px;
+}
+.lucide-grip-vertical > :is(:nth-child(4), :nth-child(5), :nth-child(6)) {
+  --icon-move: icon-there;
+  --icon-y: 1.5px;
+}
+
+/* The hammer strikes. */
+.lucide-hammer {
+  --icon-move: icon-swing;
+  --icon-turn: -20deg;
+  --icon-origin: 30% 70%;
+  --icon-time: 0.6s;
+}
+
+/* The hand waves. */
+.lucide-hand {
+  --icon-move: icon-swing;
+  --icon-turn: 12deg;
+  --icon-origin: 50% 85%;
+  --icon-time: 0.6s;
+}
+
+/* The four lines are drawn one by one. */
+.lucide-hash > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 17 100;
+  --icon-from: 18.5;
+  --icon-time: 0.45s;
+}
+.lucide-hash > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 17 100;
+  --icon-from: 18.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.07s;
+}
+.lucide-hash > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 20 100;
+  --icon-from: 21.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.14s;
+}
+.lucide-hash > :nth-child(4) {
+  --icon-move: icon-draw;
+  --icon-dash: 20 100;
+  --icon-from: 21.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.21s;
+}
+
+/* The marker goes over its line. */
+.lucide-highlighter {
+  --icon-move: icon-wiggle;
+  --icon-x: 6.25%;
+  --icon-y: 6.25%;
+}
+
+/* The hourglass is turned over. */
+.lucide-hourglass {
+  --icon-move: icon-to;
+  --icon-turn: 180deg;
+  --icon-time: 0.6s;
+  --icon-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* The head comes up, then the shoulders and the two lines. */
+.lucide-id-card > :nth-child(4) {
+  --icon-move: icon-pop;
+}
+.lucide-id-card > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 14 100;
+  --icon-from: 15.5;
+  --icon-time: 0.4s;
+  --icon-wait: 0.1s;
+}
+.lucide-id-card > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 3 100;
+  --icon-from: 4.5;
+  --icon-time: 0.3s;
+  --icon-wait: 0.2s;
+}
+.lucide-id-card > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 3 100;
+  --icon-from: 4.5;
+  --icon-time: 0.3s;
+  --icon-wait: 0.3s;
+}
+
+/* The sun rises and the hill is drawn. */
+.lucide-image > :nth-child(2) {
+  --icon-move: icon-land;
+  --icon-y: 3px;
+  --icon-fade: 0;
+}
+.lucide-image > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 22 100;
+  --icon-from: -23.5;
+  --icon-wait: 0.1s;
+}
+
+/* The edge of the tray is drawn across. */
+.lucide-inbox > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 25 100;
+  --icon-from: -26.5;
+}
+
+/* The stem is drawn and its dot comes up. */
+.lucide-info > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 5 100;
+  --icon-from: 6.5;
+  --icon-time: 0.3s;
+}
+.lucide-info > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.2s;
+}
+
+/* The key turns in its lock. */
+.lucide-key-round {
+  --icon-move: icon-swing;
+  --icon-turn: -18deg;
+  --icon-origin: 68.75% 31.25%;
+  --icon-time: 0.6s;
+}
+
+/* The keys are pressed one by one, then the space bar. */
+.lucide-keyboard > :nth-child(6) {
+  --icon-move: icon-there;
+  --icon-y: 1.5px;
+  --icon-time: 0.3s;
+}
+.lucide-keyboard > :nth-child(8) {
+  --icon-move: icon-there;
+  --icon-y: 1.5px;
+  --icon-time: 0.3s;
+  --icon-wait: 0.05s;
+}
+.lucide-keyboard > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-y: 1.5px;
+  --icon-time: 0.3s;
+  --icon-wait: 0.09s;
+}
+.lucide-keyboard > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-y: 1.5px;
+  --icon-time: 0.3s;
+  --icon-wait: 0.14s;
+}
+.lucide-keyboard > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-y: 1.5px;
+  --icon-time: 0.3s;
+  --icon-wait: 0.18s;
+}
+.lucide-keyboard > :nth-child(4) {
+  --icon-move: icon-there;
+  --icon-y: 1.5px;
+  --icon-time: 0.3s;
+  --icon-wait: 0.22s;
+}
+.lucide-keyboard > :nth-child(5) {
+  --icon-move: icon-there;
+  --icon-y: 1.5px;
+  --icon-time: 0.3s;
+  --icon-wait: 0.27s;
+}
+.lucide-keyboard > :nth-child(7) {
+  --icon-move: icon-there;
+  --icon-wide: 0.6;
+  --icon-time: 0.3s;
+  --icon-wait: 0.32s;
+}
+
+/* The columns rise one by one. */
+.lucide-landmark > :nth-child(6) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: bottom;
+  --icon-time: 0.35s;
+}
+.lucide-landmark > :nth-child(1) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: bottom;
+  --icon-time: 0.35s;
+  --icon-wait: 0.08s;
+}
+.lucide-landmark > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: bottom;
+  --icon-time: 0.35s;
+  --icon-wait: 0.16s;
+}
+.lucide-landmark > :nth-child(4) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: bottom;
+  --icon-time: 0.35s;
+  --icon-wait: 0.24s;
+}
+
+/* The one script lifts and the other is drawn. */
+.lucide-languages {
+  overflow: visible;
+}
+.lucide-languages
+  > :is(:nth-child(1), :nth-child(2), :nth-child(3), :nth-child(4)) {
+  --icon-move: icon-there;
+  --icon-y: -1.5px;
+}
+.lucide-languages > :nth-child(5) {
+  --icon-move: icon-draw;
+  --icon-dash: 24 100;
+  --icon-from: 25.5;
+}
+.lucide-languages > :nth-child(6) {
+  --icon-move: icon-draw;
+  --icon-dash: 7 100;
+  --icon-from: 8.5;
+  --icon-time: 0.3s;
+  --icon-wait: 0.25s;
+}
+
+/* The lid opens and the line under the screen is drawn. */
+.lucide-laptop > :nth-child(1) {
+  --icon-move: icon-from;
+  --icon-tall: 0.4;
+  --icon-origin: bottom;
+}
+.lucide-laptop > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 18 100;
+  --icon-from: -19.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.15s;
+}
+
+/* The tiles come up one by one. */
+.lucide-layout-dashboard > :nth-child(1) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+}
+.lucide-layout-dashboard > :nth-child(2) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+  --icon-wait: 0.07s;
+}
+.lucide-layout-dashboard > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+  --icon-wait: 0.14s;
+}
+.lucide-layout-dashboard > :nth-child(4) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+  --icon-wait: 0.21s;
+}
+
+/* The tiles come up one by one, round the clock. */
+.lucide-layout-grid > :nth-child(1) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+}
+.lucide-layout-grid > :nth-child(2) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+  --icon-wait: 0.07s;
+}
+.lucide-layout-grid > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+  --icon-wait: 0.14s;
+}
+.lucide-layout-grid > :nth-child(4) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+  --icon-wait: 0.21s;
+}
+
+/* The three blocks come up one by one. */
+.lucide-layout-template > :nth-child(1) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+}
+.lucide-layout-template > :nth-child(2) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+  --icon-wait: 0.08s;
+}
+.lucide-layout-template > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-time: 0.42s;
+  --icon-wait: 0.16s;
+}
+
+/* The leaning book tips and comes to rest. */
+.lucide-library > :nth-child(1) {
+  --icon-move: icon-swing;
+  --icon-turn: -10deg;
+  --icon-origin: 20px 20px;
+  --icon-box: view-box;
+  --icon-time: 0.6s;
+}
+
+/* The bulb flickers on and its base is drawn. */
+.lucide-lightbulb > :nth-child(1) {
+  --icon-move: icon-flash;
+}
+.lucide-lightbulb > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 7 100;
+  --icon-from: 8.5;
+  --icon-time: 0.3s;
+  --icon-wait: 0.1s;
+}
+.lucide-lightbulb > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 5 100;
+  --icon-from: 6.5;
+  --icon-time: 0.3s;
+  --icon-wait: 0.2s;
+}
+
+/* The two halves pull apart and close again. */
+.lucide-link {
+  overflow: visible;
+}
+.lucide-link > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-x: 1px;
+  --icon-y: -1px;
+}
+.lucide-link > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: -1px;
+  --icon-y: 1px;
+}
+
+/* The two halves pull apart and the bar between them stretches. */
+.lucide-link-2 {
+  overflow: visible;
+}
+.lucide-link-2 > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-x: -1px;
+}
+.lucide-link-2 > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: 1px;
+}
+.lucide-link-2 > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-wide: 1.25;
+}
+
+/* The lines of the list come one by one. */
+.lucide-list > :nth-child(1) {
+  --icon-move: icon-pop;
+}
+.lucide-list > :nth-child(4) {
+  --icon-move: icon-draw;
+  --icon-dash: 14 100;
+  --icon-from: 15.5;
+  --icon-time: 0.4s;
+  --icon-wait: 0.04s;
+}
+.lucide-list > :nth-child(2) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.1s;
+}
+.lucide-list > :nth-child(5) {
+  --icon-move: icon-draw;
+  --icon-dash: 14 100;
+  --icon-from: 15.5;
+  --icon-time: 0.4s;
+  --icon-wait: 0.14s;
+}
+.lucide-list > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.2s;
+}
+.lucide-list > :nth-child(6) {
+  --icon-move: icon-draw;
+  --icon-dash: 14 100;
+  --icon-from: 15.5;
+  --icon-time: 0.4s;
+  --icon-wait: 0.24s;
+}
+
+/* The two checks are drawn, the upper one first. */
+.lucide-list-checks > :nth-child(5) {
+  --icon-move: icon-draw;
+  --icon-dash: 10 100;
+  --icon-from: 11.5;
+  --icon-time: 0.35s;
+}
+.lucide-list-checks > :nth-child(4) {
+  --icon-move: icon-draw;
+  --icon-dash: 10 100;
+  --icon-from: 11.5;
+  --icon-time: 0.35s;
+  --icon-wait: 0.18s;
+}
+
+/* The three lines grow from their middle, ever narrower. */
+.lucide-list-filter > :nth-child(1) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-time: 0.35s;
+}
+.lucide-list-filter > :nth-child(2) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-time: 0.35s;
+  --icon-wait: 0.09s;
+}
+.lucide-list-filter > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-time: 0.35s;
+  --icon-wait: 0.18s;
+}
+
+/* The numbers are written. */
+.lucide-list-ordered > :nth-child(4) {
+  --icon-move: icon-draw;
+  --icon-dash: 7 100;
+  --icon-from: 8.5;
+  --icon-time: 0.3s;
+}
+.lucide-list-ordered > :nth-child(5) {
+  --icon-move: icon-draw;
+  --icon-dash: 3 100;
+  --icon-from: 4.5;
+  --icon-time: 0.3s;
+  --icon-wait: 0.1s;
+}
+.lucide-list-ordered > :nth-child(6) {
+  --icon-move: icon-draw;
+  --icon-dash: 13 100;
+  --icon-from: 14.5;
+  --icon-time: 0.35s;
+  --icon-wait: 0.2s;
+}
+
+/* Goes round once. */
+.lucide-loader-circle {
+  --icon-move: icon-to;
+  --icon-turn: 360deg;
+  --icon-time: 0.7s;
+  --icon-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* The four marks close in on the dot, which comes up. */
+.lucide-locate-fixed > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-x: 1.5px;
+}
+.lucide-locate-fixed > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: -1.5px;
+}
+.lucide-locate-fixed > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-y: 1.5px;
+}
+.lucide-locate-fixed > :nth-child(4) {
+  --icon-move: icon-there;
+  --icon-y: -1.5px;
+}
+.lucide-locate-fixed > :nth-child(6) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.1s;
+}
+
+/* The shackle lifts and falls shut. */
+.lucide-lock {
+  overflow: visible;
+}
+.lucide-lock > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-y: -1.5px;
+}
+
+/* The shackle lifts. */
+.lucide-lock-keyhole {
+  overflow: visible;
+}
+.lucide-lock-keyhole > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-y: -1.5px;
+}
+
+/* The arrow steps out of the door. */
+.lucide-log-out > :is(:nth-child(1), :nth-child(2)) {
+  --icon-move: icon-hop;
+  --icon-x: 2px;
+}
+
+/* The flap opens and closes. */
+.lucide-mail > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-tall: -0.5;
+  --icon-origin: top;
+  --icon-time: 0.6s;
+}
+
+/* The four corners move out. */
+.lucide-maximize > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-x: -1.2px;
+  --icon-y: -1.2px;
+}
+.lucide-maximize > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: 1.2px;
+  --icon-y: -1.2px;
+}
+.lucide-maximize > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-x: -1.2px;
+  --icon-y: 1.2px;
+}
+.lucide-maximize > :nth-child(4) {
+  --icon-move: icon-there;
+  --icon-x: 1.2px;
+  --icon-y: 1.2px;
+}
+
+/* The two arrows move apart. */
+.lucide-maximize-2 > :is(:nth-child(1), :nth-child(2)) {
+  --icon-move: icon-there;
+  --icon-x: 1.5px;
+  --icon-y: -1.5px;
+}
+.lucide-maximize-2 > :is(:nth-child(3), :nth-child(4)) {
+  --icon-move: icon-there;
+  --icon-x: -1.5px;
+  --icon-y: 1.5px;
+}
+
+/* The bubble sways on its tail. */
+.lucide-message-circle {
+  --icon-move: icon-swing;
+  --icon-turn: 8deg;
+  --icon-origin: 12% 88%;
+}
+
+/* The question mark is drawn and its dot comes up. */
+.lucide-message-circle-question-mark > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 14 100;
+  --icon-from: 15.5;
+  --icon-time: 0.4s;
+}
+.lucide-message-circle-question-mark > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.3s;
+}
+
+/* The bubble sways on its tail. */
+.lucide-message-square {
+  --icon-move: icon-swing;
+  --icon-turn: 8deg;
+  --icon-origin: 10% 90%;
+}
+
+/* The plus grows from its middle, across and then down. */
+.lucide-message-square-plus > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+}
+.lucide-message-square-plus > :nth-child(2) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-wait: 0.12s;
+}
+
+/* The two quote marks drop in. */
+.lucide-message-square-quote > :nth-child(3) {
+  --icon-move: icon-land;
+  --icon-y: -2.5px;
+  --icon-fade: 0;
+}
+.lucide-message-square-quote > :nth-child(1) {
+  --icon-move: icon-land;
+  --icon-y: -2.5px;
+  --icon-fade: 0;
+  --icon-wait: 0.1s;
+}
+
+/* The lines are written one under the other. */
+.lucide-message-square-text > :nth-child(4) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.35s;
+}
+.lucide-message-square-text > :nth-child(2) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.35s;
+  --icon-wait: 0.09s;
+}
+.lucide-message-square-text > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.35s;
+  --icon-wait: 0.18s;
+}
+
+/* The two bubbles answer each other. */
+.lucide-messages-square {
+  overflow: visible;
+}
+.lucide-messages-square > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-x: -1px;
+  --icon-y: -1.5px;
+}
+.lucide-messages-square > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: 1px;
+  --icon-y: 1.5px;
+  --icon-wait: 0.12s;
+}
+
+/* The microphone dips into its holder, which is drawn. */
+.lucide-mic > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-y: 1.5px;
+}
+.lucide-mic > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 27 100;
+  --icon-from: 28.5;
+  --icon-time: 0.55s;
+  --icon-wait: 0.05s;
+}
+
+/* The stroke goes through it. */
+.lucide-mic-off > :nth-child(5) {
+  --icon-move: icon-draw;
+  --icon-dash: 30 100;
+  --icon-from: 31.5;
+  --icon-time: 0.55s;
+}
+
+/* The two arrows come together. */
+.lucide-minimize-2 > :is(:nth-child(1), :nth-child(2)) {
+  --icon-move: icon-there;
+  --icon-x: -1.5px;
+  --icon-y: 1.5px;
+}
+.lucide-minimize-2 > :is(:nth-child(3), :nth-child(4)) {
+  --icon-move: icon-there;
+  --icon-x: 1.5px;
+  --icon-y: -1.5px;
+}
+
+/* The line shrinks to its middle and comes back. */
+.lucide-minus > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-wide: 0.3;
+}
+
+/* The stand comes down and its foot grows. */
+.lucide-monitor > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: top;
+}
+.lucide-monitor > :nth-child(2) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-wait: 0.12s;
+}
+
+/* The moon rocks. */
+.lucide-moon {
+  --icon-move: icon-swing;
+  --icon-turn: -14deg;
+  --icon-time: 0.6s;
+}
+
+/* The note comes up and its stem is drawn. */
+.lucide-music-2 > :nth-child(1) {
+  --icon-move: icon-pop;
+}
+.lucide-music-2 > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 26 100;
+  --icon-from: 27.5;
+  --icon-wait: 0.15s;
+}
+
+/* The lines run down from the top box to the two under it. */
+.lucide-network > :nth-child(5) {
+  --icon-move: icon-draw;
+  --icon-dash: 5 100;
+  --icon-from: -6.5;
+  --icon-time: 0.3s;
+}
+.lucide-network > :nth-child(4) {
+  --icon-move: icon-draw;
+  --icon-dash: 23 100;
+  --icon-from: 24.5;
+  --icon-wait: 0.12s;
+}
+.lucide-network > :nth-child(2) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.3s;
+}
+.lucide-network > :nth-child(1) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.38s;
+}
+
+/* The picture comes up and the lines are written. */
+.lucide-newspaper > :nth-child(4) {
+  --icon-move: icon-pop;
+}
+.lucide-newspaper > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 9 100;
+  --icon-from: -10.5;
+  --icon-time: 0.35s;
+  --icon-wait: 0.12s;
+}
+.lucide-newspaper > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 6 100;
+  --icon-from: -7.5;
+  --icon-time: 0.3s;
+  --icon-wait: 0.22s;
+}
+
+/* The pen writes, its point in place. */
+.lucide-notebook-pen > :nth-child(6) {
+  --icon-move: icon-swing;
+  --icon-turn: -10deg;
+  --icon-origin: 12.5px 11.5px;
+  --icon-box: view-box;
+}
+
+/* The stroke drops in and its dot comes up after it. */
+.lucide-octagon-alert > :nth-child(2) {
+  --icon-move: icon-land;
+  --icon-y: -3px;
+  --icon-fade: 0;
+}
+.lucide-octagon-alert > :nth-child(1) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.22s;
+}
+
+/* The band round the parcel is drawn. */
+.lucide-package > :nth-child(4) {
+  --icon-move: icon-draw;
+  --icon-dash: 11 100;
+  --icon-from: 12.5;
+  --icon-time: 0.4s;
+}
+
+/* The panel widens and narrows. */
+.lucide-panel-left > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: 4px;
+}
+
+/* The panel narrows, its arrow a step ahead. */
+.lucide-panel-left-close > :nth-child(3) {
+  --icon-move: icon-hop;
+  --icon-x: -2px;
+}
+.lucide-panel-left-close > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: -1.5px;
+}
+
+/* The panel widens, its arrow a step ahead. */
+.lucide-panel-left-open > :nth-child(3) {
+  --icon-move: icon-hop;
+  --icon-x: 2px;
+}
+.lucide-panel-left-open > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: 1.5px;
+}
+
+/* The panel's edge slides in and back. */
+.lucide-panel-right > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: -4px;
+}
+
+/* The clip is drawn in one line. */
+.lucide-paperclip > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 87 100;
+  --icon-from: 88.5;
+  --icon-time: 0.7s;
+}
+
+/* The two bars dip, one after the other. */
+.lucide-pause > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-tall: 0.6;
+}
+.lucide-pause > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-tall: 0.6;
+  --icon-wait: 0.12s;
+}
+
+/* The pen writes and its line is drawn. */
+.lucide-pen-line > :nth-child(2) {
+  --icon-move: icon-swing;
+  --icon-turn: -8deg;
+  --icon-origin: 2.5px 21.5px;
+  --icon-box: view-box;
+}
+.lucide-pen-line > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 9 100;
+  --icon-from: 10.5;
+  --icon-time: 0.35s;
+  --icon-wait: 0.1s;
+}
+
+/* The pencil writes, its point in place. */
+.lucide-pencil > * {
+  --icon-move: icon-swing;
+  --icon-turn: -8deg;
+  --icon-origin: 2.5px 21.5px;
+  --icon-box: view-box;
+}
+
+/* The pencil writes and its line is drawn. */
+.lucide-pencil-line > :is(:nth-child(2), :nth-child(3)) {
+  --icon-move: icon-swing;
+  --icon-turn: -8deg;
+  --icon-origin: 2.5px 21.5px;
+  --icon-box: view-box;
+}
+.lucide-pencil-line > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 9 100;
+  --icon-from: 10.5;
+  --icon-time: 0.35s;
+  --icon-wait: 0.1s;
+}
+
+/* A step forward and a small step back. */
+.lucide-play {
+  overflow: visible;
+}
+.lucide-play > :nth-child(1) {
+  --icon-move: icon-hop;
+  --icon-x: 2.5px;
+}
+
+/* The pins go into the plug and come out. */
+.lucide-plug > :is(:nth-child(2), :nth-child(4)) {
+  --icon-move: icon-there;
+  --icon-y: 2px;
+}
+
+/* The plus turns a quarter, where it looks the same again. */
+.lucide-plus {
+  --icon-move: icon-to;
+  --icon-turn: 90deg;
+  --icon-time: 0.45s;
+  --icon-ease: cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+
+/* The bar on top is drawn and the legs come down. */
+.lucide-presentation > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 21 100;
+  --icon-from: 22.5;
+  --icon-time: 0.45s;
+}
+.lucide-presentation > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: top;
+  --icon-wait: 0.15s;
+}
+
+/* A sheet goes in on top and comes out below. */
+.lucide-printer > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-y: 1.5px;
+}
+.lucide-printer > :nth-child(3) {
+  --icon-move: icon-land;
+  --icon-y: -3px;
+  --icon-fade: 0;
+  --icon-wait: 0.1s;
+}
+
+/* The piece is wiggled into place. */
+.lucide-puzzle {
+  --icon-move: icon-swing;
+  --icon-turn: 10deg;
+}
+
+/* The beam sweeps round and two dots light up. */
+.lucide-radar > :nth-child(8) {
+  --icon-move: icon-to;
+  --icon-turn: 360deg;
+  --icon-origin: 12px 12px;
+  --icon-box: view-box;
+  --icon-time: 0.8s;
+  --icon-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+.lucide-radar > :nth-child(2) {
+  --icon-move: icon-flash;
+  --icon-time: 0.6s;
+}
+.lucide-radar > :nth-child(5) {
+  --icon-move: icon-flash;
+  --icon-time: 0.6s;
+  --icon-wait: 0.2s;
+}
+
+/* Turns back half a turn, where it looks the same again. */
+.lucide-refresh-ccw {
+  --icon-move: icon-to;
+  --icon-turn: -180deg;
+  --icon-time: 0.6s;
+  --icon-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Each arrow takes a step its way. */
+.lucide-repeat > :nth-child(1) {
+  --icon-move: icon-hop;
+  --icon-x: 2px;
+}
+.lucide-repeat > :nth-child(3) {
+  --icon-move: icon-hop;
+  --icon-x: -2px;
+}
+
+/* The rocket leaves up to the right and comes in from the lower left. */
+.lucide-rocket > * {
+  --icon-move: icon-away;
+  --icon-x: 8px;
+  --icon-y: -8px;
+  --icon-time: 0.6s;
+}
+
+/* Turns back once round. */
+.lucide-rotate-ccw {
+  --icon-move: icon-to;
+  --icon-turn: -360deg;
+  --icon-time: 0.65s;
+  --icon-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* The hands run back once round and the arrow gives a pull. */
+.lucide-rotate-ccw-clock > :nth-child(3) {
+  --icon-move: icon-to;
+  --icon-turn: -360deg;
+  --icon-origin: 12px 12px;
+  --icon-box: view-box;
+  --icon-time: 0.7s;
+  --icon-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+.lucide-rotate-ccw-clock > :is(:nth-child(1), :nth-child(2)) {
+  --icon-move: icon-there;
+  --icon-turn: -30deg;
+  --icon-origin: 12px 12px;
+  --icon-box: view-box;
+}
+
+/* The road is drawn from the one dot to the other, which comes up. */
+.lucide-route > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 51 100;
+  --icon-from: 52.5;
+  --icon-time: 0.6s;
+}
+.lucide-route > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.45s;
+}
+
+/* The two lines between the rows are drawn. */
+.lucide-rows-3 > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 19 100;
+  --icon-from: -20.5;
+  --icon-time: 0.45s;
+}
+.lucide-rows-3 > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 19 100;
+  --icon-from: -20.5;
+  --icon-time: 0.45s;
+  --icon-wait: 0.12s;
+}
+
+/* The scale tips to one side and comes level. */
+.lucide-scale > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-turn: -8deg;
+}
+.lucide-scale > :nth-child(4) {
+  --icon-move: icon-there;
+  --icon-y: 1px;
+}
+.lucide-scale > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-y: -1px;
+}
+
+/* The four corners close in. */
+.lucide-scan > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-x: 1.2px;
+  --icon-y: 1.2px;
+}
+.lucide-scan > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-x: -1.2px;
+  --icon-y: 1.2px;
+}
+.lucide-scan > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-x: -1.2px;
+  --icon-y: -1.2px;
+}
+.lucide-scan > :nth-child(4) {
+  --icon-move: icon-there;
+  --icon-x: 1.2px;
+  --icon-y: -1.2px;
+}
+
+/* The lines are read one by one. */
+.lucide-scan-text > :nth-child(5) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.35s;
+}
+.lucide-scan-text > :nth-child(6) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.35s;
+  --icon-wait: 0.09s;
+}
+.lucide-scan-text > :nth-child(7) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.35s;
+  --icon-wait: 0.18s;
+}
+
+/* The lens looks around. */
+.lucide-search {
+  --icon-move: icon-orbit;
+  --icon-x: 6.25%;
+  --icon-time: 0.7s;
+}
+
+/* The cross is drawn, stroke by stroke. */
+.lucide-search-x > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 9 100;
+  --icon-from: 10.5;
+  --icon-time: 0.35s;
+}
+.lucide-search-x > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 9 100;
+  --icon-from: 10.5;
+  --icon-time: 0.35s;
+  --icon-wait: 0.15s;
+}
+
+/* The plane flies off and comes back from the other side. */
+.lucide-send > * {
+  --icon-move: icon-away;
+  --icon-x: 9px;
+  --icon-y: -9px;
+  --icon-time: 0.6s;
+}
+
+/* The two lights blink, one after the other. */
+.lucide-server > :nth-child(3) {
+  --icon-move: icon-flash;
+  --icon-time: 0.6s;
+}
+.lucide-server > :nth-child(4) {
+  --icon-move: icon-flash;
+  --icon-time: 0.6s;
+  --icon-wait: 0.15s;
+}
+
+/* The gear turns half round, where it looks the same again. */
+.lucide-settings > :nth-child(1) {
+  --icon-move: icon-to;
+  --icon-turn: 180deg;
+  --icon-origin: 12px 12px;
+  --icon-box: view-box;
+  --icon-time: 0.7s;
+  --icon-ease: cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+
+/* Each shape its own way: one hops, one turns, one is drawn. */
+.lucide-shapes > :nth-child(1) {
+  --icon-move: icon-hop;
+  --icon-y: -1px;
+}
+.lucide-shapes > :nth-child(2) {
+  --icon-move: icon-to;
+  --icon-turn: 90deg;
+  --icon-wait: 0.08s;
+  --icon-ease: cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+.lucide-shapes > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 23 100;
+  --icon-from: 24.5;
+  --icon-wait: 0.16s;
+}
+
+/* The rows are ruled, then the columns. */
+.lucide-sheet > :nth-child(2) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.3s;
+}
+.lucide-sheet > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+  --icon-origin: left;
+  --icon-time: 0.3s;
+  --icon-wait: 0.08s;
+}
+.lucide-sheet > :nth-child(4) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: top;
+  --icon-time: 0.3s;
+  --icon-wait: 0.16s;
+}
+.lucide-sheet > :nth-child(5) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: top;
+  --icon-time: 0.3s;
+  --icon-wait: 0.24s;
+}
+
+/* The stroke drops in and its dot comes up after it. */
+.lucide-shield-alert > :nth-child(2) {
+  --icon-move: icon-land;
+  --icon-y: -3px;
+  --icon-fade: 0;
+}
+.lucide-shield-alert > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.22s;
+}
+
+/* The check is drawn on the shield. */
+.lucide-shield-check > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 10 100;
+  --icon-from: 11.5;
+  --icon-time: 0.35s;
+}
+
+/* The stroke goes through it. */
+.lucide-shield-off > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 30 100;
+  --icon-from: 31.5;
+  --icon-time: 0.55s;
+}
+
+/* The name is signed. */
+.lucide-signature > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 54 100;
+  --icon-from: -55.5;
+  --icon-time: 0.7s;
+}
+
+/* The three handles slide. */
+.lucide-sliders-horizontal > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-x: -2px;
+}
+.lucide-sliders-horizontal > :nth-child(8) {
+  --icon-move: icon-there;
+  --icon-x: 2px;
+  --icon-wait: 0.06s;
+}
+.lucide-sliders-horizontal > :nth-child(4) {
+  --icon-move: icon-there;
+  --icon-x: -2px;
+  --icon-wait: 0.12s;
+}
+
+/* The phone buzzes. */
+.lucide-smartphone {
+  --icon-move: icon-swing;
+  --icon-turn: 7deg;
+  --icon-time: 0.4s;
+}
+.lucide-smartphone > :nth-child(2) {
+  --icon-move: icon-pop;
+}
+
+/* The spark turns a quarter, where it looks the same again. */
+.lucide-sparkle > :nth-child(1) {
+  --icon-move: icon-to;
+  --icon-turn: 90deg;
+  --icon-time: 0.6s;
+  --icon-ease: cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+
+/* The big spark turns a quarter and the two small ones come up. */
+.lucide-sparkles > :nth-child(1) {
+  --icon-move: icon-to;
+  --icon-turn: 90deg;
+  --icon-time: 0.6s;
+  --icon-ease: cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+.lucide-sparkles > :is(:nth-child(2), :nth-child(3)) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.1s;
+}
+.lucide-sparkles > :nth-child(4) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.2s;
+}
+
+/* The line runs up and splits, and its two heads come up. */
+.lucide-split > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 24 100;
+  --icon-from: 25.5;
+}
+.lucide-split > :nth-child(4) {
+  --icon-move: icon-draw;
+  --icon-dash: 10 100;
+  --icon-from: 11.5;
+  --icon-time: 0.35s;
+  --icon-wait: 0.25s;
+}
+.lucide-split > :nth-child(2) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.3s;
+}
+.lucide-split > :nth-child(1) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.4s;
+}
+
+/* The square turns a quarter, where it looks the same again. */
+.lucide-square > :nth-child(1) {
+  --icon-move: icon-to;
+  --icon-turn: 90deg;
+  --icon-ease: cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+
+/* The arrow leaves its box and comes back out of it. */
+.lucide-square-arrow-out-up-right > :is(:nth-child(2), :nth-child(3)) {
+  --icon-move: icon-away;
+  --icon-x: 6px;
+  --icon-y: -6px;
+}
+
+/* The pointer goes to its spot and back. */
+.lucide-square-mouse-pointer > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-x: -2.5px;
+  --icon-y: -2.5px;
+}
+
+/* The pen writes, its point in place. */
+.lucide-square-pen > :nth-child(2) {
+  --icon-move: icon-swing;
+  --icon-turn: -10deg;
+  --icon-origin: 8.5px 15.5px;
+  --icon-box: view-box;
+}
+
+/* The door comes up and the awning dips. */
+.lucide-store > :nth-child(1) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-origin: bottom;
+}
+.lucide-store > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-tall: 1.2;
+  --icon-origin: top;
+}
+
+/* The rays come out one by one, round the sun. */
+.lucide-sun > :nth-child(2) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+}
+.lucide-sun > :nth-child(9) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.04s;
+}
+.lucide-sun > :nth-child(7) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.08s;
+}
+.lucide-sun > :nth-child(5) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.12s;
+}
+.lucide-sun > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.16s;
+}
+.lucide-sun > :nth-child(8) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.2s;
+}
+.lucide-sun > :nth-child(6) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.24s;
+}
+.lucide-sun > :nth-child(4) {
+  --icon-move: icon-pop;
+  --icon-time: 0.3s;
+  --icon-wait: 0.28s;
+}
+
+/* The tag swings from its hole. */
+.lucide-tag {
+  --icon-move: icon-swing;
+  --icon-turn: 10deg;
+  --icon-origin: 30% 30%;
+  --icon-time: 0.6s;
+}
+
+/* The rings come up from the middle outwards. */
+.lucide-target > :nth-child(3) {
+  --icon-move: icon-pop;
+}
+.lucide-target > :nth-child(2) {
+  --icon-move: icon-from;
+  --icon-wide: 0.6;
+  --icon-tall: 0.6;
+  --icon-fade: 0;
+  --icon-wait: 0.1s;
+}
+.lucide-target > :nth-child(1) {
+  --icon-move: icon-from;
+  --icon-wide: 0.7;
+  --icon-tall: 0.7;
+  --icon-fade: 0;
+  --icon-wait: 0.2s;
+}
+
+/* The button is pressed and the hand goes round. */
+.lucide-timer > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-y: 1px;
+  --icon-time: 0.3s;
+}
+.lucide-timer > :nth-child(2) {
+  --icon-move: icon-to;
+  --icon-turn: 360deg;
+  --icon-origin: 12px 14px;
+  --icon-box: view-box;
+  --icon-time: 0.7s;
+}
+
+/* The lid lifts. */
+.lucide-trash {
+  overflow: visible;
+}
+.lucide-trash > :is(:nth-child(4), :nth-child(5)) {
+  --icon-move: icon-there;
+  --icon-y: -1px;
+  --icon-turn: -10deg;
+  --icon-origin: 4px 6px;
+  --icon-box: view-box;
+}
+
+/* The stroke drops in and its dot comes up after it. */
+.lucide-triangle-alert > :nth-child(2) {
+  --icon-move: icon-land;
+  --icon-y: -3px;
+  --icon-fade: 0;
+}
+.lucide-triangle-alert > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.22s;
+}
+
+/* The way back is drawn, and the arrow lands at its end. */
+.lucide-undo > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 24 100;
+  --icon-from: -25.5;
+  --icon-time: 0.55s;
+}
+.lucide-undo > :nth-child(1) {
+  --icon-move: icon-land;
+  --icon-x: 3px;
+  --icon-fade: 0;
+  --icon-wait: 0.25s;
+}
+
+/* The line runs back to its arrow, whose head comes in. */
+.lucide-undo-2 > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 33 100;
+  --icon-from: -34.5;
+  --icon-time: 0.6s;
+}
+.lucide-undo-2 > :nth-child(1) {
+  --icon-move: icon-land;
+  --icon-x: 3px;
+  --icon-fade: 0;
+  --icon-wait: 0.25s;
+}
+
+/* The arrow rises out of the tray. */
+.lucide-upload > :is(:nth-child(1), :nth-child(2)) {
+  --icon-move: icon-land;
+  --icon-y: 6px;
+  --icon-fade: 0;
+}
+
+/* The head hops and the shoulders are drawn. */
+.lucide-user > :nth-child(2) {
+  --icon-move: icon-hop;
+  --icon-y: -1.5px;
+}
+.lucide-user > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 24 100;
+  --icon-from: 25.5;
+  --icon-wait: 0.05s;
+}
+
+/* The check is drawn beside them. */
+.lucide-user-check > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 10 100;
+  --icon-from: 11.5;
+  --icon-time: 0.35s;
+}
+
+/* The minus is drawn. */
+.lucide-user-minus > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 6 100;
+  --icon-from: 7.5;
+  --icon-time: 0.3s;
+}
+
+/* The plus grows from its middle, across and then down. */
+.lucide-user-plus > :nth-child(4) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+}
+.lucide-user-plus > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-wait: 0.12s;
+}
+
+/* The head hops and the shoulders are drawn. */
+.lucide-user-round > :nth-child(1) {
+  --icon-move: icon-hop;
+  --icon-y: -1.5px;
+}
+.lucide-user-round > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 27 100;
+  --icon-from: 28.5;
+  --icon-time: 0.55s;
+  --icon-wait: 0.05s;
+}
+
+/* The cross is drawn, stroke by stroke. */
+.lucide-user-x > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 9 100;
+  --icon-from: 10.5;
+  --icon-time: 0.35s;
+}
+.lucide-user-x > :nth-child(4) {
+  --icon-move: icon-draw;
+  --icon-dash: 9 100;
+  --icon-from: 10.5;
+  --icon-time: 0.35s;
+  --icon-wait: 0.15s;
+}
+
+/* The second person steps out from behind the first. */
+.lucide-users > :is(:nth-child(2), :nth-child(3)) {
+  --icon-move: icon-from;
+  --icon-x: -3px;
+  --icon-fade: 0;
+}
+
+/* The camera's lens comes out of it. */
+.lucide-video > :nth-child(1) {
+  --icon-move: icon-from;
+  --icon-x: -3px;
+  --icon-fade: 0;
+}
+
+/* The sound comes out. */
+.lucide-volume-1 > :nth-child(2) {
+  --icon-move: icon-from;
+  --icon-x: -1.5px;
+  --icon-fade: 0;
+}
+
+/* The sound comes out, wave after wave. */
+.lucide-volume-2 > :nth-child(2) {
+  --icon-move: icon-from;
+  --icon-x: -1.5px;
+  --icon-fade: 0;
+}
+.lucide-volume-2 > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-x: -2px;
+  --icon-fade: 0;
+  --icon-wait: 0.15s;
+}
+
+/* The cross is drawn, stroke by stroke. */
+.lucide-volume-x > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 9 100;
+  --icon-from: 10.5;
+  --icon-time: 0.35s;
+}
+.lucide-volume-x > :nth-child(3) {
+  --icon-move: icon-draw;
+  --icon-dash: 9 100;
+  --icon-from: 10.5;
+  --icon-time: 0.35s;
+  --icon-wait: 0.15s;
+}
+
+/* The line runs from the first step to the second, which comes up. */
+.lucide-workflow > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 13 100;
+  --icon-from: 14.5;
+  --icon-time: 0.45s;
+}
+.lucide-workflow > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-wait: 0.32s;
+}
+
+/* The wrench gives a turn. */
+.lucide-wrench {
+  --icon-move: icon-swing;
+  --icon-turn: -18deg;
+  --icon-origin: 70% 30%;
+  --icon-time: 0.6s;
+}
+
+/* The cross turns a quarter, where it looks the same again. */
+.lucide-x {
+  --icon-move: icon-to;
+  --icon-turn: 90deg;
+  --icon-time: 0.45s;
+  --icon-ease: cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+
+/* The bolt strikes: it is drawn in one go. */
+.lucide-zap > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 63 100;
+  --icon-from: 64.5;
+  --icon-time: 0.45s;
+}
+
+/* The plus grows from its middle, across and then down. */
+.lucide-zoom-in > :nth-child(4) {
+  --icon-move: icon-from;
+  --icon-wide: 0;
+}
+.lucide-zoom-in > :nth-child(3) {
+  --icon-move: icon-from;
+  --icon-tall: 0;
+  --icon-wait: 0.12s;
+}
+
+/* The line shrinks to its middle and comes back. */
+.lucide-zoom-out > :nth-child(3) {
+  --icon-move: icon-there;
+  --icon-wide: 0.3;
+}

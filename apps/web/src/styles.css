@@ -1,6 +1,8 @@
 @import "@grasp-os/ui/styles.css";
 /* The theme's sans, bundled so it is served from this origin (the CSP's default-src). */
 @import "@fontsource-variable/geist";
+/* How each icon of a control moves when it is pointed at. */
+@import "./icon-moves.css";
 
 @source "../";
 /* The kit's demos and examples, shown on the local kit pages (routes/kit_.*). */
