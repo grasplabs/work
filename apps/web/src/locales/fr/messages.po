@@ -536,6 +536,11 @@ msgctxt "filter: every integration"
 msgid "All"
 msgstr "Toutes"
 
+#: src/routes/_shell.workflows.index.tsx
+msgctxt "tab listing every workflow"
+msgid "All"
+msgstr "Tous"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "All calls"
 msgstr "Tous les appels"
@@ -763,6 +768,10 @@ msgstr "Demande"
 #: src/workflows/runs.tsx
 msgid "At {step}: {error}"
 msgstr "À {step} : {error}"
+
+#: src/workflows/workflows-table.tsx
+msgid "At work"
+msgstr "À l’œuvre"
 
 #: src/routes/_shell.settings.audit.tsx
 #: src/routes/_shell.settings.tsx
@@ -2128,6 +2137,11 @@ msgstr "Nécessite en plus"
 msgid "Needs attention"
 msgstr "À traiter"
 
+#: src/routes/_shell.workflows.index.tsx
+msgctxt "tab listing the workflows that need a person"
+msgid "Needs attention"
+msgstr "Demande de l’attention"
+
 #: src/connections/integration-row.tsx
 msgid "Needs signing in again"
 msgstr "Reconnexion nécessaire"
@@ -2238,6 +2252,10 @@ msgstr "Aucune équipe"
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "No workflow in this engine yet."
 msgstr "Aucun workflow dans ce moteur pour l’instant."
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "No workflow needs attention: nothing waits for a decision, nothing failed lately."
+msgstr "Aucun workflow ne demande d’attention : rien n’attend de décision, rien n’a échoué récemment."
 
 #: src/chat/builds.tsx
 msgid "No workflows to test."
@@ -2452,6 +2470,10 @@ msgstr "à la réception d’un e-mail à {address}@"
 msgid "on the event {event}, filtered"
 msgstr "à l’événement {event}, filtré"
 
+#: src/workflows/workflows-table.tsx
+msgid "On the way"
+msgstr "En route"
+
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.onboarding.tsx
 msgid "Onboarding"
@@ -2526,6 +2548,10 @@ msgstr "Ouvrir dans le chat"
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Ouvrir le chat"
+
+#: src/workflows/workflows-table.tsx
+msgid "Open the engine {name}"
+msgstr "Ouvrir le moteur {name}"
 
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
