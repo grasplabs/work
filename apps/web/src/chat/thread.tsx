@@ -25,15 +25,20 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { PlainMarkdown } from "../knowledge/markdown.tsx";
-import { GraspEyes } from "./grasp-eyes.tsx";
-import type { EyesState } from "./grasp-eyes.tsx";
+import { GraspSign } from "./grasp-sign.tsx";
+import { signOf } from "./sign.ts";
+import type { WorkState } from "./sign.ts";
+import { minutesAndSeconds, turnsOf, workedFor } from "./turns.ts";
 
 // A chat as the person reads it, in the prototype's look
 // (grasplabs/prototype `components/chat/chat-thread.tsx` and
 // `chat-message.tsx`): their questions in a grey bubble on the right,
-// Grasp's answers beside its eyes, each code step folded with its status,
-// and a line while Grasp reads before its answer starts. It follows the
-// answer as it streams, unless the person scrolls up to read.
+// Grasp's answers under a quiet line, each code step folded with its
+// status. While Grasp works on a question, the line says what it does and
+// Grasp's sign stands under its newest answer; once it is done, the line
+// says how long it worked, and the answer has its actions in a quiet row
+// under it. It follows the answer as it streams, unless the person scrolls
+// up to read.
 
 type Result = Extract<ChatMessage, { role: "result" }>;
 type Answer = Extract<ChatMessage, { role: "assistant" }>;
@@ -193,20 +198,46 @@ const CopyAnswer = ({ text }: { text: string }) => {
   );
 };
 
-/** What an answer's eyes show: while it is written, what it writes now. */
-const eyesOf = (
-  reply: ChatPartial & { end?: string },
-  writing: boolean,
-  results: ReadonlyMap<string, Result>
-): EyesState => {
-  if (writing) {
-    const last = reply.code.at(-1);
-    if (last !== undefined && !results.has(last.callId)) {
-      return "working";
-    }
-    return reply.text === "" ? "thinking" : "writing";
-  }
-  return reply.end === "failed" ? "error" : "idle";
+/** The line over an answer: a few quiet words, then a hairline to the end of the thread. */
+const AnswerTop = ({ children }: { children: ReactNode }) => (
+  <div className="text-muted-foreground flex items-center gap-3 text-xs">
+    <span className="flex-none">{children}</span>
+    <span aria-hidden="true" className="bg-border h-px min-w-0 flex-1" />
+  </div>
+);
+
+/** Over an answer Grasp works on: what it does now, as a light runs through the words. */
+const Working = ({ doing }: { doing: WorkState }) => {
+  const { t } = useLingui();
+  const label = {
+    reading: t`Reading the workspace`,
+    thinking: t`Thinking`,
+    writing: t`Writing`,
+    working: t`Working on it`,
+  }[doing];
+  return (
+    <AnswerTop>
+      {/* A live status, so a screen reader hears that Grasp is working. */}
+      <output className="shimmer-text">{label}</output>
+    </AnswerTop>
+  );
+};
+
+/** Over a finished answer: how long Grasp worked on the question, said short. */
+const WorkedFor = ({ seconds }: { seconds: number }) => {
+  const { t } = useLingui();
+  const { minutes, rest } = minutesAndSeconds(seconds);
+  const time =
+    minutes > 0
+      ? t({
+          message: `${minutes}m ${rest}s`,
+          comment: "A length of time, said short: 4 minutes and 21 seconds.",
+        })
+      : t({
+          message: `${rest}s`,
+          comment: "A length of time, said short: 21 seconds.",
+        });
+  return <AnswerTop>{t`Worked for ${time}`}</AnswerTop>;
 };
 
 /** One response of the agent's, stored or being written. */
@@ -215,24 +246,28 @@ const Reply = ({
   results,
   writing,
   running,
-  latest,
+  top,
+  sign,
   onRetry,
 }: {
   reply: ChatPartial & { end?: Answer["end"]; error?: string };
   results: ReadonlyMap<string, Result>;
   writing: boolean;
   running: boolean;
-  /** The newest answer: the only one whose eyes move. */
-  latest: boolean;
+  /** The line over it, over the first answer to a question. */
+  top?: ReactNode;
+  /** What Grasp does, under the newest answer while it works on it: its sign stands there, and no actions. */
+  sign?: WorkState;
   /** Asks the last question again, offered under the last answer. */
   onRetry?: () => void;
 }) => {
   const { t } = useLingui();
   const answer = reply.text.trim();
+  const quiet = writing || sign !== undefined;
   return (
-    <div className="flex w-full items-start gap-3">
-      <GraspEyes live={latest} state={eyesOf(reply, writing, results)} />
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
+    <div className="flex w-full min-w-0 flex-col gap-3">
+      {top}
+      <div className="flex min-w-0 flex-col gap-2">
         <div className="flex w-full min-w-0 flex-col gap-3 text-sm">
           {answer === "" ? null : <PlainMarkdown text={reply.text} />}
           {reply.code.map((code) => (
@@ -269,7 +304,10 @@ const Reply = ({
             </div>
           ) : null}
         </div>
-        {writing || (answer === "" && onRetry === undefined) ? null : (
+        {sign === undefined ? null : (
+          <GraspSign said={reply.text.length} state={sign} />
+        )}
+        {quiet || (answer === "" && onRetry === undefined) ? null : (
           <div className="-ml-1.5 flex items-center gap-1">
             {answer === "" ? null : <CopyAnswer text={answer} />}
             {onRetry === undefined || reply.end === "failed" ? null : (
@@ -284,17 +322,13 @@ const Reply = ({
   );
 };
 
-/** Grasp, reading before its answer starts. */
-const Reading = () => {
-  const { t } = useLingui();
-  return (
-    <div className="flex items-start gap-3">
-      <GraspEyes live state="reading" />
-      {/* A live status, so a screen reader hears that Grasp is working. */}
-      <output className="shimmer-text text-sm">{t`Reading the workspace`}</output>
-    </div>
-  );
-};
+/** Grasp, reading before its answer starts: its line, and its sign under it, where the answer will stand. */
+const Reading = () => (
+  <div className="flex w-full flex-col gap-3">
+    <Working doing="reading" />
+    <GraspSign state="reading" />
+  </div>
+);
 
 /**
  * Follows the end of `scroller` as what is in `content` grows, while the
@@ -344,6 +378,40 @@ const useFollow = (): {
   return { scroller, content, atEnd, toEnd };
 };
 
+/**
+ * Where Grasp stands on the chat's questions: the answer being written,
+ * once it shows its first words or code; while it works, the replies to
+ * the last question so far and what it does on it; and how long it worked
+ * on every other, by the ID of its first reply.
+ */
+const progressOf = (
+  messages: readonly ChatMessage[],
+  partial: ChatPartial | null,
+  running: boolean,
+  results: ReadonlyMap<string, Result>
+): {
+  shown: ChatPartial | null;
+  replies: readonly Answer[];
+  doing: WorkState | undefined;
+  worked: ReadonlyMap<number, number>;
+} => {
+  const shown =
+    partial !== null && (partial.text.trim() !== "" || partial.code.length > 0)
+      ? partial
+      : null;
+  const turns = turnsOf(messages);
+  const current = running ? turns.at(-1) : undefined;
+  const replies = current?.replies ?? [];
+  return {
+    shown,
+    replies,
+    doing: running
+      ? signOf({ partial: shown, replies, ran: (id) => results.has(id) })
+      : undefined,
+    worked: workedFor(turns, current),
+  };
+};
+
 /** The chat's messages, and the response being written, oldest first. */
 export const ChatThread = ({
   loaded,
@@ -379,11 +447,19 @@ export const ChatThread = ({
     lastAnswer !== undefined &&
     messages.findLastIndex(({ role }) => role === "user") <
       messages.indexOf(lastAnswer);
-  // Grasp is reading until the answer shows its first words or code.
-  const reading =
-    running &&
-    (partial === null ||
-      (partial.text.trim() === "" && partial.code.length === 0));
+  const { shown, replies, doing, worked } = progressOf(
+    messages,
+    partial,
+    running,
+    results
+  );
+  const topOf = (id: number): ReactNode => {
+    if (doing !== undefined && replies[0]?.id === id) {
+      return <Working doing={doing} />;
+    }
+    const seconds = worked.get(id);
+    return seconds === undefined ? undefined : <WorkedFor seconds={seconds} />;
+  };
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto" ref={scroller}>
@@ -412,7 +488,6 @@ export const ChatThread = ({
               return (
                 <li key={message.id}>
                   <Reply
-                    latest={partial === null && message === lastAnswer}
                     onRetry={
                       !running && message === lastAnswer && answersLast
                         ? onRetry
@@ -421,6 +496,12 @@ export const ChatThread = ({
                     reply={message}
                     results={results}
                     running={running}
+                    sign={
+                      shown === null && message === replies.at(-1)
+                        ? doing
+                        : undefined
+                    }
+                    top={topOf(message.id)}
                     writing={false}
                   />
                 </li>
@@ -428,18 +509,23 @@ export const ChatThread = ({
             }
             return null;
           })}
-          {partial !== null && !reading ? (
+          {shown === null ? null : (
             <li aria-busy="true">
               <Reply
-                latest
-                reply={partial}
+                reply={shown}
                 results={results}
                 running={running}
+                sign={doing}
+                top={
+                  doing !== undefined && replies.length === 0 ? (
+                    <Working doing={doing} />
+                  ) : undefined
+                }
                 writing
               />
             </li>
-          ) : null}
-          {reading ? (
+          )}
+          {doing === "reading" ? (
             <li aria-busy="true">
               <Reading />
             </li>
