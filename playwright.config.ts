@@ -79,7 +79,8 @@ export default defineConfig({
     },
     {
       name: "onboarding",
-      use: { ...devices["Desktop Chrome"] },
+      // Never tried again (below), so a trace is kept of the run that failed.
+      use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
       testMatch: onboardingTests,
       dependencies: ["chromium", "playbook", "firefox", "webkit"],
       workers: 1,
