@@ -28,6 +28,16 @@ import {
 import type { Schedule } from "./identity.ts";
 import { notFound, WorkflowInstance } from "./instance.ts";
 import type { RunStub } from "./instance.ts";
+import {
+  defaultRetentionMs,
+  readRetention,
+  readRetentionLimits,
+} from "./retention.ts";
+import type {
+  Retention,
+  RetentionLimits,
+  RetentionOptions,
+} from "./retention.ts";
 import type { StartOutcome, WorkflowRun } from "./run.ts";
 
 type RunNamespace = DurableObjectNamespace<WorkflowRun>;
@@ -67,18 +77,43 @@ const batchError = (
   message: batchMessages[code] ?? "workflows.api.error.internal_server",
 });
 
-/** What `create` takes, as the reference does; `retention` comes later. */
+/** What `create` takes, as the reference does. */
 export interface CreateOptions<Params = unknown> {
   /** 1 to 100 letters, digits, - and _, not starting with -; drawn if absent. */
   id?: string;
   /** The run's params; `{}` when absent, as on the reference. */
   params?: Params;
+  /** How long the run is kept once it has ended (retention.ts). */
+  retention?: RetentionOptions;
 }
 
 /** `createBatch`'s options: its entries, or a count of runs alike. */
 export type BatchCreateOptions<Params = unknown> =
   | { instances: readonly CreateOptions<Params>[] }
-  | { count: number; params?: Params };
+  | { count: number; params?: Params; retention?: RetentionOptions };
+
+/** How the binding keeps runs: its default retention, and the limits. */
+export interface WorkflowOptions {
+  /** An opaque version of the definition, handed to the host. */
+  version?: string;
+  /**
+   * The binding's default retention, as the reference's
+   * `default_retention`: what a run's own leaves out. 30 days each when
+   * absent.
+   */
+  retention?: RetentionOptions;
+  /**
+   * The shortest and longest retention runs may have; 1 to 30 days when
+   * absent, Grasp's product setting.
+   */
+  retentionLimits?: RetentionLimits;
+}
+
+/** What a binding resolves a run's retention from. */
+interface RetentionPolicy {
+  fallback: Retention;
+  limits: RetentionLimits;
+}
 
 export interface BatchCreateError {
   /** The entry's position in the batch. */
@@ -113,6 +148,8 @@ export interface Admission<Params> {
    * created instead of failing or creating another.
    */
   key: string;
+  /** How long the run is kept once it has ended (retention.ts). */
+  retention?: RetentionOptions;
 }
 
 /** One occurrence of a schedule, as the host's clock delivers it. */
@@ -123,10 +160,11 @@ export interface ScheduledStart<Params> {
   params?: Params;
 }
 
-/** A run to create: its ID and its params, encoded, both checked. */
+/** A run to create: its ID, its params, encoded, and its retention. */
 interface Entry {
   id: string;
   params: string;
+  retention: Retention;
 }
 
 /**
@@ -137,19 +175,37 @@ const encodeParams = (params?: unknown): string =>
   encode(params === undefined ? {} : params);
 
 /** `create`'s options, read once each: an unknown setting is refused. */
-const readCreateOptions = (options: unknown, what: string): Entry => {
+const readCreateOptions = (
+  options: unknown,
+  what: string,
+  policy: RetentionPolicy
+): Entry => {
   if (options === undefined) {
-    return { id: crypto.randomUUID(), params: encodeParams() };
+    return {
+      id: crypto.randomUUID(),
+      params: encodeParams(),
+      retention: policy.fallback,
+    };
   }
   if (!isPlainObject(options)) {
     throw new TypeError(
-      `${what} are { id?, params? }, not ${options === null ? "null" : describe(options)}`
+      `${what} are { id?, params?, retention? }, not ${options === null ? "null" : describe(options)}`
     );
   }
-  const { id, params } = readSettings(what, options, ["id", "params"] as const);
+  const { id, params, retention } = readSettings(what, options, [
+    "id",
+    "params",
+    "retention",
+  ] as const);
   return {
     id: id === undefined ? crypto.randomUUID() : assertInstanceId(id),
     params: encodeParams(params),
+    retention: readRetention(
+      retention,
+      `${what}' retention`,
+      policy.fallback,
+      policy.limits
+    ),
   };
 };
 
@@ -223,14 +279,18 @@ const settleEach = async <Result>(
 };
 
 /** The entries of an array batch, every one checked before any is created. */
-const readEntries = (batch: readonly unknown[]): Entry[] => {
+const readEntries = (
+  batch: readonly unknown[],
+  policy: RetentionPolicy
+): Entry[] => {
   assertBatchSize(batch.length, "batchCreate");
   const entries: Entry[] = [];
   let bytes = 0;
   for (const [index, options] of batch.entries()) {
     const entry = readCreateOptions(
       options,
-      `Entry ${index} of the batch's options`
+      `Entry ${index} of the batch's options`,
+      policy
     );
     // Counted as each entry is read, so a batch over the cap is refused
     // holding little more than the cap.
@@ -241,22 +301,29 @@ const readEntries = (batch: readonly unknown[]): Entry[] => {
   return entries;
 };
 
-/** `{ instances } | { count, params? }`, checked as a whole. */
-const readBatchOptions = (options: unknown): Entry[] => {
+/** `{ instances } | { count, params?, retention? }`, checked as a whole. */
+const readBatchOptions = (
+  options: unknown,
+  policy: RetentionPolicy
+): Entry[] => {
   if (!isPlainObject(options)) {
     throw new TypeError(
-      `A batch is { instances } or { count, params? }, not ${options === null ? "null" : describe(options)}`
+      `A batch is { instances } or { count, params?, retention? }, not ${options === null ? "null" : describe(options)}`
     );
   }
-  const { instances, count, params } = readSettings(
+  const { instances, count, params, retention } = readSettings(
     "A batch's options",
     options,
-    ["instances", "count", "params"] as const
+    ["instances", "count", "params", "retention"] as const
   );
   if (instances !== undefined) {
-    if (count !== undefined || params !== undefined) {
+    if (
+      count !== undefined ||
+      params !== undefined ||
+      retention !== undefined
+    ) {
       throw new TypeError(
-        "A batch takes { instances } or { count, params? }, not both"
+        "A batch takes { instances } or { count, params?, retention? }, not both"
       );
     }
     if (!Array.isArray(instances)) {
@@ -264,7 +331,7 @@ const readBatchOptions = (options: unknown): Entry[] => {
         `A batch's instances are an array, not ${describe(instances)}`
       );
     }
-    return readEntries(instances);
+    return readEntries(instances, policy);
   }
   if (
     typeof count !== "number" ||
@@ -279,9 +346,16 @@ const readBatchOptions = (options: unknown): Entry[] => {
   const encoded = encodeParams(params);
   // Every run gets its own copy of the params: counted once per run.
   assertBatchBytes(heapBytes(encoded) * count);
+  const resolved = readRetention(
+    retention,
+    "A batch's retention",
+    policy.fallback,
+    policy.limits
+  );
   return Array.from({ length: count }, () => ({
     id: crypto.randomUUID(),
     params: encoded,
+    retention: resolved,
   }));
 };
 
@@ -303,15 +377,37 @@ export class Workflow<Params = unknown> {
   readonly #namespace: RunNamespace;
   readonly #definition: string;
   readonly #version: string | null;
+  readonly #retention: RetentionPolicy;
 
+  /**
+   * A binding of `definition`'s runs in `namespace`. Its default retention
+   * and limits are checked here: a default outside the limits (Grasp's 30
+   * days included, under limits that leave it out) is refused, never run
+   * with.
+   */
   constructor(
     namespace: RunNamespace,
     definition: string,
-    options: { version?: string } = {}
+    options: WorkflowOptions = {}
   ) {
     this.#namespace = namespace;
     this.#definition = definition;
     this.#version = options.version ?? null;
+    const limits = readRetentionLimits(options.retentionLimits);
+    const fallback = readRetention(
+      options.retention,
+      "A binding's default retention",
+      { successMs: defaultRetentionMs, errorMs: defaultRetentionMs },
+      limits
+    );
+    for (const ms of [fallback.successMs, fallback.errorMs]) {
+      if (ms < limits.minMs || ms > limits.maxMs) {
+        throw new TypeError(
+          `A binding's default retention is within its limits, ${limits.minMs} to ${limits.maxMs} milliseconds: ${ms}`
+        );
+      }
+    }
+    this.#retention = { fallback, limits };
   }
 
   #stub(id: string): RunStub {
@@ -339,6 +435,7 @@ export class Workflow<Params = unknown> {
       key: key ?? crypto.randomUUID(),
       redeliverable: key !== null,
       schedule,
+      retention: entry.retention,
     });
   }
 
@@ -348,7 +445,11 @@ export class Workflow<Params = unknown> {
    * start that may be delivered again, use `admit`.
    */
   async create(options?: CreateOptions<Params>): Promise<WorkflowInstance> {
-    const entry = readCreateOptions(options, "A create's options");
+    const entry = readCreateOptions(
+      options,
+      "A create's options",
+      this.#retention
+    );
     const outcome = await this.#start(entry, null, null);
     if (outcome !== "created") {
       throw alreadyExists(entry.id);
@@ -375,14 +476,18 @@ export class Workflow<Params = unknown> {
     batch: unknown
   ): Promise<WorkflowInstance[] | BatchCreateResult> {
     if (Array.isArray(batch)) {
-      const { result, failures } = await this.#createAll(readEntries(batch));
+      const { result, failures } = await this.#createAll(
+        readEntries(batch, this.#retention)
+      );
       const [failure] = failures;
       if (failure !== undefined) {
         throw failure;
       }
       return result.created;
     }
-    const { result } = await this.#createAll(readBatchOptions(batch));
+    const { result } = await this.#createAll(
+      readBatchOptions(batch, this.#retention)
+    );
     return result;
   }
 
@@ -444,7 +549,16 @@ export class Workflow<Params = unknown> {
     const id = assertInstanceId(admission.id);
     const key = assertStartKey(admission.key);
     return await this.#admit(
-      { id, params: encodeParams(admission.params) },
+      {
+        id,
+        params: encodeParams(admission.params),
+        retention: readRetention(
+          admission.retention,
+          "An admission's retention",
+          this.#retention.fallback,
+          this.#retention.limits
+        ),
+      },
       key,
       null
     );
@@ -473,7 +587,7 @@ export class Workflow<Params = unknown> {
     const schedule = readSchedule(cron, scheduledTime);
     const id = await scheduleInstanceId(schedule);
     return await this.#admit(
-      { id, params: encodeParams(params) },
+      { id, params: encodeParams(params), retention: this.#retention.fallback },
       id,
       schedule
     );
@@ -496,7 +610,7 @@ export class Workflow<Params = unknown> {
       }
       case "conflict": {
         throw new Error(
-          `The start ${JSON.stringify(key)} of workflow instance ${JSON.stringify(entry.id)} was made with other params`
+          `The start ${JSON.stringify(key)} of workflow instance ${JSON.stringify(entry.id)} was made with other params or retention`
         );
       }
       case "collision": {

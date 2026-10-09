@@ -9,6 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { defaultLeaseMs } from "../src/run.ts";
 import {
   alarmOf,
+  wakeOf,
   deliverAlarm,
   ended,
   journalOf,
@@ -435,7 +436,7 @@ describe("storage that fails around an activation", () => {
       { generation: 2, ended: null },
       { generation: 3, ended: "settled" },
     ]);
-    await expect(alarmOf("tail", id)).resolves.toBeNull();
+    await expect(wakeOf("tail", id)).resolves.toBeNull();
   });
 
   it("ends the run when its alarm can't be removed, and the alarm left behind changes nothing", async () => {

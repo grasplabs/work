@@ -85,7 +85,16 @@
 //   what undoes its effects isn't cut short by a command.
 // - `delete` removes the run, its journal and its alarm. A stale
 //   activation of it is fenced by the run's identity: it can't act on the
-//   run, nor on one created again under the same ID.
+//   run, nor on one created again under the same ID. Its start key stays
+//   as a tombstone, so the same start delivered again creates nothing.
+//
+// Retention (retention.ts) starts when the run ends: the write of its end
+// also writes its purge time, its retention later, and the alarm is set to
+// that time in the same turn. That alarm removes the run as `delete` does,
+// tombstone and all. A restart clears the purge time, so a run that is to
+// run, wait, pause or roll back is never purged; and since the alarm is
+// stored with the run, a process that dies before the purge leaves it to
+// the alarm when it starts again.
 //
 // The host enables `nodejs_als` (or `nodejs_compat`, which includes it):
 // each call of the step API is told apart by the attempt it comes from,
@@ -140,6 +149,7 @@ import {
   removeJournal,
   nextTombstoneExpiry,
   expireTombstones,
+  startRetentionIn,
 } from "./journal.ts";
 import type { Journal, RunRow, StepType } from "./journal.ts";
 import { warnRecovered } from "./log.ts";
@@ -171,6 +181,11 @@ export interface StartCommand {
    * then does removing the run leave its key as a tombstone.
    */
   redeliverable: boolean;
+  /**
+   * How long the run is kept once it has ended, resolved by the binding:
+   * after it completed or was terminated, and after it errored.
+   */
+  retention: { successMs: number; errorMs: number };
 }
 
 /** What the instance asks the run object to accept into its inbox. */
@@ -372,6 +387,20 @@ const hasEnded = (run: RunRow): boolean =>
   run.status === "complete" ||
   run.status === "errored" ||
   run.status === "terminated";
+
+/**
+ * When the run itself next needs its alarm: an ended run's purge, a
+ * waiting run's wake, any other at once.
+ */
+const ownWake = (run: RunRow): number => {
+  if (hasEnded(run) && run.purge_at !== null) {
+    return run.purge_at;
+  }
+  if (run.status === "waiting" && run.wake_at !== null) {
+    return run.wake_at;
+  }
+  return Date.now();
+};
 
 /**
  * Takes the run from whatever activation holds it: a new generation, and
@@ -665,6 +694,15 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     // Refused before any run exists, rather than at its first alarm.
     this.#rollbackLimits();
     const horizon = this.#tombstoneHorizon();
+    // The binding resolved and bounded these; this method is the run's
+    // boundary, so it refuses anything that isn't a time above 0.
+    for (const ms of [command.retention.successMs, command.retention.errorMs]) {
+      if (!Number.isSafeInteger(ms) || ms <= 0) {
+        throw new TypeError(
+          `A run's retention is a whole number of milliseconds above 0: ${String(ms)}`
+        );
+      }
+    }
     const storage = this.#store;
     // Before the run: a start delivered again after its run was deleted
     // finds the tombstone, whatever run was created under the ID since.
@@ -685,7 +723,11 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       if (
         // The same params, whatever order a retry put their keys in.
         !equivalent(existing.params, command.params) ||
-        existing.version !== command.version
+        existing.version !== command.version ||
+        // And the same retention: another is another start, not this one
+        // delivered again, and isn't taken without a word.
+        existing.success_retention_ms !== command.retention.successMs ||
+        existing.error_retention_ms !== command.retention.errorMs
       ) {
         return "conflict";
       }
@@ -695,7 +737,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     const now = Date.now();
     createJournal(storage.sql);
     storage.sql.exec(
-      "INSERT INTO run (singleton, schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, schedule, redeliverable) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?)",
+      "INSERT INTO run (singleton, schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, schedule, redeliverable, success_retention_ms, error_retention_ms) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?)",
       journalSchemaVersion,
       crypto.randomUUID(),
       command.definition,
@@ -706,7 +748,9 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       now,
       crypto.randomUUID(),
       command.schedule === null ? null : JSON.stringify(command.schedule),
-      command.redeliverable ? 1 : 0
+      command.redeliverable ? 1 : 0,
+      command.retention.successMs,
+      command.retention.errorMs
     );
     // No await between the insert and this: one write.
     await storage.setAlarm(now);
@@ -721,7 +765,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    */
   async #ensureWake(run: RunRow): Promise<void> {
     // A paused run has no alarm until it is resumed.
-    if (hasEnded(run) || run.status === "paused") {
+    if (run.status === "paused") {
       return;
     }
     // An alarm that is only the tombstones' expiry may not be the run's
@@ -730,11 +774,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     // alarm, and nothing replays), anything else now.
     const alarm = await this.#store.getAlarm();
     if (alarm === null || alarm === this.#tombstoneExpiry()) {
-      const wake =
-        run.status === "waiting" && run.wake_at !== null
-          ? run.wake_at
-          : Date.now();
-      await this.#store.setAlarm(wake);
+      await this.#store.setAlarm(ownWake(run));
     }
   }
 
@@ -904,10 +944,10 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * An alarm's first job beside a run: the tombstones of an earlier run
    * under this ID that are due go, whatever this run does, and none of
    * its journal is touched. True when that is all the alarm does: the run
-   * has ended or is paused (what it would do is journaled already, and a
-   * paused run waits for `resume`; the alarm left is the next tombstone's),
-   * or it waits and the alarm was the tombstones', early for it (it only
-   * re-arms the run's wake; no activation replays it).
+   * is paused (a paused run waits for `resume`; the alarm left is the
+   * next tombstone's), or it waits and the alarm was the tombstones', early
+   * for it (it only re-arms the run's wake; no activation replays it). An
+   * ended run goes on to its purge, which re-arms an early alarm.
    */
   async #tombstonesBeside(run: RunRow): Promise<boolean> {
     const storage = this.#store;
@@ -918,7 +958,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       await this.#leaveToWatchdog("workflow_tombstone_expiry_failed", error);
       return true;
     }
-    if (hasEnded(run) || run.status === "paused") {
+    if (run.status === "paused") {
       try {
         await storage.deleteAlarm();
       } catch (error) {
@@ -978,6 +1018,12 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       return;
     }
     if (await this.#tombstonesBeside(run)) {
+      return;
+    }
+    if (hasEnded(run)) {
+      // An ended run's only alarm is its purge, once its retention is up;
+      // an early one re-arms it (with the tombstones', if sooner).
+      await this.#purge(run);
       return;
     }
     const storage = this.#store;
@@ -1084,6 +1130,53 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       return;
     }
     await activation.settle(settlement);
+  }
+
+  /**
+   * Purges an ended run whose retention is up: its journal, stream chunks,
+   * events and history go in one transaction, its start key stays as a
+   * tombstone (journal.ts), as a deletion does. Only an alarm reaches it,
+   * and only for a run that has ended: a restart clears the purge time, so
+   * no run that runs, waits, is paused or rolls back is purged. An alarm
+   * that came early (a duplicate, or the watchdog of the activation that
+   * ended it) sets the purge's own again.
+   */
+  async #purge(run: RunRow): Promise<void> {
+    const storage = this.#store;
+    if (run.purge_at === null) {
+      // Every end writes its purge time; a run with none is kept.
+      return;
+    }
+    const now = Date.now();
+    if (run.purge_at > now) {
+      try {
+        await storage.setAlarm(run.purge_at);
+      } catch (error) {
+        // Left to an alarm a lease away, which comes back here.
+        await this.#leaveToWatchdog("workflow_purge_rearm_failed", error);
+      }
+      return;
+    }
+    let removal: Removal;
+    try {
+      const horizon = this.#tombstoneHorizon();
+      // Read just now, with no await since: nothing has changed the run.
+      removal = storage.transactionSync(() =>
+        removeIn(
+          storage.sql,
+          run.redeliverable === 1 ? run.start_key : null,
+          now,
+          horizon
+        )
+      );
+    } catch (error) {
+      // Nothing was removed: an alarm a lease away tries again.
+      await this.#leaveToWatchdog("workflow_purge_failed", error);
+      return;
+    }
+    // With the write that removed it, the object emptied or its
+    // tombstones' expiry set, each failure recovered (#afterRemoval).
+    await this.#afterRemoval(removal);
   }
 
   /** A compensating activation, from its replay to the run's end. */
@@ -1205,7 +1298,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    */
   async terminate(command: TerminateCommand): Promise<TerminateOutcome> {
     const { sql } = this.ctx.storage;
-    return await this.#command(
+    const outcome = await this.#command(
       (run, now): CommandDecision<TerminateOutcome> => {
         if (hasEnded(run)) {
           return { outcome: "ended" };
@@ -1226,9 +1319,20 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
           "UPDATE run SET status = 'terminated', ended_at = ?, lease_until = NULL, wake_at = NULL, paused_at = NULL",
           now
         );
-        return { outcome: "terminated", alarm: null };
+        // Its alarm is now its purge, its retention after this end.
+        return { outcome: "terminated", alarm: startRetentionIn(sql) };
       }
     );
+    if (outcome === "ended") {
+      // A terminate sent again, after one whose purge alarm failed to be
+      // set once its end was written (the caller heard an error), repairs
+      // that alarm, as a repeated start or resume does.
+      const run = this.#run();
+      if (run !== undefined) {
+        await this.#ensureWake(run);
+      }
+    }
+    return outcome;
   }
 
   /**
@@ -1274,7 +1378,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       supersedeIn(sql, now);
       forgetIn(sql, forget);
       sql.exec(
-        "UPDATE run SET status = 'queued', execution_uid = ?, output = NULL, error = NULL, ended_at = NULL, lease_until = NULL, paused_at = NULL, rollback_trigger = NULL, rollback_end = NULL, rollback = NULL, rollback_replays = 0, wake_at = ?",
+        "UPDATE run SET status = 'queued', execution_uid = ?, output = NULL, error = NULL, ended_at = NULL, lease_until = NULL, paused_at = NULL, rollback_trigger = NULL, rollback_end = NULL, rollback = NULL, rollback_replays = 0, purge_at = NULL, wake_at = ?",
         crypto.randomUUID(),
         now
       );
