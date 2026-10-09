@@ -35,6 +35,13 @@ export interface RunNotification {
    * the same ID is another run, with sequences of its own from 1.
    */
   readonly runId: string;
+  /**
+   * When that run was created, in ms since the epoch: a run created again
+   * under the instance ID is created later, so `(createdAt, runId,
+   * sequence)` orders every notification of an instance ID, across
+   * deletions, as long as the clock doesn't go back between them.
+   */
+  readonly createdAt: number;
   /** The run's execution, from 1: one more at each restart. */
   readonly generation: number;
   /**
@@ -110,6 +117,7 @@ export const readPending = (sql: SqlStorage, run: RunRow): RunNotification[] =>
       version: run.version ?? undefined,
       instanceId: run.instance_id,
       runId: run.run_uid,
+      createdAt: run.created_at,
       generation: row.generation,
       sequence: row.sequence,
       status: row.status,

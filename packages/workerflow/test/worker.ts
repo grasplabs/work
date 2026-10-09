@@ -678,6 +678,25 @@ export const definitions: Record<string, WorkflowDefinition> = {
     },
   },
   // Two steps at once, for a host whose handlers have little wall time.
+  // Two steps side by side, each with a timeout of half a second.
+  "quick-pair": {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      const quick = { timeout: 500 };
+      return await Promise.all([
+        step.do(
+          "first",
+          quick,
+          async (context) => await effect(instanceId, "first", context)
+        ),
+        step.do(
+          "second",
+          quick,
+          async (context) => await effect(instanceId, "second", context)
+        ),
+      ]);
+    },
+  },
   pair: {
     run: async (event, step) => {
       const { instanceId } = event;
@@ -1035,7 +1054,7 @@ export class TestRuns extends WorkflowRun {
     testSubscriptionWaitMs;
 
   /** Short, so a host that never answers is given up on soon. */
-  protected override readonly notifyTimeoutMs = testNotifyTimeoutMs;
+  protected override readonly notifyTimeoutMs: number = testNotifyTimeoutMs;
 
   /**
    * The host: takes the run's notifications into `hostNotifications`, held at the
@@ -1106,6 +1125,8 @@ export const budgetedHandlerMs = 1000;
 
 export class BudgetedRuns extends TestRuns {
   protected override readonly handlerBudgetMs = budgetedHandlerMs;
+  /** Long enough for a delivery to take most of a handler's wall time. */
+  protected override readonly notifyTimeoutMs = budgetedHandlerMs * 2;
 }
 
 /** How long ShortTombstoneRuns keep a tombstone. */
@@ -1119,6 +1140,11 @@ export class ShortTombstoneRuns extends TestRuns {
 /** Run objects whose host let a subscription wait no time at all. */
 export class MiswaitedRuns extends TestRuns {
   protected override readonly subscriptionWaitMs: number = 0;
+}
+
+/** Run objects whose host gave its notifications no time at all. */
+export class MistimedRuns extends TestRuns {
+  protected override readonly notifyTimeoutMs = 0;
 }
 
 // The run object of a host that misconfigured it, bound as MISCONFIGURED.
