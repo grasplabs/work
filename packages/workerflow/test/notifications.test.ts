@@ -22,6 +22,7 @@ import {
 } from "./helpers.ts";
 import {
   checkpointsReached,
+  handled,
   effectsOf,
   eventOf,
   hold,
@@ -419,7 +420,7 @@ describe("a delivery to the host", () => {
 });
 
 describe("a host's notify timeout", () => {
-  it("is a whole number of milliseconds from 1: a run object given another starts no run", async () => {
+  it("is a whole number of milliseconds from 1 to a minute: a run object given another starts no run", async () => {
     const outcome = await new Workflow(env.MISTIMED, "orders")
       .create({ id: newId() })
       .then(
@@ -428,7 +429,37 @@ describe("a host's notify timeout", () => {
       );
 
     expect(outcome).toBe(
-      "A run's notifyTimeoutMs is a whole number of milliseconds from 1 to 2147483647: 0"
+      "A run's notifyTimeoutMs is a whole number of milliseconds from 1 to 60000: 0"
+    );
+  });
+
+  it("over a minute fails each delivery under it, saying why, and hands nothing over", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await suspendedOn("napper", id, "nap");
+    await outboxEmpty("napper", id);
+    // As a host that set it so would have.
+    const setTimeoutMs = async (ms: number): Promise<void> => {
+      await runInDurableObject(runObject("napper", id), (run) => {
+        Reflect.set(run, "notifyTimeoutMs", ms);
+      });
+    };
+    await setTimeoutMs(60_001);
+    const instance = await workflow("napper").get(id);
+
+    const warnings = await warningsDuring(async () => {
+      await instance.pause();
+      await within("a while", scheduler.wait(300));
+    });
+    await setTimeoutMs(testNotifyTimeoutMs);
+
+    expect(statusesOf(id)).not.toContain("paused");
+    expect(warnings).toContainEqual(
+      expect.objectContaining({
+        event: "workflow_notify_failed",
+        errorMessage:
+          "A run's notifyTimeoutMs is a whole number of milliseconds from 1 to 60000: 60001",
+      })
     );
   });
 });
@@ -451,5 +482,66 @@ describe("an alarm that comes while a delivery is out", () => {
     await notifiedWith(id, "paused");
 
     expect(took).toBeLessThan(testNotifyTimeoutMs / 2);
+  });
+});
+
+/** How many times the run's object's alarm handler ran, so far. */
+const alarmsOf = (definition: string, id: string): number => {
+  const object = runObject(definition, id).id.toString();
+  return handled.filter((handler) => handler === object).length;
+};
+
+describe("a run whose delivery the host holds", () => {
+  it("doesn't spin its alarm while the run is paused", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await suspendedOn("napper", id, "nap");
+    await outboxEmpty("napper", id);
+    const delivery = hold(id, "notify", checkpointsReached(id, "notify") + 1);
+    const instance = await workflow("napper").get(id);
+    await instance.pause();
+    await within("the delivery to be held", delivery.held);
+    const before = alarmsOf("napper", id);
+
+    await within("a while", scheduler.wait(500));
+    const during = alarmsOf("napper", id) - before;
+    delivery.release();
+    await notifiedWith(id, "paused");
+
+    expect(during).toBeLessThanOrEqual(2);
+  });
+
+  it("doesn't spin its alarm while the run waits, and still wakes it on time", async () => {
+    const id = newId();
+    // The delivery of the run's start, which goes out as it runs.
+    const delivery = hold(id, "notify", 2);
+    await workflow("napper").create({ id, params: { duration: 1500 } });
+    await within("the delivery to be held", delivery.held);
+    await suspendedOn("napper", id, "nap");
+    const before = alarmsOf("napper", id);
+
+    await within("a while", scheduler.wait(500));
+    const during = alarmsOf("napper", id) - before;
+    delivery.release();
+    await ended("napper", id);
+
+    expect(during).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("a host that fails", () => {
+  it("is not handed anything again before its backoff is over", async () => {
+    const id = newId();
+    notifyFailures.set(id, 50);
+
+    await warningsDuring(async () => {
+      await workflow("orders").create({ id });
+      await within("a while", scheduler.wait(300));
+    });
+    const { run } = await journalOf("orders", id);
+    notifyFailures.delete(id);
+
+    expect(checkpointsReached(id, "notify")).toBe(1);
+    expect(run.notify_at ?? 0).toBeGreaterThanOrEqual(run.created_at + 1000);
   });
 });

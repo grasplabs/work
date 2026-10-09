@@ -352,6 +352,8 @@ const definitionsFor = (
 export class Runs extends WorkflowRun<FixtureEnv> {
   protected override readonly leaseMs = testLeaseMs;
   protected override readonly tombstoneMs = testTombstoneMs;
+  /** Short, so a delivery cut off by a kill goes out again soon. */
+  protected override readonly notifyTimeoutMs: number = testLeaseMs;
 
   protected definition({
     definition,
