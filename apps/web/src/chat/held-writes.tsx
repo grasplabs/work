@@ -221,6 +221,141 @@ const ExactInput = ({
   );
 };
 
+/** What of a held write the person has been shown, and whether confirming still waits for more. */
+export interface Shown {
+  /** Part of what will be sent is cut short and the exact input wasn't opened: confirming waits. */
+  unseen: boolean;
+  /** The id of the line that says so. */
+  unseenId: string;
+  onInputOpen: () => void;
+  onShowAll: (input: string) => void;
+}
+
+/**
+ * Confirming is for what the person was shown, all of it: while a value
+ * the card cut short hasn't been shown in full, and the exact input hasn't
+ * been opened, Confirm waits. The exact input starts open unless the
+ * description shows every property of the input.
+ */
+export const useShown = (action: PendingAction): Shown => {
+  const { description } = action;
+  const complete = description?.complete === true;
+  const [inputSeen, setInputSeen] = useState(!complete);
+  const [seen, setSeen] = useState<string[]>([]);
+  const unseen =
+    !inputSeen &&
+    (description?.fields ?? []).some(
+      ({ input, value }) =>
+        typeof value === "string" && isCutShort(value) && !seen.includes(input)
+    );
+  const unseenId = useId();
+  return {
+    unseen,
+    unseenId,
+    onInputOpen: () => {
+      setInputSeen(true);
+    },
+    onShowAll: (input) => {
+      setSeen((shown) => [...shown, input]);
+    },
+  };
+};
+
+/** A held write's name: what it does, on which connection. */
+export const useHeldName = (action: PendingAction): string => {
+  const { t } = useLingui();
+  const title = action.description?.title ?? action.action;
+  const connection = action.connectionName ?? action.connectionId;
+  return t`${title} on ${connection}`;
+};
+
+/** The person's yes to a held write, as core takes it: for exactly the input they were shown. */
+export const confirmHeld =
+  (action: PendingAction) =>
+  async (session: Session): Promise<unknown> =>
+    await session.pendingActions.confirm(action.id, action.inputHash);
+
+/** The person's no to a held write. */
+export const declineHeld =
+  (action: PendingAction) =>
+  async (session: Session): Promise<void> => {
+    await session.pendingActions.decline(action.id);
+  };
+
+/**
+ * Where a held write would act and when it was asked for, and everything
+ * it would send: what a person reads before they confirm it.
+ */
+export const HeldWriteDetails = ({
+  action,
+  shown,
+}: {
+  action: PendingAction;
+  shown: Shown;
+}) => {
+  const { t } = useLingui();
+  const { description, resource } = action;
+  const connection = action.connectionName ?? action.connectionId;
+  const tool = action.action;
+  const asked = formatDateTime(action.requestedAt);
+  let where = connection;
+  if (resource !== null && description !== undefined) {
+    where = t`${connection}, ${resource} (${tool})`;
+  } else if (resource !== null) {
+    where = t`${connection}, ${resource}`;
+  } else if (description !== undefined) {
+    where = t`${connection} (${tool})`;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-muted-foreground">
+        <Trans>On {where}</Trans>
+      </p>
+      <p className="text-muted-foreground">
+        <Trans>
+          Asked for <time dateTime={action.requestedAt}>{asked}</time>
+        </Trans>
+      </p>
+      {action.restricted ? (
+        <Badge variant="destructive">
+          <Trans>This chat read restricted data: this may send it out</Trans>
+        </Badge>
+      ) : null}
+      {description === undefined ? null : (
+        <Described
+          description={description}
+          onShowAll={(input) => {
+            shown.onShowAll(input);
+          }}
+        />
+      )}
+      {description?.complete === false ? (
+        <p role="note">
+          <Trans>
+            More will be sent than is shown above. Read exactly what will be
+            sent before you confirm.
+          </Trans>
+        </p>
+      ) : null}
+      <ExactInput
+        input={action.input}
+        onOpen={() => {
+          shown.onInputOpen();
+        }}
+        shown={description?.complete === true}
+      />
+      {shown.unseen ? (
+        <p className="text-muted-foreground" id={shown.unseenId}>
+          <Trans>
+            Part of what will be sent is cut short above. Show it all, or
+            exactly what will be sent, to confirm.
+          </Trans>
+        </p>
+      ) : null}
+    </div>
+  );
+};
+
 export const HeldWrite = ({
   action,
   onDecided,
@@ -238,35 +373,9 @@ export const HeldWrite = ({
     await run(decision);
     onDecided();
   };
-  const { description } = action;
-  // Confirming is for what the person was shown, all of it: while a value
-  // the card cut short hasn't been shown in full, and the exact input
-  // hasn't been opened, Confirm waits. The exact input starts open unless
-  // the description shows every property of the input.
-  const complete = description?.complete === true;
-  const [inputSeen, setInputSeen] = useState(!complete);
-  const [seen, setSeen] = useState<string[]>([]);
-  const unseen =
-    !inputSeen &&
-    (description?.fields ?? []).some(
-      ({ input, value }) =>
-        typeof value === "string" && isCutShort(value) && !seen.includes(input)
-    );
-  const unseenId = useId();
-  const title = description?.title ?? action.action;
-  const connection = action.connectionName ?? action.connectionId;
-  const what = t`${title} on ${connection}`;
-  const { resource } = action;
-  const tool = action.action;
-  const asked = formatDateTime(action.requestedAt);
-  let where = connection;
-  if (resource !== null && description !== undefined) {
-    where = t`${connection}, ${resource} (${tool})`;
-  } else if (resource !== null) {
-    where = t`${connection}, ${resource}`;
-  } else if (description !== undefined) {
-    where = t`${connection} (${tool})`;
-  }
+  const shown = useShown(action);
+  const title = action.description?.title ?? action.action;
+  const what = useHeldName(action);
   return (
     <article
       aria-label={what}
@@ -282,65 +391,16 @@ export const HeldWrite = ({
         </span>
       </h3>
       <div className="flex flex-col gap-2">
-        <p className="text-muted-foreground">
-          <Trans>On {where}</Trans>
-        </p>
-        <p className="text-muted-foreground">
-          <Trans>
-            Asked for <time dateTime={action.requestedAt}>{asked}</time>
-          </Trans>
-        </p>
-        {action.restricted ? (
-          <Badge variant="destructive">
-            <Trans>This chat read restricted data: this may send it out</Trans>
-          </Badge>
-        ) : null}
-        {description === undefined ? null : (
-          <Described
-            description={description}
-            onShowAll={(input) => {
-              setSeen((shown) => [...shown, input]);
-            }}
-          />
-        )}
-        {description?.complete === false ? (
-          <p role="note">
-            <Trans>
-              More will be sent than is shown above. Read exactly what will be
-              sent before you confirm.
-            </Trans>
-          </p>
-        ) : null}
-        <ExactInput
-          input={action.input}
-          onOpen={() => {
-            setInputSeen(true);
-          }}
-          shown={complete}
-        />
-        {unseen ? (
-          <p className="text-muted-foreground" id={unseenId}>
-            <Trans>
-              Part of what will be sent is cut short above. Show it all, or
-              exactly what will be sent, to confirm.
-            </Trans>
-          </p>
-        ) : null}
+        <HeldWriteDetails action={action} shown={shown} />
         <ErrorText>{failure}</ErrorText>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button
-          aria-describedby={unseen ? unseenId : undefined}
+          aria-describedby={shown.unseen ? shown.unseenId : undefined}
           aria-label={t`Confirm ${what}`}
-          disabled={busy || unseen}
+          disabled={busy || shown.unseen}
           onClick={() => {
-            void decide(
-              async (session) =>
-                await session.pendingActions.confirm(
-                  action.id,
-                  action.inputHash
-                )
-            );
+            void decide(confirmHeld(action));
           }}
         >
           <Trans>Confirm</Trans>
@@ -349,9 +409,7 @@ export const HeldWrite = ({
           aria-label={t`Reject ${what}`}
           disabled={busy}
           onClick={() => {
-            void decide(async (session) => {
-              await session.pendingActions.decline(action.id);
-            });
+            void decide(declineHeld(action));
           }}
           variant="outline"
         >

@@ -82,7 +82,7 @@ test("a screen gets its engine's data only while an admin's approval of its code
   const deciding = await pageOf(browser, admin);
   await deciding.goto("/dashboard");
   await deciding
-    .getByRole("region", { name: "To do" })
+    .getByRole("region", { name: "Waiting elsewhere" })
     .getByRole("link", { name: `Review the apps of ${name}` })
     .click();
   const approval = deciding.getByRole("region", { name: "Approval" });

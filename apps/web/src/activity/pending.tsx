@@ -1,31 +1,10 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import type { AppExports } from "@grasp-os/shared/apps";
 import type { Permission } from "@grasp-os/shared/permissions";
-import { Button } from "@grasp-os/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@grasp-os/ui/components/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
 import { i18n } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
 
-import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import {
   appName,
@@ -35,14 +14,12 @@ import {
   readPeople,
 } from "../directory.ts";
 import type { Directory } from "../directory.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
-import { useCoreAction } from "../use-core-action.ts";
 
 // Pending approvals: the permissions Apps and agents asked for, which an
-// admin grants or rejects. Core checks the role on every call; the page
-// offers the decision only to those core lets decide (the organization's
-// own admins, never Grasp staff).
+// admin grants or rejects on the dashboard's pile (`dashboard/pile-cards.tsx`).
+// Core checks the role on every call; the dashboard reads them only for
+// those core lets decide (the organization's own admins, never Grasp staff).
 
 /** The requests an admin decides, oldest first, with the names to show. */
 export interface PendingRequests {
@@ -94,7 +71,10 @@ export const readPendingRequests = async (
 };
 
 /** Who asks: the App or agent the permission is for. */
-const subjectOf = ({ subject }: Permission, directory: Directory): string =>
+export const subjectOf = (
+  { subject }: Permission,
+  directory: Directory
+): string =>
   subject.type === "app"
     ? appName(directory, subject.appId)
     : i18n._(msg`Agent ${ph({ agent: subject.agentId })}`);
@@ -119,7 +99,7 @@ const coveredExports = (
 };
 
 /** What it asks for, by ID: connections and collections have no names here. */
-const objectOf = (
+export const objectOf = (
   { object, actions }: Permission,
   directory: Directory,
   exports: PendingRequests["exports"]
@@ -162,7 +142,7 @@ const objectOf = (
  * those another App keeps there already, which this App wouldn't get:
  * named, for an admin to grant the one they want.
  */
-const RecordTypeClaims = ({
+export const RecordTypeClaims = ({
   request,
   directory,
 }: {
@@ -199,7 +179,7 @@ const RecordTypeClaims = ({
  * permission, an App with none current, or one the list doesn't have:
  * core then grants only if the App still has none current.
  */
-const reviewedVersion = (
+export const reviewedVersion = (
   { subject }: Permission,
   directory: Directory
 ): number | null =>
@@ -208,7 +188,7 @@ const reviewedVersion = (
     : null;
 
 /** The version to review, as the row shows it. */
-const reviewedVersionText = (
+export const reviewedVersionText = (
   request: Permission,
   directory: Directory
 ): string => {
@@ -227,7 +207,7 @@ const reviewedVersionText = (
  * Why a request is asked for again, if it is: it was granted before, and
  * making another version of its App current asked for it again.
  */
-const askedAgain = (
+export const askedAgain = (
   request: Permission,
   directory: Directory
 ): string | undefined => {
@@ -252,7 +232,7 @@ const versionChanged = msg`Another version of this engine was made current since
  * with `app.conflict` once another version is current: that is said
  * plainly. Outside components, as the React Compiler can't compile `try`.
  */
-const grantReviewed = async (
+export const grantReviewed = async (
   permissions: Session["permissions"],
   request: Permission,
   version: number | null
@@ -265,234 +245,4 @@ const grantReviewed = async (
     }
     throw error;
   }
-};
-
-/** What a decision did, with a way to find it in the log. */
-interface Decided {
-  message: string;
-  permission: string;
-}
-
-const RequestActions = ({
-  request,
-  version,
-  who,
-  onDecided,
-}: {
-  request: Permission;
-  /** The version of its App the row shows for review. */
-  version: number | null;
-  who: string;
-  /** Says what a decision did; clears what the last one said when given nothing. */
-  onDecided: (decided?: Decided) => void;
-}) => {
-  const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
-  const [confirming, setConfirming] = useState(false);
-  const { t } = useLingui();
-  const decide = async (
-    change: (permissions: Session["permissions"]) => Promise<unknown>,
-    message: string
-  ): Promise<void> => {
-    setConfirming(false);
-    onDecided();
-    await run(async (session) => {
-      await changeThenRefresh(
-        async () => {
-          await change(session.permissions);
-          onDecided({ message, permission: request.id });
-        },
-        async () => {
-          // `sync` waits for the loader, so the controls stay off until
-          // the list is back.
-          await router.invalidate({ sync: true });
-        }
-      );
-    });
-  };
-  return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex gap-2">
-        <Button
-          disabled={busy}
-          aria-label={t`Approve ${who}`}
-          onClick={() => {
-            void decide(
-              async (permissions) =>
-                await grantReviewed(permissions, request, version),
-              t`Approved: ${who}.`
-            );
-          }}
-        >
-          <Trans>Approve</Trans>
-        </Button>
-        <Dialog open={confirming} onOpenChange={setConfirming}>
-          <DialogTrigger
-            render={
-              <Button
-                variant="destructive"
-                disabled={busy}
-                aria-label={t`Reject ${who}`}
-              />
-            }
-          >
-            <Trans>Reject</Trans>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
-                <Trans>Reject this request?</Trans>
-              </DialogTitle>
-              <DialogDescription>
-                <Trans>
-                  {who} can&apos;t be granted later: it has to ask again.
-                </Trans>
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter showCloseButton>
-              <Button
-                variant="destructive"
-                disabled={busy}
-                onClick={() => {
-                  void decide(
-                    async (permissions) => await permissions.revoke(request.id),
-                    t`Rejected: ${who}.`
-                  );
-                }}
-              >
-                <Trans>Reject</Trans>
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-      <ErrorText>{failure}</ErrorText>
-    </div>
-  );
-};
-
-/** The requests waiting for an admin, with the decision where it's theirs. */
-export const PendingApprovals = ({
-  pending: { requests, directory, exports },
-  decides,
-}: {
-  pending: PendingRequests;
-  /** Whether core lets this person decide: an admin, not Grasp staff. */
-  decides: boolean;
-}) => {
-  const [decided, setDecided] = useState<Decided>();
-  const { t } = useLingui();
-  return (
-    <div className="flex flex-col gap-3">
-      {decided === undefined ? null : (
-        <output className="text-sm">
-          {decided.message}{" "}
-          <Link
-            className="underline"
-            search={{ target: decided.permission }}
-            to="/settings/audit"
-          >
-            <Trans>See it in the log</Trans>
-          </Link>
-        </output>
-      )}
-      {decides ? null : (
-        <p className="text-muted-foreground text-sm">
-          <Trans>
-            Only the organization&apos;s own admins decide permissions.
-          </Trans>
-        </p>
-      )}
-      {requests.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
-          <Trans>Nothing is waiting for approval.</Trans>
-        </p>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>
-                <Trans>For</Trans>
-              </TableHead>
-              <TableHead>
-                <Trans>Asks for</Trans>
-              </TableHead>
-              <TableHead>
-                <Trans>Actions</Trans>
-              </TableHead>
-              <TableHead>
-                <Trans>Version to review</Trans>
-              </TableHead>
-              <TableHead>
-                <Trans>Asked by</Trans>
-              </TableHead>
-              <TableHead>
-                <Trans>Asked</Trans>
-              </TableHead>
-              {decides ? (
-                <TableHead>
-                  <Trans>Decision</Trans>
-                </TableHead>
-              ) : null}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {requests.map((request) => {
-              const subject = subjectOf(request, directory);
-              const object = objectOf(request, directory, exports);
-              const again = askedAgain(request, directory);
-              const { binding } = request;
-              const actions = formatList(request.actions);
-              return (
-                <TableRow key={request.id}>
-                  <TableCell>{subject}</TableCell>
-                  <TableCell>
-                    {object}
-                    <span className="text-muted-foreground block text-xs">
-                      <Trans>as {binding}</Trans>
-                    </span>
-                    {request.chat === null ? null : (
-                      <span className="text-muted-foreground block text-xs">
-                        in one chat only, for{" "}
-                        {personName(directory, request.requestedBy)}
-                      </span>
-                    )}
-                    <RecordTypeClaims request={request} directory={directory} />
-                  </TableCell>
-                  <TableCell>{formatList(request.actions)}</TableCell>
-                  <TableCell>
-                    {reviewedVersionText(request, directory)}
-                  </TableCell>
-                  <TableCell>
-                    {personName(directory, request.requestedBy)}
-                    {request.requestedVia === null ? null : (
-                      <span className="text-muted-foreground block text-xs">
-                        <Trans>asked for by the agent, in their chat</Trans>
-                      </span>
-                    )}
-                    {again === undefined ? null : (
-                      <span className="text-muted-foreground block text-xs">
-                        {again}
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>{formatTime(request.requestedAt)}</TableCell>
-                  {decides ? (
-                    <TableCell>
-                      <RequestActions
-                        request={request}
-                        version={reviewedVersion(request, directory)}
-                        who={t`${subject}: ${actions} on ${object}`}
-                        onDecided={setDecided}
-                      />
-                    </TableCell>
-                  ) : null}
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      )}
-    </div>
-  );
 };
