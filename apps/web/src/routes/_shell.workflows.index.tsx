@@ -25,17 +25,22 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { listRuns, listWorkflows, openableApps } from "../workflows/reads.ts";
 import { RunsLog } from "../workflows/runs.tsx";
-import { WorkflowsTable } from "../workflows/workflows-table.tsx";
+import {
+  needsAttention,
+  WorkflowsOverview,
+  WorkflowsTable,
+} from "../workflows/workflows-table.tsx";
 
 // Everything that runs on its own, in one place: every workflow of every
-// App the person can open, and, on the Runs tab, their runs, waiting ones
-// first, filtered by App, workflow and status. The tab and the filters
+// App the person can open, at work and on the way; those that need a
+// person now; and, on the Runs tab, their runs, waiting ones first,
+// filtered by App, workflow and status. The tab and the filters
 // are in the address, so a link can open the runs it means. Each tab
 // reads only what it shows: changing a filter reads the runs again, never
 // the list of workflows.
 
 interface WorkflowsSearch {
-  tab?: "runs";
+  tab?: "needs" | "runs";
   app?: string;
   workflow?: string;
   status?: RunFilterStatus;
@@ -194,6 +199,14 @@ const RunFilters = ({ options }: { options: FilterOptions }) => {
   );
 };
 
+/** The address of a tab: the lists take no filters. */
+const tabSearch = (tab: string): WorkflowsSearch => {
+  if (tab === "runs" || tab === "needs") {
+    return { tab };
+  }
+  return {};
+};
+
 const Workflows = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
@@ -214,15 +227,20 @@ const Workflows = () => {
         <Tabs
           onValueChange={(tab: string) => {
             void navigate({
-              // The filters are the Runs tab's: the list has none.
-              search: tab === "runs" ? { tab: "runs" } : {},
+              // The filters are the Runs tab's: the lists have none.
+              search: tabSearch(tab),
             });
           }}
           value={search.tab ?? "workflows"}
         >
           <TabsList>
             <TabsTrigger value="workflows">
-              <Trans>Workflows</Trans>
+              <Trans context="tab listing every workflow">All</Trans>
+            </TabsTrigger>
+            <TabsTrigger value="needs">
+              <Trans context="tab listing the workflows that need a person">
+                Needs attention
+              </Trans>
             </TabsTrigger>
             <TabsTrigger value="runs">
               <Trans context="tab listing the runs of workflows">Runs</Trans>
@@ -232,7 +250,28 @@ const Workflows = () => {
             {page.tab === "workflows" ? (
               <div className="mt-4 flex flex-col gap-4">
                 {page.workflows.state === "ready" ? (
-                  <WorkflowsTable rows={page.workflows.data} />
+                  <WorkflowsOverview rows={page.workflows.data} />
+                ) : (
+                  <NotLoadedState page={page.workflows} />
+                )}
+              </div>
+            ) : null}
+          </TabsContent>
+          <TabsContent value="needs">
+            {page.tab === "needs" ? (
+              <div className="mt-4 flex flex-col gap-4">
+                {page.workflows.state === "ready" ? (
+                  <WorkflowsTable
+                    empty={
+                      <p className="bg-card text-muted-foreground rounded-xl border px-4 py-6 text-center">
+                        <Trans>
+                          No workflow needs attention: nothing waits for a
+                          decision, nothing failed lately.
+                        </Trans>
+                      </p>
+                    }
+                    rows={page.workflows.data.filter(needsAttention)}
+                  />
                 ) : (
                   <NotLoadedState page={page.workflows} />
                 )}
@@ -273,7 +312,9 @@ const Workflows = () => {
 
 export const Route = createFileRoute("/_shell/workflows/")({
   validateSearch: (search: Record<string, unknown>): WorkflowsSearch => ({
-    ...(search.tab === "runs" ? { tab: "runs" } : {}),
+    ...(search.tab === "runs" || search.tab === "needs"
+      ? { tab: search.tab }
+      : {}),
     ...(typeof search.app === "string" ? { app: search.app } : {}),
     ...(typeof search.workflow === "string"
       ? { workflow: search.workflow }
@@ -289,7 +330,7 @@ export const Route = createFileRoute("/_shell/workflows/")({
   }) => {
     if (tab !== "runs") {
       return {
-        tab: "workflows" as const,
+        tab: tab ?? ("workflows" as const),
         workflows: await loadFromCore(core, listWorkflows),
       };
     }

@@ -515,6 +515,11 @@ msgctxt "filter: every integration"
 msgid "All"
 msgstr "All"
 
+#: src/routes/_shell.workflows.index.tsx
+msgctxt "tab listing every workflow"
+msgid "All"
+msgstr "All"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "All calls"
 msgstr "All calls"
@@ -742,6 +747,10 @@ msgstr "Asks for"
 #: src/workflows/runs.tsx
 msgid "At {step}: {error}"
 msgstr "At {step}: {error}"
+
+#: src/workflows/workflows-table.tsx
+msgid "At work"
+msgstr "At work"
 
 #: src/routes/_shell.settings.audit.tsx
 #: src/routes/_shell.settings.tsx
@@ -2083,6 +2092,11 @@ msgstr "Needs alongside it"
 msgid "Needs attention"
 msgstr "Needs attention"
 
+#: src/routes/_shell.workflows.index.tsx
+msgctxt "tab listing the workflows that need a person"
+msgid "Needs attention"
+msgstr "Needs attention"
+
 #: src/connections/integration-row.tsx
 msgid "Needs signing in again"
 msgstr "Needs signing in again"
@@ -2193,6 +2207,10 @@ msgstr "No teams"
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "No workflow in this engine yet."
 msgstr "No workflow in this engine yet."
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "No workflow needs attention: nothing waits for a decision, nothing failed lately."
+msgstr "No workflow needs attention: nothing waits for a decision, nothing failed lately."
 
 #: src/chat/builds.tsx
 msgid "No workflows to test."
@@ -2411,6 +2429,10 @@ msgstr "on mail to {address}@"
 msgid "on the event {event}, filtered"
 msgstr "on the event {event}, filtered"
 
+#: src/workflows/workflows-table.tsx
+msgid "On the way"
+msgstr "On the way"
+
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.onboarding.tsx
 msgid "Onboarding"
@@ -2485,6 +2507,10 @@ msgstr "Open in chat"
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Open the chat"
+
+#: src/workflows/workflows-table.tsx
+msgid "Open the engine {name}"
+msgstr "Open the engine {name}"
 
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"

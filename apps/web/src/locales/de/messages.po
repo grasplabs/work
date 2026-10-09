@@ -515,6 +515,11 @@ msgctxt "filter: every integration"
 msgid "All"
 msgstr "Alle"
 
+#: src/routes/_shell.workflows.index.tsx
+msgctxt "tab listing every workflow"
+msgid "All"
+msgstr "Alle"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "All calls"
 msgstr "Alle Aufrufe"
@@ -742,6 +747,10 @@ msgstr "Fragt nach"
 #: src/workflows/runs.tsx
 msgid "At {step}: {error}"
 msgstr "Bei {step}: {error}"
+
+#: src/workflows/workflows-table.tsx
+msgid "At work"
+msgstr "Im Einsatz"
 
 #: src/routes/_shell.settings.audit.tsx
 #: src/routes/_shell.settings.tsx
@@ -2083,6 +2092,11 @@ msgstr "Braucht daneben"
 msgid "Needs attention"
 msgstr "Braucht Aufmerksamkeit"
 
+#: src/routes/_shell.workflows.index.tsx
+msgctxt "tab listing the workflows that need a person"
+msgid "Needs attention"
+msgstr "Braucht Aufmerksamkeit"
+
 #: src/connections/integration-row.tsx
 msgid "Needs signing in again"
 msgstr "Erneute Anmeldung nötig"
@@ -2193,6 +2207,10 @@ msgstr "Keine Teams"
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "No workflow in this engine yet."
 msgstr "In dieser Engine gibt es noch keinen Workflow."
+
+#: src/routes/_shell.workflows.index.tsx
+msgid "No workflow needs attention: nothing waits for a decision, nothing failed lately."
+msgstr "Kein Workflow braucht Aufmerksamkeit: Nichts wartet auf eine Entscheidung, nichts ist zuletzt fehlgeschlagen."
 
 #: src/chat/builds.tsx
 msgid "No workflows to test."
@@ -2411,6 +2429,10 @@ msgstr "bei E-Mail an {address}@"
 msgid "on the event {event}, filtered"
 msgstr "beim Ereignis {event}, gefiltert"
 
+#: src/workflows/workflows-table.tsx
+msgid "On the way"
+msgstr "Unterwegs"
+
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.onboarding.tsx
 msgid "Onboarding"
@@ -2485,6 +2507,10 @@ msgstr "Im Chat öffnen"
 #: src/workflows/fix-in-chat.tsx
 msgid "Open the chat"
 msgstr "Chat öffnen"
+
+#: src/workflows/workflows-table.tsx
+msgid "Open the engine {name}"
+msgstr "Engine {name} öffnen"
 
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
