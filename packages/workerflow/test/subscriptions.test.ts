@@ -22,7 +22,8 @@ import {
   within,
   workflow,
 } from "./helpers.ts";
-import { effectsOf, hold } from "./outside.ts";
+import { effectsOf, eventOf, hold, warningsDuring } from "./outside.ts";
+import { testSubscriptionWaitMs } from "./worker.ts";
 
 const typesOf = (events: WorkflowInstanceEvent[]): string[] =>
   events.map((event) =>
@@ -606,5 +607,246 @@ describe("subscribe", () => {
     await instance.delete();
 
     await expect(instance.subscribe()).rejects.toThrow("instance.not_found");
+  });
+});
+
+describe("a subscription's run", () => {
+  it("is the run it subscribed to: one deleted and created again under the ID ends it", async () => {
+    const id = newId();
+    await workflow("orders").create({ id });
+    await ended("orders", id);
+    const instance = await workflow("orders").get(id);
+    using subscription = await instance.subscribe();
+    const first = await subscription.next();
+
+    await instance.delete();
+    await workflow("orders").create({ id });
+    await ended("orders", id);
+
+    expect(first).toMatchObject({ value: { type: "workflow_queued" } });
+    await expect(subscription.next()).resolves.toStrictEqual({
+      done: true,
+      value: undefined,
+    });
+  });
+});
+
+describe("an event once delivered", () => {
+  it("tells the same retry delay after a resume moved the retry on", async () => {
+    const id = newId();
+    await workflow("retrying").create({
+      id,
+      params: {
+        fails: 1,
+        config: { retries: { limit: 1, delay: 5000, backoff: "constant" } },
+      },
+    });
+    await until("the run to wait for its retry", async () => {
+      const { run, steps } = await journalOf("retrying", id);
+      return run.status === "waiting" && steps[0]?.state === "retrying"
+        ? true
+        : undefined;
+    });
+    const errored = { filter: ["attempt_errored"] } as const;
+    const instance = await workflow("retrying").get(id);
+    using before = await instance.subscribe(errored);
+    const first = await before.next();
+
+    await instance.pause();
+    await within("a while paused", scheduler.wait(waitedMs * 3));
+    await instance.resume();
+    using after = await instance.subscribe(errored);
+    const again = await after.next();
+
+    expect(first).toMatchObject({ value: { retryDelayMs: 5000 } });
+    expect(again).toStrictEqual(first);
+  });
+
+  it("leaves out the retry delay a function says, which isn't settled when the attempt ends", async () => {
+    const id = newId();
+    await workflow("dynamic-delay").create({
+      id,
+      params: { delay: "1 second" },
+    });
+    const instance = await workflow("dynamic-delay").get(id);
+    using subscription = await instance.subscribe({
+      filter: ["attempt_errored"],
+    });
+
+    const first = await within("the first failure", subscription.next());
+
+    expect(first).toMatchObject({
+      value: { type: "attempt_errored", attempt: 1 },
+    });
+    expect(first.value).not.toHaveProperty("retryDelayMs");
+  });
+
+  it("has timestamps that never go back", async () => {
+    const id = newId();
+    await workflow("retrying").create({
+      id,
+      params: {
+        fails: 2,
+        config: { retries: { limit: 2, delay: 10, backoff: "constant" } },
+      },
+    });
+    await ended("retrying", id);
+
+    const events = await eventsOf("retrying", id);
+    const times = events.map((event) => event.timestamp);
+
+    expect(times).toStrictEqual(times.toSorted((a, b) => a - b));
+  });
+
+  it("whose output can't be read is delivered without it, and the events after it still are", async () => {
+    const id = newId();
+    const sizes = [300 * 1024];
+    await workflow("streamed").create({ id, params: { sizes } });
+    await ended("streamed", id);
+    await runInDurableObject(runObject("streamed", id), (_, state) => {
+      state.storage.sql.exec("DELETE FROM stream_chunks WHERE chunk_index = 1");
+    });
+
+    let completions: WorkflowInstanceEvent[] = [];
+    const warnings = await warningsDuring(async () => {
+      completions = await eventsOf("streamed", id, {
+        filter: ["step_completed"],
+      });
+    });
+
+    expect(typesOf(completions)).toStrictEqual([
+      "step_completed export-1",
+      "step_completed digest-1",
+    ]);
+    expect(completions[0]).not.toHaveProperty("output");
+    expect(warnings.map((warning) => eventOf(warning))).toContain(
+      "workflow_event_output_unreadable"
+    );
+  });
+});
+
+describe("a subscription that waits", () => {
+  it("reads each new event once, however many it filters out", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await suspendedOn("napper", id, "nap");
+    const instance = await workflow("napper").get(id);
+    // The history's rows each read of it goes through, in the run object.
+    const reads: { rowsRead: number }[] = [];
+    await runInDurableObject(runObject("napper", id), (_, state) => {
+      const { sql } = state.storage;
+      const exec = sql.exec.bind(sql);
+      Reflect.set(
+        sql,
+        "exec",
+        (query: string, ...bindings: SqlStorageValue[]) => {
+          const cursor = exec(query, ...bindings);
+          if (query.includes("FROM history")) {
+            reads.push(cursor);
+          }
+          return cursor;
+        }
+      );
+    });
+    using subscription = await instance.subscribe({
+      filter: ["workflow_completed"],
+    });
+    const waiting = subscription.next();
+
+    const cycles = 15;
+    for (let cycle = 0; cycle < cycles; cycle += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one cycle after another
+      await instance.pause();
+      // oxlint-disable-next-line no-await-in-loop -- one cycle after another
+      await instance.resume();
+      // oxlint-disable-next-line no-await-in-loop -- one cycle after another
+      await suspendedOn("napper", id, "nap");
+    }
+    const rows = await runInDurableObject(runObject("napper", id), (_, state) =>
+      Number(
+        state.storage.sql.exec("SELECT COUNT(*) AS rows FROM history").one()
+          .rows
+      )
+    );
+    await runInDurableObject(runObject("napper", id), (_, state) => {
+      Reflect.deleteProperty(state.storage.sql, "exec");
+    });
+    await instance.terminate();
+    await within("the end", waiting);
+    const read = reads.reduce((sum, cursor) => sum + cursor.rowsRead, 0);
+
+    // Each row about once, and a few per read besides: never the whole
+    // history again at each of the run's writes.
+    expect(reads.length).toBeGreaterThan(cycles);
+    expect(read).toBeLessThan(rows * 3 + reads.length * 3);
+  });
+
+  it("is closed once it has waited as long as a run lets one wait, to be taken up again from its cursor", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await suspendedOn("napper", id, "nap");
+    const instance = await workflow("napper").get(id);
+    using subscription = await instance.subscribe({ filter: [] });
+
+    const refusal = await within("the wait to end", refusalOf(subscription));
+    using again = await instance.subscribe({
+      filter: ["workflow_terminated"],
+    });
+    await instance.terminate();
+
+    expect(refusal).toBe(
+      `instance.subscription_closed: no event came within ${testSubscriptionWaitMs} ms; subscribe again from the last event ID handled`
+    );
+    await expect(again.next()).resolves.toMatchObject({
+      value: { type: "workflow_terminated" },
+    });
+  });
+});
+
+describe("a termination that rolls back", () => {
+  it("tells of no rolling back when no step registered a rollback, as on the reference", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await suspendedOn("napper", id, "nap");
+    const instance = await workflow("napper").get(id);
+
+    await instance.terminate({ rollback: true });
+    const events = await eventsOf("napper", id);
+
+    expect(
+      events.filter((event) => event.type.startsWith("rollback_"))
+    ).toStrictEqual([]);
+    expect(events.at(-1)).toMatchObject({ type: "workflow_terminated" });
+  });
+});
+
+describe("a deleted run's subscriptions", () => {
+  it("end with it, and don't count against the run created again under the ID", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await suspendedOn("napper", id, "nap");
+    const instance = await workflow("napper").get(id);
+    const opened = await Promise.all(
+      Array.from(
+        { length: maxSubscriptions },
+        async () => await instance.subscribe()
+      )
+    );
+    const [oldest] = opened;
+
+    await instance.delete();
+    await workflow("napper").create({ id });
+    const again = await workflow("napper").get(id);
+    using newer = await again.subscribe();
+
+    await expect(
+      oldest === undefined ? "none" : refusalOf(oldest)
+    ).resolves.toBe("not refused");
+    await expect(newer.next()).resolves.toMatchObject({
+      value: { type: "workflow_queued" },
+    });
+    for (const subscription of opened) {
+      subscription[Symbol.dispose]();
+    }
   });
 });

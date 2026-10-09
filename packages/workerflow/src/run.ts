@@ -135,6 +135,7 @@ import {
   buildEvent,
   endedBy,
   forgetHistoryIn,
+  lastEventId,
   readNextEvent,
   recordStartIn,
 } from "./history.ts";
@@ -312,7 +313,11 @@ export interface SubscribeCommand {
 
 /** A subscription's place in the run's history, in the run object. */
 interface Observer {
+  /** The run it subscribed to: not one created again under the ID. */
+  readonly runUid: string;
   cursor: number;
+  /** Whether it checked once that its cursor isn't past the run's end. */
+  endChecked: boolean;
   /** The types it takes, or null for every type. */
   readonly types: ReadonlySet<string> | null;
   /** The same, as the history reads it: a JSON array, or null. */
@@ -320,8 +325,11 @@ interface Observer {
   /** Set while it waits for the next write; called by that write. */
   wake: (() => void) | undefined;
   closed: boolean;
-  /** Closed to make room for a newer one (maxSubscriptions). */
-  cutOff: boolean;
+  /**
+   * Why it was closed short of the run's end, to be taken up again from
+   * its cursor: cut off for a newer one, or waited too long.
+   */
+  failure: string | undefined;
 }
 
 /**
@@ -333,6 +341,9 @@ interface Observer {
  * up again from its cursor.
  */
 export const maxSubscriptions = 100;
+
+/** How long a subscription's `next` waits for an event by default: 60 s. */
+export const defaultSubscriptionWaitMs = 60_000;
 
 /** Which step a restart starts from; null for the run's start. */
 export interface RestartCommand {
@@ -658,6 +669,14 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   );
 
   /**
+   * How long a subscription's `next` may wait for an event, in ms: a
+   * minute by default. Past it the subscription is closed, as a cut-off
+   * one is, and its caller takes it up again from its cursor; so no
+   * waiter outlives its caller by more than this.
+   */
+  protected readonly subscriptionWaitMs: number = defaultSubscriptionWaitMs;
+
+  /**
    * The subscriptions open on this object, each only its cursor and filter:
    * what they deliver is read from the history, so an object evicted or
    * killed loses nothing a subscriber reconnecting with its cursor needs.
@@ -830,7 +849,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       command.retention.successMs,
       command.retention.errorMs
     );
-    recordStartIn(storage.sql, now);
+    recordStartIn(storage.sql);
     // No await between the insert and this: one write.
     await storage.setAlarm(now);
     return "created";
@@ -909,23 +928,26 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * observe a run before it subscribes for them.
    */
   subscribe(command: SubscribeCommand): Subscription | undefined {
-    if (this.#run() === undefined) {
+    const run = this.#run();
+    if (run === undefined) {
       return undefined;
     }
     const observer: Observer = {
+      runUid: run.run_uid,
       cursor: command.cursor,
+      endChecked: false,
       types: command.filter === null ? null : new Set(command.filter),
       filter: command.filter === null ? null : JSON.stringify(command.filter),
       wake: undefined,
       closed: false,
-      cutOff: false,
+      failure: undefined,
     };
     // A Set keeps the order observers were added in: the first is oldest.
     for (const oldest of this.#observers) {
       if (this.#observers.size < maxSubscriptions) {
         break;
       }
-      oldest.cutOff = true;
+      oldest.failure = `this run has more than ${maxSubscriptions} subscriptions open, and this, the oldest, was closed`;
       this.#close(oldest);
     }
     this.#observers.add(observer);
@@ -947,29 +969,66 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
+   * Ends every subscription, in the turn of the write that removed the run
+   * (a deletion, a purge): none reads a run created again under the ID.
+   */
+  #closeObservers(): void {
+    for (const observer of this.#observers) {
+      this.#close(observer);
+    }
+  }
+
+  /**
+   * Waits for the next write, at most `subscriptionWaitMs`: past that the
+   * subscription is closed, and its caller takes it up again from its
+   * cursor, so no waiter outlives a caller that went away for long.
+   */
+  async #waitForWrite(observer: Observer): Promise<void> {
+    const next = Promise.withResolvers<boolean>();
+    observer.wake = () => {
+      next.resolve(true);
+    };
+    const waitMs = this.subscriptionWaitMs;
+    const timer = setTimeout(() => {
+      observer.failure = `no event came within ${waitMs} ms`;
+      this.#close(observer);
+    }, waitMs);
+    try {
+      await next.promise;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
    * The next event `observer` is to see: read from the history after its
    * cursor, or waited for until a write adds one. The read and the wait
    * are set up in one synchronous turn, so no write falls between them.
+   * Each read starts after the rows the last one went through: a filter
+   * that leaves most of a long run out costs each row once, not the whole
+   * history at every write.
    */
   async #nextEvent(observer: Observer): Promise<SubscriptionResult> {
     const { sql } = this.ctx.storage;
     while (!observer.closed) {
       const run = this.#run();
-      if (run === undefined) {
-        // Deleted, or purged: there is nothing more to see.
+      if (run?.run_uid !== observer.runUid) {
+        // Deleted, or purged, and maybe created again: nothing more to see.
         return { done: true, value: undefined };
       }
-      const row = readNextEvent(sql, observer.cursor, observer.filter);
-      if (row === undefined) {
+      // Once, for a cursor given at or past the run's end: every end
+      // after it is read past the filter.
+      if (!observer.endChecked) {
+        observer.endChecked = true;
         if (endedBy(sql, observer.cursor)) {
           return { done: true, value: undefined };
         }
-        const next = Promise.withResolvers<boolean>();
-        observer.wake = () => {
-          next.resolve(true);
-        };
+      }
+      const row = readNextEvent(sql, observer.cursor, observer.filter);
+      if (row === undefined) {
+        observer.cursor = Math.max(observer.cursor, lastEventId(sql));
         // oxlint-disable-next-line no-await-in-loop -- one event at a time, waited for
-        await next.promise;
+        await this.#waitForWrite(observer);
         continue;
       }
       observer.cursor = row.seq;
@@ -983,9 +1042,9 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         ? { done: true, value: undefined }
         : { done: false, value: event };
     }
-    if (observer.cutOff) {
+    if (observer.failure !== undefined) {
       throw new Error(
-        `instance.subscription_closed: this run has more than ${maxSubscriptions} subscriptions open, and this, the oldest, was closed; subscribe again from the last event ID handled`
+        `instance.subscription_closed: ${observer.failure}; subscribe again from the last event ID handled`
       );
     }
     return { done: true, value: undefined };
@@ -1336,6 +1395,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     }
     // With the write that removed it, the object emptied or its
     // tombstones' expiry set, each failure recovered (#afterRemoval).
+    this.#closeObservers();
     await this.#afterRemoval(removal);
   }
 
@@ -1547,7 +1607,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         now
       );
       if (command.from === null) {
-        recordStartIn(sql, now);
+        recordStartIn(sql);
       }
       return { outcome: "restarted", alarm: now };
     });
@@ -1583,6 +1643,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     if (removed === "missing") {
       return "missing";
     }
+    this.#closeObservers();
     await this.#afterRemoval(removed);
     return "deleted";
   }

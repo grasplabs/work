@@ -986,6 +986,9 @@ export const definitions: Record<string, WorkflowDefinition> = {
 
 /** How long a test run's compensating replay may take. */
 export const testRollbackReplayMs = 200;
+
+/** How long a subscription to a test run may wait for its next event. */
+export const testSubscriptionWaitMs = 2000;
 /** How many test replays in a row may end without the rollbacks. */
 export const testRollbackReplays = 3;
 
@@ -1019,6 +1022,9 @@ export class TestRuns extends WorkflowRun {
   protected override clock(): number {
     return measuredClock();
   }
+
+  /** Short, so a subscription that waits too long is closed soon. */
+  protected override readonly subscriptionWaitMs = testSubscriptionWaitMs;
 
   override async alarm(): Promise<void> {
     try {

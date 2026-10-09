@@ -3,15 +3,27 @@
 // Each event is written by a trigger on the journal row whose change it
 // tells of (a status, a step's start or end, an attempt's), in the same
 // statement: no write of the run's state can leave its event out, and no
-// event is written for a change that was rolled back. An event is only a
-// reference to those rows; what it shows (an output, an error, a config)
-// is read from them as it is delivered, so the history copies no value and
-// grows by a few dozen bytes a row, one row per change the journal itself
-// keeps a row for, or a status change.
+// event is written for a change that was rolled back.
+//
+// An event, once written, says the same at every delivery. What can still
+// change in the journal after it is copied into the event's `detail` as it
+// is written: an attempt's error and retry delay (a resume moves a retry's
+// time on; a delay function's answer replaces the provisional one), a
+// rolling back step's error, the run's error, a sleep's duration. What a
+// row never changes once the event is written is read from it as the
+// event is delivered, so the history copies no value of the run's: a
+// step's name, count, config and event type (fixed when the step is first
+// reached), a completed step's result (fixed once it succeeded), the
+// run's params, and its output (fixed once it completed). A restart that
+// clears any of these forgets the events that read them in the same write
+// (forgetHistoryIn). Each row is a few dozen bytes, one per change the
+// journal keeps a row for, or per status change.
 //
 //   history   one row per event: its ID, when, its type, which step and
-//             attempt it is of, and what the row it refers to doesn't keep
-//             (a sleep's duration)
+//             attempt it is of, and what it copied (`detail`)
+//
+// Every event's time is SQLite's clock in the trigger that writes it, one
+// clock for all of them, so they never go back in the order written.
 //
 // A sensitive step's output is redacted as its event is built: no observer
 // gets it, the history never held it, and the raw result stays in the
@@ -27,6 +39,7 @@ import type {
 } from "./contracts.ts";
 import { parseError } from "./errors.ts";
 import type { RunRow } from "./journal.ts";
+import { warnRecovered } from "./log.ts";
 import { replayStream } from "./streams.ts";
 
 /** What observers see in place of a sensitive step's result. */
@@ -93,6 +106,10 @@ END`;
 
 const stepEndedStates = "('succeeded', 'failed', 'fatal')";
 
+/** What a step's end copies: a rollback's error, which an upsert sets. */
+const stepEndedDetail =
+  "CASE WHEN new.type = 'rollback' AND new.state <> 'succeeded' THEN json_object('error', new.error) END";
+
 export const createHistory = (sql: SqlStorage): void => {
   sql.exec(`
     CREATE TABLE IF NOT EXISTS history (
@@ -110,7 +127,10 @@ export const createHistory = (sql: SqlStorage): void => {
     -- A status the run changes to. 'queued' is written by the run object
     -- itself (run.ts): a restart from a step queues the run again without
     -- telling observers, as the reference does. A rolling back that ends
-    -- tells how before the run's own end.
+    -- tells how before the run's own end; every way out of rolling back
+    -- writes how it went (a termination can't cut it short, as on the
+    -- reference), and a termination with nothing to roll back tells of no
+    -- rolling back, as the reference doesn't either.
     CREATE TRIGGER IF NOT EXISTS history_status
     AFTER UPDATE OF status ON run
     WHEN old.status IS NOT new.status AND new.status <> 'queued'
@@ -118,8 +138,8 @@ export const createHistory = (sql: SqlStorage): void => {
       INSERT INTO history (at, type)
         SELECT ${now}, CASE json_extract(new.rollback, '$.status') WHEN 'complete' THEN 'rollback_completed' ELSE 'rollback_errored' END
         WHERE old.status = 'rollingBack' AND new.rollback IS NOT NULL;
-      INSERT INTO history (at, type) VALUES (
-        CASE WHEN new.status IN ('complete', 'errored', 'terminated') THEN COALESCE(new.ended_at, ${now}) ELSE ${now} END,
+      INSERT INTO history (at, type, detail) VALUES (
+        ${now},
         CASE new.status
           WHEN 'running' THEN 'workflow_running'
           WHEN 'waiting' THEN 'workflow_waiting'
@@ -129,7 +149,8 @@ export const createHistory = (sql: SqlStorage): void => {
           WHEN 'complete' THEN 'workflow_completed'
           WHEN 'errored' THEN 'workflow_errored'
           ELSE 'workflow_terminated'
-        END
+        END,
+        CASE WHEN new.status = 'errored' THEN json_object('error', new.error) END
       );
     END;
 
@@ -151,8 +172,8 @@ export const createHistory = (sql: SqlStorage): void => {
           THEN json_object('durationMs', COALESCE(new.duration_ms, MAX(0, new.deadline - ${now})))
         END
       );
-      INSERT INTO history (at, type, ordinal)
-        SELECT ${now}, ${stepEnded}, new.ordinal
+      INSERT INTO history (at, type, ordinal, detail)
+        SELECT ${now}, ${stepEnded}, new.ordinal, ${stepEndedDetail}
         WHERE new.state IN ${stepEndedStates};
     END;
 
@@ -160,27 +181,35 @@ export const createHistory = (sql: SqlStorage): void => {
     AFTER UPDATE OF state ON steps
     WHEN new.state IN ${stepEndedStates}
     BEGIN
-      INSERT INTO history (at, type, ordinal) VALUES (${now}, ${stepEnded}, new.ordinal);
+      INSERT INTO history (at, type, ordinal, detail)
+        VALUES (${now}, ${stepEnded}, new.ordinal, ${stepEndedDetail});
     END;
 
     CREATE TRIGGER IF NOT EXISTS history_attempt_started
     AFTER INSERT ON attempts
     BEGIN
       INSERT INTO history (at, type, ordinal, attempt)
-        SELECT new.started_at, CASE type WHEN 'rollback' THEN 'rollback_attempt_started' ELSE 'attempt_started' END, new.ordinal, new.attempt
+        SELECT ${now}, CASE type WHEN 'rollback' THEN 'rollback_attempt_started' ELSE 'attempt_started' END, new.ordinal, new.attempt
         FROM steps WHERE ordinal = new.ordinal;
     END;
 
     -- An attempt's outcome, journaled once. One whose answer was ignored
-    -- ('superseded') has none yet, and may still be ended as cut off.
+    -- ('superseded') has none yet, and may still be ended as cut off. A
+    -- failure's error and retry delay are copied: a resume moves the
+    -- retry on, and a delay function's answer, which comes after this
+    -- write, replaces the provisional one, so that delay isn't told.
     CREATE TRIGGER IF NOT EXISTS history_attempt_ended
     AFTER UPDATE OF ended ON attempts
     WHEN new.ended IN ('succeeded', 'failed', 'timed_out')
     BEGIN
-      INSERT INTO history (at, type, ordinal, attempt)
-        SELECT new.ended_at,
+      INSERT INTO history (at, type, ordinal, attempt, detail)
+        SELECT ${now},
           CASE WHEN type = 'rollback' THEN 'rollback_' ELSE '' END || CASE new.ended WHEN 'succeeded' THEN 'attempt_completed' ELSE 'attempt_errored' END,
-          new.ordinal, new.attempt
+          new.ordinal, new.attempt,
+          CASE WHEN new.ended <> 'succeeded' THEN json_object(
+            'error', new.error,
+            'retryDelayMs', CASE WHEN new.retry_at IS NOT NULL AND json_extract(config, '$.delay') IS NOT 'dynamic' THEN new.retry_at - new.ended_at END
+          ) END
         FROM steps WHERE ordinal = new.ordinal;
     END;
   `);
@@ -190,11 +219,9 @@ export const createHistory = (sql: SqlStorage): void => {
  * Records that the run was queued and started: at its creation, and at a
  * restart from its start, as the reference does. In the caller's write.
  */
-export const recordStartIn = (sql: SqlStorage, at: number): void => {
+export const recordStartIn = (sql: SqlStorage): void => {
   sql.exec(
-    "INSERT INTO history (at, type) VALUES (?, 'workflow_queued'), (?, 'workflow_started')",
-    at,
-    at
+    `INSERT INTO history (at, type) VALUES (${now}, 'workflow_queued'), (${now}, 'workflow_started')`
   );
 };
 
@@ -222,12 +249,8 @@ interface EventRow extends Record<string, SqlStorageValue> {
   name: string | null;
   occurrence: number | null;
   value: string | null;
-  step_error: string | null;
   config: string | null;
   event_type: string | null;
-  attempt_error: string | null;
-  attempt_ended_at: number | null;
-  retry_at: number | null;
 }
 
 /**
@@ -242,16 +265,24 @@ export const readNextEvent = (
 ): EventRow | undefined =>
   sql
     .exec<EventRow>(
-      `SELECT h.seq, h.at, h.type, h.ordinal, h.attempt, h.detail, s.name, s.occurrence, s.value, s.error AS step_error, s.config, s.event_type, a.error AS attempt_error, a.ended_at AS attempt_ended_at, a.retry_at
+      `SELECT h.seq, h.at, h.type, h.ordinal, h.attempt, h.detail, s.name, s.occurrence, s.value, s.config, s.event_type
        FROM history AS h
        LEFT JOIN steps AS s ON s.ordinal = h.ordinal
-       LEFT JOIN attempts AS a ON a.ordinal = h.ordinal AND a.attempt = h.attempt
        WHERE h.seq > ?1 AND (?2 IS NULL OR h.type IN (SELECT value FROM json_each(?2)) OR h.type IN (${terminalList}))
        ORDER BY h.seq LIMIT 1`,
       cursor,
       filter
     )
     .toArray()[0];
+
+/**
+ * The latest event ID handed out, or 0: a subscription that found nothing
+ * after its cursor has read past every row up to it, and reads none of
+ * them again.
+ */
+export const lastEventId = (sql: SqlStorage): number =>
+  sql.exec<{ seq: number | null }>("SELECT MAX(seq) AS seq FROM history").one()
+    .seq ?? 0;
 
 /**
  * Whether the run ended at or before `cursor`: a subscription past its end
@@ -314,7 +345,11 @@ const shownConfig = (
   };
 };
 
-/** A completed step's output as observers see it. */
+/**
+ * A completed step's output as observers see it. One that can't be read
+ * back (a stream's stored bytes corrupt) is left out and logged, rather
+ * than stop every subscription at this event.
+ */
 const outputOf = async (
   sql: SqlStorage,
   row: EventRow
@@ -325,16 +360,21 @@ const outputOf = async (
   if (row.value === null || row.ordinal === null) {
     return {};
   }
-  const stream = streamResultOf(row.value);
-  if (stream === undefined) {
-    return { output: decode(row.value) };
+  try {
+    const stream = streamResultOf(row.value);
+    if (stream === undefined) {
+      return { output: decode(row.value) };
+    }
+    // A fresh stream of the step's bytes, as its replay gets.
+    const replay = await replayStream(sql, row.ordinal, stream);
+    if ("corrupt" in replay) {
+      throw replay.corrupt;
+    }
+    return { output: replay.stream };
+  } catch (error) {
+    warnRecovered("workflow_event_output_unreadable", error);
+    return {};
   }
-  // A fresh stream of the step's bytes, as its replay gets.
-  const replay = await replayStream(sql, row.ordinal, stream);
-  if ("corrupt" in replay) {
-    throw replay.corrupt;
-  }
-  return { output: replay.stream };
 };
 
 /** What every event of a step carries. */
@@ -345,15 +385,20 @@ interface StepCommon {
   readonly stepName: string;
 }
 
-/** A sleep's duration, as its event was written with it. */
-const durationOf = (row: EventRow): number => {
-  const detail: unknown = row.detail === null ? null : JSON.parse(row.detail);
-  return typeof detail === "object" &&
-    detail !== null &&
-    "durationMs" in detail &&
-    typeof detail.durationMs === "number"
-    ? detail.durationMs
-    : 0;
+/** What the event copied when it was written (`detail`). */
+interface Detail {
+  durationMs?: number;
+  error?: string | null;
+  retryDelayMs?: number | null;
+}
+
+const detailOf = (row: EventRow): Detail => {
+  if (row.detail === null) {
+    return {};
+  }
+  // SAFETY: the engine's own JSON, written by its triggers alone.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return JSON.parse(row.detail) as Detail;
 };
 
 /** An attempt's event, at a step or a rollback, or undefined for another. */
@@ -371,16 +416,15 @@ const attemptEventOf = (
     }
     case "attempt_errored":
     case "rollback_attempt_errored": {
-      const retry =
-        row.retry_at === null || row.attempt_ended_at === null
-          ? {}
-          : { retryDelayMs: Math.max(0, row.retry_at - row.attempt_ended_at) };
+      const { error, retryDelayMs } = detailOf(row);
       return {
         ...step,
         type: row.type,
         attempt,
-        ...retry,
-        error: errorOf(row.attempt_error),
+        ...(typeof retryDelayMs === "number"
+          ? { retryDelayMs: Math.max(0, retryDelayMs) }
+          : {}),
+        error: errorOf(error ?? null),
       };
     }
     default: {
@@ -415,10 +459,18 @@ const stepEventOf = async (
       return { ...step, type: row.type };
     }
     case "rollback_step_errored": {
-      return { ...step, type: row.type, error: errorOf(row.step_error) };
+      return {
+        ...step,
+        type: row.type,
+        error: errorOf(detailOf(row).error ?? null),
+      };
     }
     case "sleep_started": {
-      return { ...step, type: row.type, durationMs: durationOf(row) };
+      return {
+        ...step,
+        type: row.type,
+        durationMs: detailOf(row).durationMs ?? 0,
+      };
     }
     case "wait_started": {
       return { ...step, type: row.type, eventType: row.event_type ?? "" };
@@ -465,7 +517,11 @@ export const buildEvent = async (
         : { ...common, type: row.type, output: decode(run.output) };
     }
     case "workflow_errored": {
-      return { ...common, type: row.type, error: errorOf(run.error) };
+      return {
+        ...common,
+        type: row.type,
+        error: errorOf(detailOf(row).error ?? null),
+      };
     }
     default: {
       return await stepEventOf(sql, row, common);
