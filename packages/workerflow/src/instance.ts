@@ -1,6 +1,12 @@
 import { encode } from "./codec.ts";
 import { describe, isPlainObject, readSettings } from "./config.ts";
-import type { InstanceStatus, RestartFrom } from "./contracts.ts";
+import type {
+  InstanceStatus,
+  RestartFrom,
+  WorkflowInstanceSubscribeOptions,
+  WorkflowInstanceSubscription,
+} from "./contracts.ts";
+import { isEventType } from "./history.ts";
 import {
   assertEventType,
   assertStepName,
@@ -15,6 +21,7 @@ import type { StepType } from "./journal.ts";
 import type {
   EventOutcome,
   RestartCommand,
+  SubscribeCommand,
   TerminateCommand,
   WorkflowRun,
 } from "./run.ts";
@@ -102,6 +109,53 @@ const readTerminate = (options: unknown): TerminateCommand => {
     );
   }
   return { rollback: rollback === true };
+};
+
+/**
+ * `subscribe`'s options, read once each, as the reference takes them:
+ * `{ cursor?, filter? }`, a cursor a whole number from 0 and a filter a
+ * list of event types. Anything else is a TypeError, never read as a
+ * default.
+ */
+const readSubscribe = (options: unknown): SubscribeCommand => {
+  if (options === undefined) {
+    return { cursor: 0, filter: null };
+  }
+  if (!isPlainObject(options)) {
+    throw new TypeError(
+      `A subscription's options are { cursor?, filter? }, not ${options === null ? "null" : describe(options)}`
+    );
+  }
+  const { cursor, filter } = readSettings("A subscription's options", options, [
+    "cursor",
+    "filter",
+  ] as const);
+  if (
+    cursor !== undefined &&
+    (typeof cursor !== "number" || !Number.isSafeInteger(cursor) || cursor < 0)
+  ) {
+    throw new TypeError(
+      `A subscription's cursor is an event ID, a whole number from 0: ${typeof cursor === "number" ? String(cursor) : describe(cursor)}`
+    );
+  }
+  if (filter === undefined) {
+    return { cursor: cursor ?? 0, filter: null };
+  }
+  if (!Array.isArray(filter)) {
+    throw new TypeError(
+      `A subscription's filter is a list of event types, not ${describe(filter)}`
+    );
+  }
+  const types: string[] = [];
+  for (const type of filter) {
+    if (!isEventType(type)) {
+      throw new TypeError(
+        `A subscription's filter takes event types, not ${typeof type === "string" ? JSON.stringify(type) : describe(type)}`
+      );
+    }
+    types.push(type);
+  }
+  return { cursor: cursor ?? 0, filter: types };
 };
 
 /** An event as a caller sends it. */
@@ -205,6 +259,28 @@ export class WorkflowInstance {
         `instance.cannot_restart: step ${JSON.stringify(command.from?.name)} not found in the execution history of workflow instance ${JSON.stringify(this.id)}`
       );
     }
+  }
+
+  /**
+   * Subscribes to the run's events, as Cloudflare's `subscribe`: those it
+   * has kept, after `cursor` (the last event ID the caller handled), then
+   * each as it happens, only the types `filter` names. Once the run's end
+   * has been delivered (or filtered out) every `next` is done; dispose of
+   * the subscription (`using`) when done with it earlier. A subscription
+   * cut off (the caller's or the run's process went away) is taken up
+   * again by subscribing from the last event ID handled: nothing is missed
+   * and nothing is seen twice. Who may observe a run is the caller's to
+   * decide: whoever holds the binding can.
+   */
+  async subscribe(
+    options?: WorkflowInstanceSubscribeOptions
+  ): Promise<WorkflowInstanceSubscription> {
+    const command = readSubscribe(options);
+    const subscription = await this.#stub.subscribe(command);
+    if (subscription === undefined) {
+      throw notFound(this.id);
+    }
+    return subscription;
   }
 
   /**

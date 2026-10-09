@@ -986,6 +986,9 @@ export const definitions: Record<string, WorkflowDefinition> = {
 
 /** How long a test run's compensating replay may take. */
 export const testRollbackReplayMs = 200;
+
+/** How long a subscription to a test run may wait for its next event. */
+export const testSubscriptionWaitMs = 2000;
 /** How many test replays in a row may end without the rollbacks. */
 export const testRollbackReplays = 3;
 
@@ -1019,6 +1022,10 @@ export class TestRuns extends WorkflowRun {
   protected override clock(): number {
     return measuredClock();
   }
+
+  /** Short, so a subscription that waits too long is closed soon. */
+  protected override readonly subscriptionWaitMs: number =
+    testSubscriptionWaitMs;
 
   override async alarm(): Promise<void> {
     try {
@@ -1075,6 +1082,11 @@ export const shortTombstoneMs = 1000;
 /** Run objects whose tombstones expire after a second, not 30 days. */
 export class ShortTombstoneRuns extends TestRuns {
   protected override readonly tombstoneMs = shortTombstoneMs;
+}
+
+/** Run objects whose host let a subscription wait no time at all. */
+export class MiswaitedRuns extends TestRuns {
+  protected override readonly subscriptionWaitMs: number = 0;
 }
 
 // The run object of a host that misconfigured it, bound as MISCONFIGURED.
