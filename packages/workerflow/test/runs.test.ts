@@ -119,7 +119,7 @@ describe("a workflow run", () => {
     ).toStrictEqual(sends.map((send, index) => ["send", index + 1, send.key]));
   });
 
-  it("hands the definition its params, creation time and instance ID as they were at creation", async () => {
+  it("hands the definition its params, creation time, instance ID and workflow name as they were at creation, and no schedule", async () => {
     const id = newId();
     const params = {
       when: new Date("2026-10-07T12:00:00.000Z"),
@@ -139,6 +139,9 @@ describe("a workflow run", () => {
         payload: params,
         timestamp: new Date(run.created_at),
         instanceId: id,
+        workflowName: "echo",
+        scheduled: false,
+        schedule: null,
       },
     });
   });
@@ -328,12 +331,13 @@ describe("creating a run", () => {
   it("refuses invalid IDs, and params the journal can't keep, before any run exists", async () => {
     const id = newId();
 
+    // As the reference refuses them (batches.test.ts has the rest).
     await expect(
       workflow("orders").create({ id: "-starts-with-a-dash" })
-    ).rejects.toThrow(TypeError);
+    ).rejects.toMatchObject({ name: "WorkflowError" });
     await expect(
       workflow("orders").create({ id: "x".repeat(101) })
-    ).rejects.toThrow(TypeError);
+    ).rejects.toMatchObject({ name: "WorkflowError" });
     await expect(
       workflow("orders").create({ id, params: { callback: () => "live" } })
     ).rejects.toThrow(SerializationError);

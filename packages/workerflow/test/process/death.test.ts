@@ -458,6 +458,94 @@ describe("a run on disk-backed workerd", () => {
     });
   });
 
+  it("keeps a deletion the process dies after: the run stays gone mid-step, and its start delivered again creates nothing", async () => {
+    const id = "report-delete-mid-step";
+    const chargeHeld = outside.hold(id, "charge", 1);
+    await workerd.request("/start", startOf("orders", id));
+    await chargeHeld;
+    // Killed once the deletion committed, before its answer left.
+    const deleted = outside.hold(id, "deleted");
+    const lost = workerd
+      .request(`/delete?definition=orders&id=${id}`, {})
+      .catch(() => "lost");
+    await deleted;
+    await workerd.kill();
+    const answer = await lost;
+    await workerd.start();
+    const afterRestart = {
+      status: await statusOf("orders", id),
+      journal: await journalOf("orders", id),
+    };
+
+    // The start delivered again finds its tombstone; a plain create under
+    // the ID is another run, whose alarm would be any old one's too.
+    const again = await workerd.request("/start", startOf("orders", id));
+    const create = await workerd.request(
+      "/start",
+      startOf("orders", id, { key: undefined })
+    );
+    await ended("orders", id);
+
+    expect({ answer, afterRestart, again, create }).toMatchObject({
+      answer: "lost",
+      afterRestart: { status: { status: 404 }, journal: null },
+      again: { status: 200, body: { created: false } },
+      create: { status: 200, body: { created: true } },
+    });
+    // The deleted run's charge went out once, and nothing after it: the
+    // new run's steps are its own, under another run's keys.
+    const [first, second] = outside.of(id, "charge");
+    expect(timeline(id)).toStrictEqual([
+      ["charge", 1],
+      ["charge", 1],
+      ["ship", 1],
+    ]);
+    expect(first?.key).not.toBe(second?.key);
+  });
+
+  it("expires a tombstone after its horizon though the process died in between: the same start then creates a run", async () => {
+    const id = "tombstone-across-death";
+    await workerd.request("/start", startOf("orders", id));
+    await ended("orders", id);
+    const deleted = await workerd.request(
+      `/delete?definition=orders&id=${id}`,
+      {}
+    );
+    const within = await workerd.request("/start", startOf("orders", id));
+    // Killed with the expiry still to come: only the alarm the deletion
+    // set, stored with the tombstone, can bring it.
+    await workerd.kill();
+    await workerd.start();
+
+    // Its alarm drops it, with no request: the object empties.
+    const tablesAfterDeath = await workerd.request(
+      `/tables?definition=orders&id=${id}`
+    );
+    await until("the tombstone to expire", async () => {
+      const { body } = await workerd.request(
+        `/tables?definition=orders&id=${id}`
+      );
+      return Array.isArray(body) && body.length === 0 ? true : undefined;
+    });
+    const after = await workerd.request("/start", startOf("orders", id));
+    await ended("orders", id);
+
+    expect({ deleted, within, tablesAfterDeath }).toMatchObject({
+      deleted: { status: 200, body: { deleted: [{ id }], errors: [] } },
+      within: { status: 200, body: { created: false } },
+      tablesAfterDeath: { body: ["tombstones"] },
+    });
+    expect(after).toStrictEqual({ status: 200, body: { created: true } });
+    // Two runs, one after the other, under keys of their own.
+    expect(timeline(id)).toStrictEqual([
+      ["charge", 1],
+      ["ship", 1],
+      ["charge", 1],
+      ["ship", 1],
+    ]);
+    expect(keysOf(id, "charge").size).toBe(2);
+  });
+
   it("still runs the run, once, when the process dies after the start commits; the start delivered again finds it", async () => {
     const id = "after-the-start-commit";
     const chargeHeld = outside.hold(id, "charge", 1);

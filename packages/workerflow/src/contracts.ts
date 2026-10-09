@@ -9,8 +9,9 @@
 // are structured values (codec.ts) or byte streams (streams.ts), and a
 // step may be `sensitive`, and may register a rollback. An instance can be
 // paused, resumed, terminated (rolling back, too), restarted (from a step,
-// too) and deleted (instance.ts). Retention comes in a later slice; until
-// then it is absent, never silently ignored.
+// too) and deleted (instance.ts); created and deleted in batches, and
+// started by a schedule's occurrence (binding.ts). Retention comes in a
+// later slice; until then `create` refuses it, never silently ignores it.
 
 /** What a run's definition is given when it runs. */
 export interface WorkflowEvent<Params = unknown> {
@@ -19,6 +20,17 @@ export interface WorkflowEvent<Params = unknown> {
   /** When the run was created: the same on every replay. */
   readonly timestamp: Date;
   readonly instanceId: string;
+  /** The definition's name: the workflow the run is of. */
+  readonly workflowName: string;
+  /**
+   * For a run a schedule started (the binding's `schedule`): the cron
+   * expression and the time it fired for. Absent otherwise.
+   */
+  readonly schedule?: {
+    readonly cron: string;
+    /** Milliseconds since the Unix epoch. */
+    readonly scheduledTime: number;
+  };
 }
 
 /** What a step's callback is given. */
