@@ -343,6 +343,16 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
   );`,
         { count: null }
       ),
+      // No timeout: its App call waits at the mail server while the run is
+      // cancelled, and records a point once let go, after the run ended.
+      ...workflowFiles(
+        "ended",
+        `  return await step.do("count", { description: "Count" }, async () => {
+    await env.APP.call("pointAfter", "ended");
+    return null;
+  });`,
+        { count: null }
+      ),
       ...workflowFiles(
         "bounded",
         `  return await step.do("count", { description: "Count" }, async () => {
@@ -432,6 +442,27 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       },
       { timeout: 10_000, interval: 100 }
     );
+
+    const ended = await builder.api.workflows.start(app, "ended");
+    await vi.waitFor(
+      async () => {
+        await expect(mail.searched()).resolves.toContain("hold ended");
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    await builder.api.workflows.cancel(ended.id);
+    await finished(ended.id);
+    // The run has ended: the call it left waiting goes on, its caller
+    // still live.
+    await mail.release();
+    await vi.waitFor(
+      async () => {
+        await expect(
+          hitsOf(app, builder.userId, "ended:recorded")
+        ).resolves.toBe(1);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
     const { results: kept } = await env.DB.prepare(
       "SELECT step_key, measure FROM app_statistic_steps WHERE app_id = ?"
     )
@@ -477,6 +508,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       anew,
       silent: await count("anew"),
       outlived: { counted: await count("outlived"), kept },
+      ended: await count("ended"),
       bounded: {
         status: await builder.api.workflows.status(bounded.id),
         known: await count("known"),
@@ -501,6 +533,9 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       // Tried once its run had ended: refused, its call's caller gone with
       // its attempt, so neither counted nor kept.
       outlived: { counted: 0, kept: [] },
+      // Recorded once its run had ended: taken, but neither counted nor
+      // kept (`kept` above holds no row of it either).
+      ended: 0,
       // The point in a row the day has, and the first new row, which
       // fits; the next is left out, and the step completes all the same.
       bounded: { status: { status: "completed" }, known: 1, fits: 1, over: 0 },

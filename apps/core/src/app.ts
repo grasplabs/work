@@ -764,9 +764,9 @@ export class App extends DurableObject<Env> {
    *
    * One call runs at a time; the others wait their turn, in the order
    * they came, within their deadline: `ends`, when the caller stops
-   * waiting (a workflow step's attempt, `ExportCall.deadline` for a call
-   * from another App), never later than the App's own time for a call
-   * from when it came. A call's token is made only once it has its turn.
+   * waiting (a screen's call, a workflow step's attempt;
+   * `ExportCall.deadline` for a call from another App), never later than
+   * the App's own time for a call from when it came. A call's token is made only once it has its turn.
    * A call that can't get its turn in time, or finds `waitingCallsLimit`
    * calls waiting already, gets `app.busy`, and never reaches the App's
    * code.
@@ -774,23 +774,30 @@ export class App extends DurableObject<Env> {
    * A call not answered by its deadline gets `app.timed_out`, and its
    * token stops working at once. If its method was handed to the App's
    * code, that code keeps the App's turn until it settles: the next call
-   * doesn't start alongside it. It has the App's own time for a call
-   * from when its turn began, however long it waited; past that, the
-   * App's code is stopped (`#overran`), so it can't go on writing the
-   * App's data, and then the next call gets its turn.
+   * doesn't start alongside it. It has as long as its caller asked for
+   * (never more than the App's own time for a call), from when its turn
+   * began, however long it waited; a call from another App has the App's
+   * own time. Past that, the App's code is stopped (`#overran`), so it
+   * can't go on writing the App's data, and then the next call gets its
+   * turn.
    *
    * A call from another App's code through an export (`via`, from
    * app-calls.ts) runs only on the version core checked it against, ends
    * by the time the call it came from must, and is kept with the Apps
    * above it, for the calls its code makes on (`callerOf`).
    *
-   * Known gap, closed only once each call runs in an isolate of its own
-   * (App methods as stateless handlers): work the App's code leaves
-   * running detached from its call (a promise it doesn't await, a
-   * timer) goes on after the call settled, alongside later calls, and
-   * can read a later call's token from what they share, and act for that
-   * caller while that call runs. That is never more than that later
-   * call's own code, the same App's, may do.
+   * Known gaps:
+   * - Work the App's code leaves running detached from its call (a
+   *   promise it doesn't await, a timer) goes on after the call settled,
+   *   alongside later calls, and can read a later call's token from what
+   *   they share, and act for that caller while that call runs. That is
+   *   never more than that later call's own code, the same App's, may do.
+   *   Only an isolate per call (App methods as stateless handlers) closes
+   *   it.
+   * - A caller that gives up frees the App only by its deadline: a
+   *   cancelled run doesn't free it early, and a workflow step with no
+   *   timeout, which asks for no deadline, holds it for up to the App's
+   *   own time for a call.
    */
   async call(
     caller: AppCallerInput,
@@ -831,8 +838,11 @@ export class App extends DurableObject<Env> {
       return await this.#run(caller, method, args, via, {
         ends: callEnds,
         limit,
-        // The App's own time for a call, from when its turn began.
-        stopAt: Date.now() + ownMs,
+        // From when its turn began: the time its caller asked for, the
+        // App's own at most. A call from another App gets the App's own
+        // time, so another App can't stop this one's code by calling it
+        // just before its own deadline.
+        stopAt: Date.now() + (via === undefined ? ms : ownMs),
         drainWith: (draining) => {
           drained = draining;
         },

@@ -259,6 +259,14 @@ export const argumentsFor = (
 };
 
 /**
+ * How long a screen waits for an App's answer, its turn in the App
+ * included: the App's code gets as long from its turn, then is stopped,
+ * so a call nobody waits for any more frees the App sooner than the App's
+ * own time for a call (`App.call`).
+ */
+const screenCallMs = 30_000;
+
+/**
  * Calls a method of the App's server for the person: plain data and a
  * screen's callbacks go in, plain data comes out, whatever it holds. The
  * name must be a string before it goes anywhere near the App, so an object
@@ -296,7 +304,8 @@ const callServer = async (
             },
           },
           method,
-          passed
+          passed,
+          Date.now() + screenCallMs
         )
       )
     );

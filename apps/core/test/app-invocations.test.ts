@@ -1367,7 +1367,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     });
   });
 
-  it("stops a call cut short in the App whose code never settles, at the App's own time from its turn, then lets the next in", async () => {
+  it("stops a call from another App cut short whose code never settles at the App's own time from its turn, then lets the next in", async () => {
     const admin = await personApi("admin");
     const desk = await newApp(admin);
     const host = appHost(env, desk);
@@ -1379,18 +1379,76 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
         await vi.advanceTimersByTimeAsync(ms);
       });
     };
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     let cutShort: string;
+    let meanwhile: string;
     try {
-      // Through an export from a call with five seconds left.
+      // Through an export from a call with five seconds left: another App
+      // can't stop this one's code by calling it late, so its code has
+      // the App's own time.
       const call = outcome(
         host.call(caller, "keepAndHold", [held.wait], exportCall(5000))
       );
       await entered(held, call);
       await advance(5000);
       cutShort = await call;
+      const queued = outcome(host.call(caller, "tick", [], exportCall(500)));
+      await advance(500);
+      meanwhile = await queued;
       // Its code never settles: at the App's own time, it is stopped.
       await advance(10_000);
+    } finally {
+      vi.useRealTimers();
+    }
+    try {
+      expect({
+        countBefore,
+        cutShort,
+        meanwhile,
+        // In code started afresh: the count starts again.
+        next: await host.call(caller, "tick", []),
+      }).toStrictEqual({
+        countBefore: 1,
+        cutShort: "app.timed_out",
+        meanwhile: "app.busy",
+        next: 1,
+      });
+    } finally {
+      held.release();
+    }
+  });
+
+  it("stops a call cut short by its own caller's deadline, whose code never settles, that long from its turn", async () => {
+    const admin = await personApi("admin");
+    const desk = await newApp(admin);
+    const host = appHost(env, desk);
+    const caller = as(admin.userId);
+    const countBefore = await host.call(caller, "tick", []);
+    const held = gate();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let cutShort: string;
+    try {
+      // A caller that waits five seconds, as a workflow step's attempt
+      // does: its code gets five seconds from its turn, then is stopped.
+      const call = outcome(
+        host.call(
+          caller,
+          "keepAndHold",
+          [held.wait],
+          undefined,
+          Date.now() + 5000
+        )
+      );
+      await entered(held, call);
+      await runInDurableObject(host, async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      cutShort = await call;
+      // Its code never settles: it is stopped as its time from its turn
+      // is up, which it is.
+      await runInDurableObject(host, async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
     } finally {
       vi.useRealTimers();
     }
