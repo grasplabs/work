@@ -249,7 +249,9 @@ const animate = (
   element.width = field * dpr;
   element.height = field * dpr;
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // Whether the person asks for less motion: followed as it changes.
+  const motion = matchMedia("(prefers-reduced-motion: reduce)");
+  let still = motion.matches;
   let styles = palette(element);
 
   // The sign the last one left, or a new one: its dots in a small cloud,
@@ -308,10 +310,6 @@ const animate = (
   };
 
   let visible = true;
-  const watcher = new IntersectionObserver(([entry]) => {
-    visible = entry?.isIntersecting ?? true;
-  });
-  watcher.observe(element);
 
   let frame = 0;
   let running = false;
@@ -558,6 +556,16 @@ const animate = (
     frame = requestAnimationFrame(draw);
   };
 
+  const watcher = new IntersectionObserver(([entry]) => {
+    visible = entry?.isIntersecting ?? true;
+    // A held sign drew nothing while out of sight: it draws what Grasp
+    // does now once it is back.
+    if (visible) {
+      wake();
+    }
+  });
+  watcher.observe(element);
+
   const onPointer = (event: PointerEvent): void => {
     pointer.x = event.clientX;
     pointer.y = event.clientY;
@@ -582,6 +590,18 @@ const animate = (
   if (!still) {
     window.addEventListener("pointermove", onPointer);
   }
+  // Asking for less motion while it moves holds it still at once, and
+  // the other way round.
+  const onMotion = (): void => {
+    still = motion.matches;
+    if (still) {
+      window.removeEventListener("pointermove", onPointer);
+    } else {
+      window.addEventListener("pointermove", onPointer);
+    }
+    wake();
+  };
+  motion.addEventListener("change", onMotion);
   // It prints in the brain's colours, which change with the theme.
   const repaint = (): void => {
     styles = palette(element);
@@ -605,6 +625,7 @@ const animate = (
       cancelAnimationFrame(frame);
       watcher.disconnect();
       window.removeEventListener("pointermove", onPointer);
+      motion.removeEventListener("change", onMotion);
       scheme.removeEventListener("change", repaint);
       themes.disconnect();
       host.removeEventListener("pointerenter", onEnter);
