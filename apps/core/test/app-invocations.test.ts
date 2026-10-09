@@ -1322,14 +1322,14 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     await host.call(caller, "ran", []);
     const first = gate();
     const second = gate();
-    // The deadlines' timers are held, and let go in the App's object,
-    // whose timers they are.
+    // The deadlines' timers, and the clock, are held, and moved on in the
+    // App's object, whose timers they are.
     const advance = async (ms: number) => {
       await runInDurableObject(host, async () => {
         await vi.advanceTimersByTimeAsync(ms);
       });
     };
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     let waited: string;
     let meanwhile: string;
     try {
