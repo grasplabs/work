@@ -18,6 +18,17 @@ export const agentErrors = defineErrorFamily({
     "This chat is too long to go on. Start a new chat to ask more.",
   "agent.run_ended":
     "This code run has ended, so its APIs don't answer any more.",
+  "agent.project_not_found": "There's no such project.",
+  "agent.invalid_project":
+    "A project's name is 1 to 100 characters, and its goal at most 4,000.",
+  "agent.too_many_projects":
+    "You have 100 projects, the most a person keeps. Delete one to make another.",
+  "agent.invalid_project_document":
+    "A project document is a .md, .txt, .csv or .json file of at most 100 KB, named once in its project.",
+  "agent.too_many_project_documents":
+    "A project has at most 10 documents. Remove one to add another.",
+  "agent.project_document_not_found":
+    "There's no such document in the project.",
   "agent.run_calls_spent":
     "This code run has made all the API calls one run may. Run the rest in another code step.",
 });

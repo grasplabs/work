@@ -11,11 +11,19 @@ import type {
   AuditDetailValue,
   AuditEntry,
 } from "@grasp-os/shared/audit";
+import {
+  projectDocumentMaxBytes,
+  projectDocumentsMax,
+  projectsMax,
+} from "@grasp-os/shared/chat";
 import type {
   ChatDraft,
   ChatMessage,
+  ChatProject,
   ChatProvenance,
   ChatSummary,
+  ProjectDocument,
+  ProjectDocumentInput,
 } from "@grasp-os/shared/chat";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import {
@@ -71,6 +79,8 @@ import {
   chatDraftFiles,
   chatDrafts,
   chatMessages,
+  chatProjectDocuments,
+  chatProjects,
   chatSources,
   chats,
 } from "./db/workspace/schema.ts";
@@ -84,6 +94,34 @@ import { Previews } from "./preview.ts";
 import type { WorkContext } from "./restricted.ts";
 
 export type Chat = typeof chats.$inferSelect;
+
+/**
+ * The project a chat is in, as its agent's code reads it
+ * (`env.chat.project()`): the person's goal and documents, whole. The code
+ * returns the model what it needs of them, and no more of that reaches the
+ * model than any code step's result (`codeLimits.outputChars`), so the
+ * documents never crowd its window, whatever its size.
+ */
+export interface ProjectForAgent {
+  name: string;
+  goal: string;
+  documents: { name: string; content: string }[];
+}
+
+/** A project's ID, as core makes them. */
+const projectIdSchema = z.uuid();
+
+/** A project document's ID, as core makes them. */
+const projectDocumentIdSchema = z.uuid();
+
+/** A project's audited actions, on the project. */
+type ProjectAction =
+  | "chat.project.created"
+  | "chat.project.renamed"
+  | "chat.project.goal_set"
+  | "chat.project.document_added"
+  | "chat.project.document_removed"
+  | "chat.project.deleted";
 
 /**
  * A chat's draft of an App (agent-builds.ts): the version it started
@@ -441,13 +479,17 @@ export class Workspace extends DurableObject<Env> {
    * with what the report may hold data from as its sources; restricted
    * from the start, audited so, when the run's App is. All in the same
    * transaction: no turn can read the report before the chat carries it.
+   *
+   * Made in project `projectId`, it is in it from the start: only one of
+   * `personId`'s own, refused as if there were none otherwise.
    */
   createChat(
     title: string,
     personId: string,
     agentId: string,
     by?: AuditActor,
-    fix?: RunToFix
+    fix?: RunToFix,
+    projectId?: string
   ): Chat {
     const agent = workspaceAgentIdSchema.safeParse(agentId);
     if (!agent.success) {
@@ -462,10 +504,17 @@ export class Workspace extends DurableObject<Env> {
     if ((kept?.count ?? 0) >= maxChatsPerPerson) {
       throw agentErrors.create("agent.too_many_chats");
     }
+    const project =
+      projectId === undefined ? null : this.#ownProject(projectId, personId).id;
     const id = chatIdSchema.parse(crypto.randomUUID());
     const chat = this.ctx.storage.transactionSync(() => {
       if (by !== undefined) {
-        this.#outboxed(by, "chat.created", id);
+        this.#outboxed(
+          by,
+          "chat.created",
+          id,
+          project === null ? {} : { project }
+        );
       }
       const made = this.#db
         .insert(chats)
@@ -476,6 +525,7 @@ export class Workspace extends DurableObject<Env> {
           personId,
           agentId: agent.data,
           restricted: fix?.restricted === true,
+          projectId: project,
         })
         .returning()
         .get();
@@ -576,7 +626,7 @@ export class Workspace extends DurableObject<Env> {
    */
   #outboxed(
     by: AuditActor,
-    action: "chat.created" | "chat.renamed" | "chat.deleted",
+    action: "chat.created" | "chat.renamed" | "chat.deleted" | "chat.moved",
     chatId: ChatId,
     detail: Record<string, AuditDetailValue> = {}
   ): void {
@@ -879,7 +929,9 @@ export class Workspace extends DurableObject<Env> {
   /**
    * What the model reads this turn besides the question: the memory of the
    * person's own chat (the company's files and their USER.md, read now and
-   * recorded as sources), and the skills in the chat's Knowledge catalog.
+   * recorded as sources), the skills in the chat's Knowledge catalog, and
+   * whether the chat is in a project (whose goal and documents its code
+   * reads, `chatProject`).
    */
   async #turnContext(
     scope: Parameters<typeof auditAgentCall>[1],
@@ -916,7 +968,8 @@ export class Workspace extends DurableObject<Env> {
         turn: true,
       },
     });
-    return { memory, skills };
+    const inProject = this.#chat(work.chatId).projectId !== null;
+    return { memory, skills, inProject };
   }
 
   /** Marks a code run ended, and forgets the oldest ended runs past the cap. */
@@ -1033,17 +1086,23 @@ export class Workspace extends DurableObject<Env> {
   /** `personId`'s chats, newest first: at most {@link listedChats}. */
   chats(personId: string): ChatSummary[] {
     return this.#db
-      .select({ id: chats.id, title: chats.title, createdAt: chats.createdAt })
+      .select({
+        id: chats.id,
+        title: chats.title,
+        createdAt: chats.createdAt,
+        projectId: chats.projectId,
+      })
       .from(chats)
       .where(eq(chats.personId, personId))
       .orderBy(desc(chats.createdAt))
       .limit(listedChats)
       .all()
-      .map(({ id, title, createdAt }) => ({
+      .map(({ id, title, createdAt, projectId }) => ({
         id,
         title,
         createdAt: createdAt.toISOString(),
         running: this.#turns.has(id),
+        projectId,
       }));
   }
 
@@ -1060,6 +1119,341 @@ export class Workspace extends DurableObject<Env> {
       this.#outboxed(by, "chat.renamed", id);
     });
     this.#deliverAudit();
+  }
+
+  // Projects: a person's groups of chats, each with a goal and documents
+  // its chats' agents read as data (`chatProject`). Only the person
+  // reaches theirs (chats-rpc.ts checks the input; the limits that depend
+  // on what is stored are checked here, in the same transaction as the
+  // change). Each change is audited, naming the project, never its name,
+  // goal or documents, which are the person's words.
+
+  /** `personId`'s projects, newest first, each with its documents. */
+  projects(personId: string): ChatProject[] {
+    const projects = this.#db
+      .select()
+      .from(chatProjects)
+      .where(eq(chatProjects.personId, personId))
+      .orderBy(desc(chatProjects.createdAt))
+      .all();
+    const documents = this.#db
+      .select({
+        id: chatProjectDocuments.id,
+        projectId: chatProjectDocuments.projectId,
+        name: chatProjectDocuments.name,
+        bytes: chatProjectDocuments.bytes,
+        createdAt: chatProjectDocuments.createdAt,
+      })
+      .from(chatProjectDocuments)
+      .innerJoin(
+        chatProjects,
+        eq(chatProjects.id, chatProjectDocuments.projectId)
+      )
+      .where(eq(chatProjects.personId, personId))
+      .orderBy(
+        asc(chatProjectDocuments.createdAt),
+        asc(chatProjectDocuments.id)
+      )
+      .all();
+    return projects.map(({ id, name, goal, createdAt }) => ({
+      id,
+      name,
+      goal,
+      createdAt: createdAt.toISOString(),
+      documents: documents
+        .filter((document) => document.projectId === id)
+        .map((document) => ({
+          id: document.id,
+          name: document.name,
+          bytes: document.bytes,
+          createdAt: document.createdAt.toISOString(),
+        })),
+    }));
+  }
+
+  /** A new project of `personId`'s; refused past {@link projectsMax}. */
+  createProject(personId: string, name: string, by: AuditActor): ChatProject {
+    const project = this.ctx.storage.transactionSync(() => {
+      const [kept] = this.#db
+        .select({ count: count() })
+        .from(chatProjects)
+        .where(eq(chatProjects.personId, personId))
+        .all();
+      if ((kept?.count ?? 0) >= projectsMax) {
+        throw agentErrors.create("agent.too_many_projects");
+      }
+      const made = this.#db
+        .insert(chatProjects)
+        .values({
+          id: crypto.randomUUID(),
+          personId,
+          name,
+          goal: "",
+          createdAt: new Date(),
+        })
+        .returning()
+        .get();
+      this.#outboxedProject(by, "chat.project.created", made.id);
+      return made;
+    });
+    this.#deliverAudit();
+    return {
+      id: project.id,
+      name: project.name,
+      goal: project.goal,
+      createdAt: project.createdAt.toISOString(),
+      documents: [],
+    };
+  }
+
+  /** Renames `personId`'s own project. */
+  renameProject(
+    projectId: unknown,
+    personId: string,
+    name: string,
+    by: AuditActor
+  ): void {
+    const { id } = this.#ownProject(projectId, personId);
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(chatProjects)
+        .set({ name })
+        .where(eq(chatProjects.id, id))
+        .run();
+      this.#outboxedProject(by, "chat.project.renamed", id);
+    });
+    this.#deliverAudit();
+  }
+
+  /** Sets the goal of `personId`'s own project; empty clears it. */
+  setProjectGoal(
+    projectId: unknown,
+    personId: string,
+    goal: string,
+    by: AuditActor
+  ): void {
+    const { id } = this.#ownProject(projectId, personId);
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(chatProjects)
+        .set({ goal })
+        .where(eq(chatProjects.id, id))
+        .run();
+      this.#outboxedProject(by, "chat.project.goal_set", id, {
+        chars: goal.length,
+      });
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * Adds a document to `personId`'s own project: refused past
+   * {@link projectDocumentsMax}, over {@link projectDocumentMaxBytes}, or
+   * named as one it has.
+   */
+  addProjectDocument(
+    projectId: unknown,
+    personId: string,
+    { name, content }: ProjectDocumentInput,
+    by: AuditActor
+  ): ProjectDocument {
+    const { id } = this.#ownProject(projectId, personId);
+    const bytes = new TextEncoder().encode(content).byteLength;
+    if (bytes > projectDocumentMaxBytes) {
+      throw agentErrors.create("agent.invalid_project_document");
+    }
+    const document = this.ctx.storage.transactionSync(() => {
+      const kept = this.#db
+        .select({ name: chatProjectDocuments.name })
+        .from(chatProjectDocuments)
+        .where(eq(chatProjectDocuments.projectId, id))
+        .all();
+      if (kept.length >= projectDocumentsMax) {
+        throw agentErrors.create("agent.too_many_project_documents");
+      }
+      if (kept.some((each) => each.name === name)) {
+        throw agentErrors.create("agent.invalid_project_document");
+      }
+      const added = this.#db
+        .insert(chatProjectDocuments)
+        .values({
+          id: crypto.randomUUID(),
+          projectId: id,
+          name,
+          content,
+          bytes,
+          createdAt: new Date(),
+        })
+        .returning({
+          id: chatProjectDocuments.id,
+          createdAt: chatProjectDocuments.createdAt,
+        })
+        .get();
+      this.#outboxedProject(by, "chat.project.document_added", id, {
+        document: added.id,
+        bytes,
+      });
+      return added;
+    });
+    this.#deliverAudit();
+    return {
+      id: document.id,
+      name,
+      bytes,
+      createdAt: document.createdAt.toISOString(),
+    };
+  }
+
+  /** Removes a document from `personId`'s own project. */
+  removeProjectDocument(
+    projectId: unknown,
+    personId: string,
+    documentId: unknown,
+    by: AuditActor
+  ): void {
+    const { id } = this.#ownProject(projectId, personId);
+    const document = projectDocumentIdSchema.safeParse(documentId);
+    this.ctx.storage.transactionSync(() => {
+      const removed = document.success
+        ? this.#db
+            .delete(chatProjectDocuments)
+            .where(
+              and(
+                eq(chatProjectDocuments.id, document.data),
+                eq(chatProjectDocuments.projectId, id)
+              )
+            )
+            .returning({ id: chatProjectDocuments.id })
+            .get()
+        : undefined;
+      if (removed === undefined) {
+        throw agentErrors.create("agent.project_document_not_found");
+      }
+      this.#outboxedProject(by, "chat.project.document_removed", id, {
+        document: removed.id,
+      });
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * Deletes `personId`'s own project and its documents. Its chats stay,
+   * out of any project: their agents read none from their next turn.
+   */
+  deleteProject(projectId: unknown, personId: string, by: AuditActor): void {
+    const { id } = this.#ownProject(projectId, personId);
+    this.ctx.storage.transactionSync(() => {
+      const moved = this.#db
+        .update(chats)
+        .set({ projectId: null })
+        .where(eq(chats.projectId, id))
+        .returning({ id: chats.id })
+        .all();
+      this.#db
+        .delete(chatProjectDocuments)
+        .where(eq(chatProjectDocuments.projectId, id))
+        .run();
+      this.#db.delete(chatProjects).where(eq(chatProjects.id, id)).run();
+      this.#outboxedProject(by, "chat.project.deleted", id, {
+        chats: moved.length,
+      });
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * Moves `personId`'s own chat into their own project `projectId`, or out
+   * of any with `null`.
+   */
+  moveChat(
+    chatId: unknown,
+    personId: string,
+    projectId: unknown,
+    by: AuditActor
+  ): void {
+    const { id } = this.#ownChat(chatId, personId);
+    const project =
+      projectId === null ? null : this.#ownProject(projectId, personId).id;
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .update(chats)
+        .set({ projectId: project })
+        .where(eq(chats.id, id))
+        .run();
+      this.#outboxed(by, "chat.moved", id, { project });
+    });
+    this.#deliverAudit();
+  }
+
+  /**
+   * The project chat `chatId` is in, for its agent (`env.chat.project()`
+   * in agent-apis.ts), or `null` for none: its goal, and its documents in
+   * the order they were added. Core's own read: the agent's code reaches
+   * only its own chat's.
+   */
+  chatProject(chatId: ChatId): ProjectForAgent | null {
+    const chat = this.#chat(chatId);
+    if (chat.projectId === null) {
+      return null;
+    }
+    const project = this.#db
+      .select()
+      .from(chatProjects)
+      .where(eq(chatProjects.id, chat.projectId))
+      .get();
+    if (project === undefined) {
+      return null;
+    }
+    const documents = this.#db
+      .select({
+        name: chatProjectDocuments.name,
+        content: chatProjectDocuments.content,
+      })
+      .from(chatProjectDocuments)
+      .where(eq(chatProjectDocuments.projectId, project.id))
+      .orderBy(
+        asc(chatProjectDocuments.createdAt),
+        asc(chatProjectDocuments.id)
+      )
+      .all();
+    return { name: project.name, goal: project.goal, documents };
+  }
+
+  /**
+   * The project, if it is `personId`'s; anyone else's is refused as if
+   * there were none.
+   */
+  #ownProject(
+    projectId: unknown,
+    personId: string
+  ): typeof chatProjects.$inferSelect {
+    const id = projectIdSchema.safeParse(projectId);
+    const project = id.success
+      ? this.#db
+          .select()
+          .from(chatProjects)
+          .where(eq(chatProjects.id, id.data))
+          .get()
+      : undefined;
+    if (project === undefined || project.personId !== personId) {
+      throw agentErrors.create("agent.project_not_found");
+    }
+    return project;
+  }
+
+  /** Stores the audit event of a change to project `projectId`, as `#outboxed`. */
+  #outboxedProject(
+    by: AuditActor,
+    action: ProjectAction,
+    projectId: string,
+    detail: Record<string, AuditDetailValue> = {}
+  ): void {
+    this.#outboxEntry({
+      actor: by,
+      action,
+      target: { type: "chat_project", id: projectId },
+      detail: { workspace: this.ctx.id.name ?? null, ...detail },
+    });
   }
 
   /**
