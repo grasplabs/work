@@ -117,6 +117,10 @@ msgstr "{count, plural, one {# cambio espera a que lo confirmes o lo rechaces.} 
 msgid "{count, plural, one {# file} other {# files}}"
 msgstr "{count, plural, one {# archivo} other {# archivos}}"
 
+#: src/dashboard/widget-board.tsx
+msgid "{count, plural, one {# more engine with no workflows to show} other {# more engines with no workflows to show}}"
+msgstr "{count, plural, one {# motor más sin flujos de trabajo que mostrar} other {# motores más sin flujos de trabajo que mostrar}}"
+
 #: src/knowledge/timeline.tsx
 msgid "{count, plural, one {# version} other {# versions}}"
 msgstr "{count, plural, one {# versión} other {# versiones}}"
@@ -2441,7 +2445,6 @@ msgstr "Ningún flujo de trabajo requiere atención: nada espera una decisión y
 msgid "No workflows to test."
 msgstr "No hay flujos de trabajo que probar."
 
-#: src/dashboard/widget-board.tsx
 #: src/routes/_shell.engines.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "No workflows yet"
