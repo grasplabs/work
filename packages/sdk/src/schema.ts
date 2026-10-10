@@ -32,13 +32,13 @@ import type { Infer, ValueShape } from "./values.ts";
  * can read them but never write, patch or unset them; an authored field
  * can't take their names (none starts with `_`).
  */
-export const managedFields = [
+export const managedFields = Object.freeze([
   "_id",
   "_ownerId",
   "_rev",
   "_createdAt",
   "_updatedAt",
-] as const;
+] as const);
 
 /** The managed fields an index may name: the commit times. */
 export type IndexableManagedField = "_createdAt" | "_updatedAt";
@@ -53,7 +53,7 @@ const indexableManaged: ReadonlySet<unknown> = new Set<IndexableManagedField>([
  * host's own until the runtime policy module sets validated quotas per
  * deployment, which may only lower them.
  */
-export const schemaLimits = {
+export const schemaLimits = Object.freeze({
   /** Tables in one schema: as many as a store holds. */
   tables: storeMaxTables,
   /** Code units in a table, field or index name. */
@@ -62,7 +62,7 @@ export const schemaLimits = {
   indexesPerTable: 32,
   /** Fields in one index. */
   fieldsPerIndex: 16,
-} as const;
+} as const);
 
 /**
  * The keys of a query filter's logic (`AND`, `OR`, `NOT`): never a field,
@@ -194,24 +194,31 @@ type ReservedFieldNames<Fields> = {
   [Key in keyof Fields]: IsReservedFieldName<Key> extends true ? Key : never;
 }[keyof Fields];
 
-/** How deep `ReferencedIn` looks into a value for record IDs. */
+/** Levels of a value `ReferencedIn` has gone into. */
 type Depth = readonly unknown[];
 
-/** The tables the record IDs within a value name. */
-type ReferencedIn<Value, Seen extends Depth = []> = Seen["length"] extends 8
+/**
+ * The tables the record IDs within a value name. A record ID is a branded
+ * string (`Id`), so an object that merely has a `__tableName` field isn't
+ * one. It looks as deep as a value can nest (`valueLimits.depth`), so no
+ * definable `v.id` is out of its sight.
+ */
+type ReferencedIn<Value, Seen extends Depth = []> = Seen["length"] extends 32
   ? never
-  : Value extends { readonly __tableName: infer TableName }
+  : Value extends string & { readonly __tableName: infer TableName }
     ? TableName
-    : Value extends readonly (infer Item)[]
-      ? ReferencedIn<Item, [...Seen, unknown]>
-      : Value extends object
-        ? {
-            [Key in keyof Value]-?: ReferencedIn<
-              Value[Key],
-              [...Seen, unknown]
-            >;
-          }[keyof Value]
-        : never;
+    : Value extends string | number | boolean | null | undefined
+      ? never
+      : Value extends readonly (infer Item)[]
+        ? ReferencedIn<Item, [...Seen, unknown]>
+        : Value extends object
+          ? {
+              [Key in keyof Value]-?: ReferencedIn<
+                Value[Key],
+                [...Seen, unknown]
+              >;
+            }[keyof Value]
+          : never;
 
 /** The tables the record IDs in a schema's fields name. */
 type ReferencedTables<Tables> = {
@@ -540,6 +547,14 @@ export const defineSchema = <
   }
   const copy = snapshot<unknown>(tables);
   const names = Object.keys(copy);
+  // Again on the copy, which is what is kept: a proxy can list other keys
+  // the second time it is asked.
+  if (names.length > schemaLimits.tables) {
+    refuse(
+      "schema.too_large",
+      `A schema has at most ${schemaLimits.tables} tables.`
+    );
+  }
   const states: Record<string, TableState> = {};
   for (const name of names) {
     checkedName(name, "table");

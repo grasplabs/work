@@ -70,3 +70,49 @@ defineTable({ order: v.boolean(), notes: v.string() });
 defineSchema({ notes: defineTable({ author: v.id("people") }) });
 // @ts-expect-error -- not even nested in an array
 defineSchema({ notes: defineTable({ watchers: v.array(v.id("people")) }) });
+
+// A record ID deeper than the eight levels this check once stopped at is
+// still checked. (It looks as deep as a value may nest; how deep the
+// value types themselves stay practical to infer is `v`'s own bound.)
+const nested = v.object({
+  a: v.object({
+    a: v.object({
+      a: v.object({
+        a: v.object({
+          a: v.object({
+            a: v.object({
+              a: v.object({
+                a: v.object({ a: v.object({ a: v.id("missing") }) }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  }),
+});
+// @ts-expect-error -- this schema has no `missing` table, however deep
+defineSchema({ notes: defineTable({ nested }) });
+const nestedKnown = v.object({
+  a: v.object({
+    a: v.object({
+      a: v.object({
+        a: v.object({
+          a: v.object({
+            a: v.object({
+              a: v.object({
+                a: v.object({ a: v.object({ a: v.id("notes") }) }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  }),
+});
+defineSchema({ notes: defineTable({ nestedKnown }) });
+
+// An object with a field named `__tableName` isn't a record ID.
+defineSchema({
+  notes: defineTable({ meta: v.object({ __tableName: v.string() }) }),
+});

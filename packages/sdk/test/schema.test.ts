@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 
-import { schemaLimits } from "../src/host.ts";
+import { managedFields, schemaLimits } from "../src/host.ts";
 import type { IndexDefinition } from "../src/schema.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
 
@@ -288,6 +288,41 @@ describe("schemas", () => {
     });
     expect(reads).toBe(1);
     expect(schema).toMatchObject({ tables: { notes: real } });
+  });
+
+  test("a table count is checked on the copy kept, not only on the map passed", () => {
+    const table = defineTable({ title: v.string() });
+    let asked = 0;
+    // Lists one table when counted, then more than a schema may hold.
+    const shifting = new Proxy(
+      {},
+      {
+        ownKeys: () => {
+          asked += 1;
+          return Array.from(
+            { length: asked === 1 ? 1 : schemaLimits.tables + 6 },
+            (_, n) => `t${n}`
+          );
+        },
+        getOwnPropertyDescriptor: () => ({
+          configurable: true,
+          enumerable: true,
+          value: table,
+        }),
+        get: () => table,
+      }
+    );
+    expect(codeOf(() => schemaOf(shifting))).toBe("schema.too_large");
+  });
+
+  test("the shared declaration rules can't be changed", () => {
+    expect(Object.isFrozen(schemaLimits)).toBeTruthy();
+    expect(Object.isFrozen(managedFields)).toBeTruthy();
+    expect(() => {
+      Reflect.set(schemaLimits, "tables", 1000);
+      Reflect.set(managedFields, 0, "_secret");
+    }).not.toThrow();
+    expect([schemaLimits.tables, managedFields[0]]).toStrictEqual([64, "_id"]);
   });
 
   test("a table is one `defineTable` made, never a lookalike", () => {
