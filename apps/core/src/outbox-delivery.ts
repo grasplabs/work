@@ -39,6 +39,21 @@ export type OutboxConsumers = Partial<
   Record<SubmissionIntentKind, OutboxConsumer>
 >;
 
+/**
+ * The consumer `consumers` has for `kind`: only an own property that is a
+ * function, so neither an inherited member nor a key set to undefined
+ * (a map built from an optional lookup) counts. Each outbox stages and
+ * drains by it, so nothing is staged that its drain would find no
+ * consumer for.
+ */
+export const consumerFor = (
+  consumers: OutboxConsumers,
+  kind: SubmissionIntentKind
+): OutboxConsumer | undefined => {
+  const consumer = Object.hasOwn(consumers, kind) ? consumers[kind] : undefined;
+  return typeof consumer === "function" ? consumer : undefined;
+};
+
 /** The consumers of this deployment's outbox: none yet. */
 export const outboxConsumers: OutboxConsumers = {};
 
@@ -79,7 +94,7 @@ export const backoffMs = (attempts: number): number =>
   Math.min(maxBackoffMs, 30_000 * 2 ** Math.min(attempts - 1, 20));
 
 /** What a hand-over came to. */
-type Handed =
+export type Handed =
   | { settled: "delivered" | { undeliverable: string } }
   | { failed: unknown };
 

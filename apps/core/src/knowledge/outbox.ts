@@ -6,17 +6,21 @@ import type {
 import { and, asc, eq, isNull, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { inList } from "../db/d1.ts";
 import { submissionOutbox } from "../db/knowledge/schema.ts";
 import {
   backoffMs,
+  consumerFor,
   defaultBudgetMs,
   defaultMaxAttempts,
   defaultTimeoutMs,
   handOver,
   outboxConsumers,
 } from "../outbox-delivery.ts";
-import type { DrainOptions, OutboxConsumers } from "../outbox-delivery.ts";
+import type {
+  DrainOptions,
+  Handed,
+  OutboxConsumers,
+} from "../outbox-delivery.ts";
 
 // The outbox of committed submissions (receipts.ts): what each still has
 // to tell others, written in the same batch as its change, so it is owed
@@ -42,8 +46,15 @@ import type { DrainOptions, OutboxConsumers } from "../outbox-delivery.ts";
 //   drain started, so the lease covers its own hand-over; the budget is
 //   checked before each entry.
 // - An entry nobody takes is settled away unread: a kind with no consumer
-//   can't be staged (receipts.ts, `claim`), and a drain leaves an entry
-//   whose consumer is gone untouched.
+//   can't be staged (receipts.ts, `claim`).
+// - An entry's consumer goes in a later release: its receipt is kept while
+//   the entry is owed, so it would be kept forever. A drain counts a
+//   missing consumer as a failed hand-over, backing off like any other,
+//   and past `maxAttempts` settles the entry as `outbox.no_consumer`, owed
+//   to nobody, so the sweep expires its receipt. Not at once: under
+//   version skew (a release adds a consumer and commits its entries, then
+//   a rollback or the previous release runs the drain) settling at once
+//   would drop entries the next release takes.
 //
 // Who consumes what comes with each kind's delivery: invalidations with
 // live queries, workflow notifications (GRA-372) and starts (GRA-376).
@@ -106,7 +117,9 @@ interface Drain {
  * back for later when the hand-over failed (settled as
  * `outbox.attempts_exhausted` past the drain's `maxAttempts`), only while
  * the drain still holds that lease. An entry whose kind has no consumer
- * is left as it is.
+ * here counts as a failed hand-over, so a rollback that lacks a newer
+ * release's consumer only delays its entries; past `maxAttempts` it is
+ * settled as `outbox.no_consumer`.
  */
 const handOne = async (env: Env, drain: Drain, id: string): Promise<void> => {
   const db = drizzle(env.KNOWLEDGE);
@@ -114,22 +127,24 @@ const handOne = async (env: Env, drain: Drain, id: string): Promise<void> => {
   // The lease outlasts the hand-over, with room for the writes around it.
   const until = new Date(leasedAt.getTime() + drain.timeoutMs * 2);
   const leased = await lease(env, id, leasedAt, until);
-  const consumer =
-    leased === undefined ? undefined : drain.consumers[leased.kind];
-  if (leased === undefined || consumer === undefined) {
+  if (leased === undefined) {
     return;
   }
-  const { attempts } = leased;
-  const handed = await handOver(
-    consumer,
-    { id, intent: intentOf(leased.intent), attempts },
-    drain.timeoutMs
-  );
   const held = and(
     eq(submissionOutbox.id, id),
     isNull(submissionOutbox.settledAt),
     eq(submissionOutbox.nextAttemptAt, until)
   );
+  const consumer = consumerFor(drain.consumers, leased.kind);
+  const { attempts } = leased;
+  const handed: Handed =
+    consumer === undefined
+      ? { failed: new Error(`Nothing here takes ${leased.kind}.`) }
+      : await handOver(
+          consumer,
+          { id, intent: intentOf(leased.intent), attempts },
+          drain.timeoutMs
+        );
   const handedAt = drain.clock();
   if ("settled" in handed) {
     await db
@@ -155,7 +170,10 @@ const handOne = async (env: Env, drain: Drain, id: string): Promise<void> => {
         ? {
             attempts: failed,
             settledAt: handedAt,
-            undeliverable: "outbox.attempts_exhausted",
+            undeliverable:
+              consumer === undefined
+                ? "outbox.no_consumer"
+                : "outbox.attempts_exhausted",
           }
         : {
             attempts: failed,
@@ -182,8 +200,7 @@ const drainOnePage = async (
     .where(
       and(
         isNull(submissionOutbox.settledAt),
-        lte(submissionOutbox.nextAttemptAt, drain.clock()),
-        inList(submissionOutbox.kind, Object.keys(drain.consumers))
+        lte(submissionOutbox.nextAttemptAt, drain.clock())
       )
     )
     .orderBy(asc(sql`rowid`))
@@ -216,9 +233,6 @@ export const drainSubmissionOutbox = async (
     maxAttempts = defaultMaxAttempts,
   }: DrainOptions = {}
 ): Promise<void> => {
-  if (Object.keys(consumers).length === 0) {
-    return;
-  }
   const started = Date.now();
   const drain: Drain = {
     consumers,
