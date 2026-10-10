@@ -135,6 +135,52 @@ const bounds = (
   };
 };
 
+/**
+ * Length bounds without a minimum of 0, which every length meets: so
+ * `.min(0)` and no minimum are one descriptor.
+ */
+const withoutZeroMin = ({
+  min,
+  max,
+}: {
+  min?: number;
+  max?: number;
+}): { min?: number; max?: number } => ({
+  ...(min === undefined || min === 0 ? {} : { min }),
+  ...(max === undefined ? {} : { max }),
+});
+
+/**
+ * An integer's bounds as the integers they let through: rounded inwards
+ * (`.min(1.5)` is `.min(2)`), and dropped past the safe integers, which
+ * every safe integer is within anyway. So bounds that mean the same are
+ * one descriptor.
+ */
+const integerBounds = ({
+  min,
+  max,
+}: {
+  min?: number;
+  max?: number;
+}): { min?: number; max?: number } => {
+  const low = min === undefined ? undefined : Math.ceil(min);
+  const high = max === undefined ? undefined : Math.floor(max);
+  if (low !== undefined && high !== undefined && low > high) {
+    return refuse(
+      "definition.contradictory_bounds",
+      "No whole number is between `min` and `max`."
+    );
+  }
+  return {
+    ...(low === undefined || low <= Number.MIN_SAFE_INTEGER
+      ? {}
+      : { min: low }),
+    ...(high === undefined || high >= Number.MAX_SAFE_INTEGER
+      ? {}
+      : { max: high }),
+  };
+};
+
 /** A length: of a string in code units, of an array in elements. */
 const isLength = (limit: number): boolean =>
   Number.isSafeInteger(limit) && limit >= 0;
@@ -271,17 +317,20 @@ const kindBody = (draft: DescriptorDraft): Body => {
           kind,
           trim: flag(draft, "trim"),
           email: flag(draft, "email"),
-          ...bounds(draft, isLength),
+          ...withoutZeroMin(bounds(draft, isLength)),
         },
       };
     }
     case "number": {
+      const integer = flag(draft, "integer");
       return {
         children: [],
         kind: {
           kind,
-          integer: flag(draft, "integer"),
-          ...bounds(draft, Number.isFinite),
+          integer,
+          ...(integer
+            ? integerBounds(bounds(draft, Number.isFinite))
+            : bounds(draft, Number.isFinite)),
         },
       };
     }
@@ -311,7 +360,11 @@ const kindBody = (draft: DescriptorDraft): Body => {
       const item = requiredChild(draft.item);
       return {
         children: [item],
-        kind: { kind, item: item.descriptor, ...bounds(draft, isLength) },
+        kind: {
+          kind,
+          item: item.descriptor,
+          ...withoutZeroMin(bounds(draft, isLength)),
+        },
       };
     }
     case "union": {
@@ -330,6 +383,59 @@ const kindBody = (draft: DescriptorDraft): Body => {
           );
     }
   }
+};
+
+/** Whether a member of a union lets through only null. */
+const isNullOnly = (descriptor: ValueDescriptor): boolean =>
+  descriptor.kind === "null" ||
+  (descriptor.kind === "literal" && descriptor.value === null);
+
+/**
+ * The one form of a union that means the same as a simpler draft, or
+ * undefined if it has none. Its null members become its being nullable
+ * (`v.union(T, v.null())` is `T.nullable()`), and a union left with one
+ * member is that member, with the union's presence, default and
+ * nullability. A union too long or with members that aren't schemas is
+ * left as it is, for `unionBody` to refuse.
+ */
+const collapsedUnion = (
+  draft: DescriptorDraft
+): DescriptorDraft | undefined => {
+  const { members } = draft;
+  if (
+    draft.kind !== "union" ||
+    !Array.isArray(members) ||
+    members.length === 0 ||
+    members.length > valueLimits.unionMembers
+  ) {
+    return undefined;
+  }
+  const children = members.map(requiredChild);
+  const others = children.filter((child) => !isNullOnly(child.descriptor));
+  const [only] = others;
+  const hasNull = others.length < children.length;
+  if (!hasNull && others.length > 1) {
+    return undefined;
+  }
+  const nullable = hasNull || flag(draft, "nullable");
+  const presence =
+    draft.presence === "default"
+      ? { presence: "default", defaultValue: draft.defaultValue }
+      : { presence: draft.presence };
+  if (only === undefined) {
+    return { descriptorVersion, kind: "null", nullable: false, ...presence };
+  }
+  return others.length === 1
+    ? {
+        ...only.descriptor,
+        nullable: nullable || only.descriptor.nullable,
+        ...presence,
+      }
+    : {
+        ...draft,
+        members: others.map((child) => child.descriptor),
+        nullable,
+      };
 };
 
 const presences: ReadonlySet<unknown> = new Set<Presence>([
@@ -396,9 +502,15 @@ export const seal = (draft: DescriptorDraft): ValueDescriptor => {
       "`presence` is required, optional or default."
     );
   }
+  const collapsed = collapsedUnion(draft);
+  if (collapsed !== undefined) {
+    return seal(collapsed);
+  }
+  const nullable = flag(draft, "nullable");
   const base = {
     descriptorVersion,
-    nullable: flag(draft, "nullable"),
+    // Null alone is null whether or not it is also nullable.
+    nullable: draft.kind !== "null" && nullable,
     presence,
   } as const;
   const body = kindBody(draft);

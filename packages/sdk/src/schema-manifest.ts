@@ -1,6 +1,7 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { storeNamePattern } from "@grasp-os/shared/store-limits";
 
 import {
   defineSchema,
@@ -105,6 +106,19 @@ export interface SchemaManifest {
   readonly tables: Readonly<Record<string, ManifestTable>>;
 }
 
+const encoder = new TextEncoder();
+
+/** The bytes of `text` as UTF-8. */
+const byteLength = (text: string): number => encoder.encode(text).byteLength;
+
+/**
+ * Whether `text` is more than `max` bytes as UTF-8. A code unit is at most
+ * three bytes, so only text that could be over is encoded; text longer
+ * than `max` code units is over whatever it holds.
+ */
+const isOverBytes = (text: string, max: number): boolean =>
+  text.length > max || (text.length * 3 > max && byteLength(text) > max);
+
 // Typed where it is declared: only then does a call narrow what follows it.
 const refuse: (code: SchemaDefinitionCode, message: string) => never = (
   code,
@@ -134,6 +148,22 @@ const mapOf = <Value>(
   return map;
 };
 
+/** A value of a map, only if the map has it as its own: never its prototype's. */
+const ownValue = (
+  map: Readonly<Record<string, unknown>>,
+  key: string
+): unknown => (Object.hasOwn(map, key) ? map[key] : undefined);
+
+/**
+ * A name a manifest gave, as a message may quote it: only once it is a
+ * valid name, so a refusal never repeats an unbounded piece of what was
+ * submitted.
+ */
+const quoted = (name: string, what: string): string =>
+  name.length <= schemaLimits.nameLength && storeNamePattern.test(name)
+    ? `${what} \`${name}\``
+    : `${what} with an invalid name`;
+
 const isAccessMode = (value: unknown): value is AccessMode =>
   accessModes.has(value);
 
@@ -142,16 +172,15 @@ const tableAccessOf = (table: string, declared: unknown): ManifestAccess => {
   if (declared === undefined) {
     return { read: "none", write: "none" };
   }
-  const { read = "none", write = "none" } = isPlainObject(declared)
-    ? declared
-    : {};
-  const known = isPlainObject(declared)
-    ? Object.keys(declared).every((key) => key === "read" || key === "write")
-    : false;
-  if (!(known && isAccessMode(read) && isAccessMode(write))) {
+  const known =
+    isPlainObject(declared) &&
+    Object.keys(declared).every((key) => key === "read" || key === "write");
+  const read = known ? (ownValue(declared, "read") ?? "none") : undefined;
+  const write = known ? (ownValue(declared, "write") ?? "none") : undefined;
+  if (!(isAccessMode(read) && isAccessMode(write))) {
     return refuse(
       "schema.invalid_access",
-      `Table \`${table}\`'s access is \`read\` and \`write\`, each \`owner\`, \`appMembers\`, \`appBuilders\` or \`none\`.`
+      `${quoted(table, "Table")}'s access is \`read\` and \`write\`, each \`owner\`, \`appMembers\`, \`appBuilders\` or \`none\`.`
     );
   }
   return { read, write };
@@ -178,16 +207,29 @@ const accessOf = (
     if (!Object.hasOwn(tables, table)) {
       refuse(
         "schema.unknown_table",
-        `Access names table \`${table}\`, which the schema doesn't have.`
+        `Access names a table the schema doesn't have: ${quoted(table, "table")}.`
       );
     }
   }
   return mapOf(
     Object.keys(tables).map((table) => [
       table,
-      tableAccessOf(table, byTable[table]),
+      tableAccessOf(table, ownValue(byTable, table)),
     ])
   );
+};
+
+/**
+ * A manifest's canonical text: the same for the same schema and access,
+ * whatever order they were declared in.
+ */
+export const manifestText = (manifest: SchemaManifest): string => {
+  // SAFETY: parsing JSON text always gives a JSON value; and a manifest
+  // loses nothing through JSON: it holds names, strings, the versions and
+  // sealed descriptors, whose defaults are JSON.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, unicorn/prefer-structured-clone -- see SAFETY; not a clone, a reading as JSON
+  const json = JSON.parse(JSON.stringify(manifest)) as Json;
+  return canonicalJson(json);
 };
 
 /**
@@ -203,7 +245,7 @@ export const schemaManifest = (
 ): SchemaManifest => {
   const tables = tablesOf(schema);
   const accesses = accessOf(tables, access);
-  return {
+  const manifest: SchemaManifest = {
     manifestVersion,
     descriptorVersion,
     managedFields,
@@ -215,25 +257,23 @@ export const schemaManifest = (
           indexes: mapOf(
             table.indexes.map((index) => [index.name, { fields: index.fields }])
           ),
-          // Every table has its entry: `accessOf` made one for each.
-          access: accesses[name] ?? { read: "none", write: "none" },
+          // Every table has its own entry: `accessOf` made one for each.
+          access: (Object.hasOwn(accesses, name)
+            ? accesses[name]
+            : undefined) ?? { read: "none", write: "none" },
         },
       ])
     ),
   };
-};
-
-/**
- * A manifest's canonical text: the same for the same schema and access,
- * whatever order they were declared in.
- */
-export const manifestText = (manifest: SchemaManifest): string => {
-  // SAFETY: parsing JSON text always gives a JSON value; and a manifest
-  // loses nothing through JSON: it holds names, strings, the versions and
-  // sealed descriptors, whose defaults are JSON.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, unicorn/prefer-structured-clone -- see SAFETY; not a clone, a reading as JSON
-  const json = JSON.parse(JSON.stringify(manifest)) as Json;
-  return canonicalJson(json);
+  // A schema a store's host would refuse to read is refused here, where
+  // it is declared.
+  if (isOverBytes(manifestText(manifest), manifestMaxBytes)) {
+    refuse(
+      "schema.too_large",
+      `A schema's manifest is at most ${manifestMaxBytes} bytes.`
+    );
+  }
+  return manifest;
 };
 
 /**
@@ -267,12 +307,12 @@ const readTable = (
 ): { table: AnyTable; access: ManifestAccess } => {
   if (!hasExactly(input, ["fields", "indexes", "access"])) {
     return invalid(
-      `Table \`${name}\` is \`{ fields, indexes, access }\` and nothing else.`
+      `${quoted(name, "Table")} is \`{ fields, indexes, access }\` and nothing else.`
     );
   }
   const { fields, indexes, access } = input;
   if (!(isPlainObject(fields) && isPlainObject(indexes))) {
-    return invalid(`Table \`${name}\`'s fields and indexes are maps.`);
+    return invalid(`${quoted(name, "Table")}'s fields and indexes are maps.`);
   }
   // Counted before any is read.
   if (Object.keys(indexes).length > schemaLimits.indexesPerTable) {
@@ -281,10 +321,12 @@ const readTable = (
       `A table has at most ${schemaLimits.indexesPerTable} indexes.`
     );
   }
+  // One budget for the whole table, as its document is sealed as one.
+  const budget = { nodes: 0 };
   const shape = mapOf<AnySchema>(
     Object.entries(fields).map(([field, descriptor]) => [
       field,
-      schemaOf(readDescriptor(descriptor, 1, { nodes: 0 })),
+      schemaOf(readDescriptor(descriptor, 1, budget)),
     ])
   );
   // Declared as an author would, so a manifest passes exactly the checks
@@ -298,12 +340,14 @@ const readTable = (
         definition.fields.length <= schemaLimits.fieldsPerIndex
       )
     ) {
-      return invalid(`Index \`${index}\` is \`{ fields }\`, a short list.`);
+      return invalid(
+        `${quoted(index, "Index")} is \`{ fields }\`, a short list.`
+      );
     }
     table = table.index(index, definition.fields);
   }
   if (!hasExactly(access, ["read", "write"])) {
-    return invalid(`Table \`${name}\`'s access is \`{ read, write }\`.`);
+    return invalid(`${quoted(name, "Table")}'s access is \`{ read, write }\`.`);
   }
   return { table, access: tableAccessOf(name, access) };
 };
@@ -332,11 +376,7 @@ export const readSchemaManifest = (text: string): ReadManifest => {
   if (typeof text !== "string") {
     return invalid("A manifest is read from its JSON text.");
   }
-  // Each code unit is at most three bytes: a short text needs no encoding.
-  if (
-    text.length > manifestMaxBytes &&
-    new TextEncoder().encode(text).byteLength > manifestMaxBytes
-  ) {
+  if (isOverBytes(text, manifestMaxBytes)) {
     return refuse(
       "schema.too_large",
       `A manifest is at most ${manifestMaxBytes} bytes.`

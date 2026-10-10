@@ -11,10 +11,14 @@ import {
   schemaManifest,
   schemaReferences,
 } from "../src/host.ts";
-import type { SchemaAccess, SchemaManifest } from "../src/host.ts";
+import type { SchemaAccess, SchemaManifest, TableAccess } from "../src/host.ts";
 import type { AnySchema } from "../src/value-schema.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
-import type { SchemaDefinition, StringSchema } from "../src/values.ts";
+import type {
+  SchemaDefinition,
+  StringSchema,
+  ValueShape,
+} from "../src/values.ts";
 
 // A schema's canonical manifest, its hash, the diff of two versions and
 // the reading of a manifest of unknown origin. Pure, so unit tests; a
@@ -84,6 +88,20 @@ const codeOf = (read: () => unknown): unknown => {
   return "accepted";
 };
 
+// The text and hash a stored schema hash was taken of. If either changes,
+// every stored hash changes meaning: change them only with
+// `manifestVersion`.
+const GOLDEN_TEXT =
+  '{"descriptorVersion":1,"managedFields":["_id","_ownerId","_rev","_createdAt","_updatedAt"],"manifestVersion":1,"tables":{"projects":{"access":{"read":"appMembers","write":"appBuilders"},"fields":{"name":{"descriptorVersion":1,"email":false,"kind":"string","max":80,"min":1,"nullable":false,"presence":"required","trim":true}},"indexes":{}},"tasks":{"access":{"read":"owner","write":"owner"},"fields":{"due":{"descriptorVersion":1,"kind":"timestamp","nullable":true,"presence":"required"},"meta":{"descriptorVersion":1,"fields":{"source":{"descriptorVersion":1,"email":false,"kind":"string","nullable":false,"presence":"required","trim":false},"tries":{"defaultValue":1,"descriptorVersion":1,"integer":false,"kind":"number","nullable":false,"presence":"default"}},"kind":"object","nullable":false,"presence":"required"},"note":{"descriptorVersion":1,"kind":"union","members":[{"descriptorVersion":1,"email":false,"kind":"string","max":500,"nullable":false,"presence":"required","trim":false},{"descriptorVersion":1,"kind":"literal","nullable":false,"presence":"required","value":0}],"nullable":false,"presence":"optional"},"project":{"descriptorVersion":1,"kind":"id","nullable":false,"presence":"required","tableName":"projects"},"rank":{"descriptorVersion":1,"integer":true,"kind":"number","min":0,"nullable":false,"presence":"required"},"status":{"defaultValue":"open","descriptorVersion":1,"kind":"enum","nullable":false,"presence":"default","values":["open","done"]}},"indexes":{"by_project_status":{"fields":["project","status","_createdAt"]},"by_rank":{"fields":["rank"]}}}}}';
+const GOLDEN_HASH =
+  "bc2297808e81c663e909053d76ec9e4d7f2626cf4e05236689194e1d611fbc8c";
+
+/** The hash of a one-table schema of `fields`. */
+const hashOfFields = async (fields: ValueShape): Promise<string> =>
+  await schemaHash(
+    schemaManifest(defineSchema({ things: defineTable(fields) }))
+  );
+
 describe("canonical manifests", () => {
   test("declaring fields, tables, indexes and access in another order changes nothing", async () => {
     const people = defineTable({ name: v.string() });
@@ -124,6 +142,108 @@ describe("canonical manifests", () => {
     expect(diffSchemaManifests(first, second).hasChanges).toBeFalsy();
   });
 
+  test.each([
+    ["a string's minimum of 0", v.string().min(0), v.string()],
+    [
+      "an array's minimum of 0",
+      v.array(v.string()).min(0),
+      v.array(v.string()),
+    ],
+    [
+      "an integer's bound between integers",
+      v.number().integer().min(1.5).max(9.9),
+      v.number().integer().min(2).max(9),
+    ],
+    [
+      "an integer's bound, whichever came first",
+      v.number().min(1.5).integer(),
+      v.number().integer().min(2),
+    ],
+    [
+      "an integer's bound past the safe integers",
+      v
+        .number()
+        .integer()
+        .min(Number.MIN_SAFE_INTEGER - 10),
+      v.number().integer(),
+    ],
+    ["a union with null", v.union(v.string(), v.null()), v.string().nullable()],
+    [
+      "a union with null first",
+      v.union(v.null(), v.string().max(3)),
+      v.string().max(3).nullable(),
+    ],
+    [
+      "a union of several with null",
+      v.union(v.string(), v.literal(null), v.number()),
+      v.union(v.string(), v.number()).nullable(),
+    ],
+    ["a union of one", v.union(v.boolean()), v.boolean()],
+    ["null that is also nullable", v.null().nullable(), v.null()],
+  ])("%s hashes as what it means", async (_, first, second) => {
+    await expect(hashOfFields({ value: first })).resolves.toBe(
+      await hashOfFields({ value: second })
+    );
+  });
+
+  test("bounds made one form still check what they said", () => {
+    const rank = v.number().integer().min(1.5);
+    expect(rank["~standard"].validate(1).issues).toBeDefined();
+    expect(rank["~standard"].validate(2)).toStrictEqual({ value: 2 });
+    const maybe = v.union(v.string().max(3), v.null());
+    expect(maybe["~standard"].validate(null)).toStrictEqual({ value: null });
+    expect(maybe["~standard"].validate("abcd").issues).toBeDefined();
+    expect(codeOf(() => v.number().integer().min(1.2).max(1.8))).toBe(
+      "definition.contradictory_bounds"
+    );
+  });
+
+  test("tables named like Object's own methods have manifests", async () => {
+    const names = ["constructor", "toString", "hasOwnProperty", "valueOf"];
+    const tables = Object.fromEntries(
+      names.map((name) => [name, defineTable({ title: v.string() })])
+    );
+    const declared: Record<string, TableAccess> = Object.fromEntries([
+      ["toString", { read: "owner" }],
+    ]);
+    const manifest = schemaManifest(defineSchema(tables), {
+      tables: declared,
+    });
+    const accessOf = (table: string) =>
+      Object.hasOwn(manifest.tables, table)
+        ? manifest.tables[table]?.access
+        : undefined;
+    expect(Object.keys(manifest.tables).toSorted()).toStrictEqual(
+      names.toSorted()
+    );
+    expect(accessOf("toString")).toStrictEqual({
+      read: "owner",
+      write: "none",
+    });
+    expect(accessOf("valueOf")).toStrictEqual({ read: "none", write: "none" });
+    const read = readSchemaManifest(manifestText(manifest));
+    await expect(schemaHash(read.manifest)).resolves.toBe(
+      await schemaHash(manifest)
+    );
+  });
+
+  test("a schema whose manifest is too large is refused where it is declared", () => {
+    // Each of these tables' descriptors is within its own limits; together
+    // they are over the manifest's.
+    const wide = Object.fromEntries(
+      Array.from({ length: 400 }, (_, n) => [
+        `f${n}`,
+        v.enum(["a".repeat(200), "b".repeat(200), "c".repeat(200)]),
+      ])
+    );
+    const tables = Object.fromEntries(
+      Array.from({ length: 4 }, (_, n) => [`t${n}`, defineTable(wide)])
+    );
+    expect(codeOf(() => schemaManifest(defineSchema(tables)))).toBe(
+      "schema.too_large"
+    );
+  });
+
   test("access left out is `none`, as if declared so", async () => {
     const declared = manifestOf(notes(noteFields), {
       tables: { notes: { read: "none", write: "none" } },
@@ -136,22 +256,32 @@ describe("canonical manifests", () => {
     });
   });
 
-  // The text a stored hash was taken of: if this changes, every stored
-  // schema hash changes meaning, so it changes only with `manifestVersion`.
   test("a manifest's canonical text is stable, and its hash is that text's SHA-256", async () => {
     const manifest = manifestOf(
       defineSchema({
-        tags: defineTable({ label: v.string().max(20) }).index("by_label", [
-          "label",
-        ]),
+        projects: defineTable({ name: v.string().trim().min(1).max(80) }),
+        tasks: defineTable({
+          project: v.id("projects"),
+          status: v.enum(["open", "done"]).default("open"),
+          rank: v.number().integer().min(0),
+          note: v.union(v.string().max(500), v.literal(0)).optional(),
+          meta: v.object({ source: v.string(), tries: v.number().default(1) }),
+          due: v.timestamp().nullable(),
+        })
+          .index("by_project_status", ["project", "status", "_createdAt"])
+          .index("by_rank", ["rank"]),
       }),
-      { tables: { tags: { read: "appMembers" } } }
+      {
+        tables: {
+          projects: { read: "appMembers", write: "appBuilders" },
+          tasks: { read: "owner", write: "owner" },
+        },
+      }
     );
     const text = manifestText(manifest);
-    expect(text).toBe(
-      '{"descriptorVersion":1,"managedFields":["_id","_ownerId","_rev","_createdAt","_updatedAt"],"manifestVersion":1,"tables":{"tags":{"access":{"read":"appMembers","write":"none"},"fields":{"label":{"descriptorVersion":1,"email":false,"kind":"string","max":20,"nullable":false,"presence":"required","trim":false}},"indexes":{"by_label":{"fields":["label"]}}}}}'
-    );
-    await expect(schemaHash(manifest)).resolves.toBe(await sha256Hex(text));
+    expect(text).toBe(GOLDEN_TEXT);
+    await expect(sha256Hex(text)).resolves.toBe(GOLDEN_HASH);
+    await expect(schemaHash(manifest)).resolves.toBe(GOLDEN_HASH);
   });
 
   test("access must name the schema's tables and modes that exist", () => {
@@ -489,6 +619,13 @@ describe("reading a manifest", () => {
     expect(
       codeOf(() => readSchemaManifest(" ".repeat(manifestMaxBytes + 1)))
     ).toBe("schema.too_large");
+    // Bytes, not characters: text under the limit in code units but over
+    // it in UTF-8 is too large too.
+    const wide = "漢".repeat(Math.ceil(manifestMaxBytes / 3) + 1);
+    expect(wide.length).toBeLessThan(manifestMaxBytes);
+    expect(codeOf(() => readSchemaManifest(`"${wide}"`))).toBe(
+      "schema.too_large"
+    );
     // A descriptor nested past the limit is refused, not followed.
     let deep: unknown = {
       descriptorVersion: 1,
