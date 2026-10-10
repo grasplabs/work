@@ -8,8 +8,13 @@ import type {
   ProviderHeaders,
   SimpleStreamOptions,
   StreamFunction,
+  ThinkingLevel,
   TranscriptContext,
   Usage,
+} from "@earendil-works/pi-ai";
+import {
+  clampThinkingLevel,
+  getSupportedThinkingLevels,
 } from "@earendil-works/pi-ai";
 import { streamSimple as anthropicMessages } from "@earendil-works/pi-ai/api/anthropic-messages";
 import {
@@ -43,7 +48,12 @@ import {
 import type { ModelRules } from "@grasp-os/shared/deployment-config";
 import { connectionIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { modelErrors } from "@grasp-os/shared/models";
+import {
+  defaultModelEffort,
+  modelEfforts,
+  modelErrors,
+} from "@grasp-os/shared/models";
+import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
 import {
   authoritySchema,
   permissionErrors,
@@ -277,6 +287,46 @@ export const gatewaySettings = (
 });
 
 /**
+ * The thinking level a request asks `model` for: the call's effort, or
+ * {@link defaultModelEffort}, as the model takes it. A level it lacks
+ * becomes the next one up that it has, or its highest when it has none
+ * above: pi's rule, which its OpenAI adapters apply anyway, applied here
+ * for every provider (Anthropic's falls back its own way). So a call that
+ * names none asks what it did before efforts. `undefined` for a model
+ * that doesn't think, which pi then asks for none.
+ */
+const thinkingOf = (
+  model: Model<Api>,
+  effort?: ModelEffort
+): ThinkingLevel | undefined => {
+  if (!model.reasoning) {
+    return undefined;
+  }
+  const level = clampThinkingLevel(model, effort ?? defaultModelEffort);
+  return level === "off" ? undefined : level;
+};
+
+/**
+ * The efforts `ref` takes, least first (those of {@link modelEfforts} its
+ * catalog entry supports), and the one a call that names none gets
+ * ({@link thinkingOf}). None for a model that doesn't think or isn't one
+ * the gateway offers.
+ */
+export const modelEffortsOf = (ref: string): ModelEfforts => {
+  const model = parseModelRef(ref)?.catalog;
+  if (model === undefined) {
+    return { levels: [], default: null };
+  }
+  const supported = new Set<string>(getSupportedThinkingLevels(model));
+  const levels = modelEfforts.filter((effort) => supported.has(effort));
+  const fallback = thinkingOf(model);
+  return {
+    levels,
+    default: levels.find((effort) => effort === fallback) ?? null,
+  };
+};
+
+/**
  * Whether the deployment's config keeps every call in the EU
  * (`eu.deployment`): for what sends data out of the Worker without being a model call,
  * such as Workers AI's document conversion (knowledge/extract.ts), which
@@ -303,6 +353,11 @@ const sessionShape = {
   maxTokens: z.int().positive().optional(),
   /** How long a request may take, in milliseconds, retries included. */
   timeoutMs: z.int().positive().max(maxTimeoutMs).optional(),
+  /**
+   * How hard a model that thinks does so before it answers
+   * ({@link thinkingOf}); {@link defaultModelEffort} without one.
+   */
+  effort: z.enum(modelEfforts).optional(),
   /** Why the call is made, for the audit log. */
   purpose: z.string().max(64).regex(purposePattern),
   /** Who or what asked: a person, an agent, an App or a workflow run. */
@@ -938,9 +993,8 @@ const open = (
     headers: gatewayHeaders(call),
     maxTokens: answerTokens(call, model),
     maxRetries,
-    // Reasoning at a middle effort where the model has it: without a level
-    // pi turns it off.
-    reasoning: model.reasoning ? "medium" : undefined,
+    // Without a level pi turns reasoning off.
+    reasoning: thinkingOf(model, call.effort),
     signal,
     onPayload: ref.provider === "workers-ai" ? workersAiPayload : undefined,
     onResponse: ({ status, headers }) => {
@@ -1279,6 +1333,8 @@ const auditEntry = (
         logId !== undefined && logId.length <= auditIdentifierMaxLength
           ? logId
           : null,
+      // How hard the model was asked to think: a cost the person chose.
+      effort: thinkingOf(ref.catalog, call.effort) ?? null,
       // Which rule kept the call in the EU, if one did.
       euOnly: judged.euOnly ?? null,
       // Why it carried sensitive data, if a data rule asked and it did.
