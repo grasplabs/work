@@ -54,10 +54,17 @@ export const outputCapOf = (body: unknown): number | undefined => {
   return set.length === 0 ? undefined : Math.max(...set);
 };
 
+// A denylist, not a per-adapter allowlist of fields: the provider SDKs
+// add fields of their own from release to release (caching keys,
+// metadata, reasoning settings) that cost nothing beyond the prompt and
+// the answer, and an allowlist would refuse every call on the first new
+// one. What is refused is what bills beyond the bound, as each provider
+// documents it.
+
 /**
- * Content parts whose tokens aren't bounded by their bytes: an image or a
- * document is billed by what it shows, and a file by reference holds no
- * bytes of it at all.
+ * Content parts whose tokens aren't bounded by their bytes: an image, a
+ * document or audio is billed by what it holds, and a file by reference
+ * holds no bytes of it at all.
  */
 const unboundedParts = new Set([
   "image",
@@ -66,19 +73,38 @@ const unboundedParts = new Set([
   "document",
   "file",
   "input_file",
+  "input_audio",
+  "audio",
 ]);
 
 /** Top-level fields the bound or the prices don't cover. */
 const unboundedFields = [
-  // The earlier response's prompt is billed again, and isn't in the body.
+  // The earlier response's or conversation's prompt is billed again, and
+  // isn't in the body; a stored prompt isn't either.
   "previous_response_id",
-  // Priority or flex processing is priced apart from the catalog's prices.
+  "conversation",
+  "prompt",
+  // Priority, flex or fast processing is priced apart from the catalog.
   "service_tier",
+  "speed",
+  // More than one answer, each billed.
+  "n",
+  "best_of",
+  // Audio in or out, priced apart; predicted output, billed past the cap.
+  "modalities",
+  "audio",
+  "prediction",
+  // Workers AI's vision input, billed by what it shows.
+  "image",
+  // Hosted execution and servers the provider runs, and bills, itself.
+  "container",
+  "mcp_servers",
 ] as const;
 
 /**
- * Where a body declares schemas rather than holding content: a tool's or
- * a structured answer's, whose `type` fields are JSON Schema's.
+ * Where a body declares schemas rather than holding content: a structured
+ * answer's, whose `type` fields are JSON Schema's. Tools are read apart
+ * (`unboundedTool`).
  */
 const schemaFields = new Set([
   "tools",
@@ -87,8 +113,54 @@ const schemaFields = new Set([
   "response_format",
 ]);
 
+/**
+ * Tool types the client runs: the provider only writes the call, whose
+ * tokens are part of the answer. Anthropic's client tools have no type.
+ * Any other type is a tool the provider runs and bills on its own, such
+ * as web search or code execution.
+ */
+const clientTools = new Set(["function", "custom"]);
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Whether `value` asks, anywhere in it, for a one-hour cache write. */
+const cachesForAnHour = (value: unknown): boolean => {
+  if (Array.isArray(value)) {
+    return value.some(cachesForAnHour);
+  }
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    (isRecord(value.cache_control) && value.cache_control.ttl === "1h") ||
+    Object.values(value).some(cachesForAnHour)
+  );
+};
+
+/** What in a body's `tools` the bound can't cover, if anything. */
+const unboundedTool = (tools: unknown): string | undefined => {
+  if (tools === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(tools)) {
+    return "tool";
+  }
+  for (const tool of tools) {
+    if (
+      !isRecord(tool) ||
+      (tool.type !== undefined &&
+        !(typeof tool.type === "string" && clientTools.has(tool.type)))
+    ) {
+      return "tool";
+    }
+    // Anthropic charges a one-hour cache write at twice the input price.
+    if (cachesForAnHour(tool)) {
+      return "cache_ttl";
+    }
+  }
+  return undefined;
+};
 
 /** What in `value`, content anywhere in a body, the bound can't cover. */
 const unboundedIn = (value: unknown): string | undefined => {
@@ -134,5 +206,5 @@ export const unboundedBy = (body: unknown): string | undefined => {
     return "body";
   }
   const field = unboundedFields.find((name) => parsed[name] !== undefined);
-  return field ?? unboundedIn(parsed);
+  return field ?? unboundedTool(parsed.tools) ?? unboundedIn(parsed);
 };

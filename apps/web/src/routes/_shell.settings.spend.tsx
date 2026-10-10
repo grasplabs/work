@@ -1,4 +1,5 @@
 import type {
+  HeldRequest,
   ModelBudget,
   ModelSettings,
   ModelSpender,
@@ -144,6 +145,42 @@ const SpentBy = ({
   );
 };
 
+/**
+ * Model requests whose reservations core couldn't read to settle: they
+ * hold part of the budgets until an admin releases or charges them, which
+ * Grasp does for now over core's API.
+ */
+const Held = ({ held }: { held: readonly HeldRequest[] }) => {
+  const { t } = useLingui();
+  if (held.length === 0) {
+    return null;
+  }
+  const total = dollars(held.reduce((sum, { amount }) => sum + amount, 0));
+  return (
+    <SettingsSection
+      description={t`${total} is held for these model calls until they are reviewed: what each could have cost. Contact Grasp to release or charge them.`}
+      title={t`Held for review`}
+    >
+      <ul>
+        {held.map(({ id, model, sentAt, amount }) => (
+          <li
+            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 border-t px-5 py-3"
+            key={id}
+          >
+            <span className="truncate">
+              {model}{" "}
+              <span className="text-muted-foreground">
+                {new Date(sentAt).toLocaleString()}
+              </span>
+            </span>
+            <span className="text-right tabular-nums">{dollars(amount)}</span>
+          </li>
+        ))}
+      </ul>
+    </SettingsSection>
+  );
+};
+
 const Spend = ({ settings }: { settings: ModelSettings }) => {
   const { t } = useLingui();
   const { month } = settings;
@@ -195,6 +232,7 @@ const Spend = ({ settings }: { settings: ModelSettings }) => {
           />
         )
       )}
+      <Held held={settings.held} />
     </>
   );
 };

@@ -14,6 +14,7 @@ import migrations from "./db/model-ledger/migrations/migrations.js";
 import {
   alerts,
   auditOutbox,
+  requestScopes,
   requests,
   spend,
 } from "./db/model-ledger/schema.ts";
@@ -77,6 +78,9 @@ const alarmPage = 100;
 
 /** How long the alarm waits before delivering audit events again. */
 const auditRetryMs = { first: 5000, most: 15 * 60 * 1000 };
+
+/** How much later a request that failed to reconcile is tried again. */
+const reconcileRetryMs = 60 * 60 * 1000;
 
 /** How often the alarm looks again for receipts to sweep, while any are kept. */
 const sweepEveryMs = 24 * 60 * 60 * 1000;
@@ -189,6 +193,15 @@ export type Settled =
   | { state: "quarantined" }
   | { state: "missing" };
 
+/** A request set aside because it couldn't be read, for a person to settle. */
+export interface QuarantinedRequest {
+  id: string;
+  model: string;
+  period: string;
+  reservedMicros: number;
+  dispatchedAt: number;
+}
+
 /** What a scope spent and holds in a month, for admins to read. */
 export interface ScopeSpend {
   key: string;
@@ -285,8 +298,11 @@ export class ModelLedger extends DurableObject<Env> {
         };
       }
       const { price } = admission;
+      const unpriced = [price, ...price.tiers].some(
+        (rates) => rates.input === 0 || rates.output === 0
+      );
       if (
-        (price.input === 0 || price.output === 0) &&
+        unpriced &&
         admission.scopes.some(({ limitMicros }) => limitMicros !== null)
       ) {
         return { admitted: { ok: false, unpriced: true } as const, alerted: 0 };
@@ -334,6 +350,10 @@ export class ModelLedger extends DurableObject<Env> {
         })
         .run();
       for (const { scope, key } of admission.scopes) {
+        this.#db
+          .insert(requestScopes)
+          .values({ requestId: admission.id, scope, key })
+          .run();
         this.#db
           .insert(spend)
           .values({
@@ -405,14 +425,35 @@ export class ModelLedger extends DurableObject<Env> {
           .run();
         return { settled: { state: "unknown" } as const, alerted: 0 };
       }
-      const prices = pricesOf(row);
-      if (prices === undefined) {
-        this.#quarantine(row.id, "prices");
-        return { settled: { state: "quarantined" } as const, alerted: 0 };
+      // A refusal or an unsent request costs nothing, prices or not. A
+      // count whose prices can't be read is charged the whole reservation,
+      // as reconciliation charges a count that was lost.
+      const prices = settlement.by === "usage" ? pricesOf(row) : undefined;
+      const unpriced = settlement.by === "usage" && prices === undefined;
+      let charged = 0;
+      if (unpriced) {
+        charged = row.reservedMicros;
+      } else if (settlement.by === "usage" && prices !== undefined) {
+        charged = costMicros(prices, settlement.tokens);
       }
-      const charged =
-        settlement.by === "usage" ? costMicros(prices, settlement.tokens) : 0;
-      const alertedNow = this.#charge(row, charged, settlement.by);
+      const alertedNow = this.#charge(
+        row,
+        charged,
+        unpriced ? "reconciled" : settlement.by
+      );
+      if (unpriced && alertedNow !== "quarantined") {
+        this.#outbox({
+          actor: actorOf(row),
+          action: "model.spend.reconciled",
+          detail: {
+            request: row.id,
+            model: row.model,
+            period: row.period,
+            lost: "prices",
+            charged: charged / microsPerDollar,
+          },
+        });
+      }
       return alertedNow === "quarantined"
         ? { settled: { state: "quarantined" } as const, alerted: 0 }
         : {
@@ -423,6 +464,103 @@ export class ModelLedger extends DurableObject<Env> {
     if (alerted > 0) {
       this.#deliverAudit();
     }
+    await Promise.resolve();
+    return settled;
+  }
+
+  /** The requests set aside because they couldn't be read, oldest first, at most `limit`. */
+  async quarantined(limit: number): Promise<QuarantinedRequest[]> {
+    const rows = this.#db
+      .select({
+        id: requests.id,
+        model: requests.model,
+        period: requests.period,
+        reservedMicros: requests.reservedMicros,
+        dispatchedAt: requests.dispatchedAt,
+      })
+      .from(requests)
+      .where(eq(requests.state, "quarantined"))
+      .orderBy(asc(requests.dispatchedAt))
+      .limit(limit)
+      .all();
+    await Promise.resolve();
+    return rows;
+  }
+
+  /**
+   * Settles a quarantined request as a person decided: releases what it
+   * holds, or charges all of it, against the scopes its admission
+   * recorded apart from its JSON (`request_scopes`), and audits who did,
+   * in one transaction. A request that isn't quarantined (settled since,
+   * say) is left as it is, and answered as it stands.
+   */
+  async resolveQuarantined(
+    id: string,
+    how: "release" | "charge",
+    by: AuditActor
+  ): Promise<Settled> {
+    const actor = auditActorSchema.parse(by);
+    const settled = this.ctx.storage.transactionSync((): Settled => {
+      const row = this.#db
+        .select()
+        .from(requests)
+        .where(eq(requests.id, id))
+        .get();
+      if (row === undefined) {
+        return { state: "missing" };
+      }
+      if (row.state === "settled") {
+        return { state: "settled", chargedMicros: row.chargedMicros ?? 0 };
+      }
+      if (row.state !== "quarantined") {
+        return { state: row.state === "unknown" ? "unknown" : "missing" };
+      }
+      const charged = how === "charge" ? row.reservedMicros : 0;
+      this.#db
+        .update(requests)
+        .set({
+          state: "settled",
+          chargedMicros: charged,
+          settledBy: "decided",
+          settledAt: Date.now(),
+        })
+        .where(eq(requests.id, id))
+        .run();
+      const keys = this.#db
+        .select({ scope: requestScopes.scope, key: requestScopes.key })
+        .from(requestScopes)
+        .where(eq(requestScopes.requestId, id))
+        .all();
+      for (const { scope, key } of keys) {
+        this.#db
+          .update(spend)
+          .set({
+            reservedMicros: sql`${spend.reservedMicros} - ${row.reservedMicros}`,
+            spentMicros: sql`${spend.spentMicros} + ${charged}`,
+          })
+          .where(
+            and(
+              eq(spend.scope, scope),
+              eq(spend.key, key),
+              eq(spend.period, row.period)
+            )
+          )
+          .run();
+      }
+      this.#outbox({
+        actor,
+        action:
+          how === "charge" ? "model.spend.charged" : "model.spend.released",
+        detail: {
+          request: id,
+          model: row.model,
+          period: row.period,
+          charged: charged / microsPerDollar,
+        },
+      });
+      return { state: "settled", chargedMicros: charged };
+    });
+    this.#deliverAudit();
     await Promise.resolve();
     return settled;
   }
@@ -500,11 +638,13 @@ export class ModelLedger extends DurableObject<Env> {
           });
           reconciled += charged ? 1 : 0;
         } catch (error) {
+          // Its scopes can be read, so it isn't quarantined: it is tried
+          // again later, and the rest go on now.
           log.error("model.reconcile_failed", {
             ...errorFields(error),
             request: row.id,
           });
-          this.#quarantine(row.id, "reconcile");
+          this.#retryLater(row.id, now);
         }
       }
       if (due.length < alarmPage) {
@@ -537,15 +677,14 @@ export class ModelLedger extends DurableObject<Env> {
       if (expired.length === 0) {
         return;
       }
-      this.#db
-        .delete(requests)
-        .where(
-          inArray(
-            requests.id,
-            expired.map(({ id }) => id)
-          )
-        )
-        .run();
+      const ids = expired.map(({ id }) => id);
+      this.ctx.storage.transactionSync(() => {
+        this.#db
+          .delete(requestScopes)
+          .where(inArray(requestScopes.requestId, ids))
+          .run();
+        this.#db.delete(requests).where(inArray(requests.id, ids)).run();
+      });
       if (expired.length < alarmPage) {
         return;
       }
@@ -612,7 +751,7 @@ export class ModelLedger extends DurableObject<Env> {
   ): number | "quarantined" {
     const scopes = scopesOf(row);
     if (scopes === undefined) {
-      this.#quarantine(row.id, "scopes");
+      this.#quarantine(row);
       return "quarantined";
     }
     const changed = this.#db
@@ -718,21 +857,43 @@ export class ModelLedger extends DurableObject<Env> {
    * reservation, as what it holds can't be told, and is logged for a
    * person to look at. Never throws: it is the fallback.
    */
-  #quarantine(id: string, because: string): void {
-    log.error("model.request_quarantined", { request: id, because });
+  #quarantine(row: RequestRow): void {
+    log.error("model.request_quarantined", { request: row.id });
+    const changed = this.#db
+      .update(requests)
+      .set({ state: "quarantined" })
+      .where(
+        and(
+          eq(requests.id, row.id),
+          inArray(requests.state, ["dispatched", "unknown"])
+        )
+      )
+      .returning({ id: requests.id })
+      .all();
+    if (changed.length > 0) {
+      this.#outbox({
+        actor: actorOf(row),
+        action: "model.spend.quarantined",
+        detail: {
+          request: row.id,
+          model: row.model,
+          period: row.period,
+          held: row.reservedMicros / microsPerDollar,
+        },
+      });
+    }
+  }
+
+  /** Looks at an open request again a while from `now`, after it failed to reconcile. */
+  #retryLater(id: string, now: number): void {
     try {
       this.#db
         .update(requests)
-        .set({ state: "quarantined" })
-        .where(
-          and(
-            eq(requests.id, id),
-            inArray(requests.state, ["dispatched", "unknown"])
-          )
-        )
+        .set({ reconcileAt: now + reconcileRetryMs })
+        .where(eq(requests.id, id))
         .run();
     } catch (error) {
-      log.error("model.quarantine_failed", {
+      log.error("model.reconcile_retry_failed", {
         ...errorFields(error),
         request: id,
       });

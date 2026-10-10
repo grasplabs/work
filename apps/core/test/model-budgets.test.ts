@@ -283,8 +283,9 @@ describe("model budgets", { timeout: 60_000 }, () => {
   });
 
   it("admit concurrent requests only while their reservations fit the budget together, sending nothing for the rest", async () => {
-    // A request to Claude may write 24,576 tokens (its cap with a thinking
-    // budget) at $15 a million: some $0.37 reserved each, so $1 fits two.
+    // A request to Sonnet 4.5 may write 24,576 tokens (its cap with a
+    // thinking budget), reserved at its long-context price of $22.50 a
+    // million: some $0.56 each, so $1.50 fits two.
     const release = Promise.withResolvers<boolean>();
     const paused = {
       ...pricedAnswer,
@@ -292,7 +293,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
       pause: { at: 3, until: release.promise },
     };
     const { fake, call, month } = withRules(
-      { budgets: { user: { limit: 1 } } },
+      { budgets: { user: { limit: 1.5 } } },
       [...times(2, paused), pricedAnswer]
     );
     const ada = hello({ model: anthropic, maxTokens: undefined });
@@ -650,17 +651,41 @@ describe("model budgets", { timeout: 60_000 }, () => {
     });
   });
 
-  it("refuse a Claude prompt past 200K tokens while a budget applies: the catalog doesn't price the long-context premium", async () => {
-    const long = "word ".repeat(41_000);
-    const budgeted = withRules({ budgets: { user: { limit: 100 } } }, []);
-    const open = withRules({}, [pricedAnswer]);
-    const ada = hello({ model: anthropic, input: long });
-
-    await expect(budgeted.call(ada)).rejects.toMatchObject({
-      code: "model.unpriced",
+  it("admit a long Claude transcript under a budget, its bytes far past 200K but its tokens not", async () => {
+    // 250 KB of short words: some 62,500 tokens, so well within standard
+    // prices, though its bytes bound it past the long-context threshold.
+    const { call } = withRules({ budgets: { user: { limit: 10 } } }, [
+      pricedAnswer,
+    ]);
+    const ada = hello({
+      model: anthropic,
+      maxTokens: undefined,
+      input: "Hi. ".repeat(62_500),
     });
-    await expect(outcome(open.call(ada))).resolves.toBe("ok");
-    expect(budgeted.fake.requests).toStrictEqual([]);
+
+    await expect(outcome(call(ada))).resolves.toBe("ok");
+  });
+
+  it("charge a Claude Sonnet 4.5 prompt past 200K tokens at Anthropic's long-context prices, as its audit event counts it", async () => {
+    const { call, month } = withRules({ budgets: { user: { limit: 10 } } }, [
+      { text: "Hi.", inputTokens: 250_000, outputTokens: 100 },
+    ]);
+    const ada = hello({ model: anthropic, maxTokens: 1 });
+
+    await expect(outcome(call(ada))).resolves.toBe("ok");
+    const [event] = await eventsOf(ada.trigger);
+    // $6 a million in and $22.50 out past 200K, not $3 and $15.
+    expect({
+      ledger: await ledgerOf(month, userOf(ada)),
+      audited: Math.round((event?.cost?.amount ?? 0) * 1_000_000),
+    }).toStrictEqual({
+      ledger: {
+        key: userOf(ada),
+        spentMicros: 250_000 * 6 + 2250,
+        reservedMicros: 0,
+      },
+      audited: 250_000 * 6 + 2250,
+    });
   });
 
   it("send no request whose content its bytes can't bound, such as an image", async () => {

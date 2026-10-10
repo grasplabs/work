@@ -55,7 +55,7 @@ export const requests = sqliteTable(
     }).notNull(),
     /** How it settled: by its usage, refused, never sent, or in full. */
     settledBy: text("settled_by", {
-      enum: ["usage", "refused", "unsent", "reconciled"],
+      enum: ["usage", "refused", "unsent", "reconciled", "decided"],
     }),
     /** Who or what asked, as JSON, for the alerts it causes. */
     actor: text().notNull(),
@@ -74,6 +74,23 @@ export const requests = sqliteTable(
     index("requests_open").on(table.state, table.reconcileAt),
     // Settled requests, oldest first, for the retention sweep.
     index("requests_settled_at").on(table.settledAt),
+  ]
+);
+
+/**
+ * The scopes each request reserved against, kept apart from its JSON as
+ * the record a person settles it by should that JSON become unreadable
+ * (a quarantined request, model-ledger.ts). Swept with its request.
+ */
+export const requestScopes = sqliteTable(
+  "request_scopes",
+  {
+    requestId: text("request_id").notNull(),
+    scope: text({ enum: scopes }).notNull(),
+    key: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.requestId, table.scope, table.key] }),
   ]
 );
 

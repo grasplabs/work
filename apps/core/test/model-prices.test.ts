@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { boundMicros, costMicros, pinnedPrice } from "../src/model-prices.ts";
+import {
+  boundMicros,
+  costDollars,
+  costMicros,
+  listPricesOf,
+  pinnedPrice,
+} from "../src/model-prices.ts";
 
 // What model requests cost in whole micros: pure arithmetic, tested on
 // its own.
@@ -147,6 +153,46 @@ describe("model prices", () => {
         tiers: [{ ...longPrompt, inputTokensAbove: -1 }],
       })
     ).resolves.toBeUndefined();
+  });
+
+  it("give the Claude models that carry Anthropic's long-context premium a tier past 200K, and no others", () => {
+    const premium = {
+      inputTokensAbove: 200_000,
+      input: 6,
+      output: 22.5,
+      cacheRead: 0.6,
+      cacheWrite: 7.5,
+    };
+    expect([
+      listPricesOf("anthropic", "claude-sonnet-4-5", claude),
+      listPricesOf("anthropic", "claude-sonnet-4-5-20250929", claude),
+      listPricesOf("anthropic", "claude-sonnet-4-20250514", claude),
+      listPricesOf("anthropic", "claude-sonnet-4-6", claude),
+      listPricesOf("anthropic", "claude-opus-4-6", claude),
+      listPricesOf("workers-ai", "claude-sonnet-4-5", claude),
+      listPricesOf("openai", "gpt-5.4", gpt54),
+    ]).toStrictEqual([
+      { ...claude, tiers: [premium] },
+      { ...claude, tiers: [premium] },
+      { ...claude, tiers: [premium] },
+      claude,
+      claude,
+      claude,
+      gpt54,
+    ]);
+  });
+
+  it("cost in exact dollars at the tier a count is in, as the ledger charges it before rounding", async () => {
+    const pinned = await pinnedPrice(gpt54);
+    if (pinned === undefined) {
+      throw new Error("GPT-5.4 has prices");
+    }
+    const long = { input: 300_000, output: 100, cacheRead: 0, cacheWrite: 0 };
+    const short = { input: 1000, output: 3, cacheRead: 0, cacheWrite: 0 };
+    expect([
+      costDollars(pinned, long),
+      costDollars(pinned, short),
+    ]).toStrictEqual([1.50225, 0.002545]);
   });
 
   it("refuse a count that isn't one, or a cost too large to count exactly", async () => {

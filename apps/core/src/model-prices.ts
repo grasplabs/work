@@ -16,8 +16,8 @@ import { canonicalJson } from "@grasp-os/shared/json";
 //
 // Prices the catalog leaves out are refused before a request is sent
 // (model-requests.ts): Anthropic's one-hour cache writes, a provider's
-// service tiers, and Anthropic's long-context premium past 200K tokens
-// (models.ts).
+// service tiers. Anthropic's long-context premium, which pi's catalog
+// doesn't price either, is added here as a tier (`listPricesOf`).
 
 /** Micros in a US dollar. */
 export const microsPerDollar = 1_000_000;
@@ -61,6 +61,55 @@ export interface TokenCounts {
   cacheRead: number;
   cacheWrite: number;
 }
+
+/** The prompt tokens past which Anthropic's long-context premium applies. */
+const longContextTokens = 200_000;
+
+/**
+ * The Claude models that may be charged Anthropic's long-context premium:
+ * 2x input and 1.5x output (cache prices scaled with input) for a whole
+ * request whose prompt, cached tokens included, is over 200K tokens.
+ *
+ * Source: Anthropic's pricing page, "Long context pricing"
+ * (https://platform.claude.com/docs/en/about-claude/pricing), read on
+ * 2026-10-10. It confirms that Claude 4.6 and later models (except Haiku
+ * 5.5, which pi's catalog doesn't offer) take the full 1M window at
+ * standard prices. It no longer states the premium for earlier models,
+ * so Sonnet 4.5 and Sonnet 4, the earlier models with a window past 200K,
+ * carry it here to be safe: their 1M-context beta was priced 2x/1.5x
+ * past 200K. Opus 4.5 and Haiku 4.5 have a 200K window, so they can't
+ * reach it.
+ */
+const longContextPremium = /^claude-sonnet-4(?:-5)?(?:-\d{8})?$/u;
+
+/**
+ * A model's prices as pi's catalog gives them, with Anthropic's
+ * long-context premium as a tier past 200K prompt tokens for the models
+ * that carry it, which the catalog leaves out.
+ */
+export const listPricesOf = (
+  provider: string,
+  id: string,
+  prices: ListPrices
+): ListPrices => {
+  if (provider !== "anthropic" || !longContextPremium.test(id)) {
+    return prices;
+  }
+  const { input, output, cacheRead, cacheWrite } = prices;
+  return {
+    ...prices,
+    tiers: [
+      ...(prices.tiers ?? []),
+      {
+        inputTokensAbove: longContextTokens,
+        input: input * 2,
+        output: output * 1.5,
+        cacheRead: cacheRead * 2,
+        cacheWrite: cacheWrite * 2,
+      },
+    ],
+  };
+};
 
 /**
  * Dollars per million tokens as whole micros, rounded up. The catalog's
@@ -167,6 +216,24 @@ export const costMicros = (price: PinnedPrice, tokens: TokenCounts): number => {
       priced(tokens.cacheRead, rates.cacheRead) +
       priced(tokens.cacheWrite, rates.cacheWrite)
   );
+};
+
+/**
+ * What `tokens` cost at `price`, in US dollars, as exactly as a float
+ * holds it, before the ledger rounds each kind up to a micro: for the
+ * audit event, which records the same cost.
+ */
+export const costDollars = (
+  price: PinnedPrice,
+  tokens: TokenCounts
+): number => {
+  const rates = ratesFor(price, tokens);
+  const micros =
+    BigInt(tokens.input) * BigInt(rates.input) +
+    BigInt(tokens.output) * BigInt(rates.output) +
+    BigInt(tokens.cacheRead) * BigInt(rates.cacheRead) +
+    BigInt(tokens.cacheWrite) * BigInt(rates.cacheWrite);
+  return Number(micros) / (Number(tokensPerPrice) * microsPerDollar);
 };
 
 /**

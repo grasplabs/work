@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ef892f7d-a735-4660-a835-dba80e3a7eff",
+  "id": "648a3c18-b452-4b55-8488-1edd800ef473",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "alerts": {
@@ -88,6 +88,46 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "request_scopes": {
+      "name": "request_scopes",
+      "columns": {
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "request_scopes_request_id_scope_key_pk": {
+          "columns": [
+            "request_id",
+            "scope",
+            "key"
+          ],
+          "name": "request_scopes_request_id_scope_key_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

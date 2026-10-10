@@ -543,8 +543,9 @@ describe("model gateway", { timeout: 30_000 }, () => {
         gatewayLogId: "log-1",
       },
     });
-    // At Claude Sonnet 4.5's list prices: $3 per million tokens in, $15 out.
-    expect(event?.cost?.amount).toBeCloseTo(4.5);
+    // At Claude Sonnet 4.5's long-context prices, as its prompt is past
+    // 200K tokens: $6 per million tokens in, $22.50 out.
+    expect(event?.cost?.amount).toBeCloseTo(8.25);
     // Never the prompt or the answer.
     const stored = JSON.stringify(event);
     expect(stored).not.toContain("Acme");

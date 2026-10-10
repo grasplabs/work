@@ -56,7 +56,12 @@ import { keepAuditEvent } from "./audit-outbox.ts";
 import { budgetMonth, hasBudget, scopesFor } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type { LedgerScope, Settlement } from "./model-ledger.ts";
-import { boundMicros, pinnedPrice } from "./model-prices.ts";
+import {
+  boundMicros,
+  costDollars,
+  listPricesOf,
+  pinnedPrice,
+} from "./model-prices.ts";
 import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
 import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
 import { judgeCall } from "./model-rules.ts";
@@ -499,6 +504,22 @@ const inputTokens = ({ input, cacheRead, cacheWrite }: Usage): number =>
 const costOf = ({ cost }: Usage): number =>
   Number.isFinite(cost.total) && cost.total > 0 ? cost.total : 0;
 
+/**
+ * What a provider's count cost at the request's pinned prices, in the
+ * tier its prompt is in, as the model ledger charges it; pi's own cost
+ * where the model has no pinned prices or the count isn't one.
+ */
+const pricedCost = (price: PinnedPrice | undefined, usage: Usage): number => {
+  const { input, output, cacheRead, cacheWrite } = usage;
+  const tokens = { input, output, cacheRead, cacheWrite };
+  return price !== undefined &&
+    Object.values(tokens).every(
+      (count) => Number.isSafeInteger(count) && count >= 0
+    )
+    ? costDollars(price, tokens)
+    : costOf(usage);
+};
+
 const hasFailed = ({ stopReason }: AssistantMessage): boolean =>
   stopReason === "error" || stopReason === "aborted";
 
@@ -689,12 +710,6 @@ const workersAiPayload = (payload: unknown): unknown => {
 const promptAllowanceTokens = 1024;
 
 /**
- * The most prompt tokens Anthropic charges at its standard prices: past
- * them a model with a longer window may cost its long-context premium.
- */
-const anthropicStandardPromptTokens = 200_000;
-
-/**
  * How long after a call's deadline a provider request still unsettled is
  * charged its whole reservation (model-ledger.ts).
  */
@@ -748,7 +763,7 @@ const admitRequest = async (
   route: Route,
   body: unknown
 ): Promise<{ id: string } | { held: Refusal }> => {
-  const { env, call, model, price, ref } = route;
+  const { env, call, model, price } = route;
   const { period, scopes } = route.scopesNow();
   const budgeted = hasBudget(scopes);
   if (price === undefined && budgeted) {
@@ -767,19 +782,9 @@ const admitRequest = async (
     log.error("model.unbounded_request", { model: call.model });
     return { held: { code: "model.ledger_unavailable" } };
   }
+  // Priced at the dearest tier the prompt may reach: Anthropic's
+  // long-context premium too, a tier of its own (model-prices.ts).
   const promptBound = bytes + promptAllowanceTokens;
-  if (
-    budgeted &&
-    ref.provider === "anthropic" &&
-    price !== undefined &&
-    price.tiers.length === 0 &&
-    promptBound > anthropicStandardPromptTokens
-  ) {
-    // Past 200K prompt tokens Anthropic may charge its long-context
-    // premium, which pi's catalog doesn't price: below it, standard
-    // prices certainly apply, as the bound is never below the prompt.
-    return { held: { code: "model.unpriced" } };
-  }
   const pinned = price ?? unpriced;
   const id = crypto.randomUUID();
   try {
@@ -1065,12 +1070,15 @@ interface Used {
  * list prices. A request that got no response is charged nothing: the
  * provider may not have taken it.
  */
-const usedBy = ({ ref }: Admitted, sent: Sent): Used => {
+const usedBy = (
+  { ref, price }: Pick<Route, "ref" | "price">,
+  sent: Sent
+): Used => {
   const { answer, status } = sent;
   const counted = {
     inputTokens: inputTokens(answer.usage),
     outputTokens: answer.usage.output,
-    cost: costOf(answer.usage),
+    cost: pricedCost(price, answer.usage),
   };
   const responded = status !== undefined && status >= 200 && status < 300;
   if (!(responded && hasFailed(answer))) {
@@ -1238,7 +1246,7 @@ const countedTokens = ({
  */
 const record = async (
   env: ModelsEnv,
-  admitted: Admitted,
+  admitted: Route,
   sent: Sent,
   attempt: number,
   outcome: Outcome,
@@ -1390,7 +1398,9 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     return await refuse(env, call, verdict);
   }
   // A model with no safe price can't be bounded, so no budget admits it.
-  const price = await pinnedPrice(ref.catalog.cost);
+  const price = await pinnedPrice(
+    listPricesOf(ref.provider, ref.id, ref.catalog.cost)
+  );
   const scopes = scopesFor(rules.budgets, call);
   if (price === undefined && hasBudget(scopes)) {
     return await refuse(env, call, { code: "model.unpriced" });
@@ -1432,7 +1442,7 @@ const answerCall = async <Output>(
     const { answer } = sent;
     usage.inputTokens += inputTokens(answer.usage);
     usage.outputTokens += answer.usage.output;
-    cost += costOf(answer.usage);
+    cost += pricedCost(request.price, answer.usage);
     const text = answerText(answer);
     const truncated = answer.stopReason === "length";
 

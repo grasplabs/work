@@ -83,4 +83,81 @@ describe("model requests", () => {
       "body",
     ]);
   });
+
+  it("refuse audio, a top-level image, and the fields that bill beyond one answer to the prompt sent", () => {
+    expect(
+      [
+        holding({ type: "input_audio", input_audio: { data: "x" } }),
+        holding({ type: "audio", source: { data: "x" } }),
+        // Workers AI's own vision input.
+        body({ messages: [text], image: [1, 2, 3] }),
+        ...Object.entries({
+          n: 2,
+          best_of: 2,
+          conversation: "conv_1",
+          prompt: { id: "pmpt_1" },
+          modalities: ["text", "audio"],
+          audio: { voice: "alloy" },
+          prediction: { type: "content", content: "x" },
+          container: "cntr_1",
+          mcp_servers: [{ url: "https://x" }],
+          speed: "fast",
+        }).map(([field, value]) => body({ messages: [text], [field]: value })),
+      ].map(unboundedBy)
+    ).toStrictEqual([
+      "input_audio",
+      "audio",
+      "image",
+      "n",
+      "best_of",
+      "conversation",
+      "prompt",
+      "modalities",
+      "audio",
+      "prediction",
+      "container",
+      "mcp_servers",
+      "speed",
+    ]);
+  });
+
+  it("allow only tools the client runs, and read their cache settings too", () => {
+    const tool = (fields: object) =>
+      body({ messages: [text], tools: [fields] });
+    expect(
+      [
+        // Function tools, as each provider's API names them.
+        tool({ type: "function", function: { name: "f", parameters: {} } }),
+        tool({ type: "function", name: "f", parameters: {} }),
+        tool({ type: "custom", name: "f" }),
+        // Anthropic's client tools have no type.
+        tool({ name: "f", input_schema: { type: "object" } }),
+        // Hosted tools the provider runs, and bills, itself.
+        tool({ type: "web_search" }),
+        tool({ type: "web_search_20250305", name: "web_search" }),
+        tool({ type: "code_interpreter", container: { type: "auto" } }),
+        tool({ type: "file_search", vector_store_ids: ["vs_1"] }),
+        tool({ type: "mcp", server_url: "https://x" }),
+        // A one-hour cache write on a tool is still one.
+        tool({
+          name: "f",
+          input_schema: { type: "object" },
+          cache_control: { type: "ephemeral", ttl: "1h" },
+        }),
+        body({ messages: [text], tools: "not a list" }),
+      ].map(unboundedBy)
+    ).toStrictEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "tool",
+      "tool",
+      "tool",
+      "tool",
+      "tool",
+      "cache_ttl",
+      "tool",
+    ]);
+  });
 });

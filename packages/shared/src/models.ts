@@ -103,10 +103,39 @@ export interface ModelSettings {
   rules: { state: "invalid" } | ({ state: "on" } & ModelRulesSettings);
   /** The UTC month budgets count in now, such as `2026-09`. */
   month: string;
+  /** Reservations held for review (`HeldRequest`), oldest first. */
+  held: HeldRequest[];
 }
+
+/**
+ * A model request's reservation the model ledger couldn't read to settle:
+ * it stays held against its budgets until an admin releases it or charges
+ * it in full.
+ */
+export interface HeldRequest {
+  id: string;
+  /** `<provider>/<model>`. */
+  model: string;
+  /** The UTC month it counts in. */
+  period: string;
+  /** What it holds, in US dollars: the most it could have cost. */
+  amount: number;
+  /** When it was sent, as an ISO timestamp. */
+  sentAt: string;
+}
+
+/** Most held requests listed at once. */
+export const heldListed = 100;
 
 /** The model gateway's settings, over `/rpc`, for admins only. */
 export interface ModelsApi {
   /** The settings, and this month's spend against each budget. */
   settings: () => Promise<ModelSettings>;
+  /** The reservations held for review, oldest first. */
+  held: () => Promise<HeldRequest[]>;
+  /**
+   * Settles a held reservation: `release` charges nothing, `charge` all it
+   * holds. Audited. One no longer held is left as it is.
+   */
+  resolveHeld: (id: string, how: "release" | "charge") => Promise<void>;
 }

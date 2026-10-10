@@ -9,6 +9,10 @@ import { allEvents } from "./audit-events.ts";
 // the gateway (models.ts) relies on when a request is admitted, settled,
 // lost or repeated. Each test has a ledger of its own.
 
+/** Values in order, as their JSON sorts. */
+const byJson = (one: unknown, other: unknown): number =>
+  JSON.stringify(one).localeCompare(JSON.stringify(other));
+
 /** A ledger no other test uses. */
 const newLedger = () => env.MODEL_LEDGER.getByName(crypto.randomUUID());
 
@@ -47,6 +51,34 @@ const admission = (
   reconcileAt: Date.now() + 60 * 60_000,
   ...more,
 });
+
+/** Overwrites `column` of the requests `ids`, as another release might have stored them. */
+const corrupt = async (
+  ledger: ReturnType<typeof newLedger>,
+  column: "scopes" | "actor" | "prices",
+  value: string,
+  ...ids: string[]
+): Promise<void> => {
+  await runInDurableObject(ledger, (_instance, state) => {
+    for (const id of ids) {
+      state.storage.sql.exec(
+        `UPDATE requests SET ${column} = ? WHERE id = ?`,
+        value,
+        id
+      );
+    }
+  });
+};
+
+/** The ledger's requests, most reserved first. */
+const rowsOf = async (ledger: ReturnType<typeof newLedger>) =>
+  await runInDurableObject(ledger, (_instance, state) =>
+    state.storage.sql
+      .exec<{ id: string; state: string; reconcileAt: number }>(
+        "SELECT id, state, reconcile_at AS reconcileAt FROM requests ORDER BY reserved_micros DESC"
+      )
+      .toArray()
+  );
 
 /** What `key`'s user scope spent and holds in 2400-01. */
 const spendOf = async (ledger: ReturnType<typeof newLedger>, key = "ada") => {
@@ -272,7 +304,7 @@ describe("the model ledger", () => {
     ]);
   });
 
-  it("quarantines a reservation it can't read or settle, holding it, and reconciles the rest", async () => {
+  it("quarantines a request whose scopes can't be read, audited and still held, and reconciles the rest", async () => {
     const ledger = newLedger();
     const soon = Date.now() + 1000;
     const [broken, stray, nameless, fine, settling] = [
@@ -289,40 +321,33 @@ describe("the model ledger", () => {
     // Rows written by a release that stored them otherwise: scopes that
     // aren't JSON, a scope with no spend to settle against, and an actor
     // that isn't one.
-    await runInDurableObject(ledger, (_instance, state) => {
-      const { sql } = state.storage;
-      sql.exec(
-        "UPDATE requests SET scopes = 'not JSON', actor = 'not JSON' WHERE id IN (?, ?)",
-        broken.id,
-        settling.id
-      );
-      sql.exec(
-        "UPDATE requests SET scopes = ? WHERE id = ?",
-        JSON.stringify([budget(1000, "nobody")]),
-        stray.id
-      );
-      sql.exec(
-        "UPDATE requests SET actor = 'not JSON' WHERE id = ?",
-        nameless.id
-      );
-    });
+    await corrupt(ledger, "scopes", "not JSON", broken.id, settling.id);
+    await corrupt(
+      ledger,
+      "scopes",
+      JSON.stringify([budget(1000, "nobody")]),
+      stray.id
+    );
+    await corrupt(ledger, "actor", "not JSON", nameless.id);
     await expect(
       ledger.settle(settling.id, { by: "refused" })
     ).resolves.toStrictEqual({ state: "quarantined" });
 
     await scheduler.wait(soon - Date.now() + 100);
     await runDurableObjectAlarm(ledger);
-    const states = await runInDurableObject(ledger, (_instance, state) =>
-      state.storage.sql
-        .exec<{ id: string; state: string }>(
-          "SELECT id, state FROM requests ORDER BY reserved_micros DESC"
-        )
-        .toArray()
-    );
+    const rows = await rowsOf(ledger);
     const events = await allEvents();
     expect({
-      states: states.map(({ state }) => state),
+      states: rows.map(({ id, state }) => [id, state]),
+      // Set aside for now, not quarantined: its scopes can be read.
+      strayLater:
+        (rows.find(({ id }) => id === stray.id)?.reconcileAt ?? 0) > soon,
       dan: await spendOf(ledger, "dan"),
+      quarantined: events
+        .filter(({ action }) => action === "model.spend.quarantined")
+        .map(({ detail }) => detail.request)
+        .filter((id) => id === broken.id || id === settling.id)
+        .toSorted(byJson),
       // Reconciled all the same, in the system's name.
       nameless: events.find(
         ({ action, detail }) =>
@@ -330,16 +355,130 @@ describe("the model ledger", () => {
       )?.actor,
     }).toStrictEqual({
       states: [
-        "quarantined",
-        "quarantined",
-        "settled",
-        "settled",
-        "quarantined",
+        [broken.id, "quarantined"],
+        [stray.id, "dispatched"],
+        [fine.id, "settled"],
+        [nameless.id, "settled"],
+        [settling.id, "quarantined"],
       ],
+      strayLater: true,
       // Their reservations stay held: what they hold can't be told.
       dan: { key: "dan", spentMicros: 35, reservedMicros: 30 + 25 + 5 },
+      quarantined: [broken.id, settling.id].toSorted(byJson),
       nameless: { type: "system" },
     });
+  });
+
+  it("charges in full a request whose prices can't be read, and needs none to release one", async () => {
+    const ledger = newLedger();
+    const [used, refused] = [
+      admission(30, [budget(1000, "eve")]),
+      admission(20, [budget(1000, "eve")]),
+    ];
+    await ledger.admit(used);
+    await ledger.admit(refused);
+    await corrupt(ledger, "prices", "not JSON", used.id, refused.id);
+
+    await expect(
+      Promise.all([
+        ledger.settle(used.id, {
+          by: "usage",
+          tokens: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+        }),
+        ledger.settle(refused.id, { by: "refused" }),
+      ])
+    ).resolves.toStrictEqual([
+      { state: "settled", chargedMicros: 30 },
+      { state: "settled", chargedMicros: 0 },
+    ]);
+    await expect(spendOf(ledger, "eve")).resolves.toStrictEqual({
+      key: "eve",
+      spentMicros: 30,
+      reservedMicros: 0,
+    });
+  });
+
+  it("lists quarantined requests, and releases or charges each as a person decides, once, audited", async () => {
+    const ledger = newLedger();
+    const [released, charged] = [
+      admission(30, [budget(1000, "fay")]),
+      admission(20, [budget(1000, "fay")]),
+    ];
+    await ledger.admit(released);
+    await ledger.admit(charged);
+    await corrupt(ledger, "scopes", "not JSON", released.id, charged.id);
+    await ledger.settle(released.id, { by: "refused" });
+    await ledger.settle(charged.id, { by: "refused" });
+    const listed = await ledger.quarantined(10);
+    const admin = {
+      type: "person",
+      userId: `admin-${crypto.randomUUID()}`,
+    } as const;
+
+    const resolved = await Promise.all([
+      ledger.resolveQuarantined(released.id, "release", admin),
+      ledger.resolveQuarantined(charged.id, "charge", admin),
+    ]);
+    const again = await ledger.resolveQuarantined(released.id, "charge", admin);
+    await runDurableObjectAlarm(ledger);
+    const events = await allEvents();
+    expect({
+      listed: listed
+        .map(({ id, reservedMicros, model }) => [id, reservedMicros, model])
+        .toSorted(byJson),
+      resolved,
+      again,
+      after: await ledger.quarantined(10),
+      fay: await spendOf(ledger, "fay"),
+      audited: events
+        .filter(({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin))
+        .map(({ action, detail }) => [action, detail.request, detail.charged])
+        .toSorted(byJson),
+    }).toStrictEqual({
+      listed: [
+        [released.id, 30, "workers-ai/test"],
+        [charged.id, 20, "workers-ai/test"],
+      ].toSorted(byJson),
+      resolved: [
+        { state: "settled", chargedMicros: 0 },
+        { state: "settled", chargedMicros: 20 },
+      ],
+      // Settled already: a second decision changes nothing.
+      again: { state: "settled", chargedMicros: 0 },
+      after: [],
+      fay: { key: "fay", spentMicros: 20, reservedMicros: 0 },
+      audited: [
+        ["model.spend.charged", charged.id, 0.00002],
+        ["model.spend.released", released.id, 0],
+      ],
+    });
+  });
+
+  it("refuses a request whose tiers have no price against a budget", async () => {
+    const ledger = newLedger();
+    const { version: _version, ...rates } = price;
+    const tier = { ...rates, inputTokensAbove: 100 };
+    await expect(
+      Promise.all([
+        ledger.admit(
+          admission(1, [budget(100)], {
+            price: { ...price, tiers: [{ ...tier, output: 0 }] },
+          })
+        ),
+        ledger.admit(
+          admission(1, [budget(100)], {
+            price: { ...price, tiers: [{ ...tier, input: 0 }] },
+          })
+        ),
+        ledger.admit(
+          admission(1, [budget(100)], { price: { ...price, tiers: [tier] } })
+        ),
+      ])
+    ).resolves.toStrictEqual([
+      { ok: false, unpriced: true },
+      { ok: false, unpriced: true },
+      { ok: true },
+    ]);
   });
 
   it("alerts admins once per scope, month and threshold, however many requests reach it", async () => {

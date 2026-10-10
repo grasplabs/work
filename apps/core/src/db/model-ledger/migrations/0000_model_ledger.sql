@@ -13,6 +13,13 @@ CREATE TABLE `audit_outbox` (
 	`created_at` integer NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE `request_scopes` (
+	`request_id` text NOT NULL,
+	`scope` text NOT NULL,
+	`key` text NOT NULL,
+	PRIMARY KEY(`request_id`, `scope`, `key`)
+);
+--> statement-breakpoint
 CREATE TABLE `requests` (
 	`id` text PRIMARY KEY NOT NULL,
 	`fingerprint` text NOT NULL,

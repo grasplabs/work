@@ -351,6 +351,10 @@ msgstr "{toolCount, plural, one {# tool} other {# tools}}"
 msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{total, plural, one {# integration shown} other {# integrations shown}}"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{total} is held for these model calls until they are reviewed: what each could have cost. Contact Grasp to release or charge them."
+msgstr "{total} is held for these model calls until they are reviewed: what each could have cost. Contact Grasp to release or charge them."
+
 #: src/dashboard/nav-item.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# thing waiting} other {# things waiting}}"
@@ -1831,6 +1835,10 @@ msgstr "Hash"
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "He doesn't ask about it, and moves on when somebody brings it up."
 msgstr "He doesn't ask about it, and moves on when somebody brings it up."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Held for review"
+msgstr "Held for review"
 
 #: src/routes/guest.tsx
 msgid "Hi {name}"
