@@ -14,7 +14,10 @@ import { z } from "zod";
 
 import { callApp } from "../src/app.ts";
 import type { AppCallerInput } from "../src/app.ts";
-import { drainSubmissionOutbox, maxAttempts } from "../src/knowledge/outbox.ts";
+import {
+  defaultMaxAttempts as maxAttempts,
+  drainSubmissionOutbox,
+} from "../src/knowledge/outbox.ts";
 import type {
   OutboxConsumer,
   OutboxConsumers,
@@ -1247,6 +1250,60 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       count: entries.length,
       unsettled: entries.filter(({ settled }) => !settled).length,
     }).toStrictEqual({ count: 120, unsettled: 0 });
+  });
+
+  it("lease each entry when its turn comes, so a drain started meanwhile hands none over again", async () => {
+    const setup = await setUp();
+    const marker = unique();
+    const handed: string[] = [];
+    // Slower than a hand-over may take: each one fails, and is put back.
+    const consumers = consumersFor(marker, async (entry) => {
+      handed.push(entry.id);
+      await scheduler.wait(30);
+      return "delivered";
+    });
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key: unique(),
+      intents: Array.from({ length: 12 }, (_, n) => ({
+        kind: "workflow.notify" as const,
+        data: { marker, n },
+      })),
+      consumers,
+    });
+    const first = drainSubmissionOutbox(env, consumers, { timeoutMs: 20 });
+    await scheduler.wait(150);
+    await drainSubmissionOutbox(env, consumers, { timeoutMs: 20 });
+    await first;
+    const entries = await entriesOf(marker);
+    const ids = entries.map(({ id }) => id);
+    expect(handed.toSorted()).toStrictEqual(ids.toSorted());
+  });
+
+  it("hand over one entry with no budget left, and stop", async () => {
+    const setup = await setUp();
+    const marker = unique();
+    let calls = 0;
+    const consumers = consumersFor(marker);
+    const counting: OutboxConsumers = {
+      "workflow.notify": async (entry) => {
+        calls += 1;
+        return await (consumers["workflow.notify"]?.(entry) ?? "delivered");
+      },
+    };
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key: unique(),
+      intents: Array.from({ length: 3 }, (_, n) => ({
+        kind: "workflow.notify" as const,
+        data: { marker, n },
+      })),
+      consumers,
+    });
+    await drainSubmissionOutbox(env, counting, { budgetMs: 0 });
+    const entries = await entriesOf(marker);
+    expect({
+      calls,
+      unsettled: entries.filter(({ settled }) => !settled).length,
+    }).toStrictEqual({ calls: 1, unsettled: 2 });
   });
 
   it("give up on a consumer that hangs or keeps failing only after their attempts, settling the entry", async () => {
