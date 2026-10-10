@@ -1,5 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import {
+  catalogLogoPath,
   catalogSourceSchema,
   composioToolkitSchema,
   connectErrors,
@@ -22,7 +23,7 @@ import type {
   OfferedCatalog,
 } from "@grasp-os/shared/connect";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
-import { authErrors } from "@grasp-os/shared/errors";
+import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -41,6 +42,7 @@ import { providerIds, signInConfig } from "./auth/config.ts";
 import { identifyFull } from "./auth/identity.ts";
 import { accounts, hiddenConnectors, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { errorResponse } from "./errors.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
@@ -607,4 +609,75 @@ export const handleConnectionCallback = async (
   const back = onOrigin(config.origin, finished.returnTo) ?? connectionsPage;
   back.searchParams.set("connection", finished.connectionId);
   return redirect(back);
+};
+
+/** A logo's address: `catalogLogoUrl`'s path, with the entry it names. */
+const catalogLogoPattern = new RegExp(
+  `^${catalogLogoPath}/(?<source>[a-z]+)/(?<id>[a-z0-9_-]+)$`,
+  "u"
+);
+
+/** Whether `pathname` is a catalog entry's logo's. */
+export const isCatalogLogoPath = (pathname: string): boolean =>
+  pathname.startsWith(`${catalogLogoPath}/`);
+
+/** How long a browser keeps a logo. */
+const logoMaxAgeSeconds = 24 * 60 * 60;
+
+/**
+ * How long a browser keeps that an entry has no logo: shorter, as a logo
+ * that didn't come in time is none too.
+ */
+const noLogoMaxAgeSeconds = 10 * 60;
+
+/**
+ * A catalog entry's logo, from the deployment's own origin, for anyone
+ * signed in: connect fetched it from the entry's provider and checked
+ * that it is an image of the type it is sent as (connect's logos.ts).
+ * Every answer on this path runs no script, even an SVG opened on its
+ * own (`setSecurityHeaders`). Logos of entries an admin hid are served
+ * all the same: the toolkit's logo is Composio's public image, and
+ * hiding governs what people connect, not what they may look at.
+ */
+export const catalogLogoResponse = async (
+  request: Request,
+  env: Env,
+  pathname: string,
+  requestId: string
+): Promise<Response> => {
+  const notFound = () =>
+    errorResponse(404, requestErrors.create("request.not_found"), requestId);
+  const named = catalogLogoPattern.exec(pathname)?.groups;
+  const source = catalogSourceSchema.safeParse(named?.source);
+  if (request.method !== "GET" || !source.success || named?.id === undefined) {
+    return notFound();
+  }
+  const person = await identifyFull(env, request.headers);
+  if (person === undefined) {
+    return errorResponse(
+      401,
+      authErrors.create("auth.unauthenticated"),
+      requestId
+    );
+  }
+  const logo = await env.CONNECT.catalogLogo({
+    source: source.data,
+    id: named.id,
+  });
+  if (logo === null) {
+    const none = notFound();
+    // The page draws the first letter instead: no need to ask each time.
+    none.headers.set(
+      "cache-control",
+      `private, max-age=${noLogoMaxAgeSeconds}`
+    );
+    return none;
+  }
+  return new Response(logo.bytes, {
+    headers: {
+      "content-type": logo.contentType,
+      "content-length": String(logo.bytes.byteLength),
+      "cache-control": `private, max-age=${logoMaxAgeSeconds}`,
+    },
+  });
 };

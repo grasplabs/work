@@ -1,3 +1,4 @@
+import { catalogLogoPath } from "@grasp-os/shared/connect";
 import { strictTransportSecurity } from "@grasp-os/shared/http";
 import { isPackageArtifactPath } from "@grasp-os/shared/packages";
 import { screenFramePath, screenModulePath } from "@grasp-os/shared/screens";
@@ -188,6 +189,21 @@ export const packageArtifactPolicy = (origin: string): string =>
   })}; sandbox`;
 
 /**
+ * The policy of every answer on the path of catalog logos (connections.ts):
+ * images from Composio, an SVG among them, which can carry script. Shown
+ * in an `<img>`, an SVG runs none; opened on its own, as a document, this
+ * policy runs none either: nothing loads, and `sandbox` gives it an opaque
+ * origin, so nothing in it reaches this origin's cookies or storage. Inline
+ * styles stay, as SVGs draw with them.
+ */
+export const catalogLogoPolicy = `${policy({
+  "default-src": "'none'",
+  "style-src": "'unsafe-inline'",
+  "img-src": "data:",
+  "frame-ancestors": "'none'",
+})}; sandbox`;
+
+/**
  * Sets the security headers on a response core sends for `url`, on a
  * deployment people reach at `origin`. HSTS goes only on https, since
  * browsers ignore it over http (local development). A route may send a
@@ -195,9 +211,10 @@ export const packageArtifactPolicy = (origin: string): string =>
  * URL carries a secret; it is kept. So is the screen frame's policy,
  * which names its build's scripts; a frame response without one runs no
  * script at all. Everything on the path of packages' artifacts gets their
- * policy and `no-referrer`, whatever the route sent. Answers on the paths
- * of code we didn't write vary on `Sec-Fetch-Site`, as core refuses them
- * to the product page (`isRefusedToProductPage`).
+ * policy and `no-referrer`, whatever the route sent; everything on the
+ * path of catalog logos gets theirs (`catalogLogoPolicy`). Answers on the
+ * paths of code we didn't write vary on `Sec-Fetch-Site`, as core refuses
+ * them to the product page (`isRefusedToProductPage`).
  */
 export const setSecurityHeaders = (
   headers: Headers,
@@ -208,6 +225,8 @@ export const setSecurityHeaders = (
   if (artifact) {
     headers.set("content-security-policy", packageArtifactPolicy(origin));
     headers.set("referrer-policy", "no-referrer");
+  } else if (url.pathname.startsWith(`${catalogLogoPath}/`)) {
+    headers.set("content-security-policy", catalogLogoPolicy);
   } else if (url.pathname !== screenFramePath) {
     headers.set("content-security-policy", contentSecurityPolicy(origin));
   } else if (!headers.has("content-security-policy")) {

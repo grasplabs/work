@@ -13,7 +13,7 @@
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { clients } from "../../connect/test/provider-config.ts";
-import { composioApiScript } from "./composio-api.ts";
+import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { mailServerScript } from "./mail-server.ts";
 
 /** Grasp's Entra app for connections, as set on connect in the tests. */
@@ -51,6 +51,7 @@ export const tokensFor = (subject: string): string[] => [
 export const connectProvidersScript = `
 ${mailServerScript}
 ${composioApiScript}
+${composioLogoScript}
 const base64Url = (bytes) =>
   btoa(String.fromCharCode(...bytes))
     .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
@@ -64,6 +65,9 @@ export default {
     const url = new URL(request.url);
     if (url.hostname === "backend.composio.dev" && url.pathname.startsWith("/api/v3.1/")) {
       return await composioApi(request, url);
+    }
+    if (url.hostname === "logos.composio.dev") {
+      return composioLogo(url);
     }
     if (url.hostname === "backend.composio.dev" || url.hostname === "mail-control.test") {
       return await mailServer(request, url);
