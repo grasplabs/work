@@ -690,7 +690,7 @@ describe("reading large metadata", () => {
     // one request settling another's promise or stream, which workerd
     // doesn't carry. Under load workerd took a request for hung and
     // cancelled it, and the test's next step never settled.
-    const first = { reading: false, letGo: false };
+    const first = { reading: false, letGo: false, expired: false };
     registry.override(
       "/left-pad",
       () =>
@@ -702,7 +702,9 @@ describe("reading large metadata", () => {
                 first.reading = true;
                 await until("the test to let the first answer go", () =>
                   first.letGo ? true : undefined
-                ).catch(() => {});
+                ).catch(() => {
+                  first.expired = true;
+                });
                 controller.error(new TypeError("Network connection lost."));
               },
             },
@@ -729,28 +731,38 @@ describe("reading large metadata", () => {
     registry.reset();
     await registry.publish({ ...leftPad, name: "right-pad" });
     const after = await outcome(connect.npmMetadata("right-pad"));
-    expect({ second, firstEnded, after }).toStrictEqual({
-      second: "package.registry_busy",
-      firstEnded: "package.registry_unavailable",
-      after: "ok",
-    });
+    expect({ second, firstEnded, after, expired: first.expired }).toStrictEqual(
+      {
+        // Let go by the test, not by the hold running out first.
+        expired: false,
+        second: "package.registry_busy",
+        firstEnded: "package.registry_unavailable",
+        after: "ok",
+      }
+    );
   });
 });
 
 describe("refusing metadata as busy", () => {
   it("cancels the registry's answer whenever it refuses one as busy, before or after its size is known", async () => {
-    // Two answers that hold for a moment, then break off, declaring
-    // between them every byte of the isolate's 40 MiB budget for metadata
-    // (src/npm.ts): the most one may be, and the rest. Each ends on its
-    // own: one request's stream can't be ended from another's.
-    let holding = 0;
-    const held = (declared: number) => (): Response => {
-      holding += 1;
-      return new Response(
+    // Two answers that hold until the test lets them go, then break off,
+    // declaring between them every byte of the isolate's 40 MiB budget for
+    // metadata (src/npm.ts): the most one may be, and the rest. Each ends
+    // on its own, in its own request: one request's stream can't be ended
+    // from another's.
+    const holds = { reading: 0, letGo: false, expired: false };
+    const held = (declared: number) => (): Response =>
+      new Response(
         new ReadableStream<Uint8Array>(
           {
             pull: async (controller) => {
-              await scheduler.wait(1000);
+              // Pulled once the read reserved its share and reads.
+              holds.reading += 1;
+              await until("the test to let the held answers go", () =>
+                holds.letGo ? true : undefined
+              ).catch(() => {
+                holds.expired = true;
+              });
               controller.error(new TypeError("Network connection lost."));
             },
           },
@@ -758,7 +770,6 @@ describe("refusing metadata as busy", () => {
         ),
         { headers: { "content-length": String(declared) } }
       );
-    };
     registry.override("/held-one", held(registryLimits.metadataBytes));
     registry.override(
       "/held-two",
@@ -768,8 +779,8 @@ describe("refusing metadata as busy", () => {
       outcome(connect.npmMetadata("held-one")),
       outcome(connect.npmMetadata("held-two")),
     ];
-    await until("both held answers to be asked for", () =>
-      holding === 2 ? true : undefined
+    await until("both held answers to be read", () =>
+      holds.reading === 2 ? true : undefined
     );
     // One that says nothing of its size, refused once it would take its
     // first buffer; and one that declares its size, refused at once.
@@ -787,12 +798,16 @@ describe("refusing metadata as busy", () => {
       await outcome(connect.npmMetadata("unsized")),
       await outcome(connect.npmMetadata("sized")),
     ];
+    holds.letGo = true;
     const ended = await Promise.all(ending);
     expect({
+      // Let go by the test, not by the holds running out first.
+      expired: holds.expired,
       refused,
       cancelled: [unsized.state.cancelled, sized.state.cancelled],
       ended,
     }).toStrictEqual({
+      expired: false,
       refused: ["package.registry_busy", "package.registry_busy"],
       cancelled: [true, true],
       ended: ["package.registry_unavailable", "package.registry_unavailable"],

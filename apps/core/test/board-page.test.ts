@@ -842,8 +842,9 @@ describe("the board page", { timeout: 60_000 }, () => {
     const folder = `many-${unique()}`;
     // More designed workflows than a page of records, each drawn first.
     // Saved one after another: an App takes one call at a time, and a
-    // call's deadline runs from when it came, so 25 sent at once have the
-    // last wait out the 24 before it, past its deadline under load.
+    // call's deadline runs from when it came, so 25 sent at once have a
+    // call wait out up to 24 calls ahead of it, past its deadline under
+    // load.
     const designed: z.infer<typeof savedSchema>[] = [];
     for (let index = 0; index < 25; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one call at a time
