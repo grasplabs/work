@@ -76,14 +76,14 @@ const stepsBack = (
  * and `last`, `self`'s turn, still holds `self`.
  */
 const stillWaits = async (
-  { ask, holds, signal }: WaitsFor,
+  { ask, holds }: WaitsFor,
   edges: readonly Edge[],
   last: Hold
 ): Promise<boolean> => {
   const answers = await Promise.allSettled(
     edges.map(async ({ asker }) => await ask(asker.app, [asker.call]))
   );
-  if (signal.aborted || !holds(last.call)) {
+  if (!holds(last.call)) {
     return false;
   }
   return edges.every(({ asker, expects }, at) => {

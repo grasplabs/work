@@ -35,6 +35,7 @@ const walk = async (
   {
     limit = 32,
     selfHolder = "self",
+    selfHolds = (call: string): boolean => call === selfHolder,
     failing = new Set<string>(),
     signal = new AbortController().signal,
     onAsk = (_asking: string): void => {
@@ -46,7 +47,7 @@ const walk = async (
   const found = await waitsOn({
     self,
     holding,
-    holds: (call) => call === selfHolder,
+    holds: selfHolds,
     ask: async (asking, turns) => {
       asked.push(asking);
       onAsk(asking);
@@ -219,7 +220,27 @@ describe("the walk back through Apps' queues", () => {
         }
       },
     });
-    expect(found).toBeFalsy();
+    // This App's turn ends once the walk found it, before the cycle is
+    // asked about again.
+    let selfAsked = false;
+    const selfMovedOn = await foundBy(
+      [held("a")],
+      {
+        [app("a")]: { holder: "a", waiting: [[held("b")]] },
+        [app("b")]: { holder: "b", waiting: [[held("self")]] },
+      },
+      {
+        selfHolds: (call) => {
+          const holdsNow = call === "self" && !selfAsked;
+          selfAsked = true;
+          return holdsNow;
+        },
+      }
+    );
+    expect({ found, selfMovedOn }).toStrictEqual({
+      found: false,
+      selfMovedOn: false,
+    });
   });
 
   it("asks nothing more once the call no longer waits", async () => {
