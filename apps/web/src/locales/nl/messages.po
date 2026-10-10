@@ -352,8 +352,8 @@ msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{total, plural, one {# integratie getoond} other {# integraties getoond}}"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "{total} is held for these model calls until they are reviewed: what each could have cost. Contact Grasp to release or charge them."
-msgstr "{total} wordt voor deze modelaanroepen vastgehouden tot ze zijn beoordeeld: wat elk had kunnen kosten. Neem contact op met Grasp om ze vrij te geven of in rekening te brengen."
+msgid "{total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full."
+msgstr "{total} wordt voor deze modelaanroepen vastgehouden tot je beslist: wat elk had kunnen kosten. Geef het vrij, of breng het volledig in rekening."
 
 #: src/dashboard/nav-item.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
@@ -1019,6 +1019,14 @@ msgstr "wijzigt de gegevens van de engine"
 #: src/chat/builds.tsx
 msgid "Changes the engine's data"
 msgstr "Wijzigt de gegevens van de engine"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Charge"
+msgstr "In rekening brengen"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Charge {amount} for this model call?"
+msgstr "{amount} in rekening brengen voor deze modelaanroep?"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
@@ -1922,6 +1930,10 @@ msgstr "Interviews"
 msgid "Invited a guest"
 msgstr "Een gast uitgenodigd"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
+msgstr "Het telt als uitgegeven tegen de budgetten: het meeste dat het had kunnen kosten. Dit kan niet ongedaan worden gemaakt."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
 msgstr "Er zijn geen parameters."
@@ -1945,6 +1957,10 @@ msgstr "Ze wordt met niemand gedeeld."
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
 msgstr "Misschien is het hernoemd of verwijderd."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "It no longer counts against the budgets, as if it cost nothing. This can't be undone."
+msgstr "Het telt niet meer mee tegen de budgetten, alsof het niets kostte. Dit kan niet ongedaan worden gemaakt."
 
 #: src/chat/builds.tsx
 msgid "It no longer runs (it could change things)."
@@ -3026,6 +3042,14 @@ msgstr "Afgewezen door {name} op {date}."
 #: src/dashboard/pile-cards.tsx
 msgid "Rejected: {who}."
 msgstr "Afgewezen: {who}."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Release"
+msgstr "Vrijgeven"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Release the {amount} held for this model call?"
+msgstr "De {amount} vrijgeven die voor deze modelaanroep wordt vastgehouden?"
 
 #: src/screens/screen-frame.tsx
 msgid "Reload"

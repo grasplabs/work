@@ -580,6 +580,8 @@ describe("model budgets", { timeout: 60_000 }, () => {
       ledger: await ledgerOf(month, userOf(ada)),
       // In micros, as the audit event's dollars come out of floats.
       audited: Math.round((event?.cost?.amount ?? 0) * 1_000_000),
+      // How the ledger settled it, on the event too.
+      settled: [event?.detail.ledger, event?.detail.ledgerCharged],
     }).toStrictEqual({
       ledger: {
         key: userOf(ada),
@@ -587,7 +589,61 @@ describe("model budgets", { timeout: 60_000 }, () => {
         reservedMicros: 0,
       },
       audited: 300_000 * 5 + 2250,
+      settled: ["settled", 1.50225],
     });
+  });
+
+  it("estimate a cancelled answer at its tier's prices, and say on its event what the ledger holds for it", async () => {
+    const rest = Promise.withResolvers<boolean>();
+    const { agent, month } = withRules({ budgets: { user: { limit: 10 } } }, [
+      {
+        text: "Hello there, how are you today?",
+        inputTokens: 250_000,
+        outputTokens: 100,
+        pause: { at: 12, until: rest.promise },
+      },
+    ]);
+    const ada = newPerson();
+    try {
+      const session = await agent({
+        model: anthropic,
+        purpose: "chat.turn",
+        trigger: ada,
+        work: requireWork(),
+      });
+      const cancel = new AbortController();
+      const stream = session.stream(
+        session.model,
+        normalizeContext({
+          messages: [{ role: "user", content: "Hi.", timestamp: Date.now() }],
+        }),
+        { signal: cancel.signal }
+      );
+      for await (const event of stream) {
+        if (event.type === "text_delta") {
+          cancel.abort();
+        }
+      }
+      const held = await ledgerOf(month, ada.userId);
+      const [event] = await eventsOf(ada);
+      expect({
+        // The prompt as Anthropic counted it, past 200K, and "Hello there,"
+        // estimated, both at the long-context prices.
+        audited:
+          Math.abs(
+            (event?.cost?.amount ?? 0) - (250_000 * 6 + 3 * 22.5) / 1e6
+          ) < 1e-9,
+        settled: [
+          event?.detail.ledger,
+          Math.round(Number(event?.detail.ledgerHeld) * 1_000_000),
+        ],
+      }).toStrictEqual({
+        audited: true,
+        settled: ["unknown", held.reservedMicros],
+      });
+    } finally {
+      rest.resolve(true);
+    }
   });
 
   it("hold an answer whose provider never sent its count, rather than charge it nothing", async () => {

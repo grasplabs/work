@@ -444,7 +444,7 @@ describe("the model ledger", () => {
         { state: "settled", chargedMicros: 20 },
       ],
       // Settled already: a second decision changes nothing.
-      again: { state: "settled", chargedMicros: 0 },
+      again: { state: "not_held" },
       after: [],
       fay: { key: "fay", spentMicros: 20, reservedMicros: 0 },
       audited: [
@@ -452,6 +452,119 @@ describe("the model ledger", () => {
         ["model.spend.released", released.id, 0],
       ],
     });
+  });
+
+  it("alerts admins when a decided charge takes a budget past its threshold", async () => {
+    const ledger = newLedger();
+    const key = `gus-${crypto.randomUUID()}`;
+    const held = admission(30, [budget(40, key)]);
+    await ledger.admit(held);
+    await corrupt(ledger, "scopes", "not JSON", held.id);
+    await ledger.settle(held.id, { by: "refused" });
+    const admin = {
+      type: "person",
+      userId: `admin-${crypto.randomUUID()}`,
+    } as const;
+
+    await ledger.resolveQuarantined(held.id, "charge", admin);
+    await runDurableObjectAlarm(ledger);
+    const events = await allEvents();
+    expect(
+      events
+        .filter(
+          ({ action, detail }) =>
+            action.startsWith("model.budget.") && detail.user === key
+        )
+        .map(({ action, detail }) => [action, detail.threshold])
+    ).toStrictEqual([["model.budget.alert", 0.00002]]);
+  });
+
+  it("quarantines a request that keeps failing to reconcile, after three tries, audited and held", async () => {
+    const ledger = newLedger();
+    const failing = admission(25, [budget(1000, "hal")], {
+      reconcileAt: Date.now() + 1000,
+    });
+    await ledger.admit(failing);
+    // Its scopes read as JSON, but name a scope with no spend to settle
+    // against: every charge throws.
+    await corrupt(
+      ledger,
+      "scopes",
+      JSON.stringify([budget(1000, "nobody")]),
+      failing.id
+    );
+    const states: string[] = [];
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      // As if its next try came due.
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runInDurableObject(ledger, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE requests SET reconcile_at = ? WHERE id = ?",
+          Date.now() - 1,
+          failing.id
+        );
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runDurableObjectAlarm(ledger);
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      const [row] = await rowsOf(ledger);
+      states.push(row?.state ?? "gone");
+    }
+    await runDurableObjectAlarm(ledger);
+    const events = await allEvents();
+    const held = await ledger.quarantined(10);
+
+    expect({
+      states,
+      held: held.map(({ id }) => id),
+      audited: events.some(
+        ({ action, detail }) =>
+          action === "model.spend.quarantined" && detail.request === failing.id
+      ),
+    }).toStrictEqual({
+      states: ["dispatched", "dispatched", "quarantined"],
+      held: [failing.id],
+      audited: true,
+    });
+  });
+
+  it("ends an alarm run when no request of a full page can make progress", async () => {
+    const ledger = newLedger();
+    const soon = Date.now() + 1000;
+    const stuck = Array.from({ length: 100 }, () =>
+      admission(1, [budget(1000, "ivy")], { reconcileAt: soon })
+    );
+    for (const request of stuck) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await ledger.admit(request);
+    }
+    // Every charge throws, and nothing about a request can be written:
+    // no try can be counted or put off.
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE requests SET scopes = ?",
+        JSON.stringify([budget(1000, "nobody")])
+      );
+      state.storage.sql.exec(
+        "CREATE TRIGGER stuck BEFORE UPDATE ON requests BEGIN SELECT RAISE(ABORT, 'stuck'); END"
+      );
+    });
+
+    await scheduler.wait(soon - Date.now() + 100);
+    const ran = await Promise.race([
+      (async () => {
+        await runDurableObjectAlarm(ledger);
+        return "ended";
+      })(),
+      (async () => {
+        await scheduler.wait(15_000);
+        return "still running";
+      })(),
+    ]);
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec("DROP TRIGGER stuck");
+    });
+    expect(ran).toBe("ended");
   });
 
   it("refuses a request whose tiers have no price against a budget", async () => {

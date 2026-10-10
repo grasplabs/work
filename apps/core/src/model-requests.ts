@@ -75,6 +75,10 @@ const unboundedParts = new Set([
   "input_file",
   "input_audio",
   "audio",
+  // An earlier item by reference, whose tokens aren't in the body, and a
+  // screenshot, billed as an image.
+  "item_reference",
+  "computer_screenshot",
 ]);
 
 /** Top-level fields the bound or the prices don't cover. */
@@ -204,6 +208,12 @@ export const unboundedBy = (body: unknown): string | undefined => {
   const parsed = parsedBody(body);
   if (!isRecord(parsed)) {
     return "body";
+  }
+  // US-only inference costs 1.1x on Claude 4.6 and later (Anthropic's
+  // pricing page, "Data residency pricing", read 2026-10-10); global
+  // routing, the default, costs the catalog's prices.
+  if (parsed.inference_geo !== undefined && parsed.inference_geo !== "global") {
+    return "inference_geo";
   }
   const field = unboundedFields.find((name) => parsed[name] !== undefined);
   return field ?? unboundedTool(parsed.tools) ?? unboundedIn(parsed);

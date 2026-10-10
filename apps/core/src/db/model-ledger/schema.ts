@@ -62,6 +62,8 @@ export const requests = sqliteTable(
     dispatchedAt: integer("dispatched_at").notNull(),
     /** When it is charged its whole reservation, unless settled before. */
     reconcileAt: integer("reconcile_at").notNull(),
+    /** How often reconciling it failed; quarantined once it reaches three. */
+    reconcileFailures: integer("reconcile_failures").notNull().default(0),
     settledAt: integer("settled_at"),
   },
   (table) => [
@@ -88,6 +90,11 @@ export const requestScopes = sqliteTable(
     requestId: text("request_id").notNull(),
     scope: text({ enum: scopes }).notNull(),
     key: text().notNull(),
+    /** Its budget when admitted, for the alerts a decided charge may cause. */
+    limitMicros: integer("limit_micros"),
+    alertMicros: integer("alert_micros"),
+    /** What its alerts name, as JSON. */
+    names: text().notNull().default("{}"),
   },
   (table) => [
     primaryKey({ columns: [table.requestId, table.scope, table.key] }),

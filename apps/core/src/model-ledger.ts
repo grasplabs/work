@@ -82,6 +82,9 @@ const auditRetryMs = { first: 5000, most: 15 * 60 * 1000 };
 /** How much later a request that failed to reconcile is tried again. */
 const reconcileRetryMs = 60 * 60 * 1000;
 
+/** How many failed tries at reconciling a request set it aside for a person. */
+const maxReconcileFailures = 3;
+
 /** How often the alarm looks again for receipts to sweep, while any are kept. */
 const sweepEveryMs = 24 * 60 * 60 * 1000;
 
@@ -192,6 +195,18 @@ export type Settled =
   /** It couldn't be read to settle, and holds its reservation. */
   | { state: "quarantined" }
   | { state: "missing" };
+
+/**
+ * What a person's decision on a held request came to: settled at what it
+ * charged; `not_held` for a request that exists but isn't held (settled
+ * since, or never set aside); `missing` for none.
+ */
+export type Decided =
+  | { state: "settled"; chargedMicros: number }
+  | { state: "not_held" }
+  | { state: "missing" };
+
+const namesSchema = z.record(z.string(), z.string());
 
 /** A request set aside because it couldn't be read, for a person to settle. */
 export interface QuarantinedRequest {
@@ -349,10 +364,23 @@ export class ModelLedger extends DurableObject<Env> {
           reconcileAt: admission.reconcileAt,
         })
         .run();
-      for (const { scope, key } of admission.scopes) {
+      for (const {
+        scope,
+        key,
+        limitMicros,
+        alertMicros,
+        names,
+      } of admission.scopes) {
         this.#db
           .insert(requestScopes)
-          .values({ requestId: admission.id, scope, key })
+          .values({
+            requestId: admission.id,
+            scope,
+            key,
+            limitMicros,
+            alertMicros,
+            names: JSON.stringify(names),
+          })
           .run();
         this.#db
           .insert(spend)
@@ -498,9 +526,9 @@ export class ModelLedger extends DurableObject<Env> {
     id: string,
     how: "release" | "charge",
     by: AuditActor
-  ): Promise<Settled> {
+  ): Promise<Decided> {
     const actor = auditActorSchema.parse(by);
-    const settled = this.ctx.storage.transactionSync((): Settled => {
+    const settled = this.ctx.storage.transactionSync((): Decided => {
       const row = this.#db
         .select()
         .from(requests)
@@ -509,11 +537,8 @@ export class ModelLedger extends DurableObject<Env> {
       if (row === undefined) {
         return { state: "missing" };
       }
-      if (row.state === "settled") {
-        return { state: "settled", chargedMicros: row.chargedMicros ?? 0 };
-      }
       if (row.state !== "quarantined") {
-        return { state: row.state === "unknown" ? "unknown" : "missing" };
+        return { state: "not_held" };
       }
       const charged = how === "charge" ? row.reservedMicros : 0;
       this.#db
@@ -527,12 +552,12 @@ export class ModelLedger extends DurableObject<Env> {
         .where(eq(requests.id, id))
         .run();
       const keys = this.#db
-        .select({ scope: requestScopes.scope, key: requestScopes.key })
+        .select()
         .from(requestScopes)
         .where(eq(requestScopes.requestId, id))
         .all();
-      for (const { scope, key } of keys) {
-        this.#db
+      for (const kept of keys) {
+        const after = this.#db
           .update(spend)
           .set({
             reservedMicros: sql`${spend.reservedMicros} - ${row.reservedMicros}`,
@@ -540,12 +565,28 @@ export class ModelLedger extends DurableObject<Env> {
           })
           .where(
             and(
-              eq(spend.scope, scope),
-              eq(spend.key, key),
+              eq(spend.scope, kept.scope),
+              eq(spend.key, kept.key),
               eq(spend.period, row.period)
             )
           )
-          .run();
+          .returning({ spentMicros: spend.spentMicros })
+          .get();
+        // A charge counts towards its budgets' alerts, as any spend does.
+        if (after !== undefined && charged > 0) {
+          this.#alert(
+            {
+              scope: kept.scope,
+              key: kept.key,
+              limitMicros: kept.limitMicros,
+              alertMicros: kept.alertMicros,
+              names: namesSchema.safeParse(jsonOf(kept.names)).data ?? {},
+            },
+            row.period,
+            after.spentMicros,
+            actor
+          );
+        }
       }
       this.#outbox({
         actor,
@@ -613,6 +654,9 @@ export class ModelLedger extends DurableObject<Env> {
         .orderBy(asc(requests.reconcileAt))
         .limit(alarmPage)
         .all();
+      // Whether any row of this page was settled, put off or set aside: a
+      // page where none was would be read again as it is.
+      let progressed = false;
       for (const row of due) {
         // One row that fails is set aside, never left to stop the rest.
         try {
@@ -637,17 +681,16 @@ export class ModelLedger extends DurableObject<Env> {
             return true;
           });
           reconciled += charged ? 1 : 0;
+          progressed = true;
         } catch (error) {
-          // Its scopes can be read, so it isn't quarantined: it is tried
-          // again later, and the rest go on now.
           log.error("model.reconcile_failed", {
             ...errorFields(error),
             request: row.id,
           });
-          this.#retryLater(row.id, now);
+          progressed = this.#failedToReconcile(row, now) || progressed;
         }
       }
-      if (due.length < alarmPage) {
+      if (due.length < alarmPage || !progressed) {
         break;
       }
     }
@@ -884,19 +927,35 @@ export class ModelLedger extends DurableObject<Env> {
     }
   }
 
-  /** Looks at an open request again a while from `now`, after it failed to reconcile. */
-  #retryLater(id: string, now: number): void {
+  /**
+   * Counts a failed try at reconciling `row`: it is tried again a while
+   * from `now`, and after {@link maxReconcileFailures} tries it is set
+   * aside for a person, audited, with what it holds. Whether that could
+   * be written; never throws.
+   */
+  #failedToReconcile(row: RequestRow, now: number): boolean {
+    const failures = row.reconcileFailures + 1;
     try {
-      this.#db
-        .update(requests)
-        .set({ reconcileAt: now + reconcileRetryMs })
-        .where(eq(requests.id, id))
-        .run();
+      this.ctx.storage.transactionSync(() => {
+        this.#db
+          .update(requests)
+          .set({
+            reconcileFailures: failures,
+            reconcileAt: now + reconcileRetryMs,
+          })
+          .where(eq(requests.id, row.id))
+          .run();
+        if (failures >= maxReconcileFailures) {
+          this.#quarantine(row);
+        }
+      });
+      return true;
     } catch (error) {
       log.error("model.reconcile_retry_failed", {
         ...errorFields(error),
-        request: id,
+        request: row.id,
       });
+      return false;
     }
   }
 

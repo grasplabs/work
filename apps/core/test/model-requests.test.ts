@@ -60,6 +60,8 @@ describe("model requests", () => {
           text: "Hi",
           cache_control: { type: "ephemeral" },
         }),
+        // Global routing is the default, at standard prices.
+        body({ messages: [text], inference_geo: "global" }),
         // A tool's schema may name such types: it isn't content.
         body({
           messages: [text],
@@ -80,6 +82,7 @@ describe("model requests", () => {
       "cache_ttl",
       undefined,
       undefined,
+      undefined,
       "body",
     ]);
   });
@@ -88,6 +91,10 @@ describe("model requests", () => {
     expect(
       [
         holding({ type: "input_audio", input_audio: { data: "x" } }),
+        holding({ type: "item_reference", id: "msg_1" }),
+        holding({ type: "computer_screenshot", image_url: "data:x" }),
+        // US-only inference costs 1.1x on Claude 4.6 and later.
+        body({ messages: [text], inference_geo: "us" }),
         holding({ type: "audio", source: { data: "x" } }),
         // Workers AI's own vision input.
         body({ messages: [text], image: [1, 2, 3] }),
@@ -106,6 +113,9 @@ describe("model requests", () => {
       ].map(unboundedBy)
     ).toStrictEqual([
       "input_audio",
+      "item_reference",
+      "computer_screenshot",
+      "inference_geo",
       "audio",
       "image",
       "n",

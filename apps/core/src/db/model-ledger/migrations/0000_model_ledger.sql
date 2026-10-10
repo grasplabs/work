@@ -17,6 +17,9 @@ CREATE TABLE `request_scopes` (
 	`request_id` text NOT NULL,
 	`scope` text NOT NULL,
 	`key` text NOT NULL,
+	`limit_micros` integer,
+	`alert_micros` integer,
+	`names` text DEFAULT '{}' NOT NULL,
 	PRIMARY KEY(`request_id`, `scope`, `key`)
 );
 --> statement-breakpoint
@@ -35,6 +38,7 @@ CREATE TABLE `requests` (
 	`actor` text NOT NULL,
 	`dispatched_at` integer NOT NULL,
 	`reconcile_at` integer NOT NULL,
+	`reconcile_failures` integer DEFAULT 0 NOT NULL,
 	`settled_at` integer,
 	CONSTRAINT "requests_reserved" CHECK("requests"."reserved_micros" >= 0),
 	CONSTRAINT "requests_settled" CHECK(("requests"."state" = 'settled') = ("requests"."charged_micros" IS NOT NULL AND "requests"."charged_micros" >= 0 AND "requests"."settled_by" IS NOT NULL AND "requests"."settled_at" IS NOT NULL))

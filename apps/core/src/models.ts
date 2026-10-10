@@ -55,11 +55,12 @@ import { z } from "zod";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { budgetMonth, hasBudget, scopesFor } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
-import type { LedgerScope, Settlement } from "./model-ledger.ts";
+import type { LedgerScope, Settled, Settlement } from "./model-ledger.ts";
 import {
   boundMicros,
   costDollars,
   listPricesOf,
+  microsPerDollar,
   pinnedPrice,
 } from "./model-prices.ts";
 import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
@@ -589,9 +590,15 @@ interface GatewayResponse {
   held: Refusal | undefined;
   /**
    * The provider request whose answer streams, admitted by the ledger and
-   * waiting to be settled with what it used.
+   * waiting to be settled with what it used, and what it reserved.
    */
-  pending: string | undefined;
+  pending: Admission | undefined;
+}
+
+/** A provider request the ledger admitted: its ID, and what it reserved. */
+interface Admission {
+  id: string;
+  reservedMicros: number;
 }
 
 interface Sent extends GatewayResponse {
@@ -741,14 +748,15 @@ const settleRequest = async (
   env: ModelsEnv,
   id: string,
   settlement: Settlement
-): Promise<void> => {
+): Promise<Settled | undefined> => {
   try {
-    await modelLedger(env).settle(id, settlement);
+    return await modelLedger(env).settle(id, settlement);
   } catch (error) {
     log.error("model.settle_failed", {
       ...errorFields(error),
       by: settlement.by,
     });
+    return undefined;
   }
 };
 
@@ -762,7 +770,7 @@ const settleRequest = async (
 const admitRequest = async (
   route: Route,
   body: unknown
-): Promise<{ id: string } | { held: Refusal }> => {
+): Promise<Admission | { held: Refusal }> => {
   const { env, call, model, price } = route;
   const { period, scopes } = route.scopesNow();
   const budgeted = hasBudget(scopes);
@@ -787,6 +795,10 @@ const admitRequest = async (
   const promptBound = bytes + promptAllowanceTokens;
   const pinned = price ?? unpriced;
   const id = crypto.randomUUID();
+  const reservedMicros = boundMicros(pinned, {
+    inputTokens: promptBound,
+    outputTokens,
+  });
   try {
     const admitted = await modelLedger(env).admit({
       id,
@@ -794,16 +806,13 @@ const admitRequest = async (
       scopes,
       model: call.model,
       price: pinned,
-      reservedMicros: boundMicros(pinned, {
-        inputTokens: promptBound,
-        outputTokens,
-      }),
+      reservedMicros,
       actor: call.trigger,
       reconcileAt:
         Date.now() + (call.timeoutMs ?? defaultTimeoutMs) + reconcileGraceMs,
     });
     if (admitted.ok) {
-      return { id };
+      return { id, reservedMicros };
     }
     if ("unpriced" in admitted) {
       return { held: { code: "model.unpriced" } };
@@ -898,9 +907,9 @@ const open = (
       return answered;
     }
     if (response.pending !== undefined) {
-      await settleRequest(env, response.pending, { by: "unknown" });
+      await settleRequest(env, response.pending.id, { by: "unknown" });
     }
-    response.pending = admitted.id;
+    response.pending = admitted;
     return answered;
   };
   // SAFETY: the provider picks both the adapter and the catalog the model
@@ -1089,13 +1098,22 @@ const usedBy = (
     0,
     estimatedTokens(receivedChars(answer)) - counted.outputTokens
   );
+  const { usage } = answer;
   const { cost: rates } = ref.catalog;
   return {
     inputTokens: counted.inputTokens + input,
     outputTokens: counted.outputTokens + output,
-    // The catalog's prices are per million tokens.
+    // At the pinned prices, in the tier the count and the estimate reach
+    // together; the catalog's (per million tokens) for a model with none.
     cost:
-      counted.cost + (input * rates.input + output * rates.output) / 1_000_000,
+      price === undefined
+        ? counted.cost +
+          (input * rates.input + output * rates.output) / 1_000_000
+        : pricedCost(price, {
+            ...usage,
+            input: usage.input + input,
+            output: usage.output + output,
+          }),
     estimated: input + output > 0,
   };
 };
@@ -1107,7 +1125,54 @@ interface Recorded extends Used {
   outcome: Outcome;
   status: number | undefined;
   errorType: string | undefined;
+  /** How the model ledger settled its provider request (`ledgerOf`). */
+  ledger: Ledgered;
 }
+
+/**
+ * How the model ledger settled a request's provider request, as its audit
+ * event records it, so the event and the ledger agree: `settled` at what
+ * it charged; `unknown`, holding its whole reservation until it is charged
+ * that in full; `quarantined`, held for a person; `missing` or `failed`
+ * when the ledger had none or couldn't be reached (the reservation, if
+ * any, is charged in full when it comes due); `none` when nothing was
+ * sent.
+ */
+interface Ledgered {
+  state: "settled" | "unknown" | "quarantined" | "missing" | "failed" | "none";
+  /** What it was charged, in US dollars, once settled. */
+  charged: number | null;
+  /** What its reservation holds, in US dollars, while it is unknown. */
+  held: number | null;
+}
+
+/** What the audit event records of how the ledger settled `pending`. */
+const ledgerOf = (
+  pending: Admission | undefined,
+  settled: Settled | undefined
+): Ledgered => {
+  if (pending === undefined) {
+    return { state: "none", charged: null, held: null };
+  }
+  if (settled === undefined) {
+    return { state: "failed", charged: null, held: null };
+  }
+  if (settled.state === "settled") {
+    return {
+      state: "settled",
+      charged: settled.chargedMicros / microsPerDollar,
+      held: null,
+    };
+  }
+  return {
+    state: settled.state,
+    charged: null,
+    held:
+      settled.state === "missing"
+        ? null
+        : pending.reservedMicros / microsPerDollar,
+  };
+};
 
 /**
  * The chat a call works in, if it works in one: its actor is the
@@ -1175,6 +1240,10 @@ const auditEntry = (
       errorType: recorded.errorType ?? null,
       // Whether its tokens and cost are partly an estimate (`usedBy`).
       estimated: recorded.estimated,
+      // How the model ledger settled it: what it charged, or holds.
+      ledger: recorded.ledger.state,
+      ledgerCharged: recorded.ledger.charged,
+      ledgerHeld: recorded.ledger.held,
       // Never an ID so long that the event would be refused.
       gatewayLogId:
         logId !== undefined && logId.length <= auditIdentifierMaxLength
@@ -1205,6 +1274,11 @@ const largestRecord: Recorded = {
   outcome: "invalid_output",
   status: 599,
   errorType: "x".repeat(64),
+  ledger: {
+    state: "quarantined",
+    charged: Number.MAX_VALUE,
+    held: Number.MAX_VALUE,
+  },
 };
 
 /** The most the rules can add to a call's audit event. */
@@ -1259,13 +1333,14 @@ const record = async (
   // or answered with no usage at all) keeps its whole reservation, never
   // an estimate below what the provider may bill.
   const { pending, logId, status } = sent;
+  let settled: Settled | undefined = undefined;
   if (pending !== undefined) {
     const tokens = hasFailed(sent.answer)
       ? undefined
       : countedTokens(sent.answer.usage);
-    await settleRequest(
+    settled = await settleRequest(
       env,
-      pending,
+      pending.id,
       tokens === undefined ? { by: "unknown" } : { by: "usage", tokens }
     );
   }
@@ -1280,6 +1355,7 @@ const record = async (
       outcome,
       status: failure?.status ?? status,
       errorType: failure?.errorType,
+      ledger: ledgerOf(pending, settled),
     })
   );
 };

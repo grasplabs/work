@@ -352,8 +352,8 @@ msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{total, plural, one {# integración mostrada} other {# integraciones mostradas}}"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "{total} is held for these model calls until they are reviewed: what each could have cost. Contact Grasp to release or charge them."
-msgstr "{total} queda retenido para estas llamadas al modelo hasta que se revisen: lo que cada una podría haber costado. Contacta con Grasp para liberarlas o cobrarlas."
+msgid "{total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full."
+msgstr "{total} queda retenido para estas llamadas al modelo hasta que decidas: lo que cada una podría haber costado. Libéralo o cóbralo por completo."
 
 #: src/dashboard/nav-item.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
@@ -1019,6 +1019,14 @@ msgstr "cambia los datos del motor"
 #: src/chat/builds.tsx
 msgid "Changes the engine's data"
 msgstr "Cambia los datos del motor"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Charge"
+msgstr "Cobrar"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Charge {amount} for this model call?"
+msgstr "¿Cobrar {amount} por esta llamada al modelo?"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
@@ -1922,6 +1930,10 @@ msgstr "Entrevistas"
 msgid "Invited a guest"
 msgstr "Invitó a un invitado"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
+msgstr "Cuenta como gastado en los presupuestos: lo máximo que podría haber costado. No se puede deshacer."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
 msgstr "No tiene parámetros."
@@ -1945,6 +1957,10 @@ msgstr "No está compartida con nadie."
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
 msgstr "Puede que se haya renombrado o eliminado."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "It no longer counts against the budgets, as if it cost nothing. This can't be undone."
+msgstr "Deja de contar en los presupuestos, como si no hubiera costado nada. No se puede deshacer."
 
 #: src/chat/builds.tsx
 msgid "It no longer runs (it could change things)."
@@ -3026,6 +3042,14 @@ msgstr "Rechazado por {name} el {date}."
 #: src/dashboard/pile-cards.tsx
 msgid "Rejected: {who}."
 msgstr "Rechazado: {who}."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Release"
+msgstr "Liberar"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Release the {amount} held for this model call?"
+msgstr "¿Liberar los {amount} retenidos para esta llamada al modelo?"
 
 #: src/screens/screen-frame.tsx
 msgid "Reload"
