@@ -8,6 +8,13 @@
       "when": 1791655735337,
       "tag": "0000_data_store",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791658811113,
+      "tag": "0001_receipts",
+      "breakpoints": true
     }
   ]
 }

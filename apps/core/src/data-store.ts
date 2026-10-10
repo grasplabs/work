@@ -1,29 +1,67 @@
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
+  claimSchema,
   commitSchema,
   dataErrors,
   documentMaxBytes,
   recordIdSchema,
+  storeIntentKinds,
+  storeIntentSchema,
   storeMaxTables,
   storedFieldsSchema,
   tableNameSchema,
 } from "@grasp-os/shared/stores";
 import type {
+  ClaimInput,
+  Claimed,
   Commit,
   Committed,
   StoreFields,
   StoredRecord,
 } from "@grasp-os/shared/stores";
+import {
+  submissionErrors,
+  submissionRetentionDays,
+  submissionTombstoneDays,
+} from "@grasp-os/shared/submissions";
 import { DurableObject } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  min,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import migrations from "./db/data-store/migrations/migrations.js";
-import { records, store, tables } from "./db/data-store/schema.ts";
+import {
+  outbox,
+  receipts,
+  records,
+  store,
+  tables,
+} from "./db/data-store/schema.ts";
 import { migrateOnWake } from "./db/migrate.ts";
+import { liveRuns } from "./live-runs.ts";
+import {
+  backoffMs,
+  defaultBudgetMs,
+  defaultMaxAttempts,
+  defaultTimeoutMs,
+  handOver,
+  outboxConsumers,
+} from "./outbox-delivery.ts";
+import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
 
 // A business store: one Durable Object per store, named by the store's
 // ID (data-stores.ts), with a SQLite database of its own that holds all
@@ -45,6 +83,41 @@ import { migrateOnWake } from "./db/migrate.ts";
 // change its revision once; a record inserted in the commit is at
 // revision 1 until it commits. A commit that changes nothing in a record
 // leaves its revision and update time as they were.
+//
+// Every commit is made under a receipt (`sdk_mutation_receipts`), which
+// the attempt claims before its handler runs, and the commit writes its
+// outcome and its outbox entries in the same transaction as its records.
+// The rules of the Knowledge receipts (knowledge/receipts.ts) carry over;
+// one object's transaction is all the fencing they need here. Threat
+// model, and how each is closed:
+//
+// - A stale attempt commits after a newer one began: every claim moves
+//   the receipt's fence on, and a commit is refused
+//   (`submission.superseded`) unless it holds the current fence, checked
+//   in its transaction. Every attempt under a receipt has the same input
+//   (other input is refused at the claim), so an attempt that finds its
+//   mutation committed by another answers that outcome.
+// - A call is killed, or times out, after its handler staged its writes:
+//   nothing is written before the commit, and the commit checks the
+//   attempt's deadline by this object's clock, in its transaction
+//   (`submission.deadline_passed`). A killed attempt's claim only holds
+//   the key; the next attempt claims again and commits once.
+// - A commit's answer is lost, then retried: the retry's claim finds the
+//   outcome and answers it, writing nothing.
+// - A key is reused with other input: `submission.key_conflict`; a key
+//   whose receipt expired is `submission.expired` while its tombstone is
+//   kept.
+// - A key crosses callers or operations: a receipt's ID hashes the store,
+//   the whole scope (person, resource, binding, contract and its version,
+//   operation kind) and the key, and a commit is refused unless its
+//   principal is the receipt's.
+// - A receipt expires under a commit: every claim keeps it a retention
+//   from then, and the commit another from the commit; a receipt whose
+//   outbox still owes an entry, or whose run is live, is never expired.
+// - An outbox entry is lost or handed over twice: it commits with its
+//   records, stays until settled, is leased before each hand-over and
+//   settled only by the lease holder, and keeps one ID however often it
+//   is handed over. A kind nothing takes can't be staged.
 
 /** A store's record, as staged in a commit. */
 interface Staged {
@@ -80,6 +153,29 @@ const toStored = (row: typeof records.$inferSelect): StoredRecord => ({
 });
 
 const encoder = new TextEncoder();
+
+const dayMs = 24 * 60 * 60 * 1000;
+
+/** How long a receipt is kept from each claim, and from its commit. */
+const retentionMs = submissionRetentionDays * dayMs;
+
+/** How long a tombstone is kept, so a key reused late is refused as expired. */
+const tombstoneMs = submissionTombstoneDays * dayMs;
+
+/** How much later a receipt kept for its live run is looked at again. */
+const liveRunRecheckMs = dayMs;
+
+/** Most receipts, tombstones or outbox entries one pass reads at a time. */
+const page = 100;
+
+const committedSchema = z.strictObject({
+  inserted: z.array(z.string()),
+  commit: z.number().int(),
+});
+
+/** A committed receipt's outcome, which `commit` wrote from a `Committed`. */
+const outcomeOf = (stored: string): Committed =>
+  committedSchema.parse(JSON.parse(stored));
 
 const conflict = (table: string, id: string) =>
   dataErrors.create("data.conflict", { table, id });
@@ -169,21 +265,120 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /**
-   * Commits a mutation's staged writes in one transaction, or nothing:
-   * each guard's record must still be at the revision read, and each
-   * write's record at its expected revision (a record the commit inserted
-   * is at 1). Inserted records are owned by the principal and get IDs the
-   * store mints. Refuses with `data.conflict` (a record changed or is
-   * gone), `data.unknown_table` or `data.invalid`.
+   * Claims a mutation's receipt for a new attempt, before its handler
+   * runs: a new receipt, or the fence of the one it has moved on, keeping
+   * it at least a retention from now. Answers the outcome instead when
+   * the mutation committed already, writing nothing;
+   * `submission.key_conflict` when the key was used for other input, and
+   * `submission.expired` when its receipt expired. Call it only once the
+   * caller is authorized in full.
    */
-  commit(input: Commit): Committed {
-    const { storeId, principal, schemaHash, guards, writes } = dataErrors.parse(
-      "data.invalid",
-      commitSchema,
-      input
+  async claim(input: ClaimInput): Promise<Claimed> {
+    const { storeId, scope, key, inputHash, runId, deadline } =
+      dataErrors.parse("data.invalid", claimSchema, input);
+    const receiptId = await sha256Hex(
+      canonicalJson({ storeId, scope: { ...scope }, key: [...key] })
     );
-    return this.ctx.storage.transactionSync(() => {
+    const claimed = this.ctx.storage.transactionSync((): Claimed => {
       this.#bind(storeId);
+      const now = Date.now();
+      const receipt = this.#db
+        .select()
+        .from(receipts)
+        .where(eq(receipts.receiptId, receiptId))
+        .get();
+      if (receipt === undefined) {
+        this.#db
+          .insert(receipts)
+          .values({
+            receiptId,
+            scope: canonicalJson({ ...scope }),
+            principal: scope.principal,
+            runId,
+            inputHash,
+            fence: 1,
+            createdAt: now,
+            retainUntil: now + retentionMs,
+          })
+          .run();
+        return { held: { receiptId, fence: 1, deadline } };
+      }
+      if (receipt.expiredAt !== null) {
+        throw submissionErrors.create("submission.expired");
+      }
+      if (receipt.inputHash !== inputHash) {
+        throw submissionErrors.create("submission.key_conflict");
+      }
+      if (receipt.outcome !== null) {
+        return { outcome: outcomeOf(receipt.outcome) };
+      }
+      const fence = receipt.fence + 1;
+      this.#db
+        .update(receipts)
+        .set({
+          fence,
+          retainUntil: Math.max(receipt.retainUntil, now + retentionMs),
+        })
+        .where(eq(receipts.receiptId, receiptId))
+        .run();
+      return { held: { receiptId, fence, deadline } };
+    });
+    await this.#schedule();
+    return claimed;
+  }
+
+  /**
+   * Commits a mutation's staged writes in one transaction, with its
+   * receipt's outcome and its outbox entries, or nothing: the attempt
+   * must hold the receipt's current fence (`submission.superseded`)
+   * before its deadline (`submission.deadline_passed`); each guard's
+   * record must still be at the revision read, and each write's record at
+   * its expected revision (a record the commit inserted is at 1),
+   * otherwise `data.conflict`. An attempt whose mutation another attempt
+   * committed meanwhile answers that outcome. Inserted records are owned
+   * by the principal and get IDs the store mints. An intent whose kind
+   * nothing in `consumers` takes is refused
+   * (`submission.intent_unsupported`).
+   */
+  async commit(
+    input: Commit,
+    consumers: OutboxConsumers = outboxConsumers
+  ): Promise<Committed> {
+    const {
+      storeId,
+      principal,
+      schemaHash,
+      receipt: held,
+      guards,
+      writes,
+      intents,
+    } = dataErrors.parse("data.invalid", commitSchema, input);
+    const committed = this.ctx.storage.transactionSync((): Committed => {
+      this.#bind(storeId);
+      const now = Date.now();
+      const receipt = this.#db
+        .select()
+        .from(receipts)
+        .where(eq(receipts.receiptId, held.receiptId))
+        .get();
+      if (receipt === undefined || receipt.principal !== principal.userId) {
+        throw new Error("A commit names a receipt its principal never claimed");
+      }
+      if (receipt.expiredAt !== null) {
+        throw submissionErrors.create("submission.expired");
+      }
+      if (receipt.outcome !== null) {
+        return outcomeOf(receipt.outcome);
+      }
+      if (receipt.fence !== held.fence) {
+        throw submissionErrors.create("submission.superseded");
+      }
+      if (now >= held.deadline) {
+        throw submissionErrors.create("submission.deadline_passed");
+      }
+      if (intents.some(({ kind }) => consumers[kind] === undefined)) {
+        throw submissionErrors.create("submission.intent_unsupported");
+      }
       const staged = new Map<string, Staged>();
       const stage = (table: string, recordId: string): Staged => {
         const tableId = this.#tableId(table);
@@ -264,8 +459,43 @@ export class DataStore extends DurableObject<Env> {
         }
       }
       this.#flush([...staged.values()], principal.userId, schemaHash);
-      return { inserted };
+      const counted = this.#db
+        .update(store)
+        .set({ commits: sql`${store.commits} + 1` })
+        .returning({ commits: store.commits })
+        .get();
+      if (counted === undefined) {
+        throw new Error("A bound store has no row");
+      }
+      const outcome: Committed = { inserted, commit: counted.commits };
+      this.#db
+        .update(receipts)
+        .set({
+          outcome: JSON.stringify(outcome),
+          committedAt: now,
+          commit: counted.commits,
+          retainUntil: Math.max(receipt.retainUntil, now + retentionMs),
+        })
+        .where(eq(receipts.receiptId, held.receiptId))
+        .run();
+      for (const [position, intent] of intents.entries()) {
+        this.#db
+          .insert(outbox)
+          .values({
+            id: `${held.receiptId}:${position}`,
+            receiptId: held.receiptId,
+            position,
+            kind: intent.kind,
+            intent: JSON.stringify(intent),
+            createdAt: now,
+            nextAttemptAt: now,
+          })
+          .run();
+      }
+      return outcome;
     });
+    await this.#schedule();
+    return committed;
   }
 
   /** Writes what a commit staged, changing only the records it changed. */
@@ -319,6 +549,288 @@ export class DataStore extends DurableObject<Env> {
           .where(where)
           .run();
       }
+    }
+  }
+
+  /**
+   * Hands the outbox's due entries over to `consumers`, oldest first, one
+   * at a time, until none are due or the drain's budget is spent (checked
+   * before each entry but the first). Each is leased at the drain's time
+   * when its turn comes, and settled, or put back for later when the
+   * hand-over failed (settled as `outbox.attempts_exhausted` past
+   * `maxAttempts`), only while the drain still holds that lease. An entry
+   * whose kind has no consumer is left as it is. Run by the alarm.
+   */
+  async drainOutbox(
+    consumers: OutboxConsumers = outboxConsumers,
+    {
+      now = new Date(),
+      timeoutMs = defaultTimeoutMs,
+      budgetMs = defaultBudgetMs,
+      maxAttempts = defaultMaxAttempts,
+    }: DrainOptions = {}
+  ): Promise<void> {
+    const kinds = storeIntentKinds.filter(
+      (kind) => consumers[kind] !== undefined
+    );
+    if (kinds.length === 0) {
+      return;
+    }
+    const started = Date.now();
+    const clock = () => now.getTime() + (Date.now() - started);
+    const handed = new Set<string>();
+    for (;;) {
+      const due = this.#db
+        .select({ id: outbox.id })
+        .from(outbox)
+        .where(
+          and(
+            isNull(outbox.settledAt),
+            lte(outbox.nextAttemptAt, clock()),
+            inArray(outbox.kind, kinds)
+          )
+        )
+        .orderBy(asc(sql`rowid`))
+        .limit(page)
+        .all()
+        .filter(({ id }) => !handed.has(id));
+      if (due.length === 0) {
+        return;
+      }
+      for (const { id } of due) {
+        if (handed.size > 0 && Date.now() - started >= budgetMs) {
+          return;
+        }
+        handed.add(id);
+        // One after the other: in the order they were committed.
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await this.#handOne(id, consumers, clock, timeoutMs, maxAttempts);
+      }
+    }
+  }
+
+  /** Leases, hands over and settles entry `id`, if it is still due. */
+  async #handOne(
+    id: string,
+    consumers: OutboxConsumers,
+    clock: () => number,
+    timeoutMs: number,
+    maxAttempts: number
+  ): Promise<void> {
+    const leasedAt = clock();
+    // The lease outlasts the hand-over, with room for the writes around it.
+    const until = leasedAt + timeoutMs * 2;
+    const leased = this.#db
+      .update(outbox)
+      .set({ nextAttemptAt: until })
+      .where(
+        and(
+          eq(outbox.id, id),
+          isNull(outbox.settledAt),
+          lte(outbox.nextAttemptAt, leasedAt)
+        )
+      )
+      .returning({
+        kind: outbox.kind,
+        intent: outbox.intent,
+        attempts: outbox.attempts,
+      })
+      .get();
+    const consumer = leased === undefined ? undefined : consumers[leased.kind];
+    if (leased === undefined || consumer === undefined) {
+      return;
+    }
+    const { attempts } = leased;
+    const result = await handOver(
+      consumer,
+      {
+        id,
+        intent: storeIntentSchema.parse(JSON.parse(leased.intent)),
+        attempts,
+      },
+      timeoutMs
+    );
+    const held = and(
+      eq(outbox.id, id),
+      isNull(outbox.settledAt),
+      eq(outbox.nextAttemptAt, until)
+    );
+    const handedAt = clock();
+    if ("settled" in result) {
+      this.#db
+        .update(outbox)
+        .set({
+          settledAt: handedAt,
+          undeliverable:
+            result.settled === "delivered"
+              ? null
+              : result.settled.undeliverable,
+        })
+        .where(held)
+        .run();
+      return;
+    }
+    log.warn("outbox.delivery_failed", {
+      id,
+      kind: leased.kind,
+      ...errorFields(result.failed),
+    });
+    const failed = attempts + 1;
+    this.#db
+      .update(outbox)
+      .set(
+        failed >= maxAttempts
+          ? {
+              attempts: failed,
+              settledAt: handedAt,
+              undeliverable: "outbox.attempts_exhausted",
+            }
+          : { attempts: failed, nextAttemptAt: handedAt + backoffMs(failed) }
+      )
+      .where(held)
+      .run();
+  }
+
+  /**
+   * Expires the receipts kept long enough by `now`, and deletes the
+   * tombstones kept long enough. A receipt whose outbox still owes an
+   * entry is not due; one whose run is live is looked at again a day
+   * later; the others lose their outcome and settled entries and stay as
+   * tombstones. Each page's transaction checks again that each receipt is
+   * still due, so a claim or commit landing while the runs were looked up
+   * keeps its receipt. Run by the alarm.
+   */
+  async sweepReceipts(now = new Date()): Promise<void> {
+    const at = now.getTime();
+    /** Whether the receipt owes no outbox entry. */
+    const nothingOwed = sql`NOT EXISTS (SELECT 1 FROM ${outbox} WHERE ${outbox.receiptId} = ${receipts.receiptId} AND ${outbox.settledAt} IS NULL)`;
+    const stillDue = (ids: readonly string[]) =>
+      and(
+        inArray(receipts.receiptId, [...ids]),
+        isNull(receipts.expiredAt),
+        lte(receipts.retainUntil, at),
+        nothingOwed
+      );
+    for (;;) {
+      const due = this.#db
+        .select({ receiptId: receipts.receiptId, runId: receipts.runId })
+        .from(receipts)
+        .where(
+          and(
+            isNull(receipts.expiredAt),
+            lte(receipts.retainUntil, at),
+            nothingOwed
+          )
+        )
+        .orderBy(asc(receipts.retainUntil), asc(receipts.receiptId))
+        .limit(page)
+        .all();
+      if (due.length === 0) {
+        break;
+      }
+      // One page after the other: each reads what the last left.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const live = await liveRuns(
+        this.env,
+        due.flatMap(({ runId }) => (runId === null ? [] : [runId]))
+      );
+      const isKept = ({ runId }: { runId: string | null }) =>
+        runId !== null && live.has(runId);
+      const kept = due.filter(isKept).map(({ receiptId }) => receiptId);
+      const expiring = due
+        .filter((receipt) => !isKept(receipt))
+        .map(({ receiptId }) => receiptId);
+      this.ctx.storage.transactionSync(() => {
+        if (kept.length > 0) {
+          this.#db
+            .update(receipts)
+            .set({ retainUntil: at + liveRunRecheckMs })
+            .where(stillDue(kept))
+            .run();
+        }
+        if (expiring.length === 0) {
+          return;
+        }
+        const expired = this.#db
+          .update(receipts)
+          .set({
+            expiredAt: at,
+            outcome: null,
+            committedAt: null,
+            commit: null,
+          })
+          .where(stillDue(expiring))
+          .returning({ receiptId: receipts.receiptId })
+          .all()
+          .map(({ receiptId }) => receiptId);
+        if (expired.length > 0) {
+          this.#db
+            .delete(outbox)
+            .where(inArray(outbox.receiptId, expired))
+            .run();
+        }
+      });
+      if (due.length < page) {
+        break;
+      }
+    }
+    this.#db
+      .delete(receipts)
+      .where(
+        and(
+          isNotNull(receipts.expiredAt),
+          lte(receipts.expiredAt, at - tombstoneMs)
+        )
+      )
+      .run();
+  }
+
+  /** Hands the outbox over and sweeps the receipts when due, then waits again. */
+  override async alarm(): Promise<void> {
+    await this.drainOutbox();
+    await this.sweepReceipts();
+    await this.#schedule();
+  }
+
+  /**
+   * Sets the alarm for the next time something is due: an outbox entry
+   * something takes, a receipt's retention, or a tombstone's, unless the
+   * alarm is set sooner already.
+   */
+  async #schedule(): Promise<void> {
+    const kinds = storeIntentKinds.filter(
+      (kind) => outboxConsumers[kind] !== undefined
+    );
+    const [entry] =
+      kinds.length === 0
+        ? []
+        : this.#db
+            .select({ at: min(outbox.nextAttemptAt) })
+            .from(outbox)
+            .where(and(isNull(outbox.settledAt), inArray(outbox.kind, kinds)))
+            .all();
+    const [receipt] = this.#db
+      .select({ at: min(receipts.retainUntil) })
+      .from(receipts)
+      .where(isNull(receipts.expiredAt))
+      .all();
+    const [tombstone] = this.#db
+      .select({ at: min(receipts.expiredAt) })
+      .from(receipts)
+      .where(isNotNull(receipts.expiredAt))
+      .all();
+    const times = [
+      entry?.at,
+      receipt?.at,
+      typeof tombstone?.at === "number" ? tombstone.at + tombstoneMs : null,
+    ].filter((time): time is number => typeof time === "number");
+    if (times.length === 0) {
+      return;
+    }
+    const next = Math.min(...times);
+    const set = await this.ctx.storage.getAlarm();
+    if (set === null || set > next) {
+      await this.ctx.storage.setAlarm(next);
     }
   }
 

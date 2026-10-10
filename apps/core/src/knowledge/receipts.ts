@@ -13,20 +13,10 @@ import {
 } from "@grasp-os/shared/submissions";
 import type { SubmissionIntent } from "@grasp-os/shared/submissions";
 import { runOfStepKey } from "@grasp-os/shared/workflows";
-import {
-  and,
-  asc,
-  eq,
-  inArray,
-  isNotNull,
-  isNull,
-  lte,
-  sql,
-} from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 
-import { workflowRuns } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import {
   documents,
@@ -34,8 +24,9 @@ import {
   submissionOutcomes,
   submissionReceipts,
 } from "../db/knowledge/schema.ts";
-import { outboxConsumers } from "./outbox.ts";
-import type { OutboxConsumers } from "./outbox.ts";
+import { liveRuns } from "../live-runs.ts";
+import { outboxConsumers } from "../outbox-delivery.ts";
+import type { OutboxConsumers } from "../outbox-delivery.ts";
 
 // Receipts of record saves an App's code makes (knowledge/app-binding.ts),
 // so a save retried after its answer was lost is made once, and an
@@ -439,26 +430,6 @@ export const settled = async (
     throw knowledgeErrors.create("knowledge.conflict");
   }
   throw error;
-};
-
-/** The runs of `runIds` that are live: started and not yet ended. */
-const liveRuns = async (
-  env: Env,
-  runIds: readonly string[]
-): Promise<Set<string>> => {
-  if (runIds.length === 0) {
-    return new Set();
-  }
-  const rows = await drizzle(env.DB)
-    .select({ id: workflowRuns.id })
-    .from(workflowRuns)
-    .where(
-      and(
-        inList(workflowRuns.id, runIds),
-        inArray(workflowRuns.status, ["starting", "running", "paused"])
-      )
-    );
-  return new Set(rows.map(({ id }) => id));
 };
 
 /**

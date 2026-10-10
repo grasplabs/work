@@ -7,9 +7,11 @@
  * this layout is a platform upgrade, migrated on the first wake-up after a
  * release.
  */
+import { storeIntentKinds } from "@grasp-os/shared/stores";
 import { sql } from "drizzle-orm";
 import {
   check,
+  index,
   integer,
   primaryKey,
   sqliteTable,
@@ -28,6 +30,8 @@ export const store = sqliteTable(
     only: integer().primaryKey(),
     storeId: text("store_id").notNull(),
     createdAt: integer("created_at").notNull(),
+    /** How many commits the store has made: each commit's place in order. */
+    commits: integer().notNull().default(0),
   },
   (table) => [check("sdk_store_only", sql`${table.only} = 1`)]
 );
@@ -87,5 +91,87 @@ export const records = sqliteTable(
       sql`json_valid(${table.valueJson}) AND json_type(${table.valueJson}) = 'object'`
     ),
     check("sdk_records_updated", sql`${table.updatedAt} >= ${table.createdAt}`),
+  ]
+);
+
+/**
+ * A mutation's receipt (data-store.ts), under the hash of its scope and
+ * key: the hash of its input, the fence the attempt holding it claimed
+ * last, and, once its mutation committed, the outcome, committed in the
+ * same transaction as its records. Kept until `retain_until`, which each
+ * claim and its commit set, and while the workflow run it names is live;
+ * then its outcome goes and it stays a tombstone (`expired_at`), so its
+ * key reused is refused as expired, until the tombstone goes too.
+ */
+export const receipts = sqliteTable(
+  "sdk_mutation_receipts",
+  {
+    receiptId: text("receipt_id").primaryKey(),
+    /** Its scope, as JSON, for audit and recovery. */
+    scope: text().notNull(),
+    principal: text().notNull(),
+    runId: text("run_id"),
+    inputHash: text("input_hash").notNull(),
+    fence: integer().notNull(),
+    createdAt: integer("created_at").notNull(),
+    retainUntil: integer("retain_until").notNull(),
+    expiredAt: integer("expired_at"),
+    /** What the mutation answered, as JSON; null until it committed. */
+    outcome: text(),
+    committedAt: integer("committed_at"),
+    /** Its commit's place in the store's order of commits. */
+    commit: integer(),
+  },
+  (table) => [
+    check("sdk_mutation_receipts_fence", sql`${table.fence} >= 1`),
+    check(
+      "sdk_mutation_receipts_committed",
+      sql`(${table.outcome} IS NULL) = (${table.committedAt} IS NULL) AND (${table.outcome} IS NULL) = (${table.commit} IS NULL)`
+    ),
+    // A tombstone keeps no outcome.
+    check(
+      "sdk_mutation_receipts_tombstone",
+      sql`${table.expiredAt} IS NULL OR ${table.outcome} IS NULL`
+    ),
+    index("sdk_mutation_receipts_retain")
+      .on(table.retainUntil)
+      .where(sql`expired_at IS NULL`),
+    index("sdk_mutation_receipts_expired")
+      .on(table.expiredAt)
+      .where(sql`expired_at IS NOT NULL`),
+  ]
+);
+
+/**
+ * What committed mutations still have to tell others: their intents,
+ * written in the same transaction as their records and receipt, so an
+ * entry exists exactly when its mutation committed. An entry's ID is its
+ * receipt's with its place among the commit's intents, the same however
+ * often it is handed over. Handed over in the order stored until taken,
+ * or settled with the code saying why it can't be; its receipt is kept
+ * until then.
+ */
+export const outbox = sqliteTable(
+  "sdk_change_outbox",
+  {
+    id: text().primaryKey(),
+    receiptId: text("receipt_id")
+      .notNull()
+      .references(() => receipts.receiptId),
+    position: integer().notNull(),
+    kind: text({ enum: storeIntentKinds }).notNull(),
+    /** The intent, as JSON. */
+    intent: text().notNull(),
+    createdAt: integer("created_at").notNull(),
+    attempts: integer().notNull().default(0),
+    nextAttemptAt: integer("next_attempt_at").notNull(),
+    settledAt: integer("settled_at"),
+    undeliverable: text(),
+  },
+  (table) => [
+    index("sdk_change_outbox_receipt").on(table.receiptId),
+    index("sdk_change_outbox_pending")
+      .on(table.nextAttemptAt)
+      .where(sql`settled_at IS NULL`),
   ]
 );
