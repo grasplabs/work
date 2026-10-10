@@ -8,6 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { Workflow } from "../src/binding.ts";
 import { notificationBatch } from "../src/notifications.ts";
+import { defaultLeaseMs } from "../src/run.ts";
 import {
   alarmOf,
   deliverAlarm,
@@ -809,5 +810,100 @@ describe("a paused run terminated during an alarm's delivery", () => {
         : undefined;
     });
     expect(purge).toBeGreaterThan(Date.now());
+  });
+});
+
+/**
+ * Holds the second delivery of a budget-napper run past its wake (the
+ * first fails), then lets it go with the next `failures` alarm writes of
+ * its object failing. Returns the warnings meanwhile, once `settled` says.
+ */
+const dueWithFailingAlarms = async (
+  id: string,
+  failures: number,
+  settled: () => Promise<unknown>
+): Promise<{ warnings: unknown[]; failuresLeft: number }> => {
+  notifyFailures.set(id, 1);
+  const delivery = hold(id, "notify", 2);
+  await warningsDuring(async () => {
+    await workflow("budget-napper", env.BUDGETED_RUNS).create({
+      id,
+      params: { duration: 1500 },
+    });
+    await delivery.held;
+  });
+  const journal = await journalOf("budget-napper", id, env.BUDGETED_RUNS);
+  await pastTime((journal.run.wake_at ?? 0) + 300);
+  const failing = { left: failures };
+  await runInDurableObject(
+    runObject("budget-napper", id, env.BUDGETED_RUNS),
+    (_, state) => {
+      const { storage } = state;
+      const set: unknown = Reflect.get(storage, "setAlarm");
+      if (typeof set !== "function") {
+        throw new TypeError("storage has no setAlarm");
+      }
+      Reflect.set(storage, "setAlarm", async (time: number) => {
+        if (failing.left > 0) {
+          failing.left -= 1;
+          throw new Error("injected storage failure");
+        }
+        await Reflect.apply(set, storage, [time]);
+      });
+    }
+  );
+  const warnings = await warningsDuring(async () => {
+    delivery.release();
+    await settled();
+  });
+  await runInDurableObject(
+    runObject("budget-napper", id, env.BUDGETED_RUNS),
+    (_, state) => {
+      Reflect.deleteProperty(state.storage, "setAlarm");
+    }
+  );
+  return { warnings, failuresLeft: failing.left };
+};
+
+describe("a run due after an alarm's delivery whose alarm write failed", () => {
+  it("still gets the alarm that runs it", async () => {
+    const id = newId();
+
+    // The delivery's end fails to set the alarm; the alarm's own write
+    // after it doesn't.
+    const { warnings, failuresLeft } = await dueWithFailingAlarms(
+      id,
+      1,
+      async () => await ended("budget-napper", id, env.BUDGETED_RUNS)
+    );
+
+    expect(failuresLeft).toBe(0);
+    expect(warnings.map((warning) => eventOf(warning))).toContain(
+      "workflow_alarm_set_failed"
+    );
+    expect(effectsOf(id, "after")).toHaveLength(1);
+  });
+
+  it("is left to the watchdog when the alarm's own write fails too", async () => {
+    const id = newId();
+
+    // Both fail; the watchdog's, a lease away, is set.
+    const { failuresLeft } = await dueWithFailingAlarms(
+      id,
+      2,
+      async () =>
+        await until("the second write to have failed", async () => {
+          const alarm = await runInDurableObject(
+            runObject("budget-napper", id, env.BUDGETED_RUNS),
+            async (_, state) => await state.storage.getAlarm()
+          );
+          return alarm !== null && alarm > Date.now() + defaultLeaseMs / 2
+            ? true
+            : undefined;
+        })
+    );
+
+    expect(failuresLeft).toBe(0);
+    expect(effectsOf(id, "after")).toStrictEqual([]);
   });
 });

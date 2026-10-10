@@ -1597,10 +1597,16 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     // alarm of its own, with the handler's whole wall time, rather than
     // what the delivery left of this one, which its first attempt, always
     // claimed, could run past.
-    // The delivery's end set the alarm to the run's own, which is now (or
-    // past) for a run that is due (#settleAlarm): the next alarm comes at
-    // once, and this one ends here.
+    // This alarm ends here, and the next comes at once. Written here, not
+    // left to the delivery's end (#settleAlarm), which only logs a write
+    // that failed: with the outbox emptied nothing else would set one, and
+    // the run would be left with no alarm to run it.
     if (activatesNow(fresh)) {
+      try {
+        await this.#store.setAlarm(Date.now());
+      } catch (error) {
+        await this.#leaveToWatchdog("workflow_alarm_set_failed", error);
+      }
       return undefined;
     }
     return { run: fresh, notified: true };
