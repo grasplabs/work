@@ -78,6 +78,7 @@ export type SchemaDefinitionCode =
   | "schema.invalid_index"
   | "schema.unknown_table"
   | "schema.too_large"
+  | "schema.invalid_access"
   | "schema.invalid_manifest";
 
 /**

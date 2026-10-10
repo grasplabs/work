@@ -1961,6 +1961,131 @@ add(
   }
 );
 
+// Normalization: declarations that mean the same are one descriptor
+
+/** A schema's bound, if its descriptor has one. */
+const boundOf = (schema: AnySchema, key: "min" | "max"): unknown =>
+  Reflect.get(schema.descriptor, key);
+
+add(
+  "a union with null is its other member, nullable, and reports that member's issues",
+  () => {
+    const schema = v.union(v.string().min(3), v.null());
+    return [
+      check(schema, null),
+      check(schema, "abc"),
+      check(schema, "ab"),
+      check(schema, 1),
+      schema.descriptor.kind,
+      schema.descriptor.nullable,
+    ];
+  },
+  [
+    { value: null },
+    { value: "abc" },
+    { issues: [["value.too_short"]] },
+    { issues: [["value.invalid_type"]] },
+    "string",
+    true,
+  ]
+);
+add(
+  "a union of several with null stays a union, nullable, reporting no match",
+  () => {
+    const schema = v.union(v.string(), v.literal(null), v.number());
+    return [
+      check(schema, null),
+      check(schema, true),
+      schema.descriptor.kind,
+      schema.descriptor.nullable,
+    ];
+  },
+  [{ value: null }, { issues: [["value.no_union_match"]] }, "union", true]
+);
+add(
+  "a union's malformed nullable flag is refused even when null members make it nullable",
+  () =>
+    declare(() =>
+      fromData({
+        ...base,
+        kind: "union",
+        nullable: "yes",
+        members: [
+          { ...base, kind: "boolean" },
+          { ...base, kind: "null" },
+        ],
+      })
+    ),
+  "definition.invalid_descriptor"
+);
+add(
+  "an integer's bounds with no whole number between them are contradictory",
+  () => [
+    declare(() => v.number().integer().min(1.2).max(1.8)),
+    declare(() => v.number().min(1.2).max(1.8).integer()),
+    declare(() => v.number().min(1.2).max(1.8)),
+    declare(() =>
+      v
+        .number()
+        .integer()
+        .min(Number.MAX_SAFE_INTEGER + 2)
+    ),
+    declare(() =>
+      v
+        .number()
+        .integer()
+        .max(Number.MIN_SAFE_INTEGER - 2)
+    ),
+  ],
+  [
+    "definition.contradictory_bounds",
+    "definition.contradictory_bounds",
+    "declared",
+    "definition.contradictory_bounds",
+    "definition.contradictory_bounds",
+  ]
+);
+add(
+  "an integer's bounds are rounded inwards and dropped at the edges of the safe integers",
+  () => {
+    const rounded = v.number().integer().min(1.5).max(9.9);
+    const edges = v
+      .number()
+      .integer()
+      .min(Number.MIN_SAFE_INTEGER)
+      .max(Number.MAX_SAFE_INTEGER);
+    return [
+      [boundOf(rounded, "min"), boundOf(rounded, "max")],
+      "min" in edges.descriptor,
+      "max" in edges.descriptor,
+      check(rounded, 1),
+      check(rounded, 2),
+      check(rounded, 10),
+      check(edges, Number.MAX_SAFE_INTEGER),
+      check(edges, Number.MAX_SAFE_INTEGER + 1),
+    ];
+  },
+  [
+    [2, 9],
+    false,
+    false,
+    { issues: [["value.too_small"]] },
+    { value: 2 },
+    { issues: [["value.too_large"]] },
+    { value: Number.MAX_SAFE_INTEGER },
+    { issues: [["value.not_integer"]] },
+  ]
+);
+add(
+  "a length minimum of 0 and a bound of -0 are no bound and 0",
+  () => [
+    "min" in v.string().min(0).descriptor,
+    "min" in v.array(v.string()).min(0).descriptor,
+    Object.is(boundOf(v.number().min(-0), "min"), 0),
+  ],
+  [false, false, true]
+);
+
 /** A case's outcome, as JSON text: the same text in every runtime. */
 export interface ValueCaseOutcome {
   readonly actual: string;
