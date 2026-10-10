@@ -242,6 +242,10 @@ msgstr "{name} cambió: {does}"
 msgid "{name} has no app to show."
 msgstr "{name} no tiene ninguna aplicación que mostrar."
 
+#: src/dashboard/widget-board.tsx
+msgid "{name} in {engine}"
+msgstr "{name} en {engine}"
+
 #: src/connections/connect-dialog.tsx
 msgid "{name} is read-only"
 msgstr "{name} es de solo lectura"
@@ -378,6 +382,10 @@ msgstr "{who} dio su consentimiento antes de conectarlo:"
 #: src/routes/_shell.settings.spend.tsx
 msgid "{workflowId} in {engine}"
 msgstr "{workflowId} en {engine}"
+
+#: src/dashboard/widget-board.tsx
+msgid "{workflows, plural, one {{ran} of # workflow ran} other {{ran} of # workflows ran}}"
+msgstr "{workflows, plural, one {{ran} de # flujo de trabajo se ejecutó} other {{ran} de # flujos de trabajo se ejecutaron}}"
 
 #: src/routes/_shell.engines.index.tsx
 msgid "{workflows, plural, one {# workflow} other {# workflows}}"
@@ -1049,6 +1057,7 @@ msgstr "Borrar"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connection-list.tsx
+#: src/dashboard/widget-block.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -1491,6 +1500,7 @@ msgid "Engine not found"
 msgstr "Motor no encontrado"
 
 #: src/chat/side-panel.tsx
+#: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
@@ -1557,6 +1567,10 @@ msgstr "Todo lo que se hace en Grasp, por quién y cuándo, guardado en una cade
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it, and always have the memory files in mind."
 msgstr "Todo lo que Grasp y sus agentes pueden leer, en colecciones: las tuyas, las de tus equipos y las de tu organización. Los agentes leen un documento cuando lo necesitan y siempre tienen presentes los archivos de memoria."
+
+#: src/dashboard/widget-block.tsx
+msgid "Everything this widget shows, in full."
+msgstr "Todo lo que muestra este widget, completo."
 
 #: src/chat/chat-list.tsx
 msgid "Expand the chats"
@@ -2260,6 +2274,7 @@ msgstr "Nativa"
 msgid "Needs alongside it"
 msgstr "Necesita además"
 
+#: src/dashboard/widget-board.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Needs attention"
 msgstr "Requiere atención"
@@ -2278,6 +2293,7 @@ msgstr "Hay que volver a iniciar sesión"
 msgid "Needs someone to sign in again"
 msgstr "Alguien tiene que volver a iniciar sesión"
 
+#: src/dashboard/widget-board.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Never"
 msgstr "Nunca"
@@ -2317,6 +2333,10 @@ msgstr "Ninguna llamada tiene que quedarse en la UE."
 #: src/routes/_shell.engines.index.tsx
 msgid "No engines yet"
 msgstr "Aún no hay motores"
+
+#: src/dashboard/widget-board.tsx
+msgid "No engines yet. Engines are made in chat."
+msgstr "Aún no hay motores. Los motores se crean en el chat."
 
 #: src/activity/audit-log.tsx
 msgid "No events match in the latest stretch of the log."
@@ -2388,10 +2408,15 @@ msgstr "Ningún flujo de trabajo requiere atención: nada espera una decisión y
 msgid "No workflows to test."
 msgstr "No hay flujos de trabajo que probar."
 
+#: src/dashboard/widget-board.tsx
 #: src/routes/_shell.engines.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "No workflows yet"
 msgstr "Todavía no hay flujos de trabajo"
+
+#: src/dashboard/widget-board.tsx
+msgid "No workflows yet. Describe in chat what should run on its own, and Grasp builds it."
+msgstr "Todavía no hay flujos de trabajo. Describe en el chat lo que debe funcionar solo y Grasp lo construye."
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "No works council"
@@ -2486,6 +2511,10 @@ msgstr "No ofrecida"
 msgid "Not released"
 msgstr "Sin publicar"
 
+#: src/dashboard/widget-board.tsx
+msgid "Not run yet"
+msgstr "Aún sin ejecutar"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Not signed off yet"
 msgstr "Aún sin aprobar"
@@ -2555,6 +2584,10 @@ msgstr "Aún no se ejecuta nada: esta sería la primera versión actual del moto
 #: src/routes/_shell.settings.spend.tsx
 msgid "Nothing spent yet."
 msgstr "Aún no se ha gastado nada."
+
+#: src/dashboard/signals.tsx
+msgid "Nothing to make better right now."
+msgstr "Ahora mismo no hay nada que mejorar."
 
 #: src/routes/_shell.onboarding.index.tsx
 msgctxt "onboarding stage status"
@@ -2669,10 +2702,15 @@ msgstr "Abierto"
 msgid "Open {name}"
 msgstr "Abrir {name}"
 
+#: src/dashboard/widget-block.tsx
+msgid "Open {title} in full"
+msgstr "Abrir {title} completo"
+
 #: src/chat/chat-dock.tsx
 msgid "Open at the side"
 msgstr "Abrir al lado"
 
+#: src/dashboard/widget-board.tsx
 #: src/routes/_shell.engines.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Open Chat"
@@ -2884,6 +2922,10 @@ msgstr "Propuso paquetes"
 #: src/dashboard/dependency-requests.tsx
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Lo proporciona Grasp, no se instala de nuevo: {provided}"
+
+#: src/dashboard/widget-board.tsx
+msgid "Ran"
+msgstr "Ejecutado"
 
 #: src/activity/audit-words.ts
 msgid "Ran a step of a workflow"
@@ -3420,6 +3462,10 @@ msgstr "No se pudo iniciar sesión. Vuelve a intentarlo o pregunta a un administ
 #: src/sign-in-errors.ts
 msgid "Sign-in timed out or was started elsewhere. Try again."
 msgstr "El inicio de sesión caducó o se empezó en otro sitio. Vuelve a intentarlo."
+
+#: src/dashboard/signals.tsx
+msgid "Signals by kind"
+msgstr "Señales por tipo"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgctxt "state of a data processing agreement"
@@ -4180,6 +4226,10 @@ msgstr "Esperando por ti"
 msgid "Waiting for you: {title}"
 msgstr "Esperando por ti: {title}"
 
+#: src/dashboard/widget-board.tsx
+msgid "Waiting on a person"
+msgstr "Esperando a una persona"
+
 #: src/dashboard/pile-card.tsx
 msgid "Waiting on you"
 msgstr "Te espera"
@@ -4366,8 +4416,8 @@ msgid "Worked for {time}"
 msgstr "Trabajó durante {time}"
 
 #: src/dashboard/signals.tsx
-msgid "Worked out daily, last on {date}"
-msgstr "Se calcula a diario; la última vez, el {date}"
+msgid "Worked out daily, last on {date}."
+msgstr "Se calcula a diario; la última vez, el {date}."
 
 #: src/activity/audit-words.ts
 msgid "Worked out how knowledge is used"
@@ -4396,6 +4446,7 @@ msgid "Workflow tests fail:"
 msgstr "Fallan pruebas de flujos de trabajo:"
 
 #: src/chat/builds.tsx
+#: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx

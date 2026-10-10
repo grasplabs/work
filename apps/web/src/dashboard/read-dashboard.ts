@@ -3,6 +3,7 @@ import type { KnowledgeSignals } from "@grasp-os/shared/knowledge-signals";
 import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ImprovementSignals } from "@grasp-os/shared/signals";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 
 import { readPendingRequests } from "../activity/pending.tsx";
 import { integrationsOf } from "../connections/integrations.ts";
@@ -11,17 +12,19 @@ import type { Session } from "../core.ts";
 import { listedOrNone } from "../directory.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { openableApps } from "../workflows/reads.ts";
+import { listWorkflows, openableApps } from "../workflows/reads.ts";
 import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
 import { readNotifications } from "./failed-workflows.tsx";
 import type { Signals } from "./signals.tsx";
 import { decidesRequests } from "./to-do.tsx";
 import type { Waiting } from "./to-do.tsx";
+import type { Board, EnginesRead } from "./widget-board.tsx";
 
 // What the dashboard reads, each part on its own so one that fails or
-// hangs leaves the rest: what waits on the person, the signals, and, for
-// admins, the latest of the audit trail.
+// hangs leaves the rest: what waits on the person, what the widget board
+// shows (the workflows, the engines, the signals), and, for admins, the
+// latest of the audit trail.
 
 /** The catalog and connections, as integrations: those whose access ran out are on the list. */
 const readIntegrations = async (session: Session) => {
@@ -171,14 +174,40 @@ const readActivity = async (session: Session): Promise<LatestActivity> => {
   return { records, older: true };
 };
 
+/** Both of two reads, once both came: or the first that has no data, as it is. */
+const bothOf = async <A, B>(
+  first: Promise<Loaded<A>>,
+  second: Promise<Loaded<B>>
+): Promise<Loaded<[A, B]>> => {
+  const [one, other] = await Promise.all([first, second]);
+  if (one.state !== "ready") {
+    return one;
+  }
+  if (other.state !== "ready") {
+    return other;
+  }
+  return { state: "ready", data: [one.data, other.data] };
+};
+
+/** The engines widget's read: the engines, with the workflows read once for both widgets. */
+const readEngines = async (
+  core: CoreConnection,
+  workflows: Promise<Loaded<WorkflowSummary[]>>
+): Promise<Loaded<EnginesRead>> => {
+  const both = await bothOf(loadFromCore(core, openableApps), workflows);
+  return both.state === "ready"
+    ? { state: "ready", data: { apps: both.data[0], workflows: both.data[1] } }
+    : both;
+};
+
 /**
  * Everything the dashboard shows. What waits on the person comes first;
- * the signals and activity come as they are read, so a slow one never
- * holds back the rest.
+ * the board's widgets and activity come as they are read, so a slow one
+ * never holds back the rest.
  */
 export interface Dashboard {
   waiting: Waiting;
-  signals: Promise<Loaded<Signals>>;
+  board: Board;
   /** Admins only. */
   activity: Promise<Loaded<LatestActivity>> | undefined;
 }
@@ -187,14 +216,16 @@ export const readDashboard = async (
   core: CoreConnection,
   identity: Identity
 ): Promise<Dashboard> => {
-  // Not awaited: their cards wait for them.
+  // Not awaited: their blocks and cards wait for them.
+  const workflows = loadFromCore(core, listWorkflows);
   const signals = loadFromCore(
     core,
     async (session) => await readSignals(session, identity)
   );
+  const engines = readEngines(core, workflows);
   const activity = isAdmin(identity.role)
     ? loadFromCore(core, readActivity)
     : undefined;
   const waiting = await readWaiting(core, identity);
-  return { waiting, signals, activity };
+  return { waiting, board: { workflows, engines, signals }, activity };
 };
