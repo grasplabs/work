@@ -88,6 +88,12 @@ const isArrival = (value: unknown): value is Omit<Effect, "receipt" | "at"> =>
 
 export class Outside {
   readonly effects: Effect[] = [];
+  /**
+   * What run objects' host was handed of their notifications, apart from
+   * the effects of their steps: one entry per delivery, `label` saying
+   * its last status and `key` what it held.
+   */
+  readonly notifications: Effect[] = [];
   readonly #holds: Hold[] = [];
   readonly #withheld: {
     arrival: Arrival;
@@ -178,6 +184,13 @@ export class Outside {
         )
       ) {
         response.end(streamed);
+      }
+      return;
+    }
+    if (request.url === "/notify") {
+      this.notifications.push({ ...sent, receipt: "{}", at: Date.now() });
+      if (!this.#withhold(sent, response, "{}")) {
+        response.end("{}");
       }
       return;
     }

@@ -182,6 +182,11 @@ export interface ActivationLimits {
    * start (config.ts): an attempt is claimed only if its deadline fits.
    */
   readonly handlerBudgetMs: number;
+  /**
+   * When the alarm handler running the activation started: its wall time
+   * counts from there, whatever ran in it before the activation (run.ts).
+   */
+  readonly startedAt: number;
   /** The most bytes one step's stream result may hold. */
   readonly maxStreamBytes: number;
   /** The most bytes all of the run's stream results may hold. */
@@ -638,7 +643,6 @@ export class Activation {
   /** Whether a check for quiet waits for its macrotask. */
   #quietCheckDue = false;
   /** When this activation's alarm handler started: its wall time's start. */
-  readonly #startedAt = Date.now();
   /** Whether this activation has claimed an attempt yet. */
   #claimed = false;
   /** Whether this activation rolls the run back rather than runs it. */
@@ -1173,7 +1177,8 @@ export class Activation {
   #fits(now: number, config: StepConfig): boolean {
     return (
       !this.#claimed ||
-      now + config.timeoutMs <= this.#startedAt + this.#limits.handlerBudgetMs
+      now + config.timeoutMs <=
+        this.#limits.startedAt + this.#limits.handlerBudgetMs
     );
   }
 
