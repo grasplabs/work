@@ -215,6 +215,7 @@ export const runActivity = async (
         app: app.id,
         appName: app.name,
         workflow: workflowIdSchema.parse(row.workflow),
+        current: app.workflows.includes(row.workflow),
         started: 0,
         completed: 0,
         failed: 0,

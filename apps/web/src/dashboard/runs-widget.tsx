@@ -15,7 +15,6 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { useId } from "react";
 
-import { formatDate } from "../format.ts";
 import {
   columnsOf,
   fullDays,
@@ -61,6 +60,17 @@ const outcomeSwatches: Record<RunOutcome, string> = {
 
 /** A UTC day, `YYYY-MM-DD`, as a moment inside it wherever the page is. */
 const middayOf = (day: string): string => `${day}T12:00:00Z`;
+
+/**
+ * A UTC day's date as the page's language writes it, such as "3 Oct
+ * 2026": read in UTC, as the chart's columns are, so a page east of UTC
+ * by 12 hours or more names the same day.
+ */
+const dayDate = (day: string, locale: string): string =>
+  new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  }).format(new Date(middayOf(day)));
 
 /** A share from 0 to 1 in whole percent, as the page's language writes it. */
 const percent = (share: number, locale: string): string =>
@@ -124,7 +134,7 @@ const DaysTable = ({ days }: { days: readonly RunActivityDay[] }) => {
         <TableBody>
           {days.map((day) => (
             <TableRow key={day.day}>
-              <TableCell>{formatDate(middayOf(day.day))}</TableCell>
+              <TableCell>{dayDate(day.day, i18n.locale)}</TableCell>
               {runOutcomes.map((outcome) => (
                 <TableCell key={outcome}>{day[outcome]}</TableCell>
               ))}
@@ -159,7 +169,7 @@ const DayColumns = ({
           viewBox={`0 0 ${columns.length} 1`}
         >
           {columns.map(({ day, runs, parts }, index) => {
-            const date = formatDate(middayOf(day.day));
+            const date = dayDate(day.day, i18n.locale);
             return (
               <g key={day.day}>
                 <title>
@@ -304,13 +314,17 @@ const Workflows = ({ activity }: { activity: RunActivity }) => {
           {activity.workflows.map((row) => (
             <TableRow key={`${row.app}/${row.workflow}`}>
               <TableCell>
-                <Link
-                  className="hover:underline"
-                  params={{ app: row.app, workflow: row.workflow }}
-                  to="/workflows/$app/$workflow"
-                >
-                  {row.workflow}
-                </Link>
+                {row.current ? (
+                  <Link
+                    className="hover:underline"
+                    params={{ app: row.app, workflow: row.workflow }}
+                    to="/workflows/$app/$workflow"
+                  >
+                    {row.workflow}
+                  </Link>
+                ) : (
+                  row.workflow
+                )}
               </TableCell>
               <TableCell>{row.appName}</TableCell>
               <TableCell className="text-right">{row.started}</TableCell>
