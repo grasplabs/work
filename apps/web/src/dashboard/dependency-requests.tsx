@@ -17,7 +17,7 @@ import {
 } from "@grasp-os/ui/components/table";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, ph } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link, useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";
@@ -96,7 +96,7 @@ const Packages = ({ review }: { review: DependencyReview }) => {
     <div className="flex flex-col gap-3">
       {previous === null ? (
         <p className="text-muted-foreground">
-          <Trans>No packages were approved for this engine before.</Trans>
+          <Trans>No packages were approved for this domain before.</Trans>
         </p>
       ) : (
         <div className="text-muted-foreground flex flex-col gap-1">
@@ -231,7 +231,7 @@ export const PackagesCard = ({
   const more = request.counts.direct - request.summary.direct.length;
   const moreFindings =
     request.counts.findings - request.summary.findings.length;
-  const who = t`Packages for ${engine}`;
+  const who = t`Packages for ${ph({ domain: engine })}`;
   // Read again once it is decided. A refused decision stays, with why:
   // reading again would take the card, and the reason, away.
   const decide = async (approved: boolean, said: string): Promise<void> => {
@@ -341,7 +341,7 @@ export const PackagesCard = ({
           {review === undefined ? (
             <div className="flex flex-col items-start gap-1">
               <Button
-                aria-label={t`Show the packages for ${engine}`}
+                aria-label={t`Show the packages for ${ph({ domain: engine })}`}
                 disabled={busy}
                 onClick={() => {
                   void run(async (session) => {
@@ -366,15 +366,15 @@ export const PackagesCard = ({
         <Link
           className="hover:underline focus-visible:underline"
           params={{ engine: request.app.id }}
-          to="/engines/$engine"
+          to="/domains/$engine"
         >
           {who}
         </Link>
       }
       no={{
         label: t`Reject`,
-        name: t`Reject the packages for ${engine}`,
-        does: t`${engine} doesn't get these packages.`,
+        name: t`Reject the packages for ${ph({ domain: engine })}`,
+        does: t`${ph({ domain: engine })} doesn't get these packages.`,
         onPress: async () => {
           await decide(false, t`Rejected: ${who}.`);
         },
@@ -382,8 +382,8 @@ export const PackagesCard = ({
       pile={pile}
       yes={{
         label: t`Approve`,
-        name: t`Approve the packages for ${engine}`,
-        does: t`${engine} may use exactly these packages from now on.`,
+        name: t`Approve the packages for ${ph({ domain: engine })}`,
+        does: t`${ph({ domain: engine })} may use exactly these packages from now on.`,
         disabled: review === undefined,
         describedBy: review === undefined ? hintId : undefined,
         onPress: async () => {

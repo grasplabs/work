@@ -9,15 +9,15 @@ import { runPreview, runScreen } from "./screen-host.ts";
 import type { FailureReason, ScreenState } from "./screen-host.ts";
 
 const failureMessages: Readonly<Record<FailureReason, MessageDescriptor>> = {
-  forbidden: msg`You can't open this engine's apps: your role doesn't allow it, or the engine has read data you can't read.`,
-  "not-found": msg`This engine has no such app.`,
-  "not-running": msg`This engine has no version to run yet.`,
+  forbidden: msg`You can't open this domain's apps: your role doesn't allow it, or the domain has read data you can't read.`,
+  "not-found": msg`This domain has no such app.`,
+  "not-running": msg`This domain has no version to run yet.`,
   broken: msg`This app doesn't build. Ask a builder to fix it.`,
   "timed-out": msg`This app didn't start in time.`,
   left: msg`This app left its frame and was stopped.`,
   disconnected: msg`This app lost its connection to the page and was stopped.`,
-  unreviewed: msg`Nobody has approved this app's code for the engine's data yet. An admin can approve it on the engine's page.`,
-  revoked: msg`The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the engine's page.`,
+  unreviewed: msg`Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page.`,
+  revoked: msg`The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page.`,
   unknown: msg`The app couldn't be loaded.`,
 };
 
@@ -34,7 +34,7 @@ const ScreenStatus = ({ state, onReload }: StatusProps) => {
   }
   let message = i18n._(failureMessages.unknown);
   if (state.status === "updated") {
-    message = t`A new version of this engine is available.`;
+    message = t`A new version of this domain is available.`;
   } else if (state.status === "signed-out") {
     message = t`Your session has ended. Sign in again to go on.`;
   } else if (state.status === "failed") {
@@ -199,7 +199,7 @@ export const ScreenFrame = ({
   return (
     <FramedScreen
       embedded={embedded}
-      label={t`Engine app`}
+      label={t`Domain app`}
       source={{ app, screen }}
       title={t`${screen} app`}
       {...(onReload === undefined ? {} : { onReload })}

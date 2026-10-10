@@ -104,9 +104,9 @@ const changeWords = {
 
 /** How the server code changed, as a whole sentence for its warning. */
 const serverChangeWarnings = {
-  added: msg`Added: it acts for whoever uses the engine, with everything the engine holds`,
-  modified: msg`Changed: it acts for whoever uses the engine, with everything the engine holds`,
-  removed: msg`Removed: it acts for whoever uses the engine, with everything the engine holds`,
+  added: msg`Added: it acts for whoever uses the domain, with everything the domain holds`,
+  modified: msg`Changed: it acts for whoever uses the domain, with everything the domain holds`,
+  removed: msg`Removed: it acts for whoever uses the domain, with everything the domain holds`,
 } as const;
 
 /** How a workflow changed, before its ID. */
@@ -257,7 +257,7 @@ const ReviewDetails = ({
       </blockquote>
       <p className="text-muted-foreground">
         {current === null
-          ? t`Nothing runs yet: this would be the engine's first current version.`
+          ? t`Nothing runs yet: this would be the domain's first current version.`
           : t`Compared with version ${current}, which runs now.`}
       </p>
       <section aria-label={t`Files`} className="flex flex-col gap-1">
@@ -384,7 +384,7 @@ const ReviewDetails = ({
       {review.exports.length === 0 ? null : (
         <section aria-label={t`Exports`} className="flex flex-col gap-1">
           <h4 className="font-medium">
-            <Trans>What other engines may call</Trans>
+            <Trans>What other domains may call</Trans>
           </h4>
           <ul className="flex flex-col gap-1">
             {review.exports.map((change) => {
@@ -394,7 +394,7 @@ const ReviewDetails = ({
                   {text}
                   {widens ? (
                     <Badge variant="destructive">
-                      <Trans>Changes the engine&apos;s data</Trans>
+                      <Trans>Changes the domain&apos;s data</Trans>
                     </Badge>
                   ) : null}
                 </li>
@@ -404,11 +404,11 @@ const ReviewDetails = ({
         </section>
       )}
       <section
-        aria-label={t`What the engine holds`}
+        aria-label={t`What the domain holds`}
         className="flex flex-col gap-1"
       >
         <h4 className="font-medium">
-          <Trans>What the engine holds</Trans>
+          <Trans>What the domain holds</Trans>
         </h4>
         {review.grants.length === 0 ? (
           <p className="text-muted-foreground">
@@ -726,7 +726,7 @@ export const BuildsFailure = ({ read }: { read: ChatBuildsRead }) => {
       />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <p className="font-medium">
-          <Trans>The engines this chat builds didn&apos;t load.</Trans>
+          <Trans>The domains this chat builds didn&apos;t load.</Trans>
         </p>
         {/* Gone while trying, so the alert is announced again if it fails again. */}
         {retrying ? null : <NotLoaded page={failure} />}

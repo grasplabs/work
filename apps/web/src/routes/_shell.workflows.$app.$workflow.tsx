@@ -606,7 +606,7 @@ const WorkflowView = ({
                 render={
                   <Link
                     params={{ engine: summary.app }}
-                    to="/engines/$engine"
+                    to="/domains/$engine"
                   />
                 }
                 variant="outline"
@@ -625,7 +625,7 @@ const WorkflowView = ({
             </div>
             {summary.scheduleStopped ? (
               <p className="text-destructive">
-                {t`Its schedule stopped: its run failed to start ${maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the engine is made current.`}
+                {t`Its schedule stopped: its run failed to start ${maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current.`}
               </p>
             ) : null}
           </div>

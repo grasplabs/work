@@ -68,11 +68,11 @@ test("a screen gets its engine's data only while an admin's approval of its code
 
   // Nobody approved its code: the screen isn't started, and says why.
   const using = await pageOf(browser, builder);
-  await using.goto(`/engines/${app}/apps/ledger/full`);
+  await using.goto(`/domains/${app}/apps/ledger/full`);
   const frame = using.locator('iframe[title="ledger app"]');
   await expect(
     using.getByText(
-      "Nobody has approved this app's code for the engine's data yet."
+      "Nobody has approved this app's code for the domain's data yet."
     )
   ).toBeVisible({ timeout: 20_000 });
   await expect(frame).not.toHaveAttribute("src");

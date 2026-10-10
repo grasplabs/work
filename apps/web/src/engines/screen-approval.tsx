@@ -237,7 +237,7 @@ export const ScreenApproval = ({ review }: { review: ScreenTrustReview }) => {
       {review.output === "ordinary" ? (
         <p className="text-muted-foreground max-w-prose">
           <Trans>
-            An admin said this engine&apos;s data may go to apps nobody
+            An admin said this domain&apos;s data may go to apps nobody
             approved, so its apps run without approval, unless their approval
             was taken back.
           </Trans>
@@ -246,7 +246,7 @@ export const ScreenApproval = ({ review }: { review: ScreenTrustReview }) => {
         <p className="text-muted-foreground max-w-prose">
           <Trans>
             An app is code that runs in people&apos;s browsers. It gets this
-            engine&apos;s data only once an admin has approved exactly that
+            domain&apos;s data only once an admin has approved exactly that
             code, and a change to the code needs a new approval. Read the code
             first: approved code can still send what it gets somewhere else, so
             approving says you trust it.

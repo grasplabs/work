@@ -117,24 +117,24 @@ export const objectOf = (
   if (object.type === "app") {
     const engine = appName(directory, object.appId);
     const covered = coveredExports(actions, exports.get(object.appId));
-    return i18n._(msg`Exports of ${engine}: ${covered}`);
+    return i18n._(msg`Exports of ${ph({ domain: engine })}: ${covered}`);
   }
   if (object.type === "platform" && actions.includes("guests")) {
     // Consent in plain words: who reaches what, and at whose cost.
     return i18n._(
-      msg`Guest chats. This engine can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them`
+      msg`Guest chats. This domain can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them`
     );
   }
   if (object.type === "platform") {
     // Consent in plain words: what the App reads is published company-wide
     // on purpose (counts only, never a run), and it may show it to anyone.
     return i18n._(
-      msg`Platform statistics. This engine can read run and signal counts for every engine, and may show them to anyone who uses it`
+      msg`Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it`
     );
   }
   const { workflowId } = object;
   const engine = appName(directory, object.appId);
-  return i18n._(msg`Workflow ${workflowId} of ${engine}`);
+  return i18n._(msg`Workflow ${workflowId} of ${ph({ domain: engine })}`);
 };
 
 /**
@@ -165,8 +165,8 @@ export const RecordTypeClaims = ({
       {recordTypes.taken.map(({ type, owner }) => (
         <span key={type} className="text-destructive block text-xs">
           {owner === null
-            ? t`Another engine already keeps ${type} records here: this engine's won't apply.`
-            : t`${ph({ engine: appName(directory, owner) })} already keeps ${type} records here: this engine's won't apply.`}
+            ? t`Another domain already keeps ${type} records here: this domain's won't apply.`
+            : t`${ph({ domain: appName(directory, owner) })} already keeps ${type} records here: this domain's won't apply.`}
         </span>
       ))}
     </>
@@ -225,7 +225,7 @@ export const askedAgain = (
       );
 };
 
-const versionChanged = msg`Another version of this engine was made current since this list was read. The list now shows it: review that version, then approve again.`;
+const versionChanged = msg`Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again.`;
 
 /**
  * Grants `request` for `version`, the one the admin reviewed. Core refuses

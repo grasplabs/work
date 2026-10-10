@@ -62,8 +62,8 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
     "No workflows yet.",
     pageRead
   );
-  await expect(page.getByRole("region", { name: "Engines" })).toContainText(
-    "No engines yet.",
+  await expect(page.getByRole("region", { name: "Domains" })).toContainText(
+    "No domains yet.",
     pageRead
   );
   await expect(
@@ -76,7 +76,7 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
-test("a builder sees their workflows and engine on the board, and opens them in full", async ({
+test("a builder sees their workflows and domain on the board, and opens them in full", async ({
   browser,
 }) => {
   const { builder } = peopleIn("dashboardBoard");
@@ -122,14 +122,14 @@ test("a builder sees their workflows and engine on the board, and opens them in 
   ).toBeVisible();
 
   // The engine, with how many of its workflows ran.
-  const engines = page.getByRole("region", { name: "Engines" });
+  const engines = page.getByRole("region", { name: "Domains" });
   await expect(
     engines.getByRole("listitem").filter({ hasText: name })
   ).toContainText("1 of 2 workflows ran");
 
   // In full, each engine with its workflows.
-  await engines.getByRole("button", { name: "Open Engines in full" }).click();
-  let dialog = page.getByRole("dialog", { name: "Engines" });
+  await engines.getByRole("button", { name: "Open Domains in full" }).click();
+  let dialog = page.getByRole("dialog", { name: "Domains" });
   await expect(
     dialog.getByRole("region", { name }).getByRole("link", { name: "later" })
   ).toBeVisible();

@@ -141,11 +141,11 @@ test("a builder finds an engine in the list, opens it and uses its app with live
   const page = await pageOf(browser, builder);
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
-  await nav.getByRole("link", { name: "Engines" }).click();
+  await nav.getByRole("link", { name: "Domains" }).click();
 
   // Its card says what its version holds, as core counts it.
   const card = page
-    .getByRole("list", { name: "Engines" })
+    .getByRole("list", { name: "Domains" })
     .getByRole("listitem")
     .filter({ hasText: name });
   await expect(card).toContainText("Counts clicks");
@@ -171,7 +171,7 @@ test("a builder finds an engine in the list, opens it and uses its app with live
   // A builder sees the integrations it uses; this one uses none.
   await page.getByRole("tab", { name: "Integrations" }).click();
   await expect(
-    page.getByText("This engine doesn't use an integration yet.")
+    page.getByText("This domain doesn't use an integration yet.")
   ).toBeVisible();
 
   await page.getByRole("tab", { name: "Members" }).click();
@@ -184,7 +184,7 @@ test("a builder finds an engine in the list, opens it and uses its app with live
     .getByRole("link", { name: "counter" })
     .click();
   await expect(page).toHaveURL(
-    new RegExp(`/engines/${app}/apps/counter$`, "u")
+    new RegExp(`/domains/${app}/apps/counter$`, "u")
   );
   await expect(
     page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", {
@@ -200,14 +200,23 @@ test("a builder finds an engine in the list, opens it and uses its app with live
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("1");
   await expect(
     page.getByRole("link", { name: "Open full page" })
-  ).toHaveAttribute("href", `/engines/${app}/apps/counter/full`);
+  ).toHaveAttribute("href", `/domains/${app}/apps/counter/full`);
 
-  // An old link to the screen still leads to it.
+  // An old link to the screen still leads to it, from before apps were
+  // engines and from before engines were Domains, and to its full page.
   await page.goto(`/apps/${app}/screens/counter`);
   await expect(page).toHaveURL(
-    new RegExp(`/engines/${app}/apps/counter$`, "u")
+    new RegExp(`/domains/${app}/apps/counter$`, "u")
   );
   await counterScreen(page);
+  await page.goto(`/engines/${app}/apps/counter`);
+  await expect(page).toHaveURL(
+    new RegExp(`/domains/${app}/apps/counter$`, "u")
+  );
+  await page.goto(`/engines/${app}/apps/counter/full`);
+  await expect(page).toHaveURL(
+    new RegExp(`/domains/${app}/apps/counter/full$`, "u")
+  );
 });
 
 test("the sidebar shows everyone the sections, and Settings each person the sections they may open", async ({
@@ -216,7 +225,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   const everyone = [
     "Chat",
     "Knowledge",
-    "Engines",
+    "Domains",
     "Workflows",
     "Integrations",
   ];
@@ -289,14 +298,14 @@ test("an old link to an app, opened signed out, leads through sign-in to the app
     page.getByText("Use your organization’s account to go on.")
   ).toBeVisible();
   const returnTo = new URL(page.url()).searchParams.get("returnTo");
-  expect(returnTo).toBe(`/engines/${app}/apps/counter`);
+  expect(returnTo).toBe(`/domains/${app}/apps/counter`);
 
   const signedIn = await pageOf(browser, builder);
   await signedIn.goto(
     `/sign-in?returnTo=${encodeURIComponent(returnTo ?? "")}`
   );
   await expect(signedIn).toHaveURL(
-    new RegExp(`/engines/${app}/apps/counter$`, "u")
+    new RegExp(`/domains/${app}/apps/counter$`, "u")
   );
   await counterScreen(signedIn);
 });
@@ -305,11 +314,15 @@ test("someone with the user role finds no engine to open", async ({
   browser,
 }) => {
   const page = await pageOf(browser, user);
-  // An old link to the list leads to the engines.
+  // An old link to one engine, from before they were Domains, leads to
+  // that Domain.
+  await page.goto("/engines/some-engine");
+  await expect(page).toHaveURL(/\/domains\/some-engine$/u);
+  // An old link to the list leads to the Domains.
   await page.goto("/apps");
-  await expect(page).toHaveURL(/\/engines$/u);
+  await expect(page).toHaveURL(/\/domains$/u);
   await expect(
-    page.getByText("There are no engines you can open yet.", { exact: false })
+    page.getByText("There are no domains you can open yet.", { exact: false })
   ).toBeVisible();
   await expect(page.getByRole("link", { name: "Open Chat" })).toBeVisible();
   await expect(page.getByRole("table")).toHaveCount(0);
@@ -321,8 +334,8 @@ test("signing in goes back to the page asked for, and only to a page of this sit
 }) => {
   const page = await pageOf(browser, builder);
   await page.goto("/sign-in?returnTo=%2Fengines");
-  await expect(page.getByRole("heading", { name: "Engines" })).toBeVisible();
-  expect(new URL(page.url()).pathname).toBe("/engines");
+  await expect(page.getByRole("heading", { name: "Domains" })).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/domains");
 
   for (const elsewhere of [
     "//evil.test/apps",
@@ -357,9 +370,9 @@ test("an engine whose contents can't be read, or never come, keeps its card, and
       );
     });
   });
-  await page.goto("/engines");
+  await page.goto("/domains");
   const cards = page
-    .getByRole("list", { name: "Engines" })
+    .getByRole("list", { name: "Domains" })
     .getByRole("listitem");
 
   await expect(cards.filter({ hasText: brokenName })).toContainText(
@@ -376,9 +389,9 @@ test("an engine whose contents can't be read, or never come, keeps its card, and
   const waiting = await pageOf(browser, builder);
   const gate = await callGate(waiting, hanging);
   gate.hold();
-  await waiting.goto("/engines");
+  await waiting.goto("/domains");
   const waitingCards = waiting
-    .getByRole("list", { name: "Engines" })
+    .getByRole("list", { name: "Domains" })
     .getByRole("listitem");
   await expect(waitingCards.filter({ hasText: hangingName })).toContainText(
     "Its contents couldn't be read.",
@@ -398,7 +411,7 @@ test("a runs read that never comes leaves the engine usable, and says so in its 
   gate.hold();
   // An old link to the App leads to the engine.
   await page.goto(`/apps/${app}`);
-  await expect(page).toHaveURL(new RegExp(`/engines/${app}$`, "u"));
+  await expect(page).toHaveURL(new RegExp(`/domains/${app}$`, "u"));
 
   await page.getByRole("tab", { name: /^Workflows/u }).click();
   await expect(
@@ -425,7 +438,7 @@ test("loading an app again after a new version shows that version, and the engin
   });
   const page = await pageOf(browser, builder);
   await page.clock.install();
-  await page.goto(`/engines/${swapped}/apps/counter`);
+  await page.goto(`/domains/${swapped}/apps/counter`);
   await counterScreen(page);
 
   await withApi(builder, async (api) => {
@@ -439,12 +452,12 @@ test("loading an app again after a new version shows that version, and the engin
   // The frame asks for a new version every 30 seconds.
   await page.clock.fastForward(30_000);
   await expect(
-    page.getByText("A new version of this engine is available.")
+    page.getByText("A new version of this domain is available.")
   ).toBeVisible();
   await page.getByRole("button", { name: "Reload" }).click();
 
   await expect(page).toHaveURL(
-    new RegExp(`/engines/${swapped}/apps/tally$`, "u")
+    new RegExp(`/domains/${swapped}/apps/tally$`, "u")
   );
   await counterScreen(page, "tally app");
 });

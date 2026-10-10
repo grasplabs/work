@@ -31,7 +31,7 @@ import {
 } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { modelErrors } from "@grasp-os/shared/models";
+import { modelEfforts, modelErrors } from "@grasp-os/shared/models";
 import {
   bindingNameSchema,
   permissionActionSchema,
@@ -119,11 +119,15 @@ export interface RunToFix {
   restricted: boolean;
 }
 
-/** A question for a chat's agent, and the model to answer it with. */
+/**
+ * A question for a chat's agent, the model to answer it with, and how hard
+ * that model thinks first (`ChatQuestion`).
+ */
 export const questionSchema = z.strictObject({
   text: z.string().trim().min(1).max(100_000),
   /** `<provider>/<model>`, one the deployment allows. */
   model: z.string().min(1),
+  effort: z.enum(modelEfforts).optional(),
 });
 export type Question = z.input<typeof questionSchema>;
 
@@ -741,6 +745,7 @@ export class Workspace extends DurableObject<Env> {
       const model = await models(this.env).agent(
         {
           model: parsed.data.model,
+          effort: parsed.data.effort,
           purpose: "chat.turn",
           trigger: delegateActorOf(authority),
           provenance: this.#sources(chat.id),

@@ -69,7 +69,7 @@ msgstr "{app} needs someone to sign in again"
 msgid "{appName} · Version {version}"
 msgstr "{appName} · Version {version}"
 
-#: src/routes/_shell.engines.index.tsx
+#: src/routes/_shell.domains.index.tsx
 msgid "{apps, plural, one {# app} other {# apps}}"
 msgstr "{apps, plural, one {# app} other {# apps}}"
 
@@ -118,8 +118,8 @@ msgid "{count, plural, one {# file} other {# files}}"
 msgstr "{count, plural, one {# file} other {# files}}"
 
 #: src/dashboard/widget-board.tsx
-msgid "{count, plural, one {# more engine with no workflows to show} other {# more engines with no workflows to show}}"
-msgstr "{count, plural, one {# more engine with no workflows to show} other {# more engines with no workflows to show}}"
+msgid "{count, plural, one {# more domain with no workflows to show} other {# more domains with no workflows to show}}"
+msgstr "{count, plural, one {# more domain with no workflows to show} other {# more domains with no workflows to show}}"
 
 #: src/knowledge/timeline.tsx
 msgid "{count, plural, one {# version} other {# versions}}"
@@ -146,20 +146,20 @@ msgid "{doc} in {where} is {late, plural, one {# day} other {# days}} past its r
 msgstr "{doc} in {where} is {late, plural, one {# day} other {# days}} past its review date."
 
 #: src/activity/pending.tsx
-msgid "{engine} already keeps {type} records here: this engine's won't apply."
-msgstr "{engine} already keeps {type} records here: this engine's won't apply."
+msgid "{domain} already keeps {type} records here: this domain's won't apply."
+msgstr "{domain} already keeps {type} records here: this domain's won't apply."
 
 #: src/dashboard/dependency-requests.tsx
-msgid "{engine} doesn't get these packages."
-msgstr "{engine} doesn't get these packages."
+msgid "{domain} doesn't get these packages."
+msgstr "{domain} doesn't get these packages."
 
 #: src/dashboard/dependency-requests.tsx
-msgid "{engine} may use exactly these packages from now on."
-msgstr "{engine} may use exactly these packages from now on."
+msgid "{domain} may use exactly these packages from now on."
+msgstr "{domain} may use exactly these packages from now on."
 
 #: src/activity/audit-log.tsx
-msgid "{engine}: run of {workflowId}"
-msgstr "{engine}: run of {workflowId}"
+msgid "{domain}: run of {workflowId}"
+msgstr "{domain}: run of {workflowId}"
 
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
@@ -247,8 +247,8 @@ msgid "{name} has no app to show."
 msgstr "{name} has no app to show."
 
 #: src/dashboard/widget-board.tsx
-msgid "{name} in {engine}"
-msgstr "{name} in {engine}"
+msgid "{name} in {domain}"
+msgstr "{name} in {domain}"
 
 #: src/connections/connect-dialog.tsx
 msgid "{name} is read-only"
@@ -263,12 +263,12 @@ msgid "{name} is signed out everywhere."
 msgstr "{name} is signed out everywhere."
 
 #: src/chat/builds-state.ts
-msgid "{name} no longer changes the engine's data (write → read)"
-msgstr "{name} no longer changes the engine's data (write → read)"
+msgid "{name} no longer changes the domain's data (write → read)"
+msgstr "{name} no longer changes the domain's data (write → read)"
 
 #: src/chat/builds-state.ts
-msgid "{name} now changes the engine's data (read → write)"
-msgstr "{name} now changes the engine's data (read → write)"
+msgid "{name} now changes the domain's data (read → write)"
+msgstr "{name} now changes the domain's data (read → write)"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{name}, per {key}"
@@ -347,7 +347,7 @@ msgstr "{subject} gets this permission from now on."
 msgid "{subject}: {actions} on {object}"
 msgstr "{subject}: {actions} on {object}"
 
-#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 msgid "{team} (team)"
 msgstr "{team} (team)"
 
@@ -400,14 +400,14 @@ msgid "{who} consented to this before connecting it:"
 msgstr "{who} consented to this before connecting it:"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "{workflowId} in {engine}"
-msgstr "{workflowId} in {engine}"
+msgid "{workflowId} in {domain}"
+msgstr "{workflowId} in {domain}"
 
 #: src/dashboard/widget-board.tsx
 msgid "{workflows, plural, one {{ran} of # workflow ran} other {{ran} of # workflows ran}}"
 msgstr "{workflows, plural, one {{ran} of # workflow ran} other {{ran} of # workflows ran}}"
 
-#: src/routes/_shell.engines.index.tsx
+#: src/routes/_shell.domains.index.tsx
 msgid "{workflows, plural, one {# workflow} other {# workflows}}"
 msgstr "{workflows, plural, one {# workflow} other {# workflows}}"
 
@@ -474,8 +474,8 @@ msgid "A model call was refused"
 msgstr "A model call was refused"
 
 #: src/screens/screen-frame.tsx
-msgid "A new version of this engine is available."
-msgstr "A new version of this engine is available."
+msgid "A new version of this domain is available."
+msgstr "A new version of this domain is available."
 
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow asked for this answer."
@@ -542,8 +542,8 @@ msgid "Added"
 msgstr "Added"
 
 #: src/activity/audit-words.ts
-msgid "Added a member to an engine"
-msgstr "Added a member to an engine"
+msgid "Added a member to a domain"
+msgstr "Added a member to a domain"
 
 #: src/chat/builds.tsx
 msgid "Added parameter {name}"
@@ -562,8 +562,8 @@ msgid "Added workflow"
 msgstr "Added workflow"
 
 #: src/chat/builds.tsx
-msgid "Added: it acts for whoever uses the engine, with everything the engine holds"
-msgstr "Added: it acts for whoever uses the engine, with everything the engine holds"
+msgid "Added: it acts for whoever uses the domain, with everything the domain holds"
+msgstr "Added: it acts for whoever uses the domain, with everything the domain holds"
 
 #: src/labels.ts
 msgid "Admin"
@@ -633,8 +633,8 @@ msgid "All calls together"
 msgstr "All calls together"
 
 #: src/chat/side-panel.tsx
-msgid "All engines"
-msgstr "All engines"
+msgid "All domains"
+msgstr "All domains"
 
 #: src/chat/builds.tsx
 msgid "All workflow tests pass."
@@ -661,8 +661,8 @@ msgid "An admin hasn't set up company memory yet."
 msgstr "An admin hasn't set up company memory yet."
 
 #: src/engines/screen-approval.tsx
-msgid "An admin said this engine's data may go to apps nobody approved, so its apps run without approval, unless their approval was taken back."
-msgstr "An admin said this engine's data may go to apps nobody approved, so its apps run without approval, unless their approval was taken back."
+msgid "An admin said this domain's data may go to apps nobody approved, so its apps run without approval, unless their approval was taken back."
+msgstr "An admin said this domain's data may go to apps nobody approved, so its apps run without approval, unless their approval was taken back."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "An amount in {currency} has at most {digits, plural, one {# decimal} other {# decimals}}."
@@ -673,24 +673,24 @@ msgid "An amount in {currency} has no decimals."
 msgstr "An amount in {currency} has no decimals."
 
 #: src/engines/screen-approval.tsx
-msgid "An app is code that runs in people's browsers. It gets this engine's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
-msgstr "An app is code that runs in people's browsers. It gets this engine's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
+msgid "An app is code that runs in people's browsers. It gets this domain's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
+msgstr "An app is code that runs in people's browsers. It gets this domain's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
 
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "An app is what this engine's team works in, standing on its workflows and integrations. Ask Grasp in chat to build one."
-msgstr "An app is what this engine's team works in, standing on its workflows and integrations. Ask Grasp in chat to build one."
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "An app is what this domain's team works in, standing on its workflows and integrations. Ask Grasp in chat to build one."
+msgstr "An app is what this domain's team works in, standing on its workflows and integrations. Ask Grasp in chat to build one."
 
 #: src/activity/audit-words.ts
-msgid "An app nobody approved was refused the engine's data"
-msgstr "An app nobody approved was refused the engine's data"
+msgid "An app nobody approved was refused the domain's data"
+msgstr "An app nobody approved was refused the domain's data"
 
 #: src/activity/pending.tsx
-msgid "Another engine already keeps {type} records here: this engine's won't apply."
-msgstr "Another engine already keeps {type} records here: this engine's won't apply."
+msgid "Another domain already keeps {type} records here: this domain's won't apply."
+msgstr "Another domain already keeps {type} records here: this domain's won't apply."
 
 #: src/activity/pending.tsx
-msgid "Another version of this engine was made current since this list was read. The list now shows it: review that version, then approve again."
-msgstr "Another version of this engine was made current since this list was read. The list now shows it: review that version, then approve again."
+msgid "Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again."
+msgstr "Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again."
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter: team"
@@ -748,8 +748,8 @@ msgid "Approve the apps of version {version}"
 msgstr "Approve the apps of version {version}"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Approve the packages for {engine}"
-msgstr "Approve the packages for {engine}"
+msgid "Approve the packages for {domain}"
+msgstr "Approve the packages for {domain}"
 
 #: src/dashboard/runs-widget.tsx
 #: src/engines/screen-approval.tsx
@@ -773,7 +773,7 @@ msgstr "Approved packages"
 msgid "Approved: {who}."
 msgstr "Approved: {who}."
 
-#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 msgid "Apps"
 msgstr "Apps"
 
@@ -811,8 +811,8 @@ msgid "Ask Grasp"
 msgstr "Ask Grasp"
 
 #: src/chat/side-panel.tsx
-msgid "Ask Grasp to build one. While it works, the engine stands beside the chat, to preview before it is proposed."
-msgstr "Ask Grasp to build one. While it works, the engine stands beside the chat, to preview before it is proposed."
+msgid "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
+msgstr "Ask Grasp to build one. While it works, the domain stands beside the chat, to preview before it is proposed."
 
 #: src/workflows/fix-in-chat.tsx
 msgid "Ask the agent to fix"
@@ -931,8 +931,8 @@ msgid "Called a model"
 msgstr "Called a model"
 
 #: src/activity/audit-words.ts
-msgid "Called another engine"
-msgstr "Called another engine"
+msgid "Called another domain"
+msgstr "Called another domain"
 
 #: src/chat/builds.tsx
 msgid "Calls {tools} (any of their methods): may change things"
@@ -967,6 +967,10 @@ msgid "Changed a connection"
 msgstr "Changed a connection"
 
 #: src/activity/audit-words.ts
+msgid "Changed a domain"
+msgstr "Changed a domain"
+
+#: src/activity/audit-words.ts
 msgid "Changed a member"
 msgstr "Changed a member"
 
@@ -995,10 +999,6 @@ msgid "Changed a workflow's parameter"
 msgstr "Changed a workflow's parameter"
 
 #: src/activity/audit-words.ts
-msgid "Changed an engine"
-msgstr "Changed an engine"
-
-#: src/activity/audit-words.ts
 msgid "Changed knowledge"
 msgstr "Changed knowledge"
 
@@ -1019,8 +1019,8 @@ msgid "Changed what is built of approved packages"
 msgstr "Changed what is built of approved packages"
 
 #: src/activity/audit-words.ts
-msgid "Changed whether an engine's data needs approved apps"
-msgstr "Changed whether an engine's data needs approved apps"
+msgid "Changed whether a domain's data needs approved apps"
+msgstr "Changed whether a domain's data needs approved apps"
 
 #: src/activity/audit-words.ts
 msgid "Changed which integrations are offered"
@@ -1031,8 +1031,8 @@ msgid "Changed workflow"
 msgstr "Changed workflow"
 
 #: src/chat/builds.tsx
-msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
-msgstr "Changed: it acts for whoever uses the engine, with everything the engine holds"
+msgid "Changed: it acts for whoever uses the domain, with everything the domain holds"
+msgstr "Changed: it acts for whoever uses the domain, with everything the domain holds"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
@@ -1043,12 +1043,12 @@ msgid "Changes something"
 msgstr "Changes something"
 
 #: src/chat/builds-state.ts
-msgid "changes the engine's data"
-msgstr "changes the engine's data"
+msgid "changes the domain's data"
+msgstr "changes the domain's data"
 
 #: src/chat/builds.tsx
-msgid "Changes the engine's data"
-msgstr "Changes the engine's data"
+msgid "Changes the domain's data"
+msgstr "Changes the domain's data"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "Charge"
@@ -1279,8 +1279,8 @@ msgid "couldn't be read"
 msgstr "couldn't be read"
 
 #: src/routes/_shell.workflows.index.tsx
-msgid "Couldn't load this engine's workflows."
-msgstr "Couldn't load this engine's workflows."
+msgid "Couldn't load this domain's workflows."
+msgstr "Couldn't load this domain's workflows."
 
 #: src/activity/audit-words.ts
 msgid "Created a collection"
@@ -1290,11 +1290,11 @@ msgstr "Created a collection"
 msgid "Created a team"
 msgstr "Created a team"
 
-#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 msgid "Created by the member {owner}."
 msgstr "Created by the member {owner}."
 
-#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 msgid "Created by you."
 msgstr "Created by you."
 
@@ -1463,6 +1463,40 @@ msgstr "Documents written here, and files uploaded to it, show up here for Grasp
 msgid "Doesn't build now"
 msgstr "Doesn't build now"
 
+#: src/dashboard/runs-widget.tsx
+#: src/routes/_shell.domains.$engine.apps.$screen.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
+#: src/routes/_shell.workflows.index.tsx
+#: src/workflows/workflows-table.tsx
+msgid "Domain"
+msgstr "Domain"
+
+#: src/connections/connection-list.tsx
+msgid "Domain {domain}"
+msgstr "Domain {domain}"
+
+#: src/screens/screen-frame.tsx
+msgid "Domain app"
+msgstr "Domain app"
+
+#: src/routes/_shell.domains.$engine.apps.$screen.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "Domain not found"
+msgstr "Domain not found"
+
+#: src/chat/side-panel.tsx
+#: src/dashboard/widget-board.tsx
+#: src/frame/app-sidebar.tsx
+#: src/routes/_shell.domains.$engine.apps.$screen.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
+#: src/routes/_shell.domains.index.tsx
+msgid "Domains"
+msgstr "Domains"
+
+#: src/connections/connection-list.tsx
+msgid "Domains and agents with a permission"
+msgstr "Domains and agents with a permission"
+
 #: src/routes/_shell.onboarding.index.tsx
 msgctxt "onboarding stage status"
 msgid "done"
@@ -1493,9 +1527,9 @@ msgstr "Dropped a kept build of approved packages"
 msgid "Dropped an event no workflow could take"
 msgstr "Dropped an event no workflow could take"
 
-#: src/routes/_shell.engines.index.tsx
-msgid "Each engine runs one part of the business: its workflows, apps and connections."
-msgstr "Each engine runs one part of the business: its workflows, apps and connections."
+#: src/routes/_shell.domains.index.tsx
+msgid "Each domain runs one part of the business: its workflows, apps and connections."
+msgstr "Each domain runs one part of the business: its workflows, apps and connections."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Each person"
@@ -1521,40 +1555,6 @@ msgstr "Edit"
 #: src/routes/_shell.settings.profile.tsx
 msgid "Email"
 msgstr "Email"
-
-#: src/dashboard/runs-widget.tsx
-#: src/routes/_shell.engines.$engine.apps.$screen.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/routes/_shell.workflows.index.tsx
-#: src/workflows/workflows-table.tsx
-msgid "Engine"
-msgstr "Engine"
-
-#: src/connections/connection-list.tsx
-msgid "Engine {engine}"
-msgstr "Engine {engine}"
-
-#: src/screens/screen-frame.tsx
-msgid "Engine app"
-msgstr "Engine app"
-
-#: src/routes/_shell.engines.$engine.apps.$screen.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "Engine not found"
-msgstr "Engine not found"
-
-#: src/chat/side-panel.tsx
-#: src/dashboard/widget-board.tsx
-#: src/frame/app-sidebar.tsx
-#: src/routes/_shell.engines.$engine.apps.$screen.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/routes/_shell.engines.index.tsx
-msgid "Engines"
-msgstr "Engines"
-
-#: src/connections/connection-list.tsx
-msgid "Engines and agents with a permission"
-msgstr "Engines and agents with a permission"
 
 #: src/onboarding/staff-words.ts
 msgid "Enough is known ({known}% of {threshold}%): the company waits for Grasp's go"
@@ -1662,8 +1662,13 @@ msgid "Exports"
 msgstr "Exports"
 
 #: src/activity/pending.tsx
-msgid "Exports of {engine}: {covered}"
-msgstr "Exports of {engine}: {covered}"
+msgid "Exports of {domain}: {covered}"
+msgstr "Exports of {domain}: {covered}"
+
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Extra high"
+msgstr "Extra high"
 
 #: src/knowledge/uploads.tsx
 msgid "Extracting"
@@ -1876,12 +1881,12 @@ msgid "Guest accounts can't sign in. Use your organization's own account."
 msgstr "Guest accounts can't sign in. Use your organization's own account."
 
 #: src/activity/pending.tsx
-msgid "Guest chats. This engine can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
-msgstr "Guest chats. This engine can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
+msgid "Guest chats. This domain can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
+msgstr "Guest chats. This domain can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
 
 #: src/activity/audit-log.tsx
-msgid "Guest of {engine}, invited for {person}"
-msgstr "Guest of {engine}, invited for {person}"
+msgid "Guest of {domain}, invited for {person}"
+msgstr "Guest of {domain}, invited for {person}"
 
 #: src/activity/audit-log.tsx
 msgid "Hash"
@@ -1912,6 +1917,11 @@ msgctxt "severity of a finding"
 msgid "High"
 msgstr "High"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "High"
+msgstr "High"
+
 #: src/knowledge/timeline.tsx
 msgid "History"
 msgstr "History"
@@ -1919,6 +1929,10 @@ msgstr "History"
 #: src/routes/_shell.settings.models.tsx
 msgid "Hosted in the EU"
 msgstr "Hosted in the EU"
+
+#: src/chat/composer.tsx
+msgid "How hard it thinks"
+msgstr "How hard it thinks"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "How much has to be known before it opens"
@@ -1957,7 +1971,7 @@ msgid "Integration not found"
 msgstr "Integration not found"
 
 #: src/frame/app-sidebar.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Integrations"
@@ -1997,7 +2011,7 @@ msgstr "It isn't offered to your organization: offer it on its Overview before c
 msgid "It isn't offered to your organization."
 msgstr "It isn't offered to your organization."
 
-#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 msgid "It isn't shared with anyone."
 msgstr "It isn't shared with anyone."
 
@@ -2038,10 +2052,10 @@ msgid "Its access ran out. Grasp staff can't reconnect it: an admin of the organ
 msgstr "Its access ran out. Grasp staff can't reconnect it: an admin of the organization can."
 
 #: src/connections/connection-list.tsx
-msgid "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
-msgstr "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
+msgid "Its access ran out. Sign in again with the same account: domains and agents keep their permissions for it."
+msgstr "Its access ran out. Sign in again with the same account: domains and agents keep their permissions for it."
 
-#: src/routes/_shell.engines.index.tsx
+#: src/routes/_shell.domains.index.tsx
 msgid "Its contents couldn't be read."
 msgstr "Its contents couldn't be read."
 
@@ -2054,8 +2068,8 @@ msgid "Its parameters can't be read from its code."
 msgstr "Its parameters can't be read from its code."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
-msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the engine is made current."
-msgstr "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the engine is made current."
+msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
+msgstr "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the domain is made current."
 
 #: src/chat/builds.tsx
 msgid "Its steps can't be read from its code, so any step may do anything its code does, calling {tools}."
@@ -2066,8 +2080,8 @@ msgid "Its steps can't be read from its code, so any step may do anything its co
 msgstr "Its steps can't be read from its code, so any step may do anything its code does, calling none of the App's bindings."
 
 #: src/connections/connection-list.tsx
-msgid "Its tokens are deleted, every engine and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
-msgstr "Its tokens are deleted, every engine and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
+msgid "Its tokens are deleted, every domain and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
+msgstr "Its tokens are deleted, every domain and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
 
 #: src/chat/thread.tsx
 msgid "Jump to the newest message"
@@ -2218,6 +2232,11 @@ msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Low"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Low"
+msgstr "Low"
+
 #: src/frame/app-sidebar.tsx
 msgid "Main"
 msgstr "Main"
@@ -2250,11 +2269,21 @@ msgstr "Manage {app}, connected for you"
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Max"
+msgstr "Max"
+
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
 msgstr "May change something outside Grasp"
 
-#: src/routes/_shell.engines.$engine.index.tsx
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Medium"
+msgstr "Medium"
+
+#: src/routes/_shell.domains.$engine.index.tsx
 msgid "Members"
 msgstr "Members"
 
@@ -2284,6 +2313,10 @@ msgstr "Model call"
 #: src/dashboard/signals.tsx
 msgid "Model cost"
 msgstr "Model cost"
+
+#: src/chat/composer.tsx
+msgid "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
+msgstr "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
 
 #: src/chat/composer.tsx
 msgid "Model: {name}. Change model"
@@ -2373,8 +2406,8 @@ msgstr "New since the last approval: {added}"
 msgid "New: failed while acting for you"
 msgstr "New: failed while acting for you"
 
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/routes/_shell.engines.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
+#: src/routes/_shell.domains.index.tsx
 msgid "No apps yet"
 msgstr "No apps yet"
 
@@ -2387,13 +2420,13 @@ msgid "No call has to stay in the EU."
 msgstr "No call has to stay in the EU."
 
 #: src/chat/side-panel.tsx
-#: src/routes/_shell.engines.index.tsx
-msgid "No engines yet"
-msgstr "No engines yet"
+#: src/routes/_shell.domains.index.tsx
+msgid "No domains yet"
+msgstr "No domains yet"
 
 #: src/dashboard/widget-board.tsx
-msgid "No engines yet. Engines are made in chat."
-msgstr "No engines yet. Engines are made in chat."
+msgid "No domains yet. Domains are made in chat."
+msgstr "No domains yet. Domains are made in chat."
 
 #: src/activity/audit-log.tsx
 msgid "No events match in the latest stretch of the log."
@@ -2434,8 +2467,8 @@ msgid "No model is set up for this deployment yet."
 msgstr "No model is set up for this deployment yet."
 
 #: src/dashboard/dependency-requests.tsx
-msgid "No packages were approved for this engine before."
-msgstr "No packages were approved for this engine before."
+msgid "No packages were approved for this domain before."
+msgstr "No packages were approved for this domain before."
 
 #: src/chat/builds.tsx
 msgid "No permissions."
@@ -2449,7 +2482,7 @@ msgstr "No runs match these filters."
 msgid "No runs this week."
 msgstr "No runs this week."
 
-#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 msgid "No runs yet."
 msgstr "No runs yet."
 
@@ -2457,9 +2490,9 @@ msgstr "No runs yet."
 msgid "No teams"
 msgstr "No teams"
 
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "No workflow in this engine yet."
-msgstr "No workflow in this engine yet."
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "No workflow in this domain yet."
+msgstr "No workflow in this domain yet."
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "No workflow needs attention: nothing waits for a decision, nothing failed lately."
@@ -2469,7 +2502,7 @@ msgstr "No workflow needs attention: nothing waits for a decision, nothing faile
 msgid "No workflows to test."
 msgstr "No workflows to test."
 
-#: src/routes/_shell.engines.index.tsx
+#: src/routes/_shell.domains.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "No workflows yet"
 msgstr "No workflows yet"
@@ -2491,8 +2524,8 @@ msgid "Nobody answered in time, so this decision has closed."
 msgstr "Nobody answered in time, so this decision has closed."
 
 #: src/screens/screen-frame.tsx
-msgid "Nobody has approved this app's code for the engine's data yet. An admin can approve it on the engine's page."
-msgstr "Nobody has approved this app's code for the engine's data yet. An admin can approve it on the engine's page."
+msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
+msgstr "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Nobody matches."
@@ -2566,8 +2599,8 @@ msgstr "Not named by the provider"
 msgid "Not offered"
 msgstr "Not offered"
 
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/routes/_shell.engines.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
+#: src/routes/_shell.domains.index.tsx
 msgid "Not released"
 msgstr "Not released"
 
@@ -2638,8 +2671,8 @@ msgid "Nothing needs Grasp right now."
 msgstr "Nothing needs Grasp right now."
 
 #: src/chat/builds.tsx
-msgid "Nothing runs yet: this would be the engine's first current version."
-msgstr "Nothing runs yet: this would be the engine's first current version."
+msgid "Nothing runs yet: this would be the domain's first current version."
+msgstr "Nothing runs yet: this would be the domain's first current version."
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "Nothing spent yet."
@@ -2720,8 +2753,8 @@ msgid "Onboarding sections"
 msgstr "Onboarding sections"
 
 #: src/routes/_shell.settings.models.tsx
-msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, engine or run that read one."
-msgstr "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, engine or run that read one."
+msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
+msgstr "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
 
 #: src/knowledge/collection-markers.tsx
 msgid "Only the owner"
@@ -2771,12 +2804,12 @@ msgid "Open at the side"
 msgstr "Open at the side"
 
 #: src/dashboard/widget-board.tsx
-#: src/routes/_shell.engines.index.tsx
+#: src/routes/_shell.domains.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Open Chat"
 msgstr "Open Chat"
 
-#: src/routes/_shell.engines.$engine.apps.$screen.tsx
+#: src/routes/_shell.domains.$engine.apps.$screen.tsx
 msgid "Open full page"
 msgstr "Open full page"
 
@@ -2802,8 +2835,8 @@ msgid "Open the chat"
 msgstr "Open the chat"
 
 #: src/workflows/workflows-table.tsx
-msgid "Open the engine {name}"
-msgstr "Open the engine {name}"
+msgid "Open the domain {name}"
+msgstr "Open the domain {name}"
 
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
@@ -2823,16 +2856,16 @@ msgid "or choose them from your computer"
 msgstr "or choose them from your computer"
 
 #: src/chat/builds-state.ts
-msgid "Other engines may no longer call {name}"
-msgstr "Other engines may no longer call {name}"
+msgid "Other domains may no longer call {name}"
+msgstr "Other domains may no longer call {name}"
 
 #: src/chat/builds-state.ts
-msgid "Other engines may now call {name}"
-msgstr "Other engines may now call {name}"
+msgid "Other domains may now call {name}"
+msgstr "Other domains may now call {name}"
 
 #: src/chat/builds-state.ts
-msgid "Other engines may now call {name}, which {does}"
-msgstr "Other engines may now call {name}, which {does}"
+msgid "Other domains may now call {name}, which {does}"
+msgstr "Other domains may now call {name}, which {does}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
@@ -2860,8 +2893,8 @@ msgid "Package"
 msgstr "Package"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Packages for {engine}"
-msgstr "Packages for {engine}"
+msgid "Packages for {domain}"
+msgstr "Packages for {domain}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "tab of a workflow"
@@ -2931,8 +2964,8 @@ msgid "Person"
 msgstr "Person"
 
 #: src/activity/pending.tsx
-msgid "Platform statistics. This engine can read run and signal counts for every engine, and may show them to anyone who uses it"
-msgstr "Platform statistics. This engine can read run and signal counts for every engine, and may show them to anyone who uses it"
+msgid "Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it"
+msgstr "Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it"
 
 #: src/activity/audit-log.tsx
 msgid "Platform update"
@@ -3004,16 +3037,16 @@ msgid "Read"
 msgstr "Read"
 
 #: src/activity/audit-words.ts
+msgid "Read a domain's statistics"
+msgstr "Read a domain's statistics"
+
+#: src/activity/audit-words.ts
 msgid "Read a knowledge document"
 msgstr "Read a knowledge document"
 
 #: src/activity/audit-words.ts
 msgid "Read an email attachment"
 msgstr "Read an email attachment"
-
-#: src/activity/audit-words.ts
-msgid "Read an engine's statistics"
-msgstr "Read an engine's statistics"
 
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"
@@ -3053,8 +3086,8 @@ msgid "Read-only"
 msgstr "Read-only"
 
 #: src/connections/connect-dialog.tsx
-msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using an engine, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using an engine, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
+msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
+msgstr "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using a domain, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
 
 #: src/chat/thread.tsx
 msgid "Reading the workspace"
@@ -3073,8 +3106,8 @@ msgid "Reads"
 msgstr "Reads"
 
 #: src/chat/builds-state.ts
-msgid "reads the engine's data"
-msgstr "reads the engine's data"
+msgid "reads the domain's data"
+msgstr "reads the domain's data"
 
 #: src/knowledge/uploads.tsx
 msgid "Ready"
@@ -3109,8 +3142,8 @@ msgid "Reject all"
 msgstr "Reject all"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Reject the packages for {engine}"
-msgstr "Reject the packages for {engine}"
+msgid "Reject the packages for {domain}"
+msgstr "Reject the packages for {domain}"
 
 #: src/dashboard/pile-cards.tsx
 msgid "Reject this request?"
@@ -3174,8 +3207,8 @@ msgid "Removed workflow"
 msgstr "Removed workflow"
 
 #: src/chat/builds.tsx
-msgid "Removed: it acts for whoever uses the engine, with everything the engine holds"
-msgstr "Removed: it acts for whoever uses the engine, with everything the engine holds"
+msgid "Removed: it acts for whoever uses the domain, with everything the domain holds"
+msgstr "Removed: it acts for whoever uses the domain, with everything the domain holds"
 
 #: src/chat/chat-list.tsx
 msgid "Rename"
@@ -3267,7 +3300,7 @@ msgstr "Risk assessment done"
 msgid "Risk assessment signed off"
 msgstr "Risk assessment signed off"
 
-#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Role"
 msgstr "Role"
@@ -3295,7 +3328,7 @@ msgstr "Running"
 msgid "Running or cancelled"
 msgstr "Running or cancelled"
 
-#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 msgid "Runs"
 msgstr "Runs"
 
@@ -3440,7 +3473,7 @@ msgstr "Settings"
 msgid "Shared code changed"
 msgstr "Shared code changed"
 
-#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 msgid "Shared with"
 msgstr "Shared with"
 
@@ -3477,8 +3510,8 @@ msgid "Show or hide the sidebar"
 msgstr "Show or hide the sidebar"
 
 #: src/dashboard/dependency-requests.tsx
-msgid "Show the packages for {engine}"
-msgstr "Show the packages for {engine}"
+msgid "Show the packages for {domain}"
+msgstr "Show the packages for {domain}"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Showing the first {count} of {total}. Refine your search to find others."
@@ -3835,8 +3868,8 @@ msgid "The app couldn't be loaded."
 msgstr "The app couldn't be loaded."
 
 #: src/screens/screen-frame.tsx
-msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the engine's page."
-msgstr "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the engine's page."
+msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
+msgstr "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
@@ -3885,8 +3918,8 @@ msgid "The default, {each}"
 msgstr "The default, {each}"
 
 #: src/chat/builds.tsx
-msgid "The engines this chat builds didn't load."
-msgstr "The engines this chat builds didn't load."
+msgid "The domains this chat builds didn't load."
+msgstr "The domains this chat builds didn't load."
 
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
@@ -4033,9 +4066,9 @@ msgstr "Their tools"
 msgid "There are no collections you can read yet."
 msgstr "There are no collections you can read yet."
 
-#: src/routes/_shell.engines.index.tsx
-msgid "There are no engines you can open yet. Engines are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
-msgstr "There are no engines you can open yet. Engines are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
+#: src/routes/_shell.domains.index.tsx
+msgid "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
+msgstr "There are no domains you can open yet. Domains are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "There is no data rule: any allowed model may take sensitive data."
@@ -4109,18 +4142,18 @@ msgstr "This document changed since you opened it. Version {newerVersion} is bel
 msgid "This document is empty."
 msgstr "This document is empty."
 
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "This engine doesn't use an integration yet."
-msgstr "This engine doesn't use an integration yet."
+#: src/routes/_shell.domains.$engine.index.tsx
+msgid "This domain doesn't use an integration yet."
+msgstr "This domain doesn't use an integration yet."
 
 #: src/screens/screen-frame.tsx
-msgid "This engine has no such app."
-msgstr "This engine has no such app."
+msgid "This domain has no such app."
+msgstr "This domain has no such app."
 
-#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 #: src/screens/screen-frame.tsx
-msgid "This engine has no version to run yet."
-msgstr "This engine has no version to run yet."
+msgid "This domain has no version to run yet."
+msgstr "This domain has no version to run yet."
 
 #: src/connections/connection-list.tsx
 msgid "This is the consent as Grasp words it now. The audit log keeps a hash of the exact text they were shown."
@@ -4281,8 +4314,8 @@ msgstr "Version {number}"
 msgid "Version {number}, current"
 msgstr "Version {number}, current"
 
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/routes/_shell.engines.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
+#: src/routes/_shell.domains.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Version {version}"
@@ -4337,12 +4370,12 @@ msgid "Waiting on you"
 msgstr "Waiting on you"
 
 #: src/activity/audit-words.ts
-msgid "Was called by another engine"
-msgstr "Was called by another engine"
+msgid "Was called by another domain"
+msgstr "Was called by another domain"
 
 #: src/activity/audit-words.ts
-msgid "Was refused adding a member to an engine"
-msgstr "Was refused adding a member to an engine"
+msgid "Was refused adding a member to a domain"
+msgstr "Was refused adding a member to a domain"
 
 #: src/activity/audit-words.ts
 msgid "Was refused packages nobody approved"
@@ -4394,8 +4427,8 @@ msgid "What it brought"
 msgstr "What it brought"
 
 #: src/routes/_shell.integrations.$integration.tsx
-msgid "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
-msgstr "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
+msgid "What its tools do, as its provider declares them. Domains and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
+msgstr "What its tools do, as its provider declares them. Domains and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
 
 #: src/chat/builds.tsx
 msgid "What makes it run on its own can't be read from its code."
@@ -4406,8 +4439,8 @@ msgid "What needs Grasp"
 msgstr "What needs Grasp"
 
 #: src/chat/builds.tsx
-msgid "What other engines may call"
-msgstr "What other engines may call"
+msgid "What other domains may call"
+msgstr "What other domains may call"
 
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "What should the next person at Grasp know?"
@@ -4427,8 +4460,8 @@ msgid "What Stephen takes into every interview. What the conversation left open 
 msgstr "What Stephen takes into every interview. What the conversation left open goes to the sponsor."
 
 #: src/chat/builds.tsx
-msgid "What the engine holds"
-msgstr "What the engine holds"
+msgid "What the domain holds"
+msgstr "What the domain holds"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
@@ -4465,8 +4498,8 @@ msgid "Where the onboarding stands, stage by stage."
 msgstr "Where the onboarding stands, stage by stage."
 
 #: src/routes/_shell.integrations.$integration.tsx
-msgid "Which engines and agents hold permissions: {why}"
-msgstr "Which engines and agents hold permissions: {why}"
+msgid "Which domains and agents hold permissions: {why}"
+msgstr "Which domains and agents hold permissions: {why}"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "While paused, no link opens and none goes out, whatever was agreed."
@@ -4537,8 +4570,8 @@ msgid "Workflow"
 msgstr "Workflow"
 
 #: src/activity/pending.tsx
-msgid "Workflow {workflowId} of {engine}"
-msgstr "Workflow {workflowId} of {engine}"
+msgid "Workflow {workflowId} of {domain}"
+msgstr "Workflow {workflowId} of {domain}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Workflow not found"
@@ -4551,7 +4584,7 @@ msgstr "Workflow tests fail:"
 #: src/chat/builds.tsx
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/decisions.$decision.tsx
@@ -4568,8 +4601,8 @@ msgid "Workflows and more"
 msgstr "Workflows and more"
 
 #: src/workflows/workflows-table.tsx
-msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it into an engine."
-msgstr "Workflows are made in chat: describe what should run on its own, and Grasp builds it into an engine."
+msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it into a domain."
+msgstr "Workflows are made in chat: describe what should run on its own, and Grasp builds it into a domain."
 
 #: src/onboarding/staff-words.ts
 msgctxt "what Grasp knows, by source"
@@ -4638,8 +4671,8 @@ msgid "You are signed in as Grasp staff, for a limited time."
 msgstr "You are signed in as Grasp staff, for a limited time."
 
 #: src/screens/screen-frame.tsx
-msgid "You can't open this engine's apps: your role doesn't allow it, or the engine has read data you can't read."
-msgstr "You can't open this engine's apps: your role doesn't allow it, or the engine has read data you can't read."
+msgid "You can't open this domain's apps: your role doesn't allow it, or the domain has read data you can't read."
+msgstr "You can't open this domain's apps: your role doesn't allow it, or the domain has read data you can't read."
 
 #: src/connections/connect-dialog.tsx
 msgid "You come back to {app}’s page here."

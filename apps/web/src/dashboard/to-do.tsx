@@ -144,7 +144,7 @@ const ScreensRow = ({ waiting }: { waiting: ScreensWaiting }) => {
         aria-label={t`Review the apps of ${name}`}
         className={buttonVariants({ size: "xs" })}
         params={{ engine: app }}
-        to="/engines/$engine"
+        to="/domains/$engine"
       >
         <Trans>Review</Trans>
       </Link>

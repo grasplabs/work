@@ -1,3 +1,4 @@
+import type { ModelEfforts } from "@grasp-os/shared/models";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useLocation } from "@tanstack/react-router";
@@ -37,14 +38,26 @@ import { useAsk } from "./use-ask.ts";
 /** How the dock sits: its bar alone, a frame around it, or a drawer down the right side. */
 type DockMode = "bar" | "frame" | "drawer";
 
-/** The models a question may name, as core lists them. */
+/** The models a question may name, and the efforts each takes. */
+interface Offered {
+  models: string[];
+  efforts: Record<string, ModelEfforts>;
+}
+
+/** The models a question may name, as core lists them, with their efforts. */
 const readModels = async (
   core: CoreConnection,
   signal?: AbortSignal
-): Promise<Loaded<string[]>> =>
+): Promise<Loaded<Offered>> =>
   await loadFromCore(
     core,
-    async (session) => await session.chats.models(),
+    async (session) => {
+      const [models, efforts] = await Promise.all([
+        session.chats.models(),
+        session.chats.efforts(),
+      ]);
+      return { models, efforts };
+    },
     signal
   );
 
@@ -53,11 +66,11 @@ const readModels = async (
  * on `retry`, as after core was out of reach.
  */
 const useModels = (): {
-  models: Loaded<string[]> | undefined;
+  models: Loaded<Offered> | undefined;
   retry: () => void;
 } => {
   const core = useCore();
-  const [models, setModels] = useState<Loaded<string[]>>();
+  const [models, setModels] = useState<Loaded<Offered>>();
   useEffect(() => {
     const left = new AbortController();
     const read = async (): Promise<void> => {
@@ -84,11 +97,11 @@ const useModels = (): {
 
 /** Why nothing can be asked yet, if that is so: the models are what a question names. */
 const useNoModels = (
-  models: Loaded<string[]> | undefined
+  models: Loaded<Offered> | undefined
 ): string | undefined => {
   const { t } = useLingui();
   if (models === undefined || models.state === "ready") {
-    return models?.state === "ready" && models.data.length === 0
+    return models?.state === "ready" && models.data.models.length === 0
       ? t`No model is set up for this deployment yet.`
       : undefined;
   }
@@ -240,9 +253,11 @@ const Dock = () => {
   const noModels = useNoModels(models);
   // Core out of reach or refusing may pass: the read can be asked for again.
   const canRetry = models !== undefined && models.state !== "ready";
+  const offered = models?.state === "ready" ? models.data : undefined;
   const { composer, ask } = useAsk(
     chatId,
-    models?.state === "ready" ? models.data : [],
+    offered?.models ?? [],
+    offered?.efforts,
     "here"
   );
   const [mode, setMode] = useState<DockMode>("bar");

@@ -273,7 +273,7 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   const page = await pageOf(browser, admin);
   // The engine's Integrations tab lists the integrations of the
   // connections it may use, in those connections' state.
-  await page.goto(`/engines/${appId}`);
+  await page.goto(`/domains/${appId}`);
   await page.getByRole("tab", { name: "Integrations" }).click();
   const used = page
     .getByRole("tabpanel")
@@ -290,11 +290,11 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   );
   const holder = mailboxCard.getByRole("listitem").filter({ hasText: appName });
   await expect(holder).toContainText(
-    `Engine ${appName}: mail.read on the whole connection`
+    `Domain ${appName}: mail.read on the whole connection`
   );
   await expect(holder).toHaveCount(1);
   await holder
-    .getByRole("button", { name: `Revoke Engine ${appName}'s permission` })
+    .getByRole("button", { name: `Revoke Domain ${appName}'s permission` })
     .click();
   await expect(holder).toHaveCount(0);
   await expect(mailboxCard.getByText("None.")).toBeVisible();

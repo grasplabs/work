@@ -187,8 +187,8 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
   // It has run, so it is at work; its line begins with its engine, which opens it.
   await expect(page.getByRole("heading", { name: "At work" })).toBeVisible();
   await expect(
-    row.getByRole("link", { name: `Open the engine ${name}` })
-  ).toHaveAttribute("href", `/engines/${app}`);
+    row.getByRole("link", { name: `Open the domain ${name}` })
+  ).toHaveAttribute("href", `/domains/${app}`);
   // A run waits for a decision: it needs attention.
   await page.getByRole("tab", { name: "Needs attention" }).click();
   await expect(page).toHaveURL(/tab=needs/u);
@@ -305,7 +305,7 @@ test("someone an App is shared with reads its workflow, with nothing to change o
   // The App's workflows couldn't be read: the filter says so, and its runs
   // are listed all the same.
   await expect(
-    page.getByText("Couldn't load this engine's workflows.")
+    page.getByText("Couldn't load this domain's workflows.")
   ).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Workflow" })).toBeDisabled();
 });

@@ -167,8 +167,8 @@ export const triggerChangeText = ({
 
 /** What an export lets another App do, in a reviewer's words. */
 const accessWords = {
-  read: msg`reads the engine's data`,
-  write: msg`changes the engine's data`,
+  read: msg`reads the domain's data`,
+  write: msg`changes the domain's data`,
 } as const;
 
 /**
@@ -187,27 +187,27 @@ export const exportChangeText = ({
     return {
       text:
         does === undefined
-          ? i18n._(msg`Other engines may now call ${name}`)
-          : i18n._(msg`Other engines may now call ${name}, which ${does}`),
+          ? i18n._(msg`Other domains may now call ${name}`)
+          : i18n._(msg`Other domains may now call ${name}, which ${does}`),
       widens: access === "write",
     };
   }
   if (change === "removed") {
     return {
-      text: i18n._(msg`Other engines may no longer call ${name}`),
+      text: i18n._(msg`Other domains may no longer call ${name}`),
       widens: false,
     };
   }
   if (accessBefore === "read" && access === "write") {
     return {
-      text: i18n._(msg`${name} now changes the engine's data (read → write)`),
+      text: i18n._(msg`${name} now changes the domain's data (read → write)`),
       widens: true,
     };
   }
   if (accessBefore === "write" && access === "read") {
     return {
       text: i18n._(
-        msg`${name} no longer changes the engine's data (write → read)`
+        msg`${name} no longer changes the domain's data (write → read)`
       ),
       widens: false,
     };
