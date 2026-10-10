@@ -58,6 +58,12 @@ defineTable({ _ownerId: v.string() });
 defineTable({ _draft: v.boolean() });
 // @ts-expect-error -- a filter's operator isn't a field
 defineTable({ AND: v.boolean() });
+// @ts-expect-error -- in any case
+defineTable({ or: v.boolean() });
+// @ts-expect-error -- in any case
+defineTable({ Not: v.boolean() });
+// A name that only starts like an operator is a field.
+defineTable({ order: v.boolean(), notes: v.string() });
 
 // A record ID names a table of the same schema.
 // @ts-expect-error -- this schema has no `people` table

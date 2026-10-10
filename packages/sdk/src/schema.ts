@@ -178,8 +178,21 @@ export interface SchemaDefinition<
   readonly tables: Tables;
 }
 
-/** Field names an author can't use: the managed fields' prefix. */
-type ReservedFieldName = `_${string}` | "AND" | "OR" | "NOT";
+type IsReservedFieldName<Name> = Name extends `_${string}`
+  ? true
+  : Name extends string
+    ? Uppercase<Name> extends "AND" | "OR" | "NOT"
+      ? true
+      : false
+    : false;
+
+/**
+ * The names among `Fields` an author can't use: the managed fields'
+ * prefix, and a filter's operators in any case.
+ */
+type ReservedFieldNames<Fields> = {
+  [Key in keyof Fields]: IsReservedFieldName<Key> extends true ? Key : never;
+}[keyof Fields];
 
 /** How deep `ReferencedIn` looks into a value for record IDs. */
 type Depth = readonly unknown[];
@@ -235,6 +248,22 @@ const schemaStates = new WeakMap<
   object,
   Readonly<Record<string, TableState>>
 >();
+
+/**
+ * A map's own entries, read once into a frozen copy: every check after
+ * reads the copy, so a getter can't answer one thing to the check and
+ * another to what is kept.
+ */
+const snapshot = <Value>(
+  map: Readonly<Record<string, Value>>
+): Readonly<Record<string, Value>> => {
+  const copy: Record<string, Value> = {};
+  for (const [key, value] of Object.entries(map)) {
+    // Defined, not assigned: no key can reach the prototype.
+    Object.defineProperty(copy, key, { enumerable: true, value });
+  }
+  return Object.freeze(copy);
+};
 
 /** A table, field or index name, checked; `what` says which, for the message. */
 const checkedName = (name: unknown, what: string): string => {
@@ -412,7 +441,7 @@ const tableOf = (shape: ValueShape, state: TableState): AnyTable => {
  * `ValueDefinitionError`, for fields that aren't `v` schemas) otherwise.
  */
 export const defineTable = <const Fields extends ValueShape>(
-  fields: Fields & Readonly<Record<keyof Fields & ReservedFieldName, never>>
+  fields: Fields & Readonly<Record<ReservedFieldNames<Fields>, never>>
 ): TableDefinition<Fields> => {
   if (!isPlainObject(fields)) {
     return refuse(
@@ -420,7 +449,8 @@ export const defineTable = <const Fields extends ValueShape>(
       "A table's fields are a map of names to schemas."
     );
   }
-  const names = Object.keys(fields);
+  const shape = snapshot(fields);
+  const names = Object.keys(shape);
   for (const name of names) {
     checkedName(name, "field");
     if (filterOperators.has(name.toLowerCase())) {
@@ -431,9 +461,9 @@ export const defineTable = <const Fields extends ValueShape>(
     }
   }
   checkUnique(names, "field");
-  const descriptors = fieldDescriptors(fields);
+  const descriptors = fieldDescriptors(shape);
   // Sealed as one object, so the table's whole document is within the
-  // limits of one schema; the descriptors are those of `fields` as given.
+  // limits of one schema; the descriptors are those of the fields kept.
   const document = seal({
     descriptorVersion,
     fields: descriptors,
@@ -444,7 +474,6 @@ export const defineTable = <const Fields extends ValueShape>(
   if (document.kind !== "object") {
     throw new Error("A sealed object descriptor isn't an object");
   }
-  const shape: Fields = Object.freeze({ ...fields });
   // SAFETY: the table's shape is `fields` itself, copied and frozen, it
   // has no indexes yet, and its `index` checks at run time what
   // `TableDefinition` types: index fields of the table, by a new name.
@@ -503,17 +532,18 @@ export const defineSchema = <
     );
   }
   // Counted before any is read.
-  const names = Object.keys(tables);
-  if (names.length > schemaLimits.tables) {
+  if (Object.keys(tables).length > schemaLimits.tables) {
     refuse(
       "schema.too_large",
       `A schema has at most ${schemaLimits.tables} tables.`
     );
   }
+  const copy = snapshot<unknown>(tables);
+  const names = Object.keys(copy);
   const states: Record<string, TableState> = {};
   for (const name of names) {
     checkedName(name, "table");
-    const table: unknown = tables[name];
+    const table = copy[name];
     const state =
       typeof table === "object" && table !== null
         ? tableStates.get(table)
@@ -524,7 +554,7 @@ export const defineSchema = <
         `Table \`${name}\` isn't one \`defineTable\` made.`
       );
     }
-    states[name] = state;
+    Object.defineProperty(states, name, { enumerable: true, value: state });
   }
   checkUnique(names, "table");
   for (const [name, state] of Object.entries(states)) {
@@ -539,9 +569,10 @@ export const defineSchema = <
       });
     }
   }
-  const schema: SchemaDefinition<Tables> = Object.freeze({
-    tables: Object.freeze({ ...tables }),
-  });
+  // SAFETY: the copy holds exactly the tables passed, each checked to be
+  // one `defineTable` made.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const schema = Object.freeze({ tables: copy }) as SchemaDefinition<Tables>;
   schemaStates.set(schema, Object.freeze(states));
   return schema;
 };

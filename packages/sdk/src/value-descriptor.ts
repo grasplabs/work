@@ -125,10 +125,15 @@ export const valueLimits = {
   /** Members of one union. */
   unionMembers: 64,
   /**
-   * Code units in a name a descriptor or a record states: a field, a table,
-   * an enum value, a literal, a record key.
+   * Code units in a name a descriptor or a record states: an enum value, a
+   * literal, a record key.
    */
   nameLength: 256,
+  /**
+   * Code units in an object's field name, at any depth: the same limit as
+   * a table's, a field's or an index's name in a schema.
+   */
+  fieldNameLength: 64,
   /** Issues one check reports. */
   issues: 50,
   /**

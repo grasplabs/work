@@ -11,6 +11,15 @@ import { schemaOf, seal } from "./value-schema.ts";
 // and turns them back into schemas here, without running the code that
 // declared them.
 
+// What a host knows of schemas that App code needn't: the managed fields,
+// the limits, and the error a declaration throws.
+export {
+  managedFields,
+  SchemaDefinitionError,
+  schemaLimits,
+} from "./schema.ts";
+export type { SchemaDefinitionCode } from "./schema.ts";
+
 // Which currencies and time zones this SDK accepts: a host compares it with
 // its own before it activates an App.
 export { valueCatalogVersion } from "./value-catalog.ts";

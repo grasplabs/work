@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vite-plus/test";
 
+import { schemaLimits } from "../src/host.ts";
 import type { IndexDefinition } from "../src/schema.ts";
-import { defineSchema, defineTable, schemaLimits, v } from "../src/values.ts";
+import { defineSchema, defineTable, v } from "../src/values.ts";
 
 // `defineSchema` and `defineTable`: what a declaration may say, refused as
 // it is built rather than when a store is handed it. Pure checks, so unit
@@ -107,6 +108,31 @@ describe("tables", () => {
       "definition.invalid_schema"
     );
     expect(codeOf(() => tableOf(["title"]))).toBe("schema.invalid_table");
+  });
+
+  test("a field read through a getter is read once, and kept as checked", () => {
+    let reads = 0;
+    const fields = {
+      get title() {
+        reads += 1;
+        // Valid when checked, something else on any later read.
+        return reads === 1 ? v.string() : "not a schema";
+      },
+    };
+    const table = tableOf(fields);
+    expect(reads).toBe(1);
+    expect(
+      Object.getOwnPropertyDescriptor(table.fields, "title")
+    ).not.toHaveProperty("get");
+    expect(reads).toBe(1);
+  });
+
+  test("a nested field's name is at most 64 characters too", () => {
+    expect(
+      codeOf(() =>
+        tableOf({ meta: v.object({ ["k".repeat(65)]: v.string() }) })
+      )
+    ).toBe("definition.invalid_key");
   });
 
   test("a name of up to 64 characters is a field's", () => {
@@ -249,6 +275,19 @@ describe("schemas", () => {
     expect(codeOf(() => defineSchema({ notes: table, Notes: table }))).toBe(
       "schema.name_conflict"
     );
+  });
+
+  test("a table read through a getter is read once, and kept as checked", () => {
+    const real = defineTable({ title: v.string() });
+    let reads = 0;
+    const schema = schemaOf({
+      get notes() {
+        reads += 1;
+        return reads === 1 ? real : { fields: {}, indexes: [] };
+      },
+    });
+    expect(reads).toBe(1);
+    expect(schema).toMatchObject({ tables: { notes: real } });
   });
 
   test("a table is one `defineTable` made, never a lookalike", () => {
