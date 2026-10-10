@@ -1,0 +1,206 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "0f0c2290-427a-4006-afe8-00f1d2b19a35",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "sdk_records": {
+      "name": "sdk_records",
+      "columns": {
+        "table_id": {
+          "name": "table_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "record_id": {
+          "name": "record_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "value_json": {
+          "name": "value_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "schema_hash": {
+          "name": "schema_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "sdk_records_table_id_sdk_tables_table_id_fk": {
+          "name": "sdk_records_table_id_sdk_tables_table_id_fk",
+          "tableFrom": "sdk_records",
+          "tableTo": "sdk_tables",
+          "columnsFrom": [
+            "table_id"
+          ],
+          "columnsTo": [
+            "table_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sdk_records_table_id_record_id_pk": {
+          "columns": [
+            "table_id",
+            "record_id"
+          ],
+          "name": "sdk_records_table_id_record_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "sdk_records_revision": {
+          "name": "sdk_records_revision",
+          "value": "\"sdk_records\".\"revision\" >= 1"
+        },
+        "sdk_records_value": {
+          "name": "sdk_records_value",
+          "value": "json_valid(\"sdk_records\".\"value_json\") AND json_type(\"sdk_records\".\"value_json\") = 'object'"
+        },
+        "sdk_records_updated": {
+          "name": "sdk_records_updated",
+          "value": "\"sdk_records\".\"updated_at\" >= \"sdk_records\".\"created_at\""
+        }
+      }
+    },
+    "sdk_store": {
+      "name": "sdk_store",
+      "columns": {
+        "only": {
+          "name": "only",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "store_id": {
+          "name": "store_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "sdk_store_only": {
+          "name": "sdk_store_only",
+          "value": "\"sdk_store\".\"only\" = 1"
+        }
+      }
+    },
+    "sdk_tables": {
+      "name": "sdk_tables",
+      "columns": {
+        "table_id": {
+          "name": "table_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name_key": {
+          "name": "name_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "sdk_tables_name_key": {
+          "name": "sdk_tables_name_key",
+          "columns": [
+            "name_key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "sdk_tables_name_key_lower": {
+          "name": "sdk_tables_name_key_lower",
+          "value": "\"sdk_tables\".\"name_key\" = lower(\"sdk_tables\".\"name\")"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

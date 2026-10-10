@@ -27,6 +27,13 @@ export const identifierSchema = z.string().min(1).max(identifierMaxLength);
 // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- the brand is type-only by design
 const idSchema = <Brand extends string>() => identifierSchema.brand<Brand>();
 
+/**
+ * A business store: its logical tables and records, independent of any
+ * App, workflow or run that uses it.
+ */
+export const storeIdSchema = idSchema<"StoreId">();
+export type StoreId = z.infer<typeof storeIdSchema>;
+
 /** An App: its screens, workflows and permissions, installed as one unit. */
 export const appIdSchema = idSchema<"AppId">();
 export type AppId = z.infer<typeof appIdSchema>;

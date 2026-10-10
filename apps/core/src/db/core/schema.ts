@@ -1319,3 +1319,29 @@ export const guestMessages = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.chatId, table.seq] })]
 );
+
+/**
+ * The deployment's business stores (src/data-stores.ts): an inventory,
+ * never a copy of their records. Each store's records, receipts and
+ * outbox live in its own Durable Object (src/data-store.ts), named by
+ * this ID, which the host mints and which no App, workflow or run ID
+ * becomes. `physical_namespace_role` says which namespace of objects
+ * holds it. The active schema and operation hashes are filled in once a
+ * store activates a schema; until then they are null. A deleted store
+ * keeps its row, with `deleted_at` set, and is never served again.
+ */
+export const businessStores = sqliteTable("business_stores", {
+  id: text().primaryKey(),
+  /** The user who created it. */
+  ownerId: text("owner_id").notNull(),
+  activeSchemaVersion: integer("active_schema_version"),
+  activeSchemaHash: text("active_schema_hash"),
+  activeOperationManifestHash: text("active_operation_manifest_hash"),
+  /** Moves on with every change of who may use the store. */
+  policyGeneration: integer("policy_generation").notNull().default(1),
+  physicalNamespaceRole: text("physical_namespace_role", {
+    enum: ["data_store"],
+  }).notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  deletedAt: timestamp("deleted_at"),
+});
