@@ -109,6 +109,16 @@ describe("runs over time", () => {
     const { id: hidden } = await other.api.apps.create({
       name: `Payroll ${unique()}`,
     });
+    // Its current version has `approve`: `remind` ran, but a later
+    // version removed it, so it has no page to open.
+    const { version } = await owner.api.apps.files.commit(
+      app,
+      { "workflows/approve.ts": "export default {};\n" },
+      "Workflows"
+    );
+    await env.DB.prepare("UPDATE apps SET current_version = ? WHERE id = ?")
+      .bind(version, app)
+      .run();
     await owner.api.apps.members.add(app, {
       type: "person",
       id: user.userId,
@@ -172,6 +182,7 @@ describe("runs over time", () => {
           app,
           appName,
           workflow: workflowIdSchema.parse("approve"),
+          current: true,
           started: 5,
           completed: 2,
           failed: 1,
@@ -180,6 +191,7 @@ describe("runs over time", () => {
           app,
           appName,
           workflow: workflowIdSchema.parse("remind"),
+          current: false,
           started: 2,
           completed: 0,
           failed: 1,
@@ -216,6 +228,7 @@ describe("runs over time", () => {
         app,
         appName,
         workflow: "remind",
+        current: false,
         started: 3,
         completed: 1,
         failed: 1,

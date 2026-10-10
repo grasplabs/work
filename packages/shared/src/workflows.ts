@@ -788,6 +788,11 @@ export interface RunActivityWorkflow {
   app: AppId;
   appName: string;
   workflow: WorkflowId;
+  /**
+   * It is a workflow of its App's current version, so its page opens; a
+   * workflow a later version removed or renamed has runs here but no page.
+   */
+  current: boolean;
   started: number;
   completed: number;
   failed: number;
