@@ -141,9 +141,7 @@ describe("a chat in a project", slow, () => {
         result?.text.includes("maintenance mode"),
       ],
       // Out of the project, the section goes.
-      movedOutTold: JSON.stringify(movedOut?.messages).includes(
-        "This chat is in one of the person's projects"
-      ),
+      movedOutTold: movedOut?.system.includes("<project>"),
       calls: events
         .filter(
           ({ action, detail }) =>
