@@ -32,6 +32,11 @@ export const store = sqliteTable(
     createdAt: integer("created_at").notNull(),
     /** How many commits the store has made: each commit's place in order. */
     commits: integer().notNull().default(0),
+    /**
+     * When the store was deleted: from then on the object serves nothing,
+     * and its alarm purges what it held, keeping only this row.
+     */
+    deletedAt: integer("deleted_at"),
   },
   (table) => [check("sdk_store_only", sql`${table.only} = 1`)]
 );

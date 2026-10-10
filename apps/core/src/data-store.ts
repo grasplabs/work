@@ -56,6 +56,11 @@ export class DataStore extends DurableObject<Env> {
     return await this.#host.claim(input);
   }
 
+  /** `StoreHost.close`. */
+  async close(storeId: StoreId): Promise<void> {
+    await this.#host.close(storeId);
+  }
+
   /** `StoreHost.commit`, with the deployment's outbox consumers. */
   async commit(input: Commit): Promise<Committed> {
     return await this.#host.commit(input, outboxConsumers);

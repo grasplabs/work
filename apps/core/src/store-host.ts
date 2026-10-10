@@ -30,6 +30,7 @@ import {
 import {
   and,
   asc,
+  count,
   eq,
   inArray,
   isNotNull,
@@ -192,6 +193,12 @@ const nothingOwed = sql`NOT EXISTS (SELECT 1 FROM ${outbox} WHERE ${outbox.recei
 
 /** How long a sweep goes on taking pages, at most, as for Knowledge receipts. */
 const sweepBudgetMs = 20_000;
+
+/** Most records a deleted store's purge removes in one transaction. */
+const purgePage = 1000;
+
+/** How long one alarm goes on purging before the next one continues. */
+const purgeBudgetMs = 10_000;
 
 /** The least wait before the alarm comes again, so it never spins. */
 const alarmGapMs = 1000;
@@ -881,6 +888,11 @@ export class StoreHost {
     consumers: OutboxConsumers,
     sweep: SweepOptions = {}
   ): Promise<void> {
+    if (this.#deleted()) {
+      this.#purge();
+      await this.schedule();
+      return;
+    }
     let failed = false;
     try {
       await this.drainOutbox(consumers);
@@ -907,6 +919,18 @@ export class StoreHost {
    * nothing the alarm can't act on sets one.
    */
   async schedule(gapMs = alarmGapMs): Promise<void> {
+    if (this.#deleted()) {
+      // Only its purge is left, if anything.
+      const left = this.ctx.storage.sql
+        .exec(
+          "SELECT 1 FROM sdk_tables UNION ALL SELECT 1 FROM sdk_mutation_receipts LIMIT 1"
+        )
+        .toArray();
+      if (left.length > 0) {
+        await this.ctx.storage.setAlarm(Date.now() + gapMs);
+      }
+      return;
+    }
     const [entry] = this.#db
       .select({ at: min(outbox.nextAttemptAt) })
       .from(outbox)
@@ -937,6 +961,95 @@ export class StoreHost {
     }
   }
 
+  /** Whether the store was deleted. */
+  #deleted(): boolean {
+    const bound = this.#db
+      .select({ deletedAt: store.deletedAt })
+      .from(store)
+      .get();
+    return bound !== undefined && bound.deletedAt !== null;
+  }
+
+  /**
+   * Deletes the store, unless a receipt still refers to it: one not yet
+   * expired (`data.store_in_use`), which a mutation in flight, a retry
+   * still to come, a live workflow run or an outbox entry still owed
+   * keeps. Checked in the transaction that marks the store deleted, so no
+   * claim can land between the check and the mark; every call after it is
+   * refused (`#bind`). Deleting a deleted store changes nothing, so core
+   * can repeat a deletion its inventory didn't record. The records go
+   * afterwards, a page at a time, on the alarm (`#purge`).
+   */
+  async close(storeId: StoreId): Promise<void> {
+    const id = storeIdSchema.parse(storeId);
+    if (this.ctx.id.name !== id) {
+      throw new Error("This object holds another store");
+    }
+    this.ctx.storage.transactionSync(() => {
+      const now = Date.now();
+      const bound = this.#db
+        .select({ storeId: store.storeId, deletedAt: store.deletedAt })
+        .from(store)
+        .get();
+      if (bound === undefined) {
+        // Never used: nothing refers to it.
+        this.#db
+          .insert(store)
+          .values({ only: 1, storeId: id, createdAt: now, deletedAt: now })
+          .run();
+        return;
+      }
+      if (bound.storeId !== id) {
+        throw new Error("This object holds another store");
+      }
+      if (bound.deletedAt !== null) {
+        return;
+      }
+      const [held] = this.#db
+        .select({ count: count() })
+        .from(receipts)
+        .where(isNull(receipts.expiredAt))
+        .all();
+      const receiptsHeld = held?.count ?? 0;
+      if (receiptsHeld > 0) {
+        throw dataErrors.create("data.store_in_use", {
+          receipts: receiptsHeld,
+        });
+      }
+      this.#db.update(store).set({ deletedAt: now }).run();
+    });
+    await this.schedule(0);
+  }
+
+  /**
+   * Purges a deleted store, a page of records per transaction, until
+   * nothing is left but its deletion mark or its time is up; the next
+   * alarm continues (`schedule`).
+   */
+  #purge(): void {
+    const started = Date.now();
+    for (;;) {
+      const removed = this.ctx.storage.transactionSync(
+        () =>
+          this.ctx.storage.sql.exec(
+            "DELETE FROM sdk_records WHERE rowid IN (SELECT rowid FROM sdk_records LIMIT ?)",
+            purgePage
+          ).rowsWritten
+      );
+      if (removed === 0) {
+        break;
+      }
+      if (Date.now() - started >= purgeBudgetMs) {
+        return;
+      }
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.#db.delete(outbox).run();
+      this.#db.delete(receipts).run();
+      this.#db.delete(tables).run();
+    });
+  }
+
   /** The ID of the table named `name`, or `data.unknown_table`. */
   #tableId(name: string): string {
     const row = this.#db
@@ -962,7 +1075,10 @@ export class StoreHost {
     if (this.ctx.id.name !== id) {
       throw new Error("This object holds another store");
     }
-    const bound = this.#db.select({ storeId: store.storeId }).from(store).get();
+    const bound = this.#db
+      .select({ storeId: store.storeId, deletedAt: store.deletedAt })
+      .from(store)
+      .get();
     if (bound === undefined) {
       this.#db
         .insert(store)
@@ -972,6 +1088,11 @@ export class StoreHost {
     }
     if (bound.storeId !== id) {
       throw new Error("This object holds another store");
+    }
+    // Deleted: refused whatever core's inventory says, so a deleted store
+    // stays deleted even if its inventory row were wrong.
+    if (bound.deletedAt !== null) {
+      throw dataErrors.create("data.store_unavailable");
     }
   }
 }

@@ -1348,3 +1348,30 @@ export const businessStores = sqliteTable("business_stores", {
   createdAt: timestamp("created_at").notNull(),
   deletedAt: timestamp("deleted_at"),
 });
+
+/**
+ * Who manages each business store besides the organization's admins and
+ * its creator (src/data-stores.ts): a person (`member_type` `person`,
+ * `member_id` their user ID) or a team, in role `manage`. Unsharing
+ * deletes the row; who did which is in the audit log.
+ */
+export const businessStoreMembers = sqliteTable(
+  "business_store_members",
+  {
+    storeId: text("store_id")
+      .notNull()
+      .references(() => businessStores.id),
+    memberType: text("member_type", { enum: ["person", "team"] }).notNull(),
+    memberId: text("member_id").notNull(),
+    role: text({ enum: ["manage"] }).notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storeId, table.memberType, table.memberId] }),
+    index("business_store_members_member_idx").on(
+      table.memberType,
+      table.memberId
+    ),
+  ]
+);
