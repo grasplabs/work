@@ -1260,14 +1260,25 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
         },
       })
     );
+    // A map built from an optional lookup: the kind is there, its consumer
+    // isn't.
+    const unset = await outcome(
+      directSave(setup, docSave(path, "Plan"), {
+        key: unique(),
+        intents: [{ kind: "workflow.start", data: { marker } }],
+        consumers: { "workflow.start": undefined },
+      })
+    );
     expect({
       refused,
       partly,
+      unset,
       versions: await versionsAt(setup.collectionId, path),
       entries: await entriesOf(marker),
     }).toStrictEqual({
       refused: "submission.intent_unsupported",
       partly: "submission.intent_unsupported",
+      unset: "submission.intent_unsupported",
       versions: 0,
       entries: [],
     });

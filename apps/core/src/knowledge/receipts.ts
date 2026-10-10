@@ -25,7 +25,7 @@ import {
   submissionReceipts,
 } from "../db/knowledge/schema.ts";
 import { liveRuns } from "../live-runs.ts";
-import { outboxConsumers } from "../outbox-delivery.ts";
+import { consumerFor, outboxConsumers } from "../outbox-delivery.ts";
 import type { OutboxConsumers } from "../outbox-delivery.ts";
 
 // Receipts of record saves an App's code makes (knowledge/app-binding.ts),
@@ -219,7 +219,7 @@ export const claim = async (
   }
   // New work stages nothing that nothing would take: it would only be
   // settled away unread.
-  if (intents.some(({ kind }) => !Object.hasOwn(consumers, kind))) {
+  if (intents.some(({ kind }) => consumerFor(consumers, kind) === undefined)) {
     throw submissionErrors.create("submission.intent_unsupported");
   }
   const db = drizzle(env.KNOWLEDGE);

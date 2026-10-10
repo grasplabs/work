@@ -52,6 +52,7 @@ import {
 import { liveRuns } from "./live-runs.ts";
 import {
   backoffMs,
+  consumerFor,
   defaultBudgetMs,
   defaultMaxAttempts,
   defaultTimeoutMs,
@@ -429,7 +430,9 @@ export class StoreHost {
       if (now >= receipt.deadline) {
         throw submissionErrors.create("submission.deadline_passed");
       }
-      if (intents.some(({ kind }) => !Object.hasOwn(consumers, kind))) {
+      if (
+        intents.some(({ kind }) => consumerFor(consumers, kind) === undefined)
+      ) {
         throw submissionErrors.create("submission.intent_unsupported");
       }
       const staged = new Map<string, Staged>();
@@ -716,9 +719,7 @@ export class StoreHost {
     // a failed attempt like any other: the entry waits for one to come
     // back, and settles as `outbox.no_consumer` only once its attempts
     // run out.
-    const consumer = Object.hasOwn(consumers, leased.kind)
-      ? consumers[leased.kind]
-      : undefined;
+    const consumer = consumerFor(consumers, leased.kind);
     const result =
       consumer === undefined
         ? { failed: new Error("Nothing takes this kind of entry") }

@@ -9,13 +9,18 @@ import { drizzle } from "drizzle-orm/d1";
 import { submissionOutbox } from "../db/knowledge/schema.ts";
 import {
   backoffMs,
+  consumerFor,
   defaultBudgetMs,
   defaultMaxAttempts,
   defaultTimeoutMs,
   handOver,
   outboxConsumers,
 } from "../outbox-delivery.ts";
-import type { DrainOptions, OutboxConsumers } from "../outbox-delivery.ts";
+import type {
+  DrainOptions,
+  Handed,
+  OutboxConsumers,
+} from "../outbox-delivery.ts";
 
 // The outbox of committed submissions (receipts.ts): what each still has
 // to tell others, written in the same batch as its change, so it is owed
@@ -130,9 +135,7 @@ const handOne = async (env: Env, drain: Drain, id: string): Promise<void> => {
     isNull(submissionOutbox.settledAt),
     eq(submissionOutbox.nextAttemptAt, until)
   );
-  const consumer = Object.hasOwn(drain.consumers, leased.kind)
-    ? drain.consumers[leased.kind]
-    : undefined;
+  const consumer = consumerFor(drain.consumers, leased.kind);
   const { attempts } = leased;
   const handed: Handed =
     consumer === undefined
