@@ -77,6 +77,7 @@ const core :Workerd.Worker = (
     (className = "AuditLog", uniqueKey = "audit-log", enableSql = true),
     (className = "Builtins", uniqueKey = "builtins", enableSql = true),
     (className = "Onboarding", uniqueKey = "onboarding", enableSql = true),
+    (className = "ModelLedger", uniqueKey = "model-ledger", enableSql = true),
   ],
   # In-memory storage aborts workerd when a Durable Object alarm fires, so
   # the smoke run must not write audit events or run the 15-minute cron

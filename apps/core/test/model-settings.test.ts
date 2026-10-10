@@ -2,12 +2,16 @@ import { runActorOf } from "@grasp-os/shared/audit";
 import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
 import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
 import { modelSpendListed } from "@grasp-os/shared/models";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { modelLedger } from "../src/model-ledger.ts";
+import type { LedgerScope } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall, ModelsEnv } from "../src/models.ts";
 import { fakeGateway } from "./ai-gateway.ts";
+import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { finished } from "./runs.ts";
 import {
@@ -55,6 +59,19 @@ const envWith = (config?: unknown) => {
   };
   return coreEnv;
 };
+
+/** A scope the ledger counts spend in, with no budget. */
+const counted = (scope: "user" | "workflow", key: string): LedgerScope => ({
+  scope,
+  key,
+  limitMicros: null,
+  alertMicros: null,
+  names: {},
+});
+
+/** Values in order, as their JSON sorts. */
+const byJson = (one: unknown, other: unknown): number =>
+  JSON.stringify(one).localeCompare(JSON.stringify(other));
 
 /** The settings as an admin reads them from `coreEnv`. */
 const settingsIn = async (
@@ -202,6 +219,8 @@ describe("model settings", { timeout: 60_000 }, () => {
         ],
       },
       month: coreEnv.MODEL_BUDGET_MONTH,
+      // Nothing held for review: this file's first test.
+      held: [],
     });
   });
 
@@ -245,25 +264,45 @@ describe("model settings", { timeout: 60_000 }, () => {
       budgets: { workflow: { limit: 5 }, user: { limit: 1 } },
     });
     const period = coreEnv.MODEL_BUDGET_MONTH;
+    if (period === undefined) {
+      throw new Error("Each test counts in a month of its own");
+    }
     // Spend already counted for people and an App no longer here: one more
     // person than are listed, the two who spent most tied.
     const people = Array.from({ length: modelSpendListed + 1 }, (_, index) => ({
       key: `gone-${String(index).padStart(3, "0")}`,
       micros: index < 2 ? 900_000 : 1000 + index,
     }));
-    const spend = env.DB.prepare(
-      "INSERT INTO model_spend (scope, key, period, spent_micros) VALUES (?, ?, ?, ?)"
-    );
-    await env.DB.batch([
-      ...people.map(({ key, micros }) =>
-        spend.bind("user", key, period, micros)
-      ),
-      spend.bind(
-        "workflow",
-        JSON.stringify(["gone-app", "digest"]),
+    // Each charged through the ledger: a micro a token.
+    const ledger = modelLedger(env);
+    const spend = async (scope: LedgerScope, micros: number) => {
+      const id = crypto.randomUUID();
+      await ledger.admit({
+        id,
         period,
-        5000
-      ),
+        scopes: [scope],
+        model: workersAi,
+        price: {
+          version: "test",
+          input: 1_000_000,
+          output: 1_000_000,
+          cacheRead: 0,
+          cacheWrite: 0,
+        },
+        reservedMicros: micros,
+        actor: { type: "person", userId: "someone" },
+        reconcileAt: Date.now() + 60_000,
+      });
+      await ledger.settle(id, {
+        by: "usage",
+        tokens: { input: micros, output: 0, cacheRead: 0, cacheWrite: 0 },
+      });
+    };
+    await Promise.all([
+      ...people.map(async ({ key, micros }) => {
+        await spend(counted("user", key), micros);
+      }),
+      spend(counted("workflow", JSON.stringify(["gone-app", "digest"])), 5000),
     ]);
 
     const settings = await settingsIn(coreEnv);
@@ -302,6 +341,100 @@ describe("model settings", { timeout: 60_000 }, () => {
       ].map((userId) => ({ type: "user", userId, name: null }))
     );
     expect(user?.spent[0]?.amount).toBe(0.9);
+  });
+
+  it("show admins the reservations held for review, and let them release or charge each, audited, and nobody else", async () => {
+    const coreEnv = envWith({
+      gateway: "grasp-os-test",
+      models: [workersAi],
+      budgets: { user: { limit: 1 } },
+    });
+    const period = coreEnv.MODEL_BUDGET_MONTH;
+    if (period === undefined) {
+      throw new Error("Each test counts in a month of its own");
+    }
+    const key = `held-${crypto.randomUUID()}`;
+    const ledger = modelLedger(env);
+    // Two requests whose scopes a release stored otherwise: set aside.
+    const ids = [crypto.randomUUID(), crypto.randomUUID()] as const;
+    for (const [index, id] of ids.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await ledger.admit({
+        id,
+        period,
+        scopes: [{ ...counted("user", key), limitMicros: 1_000_000 }],
+        model: workersAi,
+        price: {
+          version: "test",
+          input: 1_000_000,
+          output: 1_000_000,
+          cacheRead: 0,
+          cacheWrite: 0,
+        },
+        reservedMicros: 10_000 * (index + 1),
+        actor: { type: "person", userId: key },
+        reconcileAt: Date.now() + 60_000,
+      });
+    }
+    await runInDurableObject(ledger, (_instance, state) => {
+      for (const id of ids) {
+        state.storage.sql.exec(
+          "UPDATE requests SET scopes = 'not JSON' WHERE id = ?",
+          id
+        );
+      }
+    });
+    await Promise.all(
+      ids.map(async (id) => await ledger.settle(id, { by: "refused" }))
+    );
+    const { session, userId } = await signedInWithRole(idp, "admin");
+    const { core } = await openRpc(session, { coreEnv });
+    const admin = core.authenticate();
+    const builder = await signedInWithRole(idp, "builder");
+    const { core: builderCore } = await openRpc(builder.session, { coreEnv });
+    const ours = <Held extends { id: string }>(held: readonly Held[]) =>
+      held.filter(({ id }) => ids.includes(id));
+
+    const shown = await admin.models.settings();
+    const [releasing, charging] = ids;
+    await expect(
+      outcome(
+        builderCore.authenticate().models.resolveHeld(releasing, "release")
+      )
+    ).resolves.toBe("role.forbidden");
+    await admin.models.resolveHeld(releasing, "release");
+    await admin.models.resolveHeld(charging, "charge");
+    await runDurableObjectAlarm(ledger);
+    const events = await allEvents();
+    const spentNow = await ledger.spendOf(period, ["user"], 1000);
+
+    expect({
+      shown: ours(shown.held)
+        .map(({ id, amount, model }) => [id, amount, model])
+        .toSorted(byJson),
+      after: ours(await admin.models.held()),
+      spent: spentNow.user?.find((row) => row.key === key),
+      audited: events
+        .filter(
+          ({ actor, detail }) =>
+            JSON.stringify(actor) ===
+              JSON.stringify({ type: "person", userId }) &&
+            ids.includes(String(detail.request))
+        )
+        .map(({ action, detail }) => [action, detail.request])
+        .toSorted(byJson),
+    }).toStrictEqual({
+      shown: [
+        [releasing, 0.01, workersAi],
+        [charging, 0.02, workersAi],
+      ].toSorted(byJson),
+      after: [],
+      spent: { key, spentMicros: 20_000, reservedMicros: 0 },
+      audited: [
+        ["model.spend.charged", charging],
+        ["model.spend.released", releasing],
+      ].toSorted(byJson),
+    });
   });
 
   it("read to Grasp staff too, through the admin role their access gives", async () => {

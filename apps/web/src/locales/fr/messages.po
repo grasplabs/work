@@ -371,6 +371,10 @@ msgstr "{total, plural, one {Pour {withPerson} sur # exécution, la décision d�
 msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{total, plural, one {# intégration affichée} other {# intégrations affichées}}"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full."
+msgstr "{total} est retenu pour ces appels au modèle jusqu’à votre décision : ce que chacun aurait pu coûter. Libérez-le, ou facturez-le en entier."
+
 #: src/dashboard/nav-item.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# élément en attente} other {# éléments en attente}}"
@@ -1045,6 +1049,14 @@ msgstr "modifie les données du moteur"
 #: src/chat/builds.tsx
 msgid "Changes the engine's data"
 msgstr "Modifie les données du moteur"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Charge"
+msgstr "Facturer"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Charge {amount} for this model call?"
+msgstr "Facturer {amount} pour cet appel au modèle ?"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
@@ -1879,6 +1891,10 @@ msgstr "Hash"
 msgid "He doesn't ask about it, and moves on when somebody brings it up."
 msgstr "Il n’en parle pas, et passe à autre chose quand quelqu’un l’aborde."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "Held for review"
+msgstr "Retenu pour examen"
+
 #: src/routes/guest.tsx
 msgid "Hi {name}"
 msgstr "Bonjour {name}"
@@ -1961,6 +1977,10 @@ msgstr "Entretiens"
 msgid "Invited a guest"
 msgstr "A invité un invité"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
+msgstr "Il compte comme dépensé dans les budgets : le maximum qu’il aurait pu coûter. Cette action est irréversible."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
 msgstr "Il n’a aucun paramètre."
@@ -1984,6 +2004,10 @@ msgstr "Elle n’est partagée avec personne."
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
 msgstr "Cet élément a peut-être été renommé ou supprimé."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "It no longer counts against the budgets, as if it cost nothing. This can't be undone."
+msgstr "Il ne compte plus dans les budgets, comme s’il n’avait rien coûté. Cette action est irréversible."
 
 #: src/chat/builds.tsx
 msgid "It no longer runs (it could change things)."
@@ -3104,6 +3128,14 @@ msgstr "Rejeté par {name} le {date}."
 #: src/dashboard/pile-cards.tsx
 msgid "Rejected: {who}."
 msgstr "Rejeté : {who}."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Release"
+msgstr "Libérer"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Release the {amount} held for this model call?"
+msgstr "Libérer les {amount} retenus pour cet appel au modèle ?"
 
 #: src/screens/screen-frame.tsx
 msgid "Reload"

@@ -5,11 +5,8 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { and, eq, inArray, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import type { OutboxEnv } from "./audit-outbox.ts";
 import { inList } from "./db/d1.ts";
 import { collections, documents } from "./db/knowledge/schema.ts";
-import { budgetMonth, budgetsFor, checkBudgets } from "./model-budgets.ts";
-import type { Budgeted } from "./model-budgets.ts";
 import { isRestricted } from "./restricted.ts";
 import type { RestrictedEnv, WorkContext } from "./restricted.ts";
 
@@ -42,8 +39,9 @@ import type { RestrictedEnv, WorkContext } from "./restricted.ts";
 // its documents, or whose data came from a connection the config marks
 // sensitive. Only the models the data rule lists may take such a call.
 //
-// And budgets: a call is refused once one of its budgets is used up for
-// the month (model-budgets.ts).
+// And budgets: each request a call sends is admitted by the model ledger,
+// which refuses it when one of its budgets has no room left for what it
+// may cost (model-budgets.ts, model-ledger.ts).
 
 /** What the rules judge a call by. */
 export interface RulesInput {
@@ -81,8 +79,6 @@ export interface Judged {
    * when no data rule asked.
    */
   sensitive: Sensitive | undefined;
-  /** The budgets it counts against, which its cost is added to. */
-  budgets: Budgeted[];
 }
 
 /** The connections whose data fed the prompt, or may have. */
@@ -174,6 +170,8 @@ export interface Refusal {
     | "model.eu_only"
     | "model.sensitive_data"
     | "model.over_budget"
+    | "model.unpriced"
+    | "model.ledger_unavailable"
     | "permission.context_invalid";
   because?: string;
 }
@@ -212,9 +210,7 @@ const restrictedWork = async (
  * no call gets past a rule with a context that isn't its own, or none.
  */
 export const judgeCall = async (
-  env: RestrictedEnv &
-    OutboxEnv &
-    Pick<Env, "KNOWLEDGE" | "MODEL_BUDGET_MONTH">,
+  env: RestrictedEnv & Pick<Env, "KNOWLEDGE">,
   rules: ModelRules,
   input: RulesInput
 ): Promise<{ ok: true; judged: Judged } | ({ ok: false } & Refusal)> => {
@@ -237,10 +233,5 @@ export const judgeCall = async (
   ) {
     return { ok: false, code: "model.sensitive_data", because: sensitive };
   }
-  const budgets = budgetsFor(rules.budgets, input, budgetMonth(env));
-  const usedUp = await checkBudgets(env, input.trigger, budgets);
-  if (usedUp !== undefined) {
-    return { ok: false, code: "model.over_budget", because: usedUp.scope };
-  }
-  return { ok: true, judged: { euOnly, sensitive, budgets } };
+  return { ok: true, judged: { euOnly, sensitive } };
 };
