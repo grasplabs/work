@@ -4,6 +4,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import {
   commitSchema,
   dataErrors,
+  documentMaxBytes,
   recordIdSchema,
   storeMaxTables,
   storedFieldsSchema,
@@ -47,6 +48,8 @@ import { migrateOnWake } from "./db/migrate.ts";
 
 /** A store's record, as staged in a commit. */
 interface Staged {
+  /** Its table's name, for what a refusal says. */
+  table: string;
   tableId: string;
   recordId: string;
   /** The row as committed before this commit; none for a record it inserted. */
@@ -75,6 +78,8 @@ const toStored = (row: typeof records.$inferSelect): StoredRecord => ({
   schemaHash: row.schemaHash,
   fields: fieldsOf(row),
 });
+
+const encoder = new TextEncoder();
 
 const conflict = (table: string, id: string) =>
   dataErrors.create("data.conflict", { table, id });
@@ -195,6 +200,7 @@ export class DataStore extends DurableObject<Env> {
           )
           .get();
         const entry: Staged = {
+          table,
           tableId,
           recordId,
           base,
@@ -203,19 +209,22 @@ export class DataStore extends DurableObject<Env> {
         staged.set(key, entry);
         return entry;
       };
-      /** The staged record, if it exists at `expected`; otherwise a conflict. */
+      /**
+       * The staged record and its fields, if it exists at `expected`;
+       * otherwise a conflict.
+       */
       const at = (
         table: string,
         recordId: string,
         expected: number
-      ): Staged & { fields: StoreFields } => {
+      ): { entry: Staged; fields: StoreFields } => {
         const entry = stage(table, recordId);
         const { fields } = entry;
         const revision = entry.base?.revision ?? 1;
         if (fields === null || revision !== expected) {
           throw conflict(table, recordId);
         }
-        return { ...entry, fields };
+        return { entry, fields };
       };
 
       for (const guard of guards) {
@@ -227,6 +236,7 @@ export class DataStore extends DurableObject<Env> {
           const recordId = crypto.randomUUID();
           const tableId = this.#tableId(write.table);
           staged.set(keyOf(tableId, recordId), {
+            table: write.table,
             tableId,
             recordId,
             base: undefined,
@@ -235,19 +245,19 @@ export class DataStore extends DurableObject<Env> {
           inserted.push(recordId);
           continue;
         }
-        const entry = at(write.table, write.id, write.expectedRevision);
-        const target = staged.get(keyOf(entry.tableId, entry.recordId));
-        if (target === undefined) {
-          throw new Error("A staged record went missing");
-        }
+        const { entry, fields } = at(
+          write.table,
+          write.id,
+          write.expectedRevision
+        );
         if (write.op === "delete") {
-          target.fields = null;
+          entry.fields = null;
         } else if (write.op === "replace") {
-          target.fields = write.fields;
+          entry.fields = write.fields;
         } else {
           const unset = new Set(write.unset);
-          target.fields = Object.fromEntries(
-            Object.entries({ ...entry.fields, ...write.fields }).filter(
+          entry.fields = Object.fromEntries(
+            Object.entries({ ...fields, ...write.fields }).filter(
               ([name]) => !unset.has(name)
             )
           );
@@ -261,43 +271,53 @@ export class DataStore extends DurableObject<Env> {
   /** Writes what a commit staged, changing only the records it changed. */
   #flush(staged: readonly Staged[], ownerId: string, schemaHash: string): void {
     const now = Date.now();
-    for (const { tableId, recordId, base, fields } of staged) {
+    for (const { table, tableId, recordId, base, fields } of staged) {
       const where = and(
         eq(records.tableId, tableId),
         eq(records.recordId, recordId)
       );
+      if (fields === null) {
+        if (base !== undefined) {
+          this.#db.delete(records).where(where).run();
+        }
+        continue;
+      }
+      // Each write's fields were within the limit, but a patch merges
+      // into what the record holds, and several patches add up: the
+      // document as it would be stored is what must fit.
+      const valueJson = storedText(fields);
+      if (encoder.encode(valueJson).byteLength > documentMaxBytes) {
+        throw dataErrors.create("data.invalid", {
+          table,
+          id: recordId,
+          issues: [`A record holds at most ${documentMaxBytes} bytes`],
+        });
+      }
       if (base === undefined) {
-        if (fields !== null) {
-          this.#db
-            .insert(records)
-            .values({
-              tableId,
-              recordId,
-              ownerId,
-              revision: 1,
-              createdAt: now,
-              updatedAt: now,
-              valueJson: storedText(fields),
-              schemaHash,
-            })
-            .run();
-        }
-      } else if (fields === null) {
-        this.#db.delete(records).where(where).run();
-      } else {
-        const valueJson = storedText(fields);
-        if (valueJson !== base.valueJson) {
-          this.#db
-            .update(records)
-            .set({
-              revision: base.revision + 1,
-              updatedAt: Math.max(now, base.updatedAt),
-              valueJson,
-              schemaHash,
-            })
-            .where(where)
-            .run();
-        }
+        this.#db
+          .insert(records)
+          .values({
+            tableId,
+            recordId,
+            ownerId,
+            revision: 1,
+            createdAt: now,
+            updatedAt: now,
+            valueJson,
+            schemaHash,
+          })
+          .run();
+      } else if (valueJson !== base.valueJson) {
+        this.#db
+          .update(records)
+          .set({
+            revision: base.revision + 1,
+            updatedAt: Math.max(now, base.updatedAt),
+            valueJson,
+            schemaHash,
+          })
+          .where(where)
+          .run();
       }
     }
   }
@@ -316,12 +336,17 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /**
-   * Holds this object to one store: the first call records which store it
-   * is, and a call for any other store fails. Its name is the store's ID
-   * (data-stores.ts), so this only fails if core addressed it wrongly.
+   * Holds this object to one store: the store whose ID is the object's
+   * name (data-stores.ts addresses it by name), recorded by the first
+   * call. A call for any other store fails, and so does every call to an
+   * object not reached by a store's ID, so no object serves a store it
+   * wasn't made for.
    */
   #bind(storeId: StoreId): void {
     const id = storeIdSchema.parse(storeId);
+    if (this.ctx.id.name !== id) {
+      throw new Error("This object holds another store");
+    }
     const bound = this.#db.select({ storeId: store.storeId }).from(store).get();
     if (bound === undefined) {
       this.#db

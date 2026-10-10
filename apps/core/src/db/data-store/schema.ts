@@ -60,8 +60,10 @@ export const tables = sqliteTable(
  * The records of every logical table. The managed fields (`_id`,
  * `_ownerId`, `_rev`, `_createdAt`, `_updatedAt`) are these fixed columns,
  * which only the host sets; the fields the schema declares are the JSON
- * object in `value_json`. `schema_hash` names the schema the record was
- * last written under.
+ * object in `value_json`. `schema_hash` names the schema of the last
+ * commit that changed the record: a commit that leaves it as it was
+ * doesn't stamp it again, and a compatible schema change needn't rewrite
+ * it.
  */
 export const records = sqliteTable(
   "sdk_records",

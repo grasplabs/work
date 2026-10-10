@@ -1,4 +1,10 @@
-import { documentMaxBytes, documentMaxDepth } from "@grasp-os/shared/stores";
+import {
+  commitMaxGuards,
+  commitMaxWrites,
+  documentMaxBytes,
+  documentMaxDepth,
+  storeMaxTables,
+} from "@grasp-os/shared/stores";
 import type { StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -52,6 +58,14 @@ const untyped = (fields: unknown): StoreFields =>
   // SAFETY: none, on purpose: the store must refuse what isn't fields.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- deliberately ill-typed input
   fields as StoreFields;
+
+/** `count` inserts of a small note. */
+const inserts = (count: number) =>
+  Array.from({ length: count }, () => ({
+    op: "insert" as const,
+    table: "notes",
+    fields: { title: "Note" },
+  }));
 
 /** The store's object, addressed directly. */
 const objectOf = (id: string) => env.DATA_STORES.getByName(id);
@@ -142,6 +156,18 @@ describe("stores", () => {
     ).rejects.toMatchObject({ code: "data.unknown_table" });
   });
 
+  it(`holds at most ${storeMaxTables} tables`, async () => {
+    const store = await openStore(env, await createStore(env, ada.userId));
+    const names = Array.from({ length: storeMaxTables }, (_, n) => `t${n}`);
+    await expect(store.defineTables(names)).resolves.toBeDefined();
+    await expect(store.defineTables(["oneMore"])).rejects.toMatchObject({
+      code: "data.too_many_tables",
+    });
+    // Nothing of the refused definition stays.
+    const tables = await store.defineTables(["t0"]);
+    expect(Object.keys(tables)).toHaveLength(storeMaxTables);
+  });
+
   it("refuses a store it doesn't list, or one deleted, alike", async () => {
     await expect(openStore(env, crypto.randomUUID())).rejects.toMatchObject({
       code: "data.store_unavailable",
@@ -166,13 +192,16 @@ describe("stores", () => {
     await expect(misaddressed()).rejects.toThrow(
       "This object holds another store"
     );
+    // Nor does an object reached by another name take the store's ID.
+    const stray = async () => await objectOf(other).get(store.id, "notes", id);
+    await expect(stray()).rejects.toThrow("This object holds another store");
   });
 
-  it("keeps its records when its object restarts", async () => {
+  it("reads its records back from storage after its object is reset", async () => {
     const store = await newStore();
     const id = await insertNote(store);
     await runInDurableObject(objectOf(store.id), (_instance, state) => {
-      state.abort("restart");
+      state.abort("reset");
     }).catch(() => {});
     // The next request reaches the object anew, from its storage.
     const reopened = await openStore(env, store.id);
@@ -569,5 +598,177 @@ describe("commits", () => {
       })
     );
     await expect(recordCount(store)).resolves.toBe(0);
+  });
+
+  it(`carries at most ${commitMaxWrites} writes and ${commitMaxGuards} guards`, async () => {
+    const store = await newStore();
+    const { inserted } = await store.commit({
+      principal: ada,
+      schemaHash,
+      writes: inserts(commitMaxWrites),
+    });
+    expect(inserted).toHaveLength(commitMaxWrites);
+    await expect(
+      store.commit({
+        principal: ada,
+        schemaHash,
+        writes: inserts(commitMaxWrites + 1),
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+
+    const guards = inserted.map((id) => ({
+      table: "notes",
+      id,
+      expectedRevision: 1,
+    }));
+    await expect(
+      store.commit({ principal: ada, schemaHash, guards, writes: [] })
+    ).resolves.toStrictEqual({ inserted: [] });
+    await expect(
+      store.commit({
+        principal: ada,
+        schemaHash,
+        guards: [...guards, ...guards.slice(0, 1)],
+        writes: [],
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+    await expect(recordCount(store)).resolves.toBe(commitMaxWrites);
+  });
+
+  it(`takes at most ${documentMaxBytes} bytes of writes in one commit`, async () => {
+    const store = await newStore();
+    // Each document fits; the two together are more than one commit takes.
+    const half = { body: "x".repeat(70_000) };
+    await expect(
+      store.commit({
+        principal: ada,
+        schemaHash,
+        writes: [
+          { op: "insert", table: "notes", fields: half },
+          { op: "insert", table: "notes", fields: half },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+});
+
+describe("document size", () => {
+  /** The JSON `{"a":"…","b":"…"}` of `a` and `b` characters takes 15 more bytes. */
+  const overhead = 15;
+  const firstPart = 65_000;
+
+  /** A note of `a` characters, patched with `b` more in field `b`. */
+  const patchedNote = async (store: OpenStore, b: number): Promise<string> => {
+    const id = await insertNote(store, { a: "x".repeat(firstPart) });
+    await store.commit({
+      principal: ada,
+      schemaHash,
+      writes: [
+        {
+          op: "patch",
+          table: "notes",
+          id,
+          fields: { b: "y".repeat(b) },
+          expectedRevision: 1,
+        },
+      ],
+    });
+    return id;
+  };
+
+  it("keeps a record of exactly the limit", async () => {
+    const store = await newStore();
+    const id = await patchedNote(
+      store,
+      documentMaxBytes - overhead - firstPart
+    );
+    await expect(store.get("notes", id)).resolves.toMatchObject({
+      revision: 2,
+    });
+  });
+
+  it("refuses a patch that takes the stored record past the limit", async () => {
+    const store = await newStore();
+    const id = await patchedNote(
+      store,
+      documentMaxBytes - overhead - firstPart
+    );
+    // One byte more, though the patch itself is small.
+    await expect(
+      store.commit({
+        principal: ada,
+        schemaHash,
+        writes: [
+          {
+            op: "patch",
+            table: "notes",
+            id,
+            fields: { c: "" },
+            expectedRevision: 2,
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+    const kept = await store.get("notes", id);
+    expect(kept?.revision).toBe(2);
+    expect(Object.keys(kept?.fields ?? {})).toStrictEqual(["a", "b"]);
+  });
+
+  it("refuses patches in one commit that together take a record past the limit", async () => {
+    const store = await newStore();
+    const id = await insertNote(store, { a: "x".repeat(firstPart) });
+    await expect(
+      store.commit({
+        principal: ada,
+        schemaHash,
+        writes: [
+          {
+            op: "patch",
+            table: "notes",
+            id,
+            fields: { b: "y".repeat(40_000) },
+            expectedRevision: 1,
+          },
+          {
+            op: "patch",
+            table: "notes",
+            id,
+            fields: { c: "z".repeat(40_000) },
+            expectedRevision: 1,
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+    await expect(store.get("notes", id)).resolves.toMatchObject({
+      revision: 1,
+    });
+  });
+
+  it("rolls back what the commit already wrote when a later record can't be stored", async () => {
+    const store = await newStore();
+    const full = await patchedNote(
+      store,
+      documentMaxBytes - overhead - firstPart
+    );
+    // The insert is written first; the patch then fails as its record is
+    // stored, and the transaction takes the insert back.
+    await expect(
+      store.commit({
+        principal: ada,
+        schemaHash,
+        writes: [
+          { op: "insert", table: "notes", fields: { title: "Lost" } },
+          {
+            op: "patch",
+            table: "notes",
+            id: full,
+            fields: { c: "over" },
+            expectedRevision: 2,
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+    await expect(recordCount(store)).resolves.toBe(1);
   });
 });

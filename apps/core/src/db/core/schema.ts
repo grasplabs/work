@@ -1332,7 +1332,10 @@ export const guestMessages = sqliteTable(
  */
 export const businessStores = sqliteTable("business_stores", {
   id: text().primaryKey(),
-  /** The user who created it. */
+  /**
+   * The store's creator, the user who created it, and so its owner. Who
+   * owns each record is the record's own `_ownerId`, never this.
+   */
   ownerId: text("owner_id").notNull(),
   activeSchemaVersion: integer("active_schema_version"),
   activeSchemaHash: text("active_schema_hash"),
