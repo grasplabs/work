@@ -214,7 +214,11 @@ const objectBody = (draft: DescriptorDraft): Body => {
   const children: Sealed[] = [];
   const sealedFields: Record<string, ValueDescriptor> = {};
   for (const [key, value] of Object.entries(fields)) {
-    if (!isName(key) || unsafeKeys.has(key)) {
+    if (
+      !isName(key) ||
+      key.length > valueLimits.fieldNameLength ||
+      unsafeKeys.has(key)
+    ) {
       return refuse(
         "definition.invalid_key",
         "A field's name is a short string that isn't a prototype key."

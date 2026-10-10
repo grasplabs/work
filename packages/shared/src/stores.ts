@@ -3,6 +3,11 @@ import { z } from "zod";
 import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema, storeIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
+import {
+  storeMaxTables,
+  storeNameMaxLength,
+  storeNamePattern,
+} from "./store-limits.ts";
 
 // Business stores: a deployment's structured records, each store one
 // Durable Object with its own SQLite database (apps/core/src/data-store.ts),
@@ -11,17 +16,6 @@ import type { Json } from "./json.ts";
 // schema declares plus the managed fields only the host sets. These are
 // the shapes core hands a store: never App code, which reaches records
 // only through the operations of its pinned schema.
-
-/**
- * A table or field name: an ASCII letter, then letters, digits or
- * underscores. A field can't start with `_`, which keeps the managed
- * fields (`_id`, `_ownerId`, `_rev`, `_createdAt`, `_updatedAt`) apart
- * from authored ones.
- */
-const storeNamePattern = /^[A-Za-z][A-Za-z0-9_]*$/u;
-
-/** The longest table or field name. */
-const storeNameMaxLength = 64;
 
 /** A logical table's name, as the schema's map key gives it. */
 export const tableNameSchema = z
@@ -56,9 +50,6 @@ export const documentMaxDepth = 32;
 // runs, so larger changes are a workflow's, in batches. They are the
 // host's own until the runtime policy module (validated quotas) sets
 // them per deployment.
-
-/** The most tables a store may define. */
-export const storeMaxTables = 64;
 
 /** The most writes one commit may stage. */
 export const commitMaxWrites = 100;
