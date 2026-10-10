@@ -17,7 +17,7 @@ import { createWriteStream } from "node:fs";
 import type { WriteStream } from "node:fs";
 import { finished } from "node:stream/promises";
 
-import type { Reporter, TestCase, TestModule } from "vite-plus/test/node";
+import type { Reporter } from "vite-plus/test/node";
 
 const minuteMs = 60 * 1000;
 
@@ -37,20 +37,59 @@ export const reportDelayMs = (minutes: number, uptimeSeconds: number): number =>
 
 const seconds = (ms: number): string => `${Math.round(ms / 1000)}s`;
 
-const moduleName = (testModule: TestModule): string =>
+/** What the reporter reads of a test file: Vitest's `TestModule` has it. */
+export interface ReportedModule {
+  readonly project: { readonly name: string };
+  readonly relativeModuleId: string;
+}
+
+/** What the reporter reads of a test: Vitest's `TestCase` has it. */
+export interface ReportedCase {
+  readonly module: ReportedModule;
+  readonly fullName: string;
+  result: () => { readonly state: string };
+}
+
+/** Where the reporter writes, and when it reports; the env's by default. */
+export interface StallReporterOptions {
+  /** Minutes after the process started; no report when unset. */
+  reportAfterMinutes?: number;
+  /** The progress file; none when unset. */
+  progressFile?: string;
+  /** How long the process has run, in seconds. */
+  uptimeSeconds?: () => number;
+  /** Where the report goes. */
+  write?: (text: string) => void;
+}
+
+const moduleName = (testModule: ReportedModule): string =>
   `${testModule.project.name} ${testModule.relativeModuleId}`;
 
-const caseName = (testCase: TestCase): string =>
+const caseName = (testCase: ReportedCase): string =>
   `${moduleName(testCase.module)} > ${testCase.fullName}`;
 
 export default class StallReporter implements Reporter {
-  readonly #modules = new Map<TestModule, number>();
-  readonly #cases = new Map<TestCase, number>();
+  readonly #modules = new Map<ReportedModule, number>();
+  readonly #cases = new Map<ReportedCase, number>();
   readonly #progress: WriteStream | undefined;
+  readonly #reportAfterMinutes: number | undefined;
+  readonly #uptimeSeconds: () => number;
+  readonly #write: (text: string) => void;
   #timer: NodeJS.Timeout | undefined;
 
-  constructor() {
-    const file = process.env.GRASP_TEST_PROGRESS_FILE;
+  // Vitest constructs a reporter given by path with no options of ours:
+  // everything then comes from the env.
+  constructor(options: StallReporterOptions = {}) {
+    this.#reportAfterMinutes =
+      options.reportAfterMinutes ??
+      positiveFromEnv("GRASP_STALL_REPORT_AFTER_MINUTES");
+    this.#uptimeSeconds = options.uptimeSeconds ?? (() => process.uptime());
+    this.#write =
+      options.write ??
+      ((text) => {
+        process.stdout.write(text);
+      });
+    const file = options.progressFile ?? process.env.GRASP_TEST_PROGRESS_FILE;
     this.#progress =
       file === undefined || file === ""
         ? undefined
@@ -65,7 +104,7 @@ export default class StallReporter implements Reporter {
 
   onTestRunStart(): void {
     clearTimeout(this.#timer);
-    const minutes = positiveFromEnv("GRASP_STALL_REPORT_AFTER_MINUTES");
+    const minutes = this.#reportAfterMinutes;
     if (minutes === undefined) {
       return;
     }
@@ -73,25 +112,25 @@ export default class StallReporter implements Reporter {
       () => {
         this.#report(minutes);
       },
-      reportDelayMs(minutes, process.uptime())
+      reportDelayMs(minutes, this.#uptimeSeconds())
     );
     // A run that ends in time doesn't wait for the report.
     this.#timer.unref();
   }
 
-  onTestModuleStart(testModule: TestModule): void {
+  onTestModuleStart(testModule: ReportedModule): void {
     this.#modules.set(testModule, Date.now());
   }
 
-  onTestModuleEnd(testModule: TestModule): void {
+  onTestModuleEnd(testModule: ReportedModule): void {
     this.#modules.delete(testModule);
   }
 
-  onTestCaseReady(testCase: TestCase): void {
+  onTestCaseReady(testCase: ReportedCase): void {
     this.#cases.set(testCase, Date.now());
   }
 
-  onTestCaseResult(testCase: TestCase): void {
+  onTestCaseResult(testCase: ReportedCase): void {
     const started = this.#cases.get(testCase);
     this.#cases.delete(testCase);
     const took = started === undefined ? "" : ` ${Date.now() - started}ms`;
@@ -130,6 +169,6 @@ export default class StallReporter implements Reporter {
       ),
       "",
     ];
-    process.stdout.write(lines.join("\n"));
+    this.#write(lines.join("\n"));
   }
 }
