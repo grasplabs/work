@@ -6,7 +6,8 @@
  * the server doesn't say: only the admin's allowlist does). It records
  * every call that reached `mail.send`, every mail it really sent and every
  * search. Each server (by the name in its URL)
- * answers its next calls as a test plans them. Imported by vite.config.ts
+ * answers its next calls as a test plans them, and holds a search whose
+ * query starts with `hold` until the test lets it go. Imported by vite.config.ts
  * (Node) and the tests (workerd), so it only holds data.
  */
 
@@ -33,7 +34,7 @@ const mailServers = new Map();
 const mailServerNamed = (name) => {
   let server = mailServers.get(name);
   if (!server) {
-    server = { plan: [], calls: 0, sent: [], searched: [], holding: false, released: false };
+    server = { plan: [], calls: 0, sent: [], searched: [], holding: false, released: false, holds: 0, releases: 0 };
     mailServers.set(name, server);
   }
   return server;
@@ -47,6 +48,7 @@ const mailServer = async (request, url) => {
       const control = await request.json();
       if (control.release) {
         server.released = true;
+        server.releases += 1;
       } else {
         server.plan = control.plan;
       }
@@ -80,6 +82,17 @@ const mailServer = async (request, url) => {
   }
   if (params.name === "mail.search") {
     server.searched.push(params.arguments.query);
+    if (params.arguments.query.startsWith("hold")) {
+      // Each held search waits for a release of its own, so the server
+      // holds the next one too once the last was let go.
+      const ticket = server.holds;
+      server.holds += 1;
+      server.holding = true;
+      while (server.releases <= ticket) {
+        await scheduler.wait(20);
+      }
+      server.holding = false;
+    }
     const found = { messages: [params.arguments.query + "-1"] };
     return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(found) }], structuredContent: found });
   }

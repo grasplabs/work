@@ -485,13 +485,14 @@ describe("App server code", { timeout: 60_000 }, () => {
       .run();
     await callApp(env, app, as(stays.userId), "label");
 
-    // Each waits in the App while the other one calls, in both orders.
+    // Each holds the App while the other one calls, which waits its turn,
+    // in both orders.
     const first = gate();
     const staysFirst = callApp(env, app, as(stays.userId), "mailLater", [
       first.wait,
     ]);
     await first.entered;
-    const leavesMeanwhile = await callApp(env, app, as(leaves.userId), "mail");
+    const leavesMeanwhile = callApp(env, app, as(leaves.userId), "mail");
     first.release();
 
     const second = gate();
@@ -499,7 +500,7 @@ describe("App server code", { timeout: 60_000 }, () => {
       second.wait,
     ]);
     await second.entered;
-    const staysMeanwhile = await callApp(env, app, as(stays.userId), "mail");
+    const staysMeanwhile = callApp(env, app, as(stays.userId), "mail");
     second.release();
 
     const whoami = await Promise.all([
@@ -507,8 +508,8 @@ describe("App server code", { timeout: 60_000 }, () => {
       callApp(env, app, as(leaves.userId), "whoami"),
     ]);
     expect({
-      stays: [await staysFirst, staysMeanwhile],
-      leaves: [leavesMeanwhile, await leavesFirst],
+      stays: [await staysFirst, await staysMeanwhile],
+      leaves: [await leavesMeanwhile, await leavesFirst],
       whoami,
     }).toStrictEqual({
       stays: [reached, reached],
@@ -713,16 +714,10 @@ describe("App server code", { timeout: 60_000 }, () => {
       callApp(env, app, caller, "writeLater", [late.wait, "late"])
     );
     await late.entered;
-    // Another call in the same code meanwhile, which stops with it.
-    const alongside = gate();
-    const alongsideCall = outcome(
-      callApp(env, app, caller, "writeLater", [alongside.wait, "alongside"])
-    );
-    await alongside.entered;
     const timedOut = await lateCall;
 
-    // A call after it runs on code started afresh. All three are let go
-    // at once: what the first two would write and mail, the third does.
+    // A call after it runs on code started afresh. Both are let go at
+    // once: what the first would write and mail, the second does.
     const after = gate();
     const afterCall = callApp(env, app, caller, "writeLater", [
       after.wait,
@@ -730,18 +725,15 @@ describe("App server code", { timeout: 60_000 }, () => {
     ]);
     await after.entered;
     late.release();
-    alongside.release();
     after.release();
     const afterAnswer = await afterCall;
     expect({
       timedOut,
-      alongside: await alongsideCall,
       afterAnswer,
       notes: await callApp(env, app, caller, "notes"),
       counts: [countBefore, await callApp(env, app, caller, "count")],
     }).toStrictEqual({
       timedOut: "app.timed_out",
-      alongside: "app.failed",
       afterAnswer: reached,
       notes: ["after"],
       // A new isolate: the count starts again.
@@ -756,7 +748,8 @@ describe("App server code", { timeout: 60_000 }, () => {
     await callApp(env, app, caller, "label");
 
     // As the call is recorded, the App's code is restarted, on the same
-    // version, and started again by another call.
+    // version. No other call can start it again meanwhile: it waits for
+    // this one's turn to end.
     const pinned = await outcome(
       appHost(env, app).call(caller, "remember", ["pinned"], {
         version: 1,
@@ -765,7 +758,6 @@ describe("App server code", { timeout: 60_000 }, () => {
         readOnly: false,
         onPinned: async () => {
           await appHost(env, app).restart("A test restarts it.");
-          await callApp(env, app, caller, "label");
         },
       })
     );
@@ -780,13 +772,10 @@ describe("App server code", { timeout: 60_000 }, () => {
     const app = await sampleApp(admin);
     await requestGranted(idp, admin, outlook(app));
     const caller = as(admin.userId);
-    await callApp(env, app, caller, "label");
+    // Module state the code holds before: still there after, as the code
+    // goes on.
+    const countBefore = await callApp(env, app, caller, "count");
 
-    const running = gate();
-    const runningCall = outcome(
-      callApp(env, app, caller, "writeLater", [running.wait, "running"])
-    );
-    await running.entered;
     // A call through an export, as app-calls.ts makes it, from a call that
     // has a moment left: it ends at that call's deadline, long before the
     // App's own time for a call. Its deadline's timer is held until its
@@ -794,6 +783,7 @@ describe("App server code", { timeout: 60_000 }, () => {
     const cutShort = gate();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     let cutShortEnded: string;
+    let countAfter: unknown;
     try {
       const cutShortCall = outcome(
         appHost(env, app).call(caller, "writeLater", [cutShort.wait, "short"], {
@@ -810,15 +800,19 @@ describe("App server code", { timeout: 60_000 }, () => {
         await vi.advanceTimersByTimeAsync(5000);
       });
       cutShortEnded = await cutShortCall;
+      // The next call waits for the cut-off code to settle, then runs in
+      // the same code, which wasn't stopped.
+      const counting = callApp(env, app, caller, "count");
+      cutShort.release();
+      countAfter = await counting;
     } finally {
       vi.useRealTimers();
+      cutShort.release();
     }
-    running.release();
-    cutShort.release();
     expect({
       cutShort: cutShortEnded,
-      running: await runningCall,
-    }).toStrictEqual({ cutShort: "app.timed_out", running: "ok" });
+      counts: [countBefore, countAfter],
+    }).toStrictEqual({ cutShort: "app.timed_out", counts: [1, 2] });
   });
 
   it("reports its errors with the version, and logs none of their text", async () => {
@@ -1196,14 +1190,15 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
     await callApp(env, app, as(member.userId), "label");
     const readArgs = ["HANDBOOK", finance.noteId];
 
-    // Each waits in the App while the other one reads, in both orders.
+    // Each holds the App while the other one reads, which waits its turn,
+    // in both orders.
     const first = gate();
     const memberFirst = callApp(env, app, as(member.userId), "readLater", [
       first.wait,
       ...readArgs,
     ]);
     await first.entered;
-    const outsiderMeanwhile = await callApp(
+    const outsiderMeanwhile = callApp(
       env,
       app,
       as(outsider.userId),
@@ -1218,7 +1213,7 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
       ...readArgs,
     ]);
     await second.entered;
-    const memberMeanwhile = await callApp(
+    const memberMeanwhile = callApp(
       env,
       app,
       as(member.userId),
@@ -1228,8 +1223,8 @@ describe("App server code reading Knowledge", { timeout: 60_000 }, () => {
     second.release();
 
     expect({
-      member: [await memberFirst, memberMeanwhile],
-      outsider: [outsiderMeanwhile, await outsiderFirst],
+      member: [await memberFirst, await memberMeanwhile],
+      outsider: [await outsiderMeanwhile, await outsiderFirst],
     }).toStrictEqual({
       member: [everyReadIs("ok"), everyReadIs("ok")],
       outsider: [

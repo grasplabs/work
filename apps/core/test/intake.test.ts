@@ -9,6 +9,7 @@ import { z } from "zod";
 import { callApp } from "../src/app.ts";
 import type { AppCallerInput } from "../src/app.ts";
 import { builtins, fingerprintOf, release } from "../src/builtins.ts";
+import { appHost } from "../src/durable-objects.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import {
   grantReviewed,
@@ -234,22 +235,6 @@ const stemOf = (sourcePath: string): string =>
 
 /** Knowledge's writes of a new version: one per record saved. */
 const insertsVersion = /^insert into "versions"/iu;
-
-/**
- * `promise`, or a failure naming `what` after 10 seconds: a held write
- * the test never reaches fails it rather than holding it forever.
- */
-const within = async <T>(promise: Promise<T>, what: string): Promise<T> => {
-  const late = Promise.withResolvers<never>();
-  const timer = setTimeout(() => {
-    late.reject(new Error(`${what} took too long`));
-  }, 10_000);
-  try {
-    return await Promise.race([promise, late.promise]);
-  } finally {
-    clearTimeout(timer);
-  }
-};
 
 /**
  * Runs `run` with `before` run ahead of each Knowledge batch, given how
@@ -729,7 +714,7 @@ describe("the intake", { timeout: 60_000 }, () => {
     });
   });
 
-  it("stops a save whose draft is discarded meanwhile before its next write", async () => {
+  it("finishes a save before a discard that comes meanwhile, which then finds no draft", async () => {
     const { admin, app } = await setUp();
     const draft = interview(`Discarded ${unique()}`);
     const slug = draft.source.title.toLowerCase().replace(" ", "-");
@@ -737,53 +722,33 @@ describe("the intake", { timeout: 60_000 }, () => {
       await call(app, admin.userId, "create", draft),
       createdSchema
     );
-    // The first statement's write waits until the draft is discarded.
-    const held = Promise.withResolvers<null>();
-    const resume = Promise.withResolvers<null>();
-    let discarded: unknown;
-    const stopped = await aroundWrites(
-      async (writes) => {
-        if (writes === 2) {
-          held.resolve(null);
-          await resume.promise;
-        }
-      },
-      async () => {
-        const saving = call(app, admin.userId, "save", {
-          id,
-          ifVersion: 1,
-          draft,
-        });
-        try {
-          await within(held.promise, "held");
-          discarded = await within(
-            call(app, admin.userId, "discard", { id, ifVersion: 2 }),
-            "discard"
-          );
-        } finally {
-          resume.resolve(null);
-        }
-        return await saving;
-      }
-    );
-    // Signed in again: the held write ran the rest of the test in another
-    // request's context, whose sockets this one can't use.
-    const reader = await signedInApi(idp, "admin");
-    const [source] = await documentsAt(reader, `sources/2026-09-21-${slug}-`);
+    // One stub, so the discard reaches the App right behind the save. The
+    // App takes one call at a time: the discard waits for the save.
+    const host = appHost(env, app);
+    const saving = host.call(as(admin.userId), "save", [
+      { id, ifVersion: 1, draft },
+    ]);
+    const discarding = host.call(as(admin.userId), "discard", [
+      { id, ifVersion: 2 },
+    ]);
+    const saved = okOf(await saving, savedSchema);
+    const discarded = await discarding;
+    const [source] = await documentsAt(admin, `sources/2026-09-21-${slug}-`);
     const statements = await documentsAt(
-      reader,
+      admin,
       `statements/${stemOf(source?.path ?? "")}-`
     );
     expect({
       discarded,
-      stopped,
-      // The write on its way landed; none after it.
+      // Every statement written: none was cut off.
       statements: statements.map(({ path }) => path),
       gone: await call(app, admin.userId, "draft", id),
     }).toStrictEqual({
-      discarded: { ok: { saving: true } },
-      stopped: { error: "intake.discarded" },
-      statements: [`statements/${stemOf(source?.path ?? "")}-1.md`],
+      discarded: { error: "intake.not_found" },
+      statements: Array.from(
+        { length: saved.statements },
+        (_, index) => `statements/${stemOf(source?.path ?? "")}-${index + 1}.md`
+      ),
       gone: { error: "intake.not_found" },
     });
   });
