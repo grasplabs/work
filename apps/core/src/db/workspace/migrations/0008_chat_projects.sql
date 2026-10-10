@@ -4,6 +4,7 @@ CREATE TABLE `chat_project_documents` (
 	`name` text NOT NULL,
 	`content` text NOT NULL,
 	`bytes` integer NOT NULL,
+	`position` integer NOT NULL,
 	`created_at` integer NOT NULL,
 	FOREIGN KEY (`project_id`) REFERENCES `chat_projects`(`id`) ON UPDATE no action ON DELETE no action
 );

@@ -1150,10 +1150,7 @@ export class Workspace extends DurableObject<Env> {
         eq(chatProjects.id, chatProjectDocuments.projectId)
       )
       .where(eq(chatProjects.personId, personId))
-      .orderBy(
-        asc(chatProjectDocuments.createdAt),
-        asc(chatProjectDocuments.id)
-      )
+      .orderBy(asc(chatProjectDocuments.position))
       .all();
     return projects.map(({ id, name, goal, createdAt }) => ({
       id,
@@ -1264,7 +1261,10 @@ export class Workspace extends DurableObject<Env> {
     }
     const document = this.ctx.storage.transactionSync(() => {
       const kept = this.#db
-        .select({ name: chatProjectDocuments.name })
+        .select({
+          name: chatProjectDocuments.name,
+          position: chatProjectDocuments.position,
+        })
         .from(chatProjectDocuments)
         .where(eq(chatProjectDocuments.projectId, id))
         .all();
@@ -1282,6 +1282,8 @@ export class Workspace extends DurableObject<Env> {
           name,
           content,
           bytes,
+          // After every document the project has: the order they were added.
+          position: Math.max(0, ...kept.map(({ position }) => position)) + 1,
           createdAt: new Date(),
         })
         .returning({
@@ -1411,10 +1413,7 @@ export class Workspace extends DurableObject<Env> {
       })
       .from(chatProjectDocuments)
       .where(eq(chatProjectDocuments.projectId, project.id))
-      .orderBy(
-        asc(chatProjectDocuments.createdAt),
-        asc(chatProjectDocuments.id)
-      )
+      .orderBy(asc(chatProjectDocuments.position))
       .all();
     return { name: project.name, goal: project.goal, documents };
   }

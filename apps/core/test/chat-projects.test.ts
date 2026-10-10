@@ -305,6 +305,35 @@ describe("a person's projects", slow, () => {
     });
   });
 
+  it("list documents in the order they were added, even within one millisecond", async () => {
+    const ann = await signedInApi(idp, "user");
+    const project = await ann.api.chats.createProject("Same moment");
+    const names = Array.from(
+      { length: projectDocumentsMax },
+      (_, index) => `note-${index}.md`
+    );
+    // Every document added at the same moment, as quick additions can be.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-10-10T12:00:00Z"));
+      for (const name of names) {
+        // oxlint-disable-next-line no-await-in-loop -- in order, as a person adds them
+        await ann.api.chats.addProjectDocument(project.id, {
+          name,
+          content: name,
+        });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    const [listed] = await ann.api.chats.projects();
+    expect({
+      sameMoment: new Set(listed?.documents.map(({ createdAt }) => createdAt))
+        .size,
+      order: listed?.documents.map(({ name }) => name),
+    }).toStrictEqual({ sameMoment: 1, order: names });
+  });
+
   it("are kept to a hundred a person", async () => {
     const ann = await signedInApi(idp, "user");
     for (let index = 0; index < projectsMax; index += 1) {

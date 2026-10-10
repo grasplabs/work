@@ -75,6 +75,12 @@ export const chatProjectDocuments = sqliteTable(
     content: text().notNull(),
     /** The content's size, in bytes of UTF-8. */
     bytes: integer().notNull(),
+    /**
+     * Where it comes in its project: past every document the project had
+     * when it was added, so they are read in the order they were added
+     * (two quick additions share a time; IDs are random).
+     */
+    position: integer().notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
