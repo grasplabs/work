@@ -5,6 +5,7 @@ import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { storeMaxTables } from "@grasp-os/shared/store-limits";
 import {
   claimSchema,
   commitSchema,
@@ -12,7 +13,6 @@ import {
   documentMaxBytes,
   recordIdSchema,
   storeIntentSchema,
-  storeMaxTables,
   storedFieldsSchema,
   tableNameSchema,
 } from "@grasp-os/shared/stores";

@@ -1,11 +1,11 @@
 import { canonicalJson } from "@grasp-os/shared/json";
+import { storeMaxTables } from "@grasp-os/shared/store-limits";
 import {
   commitMaxGuards,
   commitMaxInputBytes,
   commitMaxWrites,
   documentMaxBytes,
   documentMaxDepth,
-  storeMaxTables,
 } from "@grasp-os/shared/stores";
 import type { Commit, Committed, StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
