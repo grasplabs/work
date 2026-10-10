@@ -1,4 +1,4 @@
-import { runDurableObjectAlarm } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -209,6 +209,137 @@ describe("the model ledger", () => {
       [lost.id, "usage", 0.00002],
       [abandoned.id, "settlement", 0.00003],
     ]);
+  });
+
+  it("lets only reconciliation close a request whose usage was lost, and answers a replayed admission only while its request is open", async () => {
+    const ledger = newLedger();
+    const lost = admission(30);
+    const settled = admission(20);
+    await ledger.admit(lost);
+    await ledger.admit(settled);
+    await ledger.settle(lost.id, { by: "unknown" });
+    await ledger.settle(settled.id, { by: "refused" });
+
+    await expect(
+      Promise.all([
+        ledger.settle(lost.id, {
+          by: "usage",
+          tokens: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0 },
+        }),
+        ledger.settle(lost.id, { by: "refused" }),
+        ledger.settle(lost.id, { by: "unsent" }),
+      ])
+    ).resolves.toStrictEqual([
+      { state: "unknown" },
+      { state: "unknown" },
+      { state: "unknown" },
+    ]);
+    await expect(
+      Promise.all([ledger.admit(lost), ledger.admit(settled)])
+    ).resolves.toStrictEqual([
+      { ok: false, reused: true },
+      { ok: false, reused: true },
+    ]);
+    await expect(spendOf(ledger)).resolves.toMatchObject({
+      spentMicros: 0,
+      reservedMicros: 30,
+    });
+  });
+
+  it("refuses a request with no price against a budget, and counts it where nothing limits it", async () => {
+    const ledger = newLedger();
+    const free = { ...price, input: 0, output: 0, version: "free" };
+    const counted = {
+      scope: "deployment",
+      key: "deployment",
+      limitMicros: null,
+      alertMicros: null,
+      names: {},
+    } as const;
+
+    await expect(
+      Promise.all([
+        ledger.admit(admission(0, [budget(100)], { price: free })),
+        ledger.admit(
+          admission(0, [budget(100)], { price: { ...price, output: 0 } })
+        ),
+        ledger.admit(admission(0, [counted], { price: free })),
+      ])
+    ).resolves.toStrictEqual([
+      { ok: false, unpriced: true },
+      { ok: false, unpriced: true },
+      { ok: true },
+    ]);
+  });
+
+  it("quarantines a reservation it can't read or settle, holding it, and reconciles the rest", async () => {
+    const ledger = newLedger();
+    const soon = Date.now() + 1000;
+    const [broken, stray, nameless, fine, settling] = [
+      admission(30, [budget(1000, "dan")], { reconcileAt: soon }),
+      admission(25, [budget(1000, "dan")], { reconcileAt: soon }),
+      admission(15, [budget(1000, "dan")], { reconcileAt: soon }),
+      admission(20, [budget(1000, "dan")], { reconcileAt: soon }),
+      admission(5, [budget(1000, "dan")]),
+    ];
+    for (const request of [broken, stray, nameless, fine, settling]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await ledger.admit(request);
+    }
+    // Rows written by a release that stored them otherwise: scopes that
+    // aren't JSON, a scope with no spend to settle against, and an actor
+    // that isn't one.
+    await runInDurableObject(ledger, (_instance, state) => {
+      const { sql } = state.storage;
+      sql.exec(
+        "UPDATE requests SET scopes = 'not JSON', actor = 'not JSON' WHERE id IN (?, ?)",
+        broken.id,
+        settling.id
+      );
+      sql.exec(
+        "UPDATE requests SET scopes = ? WHERE id = ?",
+        JSON.stringify([budget(1000, "nobody")]),
+        stray.id
+      );
+      sql.exec(
+        "UPDATE requests SET actor = 'not JSON' WHERE id = ?",
+        nameless.id
+      );
+    });
+    await expect(
+      ledger.settle(settling.id, { by: "refused" })
+    ).resolves.toStrictEqual({ state: "quarantined" });
+
+    await scheduler.wait(soon - Date.now() + 100);
+    await runDurableObjectAlarm(ledger);
+    const states = await runInDurableObject(ledger, (_instance, state) =>
+      state.storage.sql
+        .exec<{ id: string; state: string }>(
+          "SELECT id, state FROM requests ORDER BY reserved_micros DESC"
+        )
+        .toArray()
+    );
+    const events = await allEvents();
+    expect({
+      states: states.map(({ state }) => state),
+      dan: await spendOf(ledger, "dan"),
+      // Reconciled all the same, in the system's name.
+      nameless: events.find(
+        ({ action, detail }) =>
+          action === "model.spend.reconciled" && detail.request === nameless.id
+      )?.actor,
+    }).toStrictEqual({
+      states: [
+        "quarantined",
+        "quarantined",
+        "settled",
+        "settled",
+        "quarantined",
+      ],
+      // Their reservations stay held: what they hold can't be told.
+      dan: { key: "dan", spentMicros: 35, reservedMicros: 30 + 25 + 5 },
+      nameless: { type: "system" },
+    });
   });
 
   it("alerts admins once per scope, month and threshold, however many requests reach it", async () => {

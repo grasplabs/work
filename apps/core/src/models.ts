@@ -58,6 +58,7 @@ import { modelLedger } from "./model-ledger.ts";
 import type { LedgerScope, Settlement } from "./model-ledger.ts";
 import { boundMicros, pinnedPrice } from "./model-prices.ts";
 import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
+import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
 import { judgeCall } from "./model-rules.ts";
 import type { Judged, Refusal } from "./model-rules.ts";
 
@@ -688,6 +689,12 @@ const workersAiPayload = (payload: unknown): unknown => {
 const promptAllowanceTokens = 1024;
 
 /**
+ * The most prompt tokens Anthropic charges at its standard prices: past
+ * them a model with a longer window may cost its long-context premium.
+ */
+const anthropicStandardPromptTokens = 200_000;
+
+/**
  * How long after a call's deadline a provider request still unsettled is
  * charged its whole reservation (model-ledger.ts).
  */
@@ -700,46 +707,7 @@ const unpriced: PinnedPrice = {
   output: 0,
   cacheRead: 0,
   cacheWrite: 0,
-};
-
-/** Bytes of a request's body as sent; `undefined` for a body of another kind. */
-const bodyBytes = (body: unknown): number | undefined => {
-  if (typeof body === "string") {
-    return new TextEncoder().encode(body).byteLength;
-  }
-  if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
-    return body.byteLength;
-  }
-  return undefined;
-};
-
-/** The fields the providers' APIs cap an answer's tokens with. */
-const outputCapSchema = z.object({
-  max_tokens: z.int().positive().optional(),
-  max_output_tokens: z.int().positive().optional(),
-  max_completion_tokens: z.int().positive().optional(),
-});
-
-/**
- * The most tokens the request's answer may take, as its body tells the
- * provider: Anthropic's and chat completions' `max_tokens`, which a
- * reasoning budget is part of, or OpenAI's `max_output_tokens`, reasoning
- * included. `undefined` when the body sets none.
- */
-const outputCapOf = (body: unknown): number | undefined => {
-  if (typeof body !== "string") {
-    return undefined;
-  }
-  let parsed: unknown = undefined;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    return undefined;
-  }
-  const caps = outputCapSchema.safeParse(parsed).data;
-  return (
-    caps?.max_tokens ?? caps?.max_output_tokens ?? caps?.max_completion_tokens
-  );
+  tiers: [],
 };
 
 /**
@@ -780,10 +748,16 @@ const admitRequest = async (
   route: Route,
   body: unknown
 ): Promise<{ id: string } | { held: Refusal }> => {
-  const { env, call, model, price } = route;
+  const { env, call, model, price, ref } = route;
   const { period, scopes } = route.scopesNow();
   const budgeted = hasBudget(scopes);
   if (price === undefined && budgeted) {
+    return { held: { code: "model.unpriced" } };
+  }
+  // Never expected: the gateway sends text only, at list prices.
+  const unbounded = unboundedBy(body);
+  if (unbounded !== undefined) {
+    log.error("model.unbounded_request", { model: call.model, unbounded });
     return { held: { code: "model.unpriced" } };
   }
   const bytes = bodyBytes(body);
@@ -792,6 +766,19 @@ const admitRequest = async (
     // Never expected: the provider SDKs send JSON, with a cap.
     log.error("model.unbounded_request", { model: call.model });
     return { held: { code: "model.ledger_unavailable" } };
+  }
+  const promptBound = bytes + promptAllowanceTokens;
+  if (
+    budgeted &&
+    ref.provider === "anthropic" &&
+    price !== undefined &&
+    price.tiers.length === 0 &&
+    promptBound > anthropicStandardPromptTokens
+  ) {
+    // Past 200K prompt tokens Anthropic may charge its long-context
+    // premium, which pi's catalog doesn't price: below it, standard
+    // prices certainly apply, as the bound is never below the prompt.
+    return { held: { code: "model.unpriced" } };
   }
   const pinned = price ?? unpriced;
   const id = crypto.randomUUID();
@@ -803,7 +790,7 @@ const admitRequest = async (
       model: call.model,
       price: pinned,
       reservedMicros: boundMicros(pinned, {
-        inputTokens: bytes + promptAllowanceTokens,
+        inputTokens: promptBound,
         outputTokens,
       }),
       actor: call.trigger,
@@ -812,6 +799,9 @@ const admitRequest = async (
     });
     if (admitted.ok) {
       return { id };
+    }
+    if ("unpriced" in admitted) {
+      return { held: { code: "model.unpriced" } };
     }
     if ("reused" in admitted) {
       // Never expected: every ID is a new UUID.
@@ -1219,14 +1209,23 @@ const largestJudged: Judged = {
 const isCount = (value: number): boolean =>
   Number.isSafeInteger(value) && value >= 0;
 
-/** The provider's count of what a request used; none if it isn't one. */
+/**
+ * The provider's whole count of what a request used; none if it isn't
+ * one. A count with no prompt tokens at all is none: every request sends
+ * a prompt, so the provider never sent its count (pi's chat completions
+ * end a stream with no usage chunk as answered, counting nothing). Nor is
+ * one with one-hour cache writes, which the catalog doesn't price.
+ */
 const countedTokens = ({
   input,
   output,
   cacheRead,
   cacheWrite,
+  cacheWrite1h,
 }: Usage): TokenCounts | undefined =>
-  [input, output, cacheRead, cacheWrite].every(isCount)
+  [input, output, cacheRead, cacheWrite].every(isCount) &&
+  input + cacheRead + cacheWrite > 0 &&
+  (cacheWrite1h ?? 0) === 0
     ? { input, output, cacheRead, cacheWrite }
     : undefined;
 
@@ -1245,7 +1244,23 @@ const record = async (
   outcome: Outcome,
   failure?: Failure
 ): Promise<void> => {
-  const { logId, status } = sent;
+  // Settled first, so nothing that goes wrong with the audit event keeps
+  // the provider request from being charged what it used. The one whose
+  // answer streamed is charged the provider's count; one that ended
+  // without a whole count (failed, timed out or cancelled once accepted,
+  // or answered with no usage at all) keeps its whole reservation, never
+  // an estimate below what the provider may bill.
+  const { pending, logId, status } = sent;
+  if (pending !== undefined) {
+    const tokens = hasFailed(sent.answer)
+      ? undefined
+      : countedTokens(sent.answer.usage);
+    await settleRequest(
+      env,
+      pending,
+      tokens === undefined ? { by: "unknown" } : { by: "usage", tokens }
+    );
+  }
   const used = usedBy(admitted, sent);
   await keepAuditEvent(
     env,
@@ -1259,21 +1274,6 @@ const record = async (
       errorType: failure?.errorType,
     })
   );
-  // The provider request whose answer streamed is charged what it used,
-  // as the provider counted it at the end; one that ended without that
-  // count (failed, timed out or cancelled once accepted) keeps its whole
-  // reservation, never an estimate below what the provider may bill.
-  const { pending } = sent;
-  if (pending !== undefined) {
-    const tokens = hasFailed(sent.answer)
-      ? undefined
-      : countedTokens(sent.answer.usage);
-    await settleRequest(
-      env,
-      pending,
-      tokens === undefined ? { by: "unknown" } : { by: "usage", tokens }
-    );
-  }
 };
 
 /**

@@ -32,7 +32,9 @@ const workersAi = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const anthropic = "anthropic/claude-sonnet-4-5";
 
 const gateway = "grasp-os-test";
-const allowed = [workersAi, anthropic];
+/** Priced in tiers: twice the input and half again the output past 272K. */
+const tiered = "openai/gpt-5.4";
+const allowed = [workersAi, anthropic, tiered];
 
 /**
  * Costs 519 micros from Llama 3.3, at its list prices of $0.293 per
@@ -184,6 +186,27 @@ const failingLedger = (
               ? async () => await Promise.reject(new Error("Unavailable"))
               : Reflect.get(stub, member, stub),
         });
+    },
+  });
+
+/** Whether `sql` writes to or reads an audit outbox. */
+const auditing = (sql: string): boolean => sql.includes("audit_outbox");
+
+/** The audit log's binding, refusing every append, as an unreachable one would. */
+const failingAuditLog = (): Env["AUDIT_LOG"] =>
+  new Proxy(env.AUDIT_LOG, {
+    get: (namespace, name): unknown => {
+      if (name !== "getByName" && name !== "get") {
+        return Reflect.get(namespace, name, namespace);
+      }
+      return () =>
+        new Proxy(
+          {},
+          {
+            get: () => async () =>
+              await Promise.reject(new Error("Unavailable")),
+          }
+        );
     },
   });
 
@@ -543,6 +566,136 @@ describe("model budgets", { timeout: 60_000 }, () => {
     });
   });
 
+  it("charge a prompt past a tier's threshold at that tier's prices, as its audit event counts it", async () => {
+    const { call, month } = withRules({ budgets: { user: { limit: 10 } } }, [
+      { text: "Hi.", inputTokens: 300_000, outputTokens: 100 },
+    ]);
+    const ada = hello({ model: tiered, maxTokens: undefined });
+
+    await expect(outcome(call(ada))).resolves.toBe("ok");
+    const [event] = await eventsOf(ada.trigger);
+    // $5 a million in and $22.50 out past 272K, not $2.50 and $15.
+    expect({
+      ledger: await ledgerOf(month, userOf(ada)),
+      // In micros, as the audit event's dollars come out of floats.
+      audited: Math.round((event?.cost?.amount ?? 0) * 1_000_000),
+    }).toStrictEqual({
+      ledger: {
+        key: userOf(ada),
+        spentMicros: 300_000 * 5 + 2250,
+        reservedMicros: 0,
+      },
+      audited: 300_000 * 5 + 2250,
+    });
+  });
+
+  it("hold an answer whose provider never sent its count, rather than charge it nothing", async () => {
+    const { call, month } = withRules({ budgets: { user: { limit: 1 } } }, [
+      { ...pricedAnswer, noUsage: true },
+    ]);
+    const ada = hello();
+
+    await expect(call(ada)).resolves.toMatchObject({ text: "Hi." });
+    const held = await ledgerOf(month, userOf(ada));
+    expect([held.spentMicros, held.reservedMicros > 0]).toStrictEqual([
+      0,
+      true,
+    ]);
+  });
+
+  it("hold an answer that wrote to a one-hour cache, which the catalog doesn't price", async () => {
+    const { call, month } = withRules({ budgets: { user: { limit: 1 } } }, [
+      { ...pricedAnswer, cacheWrite1h: 2000 },
+    ]);
+    const ada = hello({ model: anthropic, maxTokens: 1 });
+
+    await expect(call(ada)).resolves.toMatchObject({ text: "Hi." });
+    const held = await ledgerOf(month, userOf(ada));
+    expect([held.spentMicros, held.reservedMicros > 0]).toStrictEqual([
+      0,
+      true,
+    ]);
+  });
+
+  it("settle an answered request at what it used even when its audit event can't be stored", async () => {
+    const database: D1Database = env.DB;
+    const { call, month } = withRules(
+      { budgets: { user: { limit: 1 } } },
+      [pricedAnswer],
+      {
+        // The audit outbox refuses every write; everything else works.
+        DB: new Proxy(database, {
+          get: (target, name): unknown => {
+            if (name === "prepare") {
+              return (sql: string) => {
+                if (auditing(sql)) {
+                  throw new Error("Unavailable");
+                }
+                return target.prepare(sql);
+              };
+            }
+            return Reflect.get(target, name, target);
+          },
+        }),
+        AUDIT_LOG: failingAuditLog(),
+      }
+    );
+    const ada = hello();
+
+    await expect(call(ada)).resolves.toMatchObject({ text: "Hi." });
+    await expect(ledgerOf(month, userOf(ada))).resolves.toStrictEqual({
+      key: userOf(ada),
+      spentMicros: pricedMicros,
+      reservedMicros: 0,
+    });
+  });
+
+  it("refuse a Claude prompt past 200K tokens while a budget applies: the catalog doesn't price the long-context premium", async () => {
+    const long = "word ".repeat(41_000);
+    const budgeted = withRules({ budgets: { user: { limit: 100 } } }, []);
+    const open = withRules({}, [pricedAnswer]);
+    const ada = hello({ model: anthropic, input: long });
+
+    await expect(budgeted.call(ada)).rejects.toMatchObject({
+      code: "model.unpriced",
+    });
+    await expect(outcome(open.call(ada))).resolves.toBe("ok");
+    expect(budgeted.fake.requests).toStrictEqual([]);
+  });
+
+  it("send no request whose content its bytes can't bound, such as an image", async () => {
+    const { fake, agent } = withRules({}, [pricedAnswer]);
+    const ada = newPerson();
+    const session = await agent({
+      model: anthropic,
+      purpose: "chat.turn",
+      trigger: ada,
+      work: requireWork(),
+    });
+    const stream = session.stream(
+      session.model,
+      normalizeContext({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "What's this?" },
+              { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+            ],
+            timestamp: Date.now(),
+          },
+        ],
+      })
+    );
+    const { stopReason, errorMessage } = await stream.result();
+
+    expect({ stopReason, errorMessage, sent: fake.requests }).toStrictEqual({
+      stopReason: "error",
+      errorMessage: "The model call was refused (model.unpriced).",
+      sent: [],
+    });
+  });
+
   it("send nothing when the ledger can't admit a request, and say so", async () => {
     const { fake, call } = withRules(
       { budgets: { user: { limit: 1 } } },
@@ -681,10 +834,11 @@ describe("model budgets", { timeout: 60_000 }, () => {
     ).resolves.toBe("model.over_budget");
     expect(fake.requests).toHaveLength(1);
     const events = await eventsOf(ada.trigger);
-    expect(events.map(({ action }) => action)).toStrictEqual([
-      "model.call",
+    // The ledger's alerts and the gateway's events reach the log apart.
+    expect(events.map(({ action }) => action).toSorted()).toStrictEqual([
       "model.budget.alert",
       "model.budget.exhausted",
+      "model.call",
       "model.refused",
     ]);
   });

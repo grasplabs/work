@@ -2,7 +2,7 @@ import { auditActorSchema, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { DurableObject } from "cloudflare:workers";
 import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
@@ -102,12 +102,21 @@ const scopeSchema = z.strictObject({
 /** One scope a request counts against, with its budget when admitted. */
 export type LedgerScope = z.infer<typeof scopeSchema>;
 
-const priceSchema = z.strictObject({
-  version: z.string().min(1).max(128),
+const ratesShape = {
   input: microsSchema,
   output: microsSchema,
   cacheRead: microsSchema,
   cacheWrite: microsSchema,
+};
+
+const priceSchema = z.strictObject({
+  version: z.string().min(1).max(128),
+  ...ratesShape,
+  /** Prices past a prompt size, lowest first (model-prices.ts). */
+  tiers: z
+    .array(z.strictObject({ inputTokensAbove: microsSchema, ...ratesShape }))
+    .max(16)
+    .default([]),
 });
 
 const periodPattern = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
@@ -143,8 +152,13 @@ export type Admission = z.input<typeof admissionSchema>;
 export type Admitted =
   | { ok: true }
   | { ok: false; scope: LedgerScopeName }
-  /** Its ID was admitted before for another request: refused, reserving nothing. */
-  | { ok: false; reused: true };
+  /**
+   * Its ID was admitted before, for another request or one no longer
+   * open: refused, reserving nothing.
+   */
+  | { ok: false; reused: true }
+  /** No price for its input or output, against a budget: refused. */
+  | { ok: false; unpriced: true };
 
 const tokensSchema = z.strictObject({
   input: microsSchema,
@@ -171,6 +185,8 @@ export type Settlement = z.input<typeof settlementSchema>;
 export type Settled =
   | { state: "settled"; chargedMicros: number }
   | { state: "unknown" }
+  /** It couldn't be read to settle, and holds its reservation. */
+  | { state: "quarantined" }
   | { state: "missing" };
 
 /** What a scope spent and holds in a month, for admins to read. */
@@ -191,9 +207,29 @@ const thresholds = [
   { kind: "exhausted", of: (scope: LedgerScope) => scope.limitMicros },
 ] as const;
 
-/** The prices `row` was pinned to. */
-const pricesOf = (row: RequestRow): PinnedPrice =>
-  priceSchema.parse(JSON.parse(row.prices));
+/** `text` as JSON; `undefined` when it isn't. */
+const jsonOf = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
+/** The prices `row` was pinned to; `undefined` when they can't be read. */
+const pricesOf = (row: RequestRow): PinnedPrice | undefined =>
+  priceSchema.safeParse(jsonOf(row.prices)).data;
+
+/** The scopes `row` reserved against; `undefined` when they can't be read. */
+const scopesOf = (row: RequestRow): LedgerScope[] | undefined =>
+  storedScopesSchema.safeParse(jsonOf(row.scopes)).data;
+
+/**
+ * Who `row` was made for, for the events it causes: the system when that
+ * can't be read, so a request is still settled and alerted on.
+ */
+const actorOf = (row: RequestRow): AuditActor =>
+  auditActorSchema.safeParse(jsonOf(row.actor)).data ?? { type: "system" };
 
 /** The deployment's model ledger, in the EU unless turned off. */
 export const modelLedger = (
@@ -232,18 +268,28 @@ export class ModelLedger extends DurableObject<Env> {
     const now = Date.now();
     const { admitted, alerted } = this.ctx.storage.transactionSync(() => {
       const existing = this.#db
-        .select({ fingerprint: requests.fingerprint })
+        .select({ fingerprint: requests.fingerprint, state: requests.state })
         .from(requests)
         .where(eq(requests.id, admission.id))
         .get();
       if (existing !== undefined) {
+        // A repeat of the same admission, while its request is still open
+        // and unsettled; never one that settled or whose usage was lost.
         return {
           admitted:
-            existing.fingerprint === fingerprint
+            existing.fingerprint === fingerprint &&
+            existing.state === "dispatched"
               ? ({ ok: true } as const)
               : ({ ok: false, reused: true } as const),
           alerted: 0,
         };
+      }
+      const { price } = admission;
+      if (
+        (price.input === 0 || price.output === 0) &&
+        admission.scopes.some(({ limitMicros }) => limitMicros !== null)
+      ) {
+        return { admitted: { ok: false, unpriced: true } as const, alerted: 0 };
       }
       const rows = admission.scopes.map((scope) => ({
         scope,
@@ -343,6 +389,14 @@ export class ModelLedger extends DurableObject<Env> {
           alerted: 0,
         };
       }
+      if (row.state === "quarantined") {
+        return { settled: { state: "quarantined" } as const, alerted: 0 };
+      }
+      // Once its usage was lost, only reconciliation closes it: no later
+      // report, of any kind, releases what it holds.
+      if (row.state === "unknown") {
+        return { settled: { state: "unknown" } as const, alerted: 0 };
+      }
       if (settlement.by === "unknown") {
         this.#db
           .update(requests)
@@ -351,14 +405,20 @@ export class ModelLedger extends DurableObject<Env> {
           .run();
         return { settled: { state: "unknown" } as const, alerted: 0 };
       }
+      const prices = pricesOf(row);
+      if (prices === undefined) {
+        this.#quarantine(row.id, "prices");
+        return { settled: { state: "quarantined" } as const, alerted: 0 };
+      }
       const charged =
-        settlement.by === "usage"
-          ? costMicros(pricesOf(row), settlement.tokens)
-          : 0;
-      return {
-        settled: { state: "settled", chargedMicros: charged } as const,
-        alerted: this.#charge(row, charged, settlement.by),
-      };
+        settlement.by === "usage" ? costMicros(prices, settlement.tokens) : 0;
+      const alertedNow = this.#charge(row, charged, settlement.by);
+      return alertedNow === "quarantined"
+        ? { settled: { state: "quarantined" } as const, alerted: 0 }
+        : {
+            settled: { state: "settled", chargedMicros: charged } as const,
+            alerted: alertedNow,
+          };
     });
     if (alerted > 0) {
       this.#deliverAudit();
@@ -416,21 +476,36 @@ export class ModelLedger extends DurableObject<Env> {
         .limit(alarmPage)
         .all();
       for (const row of due) {
-        this.ctx.storage.transactionSync(() => {
-          this.#charge(row, row.reservedMicros, "reconciled");
-          this.#outbox({
-            actor: auditActorSchema.parse(JSON.parse(row.actor)),
-            action: "model.spend.reconciled",
-            detail: {
-              request: row.id,
-              model: row.model,
-              period: row.period,
-              lost: row.state === "unknown" ? "usage" : "settlement",
-              charged: row.reservedMicros / microsPerDollar,
-            },
+        // One row that fails is set aside, never left to stop the rest.
+        try {
+          const charged = this.ctx.storage.transactionSync(() => {
+            if (
+              this.#charge(row, row.reservedMicros, "reconciled") ===
+              "quarantined"
+            ) {
+              return false;
+            }
+            this.#outbox({
+              actor: actorOf(row),
+              action: "model.spend.reconciled",
+              detail: {
+                request: row.id,
+                model: row.model,
+                period: row.period,
+                lost: row.state === "unknown" ? "usage" : "settlement",
+                charged: row.reservedMicros / microsPerDollar,
+              },
+            });
+            return true;
           });
-        });
-        reconciled += 1;
+          reconciled += charged ? 1 : 0;
+        } catch (error) {
+          log.error("model.reconcile_failed", {
+            ...errorFields(error),
+            request: row.id,
+          });
+          this.#quarantine(row.id, "reconcile");
+        }
       }
       if (due.length < alarmPage) {
         break;
@@ -534,7 +609,12 @@ export class ModelLedger extends DurableObject<Env> {
     row: RequestRow,
     charged: number,
     by: "usage" | "refused" | "unsent" | "reconciled"
-  ): number {
+  ): number | "quarantined" {
+    const scopes = scopesOf(row);
+    if (scopes === undefined) {
+      this.#quarantine(row.id, "scopes");
+      return "quarantined";
+    }
     const changed = this.#db
       .update(requests)
       .set({
@@ -554,8 +634,7 @@ export class ModelLedger extends DurableObject<Env> {
     if (changed.length === 0) {
       return 0;
     }
-    const scopes = storedScopesSchema.parse(JSON.parse(row.scopes));
-    const actor = auditActorSchema.parse(JSON.parse(row.actor));
+    const actor = actorOf(row);
     let alerted = 0;
     for (const scope of scopes) {
       const after = this.#db
@@ -632,6 +711,32 @@ export class ModelLedger extends DurableObject<Env> {
       stored += 1;
     }
     return stored;
+  }
+
+  /**
+   * Sets aside a request that can't be read to settle: it keeps holding its
+   * reservation, as what it holds can't be told, and is logged for a
+   * person to look at. Never throws: it is the fallback.
+   */
+  #quarantine(id: string, because: string): void {
+    log.error("model.request_quarantined", { request: id, because });
+    try {
+      this.#db
+        .update(requests)
+        .set({ state: "quarantined" })
+        .where(
+          and(
+            eq(requests.id, id),
+            inArray(requests.state, ["dispatched", "unknown"])
+          )
+        )
+        .run();
+    } catch (error) {
+      log.error("model.quarantine_failed", {
+        ...errorFields(error),
+        request: id,
+      });
+    }
   }
 
   /** Stores `entry`'s event in the object's outbox. Inside a transaction. */

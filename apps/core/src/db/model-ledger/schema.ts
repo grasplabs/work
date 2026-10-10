@@ -46,7 +46,13 @@ export const requests = sqliteTable(
     reservedMicros: integer("reserved_micros").notNull(),
     /** What it was charged; null until settled. */
     chargedMicros: integer("charged_micros"),
-    state: text({ enum: ["dispatched", "unknown", "settled"] }).notNull(),
+    /**
+     * `dispatched` and `unknown` hold their reservation; `settled` moved it
+     * to spend; `quarantined` couldn't be read to settle, and holds it.
+     */
+    state: text({
+      enum: ["dispatched", "unknown", "settled", "quarantined"],
+    }).notNull(),
     /** How it settled: by its usage, refused, never sent, or in full. */
     settledBy: text("settled_by", {
       enum: ["usage", "refused", "unsent", "reconciled"],

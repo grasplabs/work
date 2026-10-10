@@ -7,6 +7,17 @@ import { canonicalJson } from "@grasp-os/shared/json";
 // usage cost, which the ledger charges. Integers only, rounded up, so no
 // sum of many small requests rounds away to nothing, and a reservation is
 // never below what its request can cost at those prices.
+//
+// Some models are priced in tiers: past a number of prompt tokens, all of
+// the request is charged at the tier's prices (OpenAI's GPT-5.4 and later
+// past 272K). A request is charged at its tier as pi's `calculateCost`
+// picks it, so the ledger agrees with the cost the audit log records, and
+// bounded at the dearest tier, which its prompt may reach.
+//
+// Prices the catalog leaves out are refused before a request is sent
+// (model-requests.ts): Anthropic's one-hour cache writes, a provider's
+// service tiers, and Anthropic's long-context premium past 200K tokens
+// (models.ts).
 
 /** Micros in a US dollar. */
 export const microsPerDollar = 1_000_000;
@@ -14,25 +25,33 @@ export const microsPerDollar = 1_000_000;
 /** The token counts that prices are given per. */
 const tokensPerPrice = 1_000_000n;
 
-/**
- * A model's list prices as a request is charged at them: micros per
- * million tokens, rounded up to whole micros, and the content hash of
- * those prices, which names the catalog entry they came from.
- */
-export interface PinnedPrice {
-  version: string;
+/** Prices per million tokens, of each kind. */
+export interface Rates {
   input: number;
   output: number;
   cacheRead: number;
   cacheWrite: number;
 }
 
+/** Prices that apply to a request whose prompt has more than `inputTokensAbove` tokens. */
+export interface Tier extends Rates {
+  inputTokensAbove: number;
+}
+
+/**
+ * A model's list prices as a request is charged at them: micros per
+ * million tokens, rounded up to whole micros, its tiers lowest first, and
+ * the content hash of all of them, which names the catalog entry they came
+ * from.
+ */
+export interface PinnedPrice extends Rates {
+  version: string;
+  tiers: Tier[];
+}
+
 /** A model's prices as pi's catalog gives them: US dollars per million tokens. */
-export interface ListPrices {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
+export interface ListPrices extends Rates {
+  tiers?: readonly Tier[];
 }
 
 /** Tokens a request used, or may use, by how they are priced. */
@@ -54,33 +73,72 @@ const microsOf = (dollars: number): number =>
 const isPrice = (value: number): boolean =>
   Number.isFinite(value) && value >= 0 && Number.isSafeInteger(microsOf(value));
 
+/** Whether `rates` are all prices, with some for input and output. */
+const arePrices = ({ input, output, cacheRead, cacheWrite }: Rates): boolean =>
+  [input, output, cacheRead, cacheWrite].every(isPrice) &&
+  input > 0 &&
+  output > 0;
+
+const ratesOf = ({ input, output, cacheRead, cacheWrite }: Rates): Rates => ({
+  input: microsOf(input),
+  output: microsOf(output),
+  cacheRead: microsOf(cacheRead),
+  cacheWrite: microsOf(cacheWrite),
+});
+
 /**
  * The prices a model's requests are pinned to, or `undefined` for a model
  * with no safe price: a price that isn't a number, below nothing, or none
  * at all for its input or its output, which a catalog gives a model it
- * doesn't know the price of. Such a model can't be admitted against a
- * budget: what it costs can't be bounded.
+ * doesn't know the price of, in its base prices or any tier. Such a model
+ * can't be admitted against a budget: what it costs can't be bounded.
  */
 export const pinnedPrice = async (
   prices: ListPrices
 ): Promise<PinnedPrice | undefined> => {
-  const { input, output, cacheRead, cacheWrite } = prices;
+  const tiers = prices.tiers ?? [];
   if (
-    ![input, output, cacheRead, cacheWrite].every(isPrice) ||
-    !(input > 0 && output > 0)
+    !arePrices(prices) ||
+    !tiers.every(
+      (tier) =>
+        arePrices(tier) &&
+        Number.isSafeInteger(tier.inputTokensAbove) &&
+        tier.inputTokensAbove >= 0
+    )
   ) {
     return undefined;
   }
   const rates = {
-    input: microsOf(input),
-    output: microsOf(output),
-    cacheRead: microsOf(cacheRead),
-    cacheWrite: microsOf(cacheWrite),
+    ...ratesOf(prices),
+    tiers: tiers
+      .map((tier) => ({
+        inputTokensAbove: tier.inputTokensAbove,
+        ...ratesOf(tier),
+      }))
+      .toSorted((one, other) => one.inputTokensAbove - other.inputTokensAbove),
   };
   return {
     version: `sha256:${await sha256Hex(canonicalJson(rates))}`,
     ...rates,
   };
+};
+
+/**
+ * The rates `tokens` are charged at, as pi's `calculateCost` picks them:
+ * the tier with the highest threshold its whole prompt (cached or not) is
+ * past, or the base prices.
+ */
+const ratesFor = (price: PinnedPrice, tokens: TokenCounts): Rates => {
+  const prompt = tokens.input + tokens.cacheRead + tokens.cacheWrite;
+  let rates: Rates = price;
+  let matched = -1;
+  for (const tier of price.tiers) {
+    if (prompt > tier.inputTokensAbove && tier.inputTokensAbove > matched) {
+      rates = tier;
+      matched = tier.inputTokensAbove;
+    }
+  }
+  return rates;
 };
 
 /** `tokens` at `rate` micros a million, rounded up. */
@@ -100,27 +158,35 @@ const safeMicros = (micros: bigint): number => {
   return value;
 };
 
-/** What `tokens` cost at `price`, each kind at its own price. */
-export const costMicros = (price: PinnedPrice, tokens: TokenCounts): number =>
-  safeMicros(
-    priced(tokens.input, price.input) +
-      priced(tokens.output, price.output) +
-      priced(tokens.cacheRead, price.cacheRead) +
-      priced(tokens.cacheWrite, price.cacheWrite)
+/** What `tokens` cost at `price`, each kind at its own price, in its tier. */
+export const costMicros = (price: PinnedPrice, tokens: TokenCounts): number => {
+  const rates = ratesFor(price, tokens);
+  return safeMicros(
+    priced(tokens.input, rates.input) +
+      priced(tokens.output, rates.output) +
+      priced(tokens.cacheRead, rates.cacheRead) +
+      priced(tokens.cacheWrite, rates.cacheWrite)
   );
+};
 
 /**
  * The most a request can cost at `price`: its input bound at the dearest
- * price any input token can take (written to the provider's cache costs
- * more than plain input), and its output bound at the output price.
+ * price any input token can take, in any tier (written to the provider's
+ * cache costs more than plain input), and its output bound at the dearest
+ * output price.
  */
 export const boundMicros = (
   price: PinnedPrice,
   bound: { inputTokens: number; outputTokens: number }
-): number =>
-  safeMicros(
-    priced(
-      bound.inputTokens,
-      Math.max(price.input, price.cacheRead, price.cacheWrite)
-    ) + priced(bound.outputTokens, price.output)
+): number => {
+  const all: Rates[] = [price, ...price.tiers];
+  const input = Math.max(
+    ...all.map(({ input: plain, cacheRead, cacheWrite }) =>
+      Math.max(plain, cacheRead, cacheWrite)
+    )
   );
+  const output = Math.max(...all.map((rates) => rates.output));
+  return safeMicros(
+    priced(bound.inputTokens, input) + priced(bound.outputTokens, output)
+  );
+};

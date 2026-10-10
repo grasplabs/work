@@ -12,7 +12,7 @@ export const modelErrors = defineErrorFamily({
   "model.over_budget":
     "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
   "model.unpriced":
-    "That model has no known price, so it can't be used while a model budget applies. Choose another.",
+    "What this model call would cost can't be bounded at known prices, so it wasn't sent. Choose another model, or send less.",
   "model.ledger_unavailable":
     "Model spend can't be accounted for right now, so no model call was made. Try again later.",
   "model.failed": "The model call failed. Try again later.",

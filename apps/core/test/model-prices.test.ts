@@ -7,6 +7,22 @@ import { boundMicros, costMicros, pinnedPrice } from "../src/model-prices.ts";
 
 const llama = { input: 0.293, output: 2.253, cacheRead: 0, cacheWrite: 0 };
 const claude = { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 };
+/** GPT-5.4's prices past 272K prompt tokens, as pi's catalog gives them. */
+const longPrompt = {
+  inputTokensAbove: 272_000,
+  input: 5,
+  output: 22.5,
+  cacheRead: 0.5,
+  cacheWrite: 0,
+};
+/** As pi's catalog prices it: twice the input and half again the output past 272K. */
+const gpt54 = {
+  input: 2.5,
+  output: 15,
+  cacheRead: 0.25,
+  cacheWrite: 0,
+  tiers: [longPrompt],
+};
 
 describe("model prices", () => {
   it("pin a model's list prices as whole micros a million tokens, rounded up, named by their hash", async () => {
@@ -81,6 +97,56 @@ describe("model prices", () => {
     ]) {
       expect(costMicros(pinned, tokens)).toBeLessThanOrEqual(bound);
     }
+  });
+
+  it("charge a prompt past a tier's threshold at that tier's prices, as pi counts it, cached tokens included", async () => {
+    const pinned = await pinnedPrice(gpt54);
+    if (pinned === undefined) {
+      throw new Error("GPT-5.4 has prices");
+    }
+    // At the threshold: the base prices.
+    expect(
+      costMicros(pinned, {
+        input: 272_000,
+        output: 100,
+        cacheRead: 0,
+        cacheWrite: 0,
+      })
+    ).toBe(272_000 * 2.5 + 1500);
+    // Past it, cached tokens counting towards it: the tier's, for all of it.
+    expect(
+      costMicros(pinned, {
+        input: 272_000,
+        output: 100,
+        cacheRead: 28_000,
+        cacheWrite: 0,
+      })
+    ).toBe(272_000 * 5 + 2250 + 28_000 * 0.5);
+  });
+
+  it("bound a tiered model at its dearest tier, and name its tiers in its version", async () => {
+    const pinned = await pinnedPrice(gpt54);
+    const untiered = await pinnedPrice({ ...gpt54, tiers: [] });
+    if (pinned === undefined || untiered === undefined) {
+      throw new Error("GPT-5.4 has prices");
+    }
+    expect(boundMicros(pinned, { inputTokens: 1000, outputTokens: 100 })).toBe(
+      1000 * 5 + 2250
+    );
+    expect(pinned.version).not.toBe(untiered.version);
+    // A tier whose prices aren't prices leaves the model with none.
+    await expect(
+      pinnedPrice({
+        ...gpt54,
+        tiers: [{ ...longPrompt, output: Number.NaN }],
+      })
+    ).resolves.toBeUndefined();
+    await expect(
+      pinnedPrice({
+        ...gpt54,
+        tiers: [{ ...longPrompt, inputTokensAbove: -1 }],
+      })
+    ).resolves.toBeUndefined();
   });
 
   it("refuse a count that isn't one, or a cost too large to count exactly", async () => {
