@@ -196,6 +196,17 @@ const alarmGapMs = 1000;
 /** The wait before the alarm tries again after its work failed. */
 const alarmRetryMs = 30_000;
 
+/** A stored intent, or undefined if it no longer reads as one. */
+const intentOf = (stored: string) => {
+  let json: unknown = null;
+  try {
+    json = JSON.parse(stored);
+  } catch {
+    // Not JSON: unreadable, as below.
+  }
+  return storeIntentSchema.safeParse(json).data;
+};
+
 const conflict = (table: string, id: string) =>
   dataErrors.create("data.conflict", { table, id });
 
@@ -340,7 +351,7 @@ export class StoreHost {
             retainUntil: now + retentionMs,
           })
           .run();
-        return { held: { receiptId, fence: 1, deadline } };
+        return { held: { receiptId, fence: 1 } };
       }
       if (receipt.expiredAt !== null) {
         throw submissionErrors.create("submission.expired");
@@ -361,7 +372,7 @@ export class StoreHost {
         })
         .where(eq(receipts.receiptId, receiptId))
         .run();
-      return { held: { receiptId, fence, deadline } };
+      return { held: { receiptId, fence } };
     });
     await this.schedule();
     return claimed;
@@ -670,11 +681,11 @@ export class StoreHost {
     if (leased === undefined) {
       return;
     }
-    const consumer = consumers[leased.kind];
-    if (consumer === undefined) {
+    /** Settles the entry, nobody to hand it to, while this drain holds it. */
+    const settleUndeliverable = (code: string): void => {
       this.#db
         .update(outbox)
-        .set({ settledAt: clock(), undeliverable: "outbox.no_consumer" })
+        .set({ settledAt: clock(), undeliverable: code })
         .where(
           and(
             eq(outbox.id, id),
@@ -683,16 +694,24 @@ export class StoreHost {
           )
         )
         .run();
+    };
+    const consumer = consumers[leased.kind];
+    if (consumer === undefined) {
+      settleUndeliverable("outbox.no_consumer");
+      return;
+    }
+    // An entry a later release can't read is settled, not left to stop
+    // every drain behind it.
+    const intent = intentOf(leased.intent);
+    if (intent === undefined) {
+      log.warn("outbox.unreadable", { id, kind: leased.kind });
+      settleUndeliverable("outbox.unreadable");
       return;
     }
     const { attempts } = leased;
     const result = await handOver(
       consumer,
-      {
-        id,
-        intent: storeIntentSchema.parse(JSON.parse(leased.intent)),
-        attempts,
-      },
+      { id, intent, attempts },
       timeoutMs
     );
     const held = and(
@@ -821,8 +840,11 @@ export class StoreHost {
             .run();
         }
       });
-      if (due.length < page || spent()) {
+      if (spent()) {
         return;
+      }
+      if (due.length < page) {
+        break;
       }
     }
     // Tombstones old enough, a page at a time.

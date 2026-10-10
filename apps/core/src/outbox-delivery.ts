@@ -26,6 +26,10 @@ export interface OutboxEntry {
  * Takes one entry: `delivered`, or settled undeliverable for good with a
  * code (`{ undeliverable }`), such as a run that ended. Throws to have it
  * handed over again later.
+ *
+ * A consumer must stop once `signal` aborts, and must take each entry ID
+ * once: a hand-over that timed out (or whose drain died) is handed over
+ * again, under the same ID, possibly while the first call still runs.
  */
 export type OutboxConsumer = (
   entry: OutboxEntry

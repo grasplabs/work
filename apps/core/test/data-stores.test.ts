@@ -56,8 +56,7 @@ const commitIn = async (
   if (!("held" in claimed)) {
     throw new Error("A new key found an outcome");
   }
-  const { receiptId, fence } = claimed.held;
-  return await store.commit({ ...commit, receipt: { receiptId, fence } });
+  return await store.commit({ ...commit, receipt: claimed.held });
 };
 
 /** A new store with a `notes` table. */

@@ -63,20 +63,17 @@ const claimOf = async (
   ...more,
 });
 
-/** The receipt a claim must have taken, as a commit names it. */
-const heldBy = (
-  claimed: { held: Held } | { outcome: Committed }
-): Commit["receipt"] => {
+/** The receipt a claim must have taken. */
+const heldBy = (claimed: { held: Held } | { outcome: Committed }): Held => {
   if (!("held" in claimed)) {
     throw new Error("The mutation had committed already");
   }
-  const { receiptId, fence } = claimed.held;
-  return { receiptId, fence };
+  return claimed.held;
 };
 
 /** A commit inserting one note titled `title`, under `receipt`. */
 const insertOf = (
-  receipt: Commit["receipt"],
+  receipt: Held,
   title: string,
   more: Partial<Omit<Commit, "storeId">> = {}
 ): Omit<Commit, "storeId"> => ({
@@ -623,12 +620,15 @@ describe("outbox", () => {
         { timeoutMs: 1000 }
       );
     }).catch(() => {});
-    // Nothing the dead object wrote after its last commit stays, its lease
-    // included: the entry is due again at once, under the same ID, and
-    // the hand-over that died doesn't count as a failed attempt.
+    // Past the dead drain's lease (if it was kept at all), the entry is
+    // handed over again under the same ID, and the hand-over that died
+    // doesn't count as a failed attempt.
     const taken: OutboxEntry[] = [];
     await inHost(store, async (host) => {
-      await host.drainOutbox({ "workflow.start": taker(taken) });
+      await host.drainOutbox(
+        { "workflow.start": taker(taken) },
+        { now: new Date(Date.now() + 2 * 1000 + 1) }
+      );
     });
 
     expect(seen).toStrictEqual([`${held.receiptId}:0`]);
@@ -796,5 +796,65 @@ describe("alarm", () => {
       });
     });
     await expect(store.claim(claim)).resolves.toHaveProperty("outcome");
+  });
+
+  it("sweeps receipts due and old tombstones in the same pass", async () => {
+    const store = await newStore();
+    const input = { title: "Launch" };
+    await store.commit(
+      insertOf(heldBy(await store.claim(await claimOf("old", input))), "Old")
+    );
+    await store.commit(
+      insertOf(heldBy(await store.claim(await claimOf("due", input))), "Due")
+    );
+    // One receipt expired long ago; the other is just past its retention.
+    await runInDurableObject(objectOf(store), (_instance, state) => {
+      const { sql } = state.storage;
+      const old = Date.now() - 31 * dayMs;
+      sql.exec(
+        'UPDATE sdk_mutation_receipts SET expired_at = ?, outcome = NULL, committed_at = NULL, "commit" = NULL WHERE receipt_id = (SELECT receipt_id FROM sdk_mutation_receipts ORDER BY created_at LIMIT 1)',
+        old
+      );
+      sql.exec(
+        "UPDATE sdk_mutation_receipts SET retain_until = ? WHERE expired_at IS NULL",
+        Date.now() - 1
+      );
+    });
+    await inHost(store, async (host) => {
+      await host.sweepReceipts(new Date());
+    });
+    const left = await rowsOf(store, "sdk_mutation_receipts");
+    expect(left).toHaveLength(1);
+    expect(left[0]?.expired_at).not.toBeNull();
+  });
+
+  it("settles an entry it can no longer read, and goes on with the rest", async () => {
+    const store = await newStore();
+    const held = heldBy(await store.claim(await claimOf("k1", {})));
+    await commitWith(
+      store,
+      insertOf(held, "Launch", {
+        intents: [
+          { kind: "workflow.start", data: { run: "r1" } },
+          { kind: "workflow.start", data: { run: "r2" } },
+        ],
+      }),
+      { "workflow.start": taker([]) }
+    );
+    await runInDurableObject(objectOf(store), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE sdk_change_outbox SET intent = 'not json' WHERE position = 0"
+      );
+    });
+    const taken: OutboxEntry[] = [];
+    await inHost(store, async (host) => {
+      await host.drainOutbox({ "workflow.start": taker(taken) });
+    });
+    const entries = await rowsOf(store, "sdk_change_outbox");
+    expect(entries.map(({ undeliverable }) => undeliverable)).toStrictEqual([
+      "outbox.unreadable",
+      null,
+    ]);
+    expect(taken.map(({ id }) => id)).toStrictEqual([`${held.receiptId}:1`]);
   });
 });

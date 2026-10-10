@@ -228,13 +228,12 @@ export const claimSchema = z.strictObject({
 export type ClaimInput = z.infer<typeof claimSchema>;
 
 /**
- * The attempt holding a receipt, as its commit names it, with the
- * deadline it claimed with, which the store kept and checks.
+ * The attempt holding a receipt, as its commit names it. The deadline it
+ * claimed with stays with the store, which checks it.
  */
 export interface Held {
   receiptId: string;
   fence: number;
-  deadline: number;
 }
 
 /**
