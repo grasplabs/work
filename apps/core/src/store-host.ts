@@ -1,5 +1,9 @@
-import { SchemaDefinitionError, ValueDefinitionError } from "@grasp-os/sdk";
-import { readSchemaManifest, schemaHash as hashOf } from "@grasp-os/sdk/host";
+import { ValueDefinitionError } from "@grasp-os/sdk";
+import {
+  readSchemaManifest,
+  SchemaDefinitionError,
+  schemaHash as hashOf,
+} from "@grasp-os/sdk/host";
 import type { ReadManifest } from "@grasp-os/sdk/host";
 import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
@@ -261,6 +265,9 @@ const markOf = (row: {
  * `data.invalid_schema`, with the check's code, if it fails one.
  */
 const readSchema = (manifest: string): ReadManifest => {
+  // What a refusal says goes back to the caller as its issue. Neither error
+  // repeats what was submitted: a descriptor's refusals name no value (a
+  // default included), and a manifest's quote only names that are valid.
   try {
     // It refuses anything but text itself: what crossed RPC may be other.
     return readSchemaManifest(manifest);
@@ -372,11 +379,19 @@ export class StoreHost {
       if (all.length > storeMaxTables) {
         throw dataErrors.create("data.too_many_tables");
       }
-      return Object.fromEntries(
-        all.map(({ name, tableId }) => [name, tableId])
-      );
+      const schemaTables = new Set(names);
+      return {
+        tables: Object.fromEntries(
+          all
+            .filter(({ name }) => schemaTables.has(name))
+            .map(({ name, tableId }) => [name, tableId])
+        ),
+        storeTables: Object.fromEntries(
+          all.map(({ name, tableId }) => [name, tableId])
+        ),
+      };
     });
-    return { schemaHash, tables: ids };
+    return { schemaHash, ...ids };
   }
 
   /** The record `id` of `table`, or null if the store has none. */

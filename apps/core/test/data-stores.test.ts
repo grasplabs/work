@@ -5,6 +5,7 @@ import {
   schemaHash as hashOf,
   schemaManifest,
 } from "@grasp-os/sdk/host";
+import type { AccessMode } from "@grasp-os/sdk/host";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { storeMaxTables } from "@grasp-os/shared/store-limits";
 import {
@@ -177,7 +178,7 @@ describe("stores", () => {
     // Defining tables again keeps their IDs.
     await expect(
       first.defineTables(tablesManifest("notes"))
-    ).resolves.toMatchObject({ tables: firstTables.tables });
+    ).resolves.toMatchObject({ storeTables: firstTables.tables });
   });
 
   it("refuses a table whose name differs only in case from one it holds", async () => {
@@ -207,8 +208,8 @@ describe("stores", () => {
       store.defineTables(tablesManifest("oneMore"))
     ).rejects.toMatchObject({ code: "data.too_many_tables" });
     // Nothing of the refused definition stays.
-    const { tables } = await store.defineTables(tablesManifest("t0"));
-    expect(Object.keys(tables)).toHaveLength(storeMaxTables);
+    const { storeTables } = await store.defineTables(tablesManifest("t0"));
+    expect(Object.keys(storeTables)).toHaveLength(storeMaxTables);
   });
 
   it("refuses a store it doesn't list, or one deleted, alike", async () => {
@@ -282,6 +283,27 @@ const notesSchema = (order: "declared" | "reordered") => {
   );
 };
 
+/**
+ * The Notes schema with one thing chosen: who reads notes, or the order its
+ * indexes are declared in.
+ */
+const notesManifest = ({
+  read = "owner",
+  indexes = "declared",
+}: {
+  read?: AccessMode;
+  indexes?: "declared" | "reversed";
+} = {}) => {
+  const table = defineTable({ title: v.string(), body: v.string() });
+  const notes =
+    indexes === "declared"
+      ? table.index("by_updated", ["_updatedAt"]).index("by_title", ["title"])
+      : table.index("by_title", ["title"]).index("by_updated", ["_updatedAt"]);
+  return schemaManifest(defineSchema({ notes }), {
+    tables: { notes: { read, write: "owner" } },
+  });
+};
+
 /** The Notes manifest's JSON, changed by `change`, as text. */
 const changed = (change: (json: Record<string, unknown>) => void): string => {
   // SAFETY: a manifest's text is a JSON object.
@@ -317,6 +339,10 @@ describe("schemas", () => {
       "notes",
       "people",
     ]);
+    // A later schema of fewer tables gets its own; the store keeps them all.
+    const fewer = await store.defineTables(tablesManifest("notes"));
+    expect(fewer.tables).toStrictEqual({ notes: defined.tables.notes });
+    expect(fewer.storeTables).toStrictEqual(defined.tables);
     // The same schema declared in another order, its text's keys in yet
     // another, is the same schema: the same hash, the same tables.
     const reordered = manifestText(notesSchema("reordered"));
@@ -330,23 +356,23 @@ describe("schemas", () => {
     await expect(store.defineTables(reversed)).resolves.toStrictEqual(defined);
   });
 
-  it("a changed access mode or index order is another schema", async () => {
+  it("a changed access mode alone is another schema, of the same tables", async () => {
     const store = await openStore(env, await createStore(env, builder));
-    const declared = await store.defineTables(
-      manifestText(notesSchema("declared"))
+    const owned = await store.defineTables(manifestText(notesManifest()));
+    const shared = await store.defineTables(
+      manifestText(notesManifest({ read: "appMembers" }))
     );
-    const shared = schemaManifest(
-      defineSchema({
-        notes: defineTable({ title: v.string(), body: v.string() })
-          .index("by_updated", ["_updatedAt"])
-          .index("by_title", ["title"]),
-        people: defineTable({ name: v.string() }),
-      }),
-      { tables: { notes: { read: "appMembers", write: "owner" } } }
+    expect(shared.schemaHash).not.toBe(owned.schemaHash);
+    expect(shared.tables).toStrictEqual(owned.tables);
+  });
+
+  it("indexes declared in another order alone are the same schema", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const declared = await store.defineTables(manifestText(notesManifest()));
+    const reversed = await store.defineTables(
+      manifestText(notesManifest({ indexes: "reversed" }))
     );
-    const again = await store.defineTables(manifestText(shared));
-    expect(again.schemaHash).not.toBe(declared.schemaHash);
-    expect(again.tables).toStrictEqual(declared.tables);
+    expect(reversed).toStrictEqual(declared);
   });
 
   it.each([
