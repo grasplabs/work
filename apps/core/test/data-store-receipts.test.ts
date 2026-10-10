@@ -19,6 +19,7 @@ import type {
   OutboxEntry,
 } from "../src/outbox-delivery.ts";
 import { StoreHost } from "../src/store-host.ts";
+import { tablesManifest } from "./store-schemas.ts";
 
 /** Who creates the stores these tests use: a builder of the organization. */
 const builder: Acting = {
@@ -48,7 +49,7 @@ const scope = {
 /** A new store with a `notes` table. */
 const newStore = async (): Promise<OpenStore> => {
   const store = await openStore(env, await createStore(env, builder));
-  await store.defineTables(["notes"]);
+  await store.defineTables(tablesManifest("notes"));
   return store;
 };
 
