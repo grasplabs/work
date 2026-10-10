@@ -745,6 +745,87 @@ export interface WorkflowDryRun {
   }[];
 }
 
+/** Most UTC days one `activity` read looks back over, today included. */
+export const runActivityMaxDays = 90;
+
+/** The UTC days an `activity` read looks back over when it names none. */
+export const runActivityDefaultDays = 7;
+
+/**
+ * What `WorkflowsApi.activity` reads: the last `days` UTC days, today
+ * included, {@link runActivityDefaultDays} unless given.
+ */
+export const runActivityQuerySchema = z
+  .strictObject({
+    days: z
+      .int()
+      .min(1)
+      .max(runActivityMaxDays)
+      .default(runActivityDefaultDays),
+  })
+  .default({ days: runActivityDefaultDays });
+
+/** What `WorkflowsApi.activity` reads. */
+export type RunActivityQuery = z.input<typeof runActivityQuerySchema>;
+
+/**
+ * How runs started on one UTC day stand now: completed, failed, waiting
+ * for a decision, or otherwise (running, paused or cancelled).
+ */
+export interface RunActivityDay {
+  /** `YYYY-MM-DD`, UTC. */
+  day: string;
+  completed: number;
+  failed: number;
+  waiting: number;
+  other: number;
+  /** Of all of them, those that asked a person for a decision. */
+  withPerson: number;
+}
+
+/** A workflow's runs started in the window, and how many of them ended how. */
+export interface RunActivityWorkflow {
+  app: AppId;
+  appName: string;
+  workflow: WorkflowId;
+  started: number;
+  completed: number;
+  failed: number;
+}
+
+/**
+ * The runs of the Apps a person can open, started over the last days, and
+ * the people they needed. Everything counts the runs started in the
+ * window, by the UTC day they started, and stands as they are now.
+ */
+export interface RunActivity {
+  /** The first day of the window, `YYYY-MM-DD` (UTC). */
+  from: string;
+  /** Its last day, today. */
+  to: string;
+  /** Each day of the window, oldest first, days without runs too. */
+  days: RunActivityDay[];
+  runs: {
+    total: number;
+    /** Runs that asked a person for a decision, at least once. */
+    withPerson: number;
+    /** Runs that asked no one. */
+    withoutPerson: number;
+  };
+  /**
+   * The decisions those runs asked for: answered, timed out, or open now
+   * (one someone can still answer, of a run that hasn't ended).
+   */
+  decisions: {
+    approved: number;
+    rejected: number;
+    timedOut: number;
+    open: number;
+  };
+  /** Each workflow that ran, by App name, then workflow. */
+  workflows: RunActivityWorkflow[];
+}
+
 /**
  * A signed-in person's workflows. Anyone with a role in the App
  * (`AppsApi`) starts and follows its runs, and its builders cancel them;
@@ -782,6 +863,12 @@ export interface WorkflowsApi {
    * with `more` when more matched.
    */
   runs: (filter?: RunFilter) => Promise<RunsPage>;
+  /**
+   * The runs of the Apps the person can open started over the last days
+   * (`runActivityQuerySchema`), by day and how they stand, and the
+   * decisions they asked people for.
+   */
+  activity: (query?: RunActivityQuery) => Promise<RunActivity>;
   /** One workflow of an App's current version. */
   get: (app: string, workflow: string) => Promise<WorkflowDetail>;
   /**

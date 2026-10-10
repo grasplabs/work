@@ -6,12 +6,12 @@ import { apiOf, pageOf, peopleIn, release } from "./people.ts";
 import { pileOf, toCard } from "./pile.ts";
 
 // The dashboard, from the nav: what waits on the person; the widget
-// board under it, with where their workflows and engines stand and what
-// could be better, each block opening in full; and, for admins, the
-// latest of the audit trail. What waits is a pile of cards gone through
-// one at a time, and what is settled on its own page under it; what fills
-// them is the failed-run, held-write and approval journeys'
-// (notifications, chat, activity, screen approval).
+// board under it, with where their workflows and engines stand, the runs
+// this week and what could be better, each block opening in full; and,
+// for admins, the latest of the audit trail. What waits is a pile of
+// cards gone through one at a time, and what is settled on its own page
+// under it; what fills them is the failed-run, held-write and approval
+// journeys' (notifications, chat, activity, screen approval).
 
 /** Counts in one step, and is done. */
 const tally = `import { workflow, z } from "@grasp-os/sdk/workflow";
@@ -66,6 +66,9 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
     "No engines yet.",
     pageRead
   );
+  await expect(
+    page.getByRole("region", { name: "Runs this week" })
+  ).toContainText("No runs this week.", pageRead);
   await expect(
     page.getByRole("region", { name: "Could be better" })
   ).toContainText("Nothing to make better right now.", pageRead);
@@ -130,6 +133,30 @@ test("a builder sees their workflows and engine on the board, and opens them in 
   await expect(
     dialog.getByRole("region", { name }).getByRole("link", { name: "later" })
   ).toBeVisible();
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  // The run, completed today, which needed nobody.
+  const runs = page.getByRole("region", { name: "Runs this week" });
+  await expect(runs).toContainText("100% without a person", pageRead);
+  const today = runs
+    .getByRole("table", { name: "Runs by the day they started" })
+    .getByRole("row")
+    .last();
+  // Its day, then completed, failed, waiting, and the rest.
+  await expect(today.getByRole("cell").nth(1)).toHaveText(/^[1-9]\d*$/u);
+
+  // In full, the month, with each workflow's runs.
+  await runs
+    .getByRole("button", { name: "Open Runs this week in full" })
+    .click();
+  dialog = page.getByRole("dialog", { name: "Runs this week" });
+  await expect(
+    dialog
+      .getByRole("region", { name: "By workflow" })
+      .getByRole("row")
+      .filter({ hasText: name })
+  ).toContainText("tally");
   await dialog.getByRole("button", { name: "Close" }).click();
   await expect(dialog).toHaveCount(0);
 
