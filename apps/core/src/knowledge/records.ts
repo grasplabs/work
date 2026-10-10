@@ -396,7 +396,7 @@ export const saveRecordAsDelegate = async (
       claimed.claim
     );
   } catch (error) {
-    return await settled(env, claimed.claim, error);
+    return await settled(env, claimed.claim, error, checked.lastCheck);
   }
 };
 

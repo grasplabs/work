@@ -21,6 +21,7 @@ import {
 } from "../src/knowledge/receipts.ts";
 import type { Submission } from "../src/knowledge/receipts.ts";
 import { saveRecordAsDelegate } from "../src/knowledge/records.ts";
+import { restrict } from "../src/restricted.ts";
 import { release, requestGranted, serverBuilt } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
@@ -200,6 +201,56 @@ const directSave = async (
         deadline
       )
   );
+
+/**
+ * Knowledge's database, with `first` run once, just before the first
+ * query matching `when` is run.
+ */
+const onFirstQuery = (
+  when: RegExp,
+  first: () => Promise<void>,
+  real: D1Database = env.KNOWLEDGE
+): D1Database => {
+  let done = false;
+  const racing = (statement: D1PreparedStatement): D1PreparedStatement => {
+    const once = async (): Promise<void> => {
+      if (!done) {
+        done = true;
+        await first();
+      }
+    };
+    // SAFETY: an object whose prototype is `statement` is a statement: it
+    // has every member, and the ones it runs by are replaced below.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return Object.assign(Object.create(statement) as D1PreparedStatement, {
+      bind: (...values: unknown[]) => racing(statement.bind(...values)),
+      first: async () => {
+        await once();
+        return await statement.first();
+      },
+      all: async () => {
+        await once();
+        return await statement.all();
+      },
+      raw: async () => {
+        await once();
+        return await statement.raw();
+      },
+      run: async () => {
+        await once();
+        return await statement.run();
+      },
+    });
+  };
+  // SAFETY: as above, for the database.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return Object.assign(Object.create(real) as D1Database, {
+    prepare: (query: string) => {
+      const statement = real.prepare(query);
+      return !done && when.test(query) ? racing(statement) : statement;
+    },
+  });
+};
 
 /** Knowledge's database, with `first` run before each batch is sent. */
 const beforeBatch = (
@@ -557,6 +608,43 @@ describe("record saves under an idempotency key", { timeout: 60_000 }, () => {
     // Keyed with what the first save's input hashes to.
     const keyed = await outcome(stepSave(second, await inputHashOf(first)));
     expect(keyed).toBe("ok");
+  });
+
+  it("answer a conflicted attempt with a newer one's save only after its own last check", async () => {
+    const setup = await setUp();
+    const { admin, app } = setup;
+    const path = `notes/${unique()}.md`;
+    const key = `conflicted-${unique()}`;
+    let newer: unknown;
+    // Once A has claimed and goes to read the document, B makes the same
+    // save, then the App reads restricted data: A's caller may no longer
+    // write, and A meets B's version before its last check.
+    const racing = onFirstQuery(/from "documents"/iu, async () => {
+      newer = await directSave(setup, docSave(path, "Plan"), { key });
+      await restrict(
+        env,
+        {
+          subject: { type: "app", appId: app },
+          onBehalfOf: admin.userId,
+          mode: "interactive",
+          appVersion: 1,
+        },
+        { type: "app", appId: app },
+        ["payroll"]
+      );
+    });
+    const conflicted = await outcome(
+      directSave(setup, docSave(path, "Plan"), { key, db: racing })
+    );
+    expect({
+      newer: versionOf(summaryOf({ ok: newer })),
+      conflicted,
+      versions: await versionsAt(setup.collectionId, path),
+    }).toStrictEqual({
+      newer: 1,
+      conflicted: "permission.restricted",
+      versions: 1,
+    });
   });
 
   it("don't commit once the call's deadline passed, by the database's clock, though the last check before the batch said yes", async () => {

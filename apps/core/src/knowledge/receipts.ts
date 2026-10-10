@@ -342,12 +342,16 @@ const failedCheck = (error: unknown, name: string): boolean =>
  * `submission.superseded` when another attempt claimed the receipt since;
  * `app.caller_invalid` when its call's deadline passed before the batch,
  * as for any stub call past it; `knowledge.conflict` when a save that
- * changes nothing found the record moved on; `error` otherwise.
+ * changes nothing found the record moved on; `error` otherwise. An
+ * outcome is answered only once `lastCheck`, the caller's last check,
+ * passes again, as for a replay: whatever it throws is the answer
+ * instead.
  */
 export const settled = async (
   env: Env,
   held: Claim,
-  error: unknown
+  error: unknown,
+  lastCheck?: () => Promise<void>
 ): Promise<DocumentSummary> => {
   // Its last check failed: the caller may not be allowed any more, and
   // whatever the check threw is the answer.
@@ -364,6 +368,10 @@ export const settled = async (
   }
   const receipt = await receiptOf(env, held.id);
   if (receipt !== undefined && receipt.outcome !== null) {
+    // The caller may have lost what let it write since it was admitted:
+    // the conflict, or the failed batch, came before or without its last
+    // check.
+    await lastCheck?.();
     return summaryOf(receipt.outcome);
   }
   if (conflicted) {
