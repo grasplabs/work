@@ -130,6 +130,11 @@
           "type": "durable_object_namespace"
         },
         {
+          "class_name": "DataStore",
+          "name": "DATA_STORES",
+          "type": "durable_object_namespace"
+        },
+        {
           "class_name": "WorkflowDispatcher",
           "name": "WORKFLOWS",
           "type": "workflow",
@@ -242,6 +247,12 @@
             "ModelLedger"
           ],
           "tag": "v4"
+        },
+        {
+          "new_sqlite_classes": [
+            "DataStore"
+          ],
+          "tag": "v5"
         }
       ],
       "keepVars": true,

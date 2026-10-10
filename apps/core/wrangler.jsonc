@@ -105,6 +105,9 @@
       // The one ledger of what model requests reserve and spend
       // (src/model-ledger.ts).
       { "name": "MODEL_LEDGER", "class_name": "ModelLedger" },
+      // One object per business store, named by the store's ID
+      // (src/data-store.ts, src/data-stores.ts).
+      { "name": "DATA_STORES", "class_name": "DataStore" },
     ],
   },
   "migrations": [
@@ -112,6 +115,7 @@
     { "tag": "v2", "new_sqlite_classes": ["Builtins"] },
     { "tag": "v3", "new_sqlite_classes": ["Onboarding"] },
     { "tag": "v4", "new_sqlite_classes": ["ModelLedger"] },
+    { "tag": "v5", "new_sqlite_classes": ["DataStore"] },
   ],
   // The one dispatcher of every App's workflow runs (src/workflows/): it
   // loads each run's code by App and pinned version, with an env rebuilt
