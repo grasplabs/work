@@ -2,15 +2,18 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { describe, expect, it } from "vite-plus/test";
 
+import { CallQueue } from "../src/app-call-queue.ts";
 import { waitsOn } from "../src/app-waits-for.ts";
 import type { Hold } from "../src/app-waits-for.ts";
 
 // The walk a call about to wait makes back through other Apps' queues
 // (app-waits-for.ts), over queues the test lays out: pure logic, so
 // tested on its own. How it can fail: a cycle missed, a hold left behind
-// by a call that ended taken on trust (here or in another App), an App
-// that can't answer stopping the walk, a walk with no end, and a wide
-// round crowding out the chain that closes the cycle.
+// by a call that ended taken on trust (here or in another App), a busy
+// App's ended turns using up the limit, a cycle that broke while the walk
+// went on still refused, an App that can't answer stopping the walk, a
+// walk with no end or that goes on once its call no longer waits, and a
+// wide round crowding out the chain that closes the cycle.
 
 const app = (name: string): AppId => appIdSchema.parse(`app-${name}`);
 
@@ -29,22 +32,36 @@ type Queues = Record<string, { holder: string; waiting: Hold[][] }>;
 const walk = async (
   holding: Hold[],
   queues: Queues,
-  { limit = 32, selfHolder = "self", failing = new Set<string>() } = {}
+  {
+    limit = 32,
+    selfHolder = "self",
+    failing = new Set<string>(),
+    signal = new AbortController().signal,
+    onAsk = (_asking: string): void => {
+      // Nothing changes as the walk asks, unless a test says so.
+    },
+  } = {}
 ): Promise<{ found: boolean; asked: string[] }> => {
   const asked: string[] = [];
   const found = await waitsOn({
     self,
     holding,
     holds: (call) => call === selfHolder,
-    ask: async ({ app: asking, call }) => {
+    ask: async (asking, turns) => {
       asked.push(asking);
+      onAsk(asking);
       if (failing.has(asking)) {
         throw new Error("No answer");
       }
       const queue = queues[asking];
-      return await Promise.resolve(queue?.holder === call ? queue.waiting : []);
+      return await Promise.resolve(
+        queue !== undefined && turns.includes(queue.holder)
+          ? { holder: queue.holder, waiting: queue.waiting }
+          : undefined
+      );
     },
     limit,
+    signal,
   });
   return { found, asked };
 };
@@ -121,13 +138,12 @@ describe("the walk back through Apps' queues", () => {
       };
     }
     const short = await walk([held("0")], line, { limit: 32 });
-    const long = await walk([held("0")], line, { limit: 40 });
     expect({
       short: { found: short.found, asked: short.asked.length },
-      long: { found: long.found, asked: long.asked.length },
+      long: await foundBy([held("0")], line, { limit: 40 }),
     }).toStrictEqual({
       short: { found: false, asked: 32 },
-      long: { found: true, asked: 40 },
+      long: true,
     });
   });
 
@@ -162,9 +178,123 @@ describe("the walk back through Apps' queues", () => {
     const { found, asked } = await walk([held("a"), held("b")], queues, {
       limit: 4,
     });
-    expect({ found, askedG: asked.includes(app("g")) }).toStrictEqual({
-      found: true,
-      askedG: true,
+    expect({
+      found,
+      askedG: asked.includes(app("g")),
+      // Two Apps were left to ask in that round: G and F1.
+      askedF2: asked.includes(app("f2")),
+    }).toStrictEqual({ found: true, askedG: true, askedF2: false });
+  });
+
+  it("asks a busy App about all its turns at once, so the ones that ended don't use up the limit", async () => {
+    // 31 calls wait for B holding turns of A that have ended, and one
+    // holding the turn of A that holds it now, which waits on this App.
+    const ended = Array.from({ length: 31 }, (_, at) => [
+      { app: app("a"), call: `ended-${at}` },
+    ]);
+    const { found, asked } = await walk(
+      [held("b")],
+      {
+        [app("b")]: { holder: "b", waiting: [...ended, [held("a")]] },
+        [app("a")]: { holder: "a", waiting: [[held("self")]] },
+      },
+      { limit: 2 }
+    );
+    expect({
+      found,
+      askedA: asked.filter((asking) => asking === app("a")).length,
+    }).toStrictEqual({ found: true, askedA: 2 });
+  });
+
+  it("refuses nothing once a cycle it found broke while it went on", async () => {
+    const queues: Queues = {
+      [app("a")]: { holder: "a", waiting: [[held("b")]] },
+      [app("b")]: { holder: "b", waiting: [[held("self")]] },
+    };
+    // B's call stops waiting for A once A answered, before B is asked.
+    const found = await foundBy([held("a")], queues, {
+      onAsk: (asking) => {
+        if (asking === app("b")) {
+          queues[app("a")] = { holder: "a", waiting: [] };
+        }
+      },
+    });
+    expect(found).toBeFalsy();
+  });
+
+  it("asks nothing more once the call no longer waits", async () => {
+    const left = new AbortController();
+    const { found, asked } = await walk(
+      [held("a")],
+      {
+        [app("a")]: { holder: "a", waiting: [[held("b")]] },
+        [app("b")]: { holder: "b", waiting: [[held("self")]] },
+      },
+      {
+        signal: left.signal,
+        onAsk: () => {
+          left.abort();
+        },
+      }
+    );
+    expect({ found, asked }).toStrictEqual({ found: false, asked: [app("a")] });
+  });
+});
+
+describe("a call's check as it waits its turn", () => {
+  it("is told once its call no longer waits: let in, or given up", async () => {
+    const queue = new CallQueue<string>(4);
+    const release = await queue.turn(
+      new AbortController().signal,
+      () => new Error("busy"),
+      "first"
+    );
+    const signals: AbortSignal[] = [];
+    // Finds nothing, so each call waits on.
+    const found: Error[] = [];
+    const check = async (left: AbortSignal): Promise<Error | undefined> => {
+      signals.push(left);
+      await Promise.resolve();
+      return found[0];
+    };
+    const letIn = queue.turn(
+      new AbortController().signal,
+      () => new Error("busy"),
+      "second",
+      {
+        tag: "second",
+        check,
+      }
+    );
+    const deadline = new AbortController();
+    const givenUp = queue.turn(
+      deadline.signal,
+      () => new Error("busy"),
+      "third",
+      {
+        tag: "third",
+        check,
+      }
+    );
+    const before = signals.map(({ aborted }) => aborted);
+    deadline.abort();
+    const gaveUp = await givenUp.then(
+      () => "let in",
+      () => "gave up"
+    );
+    release();
+    const releaseSecond = await letIn;
+    releaseSecond();
+    expect({
+      before,
+      gaveUp,
+      after: signals.map(({ aborted }) => aborted),
+      holder: queue.holder(),
+    }).toStrictEqual({
+      before: [false, false],
+      gaveUp: "gave up",
+      after: [true, true],
+      holder: undefined,
     });
   });
 });

@@ -38,7 +38,7 @@ import { CallQueue } from "./app-call-queue.ts";
 import { ErrorLog } from "./app-error-log.ts";
 import type { ReportedProblem } from "./app-error-log.ts";
 import { waitsOn } from "./app-waits-for.ts";
-import type { Hold } from "./app-waits-for.ts";
+import type { Held, Hold } from "./app-waits-for.ts";
 import { findApp, versionFiles } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { appHost } from "./durable-objects.ts";
@@ -872,8 +872,8 @@ export class App extends DurableObject<Env> {
           ? undefined
           : {
               tag: via.holding,
-              check: async () =>
-                (await this.#waitsOn(via.holding))
+              check: async (left) =>
+                (await this.#waitsOn(via.holding, left))
                   ? appErrors.create("app.call_deadlock", { method })
                   : undefined,
             }
@@ -1053,20 +1053,25 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * For each call from another App's code, or a workflow run, waiting for
-   * this App, oldest first: the turns its chain holds (`CallPath.holding`),
-   * which all wait for this App with it; none for a run's own call. Only
-   * while `holder` still holds this App's turn: a hold another App passes
-   * on from a call that has ended answers nothing (`waitsOn`). Asked by
-   * other Apps' hosts, as a call about to wait looks for a cycle.
+   * Which of `turns` holds this App now, and for each call from another
+   * App's code, or a workflow run, waiting for it, oldest first: the turns
+   * its chain holds (`CallPath.holding`), which all wait for this App with
+   * it; none for a run's own call. Nothing while none of `turns` holds it:
+   * a hold another App passes on from a call that has ended answers
+   * nothing (`waitsOn`). Asked by other Apps' hosts, as a call about to
+   * wait looks for a cycle.
    */
-  waitingHolds(holder: string): Hold[][] {
-    if (this.#queue.holder() !== holder) {
-      return [];
+  waitingHolds(turns: string[]): Held | undefined {
+    const holder = this.#queue.holder();
+    if (holder === undefined || !turns.includes(holder)) {
+      return undefined;
     }
-    return this.#queue
-      .waitingTags()
-      .map((holding) => holding.map(({ app, call }) => ({ app, call })));
+    return {
+      holder,
+      waiting: this.#queue
+        .waitingTags()
+        .map((holding) => holding.map(({ app, call }) => ({ app, call }))),
+    };
   }
 
   /**
@@ -1079,16 +1084,19 @@ export class App extends DurableObject<Env> {
    * time, the one that asks later finds the other; both may, and then
    * both are refused, never neither.
    */
-  async #waitsOn(holding: readonly Hold[]): Promise<boolean> {
+  async #waitsOn(
+    holding: readonly Hold[],
+    signal: AbortSignal
+  ): Promise<boolean> {
     return await waitsOn({
       self: this.#app,
       holding,
       holds: (call) => this.#queue.holder() === call,
-      ask: async ({ app, call }) => {
+      ask: async (app, turns) => {
         const cap = deadline(waitsForAskMs);
         try {
           return await Promise.race([
-            appHost(this.env, app).waitingHolds(call),
+            appHost(this.env, app).waitingHolds([...turns]),
             whenAborted(cap.signal),
           ]);
         } finally {
@@ -1096,6 +1104,7 @@ export class App extends DurableObject<Env> {
         }
       },
       limit: waitsForAsked,
+      signal,
     });
   }
 

@@ -3,6 +3,8 @@ interface Waiter<Tag> {
   /** What the call waiting says of itself (`CallQueue.waitingTags`). */
   tag: Tag | undefined;
   letIn: () => void;
+  /** Aborts once the waiter leaves the queue, let in or given up. */
+  left: AbortController;
   /** Gives up as its deadline passed, with the call's `busy()`. */
   giveUp: () => void;
   /** Gives up with `refusal`, as its `Wait.check` found. */
@@ -12,21 +14,22 @@ interface Waiter<Tag> {
 /**
  * What a call says as it waits: `tag`, which `CallQueue.waitingTags`
  * shows while it waits, and `check`, asked once it waits, whose error, if
- * any, refuses the call at once, unless it was let in meanwhile.
+ * any, refuses the call at once, unless it was let in meanwhile. `left`
+ * aborts once the call no longer waits: the check has nothing left to do.
  */
 export interface Wait<Tag> {
   tag: Tag;
-  check: () => Promise<Error | undefined>;
+  check: (left: AbortSignal) => Promise<Error | undefined>;
 }
 
 /** Refuses `waiter` with what `check` finds, unless let in by then. */
 const refuseIfFound = async <Tag>(
   waiter: Waiter<Tag>,
-  check: () => Promise<Error | undefined>
+  check: (left: AbortSignal) => Promise<Error | undefined>
 ): Promise<void> => {
   let refusal: Error | undefined;
   try {
-    refusal = await check();
+    refusal = await check(waiter.left.signal);
   } catch {
     // A check that fails finds nothing: the call waits as any other.
     return;
@@ -112,9 +115,11 @@ export class CallQueue<Tag = never> {
     // let in no longer gives up.
     const waiter: Waiter<Tag> = {
       tag: wait?.tag,
+      left: new AbortController(),
       letIn: () => {
         this.#holder = id;
         this.#waiting.delete(waiter);
+        waiter.left.abort();
         signal.removeEventListener("abort", waiter.giveUp);
         waited.resolve(true);
       },
@@ -123,6 +128,7 @@ export class CallQueue<Tag = never> {
       },
       refuse: (refusal) => {
         this.#waiting.delete(waiter);
+        waiter.left.abort();
         signal.removeEventListener("abort", waiter.giveUp);
         waited.reject(refusal);
       },
