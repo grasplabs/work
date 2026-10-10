@@ -563,6 +563,8 @@ export const appErrors = defineErrorFamily({
   "app.answer_invalid":
     "The App's server code answered with something other than plain data.",
   "app.timed_out": "The App's server code took too long to answer.",
+  "app.busy":
+    "The App is busy with other calls and couldn't take this one in time. Try again in a moment.",
   "app.caller_invalid":
     "Pass the caller of the App method this runs in, while that call runs.",
   "app.read_only":

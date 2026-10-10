@@ -94,7 +94,7 @@ const dayMs = 24 * 60 * 60 * 1000;
 const invalid = () => workflowErrors.create("workflow.invalid");
 
 /** An App as the lists need it, with its current version's workflows. */
-interface ListedApp {
+export interface ListedApp {
   id: AppId;
   name: string;
   ownerId: string;
@@ -109,7 +109,10 @@ interface ListedApp {
  * (`appsFoundBy`) and whose data they can read
  * (`appsReadableBy`).
  */
-const visibleApps = async (env: Env, by: Member): Promise<ListedApp[]> => {
+export const visibleApps = async (
+  env: Env,
+  by: Member
+): Promise<ListedApp[]> => {
   const rows = await drizzle(env.DB)
     .select({
       id: apps.id,
@@ -154,7 +157,7 @@ const ofApps = (ids: readonly string[]): SQL =>
   sql`+${workflowRuns.appId} IN ${listOf(ids)}`;
 
 /** That a run hasn't ended, never looked up by an index. */
-const runUnended = (): SQL =>
+export const runUnended = (): SQL =>
   sql`+${workflowRuns.status} IN ${listOf(unended)}`;
 
 /**
@@ -170,7 +173,7 @@ const hasOpenDecision = (now: Date): SQL => sql`EXISTS (
 )`;
 
 /** That a run waits at `now`: it hasn't ended, and a decision of its is open. */
-const waits = (now: Date): SQL =>
+export const waits = (now: Date): SQL =>
   sql`(${runUnended()} AND ${hasOpenDecision(now)})`;
 
 interface AppWorkflow {

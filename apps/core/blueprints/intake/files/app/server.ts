@@ -432,11 +432,11 @@ export class App extends DurableObject<Env> {
 
   /**
    * Throws a draft away, at `ifVersion`: an open one, or one whose save
-   * stopped halfway, or is still under way (`saving`), which then stops
-   * before its next write. Records it already wrote stay in the Playbook,
-   * where Knowledge shows them; one write on its way as it is discarded
-   * may still land. Answers whether a save had started (`saving`), so the
-   * screen can say so.
+   * stopped halfway (`saving`). The App takes one call at a time, so a
+   * discard that comes while a save runs waits for it, and then finds the
+   * draft saved and gone. Records a stopped save already wrote stay in the
+   * Playbook, where Knowledge shows them. Answers whether a save had
+   * started (`saving`), so the screen can say so.
    */
   async discard(
     caller: Caller,
@@ -501,7 +501,8 @@ export class App extends DurableObject<Env> {
         saveKey ?? refuse("intake.conflict", "The draft's save has no key.");
       const paths = pathsOf(key, draft);
       // Before each write: the draft is still here, saving under this key.
-      // One discarded meanwhile (from another tab, say) stops the save.
+      // Nothing else runs in the App while the save does, so this holds;
+      // checked anyway, in case a save's writes ever outlive its call.
       const stillSaving = () => {
         const [now] = this.ctx.storage.sql
           .exec<Row>("SELECT * FROM drafts WHERE id = ?", input.id)

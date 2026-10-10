@@ -227,8 +227,8 @@ const runWorkflow = async (
       waiting: async (why) => {
         await recordWaiting(env, row, why);
       },
-      callApp: async (caller, method, args) =>
-        await callApp(env, run.app, caller, method, args),
+      callApp: async (caller, method, args, ends) =>
+        await callApp(env, run.app, caller, method, args, ends),
     });
     return await code.run(host, {
       runId,

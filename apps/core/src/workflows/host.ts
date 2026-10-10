@@ -151,6 +151,11 @@ interface StepAttempt {
    */
   refused?: Error;
   keptMessages?: Map<string, Email>;
+  /**
+   * When the engine gives up on it, by the step's timeout, if it has one:
+   * an App call it makes waits for the App no longer (`callApp`).
+   */
+  ends?: number;
 }
 
 /** Why a run waits before running a step again. */
@@ -670,11 +675,15 @@ export interface HostHooks {
    * the person it acts for.
    */
   waiting: (why: WaitReason) => Promise<void>;
-  /** Calls a method of the run's App for `caller` (`callApp`). */
+  /**
+   * Calls a method of the run's App for `caller` (`callApp`), giving up
+   * at `ends`, when the step's attempt does, if it has a timeout.
+   */
   callApp: (
     caller: AppCallerInput,
     method: string,
-    args: unknown[]
+    args: unknown[],
+    ends: number | undefined
   ) => Promise<AppAnswer>;
 }
 
@@ -902,6 +911,9 @@ export class RunHost extends RpcTarget {
           step,
           held: false,
           calledApp: false,
+          ...(parsed.timeout === undefined
+            ? {}
+            : { ends: Date.now() + parsed.timeout }),
         };
         this.#attempts.set(attempt.id, attempt);
         this.#running = attempt;
@@ -1363,7 +1375,9 @@ export class RunHost extends RpcTarget {
    * version, as the person, whatever version the run is on
    * (`requireApprovedVersion`). The answer is plain
    * data (`callApp`), and whatever it holds of the App's data is covered by
-   * the run's restricted mode, which is the App's (restricted.ts).
+   * the run's restricted mode, which is the App's (restricted.ts). The call
+   * waits for its turn in the App, and its answer, no longer than the
+   * attempt it comes from runs (`StepAttempt.ends`).
    */
   async callApp(
     method: unknown,
@@ -1393,7 +1407,8 @@ export class RunHost extends RpcTarget {
           await this.#hooks.callApp(
             caller,
             String(method),
-            checked(z.array(z.unknown()), args)
+            checked(z.array(z.unknown()), args),
+            calling.ends
           )
       );
     });

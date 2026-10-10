@@ -17,6 +17,11 @@
 //                is due
 //   events       the inbox: each event the run accepted, in order, and the
 //                wait that took it
+//   history      what observers are shown: one row per change of the
+//                above, written by triggers in the same statement
+//                (history.ts)
+//   notifications  the status changes the host hasn't taken yet, written
+//                by a trigger in the same statement (notifications.ts)
 //
 // Beside the journal, and outliving it, `tombstones` keeps the start key
 // of each removed run whose start can be delivered again (`admit`, a
@@ -27,9 +32,9 @@
 // a new start. A run `create` made leaves none: no one has its key.
 //
 // Values and errors are kept as codec text (codec.ts), never as live
-// objects; a step's stream result as chunks beside them (streams.ts). What
-// observers are shown is the run's history (history.ts).
+// objects; a step's stream result as chunks beside them (streams.ts).
 import { createHistory } from "./history.ts";
+import { createNotifications } from "./notifications.ts";
 import { createStreamChunks } from "./streams.ts";
 
 /**
@@ -43,11 +48,11 @@ export class JournalSchemaError extends Error {
 
 /**
  * The journal's own layout; a change to it is a new version. No journal
- * predates version 6 (nothing earlier was released), so a run of any other
+ * predates version 8 (nothing earlier was released), so a run of any other
  * version is refused when it is read; a later layout that changes it
  * brings its own upgrade.
  */
-export const journalSchemaVersion = 6;
+export const journalSchemaVersion = 8;
 
 /**
  * The largest event payload a run accepts, as the encoded text it keeps:
@@ -185,6 +190,20 @@ export interface RunRow extends Record<string, SqlStorageValue> {
    * back is ever purged.
    */
   purge_at: number | null;
+  /**
+   * The run's execution: 1 when it is created, one more at each restart.
+   * Its host is told it with each notification (notifications.ts).
+   */
+  executions: number;
+  /**
+   * When the notifications the host hasn't taken are next handed to it:
+   * set by the write that adds the first of them, put off after the host
+   * failed, null once it has taken them all. Every alarm the run object
+   * sets is brought forward to it (run.ts).
+   */
+  notify_at: number | null;
+  /** How many deliveries in a row the host failed: the backoff's count. */
+  notify_failures: number;
 }
 
 /**
@@ -358,7 +377,10 @@ export const createJournal = (sql: SqlStorage): void => {
       redeliverable INTEGER NOT NULL,
       success_retention_ms INTEGER NOT NULL,
       error_retention_ms INTEGER NOT NULL,
-      purge_at INTEGER
+      purge_at INTEGER,
+      executions INTEGER NOT NULL DEFAULT 1,
+      notify_at INTEGER,
+      notify_failures INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS activations (
       generation INTEGER PRIMARY KEY,
@@ -419,6 +441,7 @@ export const createJournal = (sql: SqlStorage): void => {
   `);
   createStreamChunks(sql);
   createHistory(sql);
+  createNotifications(sql);
 };
 
 /**
@@ -436,6 +459,7 @@ export const hasJournal = (sql: SqlStorage): boolean =>
  */
 const journalTables = [
   "history",
+  "notifications",
   "stream_chunks",
   "attempts",
   "events",
@@ -572,6 +596,26 @@ export const expireTombstones = (
   return oldest.at;
 };
 
+/**
+ * When the run's notifications are next due for its host, or null when it
+ * has taken them all, or there is no run, or one of a layout this engine
+ * doesn't read (which notifies no one).
+ */
+export const notifyDue = (sql: SqlStorage): number | null => {
+  if (!hasJournal(sql)) {
+    return null;
+  }
+  const [run] = sql
+    .exec<{ schema: SqlStorageValue }>("SELECT schema FROM run")
+    .toArray();
+  if (run?.schema !== journalSchemaVersion) {
+    return null;
+  }
+  return sql
+    .exec<{ notify_at: number | null }>("SELECT notify_at FROM run")
+    .one().notify_at;
+};
+
 export const readRun = (sql: SqlStorage): RunRow | undefined => {
   // A run deleted (its tables with it) is no run: a stale activation of it
   // reads that, and is fenced, rather than fail on a missing table.
@@ -594,7 +638,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
   }
   return sql
     .exec<RunRow>(
-      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable, success_retention_ms, error_retention_ms, purge_at FROM run"
+      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable, success_retention_ms, error_retention_ms, purge_at, executions, notify_at, notify_failures FROM run"
     )
     .toArray()[0];
 };

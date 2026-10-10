@@ -11,6 +11,12 @@ export const modelErrors = defineErrorFamily({
     "This call carries sensitive data, and that model may not take it. Choose one this deployment allows for sensitive data.",
   "model.over_budget":
     "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
+  "model.unpriced":
+    "What this model call would cost can't be bounded at known prices, so it wasn't sent. Choose another model, or send less.",
+  "model.ledger_unavailable":
+    "Model spend can't be accounted for right now, so no model call was made. Try again later.",
+  "model.held_unresolvable":
+    "That reservation can't be settled: a budget it counts against has no record. Contact Grasp.",
   "model.failed": "The model call failed. Try again later.",
   "model.invalid_output":
     "The model's answer didn't match the expected shape, also when asked again.",
@@ -123,10 +129,39 @@ export interface ModelSettings {
   rules: { state: "invalid" } | ({ state: "on" } & ModelRulesSettings);
   /** The UTC month budgets count in now, such as `2026-09`. */
   month: string;
+  /** Reservations held for review (`HeldRequest`), oldest first. */
+  held: HeldRequest[];
 }
+
+/**
+ * A model request's reservation the model ledger couldn't read to settle:
+ * it stays held against its budgets until an admin releases it or charges
+ * it in full.
+ */
+export interface HeldRequest {
+  id: string;
+  /** `<provider>/<model>`. */
+  model: string;
+  /** The UTC month it counts in. */
+  period: string;
+  /** What it holds, in US dollars: the most it could have cost. */
+  amount: number;
+  /** When it was sent, as an ISO timestamp. */
+  sentAt: string;
+}
+
+/** Most held requests listed at once. */
+export const heldListed = 100;
 
 /** The model gateway's settings, over `/rpc`, for admins only. */
 export interface ModelsApi {
   /** The settings, and this month's spend against each budget. */
   settings: () => Promise<ModelSettings>;
+  /** The reservations held for review, oldest first. */
+  held: () => Promise<HeldRequest[]>;
+  /**
+   * Settles a held reservation: `release` charges nothing, `charge` all it
+   * holds. Audited. One no longer held is left as it is.
+   */
+  resolveHeld: (id: string, how: "release" | "charge") => Promise<void>;
 }

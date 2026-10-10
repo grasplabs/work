@@ -117,6 +117,10 @@ msgstr "{count, plural, one {# wijziging wacht tot je die bevestigt of afwijst.}
 msgid "{count, plural, one {# file} other {# files}}"
 msgstr "{count, plural, one {# bestand} other {# bestanden}}"
 
+#: src/dashboard/widget-board.tsx
+msgid "{count, plural, one {# more engine with no workflows to show} other {# more engines with no workflows to show}}"
+msgstr "{count, plural, one {Nog # engine zonder workflows om te tonen} other {Nog # engines zonder workflows om te tonen}}"
+
 #: src/knowledge/timeline.tsx
 msgid "{count, plural, one {# version} other {# versions}}"
 msgstr "{count, plural, one {# versie} other {# versies}}"
@@ -242,6 +246,10 @@ msgstr "{name} gewijzigd: {does}"
 msgid "{name} has no app to show."
 msgstr "{name} heeft geen app om te tonen."
 
+#: src/dashboard/widget-board.tsx
+msgid "{name} in {engine}"
+msgstr "{name} in {engine}"
+
 #: src/connections/connect-dialog.tsx
 msgid "{name} is read-only"
 msgstr "{name} is alleen-lezen"
@@ -315,6 +323,14 @@ msgstr "{run}: voltooid"
 msgid "{run}: failed"
 msgstr "{run}: mislukt"
 
+#: src/dashboard/runs-widget.tsx
+msgid "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
+msgstr "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
+
+#: src/dashboard/runs-widget.tsx
+msgid "{runs, plural, one {of # run} other {of # runs}}"
+msgstr "{runs, plural, one {van # run} other {van # runs}}"
+
 #: src/screens/screen-frame.tsx
 msgid "{screen} app"
 msgstr "App {screen}"
@@ -347,9 +363,17 @@ msgstr "{title} op {connection}"
 msgid "{toolCount, plural, one {# tool} other {# tools}}"
 msgstr "{toolCount, plural, one {# tool} other {# tools}}"
 
+#: src/dashboard/runs-widget.tsx
+msgid "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
+msgstr "{total, plural, one {Bij {withPerson} van # run was een beslissing van een persoon nodig.} other {Bij {withPerson} van # runs was een beslissing van een persoon nodig.}}"
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{total, plural, one {# integratie getoond} other {# integraties getoond}}"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "{total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full."
+msgstr "{total} wordt voor deze modelaanroepen vastgehouden tot je beslist: wat elk had kunnen kosten. Geef het vrij, of breng het volledig in rekening."
 
 #: src/dashboard/nav-item.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
@@ -379,6 +403,10 @@ msgstr "{who} gaf hier toestemming voor voordat het werd gekoppeld:"
 msgid "{workflowId} in {engine}"
 msgstr "{workflowId} in {engine}"
 
+#: src/dashboard/widget-board.tsx
+msgid "{workflows, plural, one {{ran} of # workflow ran} other {{ran} of # workflows ran}}"
+msgstr "{workflows, plural, one {{ran} van # workflow liep} other {{ran} van # workflows liepen}}"
+
 #: src/routes/_shell.engines.index.tsx
 msgid "{workflows, plural, one {# workflow} other {# workflows}}"
 msgstr "{workflows, plural, one {# workflow} other {# workflows}}"
@@ -392,6 +420,10 @@ msgstr "**Grasp:**"
 #: src/chat/chat-markdown.ts
 msgid "**You:**"
 msgstr "**Jij:**"
+
+#: src/dashboard/runs-widget.tsx
+msgid "<0>{without}</0> without a person"
+msgstr "<0>{without}</0> zonder een persoon"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "A .txt, .vtt, .srt or .docx file, or pasted text."
@@ -719,6 +751,7 @@ msgstr "De apps van versie {version} goedkeuren"
 msgid "Approve the packages for {engine}"
 msgstr "De pakketten voor {engine} goedkeuren"
 
+#: src/dashboard/runs-widget.tsx
 #: src/engines/screen-approval.tsx
 msgid "Approved"
 msgstr "Goedgekeurd"
@@ -888,6 +921,7 @@ msgstr "Per persoon"
 msgid "By the end of the month"
 msgstr "Tegen het einde van de maand"
 
+#: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.settings.spend.tsx
 msgid "By workflow"
 msgstr "Per workflow"
@@ -1016,6 +1050,14 @@ msgstr "wijzigt de gegevens van de engine"
 msgid "Changes the engine's data"
 msgstr "Wijzigt de gegevens van de engine"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "Charge"
+msgstr "In rekening brengen"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Charge {amount} for this model call?"
+msgstr "{amount} in rekening brengen voor deze modelaanroep?"
+
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
 msgid "Chat"
@@ -1049,6 +1091,7 @@ msgstr "Wissen"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connection-list.tsx
+#: src/dashboard/widget-block.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -1111,6 +1154,7 @@ msgstr "Vastgelegd door een persoon."
 msgid "Compared with version {current}, which runs now."
 msgstr "Vergeleken met versie {current}, die nu draait."
 
+#: src/dashboard/runs-widget.tsx
 #: src/workflows/runs.tsx
 msgid "Completed"
 msgstr "Voltooid"
@@ -1277,6 +1321,10 @@ msgstr "Verwerkersovereenkomst getekend"
 msgid "Data rules"
 msgstr "Gegevensregels"
 
+#: src/dashboard/runs-widget.tsx
+msgid "Day"
+msgstr "Dag"
+
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
 msgid "Day"
@@ -1311,6 +1359,10 @@ msgstr "Beslissing"
 #: src/routes/decisions.$decision.tsx
 msgid "Decision not found"
 msgstr "Beslissing niet gevonden"
+
+#: src/dashboard/runs-widget.tsx
+msgid "Decisions"
+msgstr "Beslissingen"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Default: {fallback}"
@@ -1470,6 +1522,7 @@ msgstr "Bewerken"
 msgid "Email"
 msgstr "E-mail"
 
+#: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -1491,6 +1544,7 @@ msgid "Engine not found"
 msgstr "Engine niet gevonden"
 
 #: src/chat/side-panel.tsx
+#: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
@@ -1558,6 +1612,10 @@ msgstr "Alles wat in Grasp is gedaan, door wie en wanneer, bewaard in een keten 
 msgid "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it, and always have the memory files in mind."
 msgstr "Alles wat Grasp en zijn agents mogen lezen, in collecties: die van jezelf, van je teams en van je organisatie. Agents lezen een document wanneer ze het nodig hebben en houden de geheugenbestanden altijd voor ogen."
 
+#: src/dashboard/widget-block.tsx
+msgid "Everything this widget shows, in full."
+msgstr "Alles wat deze widget toont, volledig."
+
 #: src/chat/chat-list.tsx
 msgid "Expand the chats"
 msgstr "Chats uitklappen"
@@ -1617,6 +1675,7 @@ msgid "Extracting"
 msgstr "Wordt uitgelezen"
 
 #: src/chat/thread.tsx
+#: src/dashboard/runs-widget.tsx
 #: src/knowledge/uploads.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
@@ -1837,6 +1896,10 @@ msgstr "Hash"
 msgid "He doesn't ask about it, and moves on when somebody brings it up."
 msgstr "Hij vraagt er niet naar, en gaat verder als iemand erover begint."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "Held for review"
+msgstr "Vastgehouden voor beoordeling"
+
 #: src/routes/guest.tsx
 msgid "Hi {name}"
 msgstr "Hoi {name}"
@@ -1928,6 +1991,10 @@ msgstr "Interviews"
 msgid "Invited a guest"
 msgstr "Een gast uitgenodigd"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
+msgstr "Het telt als uitgegeven tegen de budgetten: het meeste dat het had kunnen kosten. Dit kan niet ongedaan worden gemaakt."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
 msgstr "Er zijn geen parameters."
@@ -1951,6 +2018,10 @@ msgstr "Ze wordt met niemand gedeeld."
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
 msgstr "Misschien is het hernoemd of verwijderd."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "It no longer counts against the budgets, as if it cost nothing. This can't be undone."
+msgstr "Het telt niet meer mee tegen de budgetten, alsof het niets kostte. Dit kan niet ongedaan worden gemaakt."
 
 #: src/chat/builds.tsx
 msgid "It no longer runs (it could change things)."
@@ -2293,6 +2364,7 @@ msgstr "Native"
 msgid "Needs alongside it"
 msgstr "Heeft daarnaast nodig"
 
+#: src/dashboard/widget-board.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Needs attention"
 msgstr "Vraagt aandacht"
@@ -2311,6 +2383,7 @@ msgstr "Opnieuw aanmelden nodig"
 msgid "Needs someone to sign in again"
 msgstr "Iemand moet opnieuw aanmelden"
 
+#: src/dashboard/widget-board.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Never"
 msgstr "Nooit"
@@ -2350,6 +2423,10 @@ msgstr "Geen aanroep hoeft in de EU te blijven."
 #: src/routes/_shell.engines.index.tsx
 msgid "No engines yet"
 msgstr "Nog geen engines"
+
+#: src/dashboard/widget-board.tsx
+msgid "No engines yet. Engines are made in chat."
+msgstr "Nog geen engines. Engines maak je in de chat."
 
 #: src/activity/audit-log.tsx
 msgid "No events match in the latest stretch of the log."
@@ -2401,6 +2478,10 @@ msgstr "Geen toestemmingen."
 msgid "No runs match these filters."
 msgstr "Geen runs passen bij deze filters."
 
+#: src/dashboard/runs-widget.tsx
+msgid "No runs this week."
+msgstr "Deze week geen runs."
+
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "No runs yet."
 msgstr "Nog geen runs."
@@ -2425,6 +2506,10 @@ msgstr "Geen workflows om te testen."
 #: src/workflows/workflows-table.tsx
 msgid "No workflows yet"
 msgstr "Nog geen workflows"
+
+#: src/dashboard/widget-board.tsx
+msgid "No workflows yet. Describe in chat what should run on its own, and Grasp builds it."
+msgstr "Nog geen workflows. Beschrijf in de chat wat vanzelf moet lopen, en Grasp bouwt het."
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "No works council"
@@ -2519,6 +2604,10 @@ msgstr "Niet aangeboden"
 msgid "Not released"
 msgstr "Niet uitgebracht"
 
+#: src/dashboard/widget-board.tsx
+msgid "Not run yet"
+msgstr "Nog niet gelopen"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Not signed off yet"
 msgstr "Nog niet goedgekeurd"
@@ -2588,6 +2677,10 @@ msgstr "Er draait nog niets: dit zou de eerste actuele versie van de engine zijn
 #: src/routes/_shell.settings.spend.tsx
 msgid "Nothing spent yet."
 msgstr "Nog niets uitgegeven."
+
+#: src/dashboard/signals.tsx
+msgid "Nothing to make better right now."
+msgstr "Er is nu niets te verbeteren."
 
 #: src/routes/_shell.onboarding.index.tsx
 msgctxt "onboarding stage status"
@@ -2702,10 +2795,15 @@ msgstr "Open"
 msgid "Open {name}"
 msgstr "{name} openen"
 
+#: src/dashboard/widget-block.tsx
+msgid "Open {title} in full"
+msgstr "{title} volledig openen"
+
 #: src/chat/chat-dock.tsx
 msgid "Open at the side"
 msgstr "Aan de zijkant openen"
 
+#: src/dashboard/widget-board.tsx
 #: src/routes/_shell.engines.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Open Chat"
@@ -2722,6 +2820,10 @@ msgstr "Openen in Chat"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open it anyway"
 msgstr "Toch openen"
+
+#: src/dashboard/runs-widget.tsx
+msgid "Open now"
+msgstr "Nu open"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open since Grasp's go on {since}."
@@ -2918,6 +3020,10 @@ msgstr "Pakketten voorgesteld"
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Geleverd door Grasp, niet opnieuw geïnstalleerd: {provided}"
 
+#: src/dashboard/widget-board.tsx
+msgid "Ran"
+msgstr "Gelopen"
+
 #: src/activity/audit-words.ts
 msgid "Ran a step of a workflow"
 msgstr "Een stap van een workflow uitgevoerd"
@@ -3043,6 +3149,10 @@ msgstr "De pakketten voor {engine} afwijzen"
 msgid "Reject this request?"
 msgstr "Dit verzoek afwijzen?"
 
+#: src/dashboard/runs-widget.tsx
+msgid "Rejected"
+msgstr "Afgewezen"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Rejected by {name} on {date}."
 msgstr "Afgewezen door {name} op {date}."
@@ -3051,6 +3161,14 @@ msgstr "Afgewezen door {name} op {date}."
 #: src/dashboard/pile-cards.tsx
 msgid "Rejected: {who}."
 msgstr "Afgewezen: {who}."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Release"
+msgstr "Vrijgeven"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Release the {amount} held for this model call?"
+msgstr "De {amount} vrijgeven die voor deze modelaanroep wordt vastgehouden?"
 
 #: src/screens/screen-frame.tsx
 msgid "Reload"
@@ -3206,6 +3324,10 @@ msgstr "Run"
 msgid "Running"
 msgstr "Draait"
 
+#: src/dashboard/runs-widget.tsx
+msgid "Running or cancelled"
+msgstr "Loopt of geannuleerd"
+
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "Runs"
 msgstr "Runs"
@@ -3224,13 +3346,26 @@ msgstr "Draait {how} {count, plural, one {# keer minder} other {# keer minder}} 
 msgid "Runs {how} {count, plural, one {# more time} other {# more times}} ({now} now)"
 msgstr "Draait {how} {count, plural, one {# keer vaker} other {# keer vaker}} (nu {now})"
 
+#: src/dashboard/runs-widget.tsx
+msgid "Runs by the day they started"
+msgstr "Runs per dag waarop ze startten"
+
 #: src/chat/builds-state.ts
 msgid "Runs now"
 msgstr "Draait nu"
 
+#: src/dashboard/runs-widget.tsx
+msgid "Runs over the last {fullDays} days, by the day they started and how they stand now."
+msgstr "Runs van de afgelopen {fullDays} dagen, per dag waarop ze startten en hoe ze er nu voor staan."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 msgstr "Voert de eigen testcases van de workflow uit met de waarden die nu zijn ingesteld. Er wordt niets gewijzigd: wat hij zou wijzigen, wordt in plaats daarvan opgesomd."
+
+#: src/dashboard/runs-widget.tsx
+#: src/dashboard/widget-board.tsx
+msgid "Runs this week"
+msgstr "Runs deze week"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Said yes"
@@ -3454,6 +3589,10 @@ msgstr "Inloggen is niet gelukt. Probeer het opnieuw of vraag een beheerder."
 msgid "Sign-in timed out or was started elsewhere. Try again."
 msgstr "Het inloggen is verlopen of elders gestart. Probeer het opnieuw."
 
+#: src/dashboard/signals.tsx
+msgid "Signals by kind"
+msgstr "Signalen per soort"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgctxt "state of a data processing agreement"
 msgid "Signed"
@@ -3516,6 +3655,10 @@ msgstr "Fasen"
 #: src/knowledge/document.tsx
 msgid "Start again from version {newerVersion}"
 msgstr "Opnieuw beginnen vanaf versie {newerVersion}"
+
+#: src/dashboard/runs-widget.tsx
+msgid "Started"
+msgstr "Gestart"
 
 #: src/activity/audit-words.ts
 msgid "Started a chat"
@@ -4040,6 +4183,10 @@ msgstr "Via Composio, dat de toegang in zijn eigen cloud bewaart. Je workflows k
 msgid "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
 msgstr "Via de eigen connector van Grasp, die de toegang in je omgeving bewaart. Je workflows kunnen het gebruiken zodra het gekoppeld is, alleen voor wat je toestaat."
 
+#: src/dashboard/runs-widget.tsx
+msgid "Timed out"
+msgstr "Verlopen"
+
 #: src/activity/audit-log.tsx
 msgid "To"
 msgstr "Tot"
@@ -4212,6 +4359,11 @@ msgstr "Wacht op jou"
 #: src/chat/held-writes.tsx
 msgid "Waiting for you: {title}"
 msgstr "Wacht op jou: {title}"
+
+#: src/dashboard/runs-widget.tsx
+#: src/dashboard/widget-board.tsx
+msgid "Waiting on a person"
+msgstr "Wacht op een persoon"
 
 #: src/dashboard/pile-card.tsx
 msgid "Waiting on you"
@@ -4399,8 +4551,8 @@ msgid "Worked for {time}"
 msgstr "Heeft {time} gewerkt"
 
 #: src/dashboard/signals.tsx
-msgid "Worked out daily, last on {date}"
-msgstr "Dagelijks bepaald, laatst op {date}"
+msgid "Worked out daily, last on {date}."
+msgstr "Dagelijks bepaald, laatst op {date}."
 
 #: src/activity/audit-words.ts
 msgid "Worked out how knowledge is used"
@@ -4410,6 +4562,7 @@ msgstr "Bepaald hoe kennis wordt gebruikt"
 msgid "Worked out what could be improved"
 msgstr "Bepaald wat er beter kan"
 
+#: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
@@ -4429,6 +4582,7 @@ msgid "Workflow tests fail:"
 msgstr "Workflowtests mislukken:"
 
 #: src/chat/builds.tsx
+#: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx

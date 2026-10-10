@@ -112,7 +112,6 @@ import {
   waitTimedOut,
 } from "./durations.ts";
 import { errorRecord, isNonRetryable, namedError, rebuild } from "./errors.ts";
-import { recordStepCompleted } from "./history.ts";
 import {
   assertEventType,
   assertStepName,
@@ -183,6 +182,11 @@ export interface ActivationLimits {
    * start (config.ts): an attempt is claimed only if its deadline fits.
    */
   readonly handlerBudgetMs: number;
+  /**
+   * When the alarm handler running the activation started: its wall time
+   * counts from there, whatever ran in it before the activation (run.ts).
+   */
+  readonly startedAt: number;
   /** The most bytes one step's stream result may hold. */
   readonly maxStreamBytes: number;
   /** The most bytes all of the run's stream results may hold. */
@@ -639,7 +643,6 @@ export class Activation {
   /** Whether a check for quiet waits for its macrotask. */
   #quietCheckDue = false;
   /** When this activation's alarm handler started: its wall time's start. */
-  readonly #startedAt = Date.now();
   /** Whether this activation has claimed an attempt yet. */
   #claimed = false;
   /** Whether this activation rolls the run back rather than runs it. */
@@ -959,12 +962,7 @@ export class Activation {
     }
     assertTime(retryAt);
     discardChunks(sql, claim.ordinal, claim.attempt);
-    sql.exec(
-      "UPDATE steps SET state = ?, value = NULL, error = ? WHERE ordinal = ?",
-      retryAt === null ? "failed" : "retrying",
-      retryAt === null ? failure.error : null,
-      claim.ordinal
-    );
+    // The attempt's end first, then its step's (history.ts).
     sql.exec(
       "UPDATE attempts SET ended_at = ?, ended = ?, error = ?, retry_at = ? WHERE ordinal = ? AND attempt = ?",
       now,
@@ -973,6 +971,12 @@ export class Activation {
       retryAt,
       claim.ordinal,
       claim.attempt
+    );
+    sql.exec(
+      "UPDATE steps SET state = ?, value = NULL, error = ? WHERE ordinal = ?",
+      retryAt === null ? "failed" : "retrying",
+      retryAt === null ? failure.error : null,
+      claim.ordinal
     );
     return landing;
   }
@@ -1173,7 +1177,8 @@ export class Activation {
   #fits(now: number, config: StepConfig): boolean {
     return (
       !this.#claimed ||
-      now + config.timeoutMs <= this.#startedAt + this.#limits.handlerBudgetMs
+      now + config.timeoutMs <=
+        this.#limits.startedAt + this.#limits.handlerBudgetMs
     );
   }
 
@@ -1247,29 +1252,19 @@ export class Activation {
         ) {
           return "incomplete";
         }
-        sql.exec(
-          "UPDATE steps SET state = 'succeeded', value = ?, error = NULL WHERE ordinal = ?",
-          outcome.value,
-          claim.ordinal
-        );
+        // The attempt's end first, then its step's: observers see them in
+        // that order (history.ts).
         sql.exec(
           "UPDATE attempts SET ended_at = ?, ended = 'succeeded' WHERE ordinal = ? AND attempt = ?",
           now,
           claim.ordinal,
           claim.attempt
         );
-        // A rollback's completion isn't a step's: observers see steps.
-        if (identity.type !== "rollback") {
-          recordStepCompleted(sql, {
-            ordinal: claim.ordinal,
-            at: now,
-            sensitive: config.sensitive,
-            result:
-              outcome.stream === undefined
-                ? { kind: "value", value: outcome.value }
-                : { kind: "stream", result: outcome.stream },
-          });
-        }
+        sql.exec(
+          "UPDATE steps SET state = 'succeeded', value = ?, error = NULL WHERE ordinal = ?",
+          outcome.value,
+          claim.ordinal
+        );
         return { ok: true, value: outcome.value, ordinal: claim.ordinal };
       }
     );
@@ -1298,16 +1293,16 @@ export class Activation {
           detail: fatal.detail,
         });
         sql.exec(
-          "UPDATE steps SET state = 'fatal', value = NULL, error = ? WHERE ordinal = ?",
-          error,
-          claim.ordinal
-        );
-        sql.exec(
           "UPDATE attempts SET ended_at = ?, ended = 'failed', error = ?, retry_at = NULL WHERE ordinal = ? AND attempt = ?",
           now,
           error,
           claim.ordinal,
           claim.attempt
+        );
+        sql.exec(
+          "UPDATE steps SET state = 'fatal', value = NULL, error = ? WHERE ordinal = ?",
+          error,
+          claim.ordinal
         );
         return true;
       })
