@@ -56,6 +56,33 @@ const outcome = async (promise: Promise<unknown>): Promise<string> => {
 
 const connect = exports.default;
 
+/** How long a test waits on what another request does before it fails. */
+const waitMs = 10_000;
+
+/**
+ * Polls `check`, in this request, until it returns something, or throws
+ * after {@link waitMs}: what another request does is seen by the state it
+ * leaves, never by a promise it settles, which workerd doesn't carry
+ * between requests.
+ */
+const until = async <T>(
+  what: string,
+  check: () => T | undefined
+): Promise<T> => {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    const value = check();
+    if (value !== undefined) {
+      return value;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out waiting for ${what}`);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- polling, one look at a time
+    await scheduler.wait(10);
+  }
+};
+
 /**
  * An answer streamed in `count` chunks of `size` bytes of `fill`, made
  * only as they are read: how many were pulled, and whether the reader
@@ -657,22 +684,30 @@ describe("reading large metadata", () => {
     await registry.publish(leftPad);
     await registry.publish({ ...leftPad, name: "right-pad" });
     const declared = registryLimits.metadataBytes;
-    const { promise: held, resolve: holding } =
-      Promise.withResolvers<boolean>();
-    let fail: ((error: Error) => void) | undefined;
     // One answer that declares 20 MiB and holds: its read keeps its share.
+    // It ends on its own, in its own request, once the test lets it. It
+    // used to signal the test with a promise and be ended by the test:
+    // one request settling another's promise or stream, which workerd
+    // doesn't carry. Under load workerd took a request for hung and
+    // cancelled it, and the test's next step never settled.
+    const first = { reading: false, letGo: false };
     registry.override(
       "/left-pad",
       () =>
         new Response(
-          new ReadableStream<Uint8Array>({
-            start: (controller) => {
-              fail = (error) => {
-                controller.error(error);
-              };
-              holding(true);
+          new ReadableStream<Uint8Array>(
+            {
+              pull: async (controller) => {
+                // Pulled once the read reserved its share and reads.
+                first.reading = true;
+                await until("the test to let the first answer go", () =>
+                  first.letGo ? true : undefined
+                ).catch(() => {});
+                controller.error(new TypeError("Network connection lost."));
+              },
             },
-          }),
+            { highWaterMark: 0 }
+          ),
           { headers: { "content-length": String(declared) } }
         )
     );
@@ -683,11 +718,13 @@ describe("reading large metadata", () => {
           headers: { "content-length": String(declared) },
         })
     );
-    const first = outcome(connect.npmMetadata("left-pad"));
-    await held;
+    const firstEnding = outcome(connect.npmMetadata("left-pad"));
+    await until("the first answer to be read", () =>
+      first.reading ? true : undefined
+    );
     const second = await outcome(connect.npmMetadata("right-pad"));
-    fail?.(new TypeError("Network connection lost."));
-    const firstEnded = await first;
+    first.letGo = true;
+    const firstEnded = await firstEnding;
     // Given back however the first ended: the next read goes ahead.
     registry.reset();
     await registry.publish({ ...leftPad, name: "right-pad" });
@@ -731,12 +768,9 @@ describe("refusing metadata as busy", () => {
       outcome(connect.npmMetadata("held-one")),
       outcome(connect.npmMetadata("held-two")),
     ];
-    // The count moves as connect asks the registry, not in this loop.
-    // oxlint-disable-next-line no-unmodified-loop-condition
-    while (holding < 2) {
-      // oxlint-disable-next-line no-await-in-loop -- until both are asked
-      await scheduler.wait(10);
-    }
+    await until("both held answers to be asked for", () =>
+      holding === 2 ? true : undefined
+    );
     // One that says nothing of its size, refused once it would take its
     // first buffer; and one that declares its size, refused at once.
     const unsized = streamed(4, 1024);

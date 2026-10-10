@@ -841,24 +841,30 @@ describe("the board page", { timeout: 60_000 }, () => {
     const { admin, app, map } = await setUp();
     const folder = `many-${unique()}`;
     // More designed workflows than a page of records, each drawn first.
-    const designed = await Promise.all(
-      Array.from({ length: 25 }, async (_, index) => {
-        const drawn = await saveWorkflow(map, admin, {
-          path: `${folder}/${index}.md`,
-          ifVersion: 0,
-          record: {
-            type: "workflow",
-            title: `Workflow ${index}`,
-            state: "drawn",
-            steps: [
-              {
-                name: "Do it",
-                numbers: { frequency: estimated(6), minutes: estimated(10) },
-              },
-            ],
-          },
-        });
-        return await saveWorkflow(map, admin, {
+    // Saved one after another: an App takes one call at a time, and a
+    // call's deadline runs from when it came, so 25 sent at once have the
+    // last wait out the 24 before it, past its deadline under load.
+    const designed: z.infer<typeof savedSchema>[] = [];
+    for (let index = 0; index < 25; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one call at a time
+      const drawn = await saveWorkflow(map, admin, {
+        path: `${folder}/${index}.md`,
+        ifVersion: 0,
+        record: {
+          type: "workflow",
+          title: `Workflow ${index}`,
+          state: "drawn",
+          steps: [
+            {
+              name: "Do it",
+              numbers: { frequency: estimated(6), minutes: estimated(10) },
+            },
+          ],
+        },
+      });
+      designed.push(
+        // oxlint-disable-next-line no-await-in-loop -- one call at a time
+        await saveWorkflow(map, admin, {
           documentId: drawn.id,
           path: drawn.path,
           ifVersion: 1,
@@ -867,9 +873,9 @@ describe("the board page", { timeout: 60_000 }, () => {
             title: `Workflow ${index}`,
             state: "designed",
           },
-        });
-      })
-    );
+        })
+      );
+    }
     let taken: z.infer<typeof savedSchema> | undefined;
     const events = await auditedDuring(async () => {
       taken = okOf(
