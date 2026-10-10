@@ -279,12 +279,20 @@ export const settled = async (
   held: Claim,
   error: unknown
 ): Promise<DocumentSummary> => {
-  if (isExpectedError(error)) {
+  // Refused before its batch, or by it for a reason of its own: the
+  // caller may not even be allowed any more, so no outcome is read. A
+  // conflict is the batch's, after every check: another attempt of the
+  // same input may have committed first.
+  const conflicted = knowledgeErrors.codeOf(error) === "knowledge.conflict";
+  if (isExpectedError(error) && !conflicted) {
     throw error;
   }
   const receipt = await receiptOf(env, held.id);
   if (receipt !== undefined && receipt.outcome !== null) {
     return summaryOf(receipt.outcome);
+  }
+  if (conflicted) {
+    throw error;
   }
   if (receipt !== undefined && receipt.fence !== held.fence) {
     throw submissionErrors.create("submission.superseded");

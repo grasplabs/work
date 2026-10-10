@@ -4,6 +4,7 @@ import {
   permissionIdSchema,
 } from "@grasp-os/shared/ids";
 import type { AppId, CollectionId, PermissionId } from "@grasp-os/shared/ids";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -402,6 +403,46 @@ describe("record saves under an idempotency key", { timeout: 60_000 }, () => {
       retried: 1,
       versions: 1,
     });
+  });
+
+  it("answer a stale attempt with the save a newer one of the same input committed first", async () => {
+    const setup = await setUp();
+    const path = `notes/${unique()}.md`;
+    const key = `overtaken-${unique()}`;
+    let newer: unknown;
+    const stale = await directSave(setup, docSave(path, "Plan"), {
+      key,
+      // A newer attempt of the same save claims and commits just before
+      // this one's batch.
+      last: async () => {
+        newer = await directSave(setup, docSave(path, "Plan"), { key });
+      },
+    });
+    expect({
+      stale,
+      versions: await versionsAt(setup.collectionId, path),
+    }).toStrictEqual({ stale: newer, versions: 1 });
+  });
+
+  it("answer nothing to an attempt refused at its last check, though its save was made meanwhile", async () => {
+    const setup = await setUp();
+    const path = `notes/${unique()}.md`;
+    const key = `refused-${unique()}`;
+    const refused = await outcome(
+      directSave(setup, docSave(path, "Plan"), {
+        key,
+        // Another attempt makes the save, then this call loses what let
+        // it write.
+        last: async () => {
+          await directSave(setup, docSave(path, "Plan"), { key });
+          throw permissionErrors.create("permission.denied");
+        },
+      })
+    );
+    expect({
+      refused,
+      versions: await versionsAt(setup.collectionId, path),
+    }).toStrictEqual({ refused: "permission.denied", versions: 1 });
   });
 
   it("don't commit once the call's deadline passed, by the database's clock, though the last check before the batch said yes", async () => {
