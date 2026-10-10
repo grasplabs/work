@@ -71,6 +71,13 @@
       "when": 1791631120790,
       "tag": "0009_submission_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791631785284,
+      "tag": "0010_submission_outbox",
+      "breakpoints": true
     }
   ]
 }

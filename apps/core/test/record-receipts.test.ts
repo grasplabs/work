@@ -7,12 +7,22 @@ import type { AppId, CollectionId, PermissionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import type { SubmissionIntent } from "@grasp-os/shared/submissions";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { callApp } from "../src/app.ts";
 import type { AppCallerInput } from "../src/app.ts";
+import {
+  defaultMaxAttempts as maxAttempts,
+  drainSubmissionOutbox,
+} from "../src/knowledge/outbox.ts";
+import type {
+  OutboxConsumer,
+  OutboxConsumers,
+  OutboxEntry,
+} from "../src/knowledge/outbox.ts";
 import {
   claim,
   inputHashOf,
@@ -169,11 +179,15 @@ const directSave = async (
     deadline = Date.now() + 60_000,
     db = env.KNOWLEDGE,
     last,
+    intents = [],
+    consumers,
   }: {
     key: string;
     deadline?: number;
     db?: D1Database;
     last?: () => Promise<void>;
+    intents?: SubmissionIntent[];
+    consumers?: OutboxConsumers;
   }
 ) =>
   await saveRecordAsDelegate(
@@ -190,8 +204,8 @@ const directSave = async (
     input,
     { app, method: "save" },
     last,
-    (inputHash) =>
-      submissionOf(
+    (inputHash) => ({
+      ...submissionOf(
         admin,
         app,
         collectionId,
@@ -199,7 +213,10 @@ const directSave = async (
         key,
         inputHash,
         deadline
-      )
+      ),
+      intents,
+      ...(consumers === undefined ? {} : { consumers }),
+    })
   );
 
 /**
@@ -281,6 +298,51 @@ const losingReplies = (real: D1Database = env.KNOWLEDGE): D1Database =>
       throw new Error("Network connection lost.");
     },
   });
+
+/** The outbox entries whose intent's data has `marker`, oldest first. */
+const entriesOf = async (marker: string) => {
+  const { results } = await env.KNOWLEDGE.prepare(
+    "SELECT id, kind, intent, attempts, settled_at AS settledAt, undeliverable FROM submission_outbox WHERE json_extract(intent, '$.data.marker') = ? ORDER BY rowid"
+  )
+    .bind(marker)
+    .all<{
+      id: string;
+      kind: string;
+      intent: string;
+      attempts: number;
+      settledAt: number | null;
+      undeliverable: string | null;
+    }>();
+  return results.map(
+    ({ id, kind, intent, attempts, settledAt, undeliverable }) => ({
+      id,
+      kind,
+      intent: z.json().parse(JSON.parse(intent)),
+      attempts,
+      settled: settledAt !== null,
+      undeliverable,
+    })
+  );
+};
+
+/** Whether `entry` is one of `marker`'s (`entriesOf`). */
+const isOf = (entry: OutboxEntry, marker: string): boolean =>
+  entry.intent.kind !== "record.changed" &&
+  z.object({ marker: z.string() }).safeParse(entry.intent.data).data?.marker ===
+    marker;
+
+/**
+ * Consumers of workflow notifications and starts: `of` takes `marker`'s
+ * entries, and any other entry is delivered at once.
+ */
+const consumersFor = (
+  marker: string,
+  of: OutboxConsumer = async () => await Promise.resolve("delivered")
+): OutboxConsumers => {
+  const consumer: OutboxConsumer = async (entry) =>
+    isOf(entry, marker) ? await of(entry) : "delivered";
+  return { "workflow.notify": consumer, "workflow.start": consumer };
+};
 
 const savedSchema = z.object({
   ok: z.object({ id: z.string(), currentVersion: z.number() }),
@@ -982,5 +1044,527 @@ describe("record save receipts", { timeout: 60_000 }, () => {
       late,
       versions: await versionsAt(collectionId, path),
     }).toStrictEqual({ late: "ok", versions: 1 });
+  });
+});
+
+describe("record save outboxes", { timeout: 60_000 }, () => {
+  it("are committed with the change and its receipt, once, with only what the save staged", async () => {
+    const setup = await setUp();
+    const path = `notes/${unique()}.md`;
+    const key = `outbox-${unique()}`;
+    const marker = unique();
+    const consumers = consumersFor(marker);
+    const notify: SubmissionIntent = {
+      kind: "workflow.notify",
+      data: { marker, runId: "run-1", event: "noteSaved" },
+    };
+    const start: SubmissionIntent = {
+      kind: "workflow.start",
+      data: { marker, workflow: "review" },
+    };
+    const save = async (last?: () => Promise<void>) =>
+      await directSave(setup, docSave(path, "Plan"), {
+        key,
+        intents: [notify, start],
+        consumers,
+        ...(last === undefined ? {} : { last }),
+      });
+    // A newer attempt claims and commits just before this one's batch.
+    const stale = await outcome(
+      save(async () => {
+        await save();
+      })
+    );
+    const replayed = await outcome(save());
+    const unchanged = await directSave(setup, docSave(path, "Plan", 1), {
+      key: unique(),
+      consumers,
+    });
+    const entries = await entriesOf(marker);
+    expect({
+      stale,
+      replayed,
+      unchanged: unchanged.currentVersion,
+      kinds: entries.map(({ kind }) => kind),
+      intents: entries.map(({ intent }) => intent),
+      // One receipt's, numbered in order.
+      ids: entries.map(({ id }) => id.replace(/^[0-9a-f]{64}:/u, "")),
+      versions: await versionsAt(setup.collectionId, path),
+    }).toStrictEqual({
+      stale: "ok",
+      replayed: "ok",
+      unchanged: 1,
+      kinds: ["workflow.notify", "workflow.start"],
+      intents: [notify, start],
+      ids: ["0", "1"],
+      versions: 1,
+    });
+  });
+
+  it("answer a committed save's retry with its outcome, though its intent's consumer has gone since", async () => {
+    const setup = await setUp();
+    const path = `notes/${unique()}.md`;
+    const key = `consumer-gone-${unique()}`;
+    const marker = unique();
+    const intents: SubmissionIntent[] = [
+      { kind: "workflow.notify", data: { marker } },
+    ];
+    const saved = await directSave(setup, docSave(path, "Plan"), {
+      key,
+      intents,
+      consumers: consumersFor(marker),
+    });
+    // The deployment's consumers now: none.
+    const retried = await outcome(
+      directSave(setup, docSave(path, "Plan"), { key, intents })
+    );
+    const again = await directSave(setup, docSave(path, "Plan"), {
+      key,
+      intents,
+    });
+    const entries = await entriesOf(marker);
+    expect({
+      retried,
+      again,
+      versions: await versionsAt(setup.collectionId, path),
+      entries: entries.length,
+    }).toStrictEqual({ retried: "ok", again: saved, versions: 1, entries: 1 });
+  });
+
+  it("refuse an intent nothing takes before anything is saved", async () => {
+    const setup = await setUp();
+    const path = `notes/${unique()}.md`;
+    const marker = unique();
+    const refused = await outcome(
+      directSave(setup, docSave(path, "Plan"), {
+        key: unique(),
+        intents: [{ kind: "workflow.notify", data: { marker } }],
+      })
+    );
+    const partly = await outcome(
+      directSave(setup, docSave(path, "Plan"), {
+        key: unique(),
+        intents: [{ kind: "workflow.start", data: { marker } }],
+        consumers: {
+          "workflow.notify": consumersFor(marker)["workflow.notify"],
+        },
+      })
+    );
+    expect({
+      refused,
+      partly,
+      versions: await versionsAt(setup.collectionId, path),
+      entries: await entriesOf(marker),
+    }).toStrictEqual({
+      refused: "submission.intent_unsupported",
+      partly: "submission.intent_unsupported",
+      versions: 0,
+      entries: [],
+    });
+  });
+
+  it("are handed over until taken, under the same ID, without making the change again", async () => {
+    const setup = await setUp();
+    const path = `notes/${unique()}.md`;
+    const marker = unique();
+    const handed: OutboxEntry[] = [];
+    let failing = true;
+    const consumers = consumersFor(marker, async (entry) => {
+      handed.push(entry);
+      if (entry.intent.kind === "workflow.start") {
+        return await Promise.resolve({ undeliverable: "workflow.not_found" });
+      }
+      if (failing) {
+        throw new Error("The consumer is down.");
+      }
+      return "delivered";
+    });
+    await directSave(setup, docSave(path, "Plan"), {
+      key: unique(),
+      intents: [
+        { kind: "workflow.notify", data: { marker } },
+        { kind: "workflow.start", data: { marker } },
+      ],
+      consumers,
+    });
+    await drainSubmissionOutbox(env, consumers);
+    const afterFailure = await entriesOf(marker);
+    failing = false;
+    // Not before its backoff, then once it is due.
+    await drainSubmissionOutbox(env, consumers);
+    const early = await entriesOf(marker);
+    await drainSubmissionOutbox(env, consumers, {
+      now: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    const settledEntries = await entriesOf(marker);
+    const notified = handed.filter(
+      ({ intent }) => intent.kind === "workflow.notify"
+    );
+    expect({
+      afterFailure: afterFailure.map(({ settled, attempts }) => ({
+        settled,
+        attempts,
+      })),
+      early: early.map(({ settled }) => settled),
+      handed: notified.map(({ id, attempts }) => ({ id, attempts })),
+      settled: settledEntries.map(({ settled, undeliverable }) => ({
+        settled,
+        undeliverable,
+      })),
+      versions: await versionsAt(setup.collectionId, path),
+    }).toStrictEqual({
+      afterFailure: [
+        { settled: false, attempts: 1 },
+        { settled: true, attempts: 0 },
+      ],
+      early: [false, true],
+      handed: [
+        { id: afterFailure[0]?.id, attempts: 0 },
+        { id: afterFailure[0]?.id, attempts: 1 },
+      ],
+      settled: [
+        { settled: true, undeliverable: null },
+        { settled: true, undeliverable: "workflow.not_found" },
+      ],
+      versions: 1,
+    });
+  });
+
+  it("are handed over once by drains running at once", async () => {
+    const setup = await setUp();
+    const marker = unique();
+    const handed: string[] = [];
+    const consumers = consumersFor(marker, async (entry) => {
+      handed.push(entry.id);
+      await scheduler.wait(200);
+      return "delivered";
+    });
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key: unique(),
+      intents: [
+        { kind: "workflow.notify", data: { marker, n: 1 } },
+        { kind: "workflow.notify", data: { marker, n: 2 } },
+      ],
+      consumers,
+    });
+    await Promise.all([
+      drainSubmissionOutbox(env, consumers),
+      drainSubmissionOutbox(env, consumers),
+      drainSubmissionOutbox(env, consumers),
+    ]);
+    const entries = await entriesOf(marker);
+    expect({
+      handed: handed.toSorted(),
+      settled: entries.map(({ settled }) => settled),
+    }).toStrictEqual({
+      handed: entries.map(({ id }) => id).toSorted(),
+      settled: [true, true],
+    });
+  });
+
+  it("are all handed over by one drain, page after page", async () => {
+    const setup = await setUp();
+    const marker = unique();
+    const consumers = consumersFor(marker);
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key: unique(),
+      intents: Array.from({ length: 120 }, (_, n) => ({
+        kind: "workflow.notify" as const,
+        data: { marker, n },
+      })),
+      consumers,
+    });
+    await drainSubmissionOutbox(env, consumers);
+    const entries = await entriesOf(marker);
+    expect({
+      count: entries.length,
+      unsettled: entries.filter(({ settled }) => !settled).length,
+    }).toStrictEqual({ count: 120, unsettled: 0 });
+  });
+
+  it("lease each entry when its turn comes, so a drain started meanwhile hands none over again", async () => {
+    const setup = await setUp();
+    const marker = unique();
+    const handed: string[] = [];
+    // Slower than a hand-over may take: each one fails, and is put back.
+    const consumers = consumersFor(marker, async (entry) => {
+      handed.push(entry.id);
+      await scheduler.wait(30);
+      return "delivered";
+    });
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key: unique(),
+      intents: Array.from({ length: 12 }, (_, n) => ({
+        kind: "workflow.notify" as const,
+        data: { marker, n },
+      })),
+      consumers,
+    });
+    const first = drainSubmissionOutbox(env, consumers, { timeoutMs: 20 });
+    await scheduler.wait(150);
+    await drainSubmissionOutbox(env, consumers, { timeoutMs: 20 });
+    await first;
+    const entries = await entriesOf(marker);
+    const ids = entries.map(({ id }) => id);
+    expect(handed.toSorted()).toStrictEqual(ids.toSorted());
+  });
+
+  it("hand over one entry with no budget left, and stop", async () => {
+    const setup = await setUp();
+    const marker = unique();
+    let calls = 0;
+    const consumers = consumersFor(marker);
+    const counting: OutboxConsumers = {
+      "workflow.notify": async (entry) => {
+        calls += 1;
+        return await (consumers["workflow.notify"]?.(entry) ?? "delivered");
+      },
+    };
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key: unique(),
+      intents: Array.from({ length: 3 }, (_, n) => ({
+        kind: "workflow.notify" as const,
+        data: { marker, n },
+      })),
+      consumers,
+    });
+    await drainSubmissionOutbox(env, counting, { budgetMs: 0 });
+    const entries = await entriesOf(marker);
+    expect({
+      calls,
+      unsettled: entries.filter(({ settled }) => !settled).length,
+    }).toStrictEqual({ calls: 1, unsettled: 2 });
+  });
+
+  it("give up on a consumer that hangs or keeps failing only after their attempts, settling the entry", async () => {
+    const setup = await setUp();
+    const marker = unique();
+    // Never settles.
+    const hanging = Promise.withResolvers<never>().promise;
+    const consumers = consumersFor(marker, async (entry) => {
+      if (
+        z
+          .object({ hang: z.literal(true) })
+          .safeParse(
+            entry.intent.kind === "record.changed" ? null : entry.intent.data
+          ).success
+      ) {
+        return await hanging;
+      }
+      await Promise.resolve();
+      throw new Error("The consumer is down.");
+    });
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key: unique(),
+      intents: [
+        { kind: "workflow.notify", data: { marker, hang: true } },
+        { kind: "workflow.notify", data: { marker, hang: false } },
+      ],
+      consumers,
+    });
+    await drainSubmissionOutbox(env, consumers, { timeoutMs: 100 });
+    const afterOne = await entriesOf(marker);
+    // Each later attempt once its backoff is over.
+    for (let attempt = 1; attempt < maxAttempts + 2; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one attempt after the other
+      await drainSubmissionOutbox(env, consumers, {
+        now: new Date(Date.now() + attempt * 2 * 60 * 60 * 1000),
+        timeoutMs: 100,
+      });
+    }
+    const finalEntries = await entriesOf(marker);
+    expect({
+      afterOne: afterOne.map(({ settled, attempts }) => ({
+        settled,
+        attempts,
+      })),
+      after: finalEntries.map(({ settled, attempts, undeliverable }) => ({
+        settled,
+        attempts,
+        undeliverable,
+      })),
+    }).toStrictEqual({
+      afterOne: [
+        { settled: false, attempts: 1 },
+        { settled: false, attempts: 1 },
+      ],
+      after: [
+        {
+          settled: true,
+          attempts: maxAttempts,
+          undeliverable: "outbox.attempts_exhausted",
+        },
+        {
+          settled: true,
+          attempts: maxAttempts,
+          undeliverable: "outbox.attempts_exhausted",
+        },
+      ],
+    });
+  });
+
+  it("keep their receipt and entries while an entry is owed, also against a commit landing under the sweep", async () => {
+    const setup = await setUp();
+    const { admin, app, collectionId, permissionId } = setup;
+    const marker = unique();
+    const path = `notes/${unique()}.md`;
+    const key = `owed-${unique()}`;
+    const input = docSave(path, "Plan");
+    const intents: SubmissionIntent[] = [
+      { kind: "workflow.notify", data: { marker } },
+    ];
+    // Consumers that never take it, for now.
+    const down = consumersFor(marker, async () => {
+      await Promise.resolve();
+      throw new Error("The consumer is down.");
+    });
+    const saved = await directSave(setup, input, {
+      key,
+      intents,
+      consumers: down,
+    });
+    const late = new Date(Date.now() + 31 * dayMs);
+    await drainSubmissionOutbox(env, down);
+    await sweepReceipts(env, late);
+    const owed = await directSave(setup, input, {
+      key,
+      intents,
+      consumers: down,
+    });
+    const owedEntries = await entriesOf(marker);
+    // A save claimed long ago commits, with an intent, under the sweep.
+    const racingPath = `notes/${unique()}.md`;
+    const racingKey = `racing-${unique()}`;
+    const racingInput = docSave(racingPath, "Plan");
+    const racingHash = await inputHashOf(racingInput);
+    await claim(
+      env,
+      submissionOf(
+        admin,
+        app,
+        collectionId,
+        permissionId,
+        racingKey,
+        racingHash,
+        Date.now() + 60_000
+      ),
+      racingHash,
+      new Date(Date.now() - 31 * dayMs)
+    );
+    let racing: unknown;
+    await sweepReceipts(
+      {
+        ...env,
+        KNOWLEDGE: beforeBatch(async () => {
+          if (racing === undefined) {
+            racing = await directSave(setup, racingInput, {
+              key: racingKey,
+              intents: [
+                { kind: "workflow.notify", data: { marker, racing: true } },
+              ],
+              consumers: down,
+            });
+          }
+        }),
+      },
+      new Date()
+    );
+    const racingAgain = await directSave(setup, racingInput, {
+      key: racingKey,
+      intents: [{ kind: "workflow.notify", data: { marker, racing: true } }],
+      consumers: down,
+    });
+    const afterRace = await entriesOf(marker);
+    // Taken at last: then it expires.
+    await drainSubmissionOutbox(env, consumersFor(marker), {
+      now: new Date(late.getTime() + 2 * 60 * 60 * 1000),
+    });
+    await sweepReceipts(env, new Date(late.getTime() + 3 * 60 * 60 * 1000));
+    expect({
+      owed,
+      owedEntries: owedEntries.map(({ settled }) => settled),
+      racingAgain,
+      afterRace: afterRace.map(({ settled }) => settled),
+      expired: await outcome(
+        directSave(setup, input, { key, intents, consumers: down })
+      ),
+    }).toStrictEqual({
+      owed: saved,
+      owedEntries: [false],
+      racingAgain: racing,
+      afterRace: [false, false],
+      expired: "submission.expired",
+    });
+  });
+
+  it("let only the drain holding an entry's lease settle it", async () => {
+    const setup = await setUp();
+    const marker = unique();
+    const held = Promise.withResolvers<null>();
+    const slow = consumersFor(marker, async () => {
+      await held.promise;
+      return "delivered";
+    });
+    const failing = consumersFor(marker, async () => {
+      await Promise.resolve();
+      throw new Error("The consumer is down.");
+    });
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key: unique(),
+      intents: [{ kind: "workflow.notify", data: { marker } }],
+      consumers: slow,
+    });
+    // The first drain takes the entry and is slow; by the time it is done
+    // another, an hour on, found the lease run out and took it over.
+    const first = drainSubmissionOutbox(env, slow, { timeoutMs: 5000 });
+    await scheduler.wait(100);
+    await drainSubmissionOutbox(env, failing, {
+      now: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    held.resolve(null);
+    await first;
+    const entries = await entriesOf(marker);
+    expect(
+      entries.map(({ settled, attempts }) => ({ settled, attempts }))
+    ).toStrictEqual([{ settled: false, attempts: 1 }]);
+  });
+
+  it("don't stall behind receipts whose entries are owed: the others due expire in the same sweep", async () => {
+    const setup = await setUp();
+    const { admin, app, collectionId, permissionId } = setup;
+    const marker = unique();
+    const down = consumersFor(marker, async () => {
+      await Promise.resolve();
+      throw new Error("The consumer is down.");
+    });
+    await Promise.all(
+      Array.from({ length: 110 }, async () => {
+        await directSave(setup, docSave(`notes/${unique()}.md`, "Owed"), {
+          key: unique(),
+          intents: [{ kind: "workflow.notify", data: { marker } }],
+          consumers: down,
+        });
+      })
+    );
+    // Due after all of them.
+    const plainKey: Json = ["call", `plain-${unique()}`];
+    const plainHash = await inputHashOf({ plainKey });
+    const plain = {
+      ...submissionOf(
+        admin,
+        app,
+        collectionId,
+        permissionId,
+        "",
+        plainHash,
+        Date.now() + 60_000
+      ),
+      key: plainKey,
+    };
+    await claim(env, plain, plainHash, new Date(Date.now() + dayMs));
+    await sweepReceipts(env, new Date(Date.now() + 32 * dayMs), 5000);
+    await expect(outcome(claim(env, plain, plainHash))).resolves.toBe(
+      "submission.expired"
+    );
   });
 });
