@@ -118,7 +118,7 @@ const waitsForAsked = 32;
  * How long one App asked who waits for it (`waitingHolds`) has to answer:
  * past it, that App is passed over, and the call waits as it would have.
  */
-const waitsForAskMs = 1000;
+export const waitsForAskMs = 1000;
 
 /** Where the host counts starts on new code or permissions (`#load`, `restart`). */
 const generationKey = "generation";
@@ -743,13 +743,6 @@ export class App extends DurableObject<Env> {
    */
   readonly #queue = new CallQueue<readonly Hold[]>(waitingCallsLimit);
 
-  /**
-   * The opaque ID of the turn that holds the App now (`Hold.call`), or
-   * held it last while the App is free: never a token, which acts for its
-   * caller.
-   */
-  #holder: string | undefined;
-
   /** Statistics points the App recorded, and reads, in the current minute. */
   #statisticsMinute = { minute: 0, point: 0, read: 0 };
 
@@ -866,11 +859,15 @@ export class App extends DurableObject<Env> {
     const callEnds = Date.now() + ms;
     // The wait for a turn counts against the deadline.
     const limit = deadline(ms);
+    // The opaque ID of the call's turn (`Hold.call`): never its token,
+    // which acts for its caller.
+    const turn = crypto.randomUUID();
     let release: () => void;
     try {
       release = await this.#queue.turn(
         limit.signal,
         () => appErrors.create("app.busy", { method }),
+        turn,
         via === undefined
           ? undefined
           : {
@@ -885,10 +882,6 @@ export class App extends DurableObject<Env> {
       limit.clear();
       throw error;
     }
-    // Holds until the next turn begins: while the App is free, no call
-    // waits for it, so no walk can find this turn's hold (`waitsOn`).
-    const turn = crypto.randomUUID();
-    this.#holder = turn;
     // Settles once the call's code has, or was stopped: never rejects.
     let drained: Promise<void> = Promise.resolve();
     try {
@@ -1060,13 +1053,6 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * How many calls wait for the App now: for a look at how busy it is.
-   */
-  waiting(): number {
-    return this.#queue.waiting();
-  }
-
-  /**
    * For each call from another App's code, or a workflow run, waiting for
    * this App, oldest first: the turns its chain holds (`CallPath.holding`),
    * which all wait for this App with it; none for a run's own call. Only
@@ -1075,7 +1061,7 @@ export class App extends DurableObject<Env> {
    * other Apps' hosts, as a call about to wait looks for a cycle.
    */
   waitingHolds(holder: string): Hold[][] {
-    if (this.#holder !== holder) {
+    if (this.#queue.holder() !== holder) {
       return [];
     }
     return this.#queue
@@ -1097,7 +1083,7 @@ export class App extends DurableObject<Env> {
     return await waitsOn({
       self: this.#app,
       holding,
-      holds: (call) => this.#holder === call,
+      holds: (call) => this.#queue.holder() === call,
       ask: async ({ app, call }) => {
         const cap = deadline(waitsForAskMs);
         try {

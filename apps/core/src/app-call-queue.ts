@@ -56,8 +56,12 @@ const refuseIfFound = async <Tag>(
  * called more than once, only the first counts.
  */
 export class CallQueue<Tag = never> {
-  /** Whether a call holds the App now. */
-  #held = false;
+  /**
+   * The ID of the turn holding the App now, or none while it is free:
+   * handed straight from one turn to the next as it ends, so no other ever
+   * looks current in between.
+   */
+  #holder: string | undefined;
 
   /** Who waits, oldest first. */
   readonly #waiting = new Set<Waiter<Tag>>();
@@ -68,9 +72,9 @@ export class CallQueue<Tag = never> {
     this.#limit = limit;
   }
 
-  /** How many calls wait now. */
-  waiting(): number {
-    return this.#waiting.size;
+  /** The ID of the turn holding the App now (`turn`), if any. */
+  holder(): string | undefined {
+    return this.#holder;
   }
 
   /** What the calls waiting now say of themselves (`Wait.tag`), oldest first. */
@@ -81,7 +85,8 @@ export class CallQueue<Tag = never> {
   }
 
   /**
-   * Waits for the App, then answers the `release` that ends the turn.
+   * Waits for the App, then answers the `release` that ends the turn, `id`
+   * the turn's (`holder`).
    * Rejects with `busy()` once `signal` aborts first, or at once when the
    * queue is full, or with what `wait.check` finds once the call waits;
    * either way, the caller never held the App.
@@ -89,10 +94,11 @@ export class CallQueue<Tag = never> {
   async turn(
     signal: AbortSignal,
     busy: () => Error,
+    id: string,
     wait?: Wait<Tag>
   ): Promise<() => void> {
-    if (!this.#held) {
-      this.#held = true;
+    if (this.#holder === undefined) {
+      this.#holder = id;
       return this.#releaser();
     }
     if (signal.aborted || this.#waiting.size >= this.#limit) {
@@ -107,6 +113,7 @@ export class CallQueue<Tag = never> {
     const waiter: Waiter<Tag> = {
       tag: wait?.tag,
       letIn: () => {
+        this.#holder = id;
         this.#waiting.delete(waiter);
         signal.removeEventListener("abort", waiter.giveUp);
         waited.resolve(true);
@@ -142,7 +149,7 @@ export class CallQueue<Tag = never> {
       released = true;
       const [next] = this.#waiting;
       if (next === undefined) {
-        this.#held = false;
+        this.#holder = undefined;
         return;
       }
       // Still held: the App passes straight to the next waiter, so no call

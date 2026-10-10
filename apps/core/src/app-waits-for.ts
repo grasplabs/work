@@ -45,6 +45,12 @@ const keyOf = ({ app, call }: Hold): string => `${app} ${call}`;
  * hold left behind by a call that has ended (a call its code didn't
  * await, a call of a `Promise.all` that failed fast) counts for nothing.
  *
+ * A turn still running counts as waiting for every call it left waiting,
+ * awaited or not: one that raced an export call against a timeout of its
+ * own, and went on without it, keeps its hold current. So a call that
+ * would close a cycle back through it is refused until that turn ends,
+ * though the turn would have ended without that call.
+ *
  * It asks at most `limit` Apps, and passes over one that can't answer:
  * either way the call only waits, as it would have. So a cycle is always
  * found when at most `limit` Apps wait, directly or through others, for

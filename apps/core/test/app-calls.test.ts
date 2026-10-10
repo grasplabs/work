@@ -9,7 +9,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { callExport } from "../src/app-calls.ts";
-import { callApp } from "../src/app.ts";
+import { callApp, callTimeoutMs, waitsForAskMs } from "../src/app.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { release, requestGranted, serverBuilt } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -339,14 +339,40 @@ const entered = async (
   );
 };
 
-/** Waits until a call waits for `app` (`App.waiting`). */
-const waitingIn = async (app: AppId): Promise<void> => {
-  await vi.waitFor(
-    async () => {
-      await expect(appHost(env, app).waiting()).resolves.toBeGreaterThan(0);
-    },
-    { timeout: stepMs, interval: 20 }
+/**
+ * Does `act`, then waits until a call it led to waits in an App's queue,
+ * by what the App does then: a call from another App's code asks the
+ * Apps it holds who waits for them (each ask timed at `waitsForAskMs`)
+ * only once it waits (`App.call`); a run's call, which holds none, sets
+ * its deadline (the App's own time for a call) just as it starts to wait.
+ * Seen as the timers set in this isolate, the App objects' included.
+ */
+const waitsAfter = async (
+  act: () => Promise<void> | void,
+  ms = waitsForAskMs
+): Promise<void> => {
+  const delays: number[] = [];
+  const real = globalThis.setTimeout;
+  // Put back below, whatever happens.
+  Reflect.set(
+    globalThis,
+    "setTimeout",
+    (callback: () => void, delay?: number) => {
+      delays.push(delay ?? 0);
+      return real(callback, delay);
+    }
   );
+  try {
+    await act();
+    await vi.waitFor(
+      () => {
+        expect(delays).toContain(ms);
+      },
+      { timeout: stepMs, interval: 20 }
+    );
+  } finally {
+    Reflect.set(globalThis, "setTimeout", real);
+  }
 };
 
 /**
@@ -762,8 +788,9 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     await entered(atA, fromA);
     await entered(atB, fromB);
     // A's call waits for B, holding A.
-    atA.release();
-    await waitingIn(b);
+    await waitsAfter(() => {
+      atA.release();
+    });
     // B's would wait for A, holding B: refused at once, well before any
     // deadline, so B lets go and A's call goes on.
     let fromBEnded: unknown;
@@ -838,14 +865,16 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     await entered(atB, fromB);
     // A's first call leaves a call of B waiting, unawaited, and ends.
     const atFirst = gate();
-    const first = callApp(env, a, caller, "callThenHold", [
-      atFirst.wait,
-      "NEXT",
-      "findCustomers",
-      find,
-    ]);
-    await entered(atFirst, first);
-    await waitingIn(b);
+    let first: Promise<unknown> = Promise.resolve();
+    await waitsAfter(async () => {
+      first = callApp(env, a, caller, "callThenHold", [
+        atFirst.wait,
+        "NEXT",
+        "findCustomers",
+        find,
+      ]);
+      await entered(atFirst, first);
+    });
     atFirst.release();
     const firstEnded = await bounded(first, "A's first call to end");
     // A's next call holds A, waiting for nothing.
@@ -853,8 +882,9 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     const next = callApp(env, a, caller, "hold", [atNext.wait]);
     await entered(atNext, next);
     // B's call of A waits for it, as plain contention.
-    atB.release();
-    await waitingIn(a);
+    await waitsAfter(() => {
+      atB.release();
+    });
     atNext.release();
     expect({
       first: firstEnded,
@@ -885,14 +915,16 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     await entered(atB, fromB);
     // X's first call leaves a call of B waiting, unawaited, and ends.
     const atFirst = gate();
-    const first = callApp(env, x, caller, "callThenHold", [
-      atFirst.wait,
-      "NEXT",
-      "findCustomers",
-      find,
-    ]);
-    await entered(atFirst, first);
-    await waitingIn(b);
+    let first: Promise<unknown> = Promise.resolve();
+    await waitsAfter(async () => {
+      first = callApp(env, x, caller, "callThenHold", [
+        atFirst.wait,
+        "NEXT",
+        "findCustomers",
+        find,
+      ]);
+      await entered(atFirst, first);
+    });
     atFirst.release();
     const firstEnded = await bounded(first, "X's first call to end");
     // X's next call holds X; A's call waits for it.
@@ -902,11 +934,13 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     const atA = gate();
     const fromA = holdThen(a, admin.userId, atA, "NEXT", "findCustomers", find);
     await entered(atA, fromA);
-    atA.release();
-    await waitingIn(x);
+    await waitsAfter(() => {
+      atA.release();
+    });
     // B's call of A waits too: X's call that waited for B has ended.
-    atB.release();
-    await waitingIn(a);
+    await waitsAfter(() => {
+      atB.release();
+    });
     atNext.release();
     expect({
       first: firstEnded,
@@ -940,10 +974,12 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     await entered(atB, fromB);
     await entered(atC, fromC);
     // A waits for B, then B for C: no cycle yet, so both wait.
-    atA.release();
-    await waitingIn(b);
-    atB.release();
-    await waitingIn(c);
+    await waitsAfter(() => {
+      atA.release();
+    });
+    await waitsAfter(() => {
+      atB.release();
+    });
     // C would wait for A, which waits on C through B.
     atC.release();
     expect({
@@ -979,8 +1015,9 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     const fromB = holdThen(b, admin.userId, atB, "NEXT", "findCustomers", find);
     await entered(atX, fromX);
     await entered(atB, fromB);
-    atX.release();
-    await waitingIn(b);
+    await waitsAfter(() => {
+      atX.release();
+    });
     // B would wait for X, at the top of the chain waiting for B.
     atB.release();
     expect({
@@ -1010,8 +1047,9 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     );
     await entered(atA, fromA);
     await entered(atB, holding);
-    atA.release();
-    await waitingIn(b);
+    await waitsAfter(() => {
+      atA.release();
+    });
     atB.release();
     expect({
       holding: await bounded(holding, "B's call to answer"),
@@ -1070,13 +1108,15 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     );
     await entered(atInvoicing, holding);
     await entered(atCrm, fromCrm);
-    atCrm.release();
-    await waitingIn(invoicing);
+    await waitsAfter(() => {
+      atCrm.release();
+    });
     let run = "";
     const events = await auditedDuring(async () => {
-      ({ id: run } = await admin.api.workflows.start(invoicing, "lookup"));
       // The run's call waits for the CRM, holding no App.
-      await waitingIn(crm);
+      await waitsAfter(async () => {
+        ({ id: run } = await admin.api.workflows.start(invoicing, "lookup"));
+      }, callTimeoutMs(env));
       atInvoicing.release();
       await finished(run);
     });
