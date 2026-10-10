@@ -336,7 +336,6 @@ const Spend = ({ settings }: { settings: ModelSettings }) => {
           />
         )
       )}
-      <Held held={settings.held} />
     </>
   );
 };
@@ -351,7 +350,14 @@ const SpendPage = () => {
       </SettingsSection>
     );
   }
-  return <Spend settings={page.data} />;
+  // Held reservations show whatever the rules say: they hold money even
+  // with no budget set, or rules that don't parse.
+  return (
+    <>
+      <Spend settings={page.data} />
+      <Held held={page.data.held} />
+    </>
+  );
 };
 
 export const Route = createFileRoute("/_shell/settings/spend")({

@@ -204,6 +204,8 @@ export type Settled =
 export type Decided =
   | { state: "settled"; chargedMicros: number }
   | { state: "not_held" }
+  /** One of its scopes has no spend to count the decision against. */
+  | { state: "spend_missing" }
   | { state: "missing" };
 
 const namesSchema = z.record(z.string(), z.string());
@@ -276,6 +278,9 @@ export class ModelLedger extends DurableObject<Env> {
 
   #auditRetryMs = auditRetryMs.first;
 
+  /** Whether an audit event was stored since the outbox was last delivered. */
+  #stored = false;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     migrateOnWake(ctx, migrations);
@@ -294,7 +299,7 @@ export class ModelLedger extends DurableObject<Env> {
     const fingerprint = await fingerprintOf(admission);
     const actor = JSON.stringify(admission.actor);
     const now = Date.now();
-    const { admitted, alerted } = this.ctx.storage.transactionSync(() => {
+    const { admitted } = this.ctx.storage.transactionSync(() => {
       const existing = this.#db
         .select({ fingerprint: requests.fingerprint, state: requests.state })
         .from(requests)
@@ -403,9 +408,7 @@ export class ModelLedger extends DurableObject<Env> {
     if (admitted.ok) {
       await this.#alarmBy(admission.reconcileAt);
     }
-    if (alerted > 0) {
-      this.#deliverAudit();
-    }
+    this.#deliverIfStored();
     return admitted;
   }
 
@@ -419,7 +422,7 @@ export class ModelLedger extends DurableObject<Env> {
    */
   async settle(id: string, input: Settlement): Promise<Settled> {
     const settlement = settlementSchema.parse(input);
-    const { settled, alerted } = this.ctx.storage.transactionSync(() => {
+    const { settled } = this.ctx.storage.transactionSync(() => {
       const row = this.#db
         .select()
         .from(requests)
@@ -489,9 +492,7 @@ export class ModelLedger extends DurableObject<Env> {
             alerted: alertedNow,
           };
     });
-    if (alerted > 0) {
-      this.#deliverAudit();
-    }
+    this.#deliverIfStored();
     await Promise.resolve();
     return settled;
   }
@@ -540,6 +541,32 @@ export class ModelLedger extends DurableObject<Env> {
       if (row.state !== "quarantined") {
         return { state: "not_held" };
       }
+      const keys = this.#db
+        .select()
+        .from(requestScopes)
+        .where(eq(requestScopes.requestId, id))
+        .all();
+      // Each scope it holds against must have its spend to release from or
+      // charge to: without one, the decision couldn't be counted, so it is
+      // refused, the request still held, and nothing audited.
+      const counted = keys.every(
+        (kept) =>
+          this.#db
+            .select({ key: spend.key })
+            .from(spend)
+            .where(
+              and(
+                eq(spend.scope, kept.scope),
+                eq(spend.key, kept.key),
+                eq(spend.period, row.period)
+              )
+            )
+            .get() !== undefined
+      );
+      if (!counted) {
+        log.error("model.held_spend_missing", { request: id });
+        return { state: "spend_missing" };
+      }
       const charged = how === "charge" ? row.reservedMicros : 0;
       this.#db
         .update(requests)
@@ -551,11 +578,6 @@ export class ModelLedger extends DurableObject<Env> {
         })
         .where(eq(requests.id, id))
         .run();
-      const keys = this.#db
-        .select()
-        .from(requestScopes)
-        .where(eq(requestScopes.requestId, id))
-        .all();
       for (const kept of keys) {
         const after = this.#db
           .update(spend)
@@ -601,7 +623,7 @@ export class ModelLedger extends DurableObject<Env> {
       });
       return { state: "settled", chargedMicros: charged };
     });
-    this.#deliverAudit();
+    this.#deliverIfStored();
     await Promise.resolve();
     return settled;
   }
@@ -960,7 +982,16 @@ export class ModelLedger extends DurableObject<Env> {
   }
 
   /** Stores `entry`'s event in the object's outbox. Inside a transaction. */
+  /** Delivers the outbox in the background if anything stored an event since the last delivery. */
+  #deliverIfStored(): void {
+    if (this.#stored) {
+      this.#stored = false;
+      this.#deliverAudit();
+    }
+  }
+
   #outbox(entry: AuditEntry): void {
+    this.#stored = true;
     const event = createAuditEvent(entry, "core");
     this.#db
       .insert(auditOutbox)

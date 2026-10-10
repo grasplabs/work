@@ -210,6 +210,14 @@ const failingAuditLog = (): Env["AUDIT_LOG"] =>
     },
   });
 
+/** What a call's audit event says the ledger did, its amounts in micros. */
+const said = (event: AuditEvent | undefined) => [
+  event?.detail.ledger,
+  event?.detail.ledgerRequests,
+  Math.round(Number(event?.detail.ledgerCharged) * 1_000_000),
+  Math.round(Number(event?.detail.ledgerHeld) * 1_000_000),
+];
+
 /** The provider request IDs the gateway's log was told, in order. */
 const requestIds = (fake: ReturnType<typeof fakeGateway>): unknown[] =>
   fake.requests.map(
@@ -565,6 +573,37 @@ describe("model budgets", { timeout: 60_000 }, () => {
       ben: [pricedMicros, 0],
       ids: [4, 4, true],
     });
+  });
+
+  it("say on a call's audit event what every one of its provider requests charged or holds, a failed retry's too", async () => {
+    const retried = withRules({ budgets: { user: { limit: 1 } } }, [
+      { status: 500 },
+      pricedAnswer,
+    ]);
+    // Three server errors: the SDK's two retries fail too.
+    const failed = withRules({ budgets: { user: { limit: 1 } } }, [
+      { status: 500 },
+      { status: 500 },
+      { status: 500 },
+    ]);
+    const ada = hello();
+    const ben = hello();
+
+    await expect(
+      Promise.all([outcome(retried.call(ada)), outcome(failed.call(ben))])
+    ).resolves.toStrictEqual(["ok", "model.failed"]);
+    const [adas, bens] = await Promise.all([
+      ledgerOf(retried.month, userOf(ada)),
+      ledgerOf(failed.month, userOf(ben)),
+    ]);
+    const [adaEvent] = await eventsOf(ada.trigger);
+    const [benEvent] = await eventsOf(ben.trigger);
+    expect({ ada: said(adaEvent), ben: said(benEvent) }).toStrictEqual({
+      // The answer charged; the failed first try's reservation still held.
+      ada: ["settled", 2, pricedMicros, adas.reservedMicros],
+      ben: ["unknown", 3, 0, bens.reservedMicros],
+    });
+    expect(adas.reservedMicros > 0 && bens.reservedMicros > 0).toBeTruthy();
   });
 
   it("charge a prompt past a tier's threshold at that tier's prices, as its audit event counts it", async () => {

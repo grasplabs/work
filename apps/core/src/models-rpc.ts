@@ -1,5 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import { heldListed } from "@grasp-os/shared/models";
+import { heldListed, modelErrors } from "@grasp-os/shared/models";
 import type {
   HeldRequest,
   ModelSettings,
@@ -74,11 +74,15 @@ export class ModelsRpc extends RpcTarget implements ModelsApi {
   async resolveHeld(id: string, how: "release" | "charge"): Promise<void> {
     await withPerson(this.#check, async (person) => {
       requireAdmin(person);
-      await modelLedger(this.#env).resolveQuarantined(
+      const decided = await modelLedger(this.#env).resolveQuarantined(
         heldIdSchema.parse(id),
         howSchema.parse(how),
         actorOf(person)
       );
+      // Still held: the admin is told, rather than it seeming done.
+      if (decided.state === "spend_missing") {
+        throw modelErrors.create("model.held_unresolvable");
+      }
     });
   }
 

@@ -593,6 +593,8 @@ interface GatewayResponse {
    * waiting to be settled with what it used, and what it reserved.
    */
   pending: Admission | undefined;
+  /** The provider requests already settled, in order: refused, failed or superseded. */
+  settled: RequestSettled[];
 }
 
 /** A provider request the ledger admitted: its ID, and what it reserved. */
@@ -872,6 +874,7 @@ const open = (
     refusal: undefined,
     held: undefined,
     pending: undefined,
+    settled: [],
   };
   // Each provider request, the SDK's retries too, is admitted by the
   // model ledger before it is sent, and held back unsent when it isn't.
@@ -893,21 +896,32 @@ const open = (
     try {
       answered = await transport(input, withRequestId(init, admitted.id));
     } catch (error) {
-      await settleRequest(env, admitted.id, { by: "unknown" });
+      response.settled.push({
+        reservedMicros: admitted.reservedMicros,
+        settled: await settleRequest(env, admitted.id, { by: "unknown" }),
+      });
       throw error;
     }
     response.refusal = undefined;
     if (!answered.ok) {
       // A refusal before the provider took the request on costs nothing;
       // a server error may have come after it did.
-      await settleRequest(env, admitted.id, {
-        by: answered.status < 500 ? "refused" : "unknown",
+      response.settled.push({
+        reservedMicros: admitted.reservedMicros,
+        settled: await settleRequest(env, admitted.id, {
+          by: answered.status < 500 ? "refused" : "unknown",
+        }),
       });
       response.refusal = refusalOf(await answered.clone().text());
       return answered;
     }
     if (response.pending !== undefined) {
-      await settleRequest(env, response.pending.id, { by: "unknown" });
+      response.settled.push({
+        reservedMicros: response.pending.reservedMicros,
+        settled: await settleRequest(env, response.pending.id, {
+          by: "unknown",
+        }),
+      });
     }
     response.pending = admitted;
     return answered;
@@ -1139,38 +1153,53 @@ interface Recorded extends Used {
  * sent.
  */
 interface Ledgered {
+  /** How the last of them settled. */
   state: "settled" | "unknown" | "quarantined" | "missing" | "failed" | "none";
-  /** What it was charged, in US dollars, once settled. */
+  /** How many provider requests were sent, retries included. */
+  requests: number;
+  /** What they were charged, in US dollars; null when none were sent. */
   charged: number | null;
-  /** What its reservation holds, in US dollars, while it is unknown. */
+  /**
+   * What their reservations still hold, in US dollars, to be charged in
+   * full or settled by a person; null when none were sent.
+   */
   held: number | null;
 }
 
-/** What the audit event records of how the ledger settled `pending`. */
-const ledgerOf = (
-  pending: Admission | undefined,
-  settled: Settled | undefined
-): Ledgered => {
-  if (pending === undefined) {
-    return { state: "none", charged: null, held: null };
+/** One provider request's settlement, with what it reserved. */
+interface RequestSettled {
+  reservedMicros: number;
+  /** `undefined` when the ledger couldn't be reached to settle it. */
+  settled: Settled | undefined;
+}
+
+/** What a settlement holds still: all its reservation, unless settled or missing. */
+const heldBy = ({ reservedMicros, settled }: RequestSettled): number =>
+  settled?.state === "settled" || settled?.state === "missing"
+    ? 0
+    : reservedMicros;
+
+/**
+ * What the audit event records of how the ledger settled every provider
+ * request a call's attempt sent: a retry the SDK made after a server error
+ * too, whose reservation stays held, so the event accounts for all of it.
+ */
+const ledgerOf = (settlements: readonly RequestSettled[]): Ledgered => {
+  const last = settlements.at(-1);
+  if (last === undefined) {
+    return { state: "none", requests: 0, charged: null, held: null };
   }
-  if (settled === undefined) {
-    return { state: "failed", charged: null, held: null };
-  }
-  if (settled.state === "settled") {
-    return {
-      state: "settled",
-      charged: settled.chargedMicros / microsPerDollar,
-      held: null,
-    };
-  }
+  const charged = settlements.reduce(
+    (sum, { settled }) =>
+      sum + (settled?.state === "settled" ? settled.chargedMicros : 0),
+    0
+  );
+  const held = settlements.reduce((sum, one) => sum + heldBy(one), 0);
   return {
-    state: settled.state,
-    charged: null,
-    held:
-      settled.state === "missing"
-        ? null
-        : pending.reservedMicros / microsPerDollar,
+    state: last.settled?.state ?? "failed",
+    requests: settlements.length,
+    charged: charged / microsPerDollar,
+    held: held / microsPerDollar,
   };
 };
 
@@ -1242,6 +1271,7 @@ const auditEntry = (
       estimated: recorded.estimated,
       // How the model ledger settled it: what it charged, or holds.
       ledger: recorded.ledger.state,
+      ledgerRequests: recorded.ledger.requests,
       ledgerCharged: recorded.ledger.charged,
       ledgerHeld: recorded.ledger.held,
       // Never an ID so long that the event would be refused.
@@ -1276,6 +1306,7 @@ const largestRecord: Recorded = {
   errorType: "x".repeat(64),
   ledger: {
     state: "quarantined",
+    requests: Number.MAX_SAFE_INTEGER,
     charged: Number.MAX_VALUE,
     held: Number.MAX_VALUE,
   },
@@ -1355,7 +1386,12 @@ const record = async (
       outcome,
       status: failure?.status ?? status,
       errorType: failure?.errorType,
-      ledger: ledgerOf(pending, settled),
+      ledger: ledgerOf([
+        ...sent.settled,
+        ...(pending === undefined
+          ? []
+          : [{ reservedMicros: pending.reservedMicros, settled }]),
+      ]),
     })
   );
 };

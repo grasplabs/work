@@ -15,6 +15,8 @@ export const modelErrors = defineErrorFamily({
     "What this model call would cost can't be bounded at known prices, so it wasn't sent. Choose another model, or send less.",
   "model.ledger_unavailable":
     "Model spend can't be accounted for right now, so no model call was made. Try again later.",
+  "model.held_unresolvable":
+    "That reservation can't be settled: a budget it counts against has no record. Contact Grasp.",
   "model.failed": "The model call failed. Try again later.",
   "model.invalid_output":
     "The model's answer didn't match the expected shape, also when asked again.",

@@ -454,6 +454,62 @@ describe("the model ledger", () => {
     });
   });
 
+  it("delivers a quarantine's audit event at once, not only when an alert comes with it", async () => {
+    const ledger = newLedger();
+    const broken = admission(10, [budget(1000, "jo")]);
+    await ledger.admit(broken);
+    await corrupt(ledger, "scopes", "not JSON", broken.id);
+
+    await ledger.settle(broken.id, { by: "refused" });
+    // No alarm runs: the event reaches the log from the settlement itself.
+    let delivered = false;
+    for (let tries = 0; tries < 20 && !delivered; tries += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- waits for the background drain
+      const events = await allEvents();
+      delivered = events.some(
+        ({ action, detail }) =>
+          action === "model.spend.quarantined" && detail.request === broken.id
+      );
+      if (!delivered) {
+        // oxlint-disable-next-line no-await-in-loop -- waits for the background drain
+        await scheduler.wait(100);
+      }
+    }
+    expect(delivered).toBeTruthy();
+  });
+
+  it("refuses a decision on a held request whose budget record is missing, leaving it held and unaudited", async () => {
+    const ledger = newLedger();
+    const key = `kim-${crypto.randomUUID()}`;
+    const held = admission(30, [budget(1000, key)]);
+    await ledger.admit(held);
+    await corrupt(ledger, "scopes", "not JSON", held.id);
+    await ledger.settle(held.id, { by: "refused" });
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec("DELETE FROM spend WHERE key = ?", key);
+    });
+    const admin = {
+      type: "person",
+      userId: `admin-${crypto.randomUUID()}`,
+    } as const;
+
+    const decided = await ledger.resolveQuarantined(held.id, "charge", admin);
+    await runDurableObjectAlarm(ledger);
+    const events = await allEvents();
+    const stillHeld = await ledger.quarantined(10);
+    expect({
+      decided,
+      held: stillHeld.map(({ id }) => id),
+      audited: events.filter(
+        ({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin)
+      ),
+    }).toStrictEqual({
+      decided: { state: "spend_missing" },
+      held: [held.id],
+      audited: [],
+    });
+  });
+
   it("alerts admins when a decided charge takes a budget past its threshold", async () => {
     const ledger = newLedger();
     const key = `gus-${crypto.randomUUID()}`;
