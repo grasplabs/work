@@ -1454,6 +1454,8 @@ export class RunHost extends RpcTarget {
               // A run's call ends by the called App's own limit.
               path: {
                 chain: [app],
+                // A run holds no App's turn while it waits for one.
+                holding: [],
                 deadline: Number.POSITIVE_INFINITY,
                 readOnly: false,
               },

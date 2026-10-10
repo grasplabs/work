@@ -104,6 +104,14 @@ const reservedMethods: ReadonlySet<string> = new Set(reservedAppMethods);
  */
 export const waitingCallsLimit = 32;
 
+/**
+ * How many Apps, at most, one call about to wait asks who waits for them
+ * (`App.#waitsOn`): past it, the call waits as it would have, until its
+ * deadline. Each App asked has a call of a chain waiting, so a cycle
+ * among fewer Apps is always found.
+ */
+const waitsForAsked = 32;
+
 /** Where the host counts starts on new code or permissions (`#load`, `restart`). */
 const generationKey = "generation";
 
@@ -520,6 +528,8 @@ export interface ExportCall {
   version: number;
   /** The Apps whose calls are under way above this one, outermost first. */
   chain: readonly AppId[];
+  /** Those of `chain` whose turns its calls hold (`CallPath.holding`). */
+  holding: readonly AppId[];
   /** When the call it comes from must end, in milliseconds since the epoch. */
   deadline: number;
   /** Whether the call may only call other Apps' exports marked `read`. */
@@ -539,6 +549,12 @@ export interface ExportCall {
 export interface CallPath {
   /** The Apps whose calls are under way, outermost first, this one last. */
   chain: AppId[];
+  /**
+   * Those of `chain` whose turns its calls hold, this one last: every one
+   * but a workflow run's App, which a run's call doesn't hold. While the
+   * call waits for another App, they all wait with it (`App.#waitsOn`).
+   */
+  holding: AppId[];
   /** When the call must end, in milliseconds since the epoch. */
   deadline: number;
   /** Whether it may only call other Apps' exports marked `read`. */
@@ -588,6 +604,8 @@ interface Invocation {
   ranOn?: ServerCode;
   /** The Apps whose calls are under way above it, outermost first. */
   above: readonly AppId[];
+  /** Those of `above` whose turns its calls hold (`CallPath.holding`). */
+  aboveHolding: readonly AppId[];
   /** When it must end: past it, it acts no more, whatever its code does. */
   deadline: number;
 }
@@ -708,8 +726,11 @@ export class App extends DurableObject<Env> {
    */
   readonly #calls = new Map<string, Invocation>();
 
-  /** Lets one call at a time run in the App's code (`call`). */
-  readonly #queue = new CallQueue(waitingCallsLimit);
+  /**
+   * Lets one call at a time run in the App's code (`call`); a call from
+   * another App's waits with the Apps its chain holds (`waitingHolds`).
+   */
+  readonly #queue = new CallQueue<readonly AppId[]>(waitingCallsLimit);
 
   /** Statistics points the App recorded, and reads, in the current minute. */
   #statisticsMinute = { minute: 0, point: 0, read: 0 };
@@ -784,7 +805,11 @@ export class App extends DurableObject<Env> {
    * A call from another App's code through an export (`via`, from
    * app-calls.ts) runs only on the version core checked it against, ends
    * by the time the call it came from must, and is kept with the Apps
-   * above it, for the calls its code makes on (`callerOf`).
+   * above it, for the calls its code makes on (`callerOf`). One that
+   * would wait for this App while this App's turn waits, through other
+   * Apps' queues, on one its own chain holds gets `app.call_deadlock` at
+   * once (`#waitsOn`), rather than both waiting until a deadline ends
+   * one.
    *
    * Known gaps:
    * - Work the App's code leaves running detached from its call (a
@@ -825,8 +850,18 @@ export class App extends DurableObject<Env> {
     const limit = deadline(ms);
     let release: () => void;
     try {
-      release = await this.#queue.turn(limit.signal, () =>
-        appErrors.create("app.busy", { method })
+      release = await this.#queue.turn(
+        limit.signal,
+        () => appErrors.create("app.busy", { method }),
+        via === undefined
+          ? undefined
+          : {
+              tag: via.holding,
+              check: async () =>
+                (await this.#waitsOn(via.holding))
+                  ? appErrors.create("app.call_deadlock", { method })
+                  : undefined,
+            }
       );
     } catch (error) {
       limit.clear();
@@ -886,6 +921,7 @@ export class App extends DurableObject<Env> {
       method,
       kind: via?.readOnly === true ? "read" : "write",
       above: via?.chain ?? [],
+      aboveHolding: via?.holding ?? [],
       deadline: ends,
     };
     this.#calls.set(token, call);
@@ -995,6 +1031,66 @@ export class App extends DurableObject<Env> {
     if (this.#server !== running) {
       throw appErrors.create("app.conflict");
     }
+  }
+
+  /**
+   * For each call from another App's code, or a workflow run, waiting for
+   * this App, oldest first: the Apps whose turns its chain holds
+   * (`CallPath.holding`), which all wait for this App with it; none for a
+   * run's own call. Asked by other Apps' hosts, as a call about to wait
+   * looks for a cycle (`#waitsOn`).
+   */
+  waitingHolds(): AppId[][] {
+    return this.#queue.waitingTags().map((holding) => [...holding]);
+  }
+
+  /**
+   * Whether this App's turn waits, through calls waiting in other Apps,
+   * on one of `holding`: the Apps whose turns a call about to wait for
+   * this App holds. If so, that call would wait for an App that waits for
+   * it: each would wait in the other's queue until a deadline ended one.
+   *
+   * Each App is its own object, so no one sees every queue: each App
+   * knows only who waits in its own (`waitingHolds`). The walk goes
+   * back from `holding`: the Apps waiting for them, then those waiting
+   * for these, and so on; this App among them closes the cycle. It asks
+   * at most `waitsForAsked` Apps, and one that can't answer is passed
+   * over: either way the call only waits, as it would have.
+   *
+   * A call asks once it waits, where its App's `waitingHolds` shows it
+   * (`CallQueue.turn`). So of two calls closing one cycle at the same
+   * time, the one that asks later finds the other; both may, and then
+   * both are refused, never neither.
+   */
+  async #waitsOn(holding: readonly AppId[]): Promise<boolean> {
+    const self = this.#app;
+    const seen = new Set<AppId>(holding);
+    let asking = [...holding];
+    let asked = 0;
+    while (asking.length > 0 && asked < waitsForAsked) {
+      const batch = asking.slice(0, waitsForAsked - asked);
+      asked += batch.length;
+      // oxlint-disable-next-line no-await-in-loop -- each round asks the Apps the last one found
+      const answers = await Promise.allSettled(
+        batch.map(async (app) => await appHost(this.env, app).waitingHolds())
+      );
+      const found: AppId[] = [];
+      for (const answer of answers) {
+        const waiting =
+          answer.status === "fulfilled" ? answer.value.flat() : [];
+        if (waiting.includes(self)) {
+          return true;
+        }
+        for (const app of waiting) {
+          if (!seen.has(app)) {
+            seen.add(app);
+            found.push(app);
+          }
+        }
+      }
+      asking = found;
+    }
+    return false;
   }
 
   /** Whether the App has read restricted data. */
@@ -1249,7 +1345,15 @@ export class App extends DurableObject<Env> {
     ) {
       throw appErrors.create("app.caller_invalid");
     }
-    const { caller, method, kind, version, above, deadline: ends } = call;
+    const {
+      caller,
+      method,
+      kind,
+      version,
+      above,
+      aboveHolding,
+      deadline: ends,
+    } = call;
     if (use === "write" && kind === "read") {
       throw appErrors.create("app.read_only");
     }
@@ -1264,6 +1368,7 @@ export class App extends DurableObject<Env> {
       attempt: caller.attempt,
       path: {
         chain: [...above, this.#app],
+        holding: [...aboveHolding, this.#app],
         deadline: ends,
         readOnly: kind === "read",
       },
