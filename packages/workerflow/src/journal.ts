@@ -17,11 +17,24 @@
 //                is due
 //   events       the inbox: each event the run accepted, in order, and the
 //                wait that took it
+//   history      what observers are shown: one row per change of the
+//                above, written by triggers in the same statement
+//                (history.ts)
+//   notifications  the status changes the host hasn't taken yet, written
+//                by a trigger in the same statement (notifications.ts)
+//
+// Beside the journal, and outliving it, `tombstones` keeps the start key
+// of each removed run whose start can be delivered again (`admit`, a
+// schedule), and when it was removed, nothing else: a start delivered
+// again finds that, and creates no second run to repeat the first one's
+// effects. A tombstone holds for the run object's tombstone horizon (30
+// days by default, run.ts), then expires: a start delivered after that is
+// a new start. A run `create` made leaves none: no one has its key.
 //
 // Values and errors are kept as codec text (codec.ts), never as live
-// objects; a step's stream result as chunks beside them (streams.ts). What
-// observers are shown is the run's history (history.ts).
+// objects; a step's stream result as chunks beside them (streams.ts).
 import { createHistory } from "./history.ts";
+import { createNotifications } from "./notifications.ts";
 import { createStreamChunks } from "./streams.ts";
 
 /**
@@ -35,11 +48,11 @@ export class JournalSchemaError extends Error {
 
 /**
  * The journal's own layout; a change to it is a new version. No journal
- * predates version 4 (nothing earlier was released), so a run of any other
+ * predates version 8 (nothing earlier was released), so a run of any other
  * version is refused when it is read; a later layout that changes it
  * brings its own upgrade.
  */
-export const journalSchemaVersion = 4;
+export const journalSchemaVersion = 8;
 
 /**
  * The largest event payload a run accepts, as the encoded text it keeps:
@@ -52,7 +65,7 @@ export { maxStoredTextBytes as maxEventPayloadBytes } from "./codec.ts";
  * What one run's inbox holds at most, taken and untaken events alike, so
  * no sender can fill a run's storage. Taken events aren't pruned: each is
  * what its wait returns on every replay, for as long as the run lives.
- * They go with the rest of the journal when retention (a later slice)
+ * They go with the rest of the journal when retention (run.ts)
  * removes it; an ended run takes no events, so its inbox no longer grows.
  */
 export const maxInboxEvents = 10_000;
@@ -151,6 +164,46 @@ export interface RunRow extends Record<string, SqlStorageValue> {
    * rollbacks still to run; reset by one that does.
    */
   rollback_replays: number;
+  /**
+   * The schedule occurrence that started the run (a Schedule, as JSON);
+   * null for a run started otherwise.
+   */
+  schedule: string | null;
+  /**
+   * 1 when the start can be delivered again (`admit`, a schedule's
+   * occurrence), so removing the run leaves its key as a tombstone; 0 for
+   * a `create`, whose key no one else has.
+   */
+  redeliverable: number;
+  /**
+   * How long the run is kept once it has ended, in milliseconds: after it
+   * completed or was terminated, and after it errored. Resolved by the
+   * binding when it was created (its own setting, or the binding's
+   * default), and never changed.
+   */
+  success_retention_ms: number;
+  error_retention_ms: number;
+  /**
+   * When the ended run is purged: its end plus its retention, written in
+   * the transaction that wrote the end. Null while it hasn't ended, and
+   * cleared by a restart, so no run that runs, waits, is paused or rolls
+   * back is ever purged.
+   */
+  purge_at: number | null;
+  /**
+   * The run's execution: 1 when it is created, one more at each restart.
+   * Its host is told it with each notification (notifications.ts).
+   */
+  executions: number;
+  /**
+   * When the notifications the host hasn't taken are next handed to it:
+   * set by the write that adds the first of them, put off after the host
+   * failed, null once it has taken them all. Every alarm the run object
+   * sets is brought forward to it (run.ts).
+   */
+  notify_at: number | null;
+  /** How many deliveries in a row the host failed: the backoff's count. */
+  notify_failures: number;
 }
 
 /**
@@ -319,7 +372,15 @@ export const createJournal = (sql: SqlStorage): void => {
       rollback_trigger TEXT,
       rollback_end TEXT CHECK (rollback_end IN ('errored', 'terminated')),
       rollback TEXT,
-      rollback_replays INTEGER NOT NULL DEFAULT 0
+      rollback_replays INTEGER NOT NULL DEFAULT 0,
+      schedule TEXT,
+      redeliverable INTEGER NOT NULL,
+      success_retention_ms INTEGER NOT NULL,
+      error_retention_ms INTEGER NOT NULL,
+      purge_at INTEGER,
+      executions INTEGER NOT NULL DEFAULT 1,
+      notify_at INTEGER,
+      notify_failures INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS activations (
       generation INTEGER PRIMARY KEY,
@@ -380,6 +441,7 @@ export const createJournal = (sql: SqlStorage): void => {
   `);
   createStreamChunks(sql);
   createHistory(sql);
+  createNotifications(sql);
 };
 
 /**
@@ -390,6 +452,169 @@ export const hasJournal = (sql: SqlStorage): boolean =>
   sql
     .exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run'")
     .toArray().length > 0;
+
+/**
+ * The journal's tables, those that refer to others first, so dropping
+ * them in this order never leaves a reference dangling.
+ */
+const journalTables = [
+  "history",
+  "notifications",
+  "stream_chunks",
+  "attempts",
+  "events",
+  "steps",
+  "activations",
+  "run",
+];
+
+/** Tables that aren't the journal's: SQLite's and the host's own. */
+const internalTable = /^(?:sqlite_|_cf_)/u;
+
+/**
+ * Removes the run's journal (every table of it, its stream chunks and
+ * history too) and, for a start that can be delivered again, leaves its
+ * key as a tombstone, in the caller's transaction: there is never a moment
+ * with neither. The tombstone holds the key and when it was left, nothing
+ * else: no params, no outputs, nothing a deletion should have taken.
+ * `null`: no tombstone (a `create`'s start, never delivered again).
+ * Tombstones left before stay, each until it expires.
+ */
+export const removeJournal = (
+  sql: SqlStorage,
+  tombstone: { key: string; at: number } | null
+): void => {
+  const present = new Set(
+    sql
+      .exec<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+      )
+      .toArray()
+      .map((table) => table.name)
+      .filter((name) => !internalTable.test(name) && name !== "tombstones")
+  );
+  // Any table a later layout adds goes too, after the known ones.
+  const order = [
+    ...journalTables.filter((name) => present.has(name)),
+    ...[...present].filter((name) => !journalTables.includes(name)),
+  ];
+  for (const name of order) {
+    sql.exec(`DROP TABLE "${name.replaceAll('"', '""')}"`);
+  }
+  if (tombstone === null) {
+    return;
+  }
+  sql.exec(
+    "CREATE TABLE IF NOT EXISTS tombstones (start_key TEXT PRIMARY KEY, removed_at INTEGER NOT NULL)"
+  );
+  sql.exec(
+    "INSERT OR REPLACE INTO tombstones (start_key, removed_at) VALUES (?, ?)",
+    tombstone.key,
+    tombstone.at
+  );
+};
+
+/**
+ * Starts the run's retention clock, in the transaction that wrote its end
+ * (`ended_at` and the status it ended with): it is purged its retention
+ * after that, the success retention for a run that completed or was
+ * terminated, the error retention for one that errored, as on the
+ * reference. Returns when, for the alarm set in the same turn.
+ */
+export const startRetentionIn = (sql: SqlStorage): number =>
+  sql
+    .exec<{ purge_at: number }>(
+      "UPDATE run SET purge_at = ended_at + CASE status WHEN 'errored' THEN error_retention_ms ELSE success_retention_ms END RETURNING purge_at"
+    )
+    .one().purge_at;
+
+const hasTombstones = (sql: SqlStorage): boolean =>
+  sql
+    .exec(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tombstones'"
+    )
+    .toArray().length > 0;
+
+/**
+ * Whether a run started under `key` was here and was removed after
+ * `since`: a tombstone left at or before it has expired, and holds no
+ * longer, whether or not it has been dropped yet.
+ */
+export const isTombstoned = (
+  sql: SqlStorage,
+  key: string,
+  since: number
+): boolean =>
+  hasTombstones(sql) &&
+  sql
+    .exec(
+      "SELECT 1 FROM tombstones WHERE start_key = ? AND removed_at > ?",
+      key,
+      since
+    )
+    .toArray().length > 0;
+
+/**
+ * When the oldest tombstone expires, `horizon` after it was left, or null
+ * when there is none.
+ */
+export const nextTombstoneExpiry = (
+  sql: SqlStorage,
+  horizon: number
+): number | null => {
+  if (!hasTombstones(sql)) {
+    return null;
+  }
+  const [oldest] = sql
+    .exec<{ at: number | null }>("SELECT MIN(removed_at) AS at FROM tombstones")
+    .toArray();
+  return oldest?.at === null || oldest === undefined
+    ? null
+    : oldest.at + horizon;
+};
+
+/**
+ * Drops the tombstones left at or before `since`, in the caller's
+ * transaction, and the table once none is left. Returns when the oldest
+ * left was left, or null when none is.
+ */
+export const expireTombstones = (
+  sql: SqlStorage,
+  since: number
+): number | null => {
+  if (!hasTombstones(sql)) {
+    return null;
+  }
+  sql.exec("DELETE FROM tombstones WHERE removed_at <= ?", since);
+  const [oldest] = sql
+    .exec<{ at: number | null }>("SELECT MIN(removed_at) AS at FROM tombstones")
+    .toArray();
+  if (oldest?.at === null || oldest === undefined) {
+    sql.exec("DROP TABLE tombstones");
+    return null;
+  }
+  return oldest.at;
+};
+
+/**
+ * When the run's notifications are next due for its host, or null when it
+ * has taken them all, or there is no run, or one of a layout this engine
+ * doesn't read (which notifies no one).
+ */
+export const notifyDue = (sql: SqlStorage): number | null => {
+  if (!hasJournal(sql)) {
+    return null;
+  }
+  const [run] = sql
+    .exec<{ schema: SqlStorageValue }>("SELECT schema FROM run")
+    .toArray();
+  if (run?.schema !== journalSchemaVersion) {
+    return null;
+  }
+  return sql
+    .exec<{ notify_at: number | null }>("SELECT notify_at FROM run")
+    .one().notify_at;
+};
 
 export const readRun = (sql: SqlStorage): RunRow | undefined => {
   // A run deleted (its tables with it) is no run: a stale activation of it
@@ -413,7 +638,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
   }
   return sql
     .exec<RunRow>(
-      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays FROM run"
+      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable, success_retention_ms, error_retention_ms, purge_at, executions, notify_at, notify_failures FROM run"
     )
     .toArray()[0];
 };

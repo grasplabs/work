@@ -9,10 +9,13 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 import {
+  FileSignatureIcon,
   HistoryIcon,
   LayoutDashboardIcon,
   MessagesSquareIcon,
   NotebookPenIcon,
+  RocketIcon,
+  UserRoundIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -36,6 +39,9 @@ import { SiteHeader } from "../frame/site-header.tsx";
 type AreaPath =
   | "/onboarding"
   | "/onboarding/kickoff"
+  | "/onboarding/agreements"
+  | "/onboarding/stephen"
+  | "/onboarding/open"
   | "/onboarding/notes"
   | "/onboarding/log";
 
@@ -57,6 +63,21 @@ const sections: readonly AreaSection[] = [
     to: "/onboarding/kickoff",
     label: msg({ message: "Kickoff", context: "onboarding area section" }),
     icon: MessagesSquareIcon,
+  },
+  {
+    to: "/onboarding/agreements",
+    label: msg({ message: "Agreements", context: "onboarding area section" }),
+    icon: FileSignatureIcon,
+  },
+  {
+    to: "/onboarding/stephen",
+    label: msg({ message: "Stephen", context: "onboarding area section" }),
+    icon: UserRoundIcon,
+  },
+  {
+    to: "/onboarding/open",
+    label: msg({ message: "The go", context: "onboarding area section" }),
+    icon: RocketIcon,
   },
   {
     to: "/onboarding/notes",

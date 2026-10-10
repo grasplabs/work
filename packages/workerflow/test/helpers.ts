@@ -2,7 +2,11 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
 import { Workflow } from "../src/binding.ts";
-import type { InstanceStatus } from "../src/contracts.ts";
+import type {
+  InstanceStatus,
+  WorkflowInstanceEvent,
+  WorkflowInstanceSubscribeOptions,
+} from "../src/contracts.ts";
 import { runObjectName } from "../src/identity.ts";
 import type { Journal } from "../src/journal.ts";
 import { WorkflowRun } from "../src/run.ts";
@@ -88,6 +92,29 @@ export const ended = async (
 
 export const newId = (): string => crypto.randomUUID();
 
+/**
+ * Every event a subscription to the run delivers, through the binding,
+ * until it is done: for a run that ends, or ended, within the deadline.
+ */
+export const eventsOf = async (
+  definition: string,
+  id: string,
+  options?: WorkflowInstanceSubscribeOptions,
+  runs: Runs = env.RUNS
+): Promise<WorkflowInstanceEvent[]> => {
+  const instance = await workflow(definition, runs).get(id);
+  using subscription = await instance.subscribe(options);
+  const events: WorkflowInstanceEvent[] = [];
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a subscription answers one event at a time
+    const result = await within(`the events of run ${id}`, subscription.next());
+    if (result.done === true) {
+      return events;
+    }
+    events.push(result.value);
+  }
+};
+
 /** When the run's alarm is due, or null when it has none. */
 export const alarmOf = async (
   definition: string,
@@ -97,6 +124,28 @@ export const alarmOf = async (
     runObject(definition, id),
     async (_, state) => await state.storage.getAlarm()
   );
+
+/**
+ * The run's alarm, unless all it is for is the ended run's purge (its
+ * retention after its end): null then, as for no alarm. What an ended run
+ * has left to wake for is its purge alone.
+ */
+export const wakeOf = async (
+  definition: string,
+  id: string
+): Promise<number | null> =>
+  await runInDurableObject(runObject(definition, id), async (_, state) => {
+    const alarm = await state.storage.getAlarm();
+    let purgeAt: SqlStorageValue = null;
+    try {
+      purgeAt = state.storage.sql
+        .exec<{ purge_at: SqlStorageValue }>("SELECT purge_at FROM run")
+        .one().purge_at;
+    } catch {
+      // No run, or one of a layout with no purge time.
+    }
+    return alarm === purgeAt ? null : alarm;
+  });
 
 /** Waits until the run is suspended, and returns its journal then. */
 export const suspendedOn = async (

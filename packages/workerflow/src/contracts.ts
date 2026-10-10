@@ -9,8 +9,9 @@
 // are structured values (codec.ts) or byte streams (streams.ts), and a
 // step may be `sensitive`, and may register a rollback. An instance can be
 // paused, resumed, terminated (rolling back, too), restarted (from a step,
-// too) and deleted (instance.ts). Retention comes in a later slice; until
-// then it is absent, never silently ignored.
+// too) and deleted (instance.ts); created and deleted in batches, and
+// started by a schedule's occurrence (binding.ts); an ended run is kept
+// for its retention, then purged (retention.ts).
 
 /** What a run's definition is given when it runs. */
 export interface WorkflowEvent<Params = unknown> {
@@ -19,6 +20,17 @@ export interface WorkflowEvent<Params = unknown> {
   /** When the run was created: the same on every replay. */
   readonly timestamp: Date;
   readonly instanceId: string;
+  /** The definition's name: the workflow the run is of. */
+  readonly workflowName: string;
+  /**
+   * For a run a schedule started (the binding's `schedule`): the cron
+   * expression and the time it fired for. Absent otherwise.
+   */
+  readonly schedule?: {
+    readonly cron: string;
+    /** Milliseconds since the Unix epoch. */
+    readonly scheduledTime: number;
+  };
 }
 
 /** What a step's callback is given. */
@@ -291,4 +303,137 @@ export interface RestartFrom {
   readonly count?: number;
   /** The step's type, when names are shared across types; `do` when left out. */
   readonly type?: "do" | "sleep" | "waitForEvent";
+}
+
+/** A step's config as observers are told it: its values in milliseconds. */
+export interface WorkflowStepEventConfig {
+  readonly retries: {
+    readonly limit: number;
+    /** `"[dynamic]"` when a function says the delay per failure. */
+    readonly delay: WorkflowDuration | "[dynamic]";
+    readonly backoff?: WorkflowBackoff;
+  };
+  readonly timeout: WorkflowDuration;
+  readonly sensitive?: "output";
+}
+
+/** An error as observers see it. */
+export interface WorkflowEventError {
+  readonly name: string;
+  readonly message: string;
+}
+
+/**
+ * What a subscription delivers, in the reference's shape: each event of
+ * the run, numbered from 1 in the order it happened (`eventId`, the
+ * cursor's unit), with when (`timestamp`, ms since the epoch). A step is
+ * named `${name}-${count}`, as the reference names it to observers. A
+ * sensitive step's `output` is `"[REDACTED]"`; a stream result's is a
+ * fresh stream of its bytes.
+ */
+export type WorkflowInstanceEvent = {
+  readonly instanceId: string;
+  readonly eventId: number;
+  readonly timestamp: number;
+} & (
+  | { readonly type: "workflow_queued" }
+  | { readonly type: "workflow_started"; readonly params?: unknown }
+  | { readonly type: "workflow_running" }
+  | { readonly type: "workflow_paused" }
+  | { readonly type: "workflow_waiting_for_pause" }
+  | { readonly type: "workflow_waiting" }
+  | { readonly type: "workflow_completed"; readonly output?: unknown }
+  | { readonly type: "workflow_errored"; readonly error: WorkflowEventError }
+  | { readonly type: "workflow_terminated" }
+  | {
+      readonly type: "step_started";
+      readonly stepName: string;
+      readonly config?: WorkflowStepEventConfig;
+    }
+  | {
+      readonly type: "step_completed";
+      readonly stepName: string;
+      readonly output?: unknown;
+    }
+  | { readonly type: "step_errored"; readonly stepName: string }
+  | {
+      readonly type: "attempt_started";
+      readonly stepName: string;
+      readonly attempt: number;
+    }
+  | {
+      readonly type: "attempt_completed";
+      readonly stepName: string;
+      readonly attempt: number;
+    }
+  | {
+      readonly type: "attempt_errored";
+      readonly stepName: string;
+      readonly attempt: number;
+      readonly retryDelayMs?: number;
+      readonly error: WorkflowEventError;
+    }
+  | {
+      readonly type: "sleep_started";
+      readonly stepName: string;
+      readonly durationMs: number;
+    }
+  | { readonly type: "sleep_completed"; readonly stepName: string }
+  | {
+      readonly type: "wait_started";
+      readonly stepName: string;
+      readonly eventType: string;
+    }
+  | { readonly type: "wait_completed"; readonly stepName: string }
+  | { readonly type: "wait_timed_out"; readonly stepName: string }
+  | { readonly type: "rollback_started" }
+  | {
+      readonly type: "rollback_step_started";
+      readonly stepName: string;
+      readonly config?: WorkflowStepEventConfig;
+    }
+  | { readonly type: "rollback_step_completed"; readonly stepName: string }
+  | {
+      readonly type: "rollback_step_errored";
+      readonly stepName: string;
+      readonly error: WorkflowEventError;
+    }
+  | {
+      readonly type: "rollback_attempt_started";
+      readonly stepName: string;
+      readonly attempt: number;
+    }
+  | {
+      readonly type: "rollback_attempt_completed";
+      readonly stepName: string;
+      readonly attempt: number;
+    }
+  | {
+      readonly type: "rollback_attempt_errored";
+      readonly stepName: string;
+      readonly attempt: number;
+      readonly retryDelayMs?: number;
+      readonly error: WorkflowEventError;
+    }
+  | { readonly type: "rollback_completed" }
+  | { readonly type: "rollback_errored" }
+);
+
+export type WorkflowInstanceEventType = WorkflowInstanceEvent["type"];
+
+/** What `subscribe` takes, as the reference does. */
+export interface WorkflowInstanceSubscribeOptions {
+  /** The last event already seen: delivery starts after it. */
+  readonly cursor?: number;
+  /** Only these types are delivered; a run's end still ends it. */
+  readonly filter?: readonly WorkflowInstanceEventType[];
+}
+
+/**
+ * A subscription to a run's events: those it kept, then those to come,
+ * until the run ends (`done: true` then, and at every later call), or the
+ * subscription is disposed, or the run is removed.
+ */
+export interface WorkflowInstanceSubscription extends Disposable {
+  next: () => Promise<IteratorResult<WorkflowInstanceEvent, undefined>>;
 }

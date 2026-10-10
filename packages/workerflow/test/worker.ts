@@ -10,13 +10,20 @@ import type {
   WorkflowStepRollbackOptions,
 } from "../src/contracts.ts";
 import { NonRetryableError, namedError } from "../src/errors.ts";
+import type { RunNotification } from "../src/notifications.ts";
 import { WorkflowRun } from "../src/run.ts";
+import type { DeleteOutcome, StartCommand, StartOutcome } from "../src/run.ts";
 import {
   busyFor,
   checkpoint,
   effect,
   handled,
+  handledAt,
+  tick,
   measuredClock,
+  hostNotifications,
+  notifyFailures,
+  notifyHangs,
   undone,
   witness,
 } from "./outside.ts";
@@ -409,7 +416,24 @@ export const definitions: Record<string, WorkflowDefinition> = {
         payload: event.payload,
         timestamp: event.timestamp,
         instanceId: event.instanceId,
+        workflowName: event.workflowName,
+        // Whether the event has the field at all, as a run a schedule
+        // didn't start has none.
+        scheduled: "schedule" in event,
+        schedule: event.schedule ?? null,
       }),
+  },
+  // As many `do` steps as the params' `steps` say, one after another.
+  "many-steps": {
+    run: async (event, step) => {
+      const steps = paramOf(event.payload, "steps");
+      let done = 0;
+      for (let index = 0; index < Number(steps); index += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- steps run one after another
+        done += await step.do(`step ${index}`, () => 1);
+      }
+      return done;
+    },
   },
   // A step called with the config in the params, as an author passing
   // whatever they were given would: refused or run, never run otherwise.
@@ -656,6 +680,61 @@ export const definitions: Record<string, WorkflowDefinition> = {
     },
   },
   // Two steps at once, for a host whose handlers have little wall time.
+  // Two steps side by side, each with a timeout of half a second.
+  // A sleep the params give (in ms), then a step whose timeout takes most
+  // of a budgeted handler's second.
+  "budget-napper": {
+    run: async (event, step) => {
+      await step.sleep("nap", durationIn(event.payload, 1000));
+      return await step.do(
+        "after",
+        { timeout: 900 },
+        async (context) => await effect(event.instanceId, "after", context)
+      );
+    },
+  },
+  // A step, then one whose timeout takes most of a budgeted handler's
+  // second: a pause asked for during the first stops before the second.
+  "budget-pair": {
+    run: async (event, step) => {
+      await step.do(
+        "first",
+        async (context) => await effect(event.instanceId, "first", context)
+      );
+      return await step.do(
+        "second",
+        { timeout: 900 },
+        async (context) => await effect(event.instanceId, "second", context)
+      );
+    },
+  },
+  // One step whose timeout takes most of a budgeted handler's second.
+  "near-budget": {
+    run: async (event, step) =>
+      await step.do(
+        "long",
+        { timeout: 900 },
+        async (context) => await effect(event.instanceId, "long", context)
+      ),
+  },
+  "quick-pair": {
+    run: async (event, step) => {
+      const { instanceId } = event;
+      const quick = { timeout: 500 };
+      return await Promise.all([
+        step.do(
+          "first",
+          quick,
+          async (context) => await effect(instanceId, "first", context)
+        ),
+        step.do(
+          "second",
+          quick,
+          async (context) => await effect(instanceId, "second", context)
+        ),
+      ]);
+    },
+  },
   pair: {
     run: async (event, step) => {
       const { instanceId } = event;
@@ -968,8 +1047,25 @@ export const definitions: Record<string, WorkflowDefinition> = {
 
 /** How long a test run's compensating replay may take. */
 export const testRollbackReplayMs = 200;
+
+/** How long a subscription to a test run may wait for its next event. */
+export const testSubscriptionWaitMs = 2000;
+
+/** How long the test host may take to take notifications. */
+export const testNotifyTimeoutMs = 300;
 /** How many test replays in a row may end without the rollbacks. */
 export const testRollbackReplays = 3;
+
+/** A run with an ID that starts with this is counted while it starts. */
+export const countedPrefix = "counted-";
+const countedStartMs = 20;
+/** How many counted starts are out now, and the most ever at once. */
+export const startsOut = { now: 0, most: 0 };
+
+/** A run with an ID that starts with this fails to be created. */
+export const unstartablePrefix = "unstartable-";
+/** A run with an ID that starts with this fails to be deleted. */
+export const undeletablePrefix = "undeletable-";
 
 export class TestRuns extends WorkflowRun {
   protected override readonly maxStreamOutputBytes = testMaxStreamBytes;
@@ -991,12 +1087,70 @@ export class TestRuns extends WorkflowRun {
     return measuredClock();
   }
 
+  /** Short, so a subscription that waits too long is closed soon. */
+  protected override readonly subscriptionWaitMs: number =
+    testSubscriptionWaitMs;
+
+  /** Short, so a host that never answers is given up on soon. */
+  protected override readonly notifyTimeoutMs: number = testNotifyTimeoutMs;
+
+  /**
+   * The host: takes the run's notifications into `hostNotifications`, held at the
+   * checkpoint "notify" if the test holds it, failing as many times as
+   * `notifyFailures` says, or not answering once if `notifyHangs` says.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- the host's state is the test's, shared through outside.ts
+  protected override async notify(
+    notifications: readonly RunNotification[]
+  ): Promise<void> {
+    const id = notifications[0]?.instanceId ?? "";
+    await checkpoint(id, "notify");
+    const failures = notifyFailures.get(id) ?? 0;
+    if (failures > 0) {
+      notifyFailures.set(id, failures - 1);
+      throw new Error("the host is down");
+    }
+    if (notifyHangs.delete(id)) {
+      await Promise.withResolvers<never>().promise;
+    }
+    hostNotifications.push(...notifications);
+  }
+
   override async alarm(): Promise<void> {
     try {
       await super.alarm();
     } finally {
       handled.push(this.ctx.id.toString());
+      handledAt.push({ object: this.ctx.id.toString(), order: tick() });
     }
+  }
+
+  /** Fails, as storage might, for an instance ID that asks it to. */
+  override async start(command: StartCommand): Promise<StartOutcome> {
+    if (command.instanceId.startsWith(unstartablePrefix)) {
+      throw new Error("storage failed as the run was created");
+    }
+    if (!command.instanceId.startsWith(countedPrefix)) {
+      return await super.start(command);
+    }
+    // Held a moment, so starts a batch has out at once overlap.
+    startsOut.now += 1;
+    startsOut.most = Math.max(startsOut.most, startsOut.now);
+    try {
+      await scheduler.wait(countedStartMs);
+      return await super.start(command);
+    } finally {
+      startsOut.now -= 1;
+    }
+  }
+
+  /** Fails, as storage might, for a run whose ID asks it to. */
+  override async deleteRun(): Promise<DeleteOutcome> {
+    const run = this.journal()?.run;
+    if (run?.instance_id.startsWith(undeletablePrefix) === true) {
+      throw new Error("storage failed as the run was deleted");
+    }
+    return await super.deleteRun();
   }
 }
 
@@ -1010,6 +1164,26 @@ export const budgetedHandlerMs = 1000;
 
 export class BudgetedRuns extends TestRuns {
   protected override readonly handlerBudgetMs = budgetedHandlerMs;
+  /** Long enough for a delivery to take most of a handler's wall time. */
+  protected override readonly notifyTimeoutMs = budgetedHandlerMs * 2;
+}
+
+/** How long ShortTombstoneRuns keep a tombstone. */
+export const shortTombstoneMs = 1000;
+
+/** Run objects whose tombstones expire after a second, not 30 days. */
+export class ShortTombstoneRuns extends TestRuns {
+  protected override readonly tombstoneMs = shortTombstoneMs;
+}
+
+/** Run objects whose host let a subscription wait no time at all. */
+export class MiswaitedRuns extends TestRuns {
+  protected override readonly subscriptionWaitMs: number = 0;
+}
+
+/** Run objects whose host gave its notifications no time at all. */
+export class MistimedRuns extends TestRuns {
+  protected override readonly notifyTimeoutMs = 0;
 }
 
 // The run object of a host that misconfigured it, bound as MISCONFIGURED.

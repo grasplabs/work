@@ -85,7 +85,16 @@
 //   what undoes its effects isn't cut short by a command.
 // - `delete` removes the run, its journal and its alarm. A stale
 //   activation of it is fenced by the run's identity: it can't act on the
-//   run, nor on one created again under the same ID.
+//   run, nor on one created again under the same ID. Its start key stays
+//   as a tombstone, so the same start delivered again creates nothing.
+//
+// Retention (retention.ts) starts when the run ends: the write of its end
+// also writes its purge time, its retention later, and the alarm is set to
+// that time in the same turn. That alarm removes the run as `delete` does,
+// tombstone and all. A restart clears the purge time, so a run that is to
+// run, wait, pause or roll back is never purged; and since the alarm is
+// stored with the run, a process that dies before the purge leaves it to
+// the alarm when it starts again.
 //
 // The host enables `nodejs_als` (or `nodejs_compat`, which includes it):
 // each call of the step API is told apart by the attempt it comes from,
@@ -100,9 +109,10 @@
 // A step's result is kept as codec text (codec.ts) or, for a byte stream,
 // as chunks in this object's storage (streams.ts). A result the step can't
 // keep ends the run, as it does on Cloudflare: the definition doesn't get
-// to catch it, and it isn't retried. Observers read the run's history
-// (history.ts), where a sensitive step's result is redacted; the raw result
-// is for the run's own replay and the host's inspection (`stepOutput`).
+// to catch it, and it isn't retried. Observers subscribe to the run's
+// history (history.ts, subscription.ts), where a sensitive step's result
+// is redacted; the raw result is for the run's own replay and the host's
+// inspection (`stepOutput`).
 import { DurableObject } from "cloudflare:workers";
 
 import { Activation, superseded, suspended } from "./activation.ts";
@@ -121,11 +131,19 @@ import type {
   WorkflowDefinition,
 } from "./contracts.ts";
 import { errorRecord, namedError, parseError } from "./errors.ts";
-import { readHistory } from "./history.ts";
-import type { HistoryEvent } from "./history.ts";
+import {
+  buildEvent,
+  endedBy,
+  forgetHistoryIn,
+  lastEventId,
+  readNextEvent,
+  recordStartIn,
+} from "./history.ts";
+import type { Schedule } from "./identity.ts";
 import {
   createJournal,
   hasJournal,
+  isTombstoned,
   JournalSchemaError,
   journalSchemaVersion,
   readJournal,
@@ -135,14 +153,32 @@ import {
   maxInboxEvents,
   readRun,
   readStep,
+  removeJournal,
+  nextTombstoneExpiry,
+  notifyDue,
+  expireTombstones,
+  startRetentionIn,
 } from "./journal.ts";
 import type { Journal, RunRow, StepType } from "./journal.ts";
 import { warnRecovered } from "./log.ts";
+import {
+  failedIn,
+  defaultNotifyTimeoutMs,
+  readPending,
+  takenIn,
+} from "./notifications.ts";
+import type { RunNotification } from "./notifications.ts";
+import { maxRetentionLimitMs } from "./retention.ts";
 import {
   defaultMaxRunStreamBytes,
   defaultMaxStreamBytes,
   replayStream,
 } from "./streams.ts";
+import { Subscription } from "./subscription.ts";
+import type { SubscriptionResult } from "./subscription.ts";
+
+/** What `WorkflowRun.notify` is handed. */
+export type { RunNotification } from "./notifications.ts";
 
 /** What `WorkflowRun.journal()` returns. */
 export type { Journal } from "./journal.ts";
@@ -159,6 +195,18 @@ export interface StartCommand {
   params: string;
   /** Says which start this is: the same key again is the same start. */
   key: string;
+  /** The schedule occurrence that starts the run, if one does. */
+  schedule: Schedule | null;
+  /**
+   * Whether the start can be delivered again (`admit`, a schedule): only
+   * then does removing the run leave its key as a tombstone.
+   */
+  redeliverable: boolean;
+  /**
+   * How long the run is kept once it has ended, resolved by the binding:
+   * after it completed or was terminated, and after it errored.
+   */
+  retention: { successMs: number; errorMs: number };
 }
 
 /** What the instance asks the run object to accept into its inbox. */
@@ -210,9 +258,15 @@ export type StepOutput =
  * `created`: this command created the run. `existing`: the run was created
  * by an earlier delivery of this same start. `collision`: another start
  * created a run under this ID. `conflict`: the same start key came with
- * other params, so it isn't the same start.
+ * other params, so it isn't the same start. `removed`: this start created
+ * a run that has since been deleted; it isn't created again.
  */
-export type StartOutcome = "created" | "existing" | "collision" | "conflict";
+export type StartOutcome =
+  | "created"
+  | "existing"
+  | "collision"
+  | "conflict"
+  | "removed";
 
 /**
  * `pausing`: an activation runs the run, and stops at its next safe
@@ -256,6 +310,54 @@ export type RestartOutcome =
   | "missing";
 
 export type DeleteOutcome = "deleted" | "missing";
+
+/**
+ * Where a subscription starts, and what it delivers: the binding read and
+ * checked them (instance.ts).
+ */
+export interface SubscribeCommand {
+  /** The last event ID the subscriber has; 0 for all of them. */
+  cursor: number;
+  /** The event types it takes; null for every type. */
+  filter: string[] | null;
+}
+
+/** A subscription's place in the run's history, in the run object. */
+interface Observer {
+  /** The run it subscribed to: not one created again under the ID. */
+  readonly runUid: string;
+  cursor: number;
+  /** Whether it checked once that its cursor isn't past the run's end. */
+  endChecked: boolean;
+  /** The types it takes, or null for every type. */
+  readonly types: ReadonlySet<string> | null;
+  /** The same, as the history reads it: a JSON array, or null. */
+  readonly filter: string | null;
+  /** Set while it waits for the next write; called by that write. */
+  wake: (() => void) | undefined;
+  closed: boolean;
+  /**
+   * Why it was closed short of the run's end, to be taken up again from
+   * its cursor: cut off for a newer one, or waited too long.
+   */
+  failure: string | undefined;
+}
+
+/**
+ * The most subscriptions a run object keeps open. Each holds a cursor and
+ * a filter, and nothing it hasn't read yet, however far it is behind; a
+ * caller that never disposes of them (or whose session ended while one
+ * waited) would still add one each time. Past this, the oldest is cut
+ * off: its `next` fails, as an RPC failure would, and its caller takes it
+ * up again from its cursor.
+ */
+export const maxSubscriptions = 100;
+
+/** How long a subscription's `next` waits for an event by default: 60 s. */
+export const defaultSubscriptionWaitMs = 60_000;
+
+/** The longest a host may let a subscription wait: 10 minutes. */
+export const maxSubscriptionWaitMs = 10 * 60_000;
 
 /** Which step a restart starts from; null for the run's start. */
 export interface RestartCommand {
@@ -356,6 +458,20 @@ const hasEnded = (run: RunRow): boolean =>
   run.status === "terminated";
 
 /**
+ * When the run itself next needs its alarm: an ended run's purge, a
+ * waiting run's wake, any other at once.
+ */
+const ownWake = (run: RunRow): number => {
+  if (hasEnded(run) && run.purge_at !== null) {
+    return run.purge_at;
+  }
+  if (run.status === "waiting" && run.wake_at !== null) {
+    return run.wake_at;
+  }
+  return Date.now();
+};
+
+/**
  * Takes the run from whatever activation holds it: a new generation, and
  * every activation still open journaled as superseded. Called inside the
  * transaction of the command that does it.
@@ -440,6 +556,164 @@ const forgetIn = (
 };
 
 /**
+ * Awaits the host's answer, or fails once `ms` have passed without it: a
+ * host that never answers counts as one that failed.
+ */
+const answeredWithin = async (
+  answer: Promise<void> | void,
+  ms: number
+): Promise<void> => {
+  const deadline = Promise.withResolvers<never>();
+  const timer = setTimeout(() => {
+    deadline.reject(
+      new Error(`The host didn't take its notifications within ${ms} ms`)
+    );
+  }, ms);
+  try {
+    await Promise.race([answer, deadline.promise]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/**
+ * The longest a host may give `notify`: a minute, well under an alarm
+ * handler's wall time, which an alarm's delivery comes out of.
+ */
+const maxNotifyTimeoutMs = 60_000;
+
+/** How much one delivery hands over, and whether a backoff holds it. */
+interface DeliveryLimits {
+  readonly batches: number;
+  readonly force: boolean;
+}
+
+/**
+ * Whether an alarm now runs an activation of the run: it is queued, runs
+ * (an activation died), rolls back with its next step due, or waits and
+ * its wake has come.
+ */
+const activatesNow = (run: RunRow): boolean => {
+  if (
+    run.status === "queued" ||
+    run.status === "running" ||
+    run.status === "waitingForPause"
+  ) {
+    return true;
+  }
+  if (run.status === "waiting" || run.status === "rollingBack") {
+    return run.wake_at === null || run.wake_at <= Date.now();
+  }
+  return false;
+};
+
+/**
+ * Whether the run's outbox is due: at once whenever it holds anything,
+ * whatever time it was stamped with, but not in a failed host's backoff,
+ * unless `force`.
+ */
+const isDue = (run: RunRow, force: boolean): boolean =>
+  run.notify_at !== null &&
+  (force || run.notify_failures === 0 || run.notify_at <= Date.now());
+
+/** How long a tombstone holds by default: 30 days. */
+export const defaultTombstoneMs = 30 * 24 * 60 * 60 * 1000;
+
+/** The longest tombstone horizon a host may set: 365 days. */
+const maxTombstoneMs = 365 * 24 * 60 * 60 * 1000;
+
+/**
+ * The object's storage, with its one alarm shared by the run, the
+ * notifications its host hasn't taken (notifications.ts) and the object's
+ * tombstones: every alarm the engine sets is moved to the next of those
+ * obligations when that comes first, and an alarm it deletes is left at
+ * it while one is left. So a run created under an ID after another was
+ * deleted, whatever it does (runs, waits, pauses, ends), never keeps a
+ * tombstone past its horizon, nor a notification from its host; alarm()
+ * does what is due, then the run's own work. `written` is called after
+ * each transaction commits, so subscriptions waiting for the next event
+ * read again and notifications go out: every write that changes the
+ * run's state after its creation is one. Everything else is the storage's
+ * own, failures included.
+ */
+const sharingAlarm = (
+  storage: DurableObjectStorage,
+  horizon: () => number,
+  notifyObligation: () => number | null,
+  written: () => void
+): DurableObjectStorage => {
+  const expiry = (): number | null => {
+    const tombstone = nextTombstoneExpiry(storage.sql, horizon());
+    const notify = notifyObligation();
+    if (tombstone === null || notify === null) {
+      return tombstone ?? notify;
+    }
+    return Math.min(tombstone, notify);
+  };
+  const earliest = (time: number | Date): number => {
+    const at = typeof time === "number" ? time : time.getTime();
+    const tombstone = expiry();
+    return tombstone === null ? at : Math.min(at, tombstone);
+  };
+  return new Proxy(storage, {
+    get: (target, property) => {
+      if (property === "transactionSync") {
+        return <T>(closure: () => T): T => {
+          const result = target.transactionSync(closure);
+          written();
+          return result;
+        };
+      }
+      if (property === "setAlarm") {
+        return async (time: number | Date): Promise<void> => {
+          // Read with no await before the call: the same turn as the
+          // write it goes with.
+          await target.setAlarm(earliest(time));
+        };
+      }
+      if (property === "deleteAlarm") {
+        return async (): Promise<void> => {
+          const tombstone = expiry();
+          await (tombstone === null
+            ? target.deleteAlarm()
+            : target.setAlarm(tombstone));
+        };
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      if (typeof value !== "function") {
+        return value;
+      }
+      return (...args: unknown[]): unknown =>
+        Reflect.apply(value, target, args);
+    },
+  });
+};
+
+/**
+ * What removing a run left: null when nothing is left (the object can be
+ * emptied), else when the oldest tombstone left expires.
+ */
+interface Removal {
+  expiresAt: number | null;
+}
+
+/**
+ * Removes the run's journal, in the caller's transaction, leaving `key` as
+ * a tombstone when the start can be delivered again (null: it can't), and
+ * expiring tombstones past the horizon on the way.
+ */
+const removeIn = (
+  sql: SqlStorage,
+  key: string | null,
+  now: number,
+  horizon: number
+): Removal => {
+  removeJournal(sql, key === null ? null : { key, at: now });
+  const oldest = expireTombstones(sql, now - horizon);
+  return { expiresAt: oldest === null ? null : oldest + horizon };
+};
+
+/**
  * A workflow run. Subclass it to say which definition a run executes, and
  * register the subclass as a SQLite-backed Durable Object class with no
  * route to it. Its RPC methods are for the binding (binding.ts).
@@ -447,6 +721,339 @@ const forgetIn = (
 export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   /** How long an activation may go quiet before the alarm recovers the run. */
   protected readonly leaseMs: number = defaultLeaseMs;
+
+  /**
+   * How long the tombstone of a removed run's redeliverable start holds
+   * (`admit`, a schedule's occurrence): a start delivered again within it
+   * creates nothing; after it, the tombstone is dropped and the same start
+   * is a new one, which creates a run. 30 days by default, Grasp's
+   * retention, so a trigger redelivered within a run's lifetime and
+   * retention is never run twice.
+   */
+  protected readonly tombstoneMs: number = defaultTombstoneMs;
+
+  /**
+   * The storage the engine sets its alarm through, shared with the
+   * tombstones' expiry (sharingAlarm). The horizon is read when an alarm
+   * is set, so a subclass's own is the one used; one the host got wrong
+   * counts as the default here, and is refused where it is checked.
+   */
+  readonly #store: DurableObjectStorage = sharingAlarm(
+    this.ctx.storage,
+    () => {
+      try {
+        return this.#tombstoneHorizon();
+      } catch {
+        return defaultTombstoneMs;
+      }
+    },
+    () => this.#notifyObligation(),
+    () => {
+      this.#wakeObservers();
+      this.#deliverSoon();
+    }
+  );
+
+  /** When the batch out to the host was handed over, if one is out. */
+  #handedAt: number | undefined;
+
+  /**
+   * When the outbox next needs the alarm: when it is due, but while a
+   * batch is out to the host, not before that batch's timeout, so the
+   * alarm doesn't come again and again for what is already out.
+   */
+  #notifyObligation(): number | null {
+    const due = notifyDue(this.ctx.storage.sql);
+    if (due === null || this.#handedAt === undefined) {
+      return due;
+    }
+    let timeout: number;
+    try {
+      timeout = this.#notifyTimeout();
+    } catch {
+      timeout = defaultNotifyTimeoutMs;
+    }
+    return Math.max(due, this.#handedAt + timeout);
+  }
+
+  /**
+   * How long a subscription's `next` may wait for an event, in ms: a
+   * minute by default. Past it the subscription is closed, as a cut-off
+   * one is, and its caller takes it up again from its cursor; so no
+   * waiter outlives its caller by more than this.
+   */
+  protected readonly subscriptionWaitMs: number = defaultSubscriptionWaitMs;
+
+  /**
+   * The subscription wait, checked: whole milliseconds from 1 to
+   * `maxSubscriptionWaitMs`. One the host got wrong refuses a run's start,
+   * and closes a subscription that would wait under it, never waits by a
+   * value no timer keeps.
+   */
+  #subscriptionWait(): number {
+    const ms = this.subscriptionWaitMs;
+    if (!Number.isSafeInteger(ms) || ms < 1 || ms > maxSubscriptionWaitMs) {
+      throw new TypeError(
+        `A run's subscriptionWaitMs is a whole number of milliseconds from 1 to ${maxSubscriptionWaitMs}: ${String(ms)}`
+      );
+    }
+    return ms;
+  }
+
+  /**
+   * How long `notify` may take, in whole milliseconds from 1 to a minute,
+   * before it counts as failed: 30 s by default. A host that never answers
+   * can't hold the run's alarm up for longer; and a delivery a dead
+   * process cut off is handed over again once this has passed.
+   */
+  protected readonly notifyTimeoutMs: number = defaultNotifyTimeoutMs;
+
+  /**
+   * Takes the run's notifications (notifications.ts): resolves once the
+   * host has them for good, and throws (or takes longer than
+   * `notifyTimeoutMs`) when it doesn't, so they are handed over again,
+   * after a backoff. They come in order, each at least once: the host
+   * keeps, per run (`runId`), the greatest `sequence` it applied and
+   * ignores one at or below it. Called outside any of the run's writes,
+   * one call at a time per run object; but a call that timed out may still
+   * be going when the same notifications are handed over again, so the
+   * two can overlap, and the host must apply each sequence once whichever
+   * arrives first. By default the host takes nothing.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- the host's hook; by default it takes nothing
+  protected notify(
+    _notifications: readonly RunNotification[]
+  ): Promise<void> | void {
+    // Nothing to tell: the notifications are dropped as taken.
+  }
+
+  /** The delivery out to the host, if one is. */
+  #delivery: Promise<void> | undefined;
+
+  /**
+   * Hands what is due of the outbox to the host (#deliverDue reads what
+   * is): once the write that called this has gone with its alarm write,
+   * a microtask later, so the host's code never runs inside the run's own
+   * turn.
+   */
+  #deliverSoon(): void {
+    // One read of the outbox's due time: an empty one costs no more.
+    try {
+      if (notifyDue(this.ctx.storage.sql) === null) {
+        return;
+      }
+    } catch {
+      return;
+    }
+    // One follow-up at most: writes while a delivery is out (or while the
+    // follow-up waits for it) are all taken by the follow-up's read.
+    if (this.#followUp) {
+      return;
+    }
+    this.#followUp = true;
+    queueMicrotask(() => {
+      void this.#deliverFollowUp();
+    });
+  }
+
+  /** Whether a delivery is queued for the writes since the last began. */
+  #followUp = false;
+
+  /**
+   * The follow-up delivery: once the one out has ended, it reads the
+   * outbox afresh; writes from its start on queue the next.
+   */
+  async #deliverFollowUp(): Promise<void> {
+    while (this.#delivery !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one delivery at a time
+      await this.#delivery;
+    }
+    this.#followUp = false;
+    await this.#deliver({ batches: Number.POSITIVE_INFINITY, force: false });
+  }
+
+  /**
+   * Delivers what is due to the host, one delivery at a time: a second
+   * waits for the one out, then reads the outbox again.
+   */
+  async #deliver(limits: DeliveryLimits): Promise<void> {
+    while (this.#delivery !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one delivery at a time
+      await this.#delivery;
+    }
+    const delivery = (async (): Promise<void> => {
+      try {
+        await this.#deliverDue(limits);
+      } finally {
+        this.#handedAt = undefined;
+        this.#delivery = undefined;
+      }
+      await this.#settleAlarm();
+    })();
+    this.#delivery = delivery;
+    await delivery;
+  }
+
+  /**
+   * The host's timeout, checked: whole milliseconds from 1 to a minute
+   * (`maxNotifyTimeoutMs`). One the host got wrong refuses a run's start, and fails
+   * each delivery (logged), never runs with a value no timer keeps.
+   */
+  #notifyTimeout(): number {
+    const ms = this.notifyTimeoutMs;
+    if (!Number.isSafeInteger(ms) || ms < 1 || ms > maxNotifyTimeoutMs) {
+      throw new TypeError(
+        `A run's notifyTimeoutMs is a whole number of milliseconds from 1 to ${maxNotifyTimeoutMs}: ${String(ms)}`
+      );
+    }
+    return ms;
+  }
+
+  /**
+   * Hands the host what it hasn't taken, a batch at a time, in order, up
+   * to `limits.batches`, and drops each batch once it has. Due at once,
+   * whatever time the outbox was stamped with, unless the host failed
+   * and its backoff isn't over (`limits.force`: even then, once, before a
+   * purge). A failure (the host's, or storage's) is logged, never
+   * thrown: the alarm, brought forward to the outbox's due time by the
+   * write that filled it, hands it over again.
+   */
+  async #deliverDue(limits: DeliveryLimits): Promise<void> {
+    const storage = this.#store;
+    const { sql } = storage;
+    for (let batches = 0; batches < limits.batches; batches += 1) {
+      let batch: RunNotification[];
+      try {
+        const run = this.#run();
+        if (run === undefined || !isDue(run, limits.force)) {
+          return;
+        }
+        batch = readPending(sql, run);
+      } catch (error) {
+        warnRecovered("workflow_notify_read_failed", error);
+        return;
+      }
+      const last = batch.at(-1);
+      try {
+        if (last !== undefined) {
+          // Checked before the host is called: a timeout no timer keeps
+          // hands nothing over.
+          const timeout = this.#notifyTimeout();
+          this.#handedAt = Date.now();
+          // oxlint-disable-next-line no-await-in-loop -- one batch at a time, in order
+          await answeredWithin(this.notify(batch), timeout);
+        }
+      } catch (error) {
+        warnRecovered("workflow_notify_failed", error);
+        this.#putOff(last?.runId ?? "");
+        return;
+      }
+      try {
+        const taken = storage.transactionSync((): boolean => {
+          const run = this.#run();
+          // The run the host was told of, not one created since under
+          // the same ID.
+          if (
+            run === undefined ||
+            (last !== undefined && run.run_uid !== last.runId)
+          ) {
+            return false;
+          }
+          takenIn(sql, last?.sequence ?? 0);
+          return true;
+        });
+        if (!taken) {
+          return;
+        }
+      } catch (error) {
+        // Handed over again by the alarm: at least once.
+        warnRecovered("workflow_notify_take_failed", error);
+        return;
+      }
+    }
+  }
+
+  /**
+   * Sets the alarm, once a delivery has ended, to exactly the earlier of
+   * what the run itself needs and what the outbox does: the run's own is
+   * none for a paused run, an ended run's purge, the watchdog of an
+   * activation that holds the run (its lease), else its wake (now if it
+   * has none: it is due); the outbox's, when it is due again (a failed
+   * host's backoff), or none once it is empty. Read and written in one
+   * turn, so the alarm says what the run and its outbox are now: brought
+   * neither back from the run's own wake, nor left early. A failure
+   * leaves the alarm as it was, which finds nothing to do and sets it
+   * again (alarm()).
+   */
+  async #settleAlarm(): Promise<void> {
+    const storage = this.#store;
+    try {
+      const run = this.#run();
+      if (run === undefined) {
+        return;
+      }
+      let own: number | null = null;
+      if (hasEnded(run)) {
+        own = run.purge_at;
+      } else if (run.status === "paused") {
+        own = null;
+      } else if (run.lease_until === null) {
+        own = run.wake_at ?? Date.now();
+      } else {
+        own = run.lease_until;
+      }
+      // The shared alarm brings it forward to the outbox and tombstones.
+      await (own === null ? storage.deleteAlarm() : storage.setAlarm(own));
+    } catch (error) {
+      warnRecovered("workflow_alarm_set_failed", error);
+    }
+  }
+
+  /**
+   * Puts the next delivery off after the host failed to take the batch of
+   * the run `runId`; the delivery's end then sets the alarm to it
+   * (#settleAlarm). A run created since under the same ID isn't put off
+   * for another run's failure.
+   */
+  #putOff(runId: string): void {
+    const storage = this.#store;
+    try {
+      storage.transactionSync(() => {
+        if (this.#run()?.run_uid === runId) {
+          failedIn(storage.sql, Date.now());
+        }
+      });
+    } catch (error) {
+      warnRecovered("workflow_notify_put_off_failed", error);
+    }
+  }
+
+  /**
+   * The subscriptions open on this object, each only its cursor and filter:
+   * what they deliver is read from the history, so an object evicted or
+   * killed loses nothing a subscriber reconnecting with its cursor needs.
+   */
+  readonly #observers = new Set<Observer>();
+
+  /** Lets every subscription waiting for an event read again. */
+  #wakeObservers(): void {
+    for (const observer of this.#observers) {
+      const { wake } = observer;
+      observer.wake = undefined;
+      wake?.();
+    }
+  }
+
+  /** The tombstone horizon, checked: whole milliseconds, 1 to 365 days. */
+  #tombstoneHorizon(): number {
+    const ms = this.tombstoneMs;
+    if (!Number.isSafeInteger(ms) || ms < 1 || ms > maxTombstoneMs) {
+      throw new TypeError(
+        `A run's tombstoneMs is whole milliseconds from 1 to 365 days: ${String(ms)}`
+      );
+    }
+    return ms;
+  }
 
   /** The most bytes a step's stream result may hold. */
   protected readonly maxStreamOutputBytes: number = defaultMaxStreamBytes;
@@ -533,6 +1140,28 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   async start(command: StartCommand): Promise<StartOutcome> {
     // Refused before any run exists, rather than at its first alarm.
     this.#rollbackLimits();
+    this.#subscriptionWait();
+    this.#notifyTimeout();
+    const horizon = this.#tombstoneHorizon();
+    // The binding resolved and bounded these; this method is the run's
+    // boundary, so it refuses anything that isn't a time above 0 and within
+    // the greatest limit any host may set: the run's end plus it is then
+    // always a time an alarm takes.
+    for (const ms of [command.retention.successMs, command.retention.errorMs]) {
+      if (!Number.isSafeInteger(ms) || ms <= 0 || ms > maxRetentionLimitMs) {
+        throw new TypeError(
+          `A run's retention is a whole number of milliseconds above 0, at most 365 days: ${String(ms)}`
+        );
+      }
+    }
+    const storage = this.#store;
+    // Before the run: a start delivered again after its run was deleted
+    // finds the tombstone, whatever run was created under the ID since.
+    // Only a start with this key could have left it, so it is this start.
+    // One past the horizon has expired, dropped yet or not.
+    if (isTombstoned(storage.sql, command.key, Date.now() - horizon)) {
+      return "removed";
+    }
     const existing = this.#run();
     if (existing !== undefined) {
       const sameStart =
@@ -545,18 +1174,21 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       if (
         // The same params, whatever order a retry put their keys in.
         !equivalent(existing.params, command.params) ||
-        existing.version !== command.version
+        existing.version !== command.version ||
+        // And the same retention: another is another start, not this one
+        // delivered again, and isn't taken without a word.
+        existing.success_retention_ms !== command.retention.successMs ||
+        existing.error_retention_ms !== command.retention.errorMs
       ) {
         return "conflict";
       }
       await this.#ensureWake(existing);
       return "existing";
     }
-    const { storage } = this.ctx;
     const now = Date.now();
     createJournal(storage.sql);
     storage.sql.exec(
-      "INSERT INTO run (singleton, schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)",
+      "INSERT INTO run (singleton, schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, schedule, redeliverable, success_retention_ms, error_retention_ms) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?)",
       journalSchemaVersion,
       crypto.randomUUID(),
       command.definition,
@@ -565,8 +1197,13 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       command.key,
       command.params,
       now,
-      crypto.randomUUID()
+      crypto.randomUUID(),
+      command.schedule === null ? null : JSON.stringify(command.schedule),
+      command.redeliverable ? 1 : 0,
+      command.retention.successMs,
+      command.retention.errorMs
     );
+    recordStartIn(storage.sql);
     // No await between the insert and this: one write.
     await storage.setAlarm(now);
     return "created";
@@ -580,12 +1217,49 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    */
   async #ensureWake(run: RunRow): Promise<void> {
     // A paused run has no alarm until it is resumed.
-    if (hasEnded(run) || run.status === "paused") {
+    if (run.status === "paused") {
       return;
     }
-    if ((await this.ctx.storage.getAlarm()) === null) {
-      await this.ctx.storage.setAlarm(Date.now());
+    // An alarm that is only the tombstones' expiry, or the outbox's due
+    // time, may not be the run's own. It is set again from what the run
+    // waits for: a waiting run's wake (the earlier obligation still wins,
+    // through the shared alarm, and nothing replays), anything else now.
+    const alarm = await this.#store.getAlarm();
+    if (
+      alarm === null ||
+      alarm === this.#tombstoneExpiry() ||
+      alarm === notifyDue(this.ctx.storage.sql)
+    ) {
+      await this.#store.setAlarm(ownWake(run));
     }
+  }
+
+  /** When the object's oldest tombstone expires, or null for none. */
+  #tombstoneExpiry(): number | null {
+    let horizon: number;
+    try {
+      horizon = this.#tombstoneHorizon();
+    } catch {
+      horizon = defaultTombstoneMs;
+    }
+    return nextTombstoneExpiry(this.ctx.storage.sql, horizon);
+  }
+
+  /**
+   * Drops the tombstones past the horizon beside a run, in one write.
+   * Returns whether any was due: this alarm may have been theirs.
+   */
+  #expireDueTombstones(now: number): boolean {
+    const horizon = this.#tombstoneHorizon();
+    const storage = this.#store;
+    return storage.transactionSync(() => {
+      const due = nextTombstoneExpiry(storage.sql, horizon);
+      if (due === null || due > now) {
+        return false;
+      }
+      expireTombstones(storage.sql, now - horizon);
+      return true;
+    });
   }
 
   status(): InstanceStatus | undefined {
@@ -595,7 +1269,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
 
   /**
    * The run's whole journal, as plain data: raw, a sensitive step's result
-   * too, for the host's own inspection. Observers read `history`.
+   * too, for the host's own inspection. Observers subscribe.
    */
   journal(): Journal | undefined {
     return hasJournal(this.ctx.storage.sql)
@@ -604,13 +1278,147 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
-   * What observers are shown of the run, in order: a sensitive step's
-   * result is `"[REDACTED]"`, a stream result its length and hash.
+   * A subscription to the run's events after `cursor` (subscription.ts),
+   * or undefined when there is no run. It sees what the run has done so
+   * far, then each write as it commits, and is done once the run's end
+   * has been delivered or filtered out, or the run is removed. Like every
+   * method here, only the host reaches it: the host decides who may
+   * observe a run before it subscribes for them.
    */
-  history(): HistoryEvent[] {
-    return hasJournal(this.ctx.storage.sql)
-      ? readHistory(this.ctx.storage.sql)
-      : [];
+  subscribe(command: SubscribeCommand): Subscription | undefined {
+    const run = this.#run();
+    if (run === undefined) {
+      return undefined;
+    }
+    const observer: Observer = {
+      runUid: run.run_uid,
+      cursor: command.cursor,
+      endChecked: false,
+      types: command.filter === null ? null : new Set(command.filter),
+      filter: command.filter === null ? null : JSON.stringify(command.filter),
+      wake: undefined,
+      closed: false,
+      failure: undefined,
+    };
+    // A Set keeps the order observers were added in: the first is oldest.
+    for (const oldest of this.#observers) {
+      if (this.#observers.size < maxSubscriptions) {
+        break;
+      }
+      oldest.failure = `this run has more than ${maxSubscriptions} subscriptions open, and this, the oldest, was closed`;
+      this.#close(oldest);
+    }
+    this.#observers.add(observer);
+    return new Subscription(
+      async () => await this.#nextEvent(observer),
+      () => {
+        this.#close(observer);
+      }
+    );
+  }
+
+  /** Ends `observer`'s subscription, and a `next` of it that waits. */
+  #close(observer: Observer): void {
+    observer.closed = true;
+    this.#observers.delete(observer);
+    const { wake } = observer;
+    observer.wake = undefined;
+    wake?.();
+  }
+
+  /**
+   * Ends every subscription, in the turn of the write that removed the run
+   * (a deletion, a purge): none reads a run created again under the ID.
+   */
+  #closeObservers(): void {
+    for (const observer of this.#observers) {
+      this.#close(observer);
+    }
+  }
+
+  /**
+   * Waits for the next write, until `deadline`: the one deadline of the
+   * `next` call it waits for, however many writes wake it meanwhile with
+   * nothing it takes (its filter leaves them out). Past it the
+   * subscription is closed, and its caller takes it up again from its
+   * cursor, so no waiter outlives a caller that went away for long.
+   */
+  async #waitForWrite(
+    observer: Observer,
+    deadline: { at: number; waitMs: number }
+  ): Promise<void> {
+    const next = Promise.withResolvers<boolean>();
+    observer.wake = () => {
+      next.resolve(true);
+    };
+    const timer = setTimeout(
+      () => {
+        observer.failure = `no event came within ${deadline.waitMs} ms`;
+        this.#close(observer);
+      },
+      Math.max(0, deadline.at - Date.now())
+    );
+    try {
+      await next.promise;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * The next event `observer` is to see: read from the history after its
+   * cursor, or waited for until a write adds one. The read and the wait
+   * are set up in one synchronous turn, so no write falls between them.
+   * Each read starts after the rows the last one went through: a filter
+   * that leaves most of a long run out costs each row once, not the whole
+   * history at every write.
+   */
+  async #nextEvent(observer: Observer): Promise<SubscriptionResult> {
+    const { sql } = this.ctx.storage;
+    // One deadline for this call, from when it began to wait.
+    let deadline: { at: number; waitMs: number } | undefined;
+    while (!observer.closed) {
+      const run = this.#run();
+      if (run?.run_uid !== observer.runUid) {
+        // Deleted, or purged, and maybe created again: nothing more to see.
+        return { done: true, value: undefined };
+      }
+      // Once, for a cursor given at or past the run's end: every end
+      // after it is read past the filter.
+      if (!observer.endChecked) {
+        observer.endChecked = true;
+        if (endedBy(sql, observer.cursor)) {
+          return { done: true, value: undefined };
+        }
+      }
+      const row = readNextEvent(sql, observer.cursor, observer.filter);
+      if (row === undefined) {
+        observer.cursor = Math.max(observer.cursor, lastEventId(sql));
+        if (deadline === undefined) {
+          const waitMs = this.#subscriptionWait();
+          deadline = { at: Date.now() + waitMs, waitMs };
+        }
+        // oxlint-disable-next-line no-await-in-loop -- one event at a time, waited for
+        await this.#waitForWrite(observer, deadline);
+        continue;
+      }
+      observer.cursor = row.seq;
+      // oxlint-disable-next-line no-await-in-loop -- the one event this call answers with
+      const event = await buildEvent(sql, run, row);
+      const filtered =
+        observer.types !== null && !observer.types.has(event.type);
+      // Only a run's end is read past the filter: it ends the
+      // subscription, delivered or not, as on the reference.
+      return filtered
+        ? { done: true, value: undefined }
+        : { done: false, value: event };
+    }
+    if (observer.failure !== undefined) {
+      throw new Error(
+        `instance.subscription_closed: ${observer.failure}; subscribe again from the last event ID handled`
+      );
+    }
+    return { done: true, value: undefined };
   }
 
   /**
@@ -689,7 +1497,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   async #leaveToWatchdog(event: string, error: unknown): Promise<void> {
     warnRecovered(event, error);
     try {
-      await this.ctx.storage.setAlarm(Date.now() + this.leaseMs);
+      await this.#store.setAlarm(Date.now() + this.leaseMs);
     } catch {
       throw error;
     }
@@ -701,7 +1509,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * is paused now. One still out somehow is fenced.
    */
   async #pauseNow(): Promise<void> {
-    const { storage } = this.ctx;
+    const storage = this.#store;
     const now = Date.now();
     try {
       storage.transactionSync(() => {
@@ -722,8 +1530,137 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     }
   }
 
+  /**
+   * Hands the host one batch of the notifications that are due, before the
+   * alarm reads the run, so a long outbox doesn't eat into the wall time
+   * of the activation after it: the rest go out after, from the write that
+   * dropped the batch. `none`: the host has taken them all. `later`: some
+   * wait out a failed host's backoff, or a delivery already out has them.
+   * `delivered`: a batch went out. `force`: even in a backoff, before a
+   * purge that would drop them. A failure is the delivery's to recover
+   * (#deliverDue), never the alarm's.
+   */
+  async #notifyDue(force: boolean): Promise<"none" | "later" | "delivered"> {
+    let run: RunRow | undefined;
+    try {
+      run = this.#run();
+    } catch {
+      return "none";
+    }
+    if (run?.notify_at === null || run === undefined) {
+      return "none";
+    }
+    if (!isDue(run, force) || this.#delivery !== undefined) {
+      return "later";
+    }
+    await this.#deliver({ batches: 1, force });
+    return "delivered";
+  }
+
+  /**
+   * What the host hasn't taken goes out before the alarm does anything of
+   * the run's; the run may have changed meanwhile (a command, an event),
+   * so it is read again after. `notified`: the outbox may have been what
+   * the alarm came for. Undefined when there is no run left to act on: it
+   * was removed, or reading it failed (left to the watchdog).
+   */
+  async #afterNotifying(
+    run: RunRow
+  ): Promise<{ run: RunRow; notified: boolean } | undefined> {
+    // An alarm that runs an activation hands the host nothing first: the
+    // activation's first write starts a delivery beside it (#deliverSoon),
+    // so no delivery time comes out of the handler's wall time before a
+    // first attempt, which always runs (activation.ts), and whose deadline
+    // a delivery first could push past the handler's limit.
+    if (activatesNow(run)) {
+      return { run, notified: false };
+    }
+    // An ended run whose purge is due gets its outbox tried once more.
+    const purgeDue =
+      hasEnded(run) && run.purge_at !== null && run.purge_at <= Date.now();
+    const notified = await this.#notifyDue(purgeDue);
+    if (notified !== "delivered") {
+      return { run, notified: notified === "later" };
+    }
+    let fresh: RunRow | undefined;
+    try {
+      fresh = this.#run();
+    } catch (error) {
+      await this.#leaveToWatchdog("workflow_run_read_failed", error);
+      return undefined;
+    }
+    if (fresh === undefined) {
+      return undefined;
+    }
+    // Due now (its wake passed, it was resumed, took an event, or was
+    // restarted, while the delivery was out): its activation gets an
+    // alarm of its own, with the handler's whole wall time, rather than
+    // what the delivery left of this one, which its first attempt, always
+    // claimed, could run past.
+    // This alarm ends here, and the next comes at once. Written here, not
+    // left to the delivery's end (#settleAlarm), which only logs a write
+    // that failed: with the outbox emptied nothing else would set one, and
+    // the run would be left with no alarm to run it.
+    if (activatesNow(fresh)) {
+      try {
+        await this.#store.setAlarm(Date.now());
+      } catch (error) {
+        await this.#leaveToWatchdog("workflow_alarm_set_failed", error);
+      }
+      return undefined;
+    }
+    return { run: fresh, notified: true };
+  }
+
+  /**
+   * An alarm's first job beside a run: the tombstones of an earlier run
+   * under this ID that are due go, whatever this run does, and none of
+   * its journal is touched. True when that is all the alarm does: the run
+   * is paused (a paused run waits for `resume`; the alarm left is the
+   * next obligation's), or it waits and the alarm was the tombstones' or
+   * the notifications' (`notified`), early for it (it only re-arms the
+   * run's wake; no activation replays it). An ended run goes on to its
+   * purge, which re-arms an early alarm.
+   */
+  async #tombstonesBeside(run: RunRow, notified: boolean): Promise<boolean> {
+    const storage = this.#store;
+    let due: boolean;
+    try {
+      due = this.#expireDueTombstones(Date.now()) || notified;
+    } catch (error) {
+      await this.#leaveToWatchdog("workflow_tombstone_expiry_failed", error);
+      return true;
+    }
+    if (run.status === "paused") {
+      try {
+        await storage.deleteAlarm();
+      } catch (error) {
+        warnRecovered("workflow_alarm_delete_failed", error);
+      }
+      return true;
+    }
+    // A run rolling back that waits for a rollback's retry waits as one
+    // asleep does.
+    const wake =
+      run.status === "waiting" || run.status === "rollingBack"
+        ? run.wake_at
+        : null;
+    if (!due || wake === null || wake <= Date.now()) {
+      return false;
+    }
+    try {
+      await storage.setAlarm(wake);
+    } catch (error) {
+      await this.#leaveToWatchdog("workflow_alarm_rearm_failed", error);
+    }
+    return true;
+  }
+
   /** One activation: replays the definition under a new generation. */
   override async alarm(): Promise<void> {
+    // The activation's wall time counts from here, the handler's start:
+    // what a delivery before it took is gone from it.
+    const startedAt = Date.now();
     // The host's settings first, before the run is read or a generation
     // taken: a mistake in them touches no run. It is logged, and the run
     // is left to a watchdog a lease away, the settings fixed by then or
@@ -748,7 +1685,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       // A journal this engine doesn't read: nothing here can run it, and
       // retrying would only refuse it again. No alarm is left to do so.
       try {
-        await this.ctx.storage.deleteAlarm();
+        await this.#store.deleteAlarm();
       } catch (deleteError) {
         // An alarm left behind is refused the same way when it comes, and
         // tries to remove itself again.
@@ -756,12 +1693,26 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       }
       return;
     }
-    if (run === undefined || hasEnded(run) || run.status === "paused") {
-      // A duplicate or late alarm: what it would do is journaled already.
-      // A paused run waits for `resume`, which sets its alarm.
+    if (run === undefined) {
+      // No run: what may be left is tombstones, to expire.
+      await this.#expireTombstones();
       return;
     }
-    const { storage } = this.ctx;
+    const after = await this.#afterNotifying(run);
+    if (after === undefined) {
+      return;
+    }
+    ({ run } = after);
+    if (await this.#tombstonesBeside(run, after.notified)) {
+      return;
+    }
+    if (hasEnded(run)) {
+      // An ended run's only alarm is its purge, once its retention is up;
+      // an early one re-arms it (with the tombstones', if sooner).
+      await this.#purge(run);
+      return;
+    }
+    const storage = this.#store;
     if (run.status === "waitingForPause") {
       await this.#pauseNow();
       return;
@@ -817,6 +1768,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       {
         leaseMs: this.leaseMs,
         handlerBudgetMs: this.handlerBudgetMs,
+        startedAt,
         maxStreamBytes: this.maxStreamOutputBytes,
         maxRunStreamBytes: this.maxRunStreamBytes,
         ...limits,
@@ -867,6 +1819,54 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     await activation.settle(settlement);
   }
 
+  /**
+   * Purges an ended run whose retention is up: its journal, stream chunks,
+   * events and history go in one transaction, its start key stays as a
+   * tombstone (journal.ts), as a deletion does. Only an alarm reaches it,
+   * and only for a run that has ended: a restart clears the purge time, so
+   * no run that runs, waits, is paused or rolls back is purged. An alarm
+   * that came early (a duplicate, or the watchdog of the activation that
+   * ended it) sets the purge's own again.
+   */
+  async #purge(run: RunRow): Promise<void> {
+    const storage = this.#store;
+    if (run.purge_at === null) {
+      // Every end writes its purge time; a run with none is kept.
+      return;
+    }
+    const now = Date.now();
+    if (run.purge_at > now) {
+      try {
+        await storage.setAlarm(run.purge_at);
+      } catch (error) {
+        // Left to an alarm a lease away, which comes back here.
+        await this.#leaveToWatchdog("workflow_purge_rearm_failed", error);
+      }
+      return;
+    }
+    let removal: Removal;
+    try {
+      const horizon = this.#tombstoneHorizon();
+      // Read just now, with no await since: nothing has changed the run.
+      removal = storage.transactionSync(() =>
+        removeIn(
+          storage.sql,
+          run.redeliverable === 1 ? run.start_key : null,
+          now,
+          horizon
+        )
+      );
+    } catch (error) {
+      // Nothing was removed: an alarm a lease away tries again.
+      await this.#leaveToWatchdog("workflow_purge_failed", error);
+      return;
+    }
+    // With the write that removed it, the object emptied or its
+    // tombstones' expiry set, each failure recovered (#afterRemoval).
+    this.#closeObservers();
+    await this.#afterRemoval(removal);
+  }
+
   /** A compensating activation, from its replay to the run's end. */
   // oxlint-disable-next-line class-methods-use-this -- beside alarm(), whose part it is
   async #compensate(
@@ -901,7 +1901,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   async #command<Outcome extends string>(
     decide: (run: RunRow, now: number) => CommandDecision<Outcome>
   ): Promise<Outcome | "missing"> {
-    const { storage } = this.ctx;
+    const storage = this.#store;
     if (!hasJournal(storage.sql)) {
       return "missing";
     }
@@ -986,7 +1986,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    */
   async terminate(command: TerminateCommand): Promise<TerminateOutcome> {
     const { sql } = this.ctx.storage;
-    return await this.#command(
+    const outcome = await this.#command(
       (run, now): CommandDecision<TerminateOutcome> => {
         if (hasEnded(run)) {
           return { outcome: "ended" };
@@ -1007,9 +2007,20 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
           "UPDATE run SET status = 'terminated', ended_at = ?, lease_until = NULL, wake_at = NULL, paused_at = NULL",
           now
         );
-        return { outcome: "terminated", alarm: null };
+        // Its alarm is now its purge, its retention after this end.
+        return { outcome: "terminated", alarm: startRetentionIn(sql) };
       }
     );
+    if (outcome === "ended") {
+      // A terminate sent again, after one whose purge alarm failed to be
+      // set once its end was written (the caller heard an error), repairs
+      // that alarm, as a repeated start or resume does.
+      const run = this.#run();
+      if (run !== undefined) {
+        await this.#ensureWake(run);
+      }
+    }
+    return outcome;
   }
 
   /**
@@ -1053,36 +2064,107 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         };
       }
       supersedeIn(sql, now);
+      // Observers see the run again from where it starts again, as on the
+      // reference: from its start, queued and started anew; from a step,
+      // with the events of the steps before it.
+      forgetHistoryIn(sql, command.from === null);
       forgetIn(sql, forget);
       sql.exec(
-        "UPDATE run SET status = 'queued', execution_uid = ?, output = NULL, error = NULL, ended_at = NULL, lease_until = NULL, paused_at = NULL, rollback_trigger = NULL, rollback_end = NULL, rollback = NULL, rollback_replays = 0, wake_at = ?",
+        "UPDATE run SET status = 'queued', execution_uid = ?, output = NULL, error = NULL, ended_at = NULL, lease_until = NULL, paused_at = NULL, rollback_trigger = NULL, rollback_end = NULL, rollback = NULL, rollback_replays = 0, purge_at = NULL, executions = executions + 1, wake_at = ?",
         crypto.randomUUID(),
         now
       );
+      if (command.from === null) {
+        recordStartIn(sql);
+      }
       return { outcome: "restarted", alarm: now };
     });
   }
 
   /**
-   * Removes the run: its journal, its stream chunks and its alarm. Nothing
-   * of the definition runs for it; a step still out answers no one.
+   * Removes the run: its journal, its stream chunks and its alarm, leaving
+   * only its start key as a tombstone (journal.ts). Nothing of the
+   * definition runs for it; a step still out answers no one.
    */
   async deleteRun(): Promise<DeleteOutcome> {
-    const { storage } = this.ctx;
-    // Not read through readRun: a journal of a layout this engine doesn't
-    // read can be deleted too.
-    if (
-      !hasJournal(storage.sql) ||
-      storage.sql.exec("SELECT 1 FROM run").toArray().length === 0
-    ) {
+    const horizon = this.#tombstoneHorizon();
+    const storage = this.#store;
+    const now = Date.now();
+    const removed = storage.transactionSync((): Removal | "missing" => {
+      // Not read through readRun: a journal of a layout this engine
+      // doesn't read can be deleted too.
+      if (!hasJournal(storage.sql)) {
+        return "missing";
+      }
+      const [run] = storage.sql.exec("SELECT * FROM run").toArray();
+      if (run === undefined) {
+        return "missing";
+      }
+      const key = run.start_key;
+      return removeIn(
+        storage.sql,
+        run.redeliverable === 1 && typeof key === "string" ? key : null,
+        now,
+        horizon
+      );
+    });
+    if (removed === "missing") {
       return "missing";
     }
-    // The journal first: should the alarm outlive it (the process dies in
-    // between), it finds no run, and does nothing. The other way round, a
-    // run would be left with no alarm to run it.
-    await storage.deleteAll();
-    await storage.deleteAlarm();
+    this.#closeObservers();
+    await this.#afterRemoval(removed);
     return "deleted";
+  }
+
+  /**
+   * What is left once a run is removed: nothing, so the object is emptied
+   * (`deleteAll`), or tombstones, so the alarm is set to expire the oldest.
+   * The journal went first: should the process die before this, the alarm
+   * the run had finds no run, and expires what it can (alarm()). The other
+   * way round, a run would be left with no alarm to run it.
+   */
+  async #afterRemoval(removal: Removal): Promise<void> {
+    const storage = this.#store;
+    if (removal.expiresAt === null) {
+      try {
+        await storage.deleteAll();
+        await storage.deleteAlarm();
+      } catch (error) {
+        // The journal is gone: an alarm left behind finds nothing, and
+        // empties the object again.
+        warnRecovered("workflow_delete_all_failed", error);
+      }
+      return;
+    }
+    try {
+      await storage.setAlarm(removal.expiresAt);
+    } catch (error) {
+      await this.#leaveToWatchdog("workflow_tombstone_alarm_failed", error);
+    }
+  }
+
+  /**
+   * An alarm with no run: tombstones past the horizon are dropped, and the
+   * alarm is set for the next to expire; once none is left, the object is
+   * emptied. A failure leaves it all to an alarm a lease away.
+   */
+  async #expireTombstones(): Promise<void> {
+    const storage = this.#store;
+    let horizon: number;
+    let oldest: number | null;
+    try {
+      horizon = this.#tombstoneHorizon();
+      const since = Date.now() - horizon;
+      oldest = storage.transactionSync(() =>
+        expireTombstones(storage.sql, since)
+      );
+    } catch (error) {
+      await this.#leaveToWatchdog("workflow_tombstone_expiry_failed", error);
+      return;
+    }
+    await this.#afterRemoval({
+      expiresAt: oldest === null ? null : oldest + horizon,
+    });
   }
 
   /**
@@ -1093,7 +2175,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * again, and accepted once.
    */
   async sendEvent(command: EventCommand): Promise<EventOutcome> {
-    const { storage } = this.ctx;
+    const storage = this.#store;
     if (!hasJournal(storage.sql)) {
       return "missing";
     }

@@ -14,6 +14,7 @@ import type { WorkflowInstance } from "../src/instance.ts";
 import { defaultLeaseMs, WorkflowRun } from "../src/run.ts";
 import {
   alarmOf,
+  wakeOf,
   deliverAlarm,
   ended,
   journalOf,
@@ -121,7 +122,7 @@ describe("a definition that throws", () => {
     expect(
       labels(id).filter((label) => label.startsWith("undo-"))
     ).toStrictEqual(["undo-ship", "undo-charge"]);
-    await expect(alarmOf("compensated", id)).resolves.toBeNull();
+    await expect(wakeOf("compensated", id)).resolves.toBeNull();
   });
 
   it("retries a rollback under its one key, and refuses it the step API", async () => {
@@ -631,8 +632,11 @@ describe("storage that fails around a rolling back", () => {
     await deliverAlarm("compensated", id);
     const status = await over(id);
 
+    // The activation's alarm write failed, and so did the one the host's
+    // delivery of the run's new status sets as it ends (run.ts): each is
+    // logged, and neither leaves anything but the watchdog.
     expect({
-      events: warnings.map((warning) => eventOf(warning)),
+      events: [...new Set(warnings.map((warning) => eventOf(warning)))],
       undone,
     }).toStrictEqual({ events: ["workflow_alarm_set_failed"], undone: [] });
     expect(watchdog).toBeGreaterThan(

@@ -6,11 +6,14 @@ import {
 } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AppConnectionBinding } from "../src/app-bindings.ts";
-import { callApp } from "../src/app.ts";
+import { callApp, waitingCallsLimit } from "../src/app.ts";
+import type { ExportCall } from "../src/app.ts";
+import { appHost } from "../src/durable-objects.ts";
 import { AppGuestsBinding } from "../src/guests-binding.ts";
 import { AppCollectionBinding } from "../src/knowledge/app-binding.ts";
 import { ordinaryData, release, requestGranted, serverBuilt } from "./apps.ts";
@@ -47,7 +50,17 @@ import { workflowFiles } from "./workflow-apps.ts";
 //   signing, a lookup) acts on what let it in as it was then: the
 //   person's role, or a permission up a chain of Apps, gone while it
 //   awaited, still lets a connection call reach connect, a guest be
-//   invited or a guest chat be revoked.
+//   invited or a guest chat be revoked;
+// - App code keeps a caller's token in module state and uses it from
+//   another call running at the same time, acting as the first caller:
+//   so calls run one at a time, and a call has a token only while it
+//   holds the App;
+// - that one-at-a-time hold leaks: a call that fails, or is given up on
+//   while its code goes on, never lets go, and the App takes no call
+//   again;
+// - a call waits for its turn past its deadline, or is let in once its
+//   caller gave up, or calls pile up without end behind a slow one;
+// - waiting calls are let in out of order, so one can wait for ever.
 //
 // Every App here runs for real, in its own sandbox; calls go in through
 // the host as screens, workflows and other Apps make them.
@@ -106,9 +119,10 @@ const carrying = (shape: string): unknown => {
   }
 };
 
-// What waitThenPoint waits for, until letGo: another call of the
-// same code, in the same module.
-let waiting: (() => void) | undefined;
+// Module state every call of this code shares: the caller keepAndHold
+// kept, and a count of calls (tick).
+let kept: Caller | undefined;
+let ticks = 0;
 
 export class App extends DurableObject {
   stub(binding: string): Stub {
@@ -155,30 +169,36 @@ export class App extends DurableObject {
     return "let go";
   }
 
-  async waitThenPoint(caller: Caller): Promise<unknown> {
-    await this.ctx.storage.put("waiting", caller);
-    await new Promise<void>((resolve) => {
-      waiting = resolve;
-    });
+  // Waits at the mail server, which holds the search until the test lets
+  // it go: the App takes no other call meanwhile. The query carries the
+  // caller, for the test to act with while the call runs.
+  async searchThenPoint(caller: Caller): Promise<unknown> {
+    await tried(() => this.stub("MAIL").call(caller, "mail.search", { query: "hold " + JSON.stringify(caller) }));
     const point = await tried(() => this.stub("STATISTICS").record(caller, { measure: "ticks", value: 1 }));
     await this.ctx.storage.put("after", point);
     return point;
   }
 
-  async isWaiting(): Promise<boolean> {
-    return (await this.ctx.storage.get("waiting")) !== undefined;
+  async keepAndHold(caller: Caller, wait: (held: Caller) => Promise<void>): Promise<number> {
+    kept = caller;
+    await wait(caller);
+    return this.tick();
   }
 
-  async waitingCaller(): Promise<unknown> {
-    return (await this.ctx.storage.get("waiting")) ?? null;
+  tick(): number {
+    ticks += 1;
+    return ticks;
   }
 
-  async letGo(): Promise<boolean> {
-    await this.ctx.storage.delete("waiting");
-    const resolve = waiting;
-    waiting = undefined;
-    resolve?.();
-    return resolve !== undefined;
+  // Lists mail as the caller keepAndHold kept, noting that it ran.
+  async listAsKept(caller: Caller, note: string): Promise<unknown> {
+    const ran = ((await this.ctx.storage.get("ran")) as string[] | undefined) ?? [];
+    await this.ctx.storage.put("ran", [...ran, note]);
+    return await tried(() => this.stub("OUTLOOK").call(kept ?? caller, "mail.list", {}));
+  }
+
+  async ran(): Promise<unknown> {
+    return (await this.ctx.storage.get("ran")) ?? [];
   }
 
   async pointAfter(caller: Caller, wait: (note: string) => Promise<void>): Promise<unknown> {
@@ -233,7 +253,7 @@ const exported = {
   },
   change: { access: "write", input: { type: "object" }, output: {} },
   sendThenList: { access: "write", input: { type: "object" }, output: {} },
-  waitThenPoint: { access: "write", input: { type: "object" }, output: {} },
+  searchThenPoint: { access: "write", input: { type: "object" }, output: {} },
 };
 
 /** A `task` record type for `collection`. */
@@ -268,6 +288,24 @@ const newApp = async (
 };
 
 /**
+ * What lets go of each hold a test made (a gate, a mail search held):
+ * `afterEach` lets go of them all, however the test ended, so a test that
+ * fails holding a call fails alone, instead of keeping an App's code, or
+ * the run, waiting.
+ */
+const holds = new Set<() => Promise<void> | void>();
+
+/**
+ * A mail connection with `mail.search`, whose server answers as `plan`
+ * says: a search it holds is let go after the test (`holds`).
+ */
+const heldMail = async (plan: MailAnswer[]) => {
+  const mail = await mailConnection(plan, mailWithSearch);
+  holds.add(mail.release);
+  return mail;
+};
+
+/**
  * The desk, granted something of every kind to read and change: Outlook
  * to read (it reaches connect), mail to send, a collection to write
  * records to, and its own exports (`SELF`, to call one marked `write`);
@@ -286,7 +324,7 @@ const setUp = async (
     "app/records.json": taskType(collectionId),
   });
   const front = await newApp(admin, frontFiles);
-  const mail = await mailConnection(plan);
+  const mail = await heldMail(plan);
   const grant = async (
     subject: AppId,
     object:
@@ -311,7 +349,7 @@ const setUp = async (
   await grant(
     desk,
     { type: "connection", connectionId: mail.id },
-    ["mail.send"],
+    ["mail.send", "mail.search"],
     "MAIL"
   );
   await grant(
@@ -347,6 +385,9 @@ const setUp = async (
 const gate = () => {
   const entered = Promise.withResolvers<unknown>();
   const released = Promise.withResolvers<boolean>();
+  holds.add(() => {
+    released.resolve(true);
+  });
   return {
     entered: entered.promise,
     release: () => {
@@ -360,20 +401,133 @@ const gate = () => {
 };
 
 /**
+ * How long a test waits for a step it is sure of (a call reaching its
+ * hold, answering once let go, the App's object taking a call), before it
+ * fails: well within the test's own time, so a test that goes wrong fails
+ * fast, with what it waited for. A real wait, not the faked clock's.
+ */
+const stepMs = 5000;
+
+/** Answers what `step` settles to, or fails once `stepMs` passes first. */
+const bounded = async <T>(step: Promise<T>, what: string): Promise<T> =>
+  await Promise.race([
+    step,
+    scheduler.wait(stepMs).then(() => {
+      throw new Error(`Gave up after ${stepMs} ms waiting for ${what}`);
+    }),
+  ]);
+
+/**
  * Waits until the App called `held`'s callback, and answers what it passed;
  * fails at once should `call` end first, rather than wait for a callback
- * that won't come.
+ * that won't come, and fails within `stepMs` should neither happen.
  */
 const entered = async (
   held: ReturnType<typeof gate>,
-  call: Promise<string>
+  call: Promise<unknown>
 ): Promise<unknown> =>
-  await Promise.race([
-    held.entered,
-    call.then((ended) => {
-      throw new Error(`The call ended before it was held: ${ended}`);
-    }),
-  ]);
+  await bounded(
+    Promise.race([
+      held.entered,
+      call.then((ended) => {
+        throw new Error(`The call ended before it was held: ${String(ended)}`);
+      }),
+    ]),
+    "the App to call the held callback"
+  );
+
+/**
+ * Fakes the clock and the timers of this isolate, the App's object's
+ * included, and notes the delay of each timer set on it from then on:
+ * how a test knows a call reached the App and set its deadline (`armed`).
+ */
+const fakeClock = (): { delays: number[]; seen: number } => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const delays: number[] = [];
+  const clock = { delays, seen: 0 };
+  const fake = globalThis.setTimeout;
+  // Put back as it was by `vi.useRealTimers`, which restores the real one.
+  Reflect.set(globalThis, "setTimeout", (callback: () => void, ms?: number) => {
+    clock.delays.push(ms ?? 0);
+    return fake(callback, ms);
+  });
+  return clock;
+};
+
+/** How often `armed` looks again. */
+const armedPollMs = 5;
+
+/**
+ * Waits until a timer of `ms` was set on the faked clock (`fakeClock`)
+ * since the one `armed` last found: until a call made to the App arrived
+ * and set its deadline. A call made through the stub can arrive after a
+ * later `runInDurableObject` (`advance`), which reaches the object by
+ * another route, and under load often does: moved on before it arrived,
+ * the clock would start the call's deadline later than the test means,
+ * or, for a call through an export whose deadline its caller set, pass it
+ * before the call even waits.
+ */
+const armed = async (
+  clock: { delays: number[]; seen: number },
+  ms: number
+): Promise<void> => {
+  for (let waited = 0; waited < stepMs; waited += armedPollMs) {
+    const at = clock.delays.indexOf(ms, clock.seen);
+    if (at !== -1) {
+      clock.seen = at + 1;
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a real pause between looks
+    await scheduler.wait(armedPollMs);
+  }
+  throw new Error(
+    `Gave up after ${stepMs} ms waiting for a call to set its ${ms} ms deadline`
+  );
+};
+
+/**
+ * Moves the faked clock on by `ms` in the App's object (`host`), whose
+ * deadlines' timers they are.
+ */
+const advance = async (
+  host: ReturnType<typeof appHost>,
+  ms: number
+): Promise<void> => {
+  await runInDurableObject(host, async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+};
+
+/** Waits until `mail`'s server holds a search the App made. */
+const heldAtSearch = async (mail: { holding: () => Promise<boolean> }) => {
+  await vi.waitFor(
+    async () => {
+      await expect(mail.holding()).resolves.toBeTruthy();
+    },
+    { timeout: 15_000, interval: 50 }
+  );
+};
+
+/**
+ * What a call through an export carries besides its caller (app-calls.ts),
+ * for the App's first version, from a call with `ms` left.
+ */
+const exportCall = (ms: number): ExportCall => ({
+  version: 1,
+  chain: [],
+  deadline: Date.now() + ms,
+  readOnly: false,
+  onPinned: async () => {},
+});
+
+/** Outlook, granted to `app` as `OUTLOOK`. */
+const grantOutlook = async (admin: Person, app: AppId) =>
+  await requestGranted(idp, admin, {
+    subject: { type: "app", appId: app },
+    object: { type: "connection", connectionId: "connection-outlook" },
+    actions: ["mail.list"],
+    binding: "OUTLOOK",
+  });
 
 /** A person using an App, as a call names them. */
 const as = (userId: string) => ({ userId, mode: "interactive" }) as const;
@@ -500,6 +654,18 @@ const messageOf = (details: unknown): string =>
     : "";
 
 describe("an App call's invocation", { timeout: 60_000 }, () => {
+  // Lets go of every hold the test made (`holds`), and of the faked clock.
+  afterEach(async () => {
+    vi.useRealTimers();
+    const releases = [...holds];
+    holds.clear();
+    await Promise.allSettled(
+      releases.map(async (letGo) => {
+        await letGo();
+      })
+    );
+  });
+
   it("lets a call through an export marked read change nothing, through any stub", async () => {
     const { admin, desk, front, mail } = await setUp();
     const read = await viaFront(front, admin.userId, "lookUp", {});
@@ -860,6 +1026,15 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
       actions: ["write"],
       binding: "DESK",
     });
+    // A shared connection, so the desk reads nothing the front desk's
+    // people couldn't: its search is where the desk's call waits.
+    const mail = await heldMail([]);
+    await requestGranted(idp, admin, {
+      subject: { type: "app", appId: desk },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.search"],
+      binding: "MAIL",
+    });
     // Its data stays fine for its screens' unapproved code, as a release
     // leaves it.
     await ordinaryData(front);
@@ -871,23 +1046,17 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
       role: "user",
     });
     // The clerk's screen of the front desk calls the desk's export, which
-    // waits in the desk until let go.
+    // waits at the mail server until let go.
     const pointAfter = async (meanwhile: () => Promise<unknown>) => {
       const call = outcome(
-        clerk.api.screens.call(front, "via", ["waitThenPoint", {}])
+        clerk.api.screens.call(front, "via", ["searchThenPoint", {}])
       );
-      await vi.waitFor(
-        async () => {
-          await expect(
-            callApp(env, desk, as(admin.userId), "isWaiting")
-          ).resolves.toBeTruthy();
-        },
-        { timeout: 15_000, interval: 50 }
-      );
-      await meanwhile();
-      await expect(
-        callApp(env, desk, as(admin.userId), "letGo")
-      ).resolves.toBeTruthy();
+      try {
+        await heldAtSearch(mail);
+        await meanwhile();
+      } finally {
+        await mail.release();
+      }
       await call;
       return await lastAfter(desk, admin.userId);
     };
@@ -1014,7 +1183,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
         })
       );
     // A shared connection, so the desk may be shared with anyone.
-    const mail = await mailConnection([], mailWithSearch);
+    const mail = await heldMail([]);
     const search = await granted(
       { type: "connection", connectionId: mail.id },
       ["mail.search"],
@@ -1023,8 +1192,9 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     const guests = await granted({ type: "platform" }, ["guests"], "GUESTS");
     await ordinaryData(desk);
     // A clerk for each stub call, each in a team of their own the desk is
-    // shared with, each with a screen call of the desk held: the stub
-    // calls below are the desk's stubs', for those calls.
+    // shared with: the stub calls below are the desk's stubs', for a
+    // screen call of the clerk's held in the desk meanwhile, one clerk at
+    // a time, as the desk takes calls.
     const clerks = await Promise.all(
       ["search", "invite", "revoke"].map(async () => {
         const clerk = await personApi("user");
@@ -1034,21 +1204,26 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
           id: team,
           role: "user",
         });
-        const held = gate();
-        const call = outcome(
-          clerk.api.screens.call(desk, "holdCaller", [held.wait])
-        );
         return {
-          caller: await entered(held, call),
           leave: async () => {
             await callAuth("/organization/remove-team-member", admin.session, {
               teamId: team,
               userId: clerk.userId,
             });
           },
-          done: async () => {
-            held.release();
-            await call;
+          whileHeld: async <T>(
+            act: (caller: unknown) => Promise<T>
+          ): Promise<T> => {
+            const held = gate();
+            const call = outcome(
+              clerk.api.screens.call(desk, "holdCaller", [held.wait])
+            );
+            try {
+              return await act(await entered(held, call));
+            } finally {
+              held.release();
+              await call;
+            }
           },
         };
       })
@@ -1083,47 +1258,38 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     });
     const anna = { name: "Anna", skill: "interview-a-stakeholder" };
 
-    const stays = {
-      search: await outcome(
-        connection(env).call(lister.caller, "mail.search", { query: "stays" })
+    const searches = await lister.whileHeld(async (caller) => ({
+      stays: await outcome(
+        connection(env).call(caller, "mail.search", { query: "stays" })
       ),
-      invite: await outcome(guestChats(env).invite(inviter.caller, anna)),
-    };
-    const chat = await guestChats(env).invite(revoker.caller, anna);
-    const leaves = {
-      search: await outcome(
+      leaves: await outcome(
         connection(leaving(lister, readsPermissions)).call(
-          lister.caller,
+          caller,
           "mail.search",
           { query: "leaves" }
         )
       ),
-      invite: await outcome(
-        guestChats(leaving(inviter, readsPermissions)).invite(
-          inviter.caller,
-          anna
-        )
+    }));
+    const invites = await inviter.whileHeld(async (caller) => ({
+      stays: await outcome(guestChats(env).invite(caller, anna)),
+      leaves: await outcome(
+        guestChats(leaving(inviter, readsPermissions)).invite(caller, anna)
       ),
-      revoke: await outcome(
-        guestChats(leaving(revoker, readsGuestChats)).revoke(
-          revoker.caller,
-          chat.id
-        )
-      ),
-    };
-    await Promise.all(
-      clerks.map(async ({ done }) => {
-        await done();
-      })
-    );
+    }));
+    const revoke = await revoker.whileHeld(async (caller) => {
+      const chat = await guestChats(env).invite(caller, anna);
+      return await outcome(
+        guestChats(leaving(revoker, readsGuestChats)).revoke(caller, chat.id)
+      );
+    });
     const chats = await env.DB.prepare(
       "SELECT ended FROM guest_chats WHERE app_id = ? ORDER BY created_at"
     )
       .bind(desk)
       .all<{ ended: string | null }>();
     expect({
-      stays,
-      leaves,
+      stays: { search: searches.stays, invite: invites.stays },
+      leaves: { search: searches.leaves, invite: invites.leaves, revoke },
       // Only the two invitations made before anyone left; neither revoked.
       chats: chats.results.map(({ ended }) => ended),
       // Only the search made before anyone left reached the mail server.
@@ -1141,18 +1307,13 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
   });
 
   it("reaches no connection once the App a call came through loses its permission, however late in the stub call that happens", async () => {
-    const { admin, desk, front, calls, outlook } = await setUp();
-    // The front desk's call of the desk's export, waiting in the desk.
-    const call = outcome(viaFront(front, admin.userId, "waitThenPoint", {}));
-    await vi.waitFor(
-      async () => {
-        await expect(
-          callApp(env, desk, as(admin.userId), "isWaiting")
-        ).resolves.toBeTruthy();
-      },
-      { timeout: 15_000, interval: 50 }
-    );
-    const caller = await callApp(env, desk, as(admin.userId), "waitingCaller");
+    const { admin, desk, front, mail, calls, outlook } = await setUp();
+    // The front desk's call of the desk's export, waiting in the desk at
+    // the mail server, whose query carries its caller.
+    const call = outcome(viaFront(front, admin.userId, "searchThenPoint", {}));
+    await heldAtSearch(mail);
+    const [query = ""] = await mail.searched();
+    const caller: unknown = JSON.parse(query.slice("hold ".length));
     const list = async (coreEnv: Env): Promise<string> =>
       await outcome(
         stubOn(
@@ -1183,11 +1344,253 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
         1
       ),
     });
-    await callApp(env, desk, as(admin.userId), "letGo");
+    await mail.release();
     await call;
     expect({ stays, revoked }).toStrictEqual({
       stays: reached,
       revoked: "permission.denied",
+    });
+  });
+
+  it("runs one call at a time: a call that comes meanwhile waits, can't act as the running call's caller, and gives up with app.busy, never run", async () => {
+    const admin = await personApi("admin");
+    const desk = await newApp(admin);
+    await grantOutlook(admin, desk);
+    // One stub, so the calls reach the App in the order they are made.
+    const host = appHost(env, desk);
+    const caller = as(admin.userId);
+    const held = gate();
+    const holding = outcome(host.call(caller, "keepAndHold", [held.wait]));
+    await entered(held, holding);
+    // Comes while the first call holds the App, which kept its caller,
+    // through an export from a call with half a second left.
+    const meanwhile = await outcome(
+      host.call(caller, "listAsKept", ["meanwhile"], exportCall(500))
+    );
+    held.release();
+    expect({
+      meanwhile,
+      holding: await holding,
+      // The kept caller's call has ended: its token acts no more.
+      after: await callApp(env, desk, caller, "listAsKept", ["after"]),
+      ran: await callApp(env, desk, caller, "ran"),
+    }).toStrictEqual({
+      meanwhile: "app.busy",
+      holding: "ok",
+      after: "app.caller_invalid",
+      ran: ["after"],
+    });
+  });
+
+  it("lets waiting calls in one at a time, in the order they came, once the call holding the App lets go", async () => {
+    const admin = await personApi("admin");
+    const desk = await newApp(admin);
+    const host = appHost(env, desk);
+    const caller = as(admin.userId);
+    const held = gate();
+    const first = host.call(caller, "keepAndHold", [held.wait]);
+    await entered(held, first);
+    const tick = async (): Promise<unknown> =>
+      await host.call(caller, "tick", []);
+    const waiting = [tick(), tick(), tick()];
+    // Behind them, one whose deadline passes while it waits: never let
+    // in after, so the App goes on taking calls.
+    const gaveUp = await outcome(
+      host.call(caller, "tick", [], exportCall(500))
+    );
+    held.release();
+    expect({
+      gaveUp,
+      first: await first,
+      waiting: await Promise.all(waiting),
+      next: await callApp(env, desk, caller, "tick"),
+    }).toStrictEqual({
+      gaveUp: "app.busy",
+      first: 1,
+      waiting: [2, 3, 4],
+      next: 5,
+    });
+  });
+
+  it("lets the next call in however a call ends: answered or failed", async () => {
+    const admin = await personApi("admin");
+    const desk = await newApp(admin);
+    const host = appHost(env, desk);
+    const caller = as(admin.userId);
+    expect({
+      failed: await outcome(host.call(caller, "fail", ["No total.", 1])),
+      afterFailed: await host.call(caller, "tick", []),
+      afterAnswered: await host.call(caller, "tick", []),
+    }).toStrictEqual({
+      failed: "app.failed",
+      afterFailed: 1,
+      afterAnswered: 2,
+    });
+  });
+
+  it("keeps a call cut short in the App until its code settles, and gives a call that waited its turn the App's own time from then", async () => {
+    const admin = await personApi("admin");
+    const desk = await newApp(admin);
+    const host = appHost(env, desk);
+    const caller = as(admin.userId);
+    // Started ahead, so the first call's code runs at once.
+    await host.call(caller, "ran", []);
+    const first = gate();
+    const second = gate();
+    // The deadlines' timers, and the clock, are held, and moved on in the
+    // App's object (`advance`).
+    const clock = fakeClock();
+    let waited: string;
+    let meanwhile: string;
+    try {
+      const holding = host.call(caller, "keepAndHold", [first.wait]);
+      await entered(first, holding);
+      await armed(clock, 10_000);
+      // Waits six of its ten seconds for its turn, then has four left of
+      // its deadline: its caller hears it timed out, but its code had
+      // nowhere near the App's own time, so it isn't stopped.
+      const waiting = outcome(host.call(caller, "keepAndHold", [second.wait]));
+      await armed(clock, 10_000);
+      await advance(host, 6000);
+      first.release();
+      await bounded<unknown>(holding, "the first call to answer once let go");
+      await entered(second, waiting);
+      await advance(host, 4001);
+      waited = await bounded(waiting, "the waiting call's deadline");
+      // Its code still runs: the App takes no other call until it settles.
+      const queued = outcome(host.call(caller, "tick", [], exportCall(500)));
+      await armed(clock, 500);
+      await advance(host, 500);
+      meanwhile = await bounded(queued, "the queued call to give up");
+    } finally {
+      vi.useRealTimers();
+      first.release();
+      second.release();
+    }
+    expect({
+      waited,
+      meanwhile,
+      // The cut-off code ticked once it was let go, before this call, in
+      // code that wasn't restarted.
+      next: await host.call(caller, "tick", []),
+    }).toStrictEqual({
+      waited: "app.timed_out",
+      meanwhile: "app.busy",
+      next: 3,
+    });
+  });
+
+  it("stops a call from another App cut short whose code never settles at the App's own time from its turn, then lets the next in", async () => {
+    const admin = await personApi("admin");
+    const desk = await newApp(admin);
+    const host = appHost(env, desk);
+    const caller = as(admin.userId);
+    const countBefore = await host.call(caller, "tick", []);
+    const held = gate();
+    const clock = fakeClock();
+    let cutShort: string;
+    let meanwhile: string;
+    try {
+      // Through an export from a call with five seconds left: another App
+      // can't stop this one's code by calling it late, so its code has
+      // the App's own time.
+      const call = outcome(
+        host.call(caller, "keepAndHold", [held.wait], exportCall(5000))
+      );
+      await entered(held, call);
+      await advance(host, 5000);
+      cutShort = await bounded(call, "the call's deadline");
+      const queued = outcome(host.call(caller, "tick", [], exportCall(500)));
+      await armed(clock, 500);
+      await advance(host, 500);
+      meanwhile = await bounded(queued, "the queued call to give up");
+      // Its code never settles: at the App's own time, it is stopped.
+      await advance(host, 10_000);
+    } finally {
+      vi.useRealTimers();
+    }
+    try {
+      expect({
+        countBefore,
+        cutShort,
+        meanwhile,
+        // In code started afresh: the count starts again.
+        next: await host.call(caller, "tick", []),
+      }).toStrictEqual({
+        countBefore: 1,
+        cutShort: "app.timed_out",
+        meanwhile: "app.busy",
+        next: 1,
+      });
+    } finally {
+      held.release();
+    }
+  });
+
+  it("stops a call cut short by its own caller's deadline, whose code never settles, that long from its turn", async () => {
+    const admin = await personApi("admin");
+    const desk = await newApp(admin);
+    const host = appHost(env, desk);
+    const caller = as(admin.userId);
+    const countBefore = await host.call(caller, "tick", []);
+    const held = gate();
+    fakeClock();
+    let cutShort: string;
+    try {
+      // A caller that waits five seconds, as a workflow step's attempt
+      // does: its code gets five seconds from its turn, then is stopped.
+      const call = outcome(
+        host.call(
+          caller,
+          "keepAndHold",
+          [held.wait],
+          undefined,
+          Date.now() + 5000
+        )
+      );
+      await entered(held, call);
+      await advance(host, 5000);
+      cutShort = await bounded(call, "the call's deadline");
+      // Its code never settles: it is stopped as its time from its turn
+      // is up, which it is.
+      await advance(host, 1);
+    } finally {
+      vi.useRealTimers();
+    }
+    try {
+      expect({
+        countBefore,
+        cutShort,
+        // In code started afresh: the count starts again.
+        next: await host.call(caller, "tick", []),
+      }).toStrictEqual({ countBefore: 1, cutShort: "app.timed_out", next: 1 });
+    } finally {
+      held.release();
+    }
+  });
+
+  it("refuses a call at once with app.busy while as many calls wait as an App takes", async () => {
+    const admin = await personApi("admin");
+    const desk = await newApp(admin);
+    const host = appHost(env, desk);
+    const caller = as(admin.userId);
+    const held = gate();
+    const first = host.call(caller, "keepAndHold", [held.wait]);
+    await entered(held, first);
+    const waiting = Array.from(
+      { length: waitingCallsLimit },
+      async () => await host.call(caller, "tick", [])
+    );
+    const refused = await outcome(host.call(caller, "tick", []));
+    held.release();
+    expect({
+      refused,
+      first: await first,
+      waiting: await Promise.all(waiting),
+    }).toStrictEqual({
+      refused: "app.busy",
+      first: 1,
+      waiting: Array.from({ length: waitingCallsLimit }, (_, at) => at + 2),
     });
   });
 });

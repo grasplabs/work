@@ -1,14 +1,26 @@
 import type {
+  HeldRequest,
   ModelBudget,
   ModelSettings,
   ModelSpender,
 } from "@grasp-os/shared/models";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/ui/components/dialog";
 import { Progress } from "@grasp-os/ui/components/progress";
 import type { I18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { useState } from "react";
 
+import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -19,6 +31,7 @@ import {
   SettingsLoading,
   SettingsSection,
 } from "../settings/settings-parts.tsx";
+import { useCoreAction } from "../use-core-action.ts";
 
 // AI spend, for admins, as in the prototype (`routes/settings/spend.tsx`):
 // what the models cost this month, as core counts it against the budgets
@@ -144,6 +157,134 @@ const SpentBy = ({
   );
 };
 
+/** What an admin decides about a held reservation. */
+type Decision = "release" | "charge";
+
+/**
+ * One held reservation, and its two decisions: release what it holds, or
+ * charge all of it. Each asks first; core audits it in the admin's name.
+ */
+const HeldRow = ({ held }: { held: HeldRequest }) => {
+  const { t } = useLingui();
+  const router = useRouter();
+  const { busy, failure, run } = useCoreAction();
+  const [deciding, setDeciding] = useState<Decision>();
+  const { id, model, sentAt } = held;
+  const amount = dollars(held.amount);
+  const decide = async (how: Decision): Promise<void> => {
+    setDeciding(undefined);
+    await run(async (session) => {
+      await changeThenRefresh(
+        async () => {
+          await session.models.resolveHeld(id, how);
+        },
+        async () => {
+          await router.invalidate({ sync: true });
+        }
+      );
+    });
+  };
+  return (
+    <li className="flex flex-col gap-2 border-t px-5 py-3">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3">
+        <span className="truncate">
+          {model}{" "}
+          <span className="text-muted-foreground">
+            {new Date(sentAt).toLocaleString()}
+          </span>
+        </span>
+        <span className="text-right tabular-nums">{amount}</span>
+        <div className="flex gap-2">
+          <Button
+            disabled={busy}
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setDeciding("release");
+            }}
+          >
+            <Trans>Release</Trans>
+          </Button>
+          <Button
+            disabled={busy}
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setDeciding("charge");
+            }}
+          >
+            <Trans>Charge</Trans>
+          </Button>
+        </div>
+      </div>
+      <Dialog
+        open={deciding !== undefined}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeciding(undefined);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {deciding === "charge"
+                ? t`Charge ${amount} for this model call?`
+                : t`Release the ${amount} held for this model call?`}
+            </DialogTitle>
+            <DialogDescription>
+              {deciding === "charge"
+                ? t`It counts against the budgets as spent: the most it could have cost. This can't be undone.`
+                : t`It no longer counts against the budgets, as if it cost nothing. This can't be undone.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter showCloseButton>
+            <Button
+              disabled={busy}
+              onClick={() => {
+                if (deciding !== undefined) {
+                  void decide(deciding);
+                }
+              }}
+            >
+              {deciding === "charge" ? (
+                <Trans>Charge</Trans>
+              ) : (
+                <Trans>Release</Trans>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ErrorText>{failure}</ErrorText>
+    </li>
+  );
+};
+
+/**
+ * Model requests whose reservations core couldn't read to settle: they
+ * hold part of the budgets until an admin releases or charges each.
+ */
+const Held = ({ held }: { held: readonly HeldRequest[] }) => {
+  const { t } = useLingui();
+  if (held.length === 0) {
+    return null;
+  }
+  const total = dollars(held.reduce((sum, { amount }) => sum + amount, 0));
+  return (
+    <SettingsSection
+      description={t`${total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full.`}
+      title={t`Held for review`}
+    >
+      <ul>
+        {held.map((one) => (
+          <HeldRow held={one} key={one.id} />
+        ))}
+      </ul>
+    </SettingsSection>
+  );
+};
+
 const Spend = ({ settings }: { settings: ModelSettings }) => {
   const { t } = useLingui();
   const { month } = settings;
@@ -209,7 +350,14 @@ const SpendPage = () => {
       </SettingsSection>
     );
   }
-  return <Spend settings={page.data} />;
+  // Held reservations show whatever the rules say: they hold money even
+  // with no budget set, or rules that don't parse.
+  return (
+    <>
+      <Spend settings={page.data} />
+      <Held held={page.data.held} />
+    </>
+  );
 };
 
 export const Route = createFileRoute("/_shell/settings/spend")({

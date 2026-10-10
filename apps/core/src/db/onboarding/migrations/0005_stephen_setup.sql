@@ -1,0 +1,1 @@
+ALTER TABLE `onboarding` ADD `stephen` text;

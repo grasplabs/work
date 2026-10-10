@@ -13,7 +13,7 @@ import { newWebSocketRpcSession } from "capnweb";
  * role the tests need, through the members API. Everyone is signed in up
  * front, before any test runs; tests only look theirs up.
  */
-import { localAdmin } from "../apps/core/test/sign-in-config.ts";
+import { localAdmin, localStaff } from "../apps/core/test/sign-in-config.ts";
 import { origin } from "./stack.ts";
 
 /** Signs session cookies on the test stack only; never a real secret. */
@@ -40,14 +40,18 @@ const locationOf = (response: Response, step: string): string => {
 /**
  * Signs in as `email` the way a browser does: core starts the sign-in, the
  * IdP (told who by `loginHint`) sends the browser back, and core's callback
- * sets the session cookie. Returns that cookie's value.
+ * sets the session cookie. Returns that cookie's value; throws, with where
+ * core sent the browser, when core refuses the sign-in.
  */
-const signInAs = async (email: string): Promise<string> => {
+export const signInAs = async (
+  email: string,
+  providerId: "microsoft" | "grasp-staff" = "microsoft"
+): Promise<string> => {
   const started = await fetch(new URL("/api/auth/sign-in/sso", origin), {
     method: "POST",
     headers: { origin, "content-type": "application/json" },
     body: JSON.stringify({
-      providerId: "microsoft",
+      providerId,
       callbackURL: "/",
       errorCallbackURL: "/",
       loginHint: email,
@@ -105,6 +109,22 @@ const rpcSocket = (person: Pick<Person, "cookie">): WebSocket => {
 export const apiOf = (person: Pick<Person, "cookie">) => {
   const core = newWebSocketRpcSession<CoreApi>(rpcSocket(person));
   return { core, api: core.authenticate() };
+};
+
+/**
+ * Grasp's staff member of the stack, signed in now through Grasp's own
+ * tenant (the stack's staff window, apps/core/test/sign-in-config.ts):
+ * not a member of the company, and never signed out by the gate.
+ */
+export const signInStaff = async (): Promise<Person> => {
+  const cookie = await signInAs(localStaff, "grasp-staff");
+  const { core, api } = apiOf({ cookie });
+  try {
+    const { userId, email, role } = await api.whoami();
+    return { userId, email, role, cookie };
+  } finally {
+    core[Symbol.dispose]();
+  }
 };
 
 /**
@@ -169,6 +189,7 @@ const cast = {
   chatBuilds: { builder: "builder" },
   notifications: { builder: "builder" },
   dashboard: { user: "user", admin: "admin" },
+  dashboardBoard: { builder: "builder" },
   dependencyApproval: { admin: "admin", builder: "builder", approver: "user" },
   chatPreview: { builder: "builder" },
   languages: { member: "user" },

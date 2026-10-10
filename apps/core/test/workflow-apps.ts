@@ -15,8 +15,8 @@ type Builder = Parameters<typeof release>[0];
 /**
  * The sample App's server code: purchase orders, a ledger that books each
  * entry once per idempotency key, counters that show how often a step
- * really ran, statistics points, recorded around a mail or by name, and
- * gates a call waits at until another opens them.
+ * really ran, and statistics points, recorded around a mail, by name, or
+ * once a held search is let go.
  */
 export const server = `import { DurableObject } from "cloudflare:workers";
 
@@ -87,33 +87,18 @@ export class App extends DurableObject {
     }
   }
 
-  // Waits at \`gate\`, then records a point of \`measure\`, and counts
-  // whether the call was taken (\`measure\`:recorded) or refused.
-  async pointAfter(caller: Caller, gate: string, measure: string): Promise<void> {
-    await this.gate(gate).promise;
+  // Waits at the mail server, which holds its search until the test lets
+  // it go (MAIL, granted \`mail.search\`), then records a point of
+  // \`measure\`, and counts whether the call was taken
+  // (\`measure\`:recorded) or refused.
+  async pointAfter(caller: Caller, measure: string): Promise<void> {
+    await (this.env as any).MAIL.call(caller, "mail.search", { query: "hold " + measure });
     try {
       await this.point(caller, measure);
       this.hit(caller, measure + ":recorded");
     } catch {
       this.hit(caller, measure + ":refused");
     }
-  }
-
-  // Waits until \`open\` was called for \`gate\`, before or after.
-  async waitFor(_caller: Caller, gate: string): Promise<void> {
-    await this.gate(gate).promise;
-  }
-
-  open(_caller: Caller, gate: string): void {
-    this.gate(gate).resolve();
-  }
-
-  gates = new Map<string, PromiseWithResolvers<void>>();
-
-  gate(name: string): PromiseWithResolvers<void> {
-    const gate = this.gates.get(name) ?? Promise.withResolvers<void>();
-    this.gates.set(name, gate);
-    return gate;
   }
 }
 `;

@@ -456,9 +456,14 @@ export default workflowTests(pay, [{ name: "counts", mocks: { count: 1 }, expect
         record: { type: "team", title: "Not a workflow" },
         body: "",
       }),
-      // What it may: the workflow, by its ID at its path.
+      // What it may: the workflow, by its ID at its path, changed (a save
+      // that changes nothing makes no version).
       workflow: okOf(
-        await saveOver({ documentId: workflow.id, path: workflow.path }),
+        await saveOver({
+          documentId: workflow.id,
+          path: workflow.path,
+          body: "Changed.",
+        }),
         z.object({ currentVersion: z.number() })
       ),
     }).toStrictEqual({

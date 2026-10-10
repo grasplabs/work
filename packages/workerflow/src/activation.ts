@@ -112,8 +112,12 @@ import {
   waitTimedOut,
 } from "./durations.ts";
 import { errorRecord, isNonRetryable, namedError, rebuild } from "./errors.ts";
-import { recordStepCompleted } from "./history.ts";
-import { assertEventType, assertStepName, stepKey } from "./identity.ts";
+import {
+  assertEventType,
+  assertStepName,
+  scheduleOf,
+  stepKey,
+} from "./identity.ts";
 import {
   readAttempt,
   readConsumedEvent,
@@ -121,6 +125,7 @@ import {
   readRollbackWorklist,
   readRun,
   readStep,
+  startRetentionIn,
 } from "./journal.ts";
 import type {
   AttemptRow,
@@ -177,6 +182,11 @@ export interface ActivationLimits {
    * start (config.ts): an attempt is claimed only if its deadline fits.
    */
   readonly handlerBudgetMs: number;
+  /**
+   * When the alarm handler running the activation started: its wall time
+   * counts from there, whatever ran in it before the activation (run.ts).
+   */
+  readonly startedAt: number;
   /** The most bytes one step's stream result may hold. */
   readonly maxStreamBytes: number;
   /** The most bytes all of the run's stream results may hold. */
@@ -633,7 +643,6 @@ export class Activation {
   /** Whether a check for quiet waits for its macrotask. */
   #quietCheckDue = false;
   /** When this activation's alarm handler started: its wall time's start. */
-  readonly #startedAt = Date.now();
   /** Whether this activation has claimed an attempt yet. */
   #claimed = false;
   /** Whether this activation rolls the run back rather than runs it. */
@@ -953,12 +962,7 @@ export class Activation {
     }
     assertTime(retryAt);
     discardChunks(sql, claim.ordinal, claim.attempt);
-    sql.exec(
-      "UPDATE steps SET state = ?, value = NULL, error = ? WHERE ordinal = ?",
-      retryAt === null ? "failed" : "retrying",
-      retryAt === null ? failure.error : null,
-      claim.ordinal
-    );
+    // The attempt's end first, then its step's (history.ts).
     sql.exec(
       "UPDATE attempts SET ended_at = ?, ended = ?, error = ?, retry_at = ? WHERE ordinal = ? AND attempt = ?",
       now,
@@ -967,6 +971,12 @@ export class Activation {
       retryAt,
       claim.ordinal,
       claim.attempt
+    );
+    sql.exec(
+      "UPDATE steps SET state = ?, value = NULL, error = ? WHERE ordinal = ?",
+      retryAt === null ? "failed" : "retrying",
+      retryAt === null ? failure.error : null,
+      claim.ordinal
     );
     return landing;
   }
@@ -1167,7 +1177,8 @@ export class Activation {
   #fits(now: number, config: StepConfig): boolean {
     return (
       !this.#claimed ||
-      now + config.timeoutMs <= this.#startedAt + this.#limits.handlerBudgetMs
+      now + config.timeoutMs <=
+        this.#limits.startedAt + this.#limits.handlerBudgetMs
     );
   }
 
@@ -1241,29 +1252,19 @@ export class Activation {
         ) {
           return "incomplete";
         }
-        sql.exec(
-          "UPDATE steps SET state = 'succeeded', value = ?, error = NULL WHERE ordinal = ?",
-          outcome.value,
-          claim.ordinal
-        );
+        // The attempt's end first, then its step's: observers see them in
+        // that order (history.ts).
         sql.exec(
           "UPDATE attempts SET ended_at = ?, ended = 'succeeded' WHERE ordinal = ? AND attempt = ?",
           now,
           claim.ordinal,
           claim.attempt
         );
-        // A rollback's completion isn't a step's: observers see steps.
-        if (identity.type !== "rollback") {
-          recordStepCompleted(sql, {
-            ordinal: claim.ordinal,
-            at: now,
-            sensitive: config.sensitive,
-            result:
-              outcome.stream === undefined
-                ? { kind: "value", value: outcome.value }
-                : { kind: "stream", result: outcome.stream },
-          });
-        }
+        sql.exec(
+          "UPDATE steps SET state = 'succeeded', value = ?, error = NULL WHERE ordinal = ?",
+          outcome.value,
+          claim.ordinal
+        );
         return { ok: true, value: outcome.value, ordinal: claim.ordinal };
       }
     );
@@ -1292,16 +1293,16 @@ export class Activation {
           detail: fatal.detail,
         });
         sql.exec(
-          "UPDATE steps SET state = 'fatal', value = NULL, error = ? WHERE ordinal = ?",
-          error,
-          claim.ordinal
-        );
-        sql.exec(
           "UPDATE attempts SET ended_at = ?, ended = 'failed', error = ?, retry_at = NULL WHERE ordinal = ? AND attempt = ?",
           now,
           error,
           claim.ordinal,
           claim.attempt
+        );
+        sql.exec(
+          "UPDATE steps SET state = 'fatal', value = NULL, error = ? WHERE ordinal = ?",
+          error,
+          claim.ordinal
         );
         return true;
       })
@@ -2557,9 +2558,9 @@ export class Activation {
         ? { status: "complete" }
         : { status: "errored", error: errorRecord(result.error) };
     const ended = this.#write(() =>
-      this.#storage.transactionSync(() => {
+      this.#storage.transactionSync((): number | null => {
         if (!this.#holdsGeneration()) {
-          return false;
+          return null;
         }
         const now = Date.now();
         this.#storage.sql.exec(
@@ -2572,7 +2573,7 @@ export class Activation {
           now,
           this.#generation
         );
-        return true;
+        return startRetentionIn(this.#storage.sql);
       })
     );
     if (ended === failed) {
@@ -2580,18 +2581,25 @@ export class Activation {
       // alarm, left as it was, brings the run back to end it again.
       return;
     }
-    if (!ended) {
+    if (ended === null) {
       this.#letGo();
       return;
     }
     this.#over = true;
+    await this.#armPurge(ended);
+  }
+
+  /**
+   * Sets the alarm to purge the ended run, in the same turn as the write
+   * that ended it. Never throws: the run's end is journaled, and an alarm
+   * left as it was (the watchdog) finds it ended and sets this one again
+   * (run.ts).
+   */
+  async #armPurge(purgeAt: number): Promise<void> {
     try {
-      // In the same write as the end: nothing is left to wake for.
-      await this.#storage.deleteAlarm();
+      await this.#storage.setAlarm(purgeAt);
     } catch (error) {
-      // The run's end is journaled: the alarm left behind finds the run
-      // ended when it comes, and does nothing (run.ts).
-      warnRecovered("workflow_alarm_delete_failed", error);
+      warnRecovered("workflow_alarm_set_failed", error);
     }
   }
 
@@ -2602,6 +2610,11 @@ export class Activation {
         payload: decode(this.#run.params),
         timestamp: new Date(this.#run.created_at),
         instanceId: this.#run.instance_id,
+        workflowName: this.#run.definition,
+        // Only a run a schedule started has it, as on the reference.
+        ...(this.#run.schedule === null
+          ? {}
+          : { schedule: scheduleOf(this.#run.schedule) }),
       };
       return { ok: true, output: await definition.run(event, this.step) };
     } catch (error) {
@@ -2630,7 +2643,7 @@ export class Activation {
       failure = JSON.stringify(errorRecord(settlement.error));
     }
     const settled = this.#write(() =>
-      this.#storage.transactionSync((): "settled" | "rollingBack" | null => {
+      this.#storage.transactionSync((): number | "rollingBack" | null => {
         if (!(halted ? this.#holdsGeneration() : this.#current())) {
           return null;
         }
@@ -2670,7 +2683,7 @@ export class Activation {
           now,
           this.#generation
         );
-        return "settled";
+        return startRetentionIn(sql);
       })
     );
     if (settled === failed) {
@@ -2694,13 +2707,7 @@ export class Activation {
       }
       return;
     }
-    try {
-      // In the same write as the outcome: nothing is left to wake for.
-      await this.#storage.deleteAlarm();
-    } catch (error) {
-      // The run's end is journaled: the alarm left behind finds the run
-      // ended when it comes, and does nothing (run.ts).
-      warnRecovered("workflow_alarm_delete_failed", error);
-    }
+    // In the same write as the outcome: what is left is its purge.
+    await this.#armPurge(settled);
   }
 }

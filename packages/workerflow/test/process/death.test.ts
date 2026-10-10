@@ -205,6 +205,109 @@ const sha256Of = (bytes: Uint8Array): string =>
 const keysOf = (id: string, label: string): Set<string> =>
   new Set(outside.of(id, label).map((effect) => effect.key));
 
+/** The run row of a journal, as far as these tests read it. */
+const runOf = (
+  journal: unknown
+): { status: unknown; notify_at: unknown } | undefined =>
+  typeof journal === "object" &&
+  journal !== null &&
+  "run" in journal &&
+  typeof journal.run === "object" &&
+  journal.run !== null &&
+  "status" in journal.run &&
+  "notify_at" in journal.run
+    ? { status: journal.run.status, notify_at: journal.run.notify_at }
+    : undefined;
+
+/** The host's deliveries for the run, in the order they arrived. */
+const deliveriesOf = (
+  id: string,
+  label?: string
+): { key: string; label: string }[] =>
+  outside.notifications.filter(
+    (delivery) =>
+      delivery.run === id && (label === undefined || delivery.label === label)
+  );
+
+/** The sequences a delivery to the host held, from its key. */
+const sequencesIn = (key: string): unknown[] => {
+  const parsed: unknown = JSON.parse(key);
+  return Array.isArray(parsed)
+    ? parsed.map((notification: unknown) =>
+        typeof notification === "object" &&
+        notification !== null &&
+        "sequence" in notification
+          ? notification.sequence
+          : undefined
+      )
+    : [];
+};
+
+/** An event as a subscriber outside the process reads it. */
+interface ObservedEvent {
+  eventId: number;
+  type: string;
+  stepName?: string;
+}
+
+const isObservedEvent = (value: unknown): value is ObservedEvent =>
+  typeof value === "object" &&
+  value !== null &&
+  "eventId" in value &&
+  typeof value.eventId === "number" &&
+  "type" in value &&
+  typeof value.type === "string";
+
+/**
+ * Subscribes to the run's events after `cursor`, handing each to `seen` as
+ * it arrives: "done" once the subscription is (the run ended), "cut off"
+ * when the connection broke first.
+ */
+const observe = async (
+  definition: string,
+  id: string,
+  cursor: number,
+  seen: (event: ObservedEvent) => void
+): Promise<"done" | "cut off"> => {
+  const response = await fetch(
+    `${workerd.url}/events?definition=${definition}&id=${id}&cursor=${cursor}`
+  );
+  if (response.body === null) {
+    throw new Error("the events came with no body");
+  }
+  const reader: ReadableStreamDefaultReader<Uint8Array> =
+    response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  try {
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- the body as it comes
+      const { done, value } = await reader.read();
+      if (done) {
+        return "done";
+      }
+      buffered += decoder.decode(value, { stream: true });
+      for (
+        let end = buffered.indexOf("\n");
+        end !== -1;
+        end = buffered.indexOf("\n")
+      ) {
+        const event: unknown = JSON.parse(buffered.slice(0, end));
+        buffered = buffered.slice(end + 1);
+        if (!isObservedEvent(event)) {
+          throw new TypeError("an event the fixture can't have sent");
+        }
+        seen(event);
+      }
+    }
+  } catch (error) {
+    if (error instanceof TypeError && error.message.startsWith("an event")) {
+      throw error;
+    }
+    return "cut off";
+  }
+};
+
 describe("a run on disk-backed workerd", () => {
   beforeAll(async () => {
     fixture = bundleFixture(bundleDirectory);
@@ -458,6 +561,125 @@ describe("a run on disk-backed workerd", () => {
     });
   });
 
+  it("keeps a deletion the process dies after: the run stays gone mid-step, and its start delivered again creates nothing", async () => {
+    const id = "report-delete-mid-step";
+    const chargeHeld = outside.hold(id, "charge", 1);
+    await workerd.request("/start", startOf("orders", id));
+    await chargeHeld;
+    // Killed once the deletion committed, before its answer left.
+    const deleted = outside.hold(id, "deleted");
+    const lost = workerd
+      .request(`/delete?definition=orders&id=${id}`, {})
+      .catch(() => "lost");
+    await deleted;
+    await workerd.kill();
+    const answer = await lost;
+    await workerd.start();
+    const afterRestart = {
+      status: await statusOf("orders", id),
+      journal: await journalOf("orders", id),
+    };
+
+    // The start delivered again finds its tombstone; a plain create under
+    // the ID is another run, whose alarm would be any old one's too.
+    const again = await workerd.request("/start", startOf("orders", id));
+    const create = await workerd.request(
+      "/start",
+      startOf("orders", id, { key: undefined })
+    );
+    await ended("orders", id);
+
+    expect({ answer, afterRestart, again, create }).toMatchObject({
+      answer: "lost",
+      afterRestart: { status: { status: 404 }, journal: null },
+      again: { status: 200, body: { created: false } },
+      create: { status: 200, body: { created: true } },
+    });
+    // The deleted run's charge went out once, and nothing after it: the
+    // new run's steps are its own, under another run's keys.
+    const [first, second] = outside.of(id, "charge");
+    expect(timeline(id)).toStrictEqual([
+      ["charge", 1],
+      ["charge", 1],
+      ["ship", 1],
+    ]);
+    expect(first?.key).not.toBe(second?.key);
+  });
+
+  it("expires a tombstone after its horizon though the process died in between: the same start then creates a run", async () => {
+    const id = "tombstone-across-death";
+    await workerd.request("/start", startOf("orders", id));
+    await ended("orders", id);
+    const deleted = await workerd.request(
+      `/delete?definition=orders&id=${id}`,
+      {}
+    );
+    const within = await workerd.request("/start", startOf("orders", id));
+    // Killed with the expiry still to come: only the alarm the deletion
+    // set, stored with the tombstone, can bring it.
+    await workerd.kill();
+    await workerd.start();
+
+    // Its alarm drops it, with no request: the object empties.
+    const tablesAfterDeath = await workerd.request(
+      `/tables?definition=orders&id=${id}`
+    );
+    await until("the tombstone to expire", async () => {
+      const { body } = await workerd.request(
+        `/tables?definition=orders&id=${id}`
+      );
+      return Array.isArray(body) && body.length === 0 ? true : undefined;
+    });
+    const after = await workerd.request("/start", startOf("orders", id));
+    await ended("orders", id);
+
+    expect({ deleted, within, tablesAfterDeath }).toMatchObject({
+      deleted: { status: 200, body: { deleted: [{ id }], errors: [] } },
+      within: { status: 200, body: { created: false } },
+      tablesAfterDeath: { body: ["tombstones"] },
+    });
+    expect(after).toStrictEqual({ status: 200, body: { created: true } });
+    // Two runs, one after the other, under keys of their own.
+    expect(timeline(id)).toStrictEqual([
+      ["charge", 1],
+      ["ship", 1],
+      ["charge", 1],
+      ["ship", 1],
+    ]);
+    expect(keysOf(id, "charge").size).toBe(2);
+  });
+
+  it("purges an ended run its retention after its end though the process died in between, tombstone kept", async () => {
+    const id = "purged-after-death";
+    const retentionMs = 2000;
+    await workerd.request("/start", startOf("orders", id, { retentionMs }));
+    await ended("orders", id);
+    const journal = await journalOf("orders", id);
+    // Killed with the purge still to come: only its alarm, stored with the
+    // run, can bring it.
+    await workerd.kill();
+    await workerd.start();
+
+    await until("the run to be purged", async () => {
+      const { status } = await statusOf("orders", id);
+      return status === 404 ? true : undefined;
+    });
+    const again = await workerd.request(
+      "/start",
+      startOf("orders", id, { retentionMs })
+    );
+
+    expect(journal).toMatchObject({
+      run: { status: "complete", success_retention_ms: retentionMs },
+    });
+    expect(again).toStrictEqual({ status: 200, body: { created: false } });
+    await expect(journalOf("orders", id)).resolves.toBeNull();
+    expect(timeline(id)).toStrictEqual([
+      ["charge", 1],
+      ["ship", 1],
+    ]);
+  });
+
   it("still runs the run, once, when the process dies after the start commits; the start delivered again finds it", async () => {
     const id = "after-the-start-commit";
     const chargeHeld = outside.hold(id, "charge", 1);
@@ -491,6 +713,102 @@ describe("a run on disk-backed workerd", () => {
         { generation: 2, ended: "settled" },
       ],
     });
+  });
+
+  it("lets a subscriber the process died under take up its events after the last it handled: none missed, none twice, one end", async () => {
+    const id = "observed-through-death";
+    const afterHeld = outside.hold(id, "after", 1);
+    await workerd.request(
+      "/start",
+      startOf("napper", id, { params: { nap: 200 } })
+    );
+    const before: ObservedEvent[] = [];
+    const cut = observe("napper", id, 0, (event) => {
+      before.push(event);
+    });
+    await afterHeld;
+    await until("the attempt at after to be delivered", () =>
+      before.some(
+        (event) =>
+          event.type === "attempt_started" && event.stepName === "after-1"
+      )
+        ? true
+        : undefined
+    );
+
+    await workerd.kill();
+    const cutOff = await cut;
+    await workerd.start();
+    const after: ObservedEvent[] = [];
+    const resumed = await observe(
+      "napper",
+      id,
+      before.at(-1)?.eventId ?? 0,
+      (event) => {
+        after.push(event);
+      }
+    );
+    const all: ObservedEvent[] = [];
+    await observe("napper", id, 0, (event) => {
+      all.push(event);
+    });
+
+    expect({ cutOff, resumed }).toStrictEqual({
+      cutOff: "cut off",
+      resumed: "done",
+    });
+    expect([...before, ...after]).toStrictEqual(all);
+    expect(all.map((event) => event.eventId)).toStrictEqual(
+      all.map((_, index) => index + 1)
+    );
+    expect(
+      all
+        .filter(
+          (event) =>
+            event.type === "step_completed" ||
+            event.type === "workflow_completed"
+        )
+        .map((event) => event.stepName ?? event.type)
+    ).toStrictEqual(["before-1", "after-1", "workflow_completed"]);
+  });
+
+  it("hands the host a run's end again after the process died before the host took it, and empties the outbox once it has", async () => {
+    const id = "notified-through-death";
+    const endHeld = outside.hold(id, "notify:complete", 1);
+    await workerd.request("/start", startOf("orders", id));
+    // The end reached the host; its answer hasn't left.
+    await endHeld;
+    const cutOff = await journalOf("orders", id);
+
+    await workerd.kill();
+    await workerd.start();
+    await until("the end to reach the host again", () =>
+      deliveriesOf(id, "notify:complete").length >= 2 ? true : undefined
+    );
+    const after = await until("the outbox to empty", async () => {
+      const journal = await journalOf("orders", id);
+      return runOf(journal)?.notify_at === null ? journal : undefined;
+    });
+
+    const [first, again] = deliveriesOf(id, "notify:complete");
+    const delivered = deliveriesOf(id).flatMap((delivery) =>
+      sequencesIn(delivery.key)
+    );
+    const cutOffRun = runOf(cutOff);
+    expect({
+      cutOff: {
+        status: cutOffRun?.status,
+        pending: typeof cutOffRun?.notify_at === "number",
+      },
+      after: runOf(after),
+      again: again?.key,
+    }).toStrictEqual({
+      cutOff: { status: "complete", pending: true },
+      after: { status: "complete", notify_at: null },
+      again: first?.key,
+    });
+    // In order, each status at least once: only the held one twice.
+    expect(delivered).toStrictEqual([1, 2, 3, 3]);
   });
 
   it("recovers an object evicted mid-step from its journal, with no request reaching it", async () => {
