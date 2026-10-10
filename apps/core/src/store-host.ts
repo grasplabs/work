@@ -1,3 +1,6 @@
+import { SchemaDefinitionError, ValueDefinitionError } from "@grasp-os/sdk";
+import { readSchemaManifest, schemaHash as hashOf } from "@grasp-os/sdk/host";
+import type { ReadManifest } from "@grasp-os/sdk/host";
 import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -21,6 +24,7 @@ import type {
   Claimed,
   Commit,
   Committed,
+  DefinedTables,
   StoreFields,
   StoredRecord,
 } from "@grasp-os/shared/stores";
@@ -131,6 +135,10 @@ import type { StoreDeletionMark } from "./store-deletion.ts";
 //   later), and on every wake-up, so a commit whose object died before
 //   setting it is still drained. Its drain and sweep are each bounded in
 //   time; the next alarm continues.
+// - A schema is crafted to break the host, or to pass for another: the
+//   manifest is read as untrusted text (bounded, strict, declared again
+//   through the SDK's own checks, sdk/src/schema-manifest.ts), and its
+//   hash is computed here from its canonical text, never taken as given.
 // - A caller bends time or delivery: the object's RPC methods take no
 //   clock, consumers or budget; only tests choose them, through this host
 //   inside the object.
@@ -248,6 +256,28 @@ const markOf = (row: {
   };
 };
 
+/**
+ * The schema a manifest's text declares, read as an untrusted manifest;
+ * `data.invalid_schema`, with the check's code, if it fails one.
+ */
+const readSchema = (manifest: string): ReadManifest => {
+  try {
+    // It refuses anything but text itself: what crossed RPC may be other.
+    return readSchemaManifest(manifest);
+  } catch (error) {
+    if (
+      error instanceof SchemaDefinitionError ||
+      error instanceof ValueDefinitionError
+    ) {
+      throw dataErrors.create("data.invalid_schema", {
+        code: error.code,
+        issues: [error.message],
+      });
+    }
+    throw error;
+  }
+};
+
 const conflict = (table: string, id: string) =>
   dataErrors.create("data.conflict", { table, id });
 
@@ -287,24 +317,30 @@ export class StoreHost {
   }
 
   /**
-   * Makes sure the store has a table for each of `names`, minting an ID
-   * for each new one, and answers every table's ID by name. A name that
+   * Makes sure the store has a table for each table of the schema whose
+   * manifest is `manifest` (its JSON text), minting an ID for each new
+   * one, and answers the schema's hash and every table's ID by name. The
+   * manifest is untrusted: it is read as `readSchemaManifest` reads it,
+   * bounded and strict, and declared again through the SDK's checks, and
+   * the hash is computed here, from its canonical text, never taken from
+   * the caller. A schema that fails a check is refused
+   * (`data.invalid_schema`, with the check's code). A table name that
    * differs from an existing one only in case is refused, and so is one
-   * past `storeMaxTables`. Tables are never renamed or removed here.
+   * past `storeMaxTables`. Tables are never renamed or removed here, and
+   * nothing is activated: which schema a store holds its records to comes
+   * with schema activation.
    */
-  defineTables(
+  async defineTables(
     storeId: StoreId,
-    names: readonly string[]
-  ): Record<string, string> {
-    const parsed = dataErrors.parse(
-      "data.invalid",
-      z.array(tableNameSchema).max(storeMaxTables),
-      names
-    );
-    return this.ctx.storage.transactionSync(() => {
+    manifest: string
+  ): Promise<DefinedTables> {
+    const read = readSchema(manifest);
+    const schemaHash = await hashOf(read.manifest);
+    const names = Object.keys(read.manifest.tables);
+    const ids = this.ctx.storage.transactionSync(() => {
       this.#bind(storeId);
       const now = Date.now();
-      for (const name of new Set(parsed)) {
+      for (const name of names) {
         const existing = this.#db
           .select({ name: tables.name })
           .from(tables)
@@ -340,6 +376,7 @@ export class StoreHost {
         all.map(({ name, tableId }) => [name, tableId])
       );
     });
+    return { schemaHash, tables: ids };
   }
 
   /** The record `id` of `table`, or null if the store has none. */

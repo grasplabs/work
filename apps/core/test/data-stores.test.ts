@@ -1,3 +1,10 @@
+import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+import {
+  manifestMaxBytes,
+  manifestText,
+  schemaHash as hashOf,
+  schemaManifest,
+} from "@grasp-os/sdk/host";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { storeMaxTables } from "@grasp-os/shared/store-limits";
 import {
@@ -15,6 +22,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { tablesManifest } from "./store-schemas.ts";
 
 /** Who creates the stores these tests use: a builder of the organization. */
 const builder: Acting = {
@@ -71,7 +79,7 @@ const commitIn = async (
 /** A new store with a `notes` table. */
 const newStore = async (): Promise<OpenStore> => {
   const store = await openStore(env, await createStore(env, builder));
-  await store.defineTables(["notes"]);
+  await store.defineTables(tablesManifest("notes"));
   return store;
 };
 
@@ -159,36 +167,24 @@ describe("stores", () => {
   it("mints table IDs, so two stores' tables of one name differ", async () => {
     const first = await openStore(env, await createStore(env, builder));
     const second = await openStore(env, await createStore(env, builder));
-    const firstTables = await first.defineTables(["notes", "people"]);
-    const secondTables = await second.defineTables(["notes"]);
-
-    expect(firstTables.notes).not.toBe("notes");
-    expect(firstTables.notes).not.toBe(secondTables.notes);
-    // Defining tables again keeps their IDs.
-    await expect(first.defineTables(["notes"])).resolves.toStrictEqual(
-      firstTables
+    const firstTables = await first.defineTables(
+      tablesManifest("notes", "people")
     );
+    const secondTables = await second.defineTables(tablesManifest("notes"));
+
+    expect(firstTables.tables.notes).not.toBe("notes");
+    expect(firstTables.tables.notes).not.toBe(secondTables.tables.notes);
+    // Defining tables again keeps their IDs.
+    await expect(
+      first.defineTables(tablesManifest("notes"))
+    ).resolves.toMatchObject({ tables: firstTables.tables });
   });
 
-  it("refuses table names that aren't identifiers, or differ only in case", async () => {
+  it("refuses a table whose name differs only in case from one it holds", async () => {
     const store = await newStore();
-    await Promise.all(
-      [
-        "_notes",
-        "notes; DROP TABLE sdk_records",
-        "1notes",
-        "notités",
-        "",
-        "n".repeat(65),
-      ].map(async (name) => {
-        await expect(store.defineTables([name])).rejects.toMatchObject({
-          code: "data.invalid",
-        });
-      })
-    );
-    await expect(store.defineTables(["Notes"])).rejects.toMatchObject({
-      code: "data.table_conflict",
-    });
+    await expect(
+      store.defineTables(tablesManifest("Notes"))
+    ).rejects.toMatchObject({ code: "data.table_conflict" });
     await expect(store.get("people", "x")).rejects.toMatchObject({
       code: "data.unknown_table",
     });
@@ -204,12 +200,14 @@ describe("stores", () => {
   it(`holds at most ${storeMaxTables} tables`, async () => {
     const store = await openStore(env, await createStore(env, builder));
     const names = Array.from({ length: storeMaxTables }, (_, n) => `t${n}`);
-    await expect(store.defineTables(names)).resolves.toBeDefined();
-    await expect(store.defineTables(["oneMore"])).rejects.toMatchObject({
-      code: "data.too_many_tables",
-    });
+    await expect(
+      store.defineTables(tablesManifest(...names))
+    ).resolves.toBeDefined();
+    await expect(
+      store.defineTables(tablesManifest("oneMore"))
+    ).rejects.toMatchObject({ code: "data.too_many_tables" });
     // Nothing of the refused definition stays.
-    const tables = await store.defineTables(["t0"]);
+    const { tables } = await store.defineTables(tablesManifest("t0"));
     expect(Object.keys(tables)).toHaveLength(storeMaxTables);
   });
 
@@ -253,6 +251,197 @@ describe("stores", () => {
     await expect(reopened.get("notes", id)).resolves.toMatchObject({
       revision: 1,
       fields: { title: "Launch" },
+    });
+  });
+});
+
+/** Something that isn't text, passed as text, as a hostile caller would. */
+const asText = (manifest: unknown): string =>
+  // SAFETY: none, on purpose: the store must refuse what isn't text.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- deliberately ill-typed input
+  manifest as string;
+
+/** The Notes schema of the specification, with its access. */
+const notesSchema = (order: "declared" | "reordered") => {
+  const title = v.string().trim().min(1).max(200);
+  const body = v.string().max(100_000).default("");
+  const fields =
+    order === "declared"
+      ? { title, body }
+      : { body, title: v.string().max(200).min(1).trim() };
+  const notes = defineTable(fields)
+    .index("by_updated", ["_updatedAt"])
+    .index("by_title", ["title"]);
+  return schemaManifest(
+    defineSchema(
+      order === "declared"
+        ? { notes, people: defineTable({ name: v.string() }) }
+        : { people: defineTable({ name: v.string() }), notes }
+    ),
+    { tables: { notes: { read: "owner", write: "owner" } } }
+  );
+};
+
+/** The Notes manifest's JSON, changed by `change`, as text. */
+const changed = (change: (json: Record<string, unknown>) => void): string => {
+  // SAFETY: a manifest's text is a JSON object.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const json = JSON.parse(manifestText(notesSchema("declared"))) as Record<
+    string,
+    unknown
+  >;
+  change(json);
+  return JSON.stringify(json);
+};
+/** The tables of a manifest's JSON. */
+const tablesOf = (
+  json: Record<string, unknown>
+): Record<string, Record<string, unknown>> =>
+  // SAFETY: the Notes manifest's JSON, as made above.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  json.tables as Record<string, Record<string, unknown>>;
+const notesOf = (json: Record<string, unknown>) => tablesOf(json).notes ?? {};
+const fieldsOf = (json: Record<string, unknown>): Record<string, unknown> =>
+  // SAFETY: as above.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  notesOf(json).fields as Record<string, unknown>;
+
+describe("schemas", () => {
+  it("defines a schema's tables from its manifest and answers its hash, as the SDK computes it", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const manifest = notesSchema("declared");
+    const defined = await store.defineTables(manifestText(manifest));
+
+    expect(defined.schemaHash).toBe(await hashOf(manifest));
+    expect(Object.keys(defined.tables).toSorted()).toStrictEqual([
+      "notes",
+      "people",
+    ]);
+    // The same schema declared in another order, its text's keys in yet
+    // another, is the same schema: the same hash, the same tables.
+    const reordered = manifestText(notesSchema("reordered"));
+    const reversed = JSON.stringify(
+      JSON.parse(reordered),
+      (_key, part: unknown) =>
+        typeof part === "object" && part !== null && !Array.isArray(part)
+          ? Object.fromEntries(Object.entries(part).toReversed())
+          : part
+    );
+    await expect(store.defineTables(reversed)).resolves.toStrictEqual(defined);
+  });
+
+  it("a changed access mode or index order is another schema", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const declared = await store.defineTables(
+      manifestText(notesSchema("declared"))
+    );
+    const shared = schemaManifest(
+      defineSchema({
+        notes: defineTable({ title: v.string(), body: v.string() })
+          .index("by_updated", ["_updatedAt"])
+          .index("by_title", ["title"]),
+        people: defineTable({ name: v.string() }),
+      }),
+      { tables: { notes: { read: "appMembers", write: "owner" } } }
+    );
+    const again = await store.defineTables(manifestText(shared));
+    expect(again.schemaHash).not.toBe(declared.schemaHash);
+    expect(again.tables).toStrictEqual(declared.tables);
+  });
+
+  it.each([
+    ["text that isn't JSON", "{", "schema.invalid_manifest"],
+    [
+      "a table name that isn't an identifier",
+      changed((json) => {
+        json.tables = { "notes; DROP TABLE sdk_records": notesOf(json) };
+      }),
+      "schema.invalid_name",
+    ],
+    [
+      "a table name with letters that aren't ASCII",
+      changed((json) => {
+        json.tables = { notités: notesOf(json) };
+      }),
+      "schema.invalid_name",
+    ],
+    [
+      "two tables that differ only in case",
+      changed((json) => {
+        tablesOf(json).Notes = notesOf(json);
+      }),
+      "schema.name_conflict",
+    ],
+    [
+      "a managed field declared",
+      changed((json) => {
+        fieldsOf(json)._ownerId = fieldsOf(json).title;
+      }),
+      "schema.invalid_name",
+    ],
+    [
+      "an index on a field that isn't a scalar",
+      changed((json) => {
+        fieldsOf(json).tags = {
+          descriptorVersion: 1,
+          kind: "array",
+          item: fieldsOf(json).title,
+          nullable: false,
+          presence: "required",
+        };
+        notesOf(json).indexes = { by_tags: { fields: ["tags"] } };
+      }),
+      "schema.invalid_index",
+    ],
+    [
+      "a record ID naming a table it hasn't",
+      changed((json) => {
+        fieldsOf(json).project = {
+          descriptorVersion: 1,
+          kind: "id",
+          tableName: "projects",
+          nullable: false,
+          presence: "required",
+        };
+      }),
+      "schema.unknown_table",
+    ],
+    [
+      "a key a manifest doesn't have",
+      changed((json) => {
+        notesOf(json).ddl = "CREATE INDEX x ON sdk_records(value_json)";
+      }),
+      "schema.invalid_manifest",
+    ],
+    [
+      "a version this host doesn't know",
+      changed((json) => {
+        json.manifestVersion = 2;
+      }),
+      "schema.invalid_manifest",
+    ],
+    ["too much text", " ".repeat(manifestMaxBytes + 1), "schema.too_large"],
+  ])(
+    "refuses a schema with %s, and defines nothing of it",
+    async (_, text, code) => {
+      const store = await openStore(env, await createStore(env, builder));
+      await expect(store.defineTables(text)).rejects.toMatchObject({
+        code: "data.invalid_schema",
+        details: { code },
+      });
+      await expect(store.get("notes", "x")).rejects.toMatchObject({
+        code: "data.unknown_table",
+      });
+    }
+  );
+
+  it("refuses anything but a manifest's text", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    await expect(
+      store.defineTables(asText(notesSchema("declared")))
+    ).rejects.toMatchObject({
+      code: "data.invalid_schema",
+      details: { code: "schema.invalid_manifest" },
     });
   });
 });

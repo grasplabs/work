@@ -5,6 +5,7 @@ import type {
   Claimed,
   Commit,
   Committed,
+  DefinedTables,
   StoredRecord,
 } from "@grasp-os/shared/stores";
 import { DurableObject } from "cloudflare:workers";
@@ -41,11 +42,11 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /** `StoreHost.defineTables`. */
-  defineTables(
+  async defineTables(
     storeId: StoreId,
-    names: readonly string[]
-  ): Record<string, string> {
-    return this.#host.defineTables(storeId, names);
+    manifest: string
+  ): Promise<DefinedTables> {
+    return await this.#host.defineTables(storeId, manifest);
   }
 
   /** `StoreHost.get`. */

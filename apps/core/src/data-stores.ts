@@ -9,6 +9,7 @@ import type {
   Claimed,
   Commit,
   Committed,
+  DefinedTables,
   StoredRecord,
 } from "@grasp-os/shared/stores";
 import { and, asc, eq, exists, isNull, or, sql } from "drizzle-orm";
@@ -83,7 +84,8 @@ import type { StoreDeletionMark } from "./store-deletion.ts";
 /** A store, as core uses it: its ID bound to every call. */
 export interface OpenStore {
   id: StoreId;
-  defineTables: (names: readonly string[]) => Promise<Record<string, string>>;
+  /** Tables for a schema, from its manifest's text (`StoreHost.defineTables`). */
+  defineTables: (manifest: string) => Promise<DefinedTables>;
   get: (table: string, id: string) => Promise<StoredRecord | null>;
   claim: (claim: Omit<ClaimInput, "storeId">) => Promise<Claimed>;
   commit: (commit: Omit<Commit, "storeId">) => Promise<Committed>;
@@ -381,7 +383,8 @@ export const openStore = async (
   const stub = inJurisdiction(env, env.DATA_STORES).getByName(storeId);
   return {
     id: storeId,
-    defineTables: async (names) => await stub.defineTables(storeId, names),
+    defineTables: async (manifest) =>
+      await stub.defineTables(storeId, manifest),
     get: async (table, recordId) => await stub.get(storeId, table, recordId),
     claim: async (claim) => await stub.claim({ ...claim, storeId }),
     commit: async (commit) => await stub.commit({ ...commit, storeId }),

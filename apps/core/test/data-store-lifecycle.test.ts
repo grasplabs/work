@@ -18,6 +18,7 @@ import type { OpenStore } from "../src/data-stores.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { allEvents } from "./audit-events.ts";
 import { outcome } from "./sign-in.ts";
+import { tablesManifest } from "./store-schemas.ts";
 
 // A business store's lifecycle (data-stores.ts, store-host.ts), from the
 // threat model in data-stores.ts: who may create, share and delete a
@@ -110,7 +111,7 @@ const commitNote = async (
 /** A store `by` created, with a `notes` table. */
 const storeOf = async (by: Acting): Promise<OpenStore> => {
   const store = await openStore(env, await createStore(env, by));
-  await store.defineTables(["notes"]);
+  await store.defineTables(tablesManifest("notes"));
   return store;
 };
 
