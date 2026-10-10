@@ -16,6 +16,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
 import { sql } from "drizzle-orm";
 import {
+  check,
   foreignKey,
   index,
   integer,
@@ -337,5 +338,81 @@ export const knowledgeSignalDismissals = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.kind, table.collectionId, table.subject] }),
+  ]
+);
+
+/**
+ * A submission's receipt (knowledge/receipts.ts): one record save by an
+ * App, under its caller's idempotency key, by its scope and key's hash
+ * (`id`): who it was for, through which App and binding, under which
+ * contract, and the key. Claimed before the save is prepared, with the
+ * hash of its input, and claimed again by every later attempt, which
+ * moves its `fence` on: only the attempt holding the current fence can
+ * commit (`submission_outcomes`). Kept `retain_until`, past which its
+ * outcome goes and it stays as a tombstone (`expired_at`), so the key
+ * reused is refused as expired; tombstones go once old enough too. A
+ * workflow step's receipt names its run (`run_id`), kept while the run
+ * is live.
+ */
+export const submissionReceipts = sqliteTable(
+  "submission_receipts",
+  {
+    id: text().primaryKey(),
+    /** What it changes: `record.save`. */
+    operation: text({ enum: ["record.save"] }).notNull(),
+    /** User ID: the person the change was for. */
+    principal: text().notNull(),
+    /** The App whose code made it. */
+    appId: text("app_id").notNull(),
+    collectionId: text("collection_id").notNull(),
+    /** The workflow run it was made in, for a step's. */
+    runId: text("run_id"),
+    /** SHA-256 hex of its normalized input. */
+    inputHash: text("input_hash").notNull(),
+    fence: integer().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    retainUntil: timestamp("retain_until").notNull(),
+    expiredAt: timestamp("expired_at"),
+  },
+  (table) => [
+    // What an outcome refers to: the receipt at the fence it committed at.
+    uniqueIndex("submission_receipts_fence_idx").on(table.id, table.fence),
+    index("submission_receipts_retain_idx")
+      .on(table.retainUntil, table.id)
+      .where(sql`expired_at IS NULL`),
+    index("submission_receipts_expired_idx")
+      .on(table.expiredAt, table.id)
+      .where(sql`expired_at IS NOT NULL`),
+  ]
+);
+
+/**
+ * A submission's outcome, written in the same batch as its change: so a
+ * receipt has one exactly when its change committed. The row is also the
+ * commit's check, which the database makes inside the batch: one per
+ * receipt (a second commit fails its primary key), only at the receipt's
+ * current fence (a superseded attempt fails the foreign key), only before
+ * the attempt's deadline by the database's own clock (`on_time`), and,
+ * for a save that changes nothing, only while the record is still at the
+ * version it expected (`current`). Any of them failing fails the batch.
+ */
+export const submissionOutcomes = sqliteTable(
+  "submission_outcomes",
+  {
+    receiptId: text("receipt_id").primaryKey(),
+    fence: integer().notNull(),
+    onTime: integer("on_time", { mode: "boolean" }).notNull(),
+    current: integer({ mode: "boolean" }).notNull(),
+    /** JSON: what the submission answered (a document summary). */
+    outcome: text().notNull(),
+    committedAt: timestamp("committed_at").notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.receiptId, table.fence],
+      foreignColumns: [submissionReceipts.id, submissionReceipts.fence],
+    }),
+    check("submission_outcomes_on_time", sql`${table.onTime} = 1`),
+    check("submission_outcomes_current", sql`${table.current} = 1`),
   ]
 );

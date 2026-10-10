@@ -64,6 +64,13 @@
       "when": 1790793391412,
       "tag": "0008_drop_memory_proposals",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791593105262,
+      "tag": "0009_submission_receipts",
+      "breakpoints": true
     }
   ]
 }

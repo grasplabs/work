@@ -363,6 +363,23 @@ export interface Write {
    * the fields every type has and a document's limits (`parseBaseFields`).
    */
   purge?: true;
+  /**
+   * The statement that commits the write's receipt (knowledge/
+   * receipts.ts, `commitOf`), given what the write answers and, for a
+   * write that changes nothing, the version it must still find: it goes
+   * first in the batch, which it refuses whole when it fails.
+   */
+  commit?: (
+    outcome: DocumentSummary,
+    unchanged?: { documentId: string; version: number }
+  ) => BatchItem<"sqlite">;
+  /**
+   * Set when `text` is the text of the version at `ifVersion` already:
+   * with a `commit`, nothing is written but the receipt, and only while
+   * the document is still at that version, so the write is checked as
+   * any other and makes no new version.
+   */
+  unchanged?: true;
 }
 
 /** A frontmatter field's value, if it has one. */
@@ -542,6 +559,41 @@ const requireStillReleased = async (
 };
 
 /**
+ * What a write's batch sends, and what it answers: its `change` (the
+ * document, as `row`), after the statement that commits its receipt when
+ * it has one (`Write.commit`); for a write that changes nothing
+ * (`Write.unchanged`), that statement alone, answering the document as
+ * it is (`existing`).
+ */
+const committed = (
+  write: Write,
+  existing: DocumentRow | undefined,
+  row: DocumentRow,
+  change: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]
+): {
+  items: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]];
+  outcome: DocumentSummary;
+} => {
+  if (write.commit === undefined) {
+    return { items: change, outcome: toSummary(row) };
+  }
+  if (write.unchanged === true && existing !== undefined) {
+    const outcome = toSummary(existing);
+    return {
+      items: [
+        write.commit(outcome, {
+          documentId: existing.id,
+          version: existing.currentVersion,
+        }),
+      ],
+      outcome,
+    };
+  }
+  const outcome = toSummary(row);
+  return { items: [write.commit(outcome), ...change], outcome };
+};
+
+/**
  * Writes the next version, if the document is still at `ifVersion`
  * (0: it doesn't exist yet). Throws `knowledge.conflict`, with the version
  * it is at, and writes nothing otherwise.
@@ -672,16 +724,20 @@ export const writeVersion = async (
         )
     : db.insert(documents).values(row);
   await requireStillReleased(env, collection.id, released.releasedType);
+  const { items, outcome } = committed(write, existing, row, [
+    document,
+    ...statements,
+  ]);
   await write.lastCheck?.();
   try {
-    await auditedBatch(env, db, [document, ...statements]);
+    await auditedBatch(env, db, items);
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw conflict(await findByPath(db, collection.id, path));
     }
     throw error;
   }
-  return toSummary(row);
+  return outcome;
 };
 
 /**

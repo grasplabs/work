@@ -18,6 +18,7 @@ import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { and, asc, eq, gt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { stringify } from "yaml";
+import { z } from "zod";
 
 import type { Person } from "../app-access.ts";
 import { memberRole, teamsOf } from "../auth/identity.ts";
@@ -48,6 +49,8 @@ import {
   parseRecord,
   savedFields,
 } from "./frontmatter.ts";
+import { claim, commitOf, inputHashOf, settled } from "./receipts.ts";
+import type { Claim, Submission } from "./receipts.ts";
 import { keptSetters } from "./record-types.ts";
 import type { DeclaredTypes } from "./record-types.ts";
 
@@ -242,7 +245,8 @@ export const writeRecord = async (
   writer: RecordWriter,
   collection: CollectionRow,
   input: unknown,
-  setter?: Setter
+  setter?: Setter,
+  held?: Claim
 ): Promise<DocumentSummary> => {
   const { path, ifVersion, record, body, message } = knowledgeErrors.parse(
     "knowledge.invalid",
@@ -283,10 +287,19 @@ export const writeRecord = async (
         : [[field, saved.fields[field]]]
     )
   );
+  const text = recordText({ ...record, ...kept }, body);
   return await writeVersion(env, versionWriter(writer), {
     collection,
     path,
-    text: recordText({ ...record, ...kept }, body),
+    text,
+    ...(held === undefined
+      ? {}
+      : {
+          commit: (outcome, unchanged) =>
+            commitOf(env, held, outcome, unchanged),
+          // Only from the current version (`previous`), as anything kept.
+          ...(previous === text ? { unchanged: true } : {}),
+        }),
     ifVersion,
     message: message === undefined || message === "" ? null : message,
     restoredFrom: null,
@@ -304,6 +317,12 @@ export const writeRecord = async (
  * exist. `stillAllowed`, if given, is checked last of all, just before
  * the write's batch: the caller's own word that what let it write still
  * holds (for an App, that the call it runs in still may, app-binding.ts).
+ *
+ * With `submissionOf`, the save keeps a receipt (receipts.ts): the
+ * submission its normalized input's hash makes. Only once the caller is
+ * authorized in full is the receipt claimed; a save its key made already
+ * answers that save's outcome and writes nothing, and the save commits
+ * only with its claim's fence, before its deadline.
  */
 export const saveRecordAsDelegate = async (
   env: Env,
@@ -313,7 +332,8 @@ export const saveRecordAsDelegate = async (
   collectionId: CollectionId,
   input: unknown,
   setter?: Setter,
-  stillAllowed?: () => Promise<void>
+  stillAllowed?: () => Promise<void>,
+  submissionOf?: (inputHash: string) => Submission
 ): Promise<DocumentSummary> => {
   const writer = await delegateWriter(
     env,
@@ -327,8 +347,7 @@ export const saveRecordAsDelegate = async (
     throw knowledgeErrors.create("knowledge.not_found");
   }
   const { lastCheck } = writer;
-  return await writeRecord(
-    env,
+  const checked: RecordWriter =
     stillAllowed === undefined
       ? writer
       : {
@@ -337,11 +356,36 @@ export const saveRecordAsDelegate = async (
             await lastCheck?.();
             await stillAllowed();
           },
-        },
-    collection,
-    input,
-    setter
+        };
+  if (submissionOf === undefined) {
+    return await writeRecord(env, checked, collection, input, setter);
+  }
+  const parsed = knowledgeErrors.parse(
+    "knowledge.invalid",
+    recordSaveSchema,
+    input
   );
+  // The receipt is read only by who may write here now.
+  requireWritable(env, writer.person, collection);
+  // As JSON, which its receipt hashes: nothing else is a record's.
+  const json = knowledgeErrors.parse("knowledge.invalid", z.json(), parsed);
+  const inputHash = await inputHashOf(json);
+  const claimed = await claim(env, submissionOf(inputHash), inputHash);
+  if ("outcome" in claimed) {
+    return claimed.outcome;
+  }
+  try {
+    return await writeRecord(
+      env,
+      checked,
+      collection,
+      parsed,
+      setter,
+      claimed.claim
+    );
+  } catch (error) {
+    return await settled(env, claimed.claim, error);
+  }
 };
 
 /**
