@@ -635,13 +635,13 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     ).resolves.toStrictEqual(["app.timed_out", "app.conflict"]);
   });
 
-  it("never run a version made current and started while a call is pinned to the one it was checked against", async () => {
+  it("run a call pinned to the version it was checked against on that version, while another made current meanwhile waits", async () => {
     const { admin, crm } = await setUp();
     const caller = { userId: admin.userId, mode: "interactive" as const };
     const withoutWrongAnswer = Object.fromEntries(
       Object.entries(exported).filter(([name]) => name !== "wrongAnswer")
     );
-    let raced = false;
+    let waiting: Promise<unknown> | undefined;
     const outcomeOfCall = await outcome(
       appHost(env, crm).call(caller, "addCustomer", [{ name: "Globex" }], {
         chain: [],
@@ -649,23 +649,22 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
         version: 1,
         deadline: Date.now() + 60_000,
         // Pinned to version 1: version 2 is made current, and another
-        // call starts it in the host, before this one's method runs.
+        // call comes for it before this one's method runs. It waits for
+        // this one's turn to end, so it can't start version 2 under it.
         onPinned: async () => {
           await serverBuilt(
             crm,
             await release(admin, crm, appFiles(withoutWrongAnswer))
           );
-          await callApp(env, crm, caller, "customerCount");
-          raced = true;
+          waiting = callApp(env, crm, caller, "customerCount");
         },
       })
     );
     expect({
-      raced,
       outcome: outcomeOfCall,
-      // Neither version's method ran.
-      customers: await callApp(env, crm, caller, "customerCount"),
-    }).toStrictEqual({ raced: true, outcome: "app.conflict", customers: 0 });
+      // Run after the pinned call, on version 2, with its customer.
+      waited: await waiting,
+    }).toStrictEqual({ outcome: "ok", waited: 1 });
   });
 
   it("record a call the host refuses before its method runs as refused, never called", async () => {

@@ -7,6 +7,7 @@ import {
 import type { AppCaller } from "@grasp-os/shared/apps";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
+import type { Deadline } from "@grasp-os/shared/deadline";
 import {
   isExpectedError,
   messageOf,
@@ -33,6 +34,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import type { Person } from "./app-access.ts";
 import { appBindings } from "./app-bindings.ts";
+import { CallQueue } from "./app-call-queue.ts";
 import { ErrorLog } from "./app-error-log.ts";
 import type { ReportedProblem } from "./app-error-log.ts";
 import { findApp, versionFiles } from "./apps.ts";
@@ -49,7 +51,7 @@ import { buildFailed, buildServer } from "./screens.ts";
 // (`disallow_importable_env`), and its env holds only stubs for the App's
 // active permissions (app-bindings.ts), never one of core's own bindings.
 //
-// One App serves everyone who uses it, at the same time. So its stubs act
+// One App serves everyone who uses it, one call at a time. So its stubs act
 // for no one on their own: every call into the App gets a caller from core
 // (from the session, the workflow run, or another App's call of one of its
 // exports, app-calls.ts), with a token only this object
@@ -57,6 +59,16 @@ import { buildFailed, buildServer } from "./screens.ts";
 // stubs, which ask this object who the token belongs to. App code has no
 // way to name a person itself, and a token it keeps stops working once its
 // call ends.
+//
+// Its code runs in one isolate for every call, so it can keep any token it
+// is handed and use it from whatever else it runs. Calls into the App
+// therefore wait their turn (`CallQueue`): a call gets its token only once
+// it holds the App, and loses it when it ends; the App's code keeps the
+// turn until it settles. So the one token that works while a call runs is
+// that call's own, but for work the App's code left running detached from
+// an earlier call (see `App.call`). Until App methods run as stateless
+// handlers, each call in an isolate of its own, an App serves about one
+// call per how long its methods take.
 
 /** The facet the App's server code runs in. */
 const facetName = "server";
@@ -84,6 +96,13 @@ export const callTimeoutMs = (env: Env): number => {
  * prototype chain is refused too (see `call`).
  */
 const reservedMethods: ReadonlySet<string> = new Set(reservedAppMethods);
+
+/**
+ * How many calls may wait for the App while one runs (`CallQueue`): past
+ * it, a call is refused at once with `app.busy` rather than queue for a
+ * turn its deadline would likely not reach.
+ */
+export const waitingCallsLimit = 32;
 
 /** Where the host counts starts on new code or permissions (`#load`, `restart`). */
 const generationKey = "generation";
@@ -535,7 +554,10 @@ export interface CallPath {
  * App code holds it directly, in the same object for every call, so a
  * call that may only read can still write it. That stays so until App
  * methods run as stateless handlers with no storage of their own, whose
- * data goes through the host like everything else.
+ * data goes through the host like everything else. Calls run one at a
+ * time (`App.call`), so a read's code can't take up the token of a write
+ * running alongside it; only work an earlier call's code left running
+ * detached can (see `App.call`).
  */
 export type InvocationKind = "read" | "write";
 
@@ -649,6 +671,18 @@ const forCaller = (
   return toOpaqueError(error, { version: version ?? null });
 };
 
+/** Ends a call's turn (`release`) once its code has settled (`drained`). */
+const releaseAfter = async (
+  drained: Promise<void>,
+  release: () => void
+): Promise<void> => {
+  try {
+    await drained;
+  } finally {
+    release();
+  }
+};
+
 /**
  * One App: the host of its server code (`app/server.ts`, exporting an
  * `App` class), and the keeper of its restricted mode (restricted.ts).
@@ -673,6 +707,9 @@ export class App extends DurableObject<Env> {
    * once it started, and where each runs within calls between Apps.
    */
   readonly #calls = new Map<string, Invocation>();
+
+  /** Lets one call at a time run in the App's code (`call`). */
+  readonly #queue = new CallQueue(waitingCallsLimit);
 
   /** Statistics points the App recorded, and reads, in the current minute. */
   #statisticsMinute = { minute: 0, point: 0, read: 0 };
@@ -725,37 +762,49 @@ export class App extends DurableObject<Env> {
    * current version, restarting the code on it when another was running.
    * Answers plain data only.
    *
-   * A call that isn't answered in time gets `app.timed_out`, and its
-   * caller stops working at once. A call that ran past the App's own time
-   * for a call, once its method was handed to the App's code, stops that
-   * code too (`#overran`), so it can't go on writing the App's data after
-   * the call ended: it is one facet, shared by all the App's calls, so
-   * calls running in it alongside fail with it. A call cut short by the
-   * deadline of the call it came from (`via`) stops only its caller:
-   * another App could otherwise stop this one at will, by calling it just
-   * before its own deadline.
+   * One call runs at a time; the others wait their turn, in the order
+   * they came, within their deadline: `ends`, when the caller stops
+   * waiting (a screen's call, a workflow step's attempt;
+   * `ExportCall.deadline` for a call from another App), never later than
+   * the App's own time for a call from when it came. A call's token is made only once it has its turn.
+   * A call that can't get its turn in time, or finds `waitingCallsLimit`
+   * calls waiting already, gets `app.busy`, and never reaches the App's
+   * code.
+   *
+   * A call not answered by its deadline gets `app.timed_out`, and its
+   * token stops working at once. If its method was handed to the App's
+   * code, that code keeps the App's turn until it settles: the next call
+   * doesn't start alongside it. It has as long as its caller asked for
+   * (never more than the App's own time for a call), from when its turn
+   * began, however long it waited; a call from another App has the App's
+   * own time. Past that, the App's code is stopped (`#overran`), so it
+   * can't go on writing the App's data, and then the next call gets its
+   * turn.
    *
    * A call from another App's code through an export (`via`, from
    * app-calls.ts) runs only on the version core checked it against, ends
    * by the time the call it came from must, and is kept with the Apps
    * above it, for the calls its code makes on (`callerOf`).
    *
-   * Known gaps, both closed once the App's server code runs as stateless
-   * handlers, each call with its own isolate or with its authority passed
-   * in as arguments:
-   * - A call cut short by the deadline of the call it came from (`via`)
-   *   stops only its caller, so its method can go on writing the App's
-   *   database until it returns.
-   * - Every call runs in the one facet, so the App's code can keep a
-   *   caller's token in module state and use it in another call running
-   *   at the same time: that call then acts, and is audited, as the first
-   *   caller.
+   * Known gaps:
+   * - Work the App's code leaves running detached from its call (a
+   *   promise it doesn't await, a timer) goes on after the call settled,
+   *   alongside later calls, and can read a later call's token from what
+   *   they share, and act for that caller while that call runs. That is
+   *   never more than that later call's own code, the same App's, may do.
+   *   Only an isolate per call (App methods as stateless handlers) closes
+   *   it.
+   * - A caller that gives up frees the App only by its deadline: a
+   *   cancelled run doesn't free it early, and a workflow step with no
+   *   timeout, which asks for no deadline, holds it for up to the App's
+   *   own time for a call.
    */
   async call(
     caller: AppCallerInput,
     method: string,
     args: unknown[],
-    via?: ExportCall
+    via?: ExportCall,
+    ends?: number
   ): Promise<AppAnswer> {
     requireAppMethod(method);
     // Each on its own: a stub among them would keep the others from being
@@ -766,13 +815,70 @@ export class App extends DurableObject<Env> {
     const ownMs = callTimeoutMs(this.env);
     const ms = Math.min(
       ownMs,
-      (via?.deadline ?? Number.POSITIVE_INFINITY) - Date.now()
+      (via?.deadline ?? ends ?? Number.POSITIVE_INFINITY) - Date.now()
     );
-    /** Whether the call has the App's own time, not less (see above). */
-    const ownBudget = ms === ownMs;
     if (ms <= 0) {
       throw appErrors.create("app.timed_out", { version: null, method });
     }
+    const callEnds = Date.now() + ms;
+    // The wait for a turn counts against the deadline.
+    const limit = deadline(ms);
+    let release: () => void;
+    try {
+      release = await this.#queue.turn(limit.signal, () =>
+        appErrors.create("app.busy", { method })
+      );
+    } catch (error) {
+      limit.clear();
+      throw error;
+    }
+    // Settles once the call's code has, or was stopped: never rejects.
+    let drained: Promise<void> = Promise.resolve();
+    try {
+      return await this.#run(caller, method, args, via, {
+        ends: callEnds,
+        limit,
+        // From when its turn began: the time its caller asked for, the
+        // App's own at most. A call from another App gets the App's own
+        // time, so another App can't stop this one's code by calling it
+        // just before its own deadline.
+        stopAt: Date.now() + (via === undefined ? ms : ownMs),
+        drainWith: (draining) => {
+          drained = draining;
+        },
+      });
+    } finally {
+      limit.clear();
+      // Its token is gone (`#run`); its code has settled before the next
+      // call gets the App.
+      void releaseAfter(drained, release);
+    }
+  }
+
+  /**
+   * Runs a call that has its turn (`call`): its token made, kept while
+   * the call runs, and dropped as it ends, whether by its answer, its
+   * error or its deadline (`limit`). A call its deadline cut short once
+   * its method was handed to the App's code hands `drainWith` what
+   * settles once that code has, or was stopped at `stopAt`.
+   */
+  async #run(
+    caller: AppCallerInput,
+    method: string,
+    args: unknown[],
+    via: ExportCall | undefined,
+    {
+      ends,
+      limit,
+      stopAt,
+      drainWith,
+    }: {
+      ends: number;
+      limit: Deadline;
+      stopAt: number;
+      drainWith: (draining: Promise<void>) => void;
+    }
+  ): Promise<AppAnswer> {
     const token = crypto.randomUUID();
     const { attempt: _attempt, admission: _admission, ...shown } = caller;
     const call: Invocation = {
@@ -780,7 +886,7 @@ export class App extends DurableObject<Env> {
       method,
       kind: via?.readOnly === true ? "read" : "write",
       above: via?.chain ?? [],
-      deadline: Date.now() + ms,
+      deadline: ends,
     };
     this.#calls.set(token, call);
     let version: number | undefined;
@@ -815,7 +921,6 @@ export class App extends DurableObject<Env> {
       );
     };
 
-    const limit = deadline(ms);
     // Never rejects: when the deadline wins, the call goes on without a
     // caller, and how it ends is nobody's business any more.
     const settled = async (): Promise<
@@ -827,25 +932,46 @@ export class App extends DurableObject<Env> {
         return { error };
       }
     };
+    const settling = settled();
     let outcome: { answer: AppAnswer } | { error: unknown };
     try {
-      outcome = await Promise.race([settled(), whenAborted(limit.signal)]);
+      outcome = await Promise.race([settling, whenAborted(limit.signal)]);
     } catch {
-      if (ownBudget && ranOn !== undefined) {
-        await this.#overran(ranOn, method);
+      if (ranOn !== undefined) {
+        drainWith(this.#drain(settling, ranOn, method, stopAt));
       }
       throw appErrors.create("app.timed_out", {
         version: version ?? null,
         method,
       });
     } finally {
-      limit.clear();
       this.#calls.delete(token);
     }
     if ("error" in outcome) {
       throw forCaller(outcome.error, this.#app, version, method);
     }
     return outcome.answer;
+  }
+
+  /**
+   * Waits for the code of a call cut short to settle (`settling`), until
+   * `stopAt`, the App's own time for the call; past it, stops the code it
+   * ran on (`#overran`). Never rejects.
+   */
+  async #drain(
+    settling: Promise<unknown>,
+    ranOn: ServerCode,
+    method: string,
+    stopAt: number
+  ): Promise<void> {
+    const cap = deadline(Math.max(0, stopAt - Date.now()));
+    try {
+      await Promise.race([settling, whenAborted(cap.signal)]);
+    } catch {
+      await this.#overran(ranOn, method);
+    } finally {
+      cap.clear();
+    }
   }
 
   /**
@@ -1338,17 +1464,20 @@ export class App extends DurableObject<Env> {
  * caller from the session or the run, never from the request. Anything
  * that fails outside the App's own errors comes back as
  * `internal.unexpected`. Screens and workflows alike call Apps only
- * through here.
+ * through here. `ends`, if given, is when the caller stops waiting for an
+ * answer (a workflow step's attempt): the call gives up then, waiting for
+ * its turn or not.
  */
 export const callApp = async (
   env: Env,
   app: AppId,
   caller: AppCallerInput,
   method: string,
-  args: unknown[] = []
+  args: unknown[] = [],
+  ends?: number
 ): Promise<AppAnswer> => {
   try {
-    return await appHost(env, app).call(caller, method, args);
+    return await appHost(env, app).call(caller, method, args, undefined, ends);
   } catch (error) {
     throw forCaller(error, app, undefined, method);
   }
