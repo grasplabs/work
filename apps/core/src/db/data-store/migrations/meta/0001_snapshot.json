@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f6ea495c-1783-4bcf-94b7-aa492084dc0f",
+  "id": "94211608-cec8-446e-b3f8-097e463c8e7d",
   "prevId": "0f0c2290-427a-4006-afe8-00f1d2b19a35",
   "tables": {
     "sdk_change_outbox": {
@@ -155,6 +155,13 @@
         },
         "fence": {
           "name": "fence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deadline": {
+          "name": "deadline",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

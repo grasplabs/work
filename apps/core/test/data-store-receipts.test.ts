@@ -5,7 +5,7 @@ import type {
   Committed,
   Held,
 } from "@grasp-os/shared/stores";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -17,6 +17,7 @@ import type {
   OutboxConsumers,
   OutboxEntry,
 } from "../src/outbox-delivery.ts";
+import { StoreHost } from "../src/store-host.ts";
 
 // A business store's receipts and outbox (data-store.ts), from the threat
 // model in its header: what a mutation's attempts rely on to commit once,
@@ -62,17 +63,20 @@ const claimOf = async (
   ...more,
 });
 
-/** The receipt a claim must have taken. */
-const heldBy = (claimed: { held: Held } | { outcome: Committed }): Held => {
+/** The receipt a claim must have taken, as a commit names it. */
+const heldBy = (
+  claimed: { held: Held } | { outcome: Committed }
+): Commit["receipt"] => {
   if (!("held" in claimed)) {
     throw new Error("The mutation had committed already");
   }
-  return claimed.held;
+  const { receiptId, fence } = claimed.held;
+  return { receiptId, fence };
 };
 
 /** A commit inserting one note titled `title`, under `receipt`. */
 const insertOf = (
-  receipt: Held,
+  receipt: Commit["receipt"],
   title: string,
   more: Partial<Omit<Commit, "storeId">> = {}
 ): Omit<Commit, "storeId"> => ({
@@ -106,16 +110,26 @@ const refusing: OutboxConsumer = async () => {
   throw new Error("Down");
 };
 
+/** Runs `work` on the store's host, inside its object. */
+const inHost = async <T>(
+  store: OpenStore,
+  work: (host: StoreHost) => Promise<T>
+): Promise<T> =>
+  await runInDurableObject(
+    objectOf(store),
+    async (_instance, state) => await work(new StoreHost(state, env))
+  );
+
 /** Commits `commit` with `consumers` taking its intents, inside the object. */
 const commitWith = async (
   store: OpenStore,
   commit: Omit<Commit, "storeId">,
   consumers: OutboxConsumers
 ): Promise<Committed> =>
-  await runInDurableObject(
-    objectOf(store),
-    async (instance) =>
-      await instance.commit({ ...commit, storeId: store.id }, consumers)
+  await inHost(
+    store,
+    async (host) =>
+      await host.commit({ ...commit, storeId: store.id }, consumers)
   );
 
 describe("receipts", () => {
@@ -169,9 +183,9 @@ describe("receipts", () => {
         await claimOf("k1", {}, { scope: { ...scope, principal: "grace" } })
       )
     );
-    await expect(store.commit(insertOf(held, "Taken"))).rejects.toThrow(
-      "A commit names a receipt its principal never claimed"
-    );
+    await expect(store.commit(insertOf(held, "Taken"))).rejects.toMatchObject({
+      code: "data.receipt_invalid",
+    });
     await expect(rowsOf(store, "sdk_records")).resolves.toHaveLength(0);
   });
 
@@ -317,8 +331,8 @@ describe("receipts", () => {
 describe("retention", () => {
   /** Sweeps `store`'s receipts as at `days` from now. */
   const sweep = async (store: OpenStore, days: number) => {
-    await runInDurableObject(objectOf(store), async (instance) => {
-      await instance.sweepReceipts(new Date(Date.now() + days * dayMs));
+    await inHost(store, async (host) => {
+      await host.sweepReceipts(new Date(Date.now() + days * dayMs));
     });
   };
 
@@ -503,8 +517,8 @@ describe("outbox", () => {
       return await Promise.resolve("delivered");
     };
     const drain = async (at: number) => {
-      await runInDurableObject(objectOf(store), async (instance) => {
-        await instance.drainOutbox(
+      await inHost(store, async (host) => {
+        await host.drainOutbox(
           { "workflow.start": flaky },
           { now: new Date(at) }
         );
@@ -544,10 +558,10 @@ describe("outbox", () => {
       await scheduler.wait(20);
       return "delivered";
     };
-    await runInDurableObject(objectOf(store), async (instance) => {
+    await inHost(store, async (host) => {
       await Promise.all([
-        instance.drainOutbox({ "workflow.start": slow }),
-        instance.drainOutbox({ "workflow.start": slow }),
+        host.drainOutbox({ "workflow.start": slow }),
+        host.drainOutbox({ "workflow.start": slow }),
       ]);
     });
     expect(taken.toSorted()).toStrictEqual([
@@ -566,11 +580,11 @@ describe("outbox", () => {
       }),
       { "workflow.start": taker([]) }
     );
-    await runInDurableObject(objectOf(store), async (instance) => {
+    await inHost(store, async (host) => {
       for (let attempt = 0; attempt < defaultMaxAttempts; attempt += 1) {
         // One drain after the other, each past the last one's backoff.
         // oxlint-disable-next-line no-await-in-loop -- see above
-        await instance.drainOutbox(
+        await host.drainOutbox(
           { "workflow.start": refusing },
           { now: new Date(Date.now() + attempt * 2 * 60 * 60 * 1000) }
         );
@@ -581,5 +595,206 @@ describe("outbox", () => {
       attempts: defaultMaxAttempts,
       undeliverable: "outbox.attempts_exhausted",
     });
+  });
+
+  it("hands an entry over again, under the same ID, after a drain died holding it", async () => {
+    const store = await newStore();
+    const held = heldBy(await store.claim(await claimOf("k1", {})));
+    await commitWith(
+      store,
+      insertOf(held, "Launch", {
+        intents: [{ kind: "workflow.start", data: {} }],
+      }),
+      { "workflow.start": taker([]) }
+    );
+    const seen: string[] = [];
+    // The object dies after the hand-over, before the drain settles it.
+    await runInDurableObject(objectOf(store), async (_instance, state) => {
+      await new StoreHost(state, env).drainOutbox(
+        {
+          "workflow.start": async ({ id }) => {
+            seen.push(id);
+            state.abort("killed");
+            // Never reached: the object is gone.
+            await scheduler.wait(60_000);
+            return "delivered";
+          },
+        },
+        { timeoutMs: 1000 }
+      );
+    }).catch(() => {});
+    // Nothing the dead object wrote after its last commit stays, its lease
+    // included: the entry is due again at once, under the same ID, and
+    // the hand-over that died doesn't count as a failed attempt.
+    const taken: OutboxEntry[] = [];
+    await inHost(store, async (host) => {
+      await host.drainOutbox({ "workflow.start": taker(taken) });
+    });
+
+    expect(seen).toStrictEqual([`${held.receiptId}:0`]);
+    expect(taken.map(({ id, attempts }) => ({ id, attempts }))).toStrictEqual([
+      { id: `${held.receiptId}:0`, attempts: 0 },
+    ]);
+  });
+
+  it("lets only the drain holding an entry's lease settle it", async () => {
+    const store = await newStore();
+    const held = heldBy(await store.claim(await claimOf("k1", {})));
+    await commitWith(
+      store,
+      insertOf(held, "Launch", {
+        intents: [{ kind: "workflow.start", data: {} }],
+      }),
+      { "workflow.start": taker([]) }
+    );
+    await inHost(store, async (host) => {
+      let handedOver = false;
+      // A slow drain whose hand-over outlives its lease, then fails.
+      const slow = host.drainOutbox(
+        {
+          "workflow.start": async () => {
+            handedOver = true;
+            await scheduler.wait(200);
+            throw new Error("Too late");
+          },
+        },
+        { timeoutMs: 100 }
+      );
+      // The consumer sets it, between awaits.
+      // oxlint-disable-next-line no-unmodified-loop-condition -- see above
+      while (!handedOver) {
+        // oxlint-disable-next-line no-await-in-loop -- until the slow drain hands it over
+        await scheduler.wait(5);
+      }
+      // Another drain, past the slow one's lease, takes it over.
+      await host.drainOutbox(
+        { "workflow.start": taker([]) },
+        { now: new Date(Date.now() + 60_000) }
+      );
+      await slow;
+    });
+    const [entry] = await rowsOf(store, "sdk_change_outbox");
+    expect(entry).toMatchObject({ attempts: 0, undeliverable: null });
+    expect(entry?.settled_at).not.toBeNull();
+  });
+});
+
+describe("alarm", () => {
+  /** Moves every receipt's retention into the past. */
+  const lapse = async (store: OpenStore): Promise<void> => {
+    await runInDurableObject(objectOf(store), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE sdk_mutation_receipts SET retain_until = ?",
+        Date.now() - 1
+      );
+    });
+  };
+
+  const alarmOf = async (store: OpenStore): Promise<number | null> =>
+    await runInDurableObject(
+      objectOf(store),
+      async (_instance, state) => await state.storage.getAlarm()
+    );
+
+  it("settles an entry nothing takes any more, then sleeps until a receipt is due", async () => {
+    const store = await newStore();
+    const input = { title: "Launch" };
+    const held = heldBy(await store.claim(await claimOf("k1", input)));
+    // Staged while something took starts; this deployment takes none now.
+    await commitWith(
+      store,
+      insertOf(held, "Launch", {
+        intents: [{ kind: "workflow.start", data: {} }],
+      }),
+      { "workflow.start": taker([]) }
+    );
+
+    await expect(runDurableObjectAlarm(objectOf(store))).resolves.toBeTruthy();
+    const [entry] = await rowsOf(store, "sdk_change_outbox");
+    expect(entry).toMatchObject({ undeliverable: "outbox.no_consumer" });
+    // No spinning: the next thing due is the receipt's retention.
+    await expect(alarmOf(store)).resolves.toBeGreaterThan(
+      Date.now() + 29 * dayMs
+    );
+    await expect(
+      store.claim(await claimOf("k1", input))
+    ).resolves.toHaveProperty("outcome");
+  });
+
+  it("sweeps receipts whose retention passed, then sleeps until their tombstones go", async () => {
+    const store = await newStore();
+    const input = { title: "Launch" };
+    await store.commit(
+      insertOf(heldBy(await store.claim(await claimOf("k1", input))), "Launch")
+    );
+    await lapse(store);
+
+    await expect(runDurableObjectAlarm(objectOf(store))).resolves.toBeTruthy();
+    await expect(store.claim(await claimOf("k1", input))).rejects.toMatchObject(
+      {
+        code: "submission.expired",
+      }
+    );
+    await expect(alarmOf(store)).resolves.toBeGreaterThan(
+      Date.now() + 29 * dayMs
+    );
+  });
+
+  it("tries again a while later when its work fails, never left without an alarm", async () => {
+    const store = await newStore();
+    await store.claim(await claimOf("k1", {}, { runId: "run-1" }));
+    await lapse(store);
+    await inHost(store, async (host) => {
+      await host.runAlarm(
+        {},
+        {
+          live: async () => {
+            await Promise.resolve();
+            throw new Error("D1 is out");
+          },
+        }
+      );
+    });
+    const alarm = await alarmOf(store);
+    expect(alarm).toBeGreaterThan(Date.now() + 10_000);
+    expect(alarm).toBeLessThan(Date.now() + 60_000);
+  });
+
+  it("keeps a receipt claimed while the sweep looks its runs up", async () => {
+    const store = await newStore();
+    const input = { title: "Launch" };
+    const claim = await claimOf("k1", input, { runId: "run-1" });
+    await store.claim(claim);
+    await lapse(store);
+    await inHost(store, async (host) => {
+      await host.sweepReceipts(new Date(), {
+        live: async () => {
+          // The attempt retries just now.
+          await host.claim({ ...claim, storeId: store.id });
+          return new Set();
+        },
+      });
+    });
+    await expect(store.claim(claim)).resolves.toHaveProperty("held");
+  });
+
+  it("keeps a receipt committed while the sweep looks its runs up", async () => {
+    const store = await newStore();
+    const input = { title: "Launch" };
+    const claim = await claimOf("k1", input, { runId: "run-1" });
+    const held = heldBy(await store.claim(claim));
+    await lapse(store);
+    await inHost(store, async (host) => {
+      await host.sweepReceipts(new Date(), {
+        live: async () => {
+          await host.commit(
+            { ...insertOf(held, "Launch"), storeId: store.id },
+            {}
+          );
+          return new Set();
+        },
+      });
+    });
+    await expect(store.claim(claim)).resolves.toHaveProperty("outcome");
   });
 });

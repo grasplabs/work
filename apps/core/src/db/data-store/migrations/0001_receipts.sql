@@ -21,6 +21,7 @@ CREATE TABLE `sdk_mutation_receipts` (
 	`run_id` text,
 	`input_hash` text NOT NULL,
 	`fence` integer NOT NULL,
+	`deadline` integer NOT NULL,
 	`created_at` integer NOT NULL,
 	`retain_until` integer NOT NULL,
 	`expired_at` integer,

@@ -41,7 +41,7 @@ const fieldNameSchema = tableNameSchema;
 export const documentMaxBytes = 128 * 1024;
 
 /**
- * The most bytes of one commit's writes and guards, as UTF-8 JSON: the
+ * The most bytes of one commit's writes, guards and intents, as UTF-8 JSON: the
  * host's own bound on one store transaction, the size spec 18.1 gives a
  * workflow step's input and result. A public operation's own input limit
  * is checked where operations are called, not here.
@@ -227,7 +227,10 @@ export const claimSchema = z.strictObject({
 });
 export type ClaimInput = z.infer<typeof claimSchema>;
 
-/** The attempt holding a receipt, as its commit names it. */
+/**
+ * The attempt holding a receipt, as its commit names it, with the
+ * deadline it claimed with, which the store kept and checks.
+ */
 export interface Held {
   receiptId: string;
   fence: number;
@@ -272,7 +275,6 @@ export const commitSchema = z
     receipt: z.strictObject({
       receiptId: sha256Schema,
       fence: z.number().int().min(1),
-      deadline: z.number().int().min(0),
     }),
     guards: z.array(revisionGuardSchema).max(commitMaxGuards).default([]),
     writes: z.array(storeWriteSchema).max(commitMaxWrites),
@@ -318,4 +320,6 @@ export const dataErrors = defineErrorFamily({
   "data.conflict":
     "The record changed since it was read. Read it again, then retry.",
   "data.store_unavailable": "This store doesn't exist or was deleted.",
+  "data.receipt_invalid":
+    "This commit doesn't hold a receipt its caller claimed.",
 });

@@ -113,6 +113,8 @@ export const receipts = sqliteTable(
     runId: text("run_id"),
     inputHash: text("input_hash").notNull(),
     fence: integer().notNull(),
+    /** When the attempt holding it must commit by, as it claimed. */
+    deadline: integer().notNull(),
     createdAt: integer("created_at").notNull(),
     retainUntil: integer("retain_until").notNull(),
     expiredAt: integer("expired_at"),
