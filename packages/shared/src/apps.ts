@@ -555,6 +555,8 @@ export const appErrors = defineErrorFamily({
   "app.call_cycle":
     "An App can't call an App whose call is already under way in this one.",
   "app.call_too_deep": "Too many Apps call one another in this one call.",
+  "app.call_deadlock":
+    "The App called is itself waiting, directly or through other Apps, for this call's App, so neither could go on. This call was stopped so the other can. Try again in a moment.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
   "app.not_running": "The App has no current version to run yet.",
   "app.build_failed": "The App's server code doesn't build.",

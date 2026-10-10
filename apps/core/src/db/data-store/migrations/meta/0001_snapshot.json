@@ -1,0 +1,456 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "94211608-cec8-446e-b3f8-097e463c8e7d",
+  "prevId": "0f0c2290-427a-4006-afe8-00f1d2b19a35",
+  "tables": {
+    "sdk_change_outbox": {
+      "name": "sdk_change_outbox",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "receipt_id": {
+          "name": "receipt_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "intent": {
+          "name": "intent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "undeliverable": {
+          "name": "undeliverable",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "sdk_change_outbox_receipt": {
+          "name": "sdk_change_outbox_receipt",
+          "columns": [
+            "receipt_id"
+          ],
+          "isUnique": false
+        },
+        "sdk_change_outbox_pending": {
+          "name": "sdk_change_outbox_pending",
+          "columns": [
+            "next_attempt_at"
+          ],
+          "isUnique": false,
+          "where": "settled_at IS NULL"
+        }
+      },
+      "foreignKeys": {
+        "sdk_change_outbox_receipt_id_sdk_mutation_receipts_receipt_id_fk": {
+          "name": "sdk_change_outbox_receipt_id_sdk_mutation_receipts_receipt_id_fk",
+          "tableFrom": "sdk_change_outbox",
+          "tableTo": "sdk_mutation_receipts",
+          "columnsFrom": [
+            "receipt_id"
+          ],
+          "columnsTo": [
+            "receipt_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "sdk_mutation_receipts": {
+      "name": "sdk_mutation_receipts",
+      "columns": {
+        "receipt_id": {
+          "name": "receipt_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "principal": {
+          "name": "principal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "input_hash": {
+          "name": "input_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fence": {
+          "name": "fence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deadline": {
+          "name": "deadline",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "retain_until": {
+          "name": "retain_until",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expired_at": {
+          "name": "expired_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "committed_at": {
+          "name": "committed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "commit": {
+          "name": "commit",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "sdk_mutation_receipts_retain": {
+          "name": "sdk_mutation_receipts_retain",
+          "columns": [
+            "retain_until"
+          ],
+          "isUnique": false,
+          "where": "expired_at IS NULL"
+        },
+        "sdk_mutation_receipts_expired": {
+          "name": "sdk_mutation_receipts_expired",
+          "columns": [
+            "expired_at"
+          ],
+          "isUnique": false,
+          "where": "expired_at IS NOT NULL"
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "sdk_mutation_receipts_fence": {
+          "name": "sdk_mutation_receipts_fence",
+          "value": "\"sdk_mutation_receipts\".\"fence\" >= 1"
+        },
+        "sdk_mutation_receipts_committed": {
+          "name": "sdk_mutation_receipts_committed",
+          "value": "(\"sdk_mutation_receipts\".\"outcome\" IS NULL) = (\"sdk_mutation_receipts\".\"committed_at\" IS NULL) AND (\"sdk_mutation_receipts\".\"outcome\" IS NULL) = (\"sdk_mutation_receipts\".\"commit\" IS NULL)"
+        },
+        "sdk_mutation_receipts_tombstone": {
+          "name": "sdk_mutation_receipts_tombstone",
+          "value": "\"sdk_mutation_receipts\".\"expired_at\" IS NULL OR \"sdk_mutation_receipts\".\"outcome\" IS NULL"
+        }
+      }
+    },
+    "sdk_records": {
+      "name": "sdk_records",
+      "columns": {
+        "table_id": {
+          "name": "table_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "record_id": {
+          "name": "record_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "value_json": {
+          "name": "value_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "schema_hash": {
+          "name": "schema_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "sdk_records_table_id_sdk_tables_table_id_fk": {
+          "name": "sdk_records_table_id_sdk_tables_table_id_fk",
+          "tableFrom": "sdk_records",
+          "tableTo": "sdk_tables",
+          "columnsFrom": [
+            "table_id"
+          ],
+          "columnsTo": [
+            "table_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sdk_records_table_id_record_id_pk": {
+          "columns": [
+            "table_id",
+            "record_id"
+          ],
+          "name": "sdk_records_table_id_record_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "sdk_records_revision": {
+          "name": "sdk_records_revision",
+          "value": "\"sdk_records\".\"revision\" >= 1"
+        },
+        "sdk_records_value": {
+          "name": "sdk_records_value",
+          "value": "json_valid(\"sdk_records\".\"value_json\") AND json_type(\"sdk_records\".\"value_json\") = 'object'"
+        },
+        "sdk_records_updated": {
+          "name": "sdk_records_updated",
+          "value": "\"sdk_records\".\"updated_at\" >= \"sdk_records\".\"created_at\""
+        }
+      }
+    },
+    "sdk_store": {
+      "name": "sdk_store",
+      "columns": {
+        "only": {
+          "name": "only",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "store_id": {
+          "name": "store_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "commits": {
+          "name": "commits",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "sdk_store_only": {
+          "name": "sdk_store_only",
+          "value": "\"sdk_store\".\"only\" = 1"
+        }
+      }
+    },
+    "sdk_tables": {
+      "name": "sdk_tables",
+      "columns": {
+        "table_id": {
+          "name": "table_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name_key": {
+          "name": "name_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "sdk_tables_name_key": {
+          "name": "sdk_tables_name_key",
+          "columns": [
+            "name_key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "sdk_tables_name_key_lower": {
+          "name": "sdk_tables_name_key_lower",
+          "value": "\"sdk_tables\".\"name_key\" = lower(\"sdk_tables\".\"name\")"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

@@ -40,7 +40,9 @@ import { isRestricted, restrict } from "./restricted.ts";
 // - The Apps whose calls are under way (`CallPath.chain`, kept by each
 //   host) never include the called App, so no call comes back round, and
 //   are at most `appCallLimits.depth` long. Each call ends by the time the
-//   first must (`CallPath.deadline`).
+//   first must (`CallPath.deadline`). One that would wait for an App
+//   whose turn waits, through other Apps' queues, on an App its own chain
+//   holds is refused at once with `app.call_deadlock` (`App.call`).
 // - The export exists in the called App's current version, and the call
 //   runs only on that version (`ExportCall.version`): an export removed or
 //   changed since is `app.export_not_found` or `app.conflict`, never a call
@@ -400,6 +402,7 @@ export const callExport = async (
       {
         version,
         chain: caller.path.chain,
+        holding: caller.path.holding,
         deadline: caller.path.deadline,
         readOnly: caller.path.readOnly || access === "read",
         onPinned: recordCalled,

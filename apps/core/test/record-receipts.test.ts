@@ -15,15 +15,7 @@ import { z } from "zod";
 
 import { callApp } from "../src/app.ts";
 import type { AppCallerInput } from "../src/app.ts";
-import {
-  defaultMaxAttempts as maxAttempts,
-  drainSubmissionOutbox,
-} from "../src/knowledge/outbox.ts";
-import type {
-  OutboxConsumer,
-  OutboxConsumers,
-  OutboxEntry,
-} from "../src/knowledge/outbox.ts";
+import { drainSubmissionOutbox } from "../src/knowledge/outbox.ts";
 import {
   claim,
   inputHashOf,
@@ -32,6 +24,12 @@ import {
 } from "../src/knowledge/receipts.ts";
 import type { Submission } from "../src/knowledge/receipts.ts";
 import { saveRecordAsDelegate } from "../src/knowledge/records.ts";
+import { defaultMaxAttempts as maxAttempts } from "../src/outbox-delivery.ts";
+import type {
+  OutboxConsumer,
+  OutboxConsumers,
+  OutboxEntry,
+} from "../src/outbox-delivery.ts";
 import { restrict } from "../src/restricted.ts";
 import { release, requestGranted, serverBuilt } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -1088,8 +1086,11 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       unchanged: unchanged.currentVersion,
       kinds: entries.map(({ kind }) => kind),
       intents: entries.map(({ intent }) => intent),
-      // One receipt's, numbered in order.
-      ids: entries.map(({ id }) => id.replace(/^[0-9a-f]{64}:/u, "")),
+      // One receipt's commit's, numbered in order.
+      commits: new Set(entries.map(({ id }) => id.replace(/:\d+$/u, ""))).size,
+      ids: entries.map(({ id }) =>
+        id.replace(/^[0-9a-f]{64}:[0-9a-f-]{36}:/u, "")
+      ),
       versions: await versionsAt(setup.collectionId, path),
     }).toStrictEqual({
       stale: "ok",
@@ -1097,12 +1098,13 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       unchanged: 1,
       kinds: ["workflow.notify", "workflow.start"],
       intents: [notify, start],
+      commits: 1,
       ids: ["0", "1"],
       versions: 1,
     });
   });
 
-  it("answer a committed save's retry with its outcome, though its intent's consumer has gone since", async () => {
+  it("answer a committed save's retry with its outcome, though its intent's consumer has gone since, and settle the entry as owed to nobody only after its attempts, so the receipt expires", async () => {
     const setup = await setUp();
     const path = `notes/${unique()}.md`;
     const key = `consumer-gone-${unique()}`;
@@ -1123,13 +1125,120 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       key,
       intents,
     });
+    // Draining with no consumers touches every due entry in this file's
+    // shared database, not only this test's: each counts a failed attempt.
+    await drainSubmissionOutbox(env, {});
+    const kept = await entriesOf(marker);
+    await drainSubmissionOutbox(
+      env,
+      {},
+      {
+        now: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        maxAttempts: 2,
+      }
+    );
     const entries = await entriesOf(marker);
+    await sweepReceipts(env, new Date(Date.now() + 31 * dayMs));
+    // Past its retention, under a release whose consumer is back.
+    const expired = await outcome(
+      directSave(setup, docSave(path, "Plan"), {
+        key,
+        intents,
+        consumers: consumersFor(marker),
+      })
+    );
     expect({
       retried,
       again,
       versions: await versionsAt(setup.collectionId, path),
-      entries: entries.length,
-    }).toStrictEqual({ retried: "ok", again: saved, versions: 1, entries: 1 });
+      kept: kept.map(({ settled, attempts }) => ({ settled, attempts })),
+      entries: entries.map(({ settled, undeliverable }) => ({
+        settled,
+        undeliverable,
+      })),
+      expired,
+    }).toStrictEqual({
+      retried: "ok",
+      again: saved,
+      versions: 1,
+      kept: [{ settled: false, attempts: 1 }],
+      entries: [{ settled: true, undeliverable: "outbox.no_consumer" }],
+      expired: "submission.expired",
+    });
+  });
+
+  it("wait out a release without their consumer, such as a rollback, and are handed over once it is back", async () => {
+    const setup = await setUp();
+    const marker = unique();
+    const handed: OutboxEntry[] = [];
+    const consumers = consumersFor(marker, async (entry) => {
+      handed.push(entry);
+      return await Promise.resolve("delivered");
+    });
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key: unique(),
+      intents: [{ kind: "workflow.notify", data: { marker } }],
+      consumers,
+    });
+    // The previous release runs the drain: it has no consumer for these.
+    // Draining with no consumers touches every due entry in this file's
+    // shared database, not only this test's.
+    await drainSubmissionOutbox(env, {});
+    const rolledBack = await entriesOf(marker);
+    await drainSubmissionOutbox(env, consumers, {
+      now: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    const back = await entriesOf(marker);
+    expect({
+      rolledBack: rolledBack.map(({ settled, attempts }) => ({
+        settled,
+        attempts,
+      })),
+      handed: handed.map(({ id, attempts }) => ({ id, attempts })),
+      back: back.map(({ settled, undeliverable }) => ({
+        settled,
+        undeliverable,
+      })),
+    }).toStrictEqual({
+      rolledBack: [{ settled: false, attempts: 1 }],
+      handed: [{ id: rolledBack[0]?.id, attempts: 1 }],
+      back: [{ settled: true, undeliverable: null }],
+    });
+  });
+
+  it("are handed over under new IDs when a key commits again after its tombstone went", async () => {
+    const setup = await setUp();
+    const key = `again-${unique()}`;
+    const marker = unique();
+    const handed: string[] = [];
+    const consumers = consumersFor(marker, async (entry) => {
+      handed.push(entry.id);
+      return await Promise.resolve("delivered");
+    });
+    const intents: SubmissionIntent[] = [
+      { kind: "workflow.notify", data: { marker } },
+    ];
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key,
+      intents,
+      consumers,
+    });
+    await drainSubmissionOutbox(env, consumers);
+    // Expired, then its tombstone deleted: the key can be told from a new
+    // one no more.
+    await sweepReceipts(env, new Date(Date.now() + 31 * dayMs));
+    await sweepReceipts(env, new Date(Date.now() + 62 * dayMs));
+    const again = await directSave(
+      setup,
+      docSave(`notes/${unique()}.md`, "Plan"),
+      { key, intents, consumers }
+    );
+    await drainSubmissionOutbox(env, consumers);
+    expect({
+      again: again.currentVersion,
+      handed: handed.length,
+      distinct: new Set(handed).size,
+    }).toStrictEqual({ again: 1, handed: 2, distinct: 2 });
   });
 
   it("refuse an intent nothing takes before anything is saved", async () => {
@@ -1151,14 +1260,25 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
         },
       })
     );
+    // A map built from an optional lookup: the kind is there, its consumer
+    // isn't.
+    const unset = await outcome(
+      directSave(setup, docSave(path, "Plan"), {
+        key: unique(),
+        intents: [{ kind: "workflow.start", data: { marker } }],
+        consumers: { "workflow.start": undefined },
+      })
+    );
     expect({
       refused,
       partly,
+      unset,
       versions: await versionsAt(setup.collectionId, path),
       entries: await entriesOf(marker),
     }).toStrictEqual({
       refused: "submission.intent_unsupported",
       partly: "submission.intent_unsupported",
+      unset: "submission.intent_unsupported",
       versions: 0,
       entries: [],
     });

@@ -379,6 +379,20 @@
       "when": 1791646553990,
       "tag": "0053_drop_model_spend",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1791656388422,
+      "tag": "0054_business_stores",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1791659512125,
+      "tag": "0055_business_store_members",
+      "breakpoints": true
     }
   ]
 }
