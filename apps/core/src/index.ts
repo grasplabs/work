@@ -6,6 +6,7 @@ import { refreshDailySignals } from "./daily-signals.ts";
 import { handleRequest } from "./entry.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { indexApps } from "./knowledge/apps-collection.ts";
+import { drainSubmissionOutbox } from "./knowledge/outbox.ts";
 import { sweepReceipts } from "./knowledge/receipts.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
@@ -108,6 +109,7 @@ export default {
           ]
         : [
             drainAuditOutboxes(env),
+            drainSubmissionOutbox(env),
             retryDisconnects(env),
             sweepUploads(env),
             // Deploys apply migrations first (CI's db:migrate, and the

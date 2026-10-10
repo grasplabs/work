@@ -11,6 +11,7 @@ import {
   submissionRetentionDays,
   submissionTombstoneDays,
 } from "@grasp-os/shared/submissions";
+import type { SubmissionIntent } from "@grasp-os/shared/submissions";
 import { runOfStepKey } from "@grasp-os/shared/workflows";
 import {
   and,
@@ -29,9 +30,12 @@ import { workflowRuns } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import {
   documents,
+  submissionOutbox,
   submissionOutcomes,
   submissionReceipts,
 } from "../db/knowledge/schema.ts";
+import { outboxConsumers } from "./outbox.ts";
+import type { OutboxConsumers } from "./outbox.ts";
 
 // Receipts of record saves an App's code makes (knowledge/app-binding.ts),
 // so a save retried after its answer was lost is made once, and an
@@ -114,6 +118,13 @@ export interface Submission {
   runId: string | null;
   /** When the call it is made in must end, in milliseconds since the epoch. */
   deadline: number;
+  /** What it stages for its outbox (outbox.ts): a workflow's notification or start. */
+  intents?: readonly SubmissionIntent[];
+  /**
+   * Who takes each kind of intent: this deployment's consumers unless
+   * given. An intent no consumer takes is refused before anything is done.
+   */
+  consumers?: OutboxConsumers;
 }
 
 /** An attempt holding a receipt, for its commit. */
@@ -121,6 +132,7 @@ export interface Claim {
   id: string;
   fence: number;
   deadline: number;
+  intents: readonly SubmissionIntent[];
 }
 
 /**
@@ -200,7 +212,25 @@ export const claim = async (
   inputHash: string,
   now = new Date()
 ): Promise<{ claim: Claim } | { outcome: DocumentSummary }> => {
+  const consumers = submission.consumers ?? outboxConsumers;
+  const intents = submission.intents ?? [];
   const id = await receiptIdOf(submission);
+  // A save its key committed already is answered, whatever takes its
+  // intents now: it stages nothing more.
+  const committed = await receiptOf(env, id);
+  if (
+    committed !== undefined &&
+    committed.expiredAt === null &&
+    committed.inputHash === inputHash &&
+    committed.outcome !== null
+  ) {
+    return { outcome: summaryOf(committed.outcome) };
+  }
+  // New work stages nothing that nothing would take: it would only be
+  // settled away unread.
+  if (intents.some(({ kind }) => consumers[kind] === undefined)) {
+    throw submissionErrors.create("submission.intent_unsupported");
+  }
   const db = drizzle(env.KNOWLEDGE);
   const retainUntil = new Date(now.getTime() + submissionRetentionDays * dayMs);
   // One statement: a new receipt, or the fence moved on, but only for the
@@ -237,7 +267,12 @@ export const claim = async (
     .get();
   if (claimed !== undefined) {
     return {
-      claim: { id, fence: claimed.fence, deadline: submission.deadline },
+      claim: {
+        id,
+        fence: claimed.fence,
+        deadline: submission.deadline,
+        intents,
+      },
     };
   }
   const receipt = await receiptOf(env, id);
@@ -261,7 +296,8 @@ export const claim = async (
  * passed by the database's clock, and, for a save that changes nothing
  * (`unchanged`), unless the document is still at the version the save
  * expected. The receipt is then kept `submissionRetentionDays` from the
- * commit.
+ * commit, and the intents it staged go to its outbox (outbox.ts), each
+ * under an ID made of the receipt's and its place.
  */
 export const commitOf = (
   env: Env,
@@ -296,6 +332,19 @@ export const commitOf = (
           eq(submissionReceipts.fence, held.fence)
         )
       ),
+    // One statement each: an intent can be large, and D1 binds at most
+    // 100 parameters to one statement.
+    ...held.intents.map((intent, position) =>
+      db.insert(submissionOutbox).values({
+        id: `${held.id}:${position}`,
+        receiptId: held.id,
+        position,
+        kind: intent.kind,
+        intent: JSON.stringify(intent),
+        createdAt: now,
+        nextAttemptAt: now,
+      })
+    ),
   ];
 };
 
@@ -414,11 +463,15 @@ const liveRuns = async (
 
 /**
  * Expires one page of the receipts due by `now`, and answers how many
- * were due. One whose run is live is looked at again a day later, out of
- * the way of the rest; the others lose their outcome and stay as
+ * were due. One whose outbox still owes an entry is not due; one whose
+ * run is live is looked at again a day later, out of the way of the rest;
+ * the others lose their outcome and settled entries and stay as
  * tombstones. The batch checks again that each is still due, so a commit
  * landing meanwhile, which keeps its receipt from then, keeps it.
  */
+/** Whether a receipt's outbox owes nothing: every entry of it settled. */
+const nothingOwed = sql`NOT EXISTS (SELECT 1 FROM ${submissionOutbox} WHERE ${submissionOutbox.receiptId} = ${submissionReceipts.id} AND ${submissionOutbox.settledAt} IS NULL)`;
+
 const expirePage = async (env: Env, now: Date): Promise<number> => {
   const db = drizzle(env.KNOWLEDGE);
   const due = await db
@@ -427,7 +480,8 @@ const expirePage = async (env: Env, now: Date): Promise<number> => {
     .where(
       and(
         isNull(submissionReceipts.expiredAt),
-        lte(submissionReceipts.retainUntil, now)
+        lte(submissionReceipts.retainUntil, now),
+        nothingOwed
       )
     )
     .orderBy(asc(submissionReceipts.retainUntil), asc(submissionReceipts.id))
@@ -449,8 +503,10 @@ const expirePage = async (env: Env, now: Date): Promise<number> => {
     and(
       inList(submissionReceipts.id, ids),
       isNull(submissionReceipts.expiredAt),
-      lte(submissionReceipts.retainUntil, now)
+      lte(submissionReceipts.retainUntil, now),
+      nothingOwed
     );
+  const expiredNow = sql`IN (SELECT ${submissionReceipts.id} FROM ${submissionReceipts} WHERE ${submissionReceipts.expiredAt} = ${now.getTime()})`;
   await db.batch([
     db
       .update(submissionReceipts)
@@ -460,13 +516,24 @@ const expirePage = async (env: Env, now: Date): Promise<number> => {
       .update(submissionReceipts)
       .set({ expiredAt: now })
       .where(stillDue(expiring)),
-    // Only the outcomes of the receipts this page expired.
+    // Only the settled entries and the outcomes of the receipts this page
+    // expired, and never an outcome an entry still needs.
+    db
+      .delete(submissionOutbox)
+      .where(
+        and(
+          inList(submissionOutbox.receiptId, expiring),
+          isNotNull(submissionOutbox.settledAt),
+          sql`${submissionOutbox.receiptId} ${expiredNow}`
+        )
+      ),
     db
       .delete(submissionOutcomes)
       .where(
         and(
           inList(submissionOutcomes.receiptId, expiring),
-          sql`${submissionOutcomes.receiptId} IN (SELECT ${submissionReceipts.id} FROM ${submissionReceipts} WHERE ${submissionReceipts.expiredAt} = ${now.getTime()})`
+          sql`${submissionOutcomes.receiptId} ${expiredNow}`,
+          sql`NOT EXISTS (SELECT 1 FROM ${submissionOutbox} WHERE ${submissionOutbox.receiptId} = ${submissionOutcomes.receiptId} AND ${submissionOutbox.settledAt} IS NULL)`
         )
       ),
   ]);
