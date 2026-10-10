@@ -1086,8 +1086,11 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       unchanged: unchanged.currentVersion,
       kinds: entries.map(({ kind }) => kind),
       intents: entries.map(({ intent }) => intent),
-      // One receipt's, numbered in order.
-      ids: entries.map(({ id }) => id.replace(/^[0-9a-f]{64}:/u, "")),
+      // One receipt's commit's, numbered in order.
+      commits: new Set(entries.map(({ id }) => id.replace(/:\d+$/u, ""))).size,
+      ids: entries.map(({ id }) =>
+        id.replace(/^[0-9a-f]{64}:[0-9a-f-]{36}:/u, "")
+      ),
       versions: await versionsAt(setup.collectionId, path),
     }).toStrictEqual({
       stale: "ok",
@@ -1095,6 +1098,7 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       unchanged: 1,
       kinds: ["workflow.notify", "workflow.start"],
       intents: [notify, start],
+      commits: 1,
       ids: ["0", "1"],
       versions: 1,
     });
@@ -1200,6 +1204,41 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       handed: [{ id: rolledBack[0]?.id, attempts: 1 }],
       back: [{ settled: true, undeliverable: null }],
     });
+  });
+
+  it("are handed over under new IDs when a key commits again after its tombstone went", async () => {
+    const setup = await setUp();
+    const key = `again-${unique()}`;
+    const marker = unique();
+    const handed: string[] = [];
+    const consumers = consumersFor(marker, async (entry) => {
+      handed.push(entry.id);
+      return await Promise.resolve("delivered");
+    });
+    const intents: SubmissionIntent[] = [
+      { kind: "workflow.notify", data: { marker } },
+    ];
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key,
+      intents,
+      consumers,
+    });
+    await drainSubmissionOutbox(env, consumers);
+    // Expired, then its tombstone deleted: the key can be told from a new
+    // one no more.
+    await sweepReceipts(env, new Date(Date.now() + 31 * dayMs));
+    await sweepReceipts(env, new Date(Date.now() + 62 * dayMs));
+    const again = await directSave(
+      setup,
+      docSave(`notes/${unique()}.md`, "Plan"),
+      { key, intents, consumers }
+    );
+    await drainSubmissionOutbox(env, consumers);
+    expect({
+      again: again.currentVersion,
+      handed: handed.length,
+      distinct: new Set(handed).size,
+    }).toStrictEqual({ again: 1, handed: 2, distinct: 2 });
   });
 
   it("refuse an intent nothing takes before anything is saved", async () => {

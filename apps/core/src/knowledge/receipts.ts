@@ -288,7 +288,11 @@ export const claim = async (
  * (`unchanged`), unless the document is still at the version the save
  * expected. The receipt is then kept `submissionRetentionDays` from the
  * commit, and the intents it staged go to its outbox (outbox.ts), each
- * under an ID made of the receipt's and its place.
+ * under an ID made of the receipt's, this commit's and its place. The
+ * commit's part keeps IDs from repeating once a receipt's tombstone is
+ * deleted and its key commits again (from fence 1), so a consumer that
+ * takes each ID once still takes the new entries. The ID is stored with
+ * the entry, so it stays the same across hand-overs.
  */
 export const commitOf = (
   env: Env,
@@ -298,6 +302,7 @@ export const commitOf = (
 ): [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] => {
   const db = drizzle(env.KNOWLEDGE);
   const now = new Date();
+  const commit = crypto.randomUUID();
   return [
     db.insert(submissionOutcomes).values({
       receiptId: held.id,
@@ -327,7 +332,7 @@ export const commitOf = (
     // 100 parameters to one statement.
     ...held.intents.map((intent, position) =>
       db.insert(submissionOutbox).values({
-        id: `${held.id}:${position}`,
+        id: `${held.id}:${commit}:${position}`,
         receiptId: held.id,
         position,
         kind: intent.kind,
