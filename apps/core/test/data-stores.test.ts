@@ -7,7 +7,7 @@ import {
   documentMaxDepth,
   storeMaxTables,
 } from "@grasp-os/shared/stores";
-import type { StoreFields } from "@grasp-os/shared/stores";
+import type { Commit, Committed, StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -25,6 +25,41 @@ const grace = { userId: "grace" };
 const schemaHash = "a".repeat(64);
 const laterHash = "b".repeat(64);
 
+/** Who commits in these tests: one operation's pinned contract, for Ada. */
+const scope = {
+  principal: "ada",
+  resource: "notes-app",
+  binding: null,
+  contractId: "notes.update",
+  contractVersion: 1,
+  operationKind: "mutation",
+} as const;
+
+/** Some input's hash: these commits each claim a key of their own. */
+const inputHash = "c".repeat(64);
+
+/**
+ * Commits `commit` under a new receipt of its own, as a mutation's first
+ * attempt does: claimed, then committed.
+ */
+const commitIn = async (
+  store: OpenStore,
+  commit: Omit<Commit, "storeId" | "receipt">
+): Promise<Committed> => {
+  const claimed = await store.claim({
+    scope: { ...scope, principal: commit.principal.userId },
+    key: [crypto.randomUUID()],
+    inputHash,
+    runId: null,
+    deadline: Date.now() + 60_000,
+  });
+  if (!("held" in claimed)) {
+    throw new Error("A new key found an outcome");
+  }
+  const { receiptId, fence } = claimed.held;
+  return await store.commit({ ...commit, receipt: { receiptId, fence } });
+};
+
 /** A new store with a `notes` table. */
 const newStore = async (): Promise<OpenStore> => {
   const store = await openStore(env, await createStore(env, ada.userId));
@@ -38,7 +73,7 @@ const insertNote = async (
   fields?: StoreFields,
   principal = ada
 ): Promise<string> => {
-  const { inserted } = await store.commit({
+  const { inserted } = await commitIn(store, {
     principal,
     schemaHash,
     writes: [
@@ -93,7 +128,7 @@ describe("stores", () => {
     });
     await expect(second.get("notes", id)).resolves.toBeNull();
     await expect(
-      second.commit({
+      commitIn(second, {
         principal: ada,
         schemaHash,
         writes: [
@@ -150,7 +185,7 @@ describe("stores", () => {
       code: "data.unknown_table",
     });
     await expect(
-      store.commit({
+      commitIn(store, {
         principal: ada,
         schemaHash,
         writes: [{ op: "insert", table: "NOTES", fields: {} }],
@@ -245,14 +280,14 @@ describe("managed fields", () => {
     await Promise.all(
       managed.map(async (fields) => {
         await expect(
-          store.commit({
+          commitIn(store, {
             principal: ada,
             schemaHash,
             writes: [{ op: "insert", table: "notes", fields }],
           })
         ).rejects.toMatchObject({ code: "data.invalid" });
         await expect(
-          store.commit({
+          commitIn(store, {
             principal: ada,
             schemaHash,
             writes: [
@@ -263,7 +298,7 @@ describe("managed fields", () => {
       })
     );
     await expect(
-      store.commit({
+      commitIn(store, {
         principal: ada,
         schemaHash,
         writes: [
@@ -289,7 +324,7 @@ describe("managed fields", () => {
     const id = await insertNote(store, { title: "Launch", body: "" });
     const created = await store.get("notes", id);
 
-    await store.commit({
+    await commitIn(store, {
       principal: grace,
       schemaHash: laterHash,
       writes: [
@@ -327,7 +362,7 @@ describe("managed fields", () => {
     const first = await insertNote(store);
     // A commit inserts another note and, in the same commit, can only
     // change the first one: it doesn't know the new ID until it commits.
-    const { inserted } = await store.commit({
+    const { inserted } = await commitIn(store, {
       principal: ada,
       schemaHash,
       writes: [
@@ -355,7 +390,7 @@ describe("managed fields", () => {
     const created = await store.get("notes", id);
 
     // The same fields in another order are the same record.
-    await store.commit({
+    await commitIn(store, {
       principal: ada,
       schemaHash: laterHash,
       writes: [
@@ -376,7 +411,7 @@ describe("commits", () => {
   it("refuses a write at a stale revision, and writes nothing of its commit", async () => {
     const store = await newStore();
     const id = await insertNote(store);
-    await store.commit({
+    await commitIn(store, {
       principal: ada,
       schemaHash,
       writes: [
@@ -391,7 +426,7 @@ describe("commits", () => {
     });
 
     await expect(
-      store.commit({
+      commitIn(store, {
         principal: ada,
         schemaHash,
         writes: [
@@ -417,7 +452,7 @@ describe("commits", () => {
     const store = await newStore();
     const id = await insertNote(store);
     const edit = async (title: string) =>
-      await store.commit({
+      await commitIn(store, {
         principal: ada,
         schemaHash,
         writes: [
@@ -449,7 +484,7 @@ describe("commits", () => {
   it("refuses a commit whose read went stale, though it writes elsewhere", async () => {
     const store = await newStore();
     const read = await insertNote(store, { title: "Rate" });
-    await store.commit({
+    await commitIn(store, {
       principal: ada,
       schemaHash,
       writes: [
@@ -464,7 +499,7 @@ describe("commits", () => {
     });
 
     await expect(
-      store.commit({
+      commitIn(store, {
         principal: ada,
         schemaHash,
         guards: [{ table: "notes", id: read, expectedRevision: 1 }],
@@ -479,7 +514,7 @@ describe("commits", () => {
   it("refuses to change or delete a record that is gone", async () => {
     const store = await newStore();
     const id = await insertNote(store);
-    await store.commit({
+    await commitIn(store, {
       principal: ada,
       schemaHash,
       writes: [{ op: "delete", table: "notes", id, expectedRevision: 1 }],
@@ -500,7 +535,7 @@ describe("commits", () => {
         ] as const
       ).map(async (write) => {
         await expect(
-          store.commit({ principal: ada, schemaHash, writes: [write] })
+          commitIn(store, { principal: ada, schemaHash, writes: [write] })
         ).rejects.toMatchObject({ code: "data.conflict" });
       })
     );
@@ -515,7 +550,7 @@ describe("commits", () => {
       summary: null,
     });
 
-    await store.commit({
+    await commitIn(store, {
       principal: ada,
       schemaHash,
       writes: [
@@ -535,7 +570,7 @@ describe("commits", () => {
       body: "Agenda",
     });
 
-    await store.commit({
+    await commitIn(store, {
       principal: ada,
       schemaHash,
       writes: [
@@ -554,7 +589,7 @@ describe("commits", () => {
     });
 
     await expect(
-      store.commit({
+      commitIn(store, {
         principal: ada,
         schemaHash,
         writes: [
@@ -591,7 +626,7 @@ describe("commits", () => {
         { body: "x".repeat(documentMaxBytes) },
       ].map(async (fields) => {
         await expect(
-          store.commit({
+          commitIn(store, {
             principal: ada,
             schemaHash,
             writes: [{ op: "insert", table: "notes", fields: untyped(fields) }],
@@ -604,14 +639,14 @@ describe("commits", () => {
 
   it(`carries at most ${commitMaxWrites} writes and ${commitMaxGuards} guards`, async () => {
     const store = await newStore();
-    const { inserted } = await store.commit({
+    const { inserted } = await commitIn(store, {
       principal: ada,
       schemaHash,
       writes: inserts(commitMaxWrites),
     });
     expect(inserted).toHaveLength(commitMaxWrites);
     await expect(
-      store.commit({
+      commitIn(store, {
         principal: ada,
         schemaHash,
         writes: inserts(commitMaxWrites + 1),
@@ -624,10 +659,10 @@ describe("commits", () => {
       expectedRevision: 1,
     }));
     await expect(
-      store.commit({ principal: ada, schemaHash, guards, writes: [] })
-    ).resolves.toStrictEqual({ inserted: [] });
+      commitIn(store, { principal: ada, schemaHash, guards, writes: [] })
+    ).resolves.toMatchObject({ inserted: [] });
     await expect(
-      store.commit({
+      commitIn(store, {
         principal: ada,
         schemaHash,
         guards: [...guards, ...guards.slice(0, 1)],
@@ -643,7 +678,7 @@ describe("commits", () => {
     const large = { body: "x".repeat(120_000) };
     const count = Math.floor(commitMaxInputBytes / 120_000) + 1;
     await expect(
-      store.commit({
+      commitIn(store, {
         principal: ada,
         schemaHash,
         writes: Array.from({ length: count }, () => ({
@@ -679,7 +714,7 @@ describe("document size", () => {
     const store = await newStore();
     // Fewer characters than the limit, but three bytes each.
     await expect(
-      store.commit({
+      commitIn(store, {
         principal: ada,
         schemaHash,
         writes: [
@@ -697,7 +732,7 @@ describe("document size", () => {
   /** A note of `a` characters, patched with `b` more in field `b`. */
   const patchedNote = async (store: OpenStore, b: number): Promise<string> => {
     const id = await insertNote(store, { a: "x".repeat(firstPart) });
-    await store.commit({
+    await commitIn(store, {
       principal: ada,
       schemaHash,
       writes: [
@@ -732,7 +767,7 @@ describe("document size", () => {
     );
     // One byte more, though the patch itself is small.
     await expect(
-      store.commit({
+      commitIn(store, {
         principal: ada,
         schemaHash,
         writes: [
@@ -755,7 +790,7 @@ describe("document size", () => {
     const store = await newStore();
     const id = await insertNote(store, { a: "x".repeat(firstPart) });
     await expect(
-      store.commit({
+      commitIn(store, {
         principal: ada,
         schemaHash,
         writes: [
@@ -790,7 +825,7 @@ describe("document size", () => {
     // The insert is written first; the patch then fails as its record is
     // stored, and the transaction takes the insert back.
     await expect(
-      store.commit({
+      commitIn(store, {
         principal: ada,
         schemaHash,
         writes: [

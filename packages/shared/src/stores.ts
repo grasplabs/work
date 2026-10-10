@@ -41,7 +41,7 @@ const fieldNameSchema = tableNameSchema;
 export const documentMaxBytes = 128 * 1024;
 
 /**
- * The most bytes of one commit's writes and guards, as UTF-8 JSON: the
+ * The most bytes of one commit's writes, guards and intents, as UTF-8 JSON: the
  * host's own bound on one store transaction, the size spec 18.1 gives a
  * workflow step's input and result. A public operation's own input limit
  * is checked where operations are called, not here.
@@ -184,30 +184,119 @@ const storeWriteSchema = z.discriminatedUnion("op", [
   }),
 ]);
 
+/** A SHA-256, in hex. */
+const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/**
+ * What a mutation's receipt is scoped to, besides its store and key: the
+ * person it is for, the resource and binding it came through, the pinned
+ * operation contract and the kind of operation. The same key under any
+ * other scope is another receipt, so a key never reaches another
+ * caller's or operation's outcome.
+ */
+export const receiptScopeSchema = z.strictObject({
+  principal: identifierSchema,
+  resource: identifierSchema,
+  binding: identifierSchema.nullable(),
+  contractId: identifierSchema,
+  contractVersion: z.number().int().min(1),
+  operationKind: z.literal("mutation"),
+});
+export type ReceiptScope = z.infer<typeof receiptScopeSchema>;
+
+/**
+ * A receipt's key, as core makes it from the caller's idempotency key
+ * (`submissionKey`): its parts, such as a workflow step's key and the
+ * caller's key under it.
+ */
+const receiptKeySchema = z.array(identifierSchema).min(1).max(4);
+
+/**
+ * An attempt's claim of a mutation's receipt, made before its handler
+ * runs: what it is scoped to, its key, the hash of its normalized input,
+ * the workflow run it is made in (whose life keeps the receipt) and when
+ * its call must end, in milliseconds since the epoch.
+ */
+export const claimSchema = z.strictObject({
+  storeId: storeIdSchema,
+  scope: receiptScopeSchema,
+  key: receiptKeySchema,
+  inputHash: sha256Schema,
+  runId: identifierSchema.nullable(),
+  deadline: z.number().int().min(0),
+});
+export type ClaimInput = z.infer<typeof claimSchema>;
+
+/**
+ * The attempt holding a receipt, as its commit names it, with the
+ * deadline it claimed with, which the store kept and checks.
+ */
+export interface Held {
+  receiptId: string;
+  fence: number;
+  deadline: number;
+}
+
+/**
+ * What a claim answers: the attempt now holds the receipt, or its
+ * mutation committed already, and this was its outcome.
+ */
+export type Claimed = { held: Held } | { outcome: Committed };
+
+/**
+ * The most intents one commit may stage for its outbox: workflow
+ * notifications and starts, each handed over after the commit.
+ */
+export const commitMaxIntents = 16;
+
+/**
+ * A workflow notification or start a commit stages: its content is
+ * defined where it is delivered.
+ */
+export const storeIntentKinds = ["workflow.notify", "workflow.start"] as const;
+
+export const storeIntentSchema = z.strictObject({
+  kind: z.enum(storeIntentKinds),
+  data: fieldValueSchema,
+});
+
 /**
  * One commit: the writes a mutation staged and the revisions it read, for
- * whom (`principal`, who owns what it inserts) and under which schema.
- * All of it commits, or none of it.
+ * whom (`principal`, who owns what it inserts), under which schema, by
+ * the attempt holding its receipt (`receipt`), with what it stages for
+ * its outbox (`intents`). All of it commits, its receipt's outcome and
+ * outbox entries included, or none of it.
  */
 export const commitSchema = z
   .strictObject({
     storeId: storeIdSchema,
     principal: z.strictObject({ userId: identifierSchema }),
     schemaHash: schemaHashSchema,
+    receipt: z.strictObject({
+      receiptId: sha256Schema,
+      fence: z.number().int().min(1),
+    }),
     guards: z.array(revisionGuardSchema).max(commitMaxGuards).default([]),
     writes: z.array(storeWriteSchema).max(commitMaxWrites),
+    intents: z.array(storeIntentSchema).max(commitMaxIntents).default([]),
   })
   .refine(
-    ({ guards, writes }) =>
-      encoder.encode(JSON.stringify({ guards, writes })).byteLength <=
+    ({ guards, writes, intents }) =>
+      encoder.encode(JSON.stringify({ guards, writes, intents })).byteLength <=
       commitMaxInputBytes,
-    { message: `At most ${commitMaxInputBytes} bytes of writes and guards` }
+    {
+      message: `At most ${commitMaxInputBytes} bytes of writes, guards and intents`,
+    }
   );
 export type Commit = z.input<typeof commitSchema>;
 
-/** What a commit made: the IDs of the records it inserted, in order. */
+/**
+ * What a commit made: the IDs of the records it inserted, in order, and
+ * its place in the store's order of commits.
+ */
 export interface Committed {
   inserted: string[];
+  commit: number;
 }
 
 /** One record, as the store holds it: its managed fields and its document. */
@@ -231,4 +320,6 @@ export const dataErrors = defineErrorFamily({
   "data.conflict":
     "The record changed since it was read. Read it again, then retry.",
   "data.store_unavailable": "This store doesn't exist or was deleted.",
+  "data.receipt_invalid":
+    "This commit doesn't hold a receipt its caller claimed.",
 });
