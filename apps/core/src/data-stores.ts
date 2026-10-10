@@ -1,7 +1,13 @@
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
 import { dataErrors } from "@grasp-os/shared/stores";
-import type { Commit, Committed, StoredRecord } from "@grasp-os/shared/stores";
+import type {
+  ClaimInput,
+  Claimed,
+  Commit,
+  Committed,
+  StoredRecord,
+} from "@grasp-os/shared/stores";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -21,6 +27,7 @@ export interface OpenStore {
   id: StoreId;
   defineTables: (names: readonly string[]) => Promise<Record<string, string>>;
   get: (table: string, id: string) => Promise<StoredRecord | null>;
+  claim: (claim: Omit<ClaimInput, "storeId">) => Promise<Claimed>;
   commit: (commit: Omit<Commit, "storeId">) => Promise<Committed>;
 }
 
@@ -76,6 +83,7 @@ export const openStore = async (
     id: storeId,
     defineTables: async (names) => await stub.defineTables(storeId, names),
     get: async (table, recordId) => await stub.get(storeId, table, recordId),
+    claim: async (claim) => await stub.claim({ ...claim, storeId }),
     commit: async (commit) => await stub.commit({ ...commit, storeId }),
   };
 };
