@@ -160,8 +160,19 @@ export class Outside {
     response: ServerResponse
   ): Promise<void> {
     let body = "";
-    for await (const chunk of request) {
-      body += String(chunk);
+    try {
+      for await (const chunk of request) {
+        body += String(chunk);
+      }
+    } catch (error) {
+      // Killed while it sent the body: the tests kill workerd on purpose,
+      // whatever it is sending, and nobody is left to answer. Anything
+      // else is a fault here, and surfaces.
+      if (!request.complete) {
+        response.destroy();
+        return;
+      }
+      throw error;
     }
     const sent: unknown = JSON.parse(body);
     if (!isArrival(sent)) {
