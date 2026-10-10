@@ -97,9 +97,11 @@ describe("the catalog", () => {
       source: "composio",
       id: "hubspot",
       name: "HubSpot",
-      // No logo: a browser showing Composio's would tell it who looks.
       categories: ["CRM", "Marketing"],
       toolCount: 3,
+      // Served from the deployment's origin: a browser showing Composio's
+      // would tell it who looks (catalog-logos.test.ts).
+      logo: "/api/catalog/logos/composio/hubspot",
     });
   });
 

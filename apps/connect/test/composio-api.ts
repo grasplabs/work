@@ -11,6 +11,7 @@ import { afterEach, beforeEach, vi } from "vite-plus/test";
 
 import { forgetComposioCatalog } from "../src/catalog.ts";
 import { composioApiBase } from "../src/composio.ts";
+import { forgetCatalogLogos } from "../src/logos.ts";
 import { mcpServerWith } from "./mcp-server.ts";
 import type { FakeTool } from "./mcp-server.ts";
 import { testComposioKey } from "./provider-config.ts";
@@ -35,6 +36,11 @@ export interface FakeToolkit {
   managed?: boolean;
   categories?: string[];
   tools: FakeComposioTool[];
+  /**
+   * Where its list says its logo is: on Composio's logo host by default,
+   * `null` for no address at all.
+   */
+  logo?: string | null;
 }
 
 /** One request connect sent to the API. */
@@ -133,6 +139,25 @@ const hugeAnswer = (sent: { bytes: number }): Response => {
   );
 };
 
+/** Where Composio serves toolkits' logos. */
+const logoHost = "logos.composio.dev";
+
+/** The smallest PNG there is: a signature and a one-pixel image. */
+export const pngLogo = Uint8Array.from(
+  atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+  ),
+  (char) => char.codePointAt(0) ?? 0
+);
+
+/** One request connect sent to the logo host. */
+export interface LogoRequest {
+  path: string;
+  /** Whether it carried connect's key, in `x-api-key`. */
+  keyed: boolean;
+  followsRedirects: boolean;
+}
+
 /** Items per page: few, so a short list takes more than one. */
 const fakePageSize = 2;
 
@@ -145,6 +170,7 @@ const toolkitItem = ({
   managed,
   categories,
   tools,
+  logo = `https://${logoHost}/api/${slug}`,
 }: FakeToolkit) => ({
   slug,
   name,
@@ -154,7 +180,7 @@ const toolkitItem = ({
   no_auth: false,
   meta: {
     description: `${name} toolkit`,
-    logo: `https://logos.composio.dev/api/${slug}`,
+    ...(logo === null ? {} : { logo }),
     categories: (categories ?? []).map((category) => ({
       id: category.toLowerCase(),
       name: category,
@@ -271,6 +297,13 @@ export const fakeComposioApi = (
     accountInUrl: "own" | "other" | "none";
     /** What connect made at Composio and hasn't deleted. */
     holds: Holdings;
+    /** Every request connect sent to the logo host, in order. */
+    logoRequests: LogoRequest[];
+    /**
+     * How the logo host answers for a toolkit, by its slug: the PNG
+     * `pngLogo` for any other.
+     */
+    logos: Map<string, () => Response>;
     /** The MCP servers' requests and tool runs, all of them together. */
     mcp: typeof mcp.state;
   } = {
@@ -283,7 +316,24 @@ export const fakeComposioApi = (
     serverUrlBase: mcpBase,
     accountInUrl: "own",
     holds: { authConfigs: new Map(), accounts: new Map(), servers: new Map() },
+    logoRequests: [],
+    logos: new Map(),
     mcp: mcp.state,
+  };
+
+  /** The logo host's answer, as `state.logos` has it. */
+  const logoAnswer = (request: Request): Response => {
+    const url = new URL(request.url);
+    state.logoRequests.push({
+      path: url.pathname,
+      keyed: request.headers.has("x-api-key"),
+      followsRedirects: request.redirect === "follow",
+    });
+    const slug = url.pathname.slice("/api/".length);
+    return (
+      state.logos.get(slug)?.() ??
+      new Response(pngLogo, { headers: { "content-type": "image/png" } })
+    );
   };
 
   /** What connect creates at Composio, by route, from the request's body. */
@@ -515,6 +565,9 @@ export const fakeComposioApi = (
   beforeEach(() => {
     // Each test asks Composio afresh, as a new isolate would.
     forgetComposioCatalog();
+    forgetCatalogLogos();
+    state.logoRequests = [];
+    state.logos = new Map();
     state.requests = [];
     state.health = "up";
     state.hugeSent = { bytes: 0 };
@@ -533,6 +586,9 @@ export const fakeComposioApi = (
       const request = new Request(input, init);
       if (request.url.startsWith(mcpBase)) {
         return await mcp.answer(request);
+      }
+      if (request.url.startsWith(`https://${logoHost}/`)) {
+        return logoAnswer(request);
       }
       if (!request.url.startsWith(`${composioApiBase}/`)) {
         throw new Error(`Unexpected outbound request to ${request.url}`);

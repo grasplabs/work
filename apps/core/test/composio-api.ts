@@ -18,6 +18,7 @@ export const composioToolkits = [
     meta: {
       categories: [{ id: "crm", name: "CRM" }],
       tools_count: 2,
+      logo: "https://logos.composio.dev/api/hubspot",
     },
   },
 ];
@@ -27,6 +28,18 @@ export const composioTools = [
   "HUBSPOT_LIST_CONTACTS",
   "HUBSPOT_CREATE_CONTACT",
 ];
+
+/** HubSpot's logo, as Composio's logo host serves it. */
+export const hubspotLogo =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><script>parent.stolen = document.cookie</script><rect width="1" height="1"/></svg>';
+
+/** The logo host, as script for the `connect-providers` Worker. */
+export const composioLogoScript = `
+const composioLogo = (url) =>
+  url.pathname === "/api/hubspot"
+    ? new Response(${JSON.stringify(hubspotLogo)}, { headers: { "content-type": "image/svg+xml" } })
+    : new Response("Not found", { status: 404 });
+`;
 
 /** The API, as script for the `connect-providers` Worker. */
 export const composioApiScript = `

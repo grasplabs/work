@@ -50,11 +50,17 @@ export const composioKey = (env: Env): string | undefined =>
     ? undefined
     : env.COMPOSIO_API_KEY;
 
-/** The body as text, read up to `maxResponseBytes` as it arrives. */
-const readCapped = async (response: Response): Promise<string> => {
+/**
+ * The body's bytes, read up to `maxBytes` as they arrive: one byte more
+ * is a {@link ComposioError}, whatever `content-length` said. The body is
+ * cancelled once read, or once refused.
+ */
+export const readCappedBytes = async (
+  response: Response,
+  maxBytes: number
+): Promise<Uint8Array> => {
   const reader = response.body?.getReader();
-  const decoder = new TextDecoder();
-  const parts: string[] = [];
+  const parts: Uint8Array[] = [];
   let bytes = 0;
   try {
     for (;;) {
@@ -68,10 +74,10 @@ const readCapped = async (response: Response): Promise<string> => {
         throw new ComposioError("The answer isn't a byte stream");
       }
       bytes += value.byteLength;
-      if (bytes > maxResponseBytes) {
-        throw new ComposioError(`The answer is over ${maxResponseBytes} bytes`);
+      if (bytes > maxBytes) {
+        throw new ComposioError(`The answer is over ${maxBytes} bytes`);
       }
-      parts.push(decoder.decode(value, { stream: true }));
+      parts.push(value);
     }
   } finally {
     // Never in place of the error that ended the read.
@@ -79,8 +85,13 @@ const readCapped = async (response: Response): Promise<string> => {
       log.warn("composio.cancel_failed", errorFields(error));
     });
   }
-  parts.push(decoder.decode());
-  return parts.join("");
+  const body = new Uint8Array(bytes);
+  let offset = 0;
+  for (const part of parts) {
+    body.set(part, offset);
+    offset += part.byteLength;
+  }
+  return body;
 };
 
 /** One request to Composio's API. */
@@ -137,7 +148,9 @@ export const composioRequest = async <Schema extends z.ZodType>(
   }
   let parsed: unknown;
   try {
-    const text = await readCapped(response);
+    const text = new TextDecoder().decode(
+      await readCappedBytes(response, maxResponseBytes)
+    );
     parsed = text === "" ? null : JSON.parse(text);
   } catch (error) {
     throw error instanceof ComposioError

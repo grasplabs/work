@@ -29,6 +29,7 @@ const entry = (
   name: id.toUpperCase(),
   categories,
   toolCount: 3,
+  logo: null,
   offered: true,
 });
 

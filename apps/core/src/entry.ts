@@ -19,7 +19,11 @@ import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
-import { handleConnectionCallback } from "./connections.ts";
+import {
+  catalogLogoResponse,
+  handleConnectionCallback,
+  isCatalogLogoPath,
+} from "./connections.ts";
 import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
@@ -185,6 +189,9 @@ const route = async (
     if (response !== undefined) {
       return response;
     }
+  }
+  if (isCatalogLogoPath(pathname)) {
+    return await catalogLogoResponse(request, env, pathname, requestId);
   }
   if (pathname === auditExportPath) {
     return await auditExportResponse(request, env, requestId);

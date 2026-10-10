@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { requestGranted } from "./apps.ts";
+import { hubspotLogo } from "./composio-api.ts";
 import { consentCode, tokensFor } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant, clientOrigin, otherTenant } from "./sign-in-config.ts";
@@ -324,6 +325,52 @@ describe("the catalog", () => {
       "native:google",
       "composio:hubspot",
     ]);
+  });
+
+  it("serves an entry's logo from the deployment's own origin, running none of its script", async () => {
+    const { session } = await signedInWithRole(idp, "user");
+    const { core } = await openRpc(session);
+    const { entries } = await core.authenticate().connections.catalog();
+    const logo = entries.find(({ id }) => id === "hubspot")?.logo ?? "";
+    const response = await routed(logo, { headers: { cookie: session } });
+    expect({
+      logo,
+      status: response.status,
+      type: response.headers.get("content-type"),
+      sniffing: response.headers.get("x-content-type-options"),
+      body: await response.text(),
+    }).toStrictEqual({
+      logo: "/api/catalog/logos/composio/hubspot",
+      status: 200,
+      type: "image/svg+xml",
+      sniffing: "nosniff",
+      body: hubspotLogo,
+    });
+    // Opened on its own, the SVG runs nothing, with no origin of its own.
+    const policy = response.headers.get("content-security-policy") ?? "";
+    expect(policy).toContain("default-src 'none'");
+    expect(policy).toContain("sandbox");
+    expect(policy).not.toContain("script-src");
+  });
+
+  it("serves a logo only to someone signed in, and none for an entry without one", async () => {
+    const { session } = await signedInWithRole(idp, "user");
+    const statuses = await Promise.all(
+      [
+        ["/api/catalog/logos/composio/hubspot", undefined],
+        ["/api/catalog/logos/native/microsoft", session],
+        ["/api/catalog/logos/composio/nobody", session],
+        ["/api/catalog/logos/elsewhere/hubspot", session],
+        ["/api/catalog/logos/composio/hub%2Fspot", session],
+      ].map(async ([path = "", cookie]) => {
+        const response = await routed(
+          path,
+          cookie === undefined ? {} : { headers: { cookie } }
+        );
+        return response.status;
+      })
+    );
+    expect(statuses).toStrictEqual([401, 404, 404, 404, 404]);
   });
 });
 
