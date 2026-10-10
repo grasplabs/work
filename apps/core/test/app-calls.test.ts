@@ -781,11 +781,25 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     await grantCalls(admin, a, b, ["read"], "NEXT");
     await grantCalls(admin, b, a, ["read"], "NEXT");
     const find = { query: "BV" };
+    const atFirst = gate();
     const atA = gate();
     const atB = gate();
-    const fromA = holdThen(a, admin.userId, atA, "NEXT", "findCustomers", find);
-    const fromB = holdThen(b, admin.userId, atB, "NEXT", "findCustomers", find);
+    // A's call gets its turn from the queue, behind an unrelated call.
+    const first = callApp(
+      env,
+      a,
+      { userId: admin.userId, mode: "interactive" },
+      "hold",
+      [atFirst.wait]
+    );
+    await entered(atFirst, first);
+    let fromA: Promise<unknown> = Promise.resolve();
+    await waitsAfter(() => {
+      fromA = holdThen(a, admin.userId, atA, "NEXT", "findCustomers", find);
+    }, callTimeoutMs(env));
+    atFirst.release();
     await entered(atA, fromA);
+    const fromB = holdThen(b, admin.userId, atB, "NEXT", "findCustomers", find);
     await entered(atB, fromB);
     // A's call waits for B, holding A.
     await waitsAfter(() => {
