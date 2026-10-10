@@ -1,6 +1,14 @@
 import type { App } from "@grasp-os/shared/apps";
+import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
 import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
-import { buttonVariants } from "@grasp-os/ui/components/button";
+import { Button, buttonVariants } from "@grasp-os/ui/components/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@grasp-os/ui/components/popover";
 import {
   Tooltip,
   TooltipContent,
@@ -11,27 +19,48 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Await, Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { GripVerticalIcon, PlusIcon, XIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent, PointerEvent, ReactNode } from "react";
+import { flushSync } from "react-dom";
 
+import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { useCoreAction } from "../use-core-action.ts";
 import { byState, enginesOf, stateOf, workflowStates } from "./board.ts";
 import type { Engines, EngineWorkflows, WorkflowState } from "./board.ts";
+import {
+  addWidget,
+  defaultWidgets,
+  differsFromDefault,
+  missingWidgets,
+  moveWidget,
+  placeWidget,
+  removeWidget,
+  slotAt,
+} from "./layout.ts";
+import type { GridShape } from "./layout.ts";
 import { RunsWidget } from "./runs-widget.tsx";
 import { CouldBeBetter } from "./signals.tsx";
 import type { Signals } from "./signals.tsx";
-import { WidgetBlock, WidgetLoading } from "./widget-block.tsx";
+import { WidgetBlock, WidgetControls, WidgetLoading } from "./widget-block.tsx";
 
 // The dashboard's widget board, under what waits on the person, as the
-// prototype lays it out (`components/dashboard/widget-board.tsx`): blocks
-// of one size, one column, two side by side where the board is wide
-// enough. Each opens in full. In a fixed order: where the workflows
+// prototype lays it out (`components/dashboard/widget-board.tsx`,
+// `widget-add.tsx`): blocks of one size, one column, two side by side
+// where the board is wide enough. Each opens in full. Each person has
+// their own board: the widgets on it in their order (where the workflows
 // stand, each engine's workflows, the runs this week, and what could be
-// better. Each comes
-// as it is read, so a slow one holds back no other. The prototype's own
-// layout, widgets Grasp makes, moving blocks and adding one, and the
-// hours and euros its widgets count, aren't here: core keeps none of it.
+// better, to begin with), saved in core whole with each change. There is
+// no mode for changing it: a block pointed at shows its grip, to drag it
+// (or by its title, with the mouse) or move it with the arrow keys, and
+// the button that takes it off; the last place is an empty card that adds
+// one back; and a quiet line under the board puts it back as it began.
+// Each comes as it is read, so a slow one holds back no other. The
+// prototype's widgets Grasp makes, and the hours and euros its widgets
+// count, aren't here: core keeps none of it.
 
 /** The engines the person can open, with the workflows. */
 export interface EnginesRead {
@@ -39,8 +68,10 @@ export interface EnginesRead {
   workflows: WorkflowSummary[];
 }
 
-/** What the board reads, each on its own. */
+/** What the board reads, each on its own, and the person's order of it. */
 export interface Board {
+  /** The widgets on the person's board, in order. */
+  layout: readonly StandardWidgetId[];
   workflows: Promise<Loaded<WorkflowSummary[]>>;
   engines: Promise<Loaded<EnginesRead>>;
   runs: Promise<Loaded<RunActivity>>;
@@ -407,53 +438,496 @@ const NotRead = ({
   </WidgetBlock>
 );
 
-/** The board, each widget in its block as its read comes. */
-export const WidgetBoard = ({ board }: { board: Board }) => {
+/** Each widget's name: its block's title, and how the add card lists it. */
+const widgetTitles: Record<StandardWidgetId, MessageDescriptor> = {
+  workflows: msg`Workflows`,
+  engines: msg`Engines`,
+  runs: msg`Runs this week`,
+  signals: msg`Could be better`,
+};
+
+/** Each widget in its block, titled `title`, as its read comes. */
+const widgetBlocks: Record<
+  StandardWidgetId,
+  (board: Board, title: string) => ReactNode
+> = {
+  workflows: (board, title) => (
+    <Await fallback={<WidgetLoading title={title} />} promise={board.workflows}>
+      {(loaded) =>
+        loaded.state === "ready" ? (
+          <WorkflowsWidget rows={loaded.data} />
+        ) : (
+          <NotRead loaded={loaded} title={title} />
+        )
+      }
+    </Await>
+  ),
+  engines: (board, title) => (
+    <Await fallback={<WidgetLoading title={title} />} promise={board.engines}>
+      {(loaded) =>
+        loaded.state === "ready" ? (
+          <EnginesWidget apps={loaded.data.apps} rows={loaded.data.workflows} />
+        ) : (
+          <NotRead loaded={loaded} title={title} />
+        )
+      }
+    </Await>
+  ),
+  runs: (board, title) => (
+    <Await fallback={<WidgetLoading title={title} />} promise={board.runs}>
+      {(loaded) =>
+        loaded.state === "ready" ? (
+          <RunsWidget activity={loaded.data} />
+        ) : (
+          <NotRead loaded={loaded} title={title} />
+        )
+      }
+    </Await>
+  ),
+  signals: (board) => <CouldBeBetter signals={board.signals} />,
+};
+
+/**
+ * A block's own buttons, until it is pointed at: there, but unseen. Seen
+ * with the keys in the block, and always where there is no pointer to
+ * point with.
+ */
+const atHand =
+  "flex opacity-0 transition-opacity group-focus-within/block:opacity-100 group-hover/block:opacity-100 pointer-coarse:opacity-100";
+
+/** How far a press has to move before it is a drag, in pixels: less is a press. */
+const dragFrom = 6;
+
+/** The places one arrow key moves a block, with the board's columns. */
+const keySteps = (key: string, columns: number): number | undefined => {
+  if (key === "ArrowLeft") {
+    return -1;
+  }
+  if (key === "ArrowRight") {
+    return 1;
+  }
+  if (key === "ArrowUp") {
+    return -columns;
+  }
+  return key === "ArrowDown" ? columns : undefined;
+};
+
+/** A length as the browser computes it, in pixels: what comes before its unit. */
+const pixels = /px$/u;
+
+/** The grid of blocks as it stands on screen now; null while it has none. */
+const shapeOf = (grid: HTMLElement | null): GridShape | null => {
+  const cells = grid?.querySelectorAll<HTMLElement>("[data-widget]") ?? [];
+  const [first] = cells;
+  if (grid === null || first === undefined) {
+    return null;
+  }
+  const box = grid.getBoundingClientRect();
+  const style = getComputedStyle(grid);
+  return {
+    left: box.left,
+    top: box.top,
+    columns: style.gridTemplateColumns.split(" ").filter(Boolean).length,
+    width: first.offsetWidth,
+    height: first.offsetHeight,
+    gap: Number(style.columnGap.replace(pixels, "")) || 0,
+    count: cells.length,
+  };
+};
+
+/**
+ * A press on a block that may become a drag: the block, where the press
+ * began, whether it moved far enough to be one, the board before it, and
+ * the order it has made so far.
+ */
+interface Press {
+  id: StandardWidgetId;
+  /** The pointer that took hold of it: another one, a second finger, is ignored. */
+  pointer: number;
+  fromX: number;
+  fromY: number;
+  moved: boolean;
+  before: readonly StandardWidgetId[];
+  order: readonly StandardWidgetId[];
+}
+
+/**
+ * Where a widget is moved by: a grip to drag it by (with a finger, the
+ * only place to take hold of it), and the arrow keys, one place with left
+ * and right, a row with up and down.
+ */
+const Grip = ({
+  id,
+  title,
+  onKeyDown,
+}: {
+  id: StandardWidgetId;
+  title: string;
+  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+}) => {
   const { t } = useLingui();
   return (
-    <div className="@container">
-      <div className="grid grid-cols-1 gap-4 @4xl:grid-cols-2">
-        <Await
-          fallback={<WidgetLoading title={t`Workflows`} />}
-          promise={board.workflows}
-        >
-          {(loaded) =>
-            loaded.state === "ready" ? (
-              <WorkflowsWidget rows={loaded.data} />
-            ) : (
-              <NotRead loaded={loaded} title={t`Workflows`} />
-            )
-          }
-        </Await>
-        <Await
-          fallback={<WidgetLoading title={t`Engines`} />}
-          promise={board.engines}
-        >
-          {(loaded) =>
-            loaded.state === "ready" ? (
-              <EnginesWidget
-                apps={loaded.data.apps}
-                rows={loaded.data.workflows}
-              />
-            ) : (
-              <NotRead loaded={loaded} title={t`Engines`} />
-            )
-          }
-        </Await>
-        <Await
-          fallback={<WidgetLoading title={t`Runs this week`} />}
-          promise={board.runs}
-        >
-          {(loaded) =>
-            loaded.state === "ready" ? (
-              <RunsWidget activity={loaded.data} />
-            ) : (
-              <NotRead loaded={loaded} title={t`Runs this week`} />
-            )
-          }
-        </Await>
-        <CouldBeBetter signals={board.signals} />
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            aria-label={t`Move ${title}`}
+            className="cursor-grab touch-none"
+            data-grip={id}
+            onKeyDown={onKeyDown}
+            size="icon-sm"
+            variant="ghost"
+          />
+        }
+      >
+        <GripVerticalIcon />
+      </TooltipTrigger>
+      <TooltipContent>
+        <Trans>Drag to move, or use the arrow keys</Trans>
+      </TooltipContent>
+    </Tooltip>
+  );
+};
+
+/** The button that takes a widget off the board. */
+const RemoveButton = ({
+  title,
+  onRemove,
+}: {
+  title: string;
+  onRemove: () => void;
+}) => {
+  const { t } = useLingui();
+  const label = t`Remove ${title}`;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            aria-label={label}
+            onClick={onRemove}
+            size="icon-sm"
+            variant="ghost"
+          />
+        }
+      >
+        <XIcon />
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+};
+
+/**
+ * Where a widget is added: the last place on the board, an empty card as
+ * large as a block with a plus in it. Pressed, it lists the widgets not on
+ * the board, each going last. Not there while every one is on it.
+ */
+const AddCard = ({
+  missing,
+  onAdd,
+}: {
+  missing: readonly StandardWidgetId[];
+  onAdd: (id: StandardWidgetId) => void;
+}) => {
+  const { t, i18n } = useLingui();
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover onOpenChange={setOpen} open={open}>
+      <PopoverTrigger
+        render={
+          <button
+            aria-label={t`Add a widget`}
+            className="border-input text-muted-foreground hover:border-ring hover:text-foreground focus-visible:ring-ring flex h-80 min-w-0 items-center justify-center rounded-xl border border-dashed transition-colors outline-none focus-visible:ring-2"
+            type="button"
+          />
+        }
+      >
+        <PlusIcon aria-hidden="true" className="size-5" />
+      </PopoverTrigger>
+      <PopoverContent className="w-64">
+        <PopoverHeader>
+          <PopoverTitle>
+            <Trans>Add a widget</Trans>
+          </PopoverTitle>
+        </PopoverHeader>
+        <ul className="flex flex-col">
+          {missing.map((id) => (
+            <li key={id}>
+              <Button
+                className="w-full justify-start"
+                onClick={() => {
+                  setOpen(false);
+                  onAdd(id);
+                }}
+                variant="ghost"
+              >
+                {i18n._(widgetTitles[id])}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
+  );
+};
+
+/**
+ * The board, each widget in its block as its read comes, in the person's
+ * order. Each change shows at once and is saved whole; one core refuses
+ * goes back, saying why.
+ */
+export const WidgetBoard = ({ board }: { board: Board }) => {
+  const { t, i18n } = useLingui();
+  const { run } = useCoreAction();
+  const [widgets, setWidgets] = useState(board.layout);
+  const [failure, setFailure] = useState<string>();
+  const [announcement, setAnnouncement] = useState("");
+  const [dragged, setDragged] = useState<StandardWidgetId | null>(null);
+  const grid = useRef<HTMLDivElement>(null);
+  const press = useRef<Press | null>(null);
+  /** Ends the drag under way, if any, without saving it. */
+  const stopDrag = useRef<(() => void) | null>(null);
+  /** The layout core last took: what a refused save goes back to. */
+  const confirmed = useRef(board.layout);
+  /** Saves go one at a time, in order, so the last to end is the last made. */
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  /** Saves started, so only the latest one's refusal puts the board back. */
+  const saves = useRef(0);
+  const titleOf = (id: StandardWidgetId) => i18n._(widgetTitles[id]);
+
+  // A save that core refuses, with no later one to come, puts the board
+  // back to what core last took: never to a layout only this page had.
+  const save = async (next: readonly StandardWidgetId[], said: string) => {
+    setWidgets(next);
+    setFailure(undefined);
+    setAnnouncement(said);
+    saves.current += 1;
+    const started = saves.current;
+    const previous = queue.current;
+    const saving = (async () => {
+      await previous;
+      const saved = await run(
+        async (session) => {
+          await session.dashboard.saveLayout({ widgets: [...next] });
+          return true;
+        },
+        (reason) => {
+          setFailure(reason);
+        }
+      );
+      if (saved === true) {
+        confirmed.current = next;
+      } else if (saves.current === started) {
+        setWidgets(confirmed.current);
+      }
+    })();
+    queue.current = saving;
+    await saving;
+  };
+
+  // A drag the board is left in the middle of ends there, unsaved.
+  useEffect(
+    () => () => {
+      stopDrag.current?.();
+    },
+    []
+  );
+
+  const placeSaid = (
+    id: StandardWidgetId,
+    order: readonly StandardWidgetId[]
+  ) => {
+    const title = titleOf(id);
+    const place = order.indexOf(id) + 1;
+    const count = order.length;
+    return t`${title} is now in place ${place} of ${count}.`;
+  };
+
+  const moveByKey = (
+    id: StandardWidgetId,
+    event: KeyboardEvent<HTMLButtonElement>
+  ) => {
+    const by = keySteps(event.key, shapeOf(grid.current)?.columns ?? 1);
+    if (by === undefined) {
+      return;
+    }
+    event.preventDefault();
+    const next = moveWidget(widgets, id, by);
+    if (next === widgets) {
+      return;
+    }
+    // Moving the block may move the grip out of the document and back,
+    // which takes the keys off it: they go back to it at once.
+    const grip = event.currentTarget;
+    flushSync(() => {
+      void save(next, placeSaid(id, next));
+    });
+    grip.focus();
+  };
+
+  const remove = (id: StandardWidgetId) => {
+    const title = titleOf(id);
+    void save(
+      removeWidget(widgets, id),
+      t`${title} removed from the dashboard.`
+    );
+  };
+
+  const add = (id: StandardWidgetId) => {
+    const title = titleOf(id);
+    void save(addWidget(widgets, id), t`${title} added to the dashboard.`);
+  };
+
+  const reset = () => {
+    void save(defaultWidgets, t`The dashboard is back to how it began.`);
+  };
+
+  // A drag follows the pointer over the whole page, so a block that moves
+  // under it while it is dragged doesn't lose it.
+  const startDrag = (
+    id: StandardWidgetId,
+    event: PointerEvent<HTMLElement>
+  ) => {
+    if (event.button !== 0 || !(event.target instanceof Element)) {
+      return;
+    }
+    const byGrip = event.target.closest("[data-grip]") !== null;
+    // The mouse takes a block by its title too, never by one of its buttons
+    // or links.
+    const byTitle =
+      event.pointerType === "mouse" &&
+      event.target.closest("header") !== null &&
+      event.target.closest("button, a") === null;
+    if (!byGrip && !byTitle) {
+      return;
+    }
+    // One drag at a time: another finger pressing meanwhile takes nothing.
+    if (press.current !== null) {
+      return;
+    }
+    press.current = {
+      id,
+      pointer: event.pointerId,
+      fromX: event.clientX,
+      fromY: event.clientY,
+      moved: false,
+      before: widgets,
+      order: widgets,
+    };
+    const follow = (moved: globalThis.PointerEvent) => {
+      const held = press.current;
+      if (held === null || moved.pointerId !== held.pointer) {
+        return;
+      }
+      if (!held.moved) {
+        const far = Math.hypot(
+          moved.clientX - held.fromX,
+          moved.clientY - held.fromY
+        );
+        if (far < dragFrom) {
+          return;
+        }
+        held.moved = true;
+        setDragged(held.id);
+      }
+      const shape = shapeOf(grid.current);
+      const slot =
+        shape === null ? null : slotAt(shape, moved.clientX, moved.clientY);
+      if (slot !== null) {
+        held.order = placeWidget(held.order, held.id, slot);
+        setWidgets(held.order);
+      }
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", follow);
+      // oxlint-disable-next-line no-use-before-define -- each takes the other off
+      window.removeEventListener("pointerup", drop);
+      // oxlint-disable-next-line no-use-before-define -- each takes the other off
+      window.removeEventListener("pointercancel", drop);
+      press.current = null;
+      stopDrag.current = null;
+    };
+    const drop = (ended: globalThis.PointerEvent) => {
+      const held = press.current;
+      if (held === null || ended.pointerId !== held.pointer) {
+        return;
+      }
+      stop();
+      setDragged(null);
+      if (held.moved && held.order !== held.before) {
+        void save(held.order, placeSaid(held.id, held.order));
+      }
+    };
+    stopDrag.current = stop;
+    window.addEventListener("pointermove", follow);
+    window.addEventListener("pointerup", drop);
+    window.addEventListener("pointercancel", drop);
+  };
+
+  const missing = missingWidgets(widgets);
+  return (
+    <div className="@container flex flex-col gap-3">
+      <div
+        className={cn(
+          "grid grid-cols-1 gap-4 @4xl:grid-cols-2",
+          dragged !== null && "cursor-grabbing select-none"
+        )}
+        ref={grid}
+      >
+        {widgets.map((id) => {
+          const title = titleOf(id);
+          return (
+            <div
+              className={cn(
+                "group/block min-w-0 rounded-xl",
+                dragged === id && "ring-ring opacity-80 shadow-lg ring-2"
+              )}
+              data-widget={id}
+              key={id}
+              onPointerDown={(event) => {
+                startDrag(id, event);
+              }}
+            >
+              <WidgetControls
+                value={
+                  <span className={atHand}>
+                    <Grip
+                      id={id}
+                      onKeyDown={(event) => {
+                        moveByKey(id, event);
+                      }}
+                      title={title}
+                    />
+                    <RemoveButton
+                      onRemove={() => {
+                        remove(id);
+                      }}
+                      title={title}
+                    />
+                  </span>
+                }
+              >
+                {widgetBlocks[id](board, title)}
+              </WidgetControls>
+            </div>
+          );
+        })}
+        {missing.length === 0 ? null : (
+          <AddCard missing={missing} onAdd={add} />
+        )}
       </div>
+      <p aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
+      <ErrorText>{failure}</ErrorText>
+      {differsFromDefault(widgets) ? (
+        <div className="flex justify-center">
+          <Button onClick={reset} size="xs" variant="link">
+            <Trans>Back to how it began</Trans>
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 };
