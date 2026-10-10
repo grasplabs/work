@@ -289,6 +289,18 @@ export interface Committed {
   commit: number;
 }
 
+/**
+ * What a store answers when handed a schema: the schema's hash, which its
+ * host computed from the manifest itself, the ID of each of the schema's
+ * tables by name, and of every table the store holds, the schema's among
+ * them (tables are never removed, so a store may hold others).
+ */
+export interface DefinedTables {
+  schemaHash: string;
+  tables: Record<string, string>;
+  storeTables: Record<string, string>;
+}
+
 /** One record, as the store holds it: its managed fields and its document. */
 export interface StoredRecord {
   id: string;
@@ -309,6 +321,7 @@ export const storeMemberSchema = z.strictObject({
 
 export const dataErrors = defineErrorFamily({
   "data.invalid": "That change isn't valid for this store.",
+  "data.invalid_schema": "That schema isn't one a store can hold.",
   "data.unknown_table": "This store has no such table.",
   "data.table_conflict":
     "Two tables can't have names that differ only in case.",
