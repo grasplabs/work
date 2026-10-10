@@ -108,12 +108,14 @@ const bound = (
   if (limit === undefined) {
     return undefined;
   }
-  return typeof limit === "number" && isValid(limit)
-    ? limit
-    : refuse(
-        "definition.invalid_bound",
-        `\`${key}\` isn't a number this kind of value can be bound by.`
-      );
+  if (typeof limit !== "number" || !isValid(limit)) {
+    return refuse(
+      "definition.invalid_bound",
+      `\`${key}\` isn't a number this kind of value can be bound by.`
+    );
+  }
+  // -0 is 0: one bound, one descriptor.
+  return limit === 0 ? 0 : limit;
 };
 
 /** The bounds of a draft, each the strongest that was set. */
@@ -165,10 +167,16 @@ const integerBounds = ({
 }): { min?: number; max?: number } => {
   const low = min === undefined ? undefined : Math.ceil(min);
   const high = max === undefined ? undefined : Math.floor(max);
-  if (low !== undefined && high !== undefined && low > high) {
+  // Past the safe integers on the wrong side, or crossed: no safe integer
+  // is left to pass.
+  const admitsNone =
+    (low !== undefined && low > Number.MAX_SAFE_INTEGER) ||
+    (high !== undefined && high < Number.MIN_SAFE_INTEGER) ||
+    (low !== undefined && high !== undefined && low > high);
+  if (admitsNone) {
     return refuse(
       "definition.contradictory_bounds",
-      "No whole number is between `min` and `max`."
+      "No safe whole number is between `min` and `max`."
     );
   }
   return {
@@ -410,6 +418,9 @@ const collapsedUnion = (
   ) {
     return undefined;
   }
+  // Read first, so a malformed flag is refused even when null members
+  // would make the union nullable anyway.
+  const declaredNullable = flag(draft, "nullable");
   const children = members.map(requiredChild);
   const others = children.filter((child) => !isNullOnly(child.descriptor));
   const [only] = others;
@@ -417,7 +428,7 @@ const collapsedUnion = (
   if (!hasNull && others.length > 1) {
     return undefined;
   }
-  const nullable = hasNull || flag(draft, "nullable");
+  const nullable = hasNull || declaredNullable;
   const presence =
     draft.presence === "default"
       ? { presence: "default", defaultValue: draft.defaultValue }
