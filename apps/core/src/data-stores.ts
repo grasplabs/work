@@ -27,6 +27,7 @@ import {
 } from "./sharing.ts";
 import type { MemberRef } from "./sharing.ts";
 import { recordStoreDeleted } from "./store-deletion.ts";
+import type { StoreDeletionMark } from "./store-deletion.ts";
 
 // The deployment's business stores, as core finds them: its inventory in
 // core D1 (`business_stores`) says which stores exist, and each store's
@@ -187,9 +188,9 @@ export const deleteStore = async (
   requireNotStaff(by);
   const store = await managedBy(env, by, id);
   const actor = by.actor ?? actorOf(by);
-  let marked: { deletedAt: number };
+  let mark: StoreDeletionMark;
   try {
-    marked = await inJurisdiction(env, env.DATA_STORES)
+    mark = await inJurisdiction(env, env.DATA_STORES)
       .getByName(store.id)
       .close(store.id, actor);
   } catch (error) {
@@ -201,7 +202,9 @@ export const deleteStore = async (
     }
     throw error;
   }
-  await recordStoreDeleted(env, store.id, actor, marked.deletedAt);
+  // The mark's actor, not `by`: when deletions race, the one that marked
+  // the store is who deleted it.
+  await recordStoreDeleted(env, store.id, mark);
 };
 
 /** The rules for sharing a store (sharing.ts). */

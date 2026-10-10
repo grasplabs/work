@@ -23,14 +23,23 @@ import { businessStores } from "./db/core/schema.ts";
 // is stored once whichever runs first, and an event delivered twice is
 // the same event, which the audit log takes once.
 
+/**
+ * A store's deletion mark, as its object keeps it (store-host.ts): who
+ * deleted it and when. The only input of its event, so core and the
+ * object make the same event.
+ */
+export interface StoreDeletionMark {
+  deletedAt: number;
+  deletedBy: AuditActor;
+}
+
 /** The `store.deleted` event of `store`, the same wherever it is made. */
 export const storeDeletedEvent = async (
   store: StoreId,
-  actor: AuditActor,
-  deletedAt: number
+  { deletedAt, deletedBy }: StoreDeletionMark
 ): Promise<AuditEvent> =>
   auditEventSchema.parse({
-    actor,
+    actor: deletedBy,
     action: "store.deleted",
     target: { type: "store", id: store },
     detail: {},
@@ -40,18 +49,18 @@ export const storeDeletedEvent = async (
   });
 
 /**
- * Marks `store`'s inventory row deleted at `deletedAt`, and stores its
+ * Marks `store`'s inventory row deleted as `mark` says, and stores its
  * `store.deleted` event in the same batch, unless the row was marked
  * already: repeating it changes nothing.
  */
 export const recordStoreDeleted = async (
   env: Env,
   store: StoreId,
-  actor: AuditActor,
-  deletedAt: number
+  mark: StoreDeletionMark
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  const event = await storeDeletedEvent(store, actor, deletedAt);
+  const { deletedAt } = mark;
+  const event = await storeDeletedEvent(store, mark);
   await auditedBatch(env, db, [
     db
       .update(businessStores)
@@ -62,4 +71,17 @@ export const recordStoreDeleted = async (
     // A deterministic event (above), which `outboxedIfChanged` can't make.
     outboxedEventWhere(db, event, sql`changes() > 0`),
   ]);
+};
+
+/** Whether core's inventory shows `store` deleted. */
+export const inventoriedDeleted = async (
+  env: Env,
+  store: StoreId
+): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ deletedAt: businessStores.deletedAt })
+    .from(businessStores)
+    .where(eq(businessStores.id, store))
+    .get();
+  return row?.deletedAt !== null && row?.deletedAt !== undefined;
 };

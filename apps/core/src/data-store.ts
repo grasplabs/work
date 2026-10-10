@@ -12,6 +12,7 @@ import { DurableObject } from "cloudflare:workers";
 import migrations from "./db/data-store/migrations/migrations.js";
 import { migrateOnWake } from "./db/migrate.ts";
 import { outboxConsumers } from "./outbox-delivery.ts";
+import type { StoreDeletionMark } from "./store-deletion.ts";
 import { StoreHost } from "./store-host.ts";
 
 // A business store: one Durable Object per store, named by the store's ID
@@ -58,10 +59,7 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /** `StoreHost.close`. */
-  async close(
-    storeId: StoreId,
-    actor: AuditActor
-  ): Promise<{ deletedAt: number }> {
+  async close(storeId: StoreId, actor: AuditActor): Promise<StoreDeletionMark> {
     return await this.#host.close(storeId, actor);
   }
 

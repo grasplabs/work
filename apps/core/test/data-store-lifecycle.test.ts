@@ -3,7 +3,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Commit, Committed, Held } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
 import {
@@ -138,6 +138,19 @@ const recordsLeft = async (id: string): Promise<number> =>
       state.storage.sql.exec("SELECT count(*) AS n FROM sdk_records").one().n
     )
   );
+
+/** Who the `store.deleted` events of store `id` name, in log order. */
+const deletionsOf = async (id: string): Promise<unknown[]> => {
+  const events = await allEvents();
+  return events
+    .filter(
+      ({ action, target }) =>
+        action === "store.deleted" &&
+        target?.type === "store" &&
+        target.id === id
+    )
+    .map(({ actor }) => actor);
+};
 
 /** The events about store `id`, by action. */
 const eventsOf = async (id: string): Promise<string[]> => {
@@ -411,21 +424,24 @@ describe("deleting stores", () => {
     });
   });
 
-  it("finishes a deletion that stopped half-way, auditing it once", async () => {
+  it("finishes a deletion that stopped half-way, auditing it once, as by whoever marked it", async () => {
     const owner = await person("builder");
+    const admin = await person("admin");
     const store = await storeOf(owner);
-    // The object was marked; the inventory batch never ran.
+    // The owner's deletion marked the object; its inventory batch never
+    // ran, and the object's alarm hasn't either.
     await inHost(store.id, async (host) => {
       await host.close(store.id, actorOf(owner));
+      await host.ctx.storage.deleteAlarm();
     });
 
-    await deleteStore(env, owner, store.id);
+    // An admin deletes it again, and core's batch lands first.
+    await deleteStore(env, admin, store.id);
     await expect(openStore(env, store.id)).rejects.toMatchObject({
       code: "data.store_unavailable",
     });
-    await expect(eventsOf(store.id)).resolves.toStrictEqual([
-      "store.created",
-      "store.deleted",
+    await expect(deletionsOf(store.id)).resolves.toStrictEqual([
+      { type: "person", userId: owner.userId },
     ]);
   });
 
@@ -519,9 +535,16 @@ describe("deleting stores", () => {
       deleteStore(env, owner, store.id),
       deleteStore(env, admin, store.id),
     ]);
-    await expect(eventsOf(store.id)).resolves.toStrictEqual([
-      "store.created",
-      "store.deleted",
+    // One event, naming whichever of them marked the store.
+    const marked = await runInDurableObject(
+      objectOf(store.id),
+      (_i, state) =>
+        state.storage.sql
+          .exec<{ deleted_by: string }>("SELECT deleted_by FROM sdk_store")
+          .one().deleted_by
+    );
+    await expect(deletionsOf(store.id)).resolves.toStrictEqual([
+      JSON.parse(marked),
     ]);
   });
 
@@ -557,5 +580,31 @@ describe("deleting stores", () => {
       async (_instance, state) => await state.storage.getAlarm()
     );
     expect(alarm).not.toBeNull();
+  });
+
+  it("schedules its own alarm, which records the deletion and purges", async () => {
+    const owner = await person("builder");
+    const store = await storeOf(owner);
+    await commitNote(store, owner);
+    await expireReceipts(store.id);
+    // Marked inside the object; core's batch never runs. Only the alarm
+    // the deletion set for itself can finish it.
+    await inHost(store.id, async (host) => {
+      await host.close(store.id, actorOf(owner));
+    });
+
+    await vi.waitFor(
+      async () => {
+        const row = await env.DB.prepare(
+          "SELECT deleted_at FROM business_stores WHERE id = ?"
+        )
+          .bind(store.id)
+          .first<{ deleted_at: number | null }>();
+        expect(row?.deleted_at).not.toBeNull();
+        await expect(deletionsOf(store.id)).resolves.toHaveLength(1);
+        await expect(recordsLeft(store.id)).resolves.toBe(0);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
   });
 });

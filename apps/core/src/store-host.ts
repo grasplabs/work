@@ -61,7 +61,8 @@ import {
   handOver,
 } from "./outbox-delivery.ts";
 import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
-import { recordStoreDeleted } from "./store-deletion.ts";
+import { inventoriedDeleted, recordStoreDeleted } from "./store-deletion.ts";
+import type { StoreDeletionMark } from "./store-deletion.ts";
 
 // The host of a business store (data-store.ts is its Durable Object): one
 // object per store, named by the store's ID (data-stores.ts), with a SQLite database of its own that holds all
@@ -230,6 +231,20 @@ const intentOf = (stored: string) => {
     // Not JSON: unreadable, as below.
   }
   return storeIntentSchema.safeParse(json).data;
+};
+
+/** A deleted store's mark, as its row holds it. */
+const markOf = (row: {
+  deletedAt: number | null;
+  deletedBy: string | null;
+}): StoreDeletionMark => {
+  if (row.deletedAt === null || row.deletedBy === null) {
+    throw new Error("A deleted store has no deletion mark");
+  }
+  return {
+    deletedAt: row.deletedAt,
+    deletedBy: auditActorSchema.parse(JSON.parse(row.deletedBy)),
+  };
 };
 
 const conflict = (table: string, id: string) =>
@@ -1012,19 +1027,20 @@ export class StoreHost {
    * first deletion, so core can repeat one its inventory didn't record.
    * The alarm records it in core, then purges the records.
    */
-  async close(
-    storeId: StoreId,
-    actor: AuditActor
-  ): Promise<{ deletedAt: number }> {
+  async close(storeId: StoreId, actor: AuditActor): Promise<StoreDeletionMark> {
     const id = storeIdSchema.parse(storeId);
     const deletedBy = JSON.stringify(auditActorSchema.parse(actor));
     if (this.ctx.id.name !== id) {
       throw new Error("This object holds another store");
     }
-    const deletedAt = this.ctx.storage.transactionSync((): number => {
+    const mark = this.ctx.storage.transactionSync((): StoreDeletionMark => {
       const now = Date.now();
       const bound = this.#db
-        .select({ storeId: store.storeId, deletedAt: store.deletedAt })
+        .select({
+          storeId: store.storeId,
+          deletedAt: store.deletedAt,
+          deletedBy: store.deletedBy,
+        })
         .from(store)
         .get();
       if (bound === undefined) {
@@ -1039,13 +1055,14 @@ export class StoreHost {
             deletedBy,
           })
           .run();
-        return now;
+        return { deletedAt: now, deletedBy: actor };
       }
       if (bound.storeId !== id) {
         throw new Error("This object holds another store");
       }
+      // Deleted already: the first deletion's mark, whoever asks now.
       if (bound.deletedAt !== null) {
-        return bound.deletedAt;
+        return markOf(bound);
       }
       const [held] = this.#db
         .select({ count: count() })
@@ -1059,10 +1076,10 @@ export class StoreHost {
         });
       }
       this.#db.update(store).set({ deletedAt: now, deletedBy }).run();
-      return now;
+      return { deletedAt: now, deletedBy: actor };
     });
     await this.schedule(0);
-    return { deletedAt };
+    return mark;
   }
 
   /**
@@ -1075,21 +1092,18 @@ export class StoreHost {
     page: purgePageSize = purgePage,
     budgetMs = purgeBudgetMs,
   }: PurgeOptions): Promise<void> {
-    const mark = this.#db.select().from(store).get();
-    if (
-      mark === undefined ||
-      mark.deletedAt === null ||
-      mark.deletedBy === null
-    ) {
+    const bound = this.#db.select().from(store).get();
+    if (bound === undefined) {
       throw new Error("A deleted store has no deletion mark");
     }
-    if (mark.inventoriedAt === null) {
-      await recordStoreDeleted(
-        this.env,
-        storeIdSchema.parse(mark.storeId),
-        auditActorSchema.parse(JSON.parse(mark.deletedBy)),
-        mark.deletedAt
-      );
+    if (bound.inventoriedAt === null) {
+      const storeId = storeIdSchema.parse(bound.storeId);
+      await recordStoreDeleted(this.env, storeId, markOf(bound));
+      // Only once core's inventory shows it: a row that went missing
+      // (or a batch that didn't land) is retried, never purged past.
+      if (!(await inventoriedDeleted(this.env, storeId))) {
+        throw new Error("Core's inventory doesn't show the store deleted");
+      }
       this.#db.update(store).set({ inventoriedAt: Date.now() }).run();
     }
     const started = Date.now();
