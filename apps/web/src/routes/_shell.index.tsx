@@ -1,4 +1,5 @@
 import type { ChatSummary } from "@grasp-os/shared/chat";
+import type { ModelEfforts } from "@grasp-os/shared/models";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@grasp-os/ui/components/sheet";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -42,6 +43,8 @@ interface ChatPage {
   chats: ChatSummary[];
   /** The models a question may name, the default first. */
   models: string[];
+  /** The efforts each of them takes (`chats.efforts()`). */
+  efforts: Record<string, ModelEfforts>;
   /** The collections' and connections' names, by ID, for provenance. */
   sourceNames: ReadonlyMap<string, SourceName>;
 }
@@ -75,8 +78,14 @@ const readSourceNames = async (
 };
 
 /** A new chat: Grasp's buddy, the question, and the box to ask in. */
-const NewChat = ({ models }: { models: string[] }) => {
-  const { composer } = useAsk(undefined, models);
+const NewChat = ({
+  models,
+  efforts,
+}: {
+  models: string[];
+  efforts: Record<string, ModelEfforts>;
+}) => {
+  const { composer } = useAsk(undefined, models, efforts);
   return (
     <section
       aria-labelledby="new-chat"
@@ -134,6 +143,7 @@ const fileNameOf = (title: string): string =>
 const OpenChat = ({
   chat,
   models,
+  efforts,
   sourceNames,
   panel,
   onPanel,
@@ -141,6 +151,7 @@ const OpenChat = ({
 }: {
   chat: ChatSummary;
   models: string[];
+  efforts: Record<string, ModelEfforts>;
   sourceNames: ReadonlyMap<string, SourceName>;
   panel: boolean;
   onPanel: (open: boolean) => void;
@@ -148,7 +159,7 @@ const OpenChat = ({
 }) => {
   const { view, failure } = useFollowedChat(chat.id);
   const { i18n, t } = useLingui();
-  const { composer, ask } = useAsk(chat.id, models);
+  const { composer, ask } = useAsk(chat.id, models, efforts);
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   const wide = useSyncExternalStore(onWide, isWide);
   const builds = useChatBuilds(chat.id, view.running, view.drafts);
@@ -299,7 +310,7 @@ const Chat = () => {
   if (page.state !== "ready") {
     return <PageNotLoaded crumbs={[{ label: t`Chat` }]} page={page} />;
   }
-  const { chats, models, sourceNames } = page.data;
+  const { chats, models, efforts, sourceNames } = page.data;
   // One past the list's newest opens too, as core finds it (or says why not).
   const chat =
     chats.find(({ id }) => id === open) ??
@@ -370,10 +381,11 @@ const Chat = () => {
           chats={chats}
         />
         {chat === undefined ? (
-          <NewChat models={models} />
+          <NewChat efforts={efforts} models={models} />
         ) : (
           <OpenChat
             chat={chat}
+            efforts={efforts}
             key={chat.id}
             models={models}
             onBuilding={setBuilding}
@@ -425,12 +437,13 @@ export const Route = createFileRoute("/_shell/")({
   },
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session): Promise<ChatPage> => {
-      const [chats, models, sourceNames] = await Promise.all([
+      const [chats, models, efforts, sourceNames] = await Promise.all([
         session.chats.list(),
         session.chats.models(),
+        session.chats.efforts(),
         readSourceNames(session),
       ]);
-      return { chats, models, sourceNames };
+      return { chats, models, efforts, sourceNames };
     }),
   component: Chat,
 });

@@ -21,10 +21,13 @@ const onboardingTests = /onboarding\.e2e\.ts$/u;
 const ci = process.env.CI === "true";
 
 /**
- * The one model the stack's gateway allows. `--local` reaches no AI Gateway,
- * so a call to it fails: the chat test (e2e/chat.e2e.ts) shows that failure.
+ * The models the stack's gateway allows: the default, which doesn't think,
+ * and one that does, so the composer offers how hard it thinks. `--local`
+ * reaches no AI Gateway, so a call to either fails: the chat test
+ * (e2e/chat.e2e.ts) shows that failure.
  */
 const e2eModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const e2eThinkingModel = "workers-ai/@cf/zai-org/glm-5.3-flash";
 
 /** A `--var` for wrangler dev, quoted once for the shell. */
 const devVar = (name: string, value: string): string =>
@@ -119,8 +122,8 @@ export default defineConfig({
           "MODEL_GATEWAY",
           JSON.stringify({
             gateway: "grasp-os-e2e",
-            models: [e2eModel],
-            eu: { models: [e2eModel], deployment: true },
+            models: [e2eModel, e2eThinkingModel],
+            eu: { models: [e2eModel, e2eThinkingModel], deployment: true },
             budgets: { deployment: { limit: 250 }, user: { limit: 20 } },
           })
         ),

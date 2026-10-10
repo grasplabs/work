@@ -374,6 +374,26 @@ describe("model budgets", { timeout: 60_000 }, () => {
     ).resolves.toStrictEqual(["ok", "ok", "ok", "model.over_budget"]);
   });
 
+  it("charge what a model thought, as the provider counts it in the answer's output", async () => {
+    // 900 tokens of thinking on top of the answer's 100: 1,000 out at
+    // Llama 3.3's $2.253 a million, beside the 1,000 in.
+    const thought = {
+      ...pricedAnswer,
+      outputTokens: pricedAnswer.outputTokens + 900,
+      thinking: { text: "Ada said hello; greet her back.", tokens: 900 },
+    };
+    const { call, month } = withRules({ budgets: { user: { limit: 1 } } }, [
+      thought,
+    ]);
+    const ada = newPerson();
+
+    await expect(outcome(call(hello({ trigger: ada })))).resolves.toBe("ok");
+    await expect(ledgerOf(month, ada.userId)).resolves.toMatchObject({
+      spentMicros: 293 + 2253,
+      reservedMicros: 0,
+    });
+  });
+
   it("keep an answer cancelled midway reserved in full, so cancelling is never free, and its audit event says what it used was estimated", async () => {
     // The answer stops after its first 12 characters, until released: the
     // provider's count, which comes with the answer's end, never arrives.

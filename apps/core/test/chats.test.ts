@@ -847,8 +847,20 @@ describe("chats", () => {
           ann.chats.send(chat.id, { text: "Hi.", model: "openai/gpt-5.4" })
         ),
         outcome(ann.chats.send(chat.id, { text: " ", model })),
+        outcome(
+          ann.chats.send(chat.id, {
+            text: "Hi.",
+            model,
+            // @ts-expect-error -- not an effort, as a page could send it
+            effort: "extreme",
+          })
+        ),
       ])
-    ).resolves.toStrictEqual(["model.not_allowed", "agent.invalid_question"]);
+    ).resolves.toStrictEqual([
+      "model.not_allowed",
+      "agent.invalid_question",
+      "agent.invalid_question",
+    ]);
     expect(gateway.requests).toHaveLength(0);
     const follower = await follow(ann.chats, chat.id);
     await vi.waitFor(
@@ -858,6 +870,36 @@ describe("chats", () => {
       { timeout: 10_000 }
     );
     expect(follower.messages()).toStrictEqual([]);
+  });
+
+  it("ask the model to think as hard as the question says, and show its answer without the thinking", async () => {
+    const ann = await person();
+    const opus = "anthropic/claude-opus-4-8";
+    const gateway = fakeGateway({
+      ...says("Two plus two is four."),
+      outputTokens: 80,
+      thinking: { text: "Add two to two.", tokens: 60 },
+    });
+    await pointAtGateway(objectOf(ann), gateway, {
+      config: { gateway: "grasp-os-test", models: [opus] },
+    });
+    const chat = await ann.chats.create("Sums");
+    const follower = await follow(ann.chats, chat.id);
+
+    await ann.chats.send(chat.id, {
+      text: "What is 2 + 2?",
+      model: opus,
+      effort: "max",
+    });
+    await settled(follower);
+
+    expect(gateway.requests[0]?.body).toMatchObject({
+      output_config: { effort: "max" },
+    });
+    expect(shown(follower)).toStrictEqual([
+      { role: "user", text: "What is 2 + 2?" },
+      { role: "assistant", text: "Two plus two is four." },
+    ]);
   });
 
   it("show a failed answer with the gateway's reason, and nothing as stopped", async () => {

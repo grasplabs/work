@@ -257,6 +257,43 @@ describe("model settings", { timeout: 60_000 }, () => {
     ]);
   });
 
+  it("tell chat the efforts each allowed model takes, and none for one that doesn't think", async () => {
+    const { session } = await signedInWithRole(idp, "user");
+    const efforts = async (coreEnv: Env) => {
+      const { core } = await openRpc(session, { coreEnv });
+      return await core.authenticate().chats.efforts();
+    };
+
+    await expect(
+      efforts(
+        envWith({
+          gateway: "grasp-os-test",
+          models: [...allowed, "anthropic/claude-opus-4-8"],
+        })
+      )
+    ).resolves.toStrictEqual({
+      [workersAi]: { levels: [], default: null },
+      [anthropic]: { levels: ["low", "medium", "high"], default: "medium" },
+      [euModel]: {
+        levels: ["low", "medium", "high", "xhigh"],
+        default: "medium",
+      },
+      "anthropic/claude-opus-4-8": {
+        levels: ["low", "medium", "high", "xhigh", "max"],
+        default: "medium",
+      },
+    });
+    // A new deployment's: GLM-5.3 Flash has no medium, so a question that
+    // names no effort gets the next level up.
+    await expect(efforts(envWith())).resolves.toStrictEqual({
+      [defaultGatewayModels[0]]: { levels: [], default: null },
+      [defaultGatewayModels[1]]: {
+        levels: ["low", "high", "max"],
+        default: "high",
+      },
+    });
+  });
+
   it("list the most who spent, most first and ties by key, say more spent, and name nobody who's gone", async () => {
     const coreEnv = envWith({
       gateway: "grasp-os-test",

@@ -289,6 +289,87 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   ).toBeVisible({ timeout: 15_000 });
 });
 
+test("one control picks the model and how hard it thinks, sends both with the question, and is remembered", async ({
+  browser,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(browser, user);
+  // What the page sends core, to see the question go out with its effort.
+  const sent: string[] = [];
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const server = socket.connectToServer();
+    socket.onMessage((message) => {
+      sent.push(String(message));
+      server.send(message);
+    });
+  });
+  const tag = crypto.randomUUID().slice(0, 8);
+  await page.goto("/");
+  const control = page.getByRole("button", { name: /^Model: /u });
+
+  // The default model doesn't think: the control names it alone.
+  await expect(control).toHaveAccessibleName(
+    "Model: llama-3.3-70b-instruct-fp8-fast. Change model"
+  );
+  await control.click();
+  const choices = page.getByRole("menuitemradio");
+  await expect(choices).toHaveText([
+    /llama-3\.3-70b-instruct-fp8-fast/u,
+    /glm-5\.3-flash/u,
+  ]);
+
+  // One that thinks offers its efforts in the same menu, which stays open
+  // for them, at the model's own default.
+  await page.getByRole("menuitemradio", { name: /^glm-5\.3-flash/u }).click();
+  await expect(choices).toHaveText([
+    /llama-3\.3-70b-instruct-fp8-fast/u,
+    /glm-5\.3-flash/u,
+    "Low",
+    "High",
+    "Max",
+  ]);
+  await expect(
+    page.getByRole("menuitemradio", { name: "High" })
+  ).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("menuitemradio", { name: "Max" }).click();
+  await page.keyboard.press("Escape");
+  await expect(choices).toHaveCount(0);
+  await expect(control).toHaveAccessibleName(
+    "Model: glm-5.3-flash, thinking max. Change model or thinking"
+  );
+
+  const question = `Think hard ${tag}.`;
+  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page).toHaveURL(/[?&]chat=/u);
+  await expect(
+    page.getByRole("list", { name: "Messages" }).getByRole("listitem").first()
+  ).toHaveText(question);
+  // The question, not the new chat named after it.
+  const asked = sent.find(
+    (message) => message.includes('"send"') && message.includes(question)
+  );
+  expect(asked).toContain('"effort":"max"');
+  expect(asked).toContain('"model":"workers-ai/@cf/zai-org/glm-5.3-flash"');
+
+  // Kept for the person in this browser.
+  await page.reload();
+  await expect(control).toHaveAccessibleName(
+    "Model: glm-5.3-flash, thinking max. Change model or thinking"
+  );
+
+  // Back on the model that doesn't think, the effort goes.
+  await control.click();
+  await page
+    .getByRole("menuitemradio", { name: /^llama-3\.3-70b-instruct-fp8-fast/u })
+    .click();
+  await expect(choices).toHaveCount(2);
+  await page.keyboard.press("Escape");
+  await expect(control).toHaveAccessibleName(
+    "Model: llama-3.3-70b-instruct-fp8-fast. Change model"
+  );
+});
+
 test("the side panel opens in a sheet over the chat on a narrow screen, and beside it on a wide one", async ({
   browser,
 }) => {
