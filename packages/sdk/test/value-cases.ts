@@ -953,7 +953,7 @@ add(
     declare(() => v.object({ constructor: v.string() })),
     declare(() => v.object({ prototype: v.string() })),
     declare(() => v.object({ "": v.string() })),
-    declare(() => v.object({ ["k".repeat(257)]: v.string() })),
+    declare(() => v.object({ ["k".repeat(65)]: v.string() })),
     declare(() => note.extend({ ["__proto__"]: v.string() })),
   ],
   [
