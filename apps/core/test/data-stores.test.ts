@@ -1,5 +1,7 @@
+import { canonicalJson } from "@grasp-os/shared/json";
 import {
   commitMaxGuards,
+  commitMaxInputBytes,
   commitMaxWrites,
   documentMaxBytes,
   documentMaxDepth,
@@ -635,28 +637,62 @@ describe("commits", () => {
     await expect(recordCount(store)).resolves.toBe(commitMaxWrites);
   });
 
-  it(`takes at most ${documentMaxBytes} bytes of writes in one commit`, async () => {
+  it(`takes at most ${commitMaxInputBytes} bytes of writes in one commit`, async () => {
     const store = await newStore();
-    // Each document fits; the two together are more than one commit takes.
-    const half = { body: "x".repeat(70_000) };
+    // Each document fits; together they are more than one commit takes.
+    const large = { body: "x".repeat(120_000) };
+    const count = Math.floor(commitMaxInputBytes / 120_000) + 1;
     await expect(
       store.commit({
         principal: ada,
         schemaHash,
-        writes: [
-          { op: "insert", table: "notes", fields: half },
-          { op: "insert", table: "notes", fields: half },
-        ],
+        writes: Array.from({ length: count }, () => ({
+          op: "insert" as const,
+          table: "notes",
+          fields: large,
+        })),
       })
     ).rejects.toMatchObject({ code: "data.invalid" });
     await expect(recordCount(store)).resolves.toBe(0);
   });
 });
 
+/** How many bytes a document's stored text takes besides its strings. */
+const overheadOf = (empty: Record<string, string>): number =>
+  new TextEncoder().encode(canonicalJson(empty)).byteLength;
+
 describe("document size", () => {
-  /** The JSON `{"a":"…","b":"…"}` of `a` and `b` characters takes 15 more bytes. */
-  const overhead = 15;
+  const overhead = overheadOf({ a: "", b: "" });
   const firstPart = 65_000;
+
+  it("takes a document of exactly the limit in one write", async () => {
+    const store = await newStore();
+    const id = await insertNote(store, {
+      body: "x".repeat(documentMaxBytes - overheadOf({ body: "" })),
+    });
+    await expect(store.get("notes", id)).resolves.toMatchObject({
+      revision: 1,
+    });
+  });
+
+  it("counts bytes, not characters", async () => {
+    const store = await newStore();
+    // Fewer characters than the limit, but three bytes each.
+    await expect(
+      store.commit({
+        principal: ada,
+        schemaHash,
+        writes: [
+          {
+            op: "insert",
+            table: "notes",
+            fields: { body: "€".repeat(50_000) },
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
 
   /** A note of `a` characters, patched with `b` more in field `b`. */
   const patchedNote = async (store: OpenStore, b: number): Promise<string> => {

@@ -42,10 +42,11 @@ export const documentMaxBytes = 128 * 1024;
 
 /**
  * The most bytes of one commit's writes and guards, as UTF-8 JSON: the
- * limit on a public operation's input (spec 18.1), which a commit carries
- * no more of.
+ * host's own bound on one store transaction, the size spec 18.1 gives a
+ * workflow step's input and result. A public operation's own input limit
+ * is checked where operations are called, not here.
  */
-export const commitMaxInputBytes = 128 * 1024;
+export const commitMaxInputBytes = 1024 * 1024;
 
 /** How deeply a record's JSON may nest. */
 export const documentMaxDepth = 32;
