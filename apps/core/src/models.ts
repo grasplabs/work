@@ -63,13 +63,18 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
+import { budgetMonth, hasBudget, scopesFor } from "./model-budgets.ts";
+import { modelLedger } from "./model-ledger.ts";
+import type { LedgerScope, Settled, Settlement } from "./model-ledger.ts";
 import {
-  budgetMonth,
-  budgetsFor,
-  chargeBudgets,
-  checkBudgets,
-} from "./model-budgets.ts";
-import type { Budgeted } from "./model-budgets.ts";
+  boundMicros,
+  costDollars,
+  listPricesOf,
+  microsPerDollar,
+  pinnedPrice,
+} from "./model-prices.ts";
+import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
+import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
 import { judgeCall } from "./model-rules.ts";
 import type { Judged, Refusal } from "./model-rules.ts";
 
@@ -555,6 +560,22 @@ const inputTokens = ({ input, cacheRead, cacheWrite }: Usage): number =>
 const costOf = ({ cost }: Usage): number =>
   Number.isFinite(cost.total) && cost.total > 0 ? cost.total : 0;
 
+/**
+ * What a provider's count cost at the request's pinned prices, in the
+ * tier its prompt is in, as the model ledger charges it; pi's own cost
+ * where the model has no pinned prices or the count isn't one.
+ */
+const pricedCost = (price: PinnedPrice | undefined, usage: Usage): number => {
+  const { input, output, cacheRead, cacheWrite } = usage;
+  const tokens = { input, output, cacheRead, cacheWrite };
+  return price !== undefined &&
+    Object.values(tokens).every(
+      (count) => Number.isSafeInteger(count) && count >= 0
+    )
+    ? costDollars(price, tokens)
+    : costOf(usage);
+};
+
 const hasFailed = ({ stopReason }: AssistantMessage): boolean =>
   stopReason === "error" || stopReason === "aborted";
 
@@ -594,6 +615,12 @@ interface Route extends Admitted {
   model: Model<Api>;
   /** The AI binding's fetch, which reaches the gateway. */
   transport: FetchFunction;
+  /** The prices its provider requests are pinned to; none for a model with none. */
+  price: PinnedPrice | undefined;
+  /** The scopes a provider request sent now counts against, in this month. */
+  scopesNow: () => { period: string; scopes: LedgerScope[] };
+  /** Core's env, for the model ledger. */
+  env: ModelsEnv;
 }
 
 interface Request extends Route {
@@ -611,6 +638,24 @@ interface GatewayResponse {
   sentChars: number;
   /** What the log keeps of a response that refused the request. */
   refusal: ProviderRefusal | undefined;
+  /**
+   * Why the model ledger held a provider request back, unsent: no room in
+   * a budget, or no ledger to account for it.
+   */
+  held: Refusal | undefined;
+  /**
+   * The provider request whose answer streams, admitted by the ledger and
+   * waiting to be settled with what it used, and what it reserved.
+   */
+  pending: Admission | undefined;
+  /** The provider requests already settled, in order: refused, failed or superseded. */
+  settled: RequestSettled[];
+}
+
+/** A provider request the ledger admitted: its ID, and what it reserved. */
+interface Admission {
+  id: string;
+  reservedMicros: number;
 }
 
 interface Sent extends GatewayResponse {
@@ -720,33 +765,220 @@ const workersAiPayload = (payload: unknown): unknown => {
 };
 
 /**
+ * Tokens a provider may add to a prompt beyond what its request body
+ * holds, such as the instructions Anthropic adds for tools, and each
+ * message's role markers beyond what its JSON takes. The rest of the
+ * prompt is bounded by the body's size: a token is at least one byte of
+ * the text it stands for.
+ */
+const promptAllowanceTokens = 1024;
+
+/**
+ * How long after a call's deadline a provider request still unsettled is
+ * charged its whole reservation (model-ledger.ts).
+ */
+const reconcileGraceMs = 5 * 60_000;
+
+/** The prices of a model that has none, which no budget admits. */
+const unpriced: PinnedPrice = {
+  version: "unpriced",
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  tiers: [],
+};
+
+/**
+ * The response a provider request held back by the ledger gets instead
+ * of being sent: a refusal the provider SDKs don't retry.
+ */
+const heldResponse = (): Response =>
+  Response.json({ error: { type: "grasp_held" } }, { status: 400 });
+
+/**
+ * Settles provider request `id` in the model ledger. Never throws: a
+ * request the ledger doesn't hear about stays reserved, and is charged
+ * its whole reservation when it comes due.
+ */
+const settleRequest = async (
+  env: ModelsEnv,
+  id: string,
+  settlement: Settlement
+): Promise<Settled | undefined> => {
+  try {
+    return await modelLedger(env).settle(id, settlement);
+  } catch (error) {
+    log.error("model.settle_failed", {
+      ...errorFields(error),
+      by: settlement.by,
+    });
+    return undefined;
+  }
+};
+
+/**
+ * Asks the model ledger to admit one provider request, with the body it
+ * will send: reserves the most it can cost, its prompt bounded by the
+ * body's size and its answer by the cap the body sets (or the model's,
+ * where it sets none), at the model's pinned prices. Its ID, or why it
+ * is held back.
+ */
+const admitRequest = async (
+  route: Route,
+  body: unknown
+): Promise<Admission | { held: Refusal }> => {
+  const { env, call, model, price } = route;
+  const { period, scopes } = route.scopesNow();
+  const budgeted = hasBudget(scopes);
+  if (price === undefined && budgeted) {
+    return { held: { code: "model.unpriced" } };
+  }
+  // Never expected: the gateway sends text only, at list prices.
+  const unbounded = unboundedBy(body);
+  if (unbounded !== undefined) {
+    log.error("model.unbounded_request", { model: call.model, unbounded });
+    return { held: { code: "model.unpriced" } };
+  }
+  const bytes = bodyBytes(body);
+  const outputTokens = outputCapOf(body) ?? model.maxTokens;
+  if (bytes === undefined || !(outputTokens > 0)) {
+    // Never expected: the provider SDKs send JSON, with a cap.
+    log.error("model.unbounded_request", { model: call.model });
+    return { held: { code: "model.ledger_unavailable" } };
+  }
+  // Priced at the dearest tier the prompt may reach: Anthropic's
+  // long-context premium too, a tier of its own (model-prices.ts).
+  const promptBound = bytes + promptAllowanceTokens;
+  const pinned = price ?? unpriced;
+  const id = crypto.randomUUID();
+  const reservedMicros = boundMicros(pinned, {
+    inputTokens: promptBound,
+    outputTokens,
+  });
+  try {
+    const admitted = await modelLedger(env).admit({
+      id,
+      period,
+      scopes,
+      model: call.model,
+      price: pinned,
+      reservedMicros,
+      actor: call.trigger,
+      reconcileAt:
+        Date.now() + (call.timeoutMs ?? defaultTimeoutMs) + reconcileGraceMs,
+    });
+    if (admitted.ok) {
+      return { id, reservedMicros };
+    }
+    if ("unpriced" in admitted) {
+      return { held: { code: "model.unpriced" } };
+    }
+    if ("reused" in admitted) {
+      // Never expected: every ID is a new UUID.
+      log.error("model.request_id_reused", { model: call.model });
+      return { held: { code: "model.ledger_unavailable" } };
+    }
+    return { held: { code: "model.over_budget", because: admitted.scope } };
+  } catch (error) {
+    log.error("model.ledger_failed", errorFields(error));
+    // The admission may have committed with its answer lost: nothing was
+    // sent, so it is released, or charged in full if even that fails.
+    await settleRequest(env, id, { by: "unsent" });
+    return { held: { code: "model.ledger_unavailable" } };
+  }
+};
+
+/** `init` with the provider request's ID in the gateway log's metadata. */
+const withRequestId = (
+  init: RequestInit | undefined,
+  id: string
+): RequestInit => {
+  const headers = new Headers(init?.headers);
+  let metadata: unknown = undefined;
+  try {
+    metadata = JSON.parse(headers.get("cf-aig-metadata") ?? "{}");
+  } catch {
+    metadata = {};
+  }
+  headers.set(
+    "cf-aig-metadata",
+    JSON.stringify({
+      ...(isRecord(metadata) ? metadata : {}),
+      providerRequest: id,
+    })
+  );
+  return { ...init, headers };
+};
+
+/**
  * Opens one request through the gateway: the model's answer as it streams
  * in, and the gateway's response once it came. pi reports a failed request
  * as a final error event instead of throwing.
  */
 const open = (
-  { model, ref, call, transport }: Route,
+  route: Route,
   context: TranscriptContext,
   signal: AbortSignal
 ) => {
+  const { model, ref, call, transport, env } = route;
   const response: GatewayResponse = {
     status: undefined,
     logId: undefined,
     sentChars: 0,
     refusal: undefined,
+    held: undefined,
+    pending: undefined,
+    settled: [],
   };
-  // The request's size as sent, should what it used have to be estimated
-  // (`usedBy`); and what a refusal's body says went wrong, which the
-  // provider SDKs drop when it isn't in their provider's shape (Workers
-  // AI's has no `error`, so OpenAI's SDK reports "400 status code (no
-  // body)").
+  // Each provider request, the SDK's retries too, is admitted by the
+  // model ledger before it is sent, and held back unsent when it isn't.
+  // One the provider refused is settled at nothing; one whose fate can't
+  // be known keeps its reservation; the one whose answer streams is
+  // settled once the answer ends (`record`). Besides, the request's size
+  // as sent, should what it used have to be estimated (`usedBy`); and
+  // what a refusal's body says went wrong, which the provider SDKs drop
+  // when it isn't in their provider's shape (Workers AI's has no `error`,
+  // so OpenAI's SDK reports "400 status code (no body)").
   const measured: FetchFunction = async (input, init) => {
+    const admitted = await admitRequest(route, init?.body);
+    if ("held" in admitted) {
+      response.held = admitted.held;
+      return heldResponse();
+    }
     response.sentChars = typeof init?.body === "string" ? init.body.length : 0;
-    const answered = await transport(input, init);
+    let answered;
+    try {
+      answered = await transport(input, withRequestId(init, admitted.id));
+    } catch (error) {
+      response.settled.push({
+        reservedMicros: admitted.reservedMicros,
+        settled: await settleRequest(env, admitted.id, { by: "unknown" }),
+      });
+      throw error;
+    }
     response.refusal = undefined;
     if (!answered.ok) {
+      // A refusal before the provider took the request on costs nothing;
+      // a server error may have come after it did.
+      response.settled.push({
+        reservedMicros: admitted.reservedMicros,
+        settled: await settleRequest(env, admitted.id, {
+          by: answered.status < 500 ? "refused" : "unknown",
+        }),
+      });
       response.refusal = refusalOf(await answered.clone().text());
+      return answered;
     }
+    if (response.pending !== undefined) {
+      response.settled.push({
+        reservedMicros: response.pending.reservedMicros,
+        settled: await settleRequest(env, response.pending.id, {
+          by: "unknown",
+        }),
+      });
+    }
+    response.pending = admitted;
     return answered;
   };
   // SAFETY: the provider picks both the adapter and the catalog the model
@@ -915,12 +1147,15 @@ interface Used {
  * list prices. A request that got no response is charged nothing: the
  * provider may not have taken it.
  */
-const usedBy = ({ ref }: Admitted, sent: Sent): Used => {
+const usedBy = (
+  { ref, price }: Pick<Route, "ref" | "price">,
+  sent: Sent
+): Used => {
   const { answer, status } = sent;
   const counted = {
     inputTokens: inputTokens(answer.usage),
     outputTokens: answer.usage.output,
-    cost: costOf(answer.usage),
+    cost: pricedCost(price, answer.usage),
   };
   const responded = status !== undefined && status >= 200 && status < 300;
   if (!(responded && hasFailed(answer))) {
@@ -931,13 +1166,22 @@ const usedBy = ({ ref }: Admitted, sent: Sent): Used => {
     0,
     estimatedTokens(receivedChars(answer)) - counted.outputTokens
   );
+  const { usage } = answer;
   const { cost: rates } = ref.catalog;
   return {
     inputTokens: counted.inputTokens + input,
     outputTokens: counted.outputTokens + output,
-    // The catalog's prices are per million tokens.
+    // At the pinned prices, in the tier the count and the estimate reach
+    // together; the catalog's (per million tokens) for a model with none.
     cost:
-      counted.cost + (input * rates.input + output * rates.output) / 1_000_000,
+      price === undefined
+        ? counted.cost +
+          (input * rates.input + output * rates.output) / 1_000_000
+        : pricedCost(price, {
+            ...usage,
+            input: usage.input + input,
+            output: usage.output + output,
+          }),
     estimated: input + output > 0,
   };
 };
@@ -949,7 +1193,69 @@ interface Recorded extends Used {
   outcome: Outcome;
   status: number | undefined;
   errorType: string | undefined;
+  /** How the model ledger settled its provider request (`ledgerOf`). */
+  ledger: Ledgered;
 }
+
+/**
+ * How the model ledger settled a request's provider request, as its audit
+ * event records it, so the event and the ledger agree: `settled` at what
+ * it charged; `unknown`, holding its whole reservation until it is charged
+ * that in full; `quarantined`, held for a person; `missing` or `failed`
+ * when the ledger had none or couldn't be reached (the reservation, if
+ * any, is charged in full when it comes due); `none` when nothing was
+ * sent.
+ */
+interface Ledgered {
+  /** How the last of them settled. */
+  state: "settled" | "unknown" | "quarantined" | "missing" | "failed" | "none";
+  /** How many provider requests were sent, retries included. */
+  requests: number;
+  /** What they were charged, in US dollars; null when none were sent. */
+  charged: number | null;
+  /**
+   * What their reservations still hold, in US dollars, to be charged in
+   * full or settled by a person; null when none were sent.
+   */
+  held: number | null;
+}
+
+/** One provider request's settlement, with what it reserved. */
+interface RequestSettled {
+  reservedMicros: number;
+  /** `undefined` when the ledger couldn't be reached to settle it. */
+  settled: Settled | undefined;
+}
+
+/** What a settlement holds still: all its reservation, unless settled or missing. */
+const heldBy = ({ reservedMicros, settled }: RequestSettled): number =>
+  settled?.state === "settled" || settled?.state === "missing"
+    ? 0
+    : reservedMicros;
+
+/**
+ * What the audit event records of how the ledger settled every provider
+ * request a call's attempt sent: a retry the SDK made after a server error
+ * too, whose reservation stays held, so the event accounts for all of it.
+ */
+const ledgerOf = (settlements: readonly RequestSettled[]): Ledgered => {
+  const last = settlements.at(-1);
+  if (last === undefined) {
+    return { state: "none", requests: 0, charged: null, held: null };
+  }
+  const charged = settlements.reduce(
+    (sum, { settled }) =>
+      sum + (settled?.state === "settled" ? settled.chargedMicros : 0),
+    0
+  );
+  const held = settlements.reduce((sum, one) => sum + heldBy(one), 0);
+  return {
+    state: last.settled?.state ?? "failed",
+    requests: settlements.length,
+    charged: charged / microsPerDollar,
+    held: held / microsPerDollar,
+  };
+};
 
 /**
  * The chat a call works in, if it works in one: its actor is the
@@ -1017,6 +1323,11 @@ const auditEntry = (
       errorType: recorded.errorType ?? null,
       // Whether its tokens and cost are partly an estimate (`usedBy`).
       estimated: recorded.estimated,
+      // How the model ledger settled it: what it charged, or holds.
+      ledger: recorded.ledger.state,
+      ledgerRequests: recorded.ledger.requests,
+      ledgerCharged: recorded.ledger.charged,
+      ledgerHeld: recorded.ledger.held,
       // Never an ID so long that the event would be refused.
       gatewayLogId:
         logId !== undefined && logId.length <= auditIdentifierMaxLength
@@ -1049,31 +1360,77 @@ const largestRecord: Recorded = {
   outcome: "invalid_output",
   status: 599,
   errorType: "x".repeat(64),
+  ledger: {
+    state: "quarantined",
+    requests: Number.MAX_SAFE_INTEGER,
+    charged: Number.MAX_VALUE,
+    held: Number.MAX_VALUE,
+  },
 };
 
 /** The most the rules can add to a call's audit event. */
 const largestJudged: Judged = {
   euOnly: "connection",
   sensitive: "collection",
-  budgets: [],
 };
 
+/** A whole number of tokens, as a provider counted them. */
+const isCount = (value: number): boolean =>
+  Number.isSafeInteger(value) && value >= 0;
+
 /**
- * Records one request in the audit log, however it ended, and adds its
- * cost to the call's budgets: what it used as the provider counted it,
- * or an estimate where a request that failed mid-answer has no count
- * (`usedBy`). Never throws: a caller that lost a paid answer to a
- * bookkeeping failure would ask (and pay) again.
+ * The provider's whole count of what a request used; none if it isn't
+ * one. A count with no prompt tokens at all is none: every request sends
+ * a prompt, so the provider never sent its count (pi's chat completions
+ * end a stream with no usage chunk as answered, counting nothing). Nor is
+ * one with one-hour cache writes, which the catalog doesn't price.
+ */
+const countedTokens = ({
+  input,
+  output,
+  cacheRead,
+  cacheWrite,
+  cacheWrite1h,
+}: Usage): TokenCounts | undefined =>
+  [input, output, cacheRead, cacheWrite].every(isCount) &&
+  input + cacheRead + cacheWrite > 0 &&
+  (cacheWrite1h ?? 0) === 0
+    ? { input, output, cacheRead, cacheWrite }
+    : undefined;
+
+/**
+ * Records one request in the audit log, however it ended, with what it
+ * used as the provider counted it, or an estimate where a request that
+ * failed mid-answer has no count (`usedBy`); and settles its provider
+ * request in the model ledger. Never throws: a caller that lost a paid
+ * answer to a bookkeeping failure would ask (and pay) again.
  */
 const record = async (
   env: ModelsEnv,
-  admitted: Admitted,
+  admitted: Route,
   sent: Sent,
   attempt: number,
   outcome: Outcome,
   failure?: Failure
 ): Promise<void> => {
-  const { logId, status } = sent;
+  // Settled first, so nothing that goes wrong with the audit event keeps
+  // the provider request from being charged what it used. The one whose
+  // answer streamed is charged the provider's count; one that ended
+  // without a whole count (failed, timed out or cancelled once accepted,
+  // or answered with no usage at all) keeps its whole reservation, never
+  // an estimate below what the provider may bill.
+  const { pending, logId, status } = sent;
+  let settled: Settled | undefined = undefined;
+  if (pending !== undefined) {
+    const tokens = hasFailed(sent.answer)
+      ? undefined
+      : countedTokens(sent.answer.usage);
+    settled = await settleRequest(
+      env,
+      pending.id,
+      tokens === undefined ? { by: "unknown" } : { by: "usage", tokens }
+    );
+  }
   const used = usedBy(admitted, sent);
   await keepAuditEvent(
     env,
@@ -1085,14 +1442,13 @@ const record = async (
       outcome,
       status: failure?.status ?? status,
       errorType: failure?.errorType,
+      ledger: ledgerOf([
+        ...sent.settled,
+        ...(pending === undefined
+          ? []
+          : [{ reservedMicros: pending.reservedMicros, settled }]),
+      ]),
     })
-  );
-  // What it cost counts against its budgets, a failed request too.
-  await chargeBudgets(
-    env,
-    admitted.call.trigger,
-    admitted.judged.budgets,
-    used.cost
   );
 };
 
@@ -1144,6 +1500,24 @@ const refuse = async (
   );
 };
 
+/** Records a refusal, as `refuse` does, without throwing it. */
+const refuseQuietly = async (
+  env: ModelsEnv,
+  call: Session,
+  refusal: Refusal
+): Promise<void> => {
+  try {
+    await refuse(env, call, refusal);
+  } catch (error) {
+    if (
+      modelErrors.codeOf(error) === undefined &&
+      permissionErrors.codeOf(error) === undefined
+    ) {
+      throw error;
+    }
+  }
+};
+
 /** `fields` parsed with `schema`, or refused as an invalid call. */
 const parseCall = <Schema extends z.ZodType>(
   schema: Schema,
@@ -1160,15 +1534,7 @@ const parseCall = <Schema extends z.ZodType>(
  * Checks a request against the deployment's config and rules, before
  * anything is sent, and routes it to the model at the gateway.
  */
-const admit = async (
-  env: ModelsEnv,
-  call: Session
-): Promise<
-  Route & {
-    /** The budgets a request sent now counts against, in this month. */
-    budgetsNow: () => Budgeted[];
-  }
-> => {
+const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   const config = modelGatewayConfig(env);
   // Plain workerd (on-prem) has no AI binding, so no gateway either.
   const rules = modelRules(env);
@@ -1199,13 +1565,23 @@ const admit = async (
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
+  // A model with no safe price can't be bounded, so no budget admits it.
+  const price = await pinnedPrice(
+    listPricesOf(ref.provider, ref.id, ref.catalog.cost)
+  );
+  const scopes = scopesFor(rules.budgets, call);
+  if (price === undefined && hasBudget(scopes)) {
+    return await refuse(env, call, { code: "model.unpriced" });
+  }
   return {
     call,
     ref,
     judged: verdict.judged,
-    budgetsNow: () => budgetsFor(rules.budgets, call, budgetMonth(env)),
     model: gatewayModel(config.gateway, ref),
     transport: createAiBindingFetch(env.AI),
+    price,
+    scopesNow: () => ({ period: budgetMonth(env), scopes }),
+    env,
   };
 };
 
@@ -1214,7 +1590,6 @@ const answerCall = async <Output>(
   env: ModelsEnv,
   request: Request,
   schema: z.ZodType<Output> | undefined,
-  budgetsNow: () => Budgeted[],
   limit: Deadline
 ): Promise<ModelAnswer<Output>> => {
   const { call } = request;
@@ -1223,29 +1598,19 @@ const answerCall = async <Output>(
   // A call with a schema asks once more when the answer doesn't fit it.
   const attempts = schema === undefined ? 1 : 2;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    if (attempt > 1) {
-      // The attempt before may have used up a budget, or the month may
-      // have turned: every request is checked, and counted, in the month
-      // it is sent in, not just the call's first.
-      const budgets = budgetsNow();
-      // oxlint-disable-next-line no-await-in-loop
-      const usedUp = await checkBudgets(env, call.trigger, budgets);
-      if (usedUp !== undefined) {
-        // oxlint-disable-next-line no-await-in-loop
-        await refuse(env, call, {
-          code: "model.over_budget",
-          because: usedUp.scope,
-        });
-      }
-      request.judged = { ...request.judged, budgets };
-    }
-    // Each attempt follows up on the answer before it.
+    // Each attempt follows up on the answer before it, and each of its
+    // provider requests is admitted by the ledger, in the month it is
+    // sent in: one the ledger held back was never sent.
     // oxlint-disable-next-line no-await-in-loop
     const sent = await send(request);
+    if (sent.held !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop
+      await refuse(env, call, sent.held);
+    }
     const { answer } = sent;
     usage.inputTokens += inputTokens(answer.usage);
     usage.outputTokens += answer.usage.output;
-    cost += costOf(answer.usage);
+    cost += pricedCost(request.price, answer.usage);
     const text = answerText(answer);
     const truncated = answer.stopReason === "length";
 
@@ -1298,17 +1663,14 @@ const callModel = async <Output>(
   { schema, ...fields }: ModelCall<Output>
 ): Promise<ModelAnswer<Output>> => {
   const call = parseCall(callSchema, fields);
-  const { ref, judged, budgetsNow, model, transport } = await admit(env, call);
+  const route = await admit(env, call);
+  const { model } = route;
   const limit = deadline(call.timeoutMs ?? defaultTimeoutMs);
   try {
     return await answerCall(
       env,
       {
-        model,
-        ref,
-        call,
-        judged,
-        transport,
+        ...route,
         signal: limit.signal,
         system:
           schema === undefined
@@ -1319,7 +1681,6 @@ const callModel = async <Output>(
         messages: toMessages(call, model),
       },
       schema,
-      budgetsNow,
       limit
     );
   } finally {
@@ -1359,6 +1720,19 @@ const relayEvents = async (
   // The answer as far as it came, as the adapter's last event had it.
   let partial: AssistantMessage | undefined = undefined;
   for await (const event of events) {
+    if (event.type === "error" && response.held !== undefined) {
+      // Never sent: the ledger held it back. Audited as a refusal.
+      const { code } = response.held;
+      await refuseQuietly(env, route.call, response.held);
+      out.push({
+        ...event,
+        error: {
+          ...event.error,
+          errorMessage: `The model call was refused (${code}).`,
+        },
+      });
+      return;
+    }
     if (event.type === "error") {
       const sent: Sent = { answer: event.error, ...response };
       const stopped = limit.stopped();
