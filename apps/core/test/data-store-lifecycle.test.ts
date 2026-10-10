@@ -312,6 +312,34 @@ describe("deleting stores", () => {
     ).rejects.toMatchObject({ code: "data.invalid" });
   });
 
+  it("audits an agent's sharing as the agent, acting for the manager", async () => {
+    const owner = await person("builder");
+    const other = await person("builder");
+    const id = await createStore(env, owner);
+    const agent = {
+      type: "agent",
+      agentId: "chat-agent",
+      onBehalfOf: owner.userId,
+    } as const;
+    const viaAgent: Acting = { ...owner, actor: agent };
+    const member = { type: "person", id: other.userId } as const;
+    await shareStore(env, viaAgent, id, member);
+    await unshareStore(env, viaAgent, id, member);
+    const logged = await allEvents();
+    expect(
+      logged
+        .filter(({ target }) => target?.id === id)
+        .map(({ action, actor }) => ({ action, actor }))
+    ).toStrictEqual([
+      {
+        action: "store.created",
+        actor: { type: "person", userId: owner.userId },
+      },
+      { action: "store.member.added", actor: agent },
+      { action: "store.member.removed", actor: agent },
+    ]);
+  });
+
   it("audits sharing and unsharing only when they change something", async () => {
     const owner = await person("builder");
     const other = await person("builder");

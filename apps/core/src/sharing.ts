@@ -1,5 +1,5 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import type { AuditEntry } from "@grasp-os/shared/audit";
+import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { canBuild, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, or, sql } from "drizzle-orm";
@@ -125,12 +125,14 @@ export const requireSharable = async (
  * The role is the one they have now, or had until unshared.
  */
 export const memberEntry = (
-  by: Pick<Identity, "userId" | "staff">,
+  by: Pick<Identity, "userId" | "staff"> & { actor?: AuditActor },
   action: string,
   target: { type: string; id: string },
   member: MemberRef & { role: string }
 ): AuditEntry => ({
-  actor: actorOf(by),
+  // Whoever acts: an agent acting for the person when one does (an
+  // `Acting`'s actor), the person themselves otherwise.
+  actor: by.actor ?? actorOf(by),
   action,
   target,
   detail: { memberType: member.type, member: member.id, role: member.role },

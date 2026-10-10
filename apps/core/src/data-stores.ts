@@ -46,8 +46,14 @@ import type { StoreDeletionMark } from "./store-deletion.ts";
 //   (`role.forbidden` otherwise), and the creation is audited in the same
 //   batch as its inventory row.
 // - Someone deletes or shares a store they don't manage: manage authority
-//   is read from the database at each call (role, ownership, membership
-//   by person or team, capped by the organization role). Anyone without
+//   is decided at each call, as an App's roles are (app-access.ts): the
+//   store's ownership and member rows are read from the database then,
+//   so unsharing applies to the next call; the caller's role and teams
+//   are their identity as read for the call (a session's latest reading,
+//   at most a few seconds old, auth/identity.ts and rpc.ts), so a
+//   demotion or a team change applies within those seconds. Whoever
+//   calls these must pass an identity read that way, never one kept
+//   across calls. Membership is capped by the organization role. Anyone without
 //   it gets `data.store_unavailable`, as for a store that doesn't exist,
 //   so they learn nothing of it. Grasp staff never share, unshare or
 //   delete a store: whom a client's data reaches, and whether it is
@@ -131,6 +137,8 @@ export const createStore = async (env: Env, by: Acting): Promise<StoreId> => {
  * person or team still in the organization it is shared with in role
  * `manage`, and only while their role in the organization builds.
  * Otherwise `data.store_unavailable`, as for a store that doesn't exist.
+ * `by`'s role and teams are taken as given: an identity read for this
+ * call, as for App roles (see the threat model above).
  */
 const managedBy = async (
   env: Env,
