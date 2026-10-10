@@ -260,6 +260,19 @@ describe("a catalog entry's logo", () => {
       () => {
         throw new Error("The connection broke");
       },
+      // Breaking off after its first bytes, while connect reads it.
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start: (controller) => {
+              controller.enqueue(pngLogo.subarray(0, 8));
+            },
+            pull: (controller) => {
+              controller.error(new Error("The connection broke"));
+            },
+          }),
+          { headers: { "content-type": "image/png" } }
+        ),
     ];
     const logos = [];
     for (const answer of passing) {
@@ -273,9 +286,10 @@ describe("a catalog entry's logo", () => {
       null,
       null,
       null,
+      null,
       "image/png",
     ]);
-    expect(composio.logoRequests).toHaveLength(4);
+    expect(composio.logoRequests).toHaveLength(5);
   });
 
   it("is none while Composio doesn't list the catalog, or connect has no key", async () => {
