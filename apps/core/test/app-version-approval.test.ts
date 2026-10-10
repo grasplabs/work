@@ -282,10 +282,17 @@ describe("An App's next version", { timeout: 60_000 }, () => {
       ],
     });
 
-    // Granted again, by an admin who saw the new code, it writes again.
+    // Granted again, by an admin who saw the new code, it writes again (a
+    // change: a save that changes nothing makes no version).
     await grantReviewed(admin.api, write?.id ?? "");
     await expect(
-      callApp(env, app, as(admin.userId), "save", saveArgs(path, drawn, 1))
+      callApp(
+        env,
+        app,
+        as(admin.userId),
+        "save",
+        saveArgs(path, { ...drawn, title: "Pay supplier invoices weekly" }, 1)
+      )
     ).resolves.toMatchObject({ ok: { path, currentVersion: 2 } });
   });
 

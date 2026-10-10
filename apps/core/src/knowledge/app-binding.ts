@@ -12,13 +12,18 @@ import type {
   SearchResults,
 } from "@grasp-os/shared/knowledge";
 import type { Authority } from "@grasp-os/shared/permissions";
+import {
+  submissionErrors,
+  submissionOptionsSchema,
+} from "@grasp-os/shared/submissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { callerOf, stillAdmitted, tokenOf } from "../app-bindings.ts";
-import type { InvocationKind } from "../app.ts";
+import type { CallPath, InvocationKind } from "../app.ts";
 import { forSandbox } from "../bindings.ts";
 import { collectionReads, readAsDelegate } from "./binding.ts";
 import type { CollectionGrant } from "./binding.ts";
+import { submissionKey } from "./receipts.ts";
 import { declaredTypes } from "./record-types.ts";
 import {
   canWriteAsDelegate,
@@ -27,6 +32,16 @@ import {
   saveRecordAsDelegate,
 } from "./records.ts";
 import type { Setter } from "./records.ts";
+
+/** Who a stub call is for, as `#callerOf` admits it. */
+interface Resolved {
+  authority: Authority;
+  setter: Setter;
+  readOnly: boolean;
+  /** The step's key, for a workflow run's caller. */
+  stepKey: string | undefined;
+  path: CallPath;
+}
 
 /**
  * A collection, as an App's server code holds it:
@@ -63,16 +78,15 @@ export class AppCollectionBinding extends WorkerEntrypoint<
    * Who `caller` is, the App method their call runs, and whether the call
    * may only read, admitted for `use` (`callerOf`).
    */
-  async #callerOf(
-    caller: unknown,
-    use: InvocationKind
-  ): Promise<{ authority: Authority; setter: Setter; readOnly: boolean }> {
+  async #callerOf(caller: unknown, use: InvocationKind): Promise<Resolved> {
     const { app } = this.ctx.props;
     const resolved = await callerOf(this.env, app, caller, use);
     return {
       authority: resolved.authority,
       setter: { app, method: resolved.method },
       readOnly: resolved.kind === "read",
+      stepKey: resolved.idempotencyKey,
+      path: resolved.path,
     };
   }
 
@@ -228,14 +242,35 @@ export class AppCollectionBinding extends WorkerEntrypoint<
    * again just before the write's batch: a call that ended, lost what let
    * it in, or whose code was stopped while the save was on its way writes
    * nothing.
+   *
+   * Each save keeps a receipt (receipts.ts) under the caller's
+   * `idempotencyKey` (`{ idempotencyKey? }`, 1 to 128 printable ASCII
+   * characters), scoped to the caller, this App's version and method,
+   * and this collection and permission: the save retried under it
+   * answers the save made, and writes nothing; other input under it is
+   * `submission.key_conflict`. A workflow step's saves go under its step,
+   * by the caller's key or, without one, by their input. Without a key,
+   * a screen's save is its own. The save commits only before its call's
+   * deadline, by the database's clock, and not once a newer attempt of
+   * it began.
    */
-  async saveRecord(caller: unknown, input: unknown): Promise<DocumentSummary> {
+  async saveRecord(
+    caller: unknown,
+    input: unknown,
+    options?: unknown
+  ): Promise<DocumentSummary> {
     const { app, collectionId } = this.ctx.props;
     return await this.#run(
       caller,
       "write",
-      async ({ authority, setter, token }, grant) =>
-        await saveRecordAsDelegate(
+      async ({ authority, setter, token, stepKey, path }, grant) => {
+        // Before anything is done: a key that isn't one does nothing.
+        const parsed = submissionOptionsSchema.safeParse(options);
+        if (!parsed.success) {
+          throw submissionErrors.create("submission.key_invalid");
+        }
+        const callerKey = parsed.data?.idempotencyKey;
+        return await saveRecordAsDelegate(
           this.env,
           authority,
           grant.context,
@@ -245,8 +280,21 @@ export class AppCollectionBinding extends WorkerEntrypoint<
           setter,
           async () => {
             await stillAdmitted(this.env, app, token, "write");
-          }
-        )
+          },
+          (inputHash) => ({
+            ...submissionKey(stepKey, callerKey, inputHash),
+            scope: {
+              principal: authority.onBehalfOf,
+              chain: path.chain,
+              appVersion: authority.appVersion ?? 0,
+              method: setter.method,
+              collectionId,
+              permissionId: grant.permissionId,
+            },
+            deadline: path.deadline,
+          })
+        );
+      }
     );
   }
 
@@ -258,12 +306,7 @@ export class AppCollectionBinding extends WorkerEntrypoint<
     caller: unknown,
     use: InvocationKind,
     run: (
-      resolved: {
-        authority: Authority;
-        setter: Setter;
-        readOnly: boolean;
-        token: string;
-      },
+      resolved: Resolved & { token: string },
       grant: CollectionGrant
     ) => Promise<T>
   ): Promise<T> {
