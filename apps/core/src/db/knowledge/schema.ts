@@ -14,6 +14,7 @@
  */
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
+import { submissionIntentKinds } from "@grasp-os/shared/submissions";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -418,5 +419,44 @@ export const submissionOutcomes = sqliteTable(
     check("submission_outcomes_open", sql`${table.open} = 1`),
     check("submission_outcomes_on_time", sql`${table.onTime} = 1`),
     check("submission_outcomes_current", sql`${table.current} = 1`),
+  ]
+);
+
+/**
+ * What committed submissions still have to tell others (knowledge/
+ * outbox.ts): their intents, written in the same batch as the change and
+ * its outcome, which they refer to, so an entry exists exactly when its
+ * submission committed. An entry's ID is its receipt's with its place
+ * among the submission's intents, the same however often it is handed
+ * over, so whoever takes it takes it once. Handed over in the order
+ * stored (rowid) until taken, or settled with the code saying why it
+ * can't be (`undeliverable`); never dropped while unsettled: its receipt
+ * is kept until it is settled.
+ */
+export const submissionOutbox = sqliteTable(
+  "submission_outbox",
+  {
+    id: text().primaryKey(),
+    receiptId: text("receipt_id")
+      .notNull()
+      .references(() => submissionOutcomes.receiptId),
+    /** Its place among its submission's intents, from 0. */
+    position: integer().notNull(),
+    kind: text({ enum: submissionIntentKinds }).notNull(),
+    /** JSON: the intent, as its kind has it. */
+    intent: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /** How many hand-overs failed, and when the next may be tried. */
+    attempts: integer().notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at").notNull(),
+    settledAt: timestamp("settled_at"),
+    /** The code it was settled with when it couldn't be delivered. */
+    undeliverable: text(),
+  },
+  (table) => [
+    index("submission_outbox_receipt_idx").on(table.receiptId),
+    index("submission_outbox_pending_idx")
+      .on(table.nextAttemptAt)
+      .where(sql`settled_at IS NULL`),
   ]
 );
