@@ -3,28 +3,28 @@ import { Await, createFileRoute } from "@tanstack/react-router";
 
 import { Activity } from "../dashboard/activity.tsx";
 import { readDashboard } from "../dashboard/read-dashboard.ts";
-import { CouldBeBetter } from "../dashboard/signals.tsx";
 import { ToDo } from "../dashboard/to-do.tsx";
+import { WidgetBoard } from "../dashboard/widget-board.tsx";
 import { LoadingLines, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
 
-// The dashboard, as the right-hand column of the prototype's
-// (`routes/dashboard.tsx`): what waits on the person, each with its next
-// step; what could be better, from the daily signals; and, for admins, the
-// latest of what Grasp and people did. The board report on the
-// prototype's left is left out: every number there comes from hours core
-// doesn't have. It replaces the Notifications page and Settings' pending
-// approvals, which lead here.
+// The dashboard, as the prototype's (`routes/dashboard.tsx`): what waits
+// on the person, each with its next step; under it the widget board,
+// where the workflows and engines stand and what could be better, from
+// the daily signals; and, for admins, the latest of what Grasp and people
+// did. The prototype's weekly board report is left out: every number
+// there comes from hours core doesn't have. It replaces the Notifications
+// page and Settings' pending approvals, which lead here.
 
 const DashboardPage = () => {
-  const { waiting, signals, activity } = Route.useLoaderData();
+  const { waiting, board, activity } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { t } = useLingui();
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Dashboard` }]} />
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-7 text-sm">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-7 text-sm">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-medium tracking-tight">
             <Trans>Dashboard</Trans>
@@ -38,15 +38,7 @@ const DashboardPage = () => {
         </div>
         <ToDo identity={identity} waiting={waiting} />
         {/* Each comes as it is read: a slow one holds back nothing else. */}
-        <Await fallback={<LoadingLines />} promise={signals}>
-          {(loaded) =>
-            loaded.state === "ready" ? (
-              <CouldBeBetter signals={loaded.data} />
-            ) : (
-              <NotLoaded page={loaded} />
-            )
-          }
-        </Await>
+        <WidgetBoard board={board} />
         {activity === undefined ? null : (
           <Await fallback={<LoadingLines />} promise={activity}>
             {(loaded) =>

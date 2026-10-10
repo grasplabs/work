@@ -2,17 +2,43 @@ import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { seedDependencyRequest } from "./dependency-request.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, pageOf, peopleIn, release } from "./people.ts";
 import { pileOf, toCard } from "./pile.ts";
 
-// The dashboard, from the nav: what waits on the person, what could be
-// better (only for someone with signals), and, for admins, the latest of
-// the audit trail. What waits is a pile of cards gone through one at a
-// time, and what is settled on its own page under it; what fills them is
-// the failed-run, held-write and approval journeys' (notifications, chat,
-// activity, screen approval).
+// The dashboard, from the nav: what waits on the person; the widget
+// board under it, with where their workflows and engines stand and what
+// could be better, each block opening in full; and, for admins, the
+// latest of the audit trail. What waits is a pile of cards gone through
+// one at a time, and what is settled on its own page under it; what fills
+// them is the failed-run, held-write and approval journeys'
+// (notifications, chat, activity, screen approval).
 
-test("someone with nothing waiting sees no pile, and no signals or activity", async ({
+/** Counts in one step, and is done. */
+const tally = `import { workflow, z } from "@grasp-os/sdk/workflow";
+
+export default workflow("tally", { input: z.unknown(), params: {} }, async (step) =>
+  await step.do("count", { description: "Count the invoices" }, async () => 3)
+);
+`;
+
+const tallyTests = `import { workflowTests } from "@grasp-os/sdk/testing";
+
+import tally from "./tally.ts";
+
+export default workflowTests(tally, [
+  { name: "counts", mocks: { count: 3 }, expect: {} },
+]);
+`;
+
+/** Never started here. */
+const later = tally.replaceAll('"tally"', '"later"');
+
+const laterTests = tallyTests.replaceAll("tally", "later");
+
+/** How long a page may take to show what core said. */
+const pageRead = { timeout: 20_000 };
+
+test("someone with nothing waiting sees no pile or activity, and a board with nothing on it yet", async ({
   browser,
 }) => {
   const { user } = peopleIn("dashboard");
@@ -31,11 +57,94 @@ test("someone with nothing waiting sees no pile, and no signals or activity", as
   await expect(
     page.getByRole("region", { name: "Waiting elsewhere" })
   ).toHaveCount(0);
+  // The board is there, with nothing on it yet.
+  await expect(page.getByRole("region", { name: "Workflows" })).toContainText(
+    "No workflows yet.",
+    pageRead
+  );
+  await expect(page.getByRole("region", { name: "Engines" })).toContainText(
+    "No engines yet.",
+    pageRead
+  );
   await expect(
     page.getByRole("region", { name: "Could be better" })
-  ).toHaveCount(0);
+  ).toContainText("Nothing to make better right now.", pageRead);
   await expect(page.getByRole("region", { name: "Activity" })).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("a builder sees their workflows and engine on the board, and opens them in full", async ({
+  browser,
+}) => {
+  const { builder } = peopleIn("dashboardBoard");
+  const name = `Invoices ${crypto.randomUUID()}`;
+  const { core, api } = apiOf(builder);
+  let app: string;
+  try {
+    ({ id: app } = await api.apps.create({ name }));
+    await release(
+      api,
+      app,
+      {
+        "workflows/tally.ts": tally,
+        "workflows/tally.workflow-tests.ts": tallyTests,
+        "workflows/later.ts": later,
+        "workflows/later.workflow-tests.ts": laterTests,
+      },
+      "Invoice counts"
+    );
+    const run = await api.workflows.start(app, "tally");
+    await expect(async () => {
+      const { status } = await api.workflows.status(run.id);
+      expect(status).toBe("completed");
+    }).toPass({ timeout: 30_000 });
+  } finally {
+    core[Symbol.dispose]();
+  }
+
+  const page = await pageOf(browser, builder);
+  await page.goto("/dashboard");
+
+  // Where the workflows stand: a dot for each, in its state's column.
+  const workflows = page.getByRole("region", { name: "Workflows" });
+  await expect(
+    workflows
+      .getByRole("list", { name: "Ran" })
+      .getByRole("link", { name: `tally in ${name}` })
+  ).toBeVisible(pageRead);
+  await expect(
+    workflows
+      .getByRole("list", { name: "Not run yet" })
+      .getByRole("link", { name: `later in ${name}` })
+  ).toBeVisible();
+
+  // The engine, with how many of its workflows ran.
+  const engines = page.getByRole("region", { name: "Engines" });
+  await expect(
+    engines.getByRole("listitem").filter({ hasText: name })
+  ).toContainText("1 of 2 workflows ran");
+
+  // In full, each engine with its workflows.
+  await engines.getByRole("button", { name: "Open Engines in full" }).click();
+  let dialog = page.getByRole("dialog", { name: "Engines" });
+  await expect(
+    dialog.getByRole("region", { name }).getByRole("link", { name: "later" })
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  // In full, each state with its workflows, each opening its own page.
+  await workflows
+    .getByRole("button", { name: "Open Workflows in full" })
+    .click();
+  dialog = page.getByRole("dialog", { name: "Workflows" });
+  const ran = dialog
+    .getByRole("region", { name: "Ran" })
+    .getByRole("listitem")
+    .filter({ hasText: name });
+  await expect(ran).toContainText("tally");
+  await ran.getByRole("link", { name: "tally" }).click();
+  await expect(page).toHaveURL(new RegExp(`/workflows/${app}/tally$`, "u"));
 });
 
 test("an admin sees the latest activity, with the way to the audit trail", async ({

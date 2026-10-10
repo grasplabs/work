@@ -1,3 +1,4 @@
+import { cn } from "@grasp-os/ui/lib/utils";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -9,33 +10,46 @@ import type { ReactNode } from "react";
 /** A block on the dashboard: a card whose rows run edge to edge, named by its heading. */
 export const DashboardCard = ({
   id,
+  className,
   children,
 }: {
   /** The id of its heading, which names it. */
   id: string;
+  /** More of its look, such as a widget's fixed height. */
+  className?: string;
   children: ReactNode;
 }) => (
   <section
     aria-labelledby={id}
-    className="bg-card flex min-w-0 flex-col overflow-hidden rounded-xl border text-sm"
+    className={cn(
+      "bg-card flex min-w-0 flex-col overflow-hidden rounded-xl border text-sm",
+      className
+    )}
   >
     {children}
   </section>
 );
 
-/** A block's name, with how many it holds or a quiet note on the right. */
+/** A block's name, with how many it holds or a quiet note on the right, and its buttons after them. */
 export const DashboardCardHeader = ({
   id,
   title,
   count,
   note,
+  actions,
 }: {
   id: string;
   title: ReactNode;
   count?: number;
   note?: ReactNode;
+  actions?: ReactNode;
 }) => (
-  <header className="flex h-12 flex-none items-center gap-2 px-4">
+  <header
+    className={cn(
+      "flex h-12 flex-none items-center gap-2",
+      actions === undefined ? "px-4" : "pr-2 pl-4"
+    )}
+  >
     <h2 className="min-w-0 flex-1 truncate font-medium" id={id}>
       {title}
     </h2>
@@ -47,6 +61,7 @@ export const DashboardCardHeader = ({
     {note === undefined ? null : (
       <span className="text-muted-foreground text-xs">{note}</span>
     )}
+    {actions}
   </header>
 );
 
