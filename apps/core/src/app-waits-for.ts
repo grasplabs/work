@@ -61,9 +61,13 @@ export const waitsOn = async ({
 }: WaitsFor): Promise<boolean> => {
   const seen = new Set(holding.map(keyOf));
   const asked = new Set<AppId>();
-  let asking = holding.filter(({ app }) => app !== self);
-  while (asking.length > 0 && asked.size < limit) {
-    const round = asking.slice(0, limit - asked.size);
+  let left = limit;
+  // A round cut to what is left asks nothing once nothing is: the walk
+  // ends there.
+  let asking = holding.filter(({ app }) => app !== self).slice(0, left);
+  while (asking.length > 0) {
+    const round = asking;
+    left -= round.length;
     for (const { app } of round) {
       asked.add(app);
     }
@@ -90,7 +94,7 @@ export const waitsOn = async ({
         }
       }
     }
-    asking = [...onChain, ...elsewhere];
+    asking = [...onChain, ...elsewhere].slice(0, left);
   }
   return false;
 };
