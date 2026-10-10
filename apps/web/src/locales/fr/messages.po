@@ -117,6 +117,10 @@ msgstr "{count, plural, one {# modification attend que vous la confirmiez ou la 
 msgid "{count, plural, one {# file} other {# files}}"
 msgstr "{count, plural, one {# fichier} other {# fichiers}}"
 
+#: src/dashboard/widget-board.tsx
+msgid "{count, plural, one {# more engine with no workflows to show} other {# more engines with no workflows to show}}"
+msgstr "{count, plural, one {# moteur de plus sans workflow à afficher} other {# moteurs de plus sans workflow à afficher}}"
+
 #: src/knowledge/timeline.tsx
 msgid "{count, plural, one {# version} other {# versions}}"
 msgstr "{count, plural, one {# version} other {# versions}}"
@@ -241,6 +245,10 @@ msgstr "{name} a changé : {does}"
 #: src/chat/side-panel.tsx
 msgid "{name} has no app to show."
 msgstr "{name} n’a aucune application à afficher."
+
+#: src/dashboard/widget-board.tsx
+msgid "{name} in {engine}"
+msgstr "{name} dans {engine}"
 
 #: src/connections/connect-dialog.tsx
 msgid "{name} is read-only"
@@ -378,6 +386,10 @@ msgstr "{who} a donné son consentement avant de le connecter :"
 #: src/routes/_shell.settings.spend.tsx
 msgid "{workflowId} in {engine}"
 msgstr "{workflowId} dans {engine}"
+
+#: src/dashboard/widget-board.tsx
+msgid "{workflows, plural, one {{ran} of # workflow ran} other {{ran} of # workflows ran}}"
+msgstr "{workflows, plural, one {{ran} sur # workflow a tourné} other {{ran} sur # workflows ont tourné}}"
 
 #: src/routes/_shell.engines.index.tsx
 msgid "{workflows, plural, one {# workflow} other {# workflows}}"
@@ -1049,6 +1061,7 @@ msgstr "Effacer"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connection-list.tsx
+#: src/dashboard/widget-block.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -1491,6 +1504,7 @@ msgid "Engine not found"
 msgstr "Moteur introuvable"
 
 #: src/chat/side-panel.tsx
+#: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
@@ -1557,6 +1571,10 @@ msgstr "Tout ce qui est fait dans Grasp, par qui et quand, conservé dans une ch
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it, and always have the memory files in mind."
 msgstr "Tout ce que Grasp et ses agents peuvent lire, en collections : les vôtres, celles de vos équipes et celles de votre organisation. Les agents lisent un document quand ils en ont besoin et gardent toujours les fichiers de mémoire à l’esprit."
+
+#: src/dashboard/widget-block.tsx
+msgid "Everything this widget shows, in full."
+msgstr "Tout ce que montre ce widget, en entier."
 
 #: src/chat/chat-list.tsx
 msgid "Expand the chats"
@@ -2260,6 +2278,7 @@ msgstr "Native"
 msgid "Needs alongside it"
 msgstr "Nécessite en plus"
 
+#: src/dashboard/widget-board.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Needs attention"
 msgstr "À traiter"
@@ -2278,6 +2297,7 @@ msgstr "Reconnexion nécessaire"
 msgid "Needs someone to sign in again"
 msgstr "Quelqu’un doit se reconnecter"
 
+#: src/dashboard/widget-board.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Never"
 msgstr "Jamais"
@@ -2317,6 +2337,10 @@ msgstr "Aucun appel n’est tenu de rester dans l’UE."
 #: src/routes/_shell.engines.index.tsx
 msgid "No engines yet"
 msgstr "Aucun moteur pour l’instant"
+
+#: src/dashboard/widget-board.tsx
+msgid "No engines yet. Engines are made in chat."
+msgstr "Aucun moteur pour l’instant. Les moteurs se créent dans le chat."
 
 #: src/activity/audit-log.tsx
 msgid "No events match in the latest stretch of the log."
@@ -2392,6 +2416,10 @@ msgstr "Aucun workflow à tester."
 #: src/workflows/workflows-table.tsx
 msgid "No workflows yet"
 msgstr "Pas encore de workflows"
+
+#: src/dashboard/widget-board.tsx
+msgid "No workflows yet. Describe in chat what should run on its own, and Grasp builds it."
+msgstr "Pas encore de workflows. Décrivez dans le chat ce qui doit tourner tout seul, et Grasp le construit."
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "No works council"
@@ -2486,6 +2514,10 @@ msgstr "Non proposée"
 msgid "Not released"
 msgstr "Non publiée"
 
+#: src/dashboard/widget-board.tsx
+msgid "Not run yet"
+msgstr "Pas encore lancé"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Not signed off yet"
 msgstr "Pas encore validée"
@@ -2555,6 +2587,10 @@ msgstr "Rien ne s’exécute encore : ce serait la première version actuelle du
 #: src/routes/_shell.settings.spend.tsx
 msgid "Nothing spent yet."
 msgstr "Rien de dépensé pour l’instant."
+
+#: src/dashboard/signals.tsx
+msgid "Nothing to make better right now."
+msgstr "Rien à améliorer pour l’instant."
 
 #: src/routes/_shell.onboarding.index.tsx
 msgctxt "onboarding stage status"
@@ -2669,10 +2705,15 @@ msgstr "Ouvert"
 msgid "Open {name}"
 msgstr "Ouvrir {name}"
 
+#: src/dashboard/widget-block.tsx
+msgid "Open {title} in full"
+msgstr "Ouvrir {title} en entier"
+
 #: src/chat/chat-dock.tsx
 msgid "Open at the side"
 msgstr "Ouvrir sur le côté"
 
+#: src/dashboard/widget-board.tsx
 #: src/routes/_shell.engines.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Open Chat"
@@ -2884,6 +2925,10 @@ msgstr "A proposé des paquets"
 #: src/dashboard/dependency-requests.tsx
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Fourni par Grasp, non réinstallé : {provided}"
+
+#: src/dashboard/widget-board.tsx
+msgid "Ran"
+msgstr "A tourné"
 
 #: src/activity/audit-words.ts
 msgid "Ran a step of a workflow"
@@ -3420,6 +3465,10 @@ msgstr "La connexion n’a pas abouti. Réessayez ou demandez à un admin."
 #: src/sign-in-errors.ts
 msgid "Sign-in timed out or was started elsewhere. Try again."
 msgstr "La connexion a expiré ou a été lancée ailleurs. Réessayez."
+
+#: src/dashboard/signals.tsx
+msgid "Signals by kind"
+msgstr "Signaux par type"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgctxt "state of a data processing agreement"
@@ -4180,6 +4229,10 @@ msgstr "En attente de vous"
 msgid "Waiting for you: {title}"
 msgstr "En attente de vous : {title}"
 
+#: src/dashboard/widget-board.tsx
+msgid "Waiting on a person"
+msgstr "Attend une personne"
+
 #: src/dashboard/pile-card.tsx
 msgid "Waiting on you"
 msgstr "Vous attend"
@@ -4366,8 +4419,8 @@ msgid "Worked for {time}"
 msgstr "A travaillé pendant {time}"
 
 #: src/dashboard/signals.tsx
-msgid "Worked out daily, last on {date}"
-msgstr "Calculé chaque jour, dernière fois le {date}"
+msgid "Worked out daily, last on {date}."
+msgstr "Calculé chaque jour, dernière fois le {date}."
 
 #: src/activity/audit-words.ts
 msgid "Worked out how knowledge is used"
@@ -4396,6 +4449,7 @@ msgid "Workflow tests fail:"
 msgstr "Des tests de workflow échouent :"
 
 #: src/chat/builds.tsx
+#: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
