@@ -425,7 +425,7 @@ describe("outbox", () => {
     const store = await newStore();
     const consumers = { "workflow.start": taker([]) };
     const held = heldBy(await store.claim(await claimOf("k1", {})));
-    await commitWith(
+    const staged = await commitWith(
       store,
       insertOf(held, "Launch", {
         intents: [
@@ -452,8 +452,8 @@ describe("outbox", () => {
 
     const entries = await rowsOf(store, "sdk_change_outbox");
     expect(entries.map(({ id }) => id)).toStrictEqual([
-      `${held.receiptId}:0`,
-      `${held.receiptId}:1`,
+      `${held.receiptId}:${staged.commit}:0`,
+      `${held.receiptId}:${staged.commit}:1`,
     ]);
     await expect(rowsOf(store, "sdk_records")).resolves.toHaveLength(1);
   });
@@ -497,7 +497,7 @@ describe("outbox", () => {
   it("hands entries over until taken, under the same ID, without committing again", async () => {
     const store = await newStore();
     const held = heldBy(await store.claim(await claimOf("k1", {})));
-    await commitWith(
+    const staged = await commitWith(
       store,
       insertOf(held, "Launch", {
         intents: [{ kind: "workflow.start", data: { run: "r1" } }],
@@ -529,7 +529,10 @@ describe("outbox", () => {
     await drain(Date.now() + dayMs);
     await drain(Date.now() + 2 * dayMs);
 
-    expect(seen).toStrictEqual([`${held.receiptId}:0`, `${held.receiptId}:0`]);
+    expect(seen).toStrictEqual([
+      `${held.receiptId}:${staged.commit}:0`,
+      `${held.receiptId}:${staged.commit}:0`,
+    ]);
     const [entry] = await rowsOf(store, "sdk_change_outbox");
     expect(entry).toMatchObject({ attempts: 1, undeliverable: null });
     expect(entry?.settled_at).not.toBeNull();
@@ -539,7 +542,7 @@ describe("outbox", () => {
   it("hands each entry over once to drains running at once", async () => {
     const store = await newStore();
     const held = heldBy(await store.claim(await claimOf("k1", {})));
-    await commitWith(
+    const staged = await commitWith(
       store,
       insertOf(held, "Launch", {
         intents: [
@@ -562,8 +565,8 @@ describe("outbox", () => {
       ]);
     });
     expect(taken.toSorted()).toStrictEqual([
-      `${held.receiptId}:0`,
-      `${held.receiptId}:1`,
+      `${held.receiptId}:${staged.commit}:0`,
+      `${held.receiptId}:${staged.commit}:1`,
     ]);
   });
 
@@ -597,7 +600,7 @@ describe("outbox", () => {
   it("hands an entry over again, under the same ID, after a drain died holding it", async () => {
     const store = await newStore();
     const held = heldBy(await store.claim(await claimOf("k1", {})));
-    await commitWith(
+    const staged = await commitWith(
       store,
       insertOf(held, "Launch", {
         intents: [{ kind: "workflow.start", data: {} }],
@@ -631,9 +634,9 @@ describe("outbox", () => {
       );
     });
 
-    expect(seen).toStrictEqual([`${held.receiptId}:0`]);
+    expect(seen).toStrictEqual([`${held.receiptId}:${staged.commit}:0`]);
     expect(taken.map(({ id, attempts }) => ({ id, attempts }))).toStrictEqual([
-      { id: `${held.receiptId}:0`, attempts: 0 },
+      { id: `${held.receiptId}:${staged.commit}:0`, attempts: 0 },
     ]);
   });
 
@@ -696,7 +699,7 @@ describe("alarm", () => {
       async (_instance, state) => await state.storage.getAlarm()
     );
 
-  it("settles an entry nothing takes any more, then sleeps until a receipt is due", async () => {
+  it("retries an entry nothing takes now, settles it only once its attempts run out, then sleeps", async () => {
     const store = await newStore();
     const input = { title: "Launch" };
     const held = heldBy(await store.claim(await claimOf("k1", input)));
@@ -709,16 +712,96 @@ describe("alarm", () => {
       { "workflow.start": taker([]) }
     );
 
-    await expect(runDurableObjectAlarm(objectOf(store))).resolves.toBeTruthy();
-    const [entry] = await rowsOf(store, "sdk_change_outbox");
-    expect(entry).toMatchObject({ undeliverable: "outbox.no_consumer" });
-    // No spinning: the next thing due is the receipt's retention.
+    await runDurableObjectAlarm(objectOf(store));
+    const [waiting] = await rowsOf(store, "sdk_change_outbox");
+    expect(waiting).toMatchObject({ attempts: 1, settled_at: null });
+    // Waits its backoff, neither spinning nor dropping it.
+    await expect(alarmOf(store)).resolves.toBeGreaterThan(Date.now() + 20_000);
+
+    await inHost(store, async (host) => {
+      for (let attempt = 1; attempt < defaultMaxAttempts; attempt += 1) {
+        // One drain after the other, each past the last one's backoff.
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await host.drainOutbox(
+          {},
+          { now: new Date(Date.now() + attempt * 2 * 60 * 60 * 1000) }
+        );
+      }
+    });
+    const [settled] = await rowsOf(store, "sdk_change_outbox");
+    expect(settled).toMatchObject({
+      attempts: defaultMaxAttempts,
+      undeliverable: "outbox.no_consumer",
+    });
+    await runDurableObjectAlarm(objectOf(store));
+    // The next thing due is the receipt's retention.
     await expect(alarmOf(store)).resolves.toBeGreaterThan(
       Date.now() + 29 * dayMs
     );
     await expect(
       store.claim(await claimOf("k1", input))
     ).resolves.toHaveProperty("outcome");
+  });
+
+  it("keeps an entry through drains with no consumer, and delivers it once one is back", async () => {
+    const store = await newStore();
+    const held = heldBy(await store.claim(await claimOf("k1", {})));
+    const staged = await commitWith(
+      store,
+      insertOf(held, "Launch", {
+        intents: [{ kind: "workflow.start", data: { run: "r1" } }],
+      }),
+      { "workflow.start": taker([]) }
+    );
+    const taken: OutboxEntry[] = [];
+    await inHost(store, async (host) => {
+      // A release without the consumer (a rollback, say)...
+      await host.drainOutbox({});
+      // ...then the consumer is back.
+      await host.drainOutbox(
+        { "workflow.start": taker(taken) },
+        { now: new Date(Date.now() + dayMs) }
+      );
+    });
+    expect(taken.map(({ id, attempts }) => ({ id, attempts }))).toStrictEqual([
+      { id: `${held.receiptId}:${staged.commit}:0`, attempts: 1 },
+    ]);
+    const [entry] = await rowsOf(store, "sdk_change_outbox");
+    expect(entry).toMatchObject({ undeliverable: null });
+    expect(entry?.settled_at).not.toBeNull();
+  });
+
+  it("gives a key that commits again after its tombstone went entries of their own", async () => {
+    const store = await newStore();
+    const input = { title: "Launch" };
+    const commitOnce = async () => {
+      const held = heldBy(await store.claim(await claimOf("k1", input)));
+      await commitWith(
+        store,
+        insertOf(held, "Launch", {
+          intents: [{ kind: "workflow.start", data: {} }],
+        }),
+        { "workflow.start": taker([]) }
+      );
+      // Delivered, so nothing keeps the receipt.
+      await inHost(store, async (host) => {
+        await host.drainOutbox({ "workflow.start": taker([]) });
+      });
+      const rows = await rowsOf(store, "sdk_change_outbox");
+      return rows.map(({ id }) => String(id));
+    };
+
+    const first = await commitOnce();
+    await inHost(store, async (host) => {
+      await host.sweepReceipts(new Date(Date.now() + 31 * dayMs));
+      await host.sweepReceipts(new Date(Date.now() + 62 * dayMs));
+    });
+    await expect(rowsOf(store, "sdk_mutation_receipts")).resolves.toHaveLength(
+      0
+    );
+    const second = await commitOnce();
+    expect(second).toHaveLength(1);
+    expect(second).not.toStrictEqual(first);
   });
 
   it("sweeps receipts whose retention passed, then sleeps until their tombstones go", async () => {
@@ -831,7 +914,7 @@ describe("alarm", () => {
   it("settles an entry it can no longer read, and goes on with the rest", async () => {
     const store = await newStore();
     const held = heldBy(await store.claim(await claimOf("k1", {})));
-    await commitWith(
+    const staged = await commitWith(
       store,
       insertOf(held, "Launch", {
         intents: [
@@ -855,6 +938,8 @@ describe("alarm", () => {
       "outbox.unreadable",
       null,
     ]);
-    expect(taken.map(({ id }) => id)).toStrictEqual([`${held.receiptId}:1`]);
+    expect(taken.map(({ id }) => id)).toStrictEqual([
+      `${held.receiptId}:${staged.commit}:1`,
+    ]);
   });
 });

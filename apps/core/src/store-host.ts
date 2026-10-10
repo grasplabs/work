@@ -114,8 +114,11 @@ import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
 //   records, stays until settled, is leased before each hand-over and
 //   settled only by the lease holder, and keeps one ID however often it
 //   is handed over. A kind nothing takes can't be staged; one whose
-//   consumer went in a later release is settled as `outbox.no_consumer`,
-//   so it doesn't keep its receipt forever.
+//   consumer is gone fails its attempts like any hand-over, so a rollback
+//   doesn't drop it, and is settled as `outbox.no_consumer` once they run
+//   out, so it doesn't keep its receipt forever. Every commit gives its
+//   entries IDs of their own (its number in the store's order), so a key
+//   that commits again after its tombstone went never reuses one.
 // - The alarm spins, or stops: it is set only for what it can act on (an
 //   owed entry, a receipt the sweep may expire, a tombstone), never
 //   sooner than a second away, again after work that failed (a while
@@ -426,7 +429,7 @@ export class StoreHost {
       if (now >= receipt.deadline) {
         throw submissionErrors.create("submission.deadline_passed");
       }
-      if (intents.some(({ kind }) => consumers[kind] === undefined)) {
+      if (intents.some(({ kind }) => !Object.hasOwn(consumers, kind))) {
         throw submissionErrors.create("submission.intent_unsupported");
       }
       const staged = new Map<string, Staged>();
@@ -532,7 +535,10 @@ export class StoreHost {
         this.#db
           .insert(outbox)
           .values({
-            id: `${held.receiptId}:${position}`,
+            // The commit's number makes it unique: a key whose tombstone
+            // went can commit again under the same receipt ID, and its
+            // entries must not pass for the ones a consumer already took.
+            id: `${held.receiptId}:${counted.commits}:${position}`,
             receiptId: held.receiptId,
             position,
             kind: intent.kind,
@@ -610,8 +616,10 @@ export class StoreHost {
    * hand-over failed (settled as `outbox.attempts_exhausted` past
    * `maxAttempts`), only while the drain still holds that lease. An entry
    * whose kind nothing takes any more (its consumer went in a later
-   * release) is settled as `outbox.no_consumer`: owed to nobody, it would
-   * otherwise keep its receipt forever. Run by the alarm.
+   * release, or not yet in one rolling out) fails its attempt, and is
+   * settled as `outbox.no_consumer` once its attempts run out: owed to
+   * nobody for good, it would otherwise keep its receipt forever. Run by
+   * the alarm.
    */
   async drainOutbox(
     consumers: OutboxConsumers,
@@ -695,13 +703,8 @@ export class StoreHost {
         )
         .run();
     };
-    const consumer = consumers[leased.kind];
-    if (consumer === undefined) {
-      settleUndeliverable("outbox.no_consumer");
-      return;
-    }
     // An entry a later release can't read is settled, not left to stop
-    // every drain behind it.
+    // every drain behind it: no retry would make it readable.
     const intent = intentOf(leased.intent);
     if (intent === undefined) {
       log.warn("outbox.unreadable", { id, kind: leased.kind });
@@ -709,11 +712,17 @@ export class StoreHost {
       return;
     }
     const { attempts } = leased;
-    const result = await handOver(
-      consumer,
-      { id, intent, attempts },
-      timeoutMs
-    );
+    // No consumer for its kind (a rollback, or a release rolling out) is
+    // a failed attempt like any other: the entry waits for one to come
+    // back, and settles as `outbox.no_consumer` only once its attempts
+    // run out.
+    const consumer = Object.hasOwn(consumers, leased.kind)
+      ? consumers[leased.kind]
+      : undefined;
+    const result =
+      consumer === undefined
+        ? { failed: new Error("Nothing takes this kind of entry") }
+        : await handOver(consumer, { id, intent, attempts }, timeoutMs);
     const held = and(
       eq(outbox.id, id),
       isNull(outbox.settledAt),
@@ -747,7 +756,10 @@ export class StoreHost {
           ? {
               attempts: failed,
               settledAt: handedAt,
-              undeliverable: "outbox.attempts_exhausted",
+              undeliverable:
+                consumer === undefined
+                  ? "outbox.no_consumer"
+                  : "outbox.attempts_exhausted",
             }
           : { attempts: failed, nextAttemptAt: handedAt + backoffMs(failed) }
       )
