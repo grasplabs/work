@@ -6,7 +6,6 @@ import type {
 import { and, asc, eq, isNull, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { inList } from "../db/d1.ts";
 import { submissionOutbox } from "../db/knowledge/schema.ts";
 import {
   backoffMs,
@@ -42,8 +41,11 @@ import type { DrainOptions, OutboxConsumers } from "../outbox-delivery.ts";
 //   drain started, so the lease covers its own hand-over; the budget is
 //   checked before each entry.
 // - An entry nobody takes is settled away unread: a kind with no consumer
-//   can't be staged (receipts.ts, `claim`), and a drain leaves an entry
-//   whose consumer is gone untouched.
+//   can't be staged (receipts.ts, `claim`).
+// - An entry's consumer goes in a later release: its receipt is kept while
+//   the entry is owed, so it would be kept forever. A drain settles such
+//   an entry as `outbox.no_consumer`, owed to nobody, under its lease like
+//   any other, and the sweep expires its receipt.
 //
 // Who consumes what comes with each kind's delivery: invalidations with
 // live queries, workflow notifications (GRA-372) and starts (GRA-376).
@@ -106,7 +108,7 @@ interface Drain {
  * back for later when the hand-over failed (settled as
  * `outbox.attempts_exhausted` past the drain's `maxAttempts`), only while
  * the drain still holds that lease. An entry whose kind has no consumer
- * is left as it is.
+ * any more is settled as `outbox.no_consumer`, under the same lease.
  */
 const handOne = async (env: Env, drain: Drain, id: string): Promise<void> => {
   const db = drizzle(env.KNOWLEDGE);
@@ -114,9 +116,20 @@ const handOne = async (env: Env, drain: Drain, id: string): Promise<void> => {
   // The lease outlasts the hand-over, with room for the writes around it.
   const until = new Date(leasedAt.getTime() + drain.timeoutMs * 2);
   const leased = await lease(env, id, leasedAt, until);
-  const consumer =
-    leased === undefined ? undefined : drain.consumers[leased.kind];
-  if (leased === undefined || consumer === undefined) {
+  if (leased === undefined) {
+    return;
+  }
+  const held = and(
+    eq(submissionOutbox.id, id),
+    isNull(submissionOutbox.settledAt),
+    eq(submissionOutbox.nextAttemptAt, until)
+  );
+  const consumer = drain.consumers[leased.kind];
+  if (consumer === undefined) {
+    await db
+      .update(submissionOutbox)
+      .set({ settledAt: drain.clock(), undeliverable: "outbox.no_consumer" })
+      .where(held);
     return;
   }
   const { attempts } = leased;
@@ -124,11 +137,6 @@ const handOne = async (env: Env, drain: Drain, id: string): Promise<void> => {
     consumer,
     { id, intent: intentOf(leased.intent), attempts },
     drain.timeoutMs
-  );
-  const held = and(
-    eq(submissionOutbox.id, id),
-    isNull(submissionOutbox.settledAt),
-    eq(submissionOutbox.nextAttemptAt, until)
   );
   const handedAt = drain.clock();
   if ("settled" in handed) {
@@ -182,8 +190,7 @@ const drainOnePage = async (
     .where(
       and(
         isNull(submissionOutbox.settledAt),
-        lte(submissionOutbox.nextAttemptAt, drain.clock()),
-        inList(submissionOutbox.kind, Object.keys(drain.consumers))
+        lte(submissionOutbox.nextAttemptAt, drain.clock())
       )
     )
     .orderBy(asc(sql`rowid`))
@@ -216,9 +223,6 @@ export const drainSubmissionOutbox = async (
     maxAttempts = defaultMaxAttempts,
   }: DrainOptions = {}
 ): Promise<void> => {
-  if (Object.keys(consumers).length === 0) {
-    return;
-  }
   const started = Date.now();
   const drain: Drain = {
     consumers,

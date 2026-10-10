@@ -1100,7 +1100,7 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
     });
   });
 
-  it("answer a committed save's retry with its outcome, though its intent's consumer has gone since", async () => {
+  it("answer a committed save's retry with its outcome, though its intent's consumer has gone since, and settle the entry as owed to nobody so the receipt expires", async () => {
     const setup = await setUp();
     const path = `notes/${unique()}.md`;
     const key = `consumer-gone-${unique()}`;
@@ -1121,13 +1121,33 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       key,
       intents,
     });
+    await drainSubmissionOutbox(env, {});
     const entries = await entriesOf(marker);
+    await sweepReceipts(env, new Date(Date.now() + 31 * dayMs));
+    // Past its retention, under a release whose consumer is back.
+    const expired = await outcome(
+      directSave(setup, docSave(path, "Plan"), {
+        key,
+        intents,
+        consumers: consumersFor(marker),
+      })
+    );
     expect({
       retried,
       again,
       versions: await versionsAt(setup.collectionId, path),
-      entries: entries.length,
-    }).toStrictEqual({ retried: "ok", again: saved, versions: 1, entries: 1 });
+      entries: entries.map(({ settled, undeliverable }) => ({
+        settled,
+        undeliverable,
+      })),
+      expired,
+    }).toStrictEqual({
+      retried: "ok",
+      again: saved,
+      versions: 1,
+      entries: [{ settled: true, undeliverable: "outbox.no_consumer" }],
+      expired: "submission.expired",
+    });
   });
 
   it("refuse an intent nothing takes before anything is saved", async () => {
