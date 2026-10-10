@@ -1101,6 +1101,36 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
     });
   });
 
+  it("answer a committed save's retry with its outcome, though its intent's consumer has gone since", async () => {
+    const setup = await setUp();
+    const path = `notes/${unique()}.md`;
+    const key = `consumer-gone-${unique()}`;
+    const marker = unique();
+    const intents: SubmissionIntent[] = [
+      { kind: "workflow.notify", data: { marker } },
+    ];
+    const saved = await directSave(setup, docSave(path, "Plan"), {
+      key,
+      intents,
+      consumers: consumersFor(marker),
+    });
+    // The deployment's consumers now: none.
+    const retried = await outcome(
+      directSave(setup, docSave(path, "Plan"), { key, intents })
+    );
+    const again = await directSave(setup, docSave(path, "Plan"), {
+      key,
+      intents,
+    });
+    const entries = await entriesOf(marker);
+    expect({
+      retried,
+      again,
+      versions: await versionsAt(setup.collectionId, path),
+      entries: entries.length,
+    }).toStrictEqual({ retried: "ok", again: saved, versions: 1, entries: 1 });
+  });
+
   it("refuse an intent nothing takes before anything is saved", async () => {
     const setup = await setUp();
     const path = `notes/${unique()}.md`;

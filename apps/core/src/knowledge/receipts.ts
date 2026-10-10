@@ -214,12 +214,23 @@ export const claim = async (
 ): Promise<{ claim: Claim } | { outcome: DocumentSummary }> => {
   const consumers = submission.consumers ?? outboxConsumers;
   const intents = submission.intents ?? [];
-  // Nothing is staged that nothing would take: it would only be settled
-  // away unread.
+  const id = await receiptIdOf(submission);
+  // A save its key committed already is answered, whatever takes its
+  // intents now: it stages nothing more.
+  const committed = await receiptOf(env, id);
+  if (
+    committed !== undefined &&
+    committed.expiredAt === null &&
+    committed.inputHash === inputHash &&
+    committed.outcome !== null
+  ) {
+    return { outcome: summaryOf(committed.outcome) };
+  }
+  // New work stages nothing that nothing would take: it would only be
+  // settled away unread.
   if (intents.some(({ kind }) => consumers[kind] === undefined)) {
     throw submissionErrors.create("submission.intent_unsupported");
   }
-  const id = await receiptIdOf(submission);
   const db = drizzle(env.KNOWLEDGE);
   const retainUntil = new Date(now.getTime() + submissionRetentionDays * dayMs);
   // One statement: a new receipt, or the fence moved on, but only for the
