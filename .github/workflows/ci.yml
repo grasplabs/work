@@ -55,7 +55,10 @@ jobs:
       # half again over the slowest pass. A minute before that, the stall
       # reporter prints the files and tests still running, and each finished
       # test is in the test-progress artifact (scripts/stall-reporter.ts).
-      - run: vp test --maxWorkers=100% --reporter=default --reporter=./scripts/stall-reporter.ts
+      # "0 files, 0 tests" there means the hang is in teardown or in shutting
+      # the pool down. Reporters given here replace Vitest's defaults, so
+      # github-actions is listed for the inline failure annotations.
+      - run: vp test --maxWorkers=100% --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts
         timeout-minutes: 16
         env:
           GRASP_STALL_REPORT_AFTER_MINUTES: 15
@@ -65,6 +68,7 @@ jobs:
         with:
           name: test-progress
           path: ${{ runner.temp }}/test-progress.log
+          if-no-files-found: ignore
           retention-days: 14
       - run: vp run -r build
       # The console isn't deployed from here (see deploy-staging): check that

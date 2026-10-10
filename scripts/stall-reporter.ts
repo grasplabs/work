@@ -5,14 +5,17 @@
 // after every reported file passed, without saying which file or test never
 // ended. This reporter:
 //
-// - appends one line per finished test to GRASP_TEST_PROGRESS_FILE, which
+// - writes one line per finished test to GRASP_TEST_PROGRESS_FILE, which
 //   CI keeps as an artifact, so the log itself isn't flooded;
-// - after GRASP_STALL_REPORT_AFTER_MINUTES, shortly before the step's own
-//   timeout, prints each file and test still running and for how long.
+// - GRASP_STALL_REPORT_AFTER_MINUTES after the process started, shortly
+//   before the step's own timeout, prints each file and test still running
+//   and for how long. None at all means the hang is in teardown or in
+//   shutting the pool down.
 //
 // It only listens: a run that ends in time prints nothing more.
 import { createWriteStream } from "node:fs";
 import type { WriteStream } from "node:fs";
+import { finished } from "node:stream/promises";
 
 import type { Reporter, TestCase, TestModule } from "vite-plus/test/node";
 
@@ -23,6 +26,14 @@ const positiveFromEnv = (name: string): number | undefined => {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value > 0 ? value : undefined;
 };
+
+/**
+ * How long from now until the report is due: `minutes` after the process
+ * started, `uptimeSeconds` ago, so a slow start doesn't push it past the
+ * step's timeout. At once if that is already past.
+ */
+export const reportDelayMs = (minutes: number, uptimeSeconds: number): number =>
+  Math.max(0, minutes * minuteMs - uptimeSeconds * 1000);
 
 const seconds = (ms: number): string => `${Math.round(ms / 1000)}s`;
 
@@ -43,17 +54,27 @@ export default class StallReporter implements Reporter {
     this.#progress =
       file === undefined || file === ""
         ? undefined
-        : createWriteStream(file, { flags: "a" });
+        : createWriteStream(file, { flags: "w" });
+    // Losing the progress file must not fail the run it describes.
+    this.#progress?.on("error", (error) => {
+      process.stderr.write(
+        `The stall reporter can't write ${file}: ${error.message}\n`
+      );
+    });
   }
 
   onTestRunStart(): void {
+    clearTimeout(this.#timer);
     const minutes = positiveFromEnv("GRASP_STALL_REPORT_AFTER_MINUTES");
     if (minutes === undefined) {
       return;
     }
-    this.#timer = setTimeout(() => {
-      this.#report(minutes);
-    }, minutes * minuteMs);
+    this.#timer = setTimeout(
+      () => {
+        this.#report(minutes);
+      },
+      reportDelayMs(minutes, process.uptime())
+    );
     // A run that ends in time doesn't wait for the report.
     this.#timer.unref();
   }
@@ -79,9 +100,19 @@ export default class StallReporter implements Reporter {
     );
   }
 
-  onTestRunEnd(): void {
+  async onTestRunEnd(): Promise<void> {
     clearTimeout(this.#timer);
-    this.#progress?.end();
+    const progress = this.#progress;
+    if (progress === undefined || progress.destroyed) {
+      return;
+    }
+    progress.end();
+    try {
+      // Every line written, so the artifact is whole.
+      await finished(progress);
+    } catch {
+      // Warned of by the stream's error listener: the run stands.
+    }
   }
 
   #report(minutes: number): void {
