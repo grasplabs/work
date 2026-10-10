@@ -37,6 +37,8 @@ import { appBindings } from "./app-bindings.ts";
 import { CallQueue } from "./app-call-queue.ts";
 import { ErrorLog } from "./app-error-log.ts";
 import type { ReportedProblem } from "./app-error-log.ts";
+import { waitsOn } from "./app-waits-for.ts";
+import type { Hold } from "./app-waits-for.ts";
 import { findApp, versionFiles } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { appHost } from "./durable-objects.ts";
@@ -106,11 +108,17 @@ export const waitingCallsLimit = 32;
 
 /**
  * How many Apps, at most, one call about to wait asks who waits for them
- * (`App.#waitsOn`): past it, the call waits as it would have, until its
- * deadline. Each App asked has a call of a chain waiting, so a cycle
- * among fewer Apps is always found.
+ * (`waitsOn`): past it, the call waits as it would have, until its
+ * deadline. A cycle is always found when at most this many Apps wait for
+ * the call's chain, directly or through others.
  */
 const waitsForAsked = 32;
+
+/**
+ * How long one App asked who waits for it (`waitingHolds`) has to answer:
+ * past it, that App is passed over, and the call waits as it would have.
+ */
+const waitsForAskMs = 1000;
 
 /** Where the host counts starts on new code or permissions (`#load`, `restart`). */
 const generationKey = "generation";
@@ -528,8 +536,8 @@ export interface ExportCall {
   version: number;
   /** The Apps whose calls are under way above this one, outermost first. */
   chain: readonly AppId[];
-  /** Those of `chain` whose turns its calls hold (`CallPath.holding`). */
-  holding: readonly AppId[];
+  /** The turns its calls hold (`CallPath.holding`). */
+  holding: readonly Hold[];
   /** When the call it comes from must end, in milliseconds since the epoch. */
   deadline: number;
   /** Whether the call may only call other Apps' exports marked `read`. */
@@ -550,11 +558,12 @@ export interface CallPath {
   /** The Apps whose calls are under way, outermost first, this one last. */
   chain: AppId[];
   /**
-   * Those of `chain` whose turns its calls hold, this one last: every one
-   * but a workflow run's App, which a run's call doesn't hold. While the
-   * call waits for another App, they all wait with it (`App.#waitsOn`).
+   * The turns of `chain`'s Apps its calls hold, by the call holding each,
+   * this one last: every App but a workflow run's, whose turn a run's call
+   * doesn't hold. While the call waits for another App, they all wait
+   * with it (`waitsOn`).
    */
-  holding: AppId[];
+  holding: Hold[];
   /** When the call must end, in milliseconds since the epoch. */
   deadline: number;
   /** Whether it may only call other Apps' exports marked `read`. */
@@ -604,8 +613,10 @@ interface Invocation {
   ranOn?: ServerCode;
   /** The Apps whose calls are under way above it, outermost first. */
   above: readonly AppId[];
-  /** Those of `above` whose turns its calls hold (`CallPath.holding`). */
-  aboveHolding: readonly AppId[];
+  /** The turns its calls above hold (`CallPath.holding`). */
+  aboveHolding: readonly Hold[];
+  /** The opaque ID of its turn, for the holds it passes on (`Hold.call`). */
+  turn: string;
   /** When it must end: past it, it acts no more, whatever its code does. */
   deadline: number;
 }
@@ -728,9 +739,16 @@ export class App extends DurableObject<Env> {
 
   /**
    * Lets one call at a time run in the App's code (`call`); a call from
-   * another App's waits with the Apps its chain holds (`waitingHolds`).
+   * another App's waits with the turns its chain holds (`waitingHolds`).
    */
-  readonly #queue = new CallQueue<readonly AppId[]>(waitingCallsLimit);
+  readonly #queue = new CallQueue<readonly Hold[]>(waitingCallsLimit);
+
+  /**
+   * The opaque ID of the turn that holds the App now (`Hold.call`), or
+   * held it last while the App is free: never a token, which acts for its
+   * caller.
+   */
+  #holder: string | undefined;
 
   /** Statistics points the App recorded, and reads, in the current minute. */
   #statisticsMinute = { minute: 0, point: 0, read: 0 };
@@ -867,10 +885,15 @@ export class App extends DurableObject<Env> {
       limit.clear();
       throw error;
     }
+    // Holds until the next turn begins: while the App is free, no call
+    // waits for it, so no walk can find this turn's hold (`waitsOn`).
+    const turn = crypto.randomUUID();
+    this.#holder = turn;
     // Settles once the call's code has, or was stopped: never rejects.
     let drained: Promise<void> = Promise.resolve();
     try {
       return await this.#run(caller, method, args, via, {
+        turn,
         ends: callEnds,
         limit,
         // From when its turn began: the time its caller asked for, the
@@ -903,11 +926,13 @@ export class App extends DurableObject<Env> {
     args: unknown[],
     via: ExportCall | undefined,
     {
+      turn,
       ends,
       limit,
       stopAt,
       drainWith,
     }: {
+      turn: string;
       ends: number;
       limit: Deadline;
       stopAt: number;
@@ -922,6 +947,7 @@ export class App extends DurableObject<Env> {
       kind: via?.readOnly === true ? "read" : "write",
       above: via?.chain ?? [],
       aboveHolding: via?.holding ?? [],
+      turn,
       deadline: ends,
     };
     this.#calls.set(token, call);
@@ -1034,63 +1060,57 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * For each call from another App's code, or a workflow run, waiting for
-   * this App, oldest first: the Apps whose turns its chain holds
-   * (`CallPath.holding`), which all wait for this App with it; none for a
-   * run's own call. Asked by other Apps' hosts, as a call about to wait
-   * looks for a cycle (`#waitsOn`).
+   * How many calls wait for the App now: for a look at how busy it is.
    */
-  waitingHolds(): AppId[][] {
-    return this.#queue.waitingTags().map((holding) => [...holding]);
+  waiting(): number {
+    return this.#queue.waiting();
+  }
+
+  /**
+   * For each call from another App's code, or a workflow run, waiting for
+   * this App, oldest first: the turns its chain holds (`CallPath.holding`),
+   * which all wait for this App with it; none for a run's own call. Only
+   * while `holder` still holds this App's turn: a hold another App passes
+   * on from a call that has ended answers nothing (`waitsOn`). Asked by
+   * other Apps' hosts, as a call about to wait looks for a cycle.
+   */
+  waitingHolds(holder: string): Hold[][] {
+    if (this.#holder !== holder) {
+      return [];
+    }
+    return this.#queue
+      .waitingTags()
+      .map((holding) => holding.map(({ app, call }) => ({ app, call })));
   }
 
   /**
    * Whether this App's turn waits, through calls waiting in other Apps,
-   * on one of `holding`: the Apps whose turns a call about to wait for
-   * this App holds. If so, that call would wait for an App that waits for
-   * it: each would wait in the other's queue until a deadline ended one.
+   * on one of `holding`, the turns a call about to wait for it holds
+   * (`waitsOn`): if so, that call would wait for an App that waits for it.
    *
-   * Each App is its own object, so no one sees every queue: each App
-   * knows only who waits in its own (`waitingHolds`). The walk goes
-   * back from `holding`: the Apps waiting for them, then those waiting
-   * for these, and so on; this App among them closes the cycle. It asks
-   * at most `waitsForAsked` Apps, and one that can't answer is passed
-   * over: either way the call only waits, as it would have.
-   *
-   * A call asks once it waits, where its App's `waitingHolds` shows it
+   * A call asks once it waits, where this App's `waitingHolds` shows it
    * (`CallQueue.turn`). So of two calls closing one cycle at the same
    * time, the one that asks later finds the other; both may, and then
    * both are refused, never neither.
    */
-  async #waitsOn(holding: readonly AppId[]): Promise<boolean> {
-    const self = this.#app;
-    const seen = new Set<AppId>(holding);
-    let asking = [...holding];
-    let asked = 0;
-    while (asking.length > 0 && asked < waitsForAsked) {
-      const batch = asking.slice(0, waitsForAsked - asked);
-      asked += batch.length;
-      // oxlint-disable-next-line no-await-in-loop -- each round asks the Apps the last one found
-      const answers = await Promise.allSettled(
-        batch.map(async (app) => await appHost(this.env, app).waitingHolds())
-      );
-      const found: AppId[] = [];
-      for (const answer of answers) {
-        const waiting =
-          answer.status === "fulfilled" ? answer.value.flat() : [];
-        if (waiting.includes(self)) {
-          return true;
+  async #waitsOn(holding: readonly Hold[]): Promise<boolean> {
+    return await waitsOn({
+      self: this.#app,
+      holding,
+      holds: (call) => this.#holder === call,
+      ask: async ({ app, call }) => {
+        const cap = deadline(waitsForAskMs);
+        try {
+          return await Promise.race([
+            appHost(this.env, app).waitingHolds(call),
+            whenAborted(cap.signal),
+          ]);
+        } finally {
+          cap.clear();
         }
-        for (const app of waiting) {
-          if (!seen.has(app)) {
-            seen.add(app);
-            found.push(app);
-          }
-        }
-      }
-      asking = found;
-    }
-    return false;
+      },
+      limit: waitsForAsked,
+    });
   }
 
   /** Whether the App has read restricted data. */
@@ -1352,6 +1372,7 @@ export class App extends DurableObject<Env> {
       version,
       above,
       aboveHolding,
+      turn,
       deadline: ends,
     } = call;
     if (use === "write" && kind === "read") {
@@ -1368,7 +1389,7 @@ export class App extends DurableObject<Env> {
       attempt: caller.attempt,
       path: {
         chain: [...above, this.#app],
-        holding: [...aboveHolding, this.#app],
+        holding: [...aboveHolding, { app: this.#app, call: turn }],
         deadline: ends,
         readOnly: kind === "read",
       },

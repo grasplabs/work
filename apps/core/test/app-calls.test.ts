@@ -1,5 +1,6 @@
 import { appCallLimits } from "@grasp-os/shared/apps";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import type { AppId } from "@grasp-os/shared/ids";
 import { appIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { KnowledgeApi } from "@grasp-os/shared/knowledge";
@@ -96,6 +97,14 @@ export class App extends DurableObject {
   async holdThen(caller: Caller, wait: () => Promise<void>, binding: string, method: string, input: unknown): Promise<unknown> {
     await wait();
     return await this.via(caller, binding, method, input);
+  }
+
+  // Calls another App without awaiting it, then holds the App until the
+  // test lets go, and ends with that call still waiting.
+  async callThenHold(caller: Caller, wait: () => Promise<void>, binding: string, method: string, input: unknown): Promise<string> {
+    void this.via(caller, binding, method, input);
+    await wait();
+    return "let go";
   }
 
   async relay(caller: Caller, input: { binding: string; method: string; input: unknown }): Promise<unknown> {
@@ -271,13 +280,22 @@ const gate = () => {
 const stepMs = 5000;
 
 /** Answers what `step` settles to, or fails once `stepMs` passes first. */
-const bounded = async <T>(step: Promise<T>, what: string): Promise<T> =>
-  await Promise.race([
-    step,
-    scheduler.wait(stepMs).then(() => {
-      throw new Error(`Gave up after ${stepMs} ms waiting for ${what}`);
-    }),
-  ]);
+const bounded = async <T>(step: Promise<T>, what: string): Promise<T> => {
+  const cap = deadline(stepMs);
+  const gaveUp = (async (): Promise<never> => {
+    try {
+      await whenAborted(cap.signal);
+    } catch {
+      // Aborted: `stepMs` passed.
+    }
+    throw new Error(`Gave up after ${stepMs} ms waiting for ${what}`);
+  })();
+  try {
+    return await Promise.race([step, gaveUp]);
+  } finally {
+    cap.clear();
+  }
+};
 
 /**
  * `app`'s call of `holdThen` for `userId`, as a screen makes it: holds
@@ -298,6 +316,10 @@ const holdThen = async (
     input,
   ]);
 
+/** Whether a call ended refused with `app.call_deadlock`. */
+const deadlocked = (ended: unknown): boolean =>
+  JSON.stringify(ended) === JSON.stringify({ refused: "app.call_deadlock" });
+
 /**
  * Waits until `app`'s call has reached `held`'s hold; fails at once
  * should the call end first.
@@ -317,16 +339,11 @@ const entered = async (
   );
 };
 
-/**
- * Waits until the calls waiting for `app` hold the Apps `expected` says,
- * call by call (`App.waitingHolds`).
- */
-const waitingIn = async (app: AppId, expected: AppId[][]): Promise<void> => {
+/** Waits until a call waits for `app` (`App.waiting`). */
+const waitingIn = async (app: AppId): Promise<void> => {
   await vi.waitFor(
     async () => {
-      await expect(appHost(env, app).waitingHolds()).resolves.toStrictEqual(
-        expected
-      );
+      await expect(appHost(env, app).waiting()).resolves.toBeGreaterThan(0);
     },
     { timeout: stepMs, interval: 20 }
   );
@@ -746,16 +763,161 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     await entered(atB, fromB);
     // A's call waits for B, holding A.
     atA.release();
-    await waitingIn(b, [[a]]);
+    await waitingIn(b);
     // B's would wait for A, holding B: refused at once, well before any
     // deadline, so B lets go and A's call goes on.
-    atB.release();
+    let fromBEnded: unknown;
+    let fromAEnded: unknown;
+    const events = await auditedDuring(async () => {
+      atB.release();
+      fromBEnded = await bounded(fromB, "B's call to be refused");
+      fromAEnded = await bounded(fromA, "A's call to go on");
+    });
     expect({
-      fromB: await bounded(fromB, "B's call to be refused"),
-      fromA: await bounded(fromA, "A's call to go on"),
+      fromB: fromBEnded,
+      fromA: fromAEnded,
+      // B's call of A: recorded as refused, and never as called by A.
+      intoA: callsIn(events)
+        .filter(({ action, actor, target }) =>
+          action === "app.call"
+            ? target?.id === a
+            : actor.type === "app" && actor.appId === a
+        )
+        .map(({ action, detail }) => ({
+          action,
+          outcome: detail.outcome,
+          reason: detail.reason,
+        })),
     }).toStrictEqual({
       fromB: { refused: "app.call_deadlock" },
       fromA: found(admin.userId, a),
+      intoA: [
+        { action: "app.call", outcome: "refused", reason: "app.call_deadlock" },
+      ],
+    });
+  });
+
+  it("refuse at least one of two calls that close a cycle at the same moment, never neither", async () => {
+    const admin = await personApi("admin");
+    const [a, b] = await Promise.all([newApp(admin, "A"), newApp(admin, "B")]);
+    await grantCalls(admin, a, b, ["read"], "NEXT");
+    await grantCalls(admin, b, a, ["read"], "NEXT");
+    const find = { query: "BV" };
+    const atA = gate();
+    const atB = gate();
+    const fromA = holdThen(a, admin.userId, atA, "NEXT", "findCustomers", find);
+    const fromB = holdThen(b, admin.userId, atB, "NEXT", "findCustomers", find);
+    await entered(atA, fromA);
+    await entered(atB, fromB);
+    atA.release();
+    atB.release();
+    const fromAEnded = await bounded(fromA, "A's call to settle");
+    const fromBEnded = await bounded(fromB, "B's call to settle");
+    // Both settle well before any deadline: each refused, or answered.
+    expect({
+      atLeastOneRefused: deadlocked(fromAEnded) || deadlocked(fromBEnded),
+      fromA: deadlocked(fromAEnded) ? "refused" : fromAEnded,
+      fromB: deadlocked(fromBEnded) ? "refused" : fromBEnded,
+    }).toStrictEqual({
+      atLeastOneRefused: true,
+      fromA: deadlocked(fromAEnded) ? "refused" : found(admin.userId, a),
+      fromB: deadlocked(fromBEnded) ? "refused" : found(admin.userId, b),
+    });
+  });
+
+  it("queue a call however a call that has ended left another waiting: what it held counts for nothing", async () => {
+    const admin = await personApi("admin");
+    const [a, b] = await Promise.all([newApp(admin, "A"), newApp(admin, "B")]);
+    await grantCalls(admin, a, b, ["read"], "NEXT");
+    await grantCalls(admin, b, a, ["read"], "NEXT");
+    const find = { query: "BV" };
+    const caller = { userId: admin.userId, mode: "interactive" as const };
+    // B's call holds B, and will call A.
+    const atB = gate();
+    const fromB = holdThen(b, admin.userId, atB, "NEXT", "findCustomers", find);
+    await entered(atB, fromB);
+    // A's first call leaves a call of B waiting, unawaited, and ends.
+    const atFirst = gate();
+    const first = callApp(env, a, caller, "callThenHold", [
+      atFirst.wait,
+      "NEXT",
+      "findCustomers",
+      find,
+    ]);
+    await entered(atFirst, first);
+    await waitingIn(b);
+    atFirst.release();
+    const firstEnded = await bounded(first, "A's first call to end");
+    // A's next call holds A, waiting for nothing.
+    const atNext = gate();
+    const next = callApp(env, a, caller, "hold", [atNext.wait]);
+    await entered(atNext, next);
+    // B's call of A waits for it, as plain contention.
+    atB.release();
+    await waitingIn(a);
+    atNext.release();
+    expect({
+      first: firstEnded,
+      next: await bounded(next, "A's next call to answer"),
+      fromB: await bounded(fromB, "B's call to go on"),
+    }).toStrictEqual({
+      first: "let go",
+      next: "let go",
+      fromB: found(admin.userId, b),
+    });
+  });
+
+  it("queue a call however a call that has ended in another App left a wait there", async () => {
+    const admin = await personApi("admin");
+    const [a, b, x] = await Promise.all([
+      newApp(admin, "A"),
+      newApp(admin, "B"),
+      newApp(admin, "X"),
+    ]);
+    await grantCalls(admin, a, x, ["read"], "NEXT");
+    await grantCalls(admin, b, a, ["read"], "NEXT");
+    await grantCalls(admin, x, b, ["read"], "NEXT");
+    const find = { query: "BV" };
+    const caller = { userId: admin.userId, mode: "interactive" as const };
+    // B's call holds B, and will call A.
+    const atB = gate();
+    const fromB = holdThen(b, admin.userId, atB, "NEXT", "findCustomers", find);
+    await entered(atB, fromB);
+    // X's first call leaves a call of B waiting, unawaited, and ends.
+    const atFirst = gate();
+    const first = callApp(env, x, caller, "callThenHold", [
+      atFirst.wait,
+      "NEXT",
+      "findCustomers",
+      find,
+    ]);
+    await entered(atFirst, first);
+    await waitingIn(b);
+    atFirst.release();
+    const firstEnded = await bounded(first, "X's first call to end");
+    // X's next call holds X; A's call waits for it.
+    const atNext = gate();
+    const next = callApp(env, x, caller, "hold", [atNext.wait]);
+    await entered(atNext, next);
+    const atA = gate();
+    const fromA = holdThen(a, admin.userId, atA, "NEXT", "findCustomers", find);
+    await entered(atA, fromA);
+    atA.release();
+    await waitingIn(x);
+    // B's call of A waits too: X's call that waited for B has ended.
+    atB.release();
+    await waitingIn(a);
+    atNext.release();
+    expect({
+      first: firstEnded,
+      next: await bounded(next, "X's next call to answer"),
+      fromA: await bounded(fromA, "A's call to go on"),
+      fromB: await bounded(fromB, "B's call to go on"),
+    }).toStrictEqual({
+      first: "let go",
+      next: "let go",
+      fromA: found(admin.userId, a),
+      fromB: found(admin.userId, b),
     });
   });
 
@@ -779,9 +941,9 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     await entered(atC, fromC);
     // A waits for B, then B for C: no cycle yet, so both wait.
     atA.release();
-    await waitingIn(b, [[a]]);
+    await waitingIn(b);
     atB.release();
-    await waitingIn(c, [[b]]);
+    await waitingIn(c);
     // C would wait for A, which waits on C through B.
     atC.release();
     expect({
@@ -818,7 +980,7 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     await entered(atX, fromX);
     await entered(atB, fromB);
     atX.release();
-    await waitingIn(b, [[x, a]]);
+    await waitingIn(b);
     // B would wait for X, at the top of the chain waiting for B.
     atB.release();
     expect({
@@ -849,7 +1011,7 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     await entered(atA, fromA);
     await entered(atB, holding);
     atA.release();
-    await waitingIn(b, [[a]]);
+    await waitingIn(b);
     atB.release();
     expect({
       holding: await bounded(holding, "B's call to answer"),
@@ -909,12 +1071,12 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     await entered(atInvoicing, holding);
     await entered(atCrm, fromCrm);
     atCrm.release();
-    await waitingIn(invoicing, [[crm]]);
+    await waitingIn(invoicing);
     let run = "";
     const events = await auditedDuring(async () => {
       ({ id: run } = await admin.api.workflows.start(invoicing, "lookup"));
       // The run's call waits for the CRM, holding no App.
-      await waitingIn(crm, [[]]);
+      await waitingIn(crm);
       atInvoicing.release();
       await finished(run);
     });

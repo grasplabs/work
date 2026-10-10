@@ -68,6 +68,11 @@ export class CallQueue<Tag = never> {
     this.#limit = limit;
   }
 
+  /** How many calls wait now. */
+  waiting(): number {
+    return this.#waiting.size;
+  }
+
   /** What the calls waiting now say of themselves (`Wait.tag`), oldest first. */
   waitingTags(): Tag[] {
     return [...this.#waiting].flatMap(({ tag }) =>
