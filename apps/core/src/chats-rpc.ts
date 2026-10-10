@@ -1,15 +1,23 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import { actorOf } from "@grasp-os/shared/audit";
-import { chatTitleSchema } from "@grasp-os/shared/chat";
+import {
+  chatTitleSchema,
+  projectDocumentMaxBytes,
+  projectDocumentNameSchema,
+  projectGoalSchema,
+  projectNameSchema,
+} from "@grasp-os/shared/chat";
 import type {
   ChatConnectionRequest,
   ChatDraft,
+  ChatProject,
   ChatQuestion,
   ChatsApi,
   ChatSummary,
   ChatUpdate,
   FixRunResult,
   PreviewBundle,
+  ProjectDocument,
 } from "@grasp-os/shared/chat";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
@@ -22,6 +30,7 @@ import {
 } from "@grasp-os/shared/screens";
 import type { ScreenProblem } from "@grasp-os/shared/screens";
 import { RpcTarget } from "capnweb";
+import { z } from "zod";
 
 import { appFor, draftFiles, screensIn } from "./apps.ts";
 import { organizationId } from "./auth/auth.ts";
@@ -53,7 +62,8 @@ import { questionSchema } from "./workspace.ts";
 // chat of someone else's is refused as if there were none. Making,
 // renaming and deleting one is audited, and so is starting one to fix a
 // failed run (`fixRun`), and deciding a connection its agent asked for
-// (chat-connections.ts).
+// (chat-connections.ts). A person's projects are theirs alike, and every
+// change to one is audited, as is moving a chat into or out of one.
 
 /**
  * The agent every chat's agent is: the organization workspace's, so
@@ -85,6 +95,17 @@ const chatIdOf = (chatId: unknown): ChatId => {
   }
   return parsed.data;
 };
+
+/**
+ * A document to add to a project, as the page sends it: a name with one
+ * of the types a project takes, and text. Its size and how many the
+ * project has are the object's to check (`addProjectDocument`).
+ */
+const projectDocumentSchema = z.strictObject({
+  name: projectDocumentNameSchema,
+  // A character is at least a byte: longer can't fit.
+  content: z.string().max(projectDocumentMaxBytes),
+});
 
 /**
  * Why a question wasn't taken, as its person reads it: an unplanned error
@@ -151,7 +172,7 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
     );
   }
 
-  async create(title: string): Promise<ChatSummary> {
+  async create(title: string, projectId?: string | null): Promise<ChatSummary> {
     return await withPerson(this.#check, async (person) => {
       const { userId } = person;
       const parsed = chatTitleSchema.safeParse(title);
@@ -162,13 +183,16 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
         parsed.data,
         userId,
         chatAgentId,
-        actorOf(person)
+        actorOf(person),
+        undefined,
+        projectId ?? undefined
       );
       return {
         id: chat.id,
         title: chat.title,
         createdAt: chat.createdAt.toISOString(),
         running: false,
+        projectId: chat.projectId,
       };
     });
   }
@@ -184,6 +208,111 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
         id,
         person.userId,
         parsed.data,
+        actorOf(person)
+      );
+    });
+  }
+
+  async moveChat(chatId: string, projectId: string | null): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await this.#chatsOf(person.userId).moveChat(
+        chatIdOf(chatId),
+        person.userId,
+        projectId,
+        actorOf(person)
+      );
+    });
+  }
+
+  async projects(): Promise<ChatProject[]> {
+    return await withPerson(
+      this.#check,
+      async ({ userId }) => await this.#chatsOf(userId).projects(userId)
+    );
+  }
+
+  async createProject(name: string): Promise<ChatProject> {
+    return await withPerson(this.#check, async (person) => {
+      const parsed = projectNameSchema.safeParse(name);
+      if (!parsed.success) {
+        throw agentErrors.create("agent.invalid_project");
+      }
+      return await this.#chatsOf(person.userId).createProject(
+        person.userId,
+        parsed.data,
+        actorOf(person)
+      );
+    });
+  }
+
+  async renameProject(projectId: string, name: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      const parsed = projectNameSchema.safeParse(name);
+      if (!parsed.success) {
+        throw agentErrors.create("agent.invalid_project");
+      }
+      await this.#chatsOf(person.userId).renameProject(
+        projectId,
+        person.userId,
+        parsed.data,
+        actorOf(person)
+      );
+    });
+  }
+
+  async setProjectGoal(projectId: string, goal: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      const parsed = projectGoalSchema.safeParse(goal);
+      if (!parsed.success) {
+        throw agentErrors.create("agent.invalid_project");
+      }
+      await this.#chatsOf(person.userId).setProjectGoal(
+        projectId,
+        person.userId,
+        parsed.data,
+        actorOf(person)
+      );
+    });
+  }
+
+  async addProjectDocument(
+    projectId: string,
+    document: unknown
+  ): Promise<ProjectDocument> {
+    return await withPerson(this.#check, async (person) => {
+      // A name and text only: whatever else the page passed goes no further.
+      const parsed = projectDocumentSchema.safeParse(document);
+      if (!parsed.success) {
+        throw agentErrors.create("agent.invalid_project_document");
+      }
+      return await this.#chatsOf(person.userId).addProjectDocument(
+        projectId,
+        person.userId,
+        parsed.data,
+        actorOf(person)
+      );
+    });
+  }
+
+  async removeProjectDocument(
+    projectId: string,
+    documentId: string
+  ): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await this.#chatsOf(person.userId).removeProjectDocument(
+        projectId,
+        person.userId,
+        documentId,
+        actorOf(person)
+      );
+    });
+  }
+
+  async removeProject(projectId: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await this.#chatsOf(person.userId).deleteProject(
+        projectId,
+        person.userId,
         actorOf(person)
       );
     });
@@ -243,6 +372,7 @@ export class ChatsRpc extends RpcTarget implements ChatsApi {
         id: chat.id,
         title: chat.title,
         createdAt: chat.createdAt.toISOString(),
+        projectId: chat.projectId,
       };
       try {
         await chats.send(chat.id, userId, {

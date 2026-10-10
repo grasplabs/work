@@ -10,6 +10,7 @@ import {
   primaryKey,
   sqliteTable,
   text,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 export const chats = sqliteTable(
@@ -31,9 +32,60 @@ export const chats = sqliteTable(
      * chat.
      */
     agentId: text("agent_id").notNull(),
+    /**
+     * The person's project the chat is in (`chatProjects`), or null: its
+     * agent reads the project's goal and documents.
+     */
+    projectId: text("project_id"),
   },
   // A person's list, newest first.
-  (table) => [index("chats_person").on(table.personId, table.createdAt)]
+  (table) => [
+    index("chats_person").on(table.personId, table.createdAt),
+    index("chats_project").on(table.projectId),
+  ]
+);
+
+/**
+ * A person's projects: a name, and a goal in their own words, which the
+ * agent of each chat in it reads, with its documents, as data
+ * (`env.chat.project()`), never as its instructions.
+ */
+export const chatProjects = sqliteTable(
+  "chat_projects",
+  {
+    id: text().primaryKey(),
+    /** The person the project belongs to, and the only one who reaches it. */
+    personId: text("person_id").notNull(),
+    name: text().notNull(),
+    goal: text().notNull().default(""),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("chat_projects_person").on(table.personId, table.createdAt)]
+);
+
+/** A project's text documents, each name once in its project. */
+export const chatProjectDocuments = sqliteTable(
+  "chat_project_documents",
+  {
+    id: text().primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => chatProjects.id),
+    name: text().notNull(),
+    content: text().notNull(),
+    /** The content's size, in bytes of UTF-8. */
+    bytes: integer().notNull(),
+    /**
+     * Where it comes in its project: past every document the project had
+     * when it was added, so they are read in the order they were added
+     * (two quick additions share a time; IDs are random).
+     */
+    position: integer().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("chat_project_documents_name").on(table.projectId, table.name),
+  ]
 );
 
 /**
