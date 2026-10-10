@@ -8,7 +8,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AppConnectionBinding } from "../src/app-bindings.ts";
 import { callApp, waitingCallsLimit } from "../src/app.ts";
@@ -288,6 +288,24 @@ const newApp = async (
 };
 
 /**
+ * What lets go of each hold a test made (a gate, a mail search held):
+ * `afterEach` lets go of them all, however the test ended, so a test that
+ * fails holding a call fails alone, instead of keeping an App's code, or
+ * the run, waiting.
+ */
+const holds = new Set<() => Promise<void> | void>();
+
+/**
+ * A mail connection with `mail.search`, whose server answers as `plan`
+ * says: a search it holds is let go after the test (`holds`).
+ */
+const heldMail = async (plan: MailAnswer[]) => {
+  const mail = await mailConnection(plan, mailWithSearch);
+  holds.add(mail.release);
+  return mail;
+};
+
+/**
  * The desk, granted something of every kind to read and change: Outlook
  * to read (it reaches connect), mail to send, a collection to write
  * records to, and its own exports (`SELF`, to call one marked `write`);
@@ -306,7 +324,7 @@ const setUp = async (
     "app/records.json": taskType(collectionId),
   });
   const front = await newApp(admin, frontFiles);
-  const mail = await mailConnection(plan, mailWithSearch);
+  const mail = await heldMail(plan);
   const grant = async (
     subject: AppId,
     object:
@@ -367,6 +385,9 @@ const setUp = async (
 const gate = () => {
   const entered = Promise.withResolvers<unknown>();
   const released = Promise.withResolvers<boolean>();
+  holds.add(() => {
+    released.resolve(true);
+  });
   return {
     entered: entered.promise,
     release: () => {
@@ -380,20 +401,102 @@ const gate = () => {
 };
 
 /**
+ * How long a test waits for a step it is sure of (a call reaching its
+ * hold, answering once let go, the App's object taking a call), before it
+ * fails: well within the test's own time, so a test that goes wrong fails
+ * fast, with what it waited for. A real wait, not the faked clock's.
+ */
+const stepMs = 5000;
+
+/** Answers what `step` settles to, or fails once `stepMs` passes first. */
+const bounded = async <T>(step: Promise<T>, what: string): Promise<T> =>
+  await Promise.race([
+    step,
+    scheduler.wait(stepMs).then(() => {
+      throw new Error(`Gave up after ${stepMs} ms waiting for ${what}`);
+    }),
+  ]);
+
+/**
  * Waits until the App called `held`'s callback, and answers what it passed;
  * fails at once should `call` end first, rather than wait for a callback
- * that won't come.
+ * that won't come, and fails within `stepMs` should neither happen.
  */
 const entered = async (
   held: ReturnType<typeof gate>,
   call: Promise<unknown>
 ): Promise<unknown> =>
-  await Promise.race([
-    held.entered,
-    call.then((ended) => {
-      throw new Error(`The call ended before it was held: ${String(ended)}`);
-    }),
-  ]);
+  await bounded(
+    Promise.race([
+      held.entered,
+      call.then((ended) => {
+        throw new Error(`The call ended before it was held: ${String(ended)}`);
+      }),
+    ]),
+    "the App to call the held callback"
+  );
+
+/**
+ * Fakes the clock and the timers of this isolate, the App's object's
+ * included, and notes the delay of each timer set on it from then on:
+ * how a test knows a call reached the App and set its deadline (`armed`).
+ */
+const fakeClock = (): { delays: number[]; seen: number } => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const delays: number[] = [];
+  const clock = { delays, seen: 0 };
+  const fake = globalThis.setTimeout;
+  // Put back as it was by `vi.useRealTimers`, which restores the real one.
+  Reflect.set(globalThis, "setTimeout", (callback: () => void, ms?: number) => {
+    clock.delays.push(ms ?? 0);
+    return fake(callback, ms);
+  });
+  return clock;
+};
+
+/** How often `armed` looks again. */
+const armedPollMs = 5;
+
+/**
+ * Waits until a timer of `ms` was set on the faked clock (`fakeClock`)
+ * since the one `armed` last found: until a call made to the App arrived
+ * and set its deadline. A call made through the stub can arrive after a
+ * later `runInDurableObject` (`advance`), which reaches the object by
+ * another route, and under load often does: moved on before it arrived,
+ * the clock would start the call's deadline later than the test means,
+ * or, for a call through an export whose deadline its caller set, pass it
+ * before the call even waits.
+ */
+const armed = async (
+  clock: { delays: number[]; seen: number },
+  ms: number
+): Promise<void> => {
+  for (let waited = 0; waited < stepMs; waited += armedPollMs) {
+    const at = clock.delays.indexOf(ms, clock.seen);
+    if (at !== -1) {
+      clock.seen = at + 1;
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a real pause between looks
+    await scheduler.wait(armedPollMs);
+  }
+  throw new Error(
+    `Gave up after ${stepMs} ms waiting for a call to set its ${ms} ms deadline`
+  );
+};
+
+/**
+ * Moves the faked clock on by `ms` in the App's object (`host`), whose
+ * deadlines' timers they are.
+ */
+const advance = async (
+  host: ReturnType<typeof appHost>,
+  ms: number
+): Promise<void> => {
+  await runInDurableObject(host, async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+};
 
 /** Waits until `mail`'s server holds a search the App made. */
 const heldAtSearch = async (mail: { holding: () => Promise<boolean> }) => {
@@ -551,6 +654,18 @@ const messageOf = (details: unknown): string =>
     : "";
 
 describe("an App call's invocation", { timeout: 60_000 }, () => {
+  // Lets go of every hold the test made (`holds`), and of the faked clock.
+  afterEach(async () => {
+    vi.useRealTimers();
+    const releases = [...holds];
+    holds.clear();
+    await Promise.allSettled(
+      releases.map(async (letGo) => {
+        await letGo();
+      })
+    );
+  });
+
   it("lets a call through an export marked read change nothing, through any stub", async () => {
     const { admin, desk, front, mail } = await setUp();
     const read = await viaFront(front, admin.userId, "lookUp", {});
@@ -913,7 +1028,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     });
     // A shared connection, so the desk reads nothing the front desk's
     // people couldn't: its search is where the desk's call waits.
-    const mail = await mailConnection([], mailWithSearch);
+    const mail = await heldMail([]);
     await requestGranted(idp, admin, {
       subject: { type: "app", appId: desk },
       object: { type: "connection", connectionId: mail.id },
@@ -1068,7 +1183,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
         })
       );
     // A shared connection, so the desk may be shared with anyone.
-    const mail = await mailConnection([], mailWithSearch);
+    const mail = await heldMail([]);
     const search = await granted(
       { type: "connection", connectionId: mail.id },
       ["mail.search"],
@@ -1323,32 +1438,30 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     const first = gate();
     const second = gate();
     // The deadlines' timers, and the clock, are held, and moved on in the
-    // App's object, whose timers they are.
-    const advance = async (ms: number) => {
-      await runInDurableObject(host, async () => {
-        await vi.advanceTimersByTimeAsync(ms);
-      });
-    };
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    // App's object (`advance`).
+    const clock = fakeClock();
     let waited: string;
     let meanwhile: string;
     try {
       const holding = host.call(caller, "keepAndHold", [first.wait]);
       await entered(first, holding);
+      await armed(clock, 10_000);
       // Waits six of its ten seconds for its turn, then has four left of
       // its deadline: its caller hears it timed out, but its code had
       // nowhere near the App's own time, so it isn't stopped.
       const waiting = outcome(host.call(caller, "keepAndHold", [second.wait]));
-      await advance(6000);
+      await armed(clock, 10_000);
+      await advance(host, 6000);
       first.release();
-      await holding;
+      await bounded<unknown>(holding, "the first call to answer once let go");
       await entered(second, waiting);
-      await advance(4001);
-      waited = await waiting;
+      await advance(host, 4001);
+      waited = await bounded(waiting, "the waiting call's deadline");
       // Its code still runs: the App takes no other call until it settles.
       const queued = outcome(host.call(caller, "tick", [], exportCall(500)));
-      await advance(500);
-      meanwhile = await queued;
+      await armed(clock, 500);
+      await advance(host, 500);
+      meanwhile = await bounded(queued, "the queued call to give up");
     } finally {
       vi.useRealTimers();
       first.release();
@@ -1374,12 +1487,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     const caller = as(admin.userId);
     const countBefore = await host.call(caller, "tick", []);
     const held = gate();
-    const advance = async (ms: number) => {
-      await runInDurableObject(host, async () => {
-        await vi.advanceTimersByTimeAsync(ms);
-      });
-    };
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const clock = fakeClock();
     let cutShort: string;
     let meanwhile: string;
     try {
@@ -1390,13 +1498,14 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
         host.call(caller, "keepAndHold", [held.wait], exportCall(5000))
       );
       await entered(held, call);
-      await advance(5000);
-      cutShort = await call;
+      await advance(host, 5000);
+      cutShort = await bounded(call, "the call's deadline");
       const queued = outcome(host.call(caller, "tick", [], exportCall(500)));
-      await advance(500);
-      meanwhile = await queued;
+      await armed(clock, 500);
+      await advance(host, 500);
+      meanwhile = await bounded(queued, "the queued call to give up");
       // Its code never settles: at the App's own time, it is stopped.
-      await advance(10_000);
+      await advance(host, 10_000);
     } finally {
       vi.useRealTimers();
     }
@@ -1425,7 +1534,7 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
     const caller = as(admin.userId);
     const countBefore = await host.call(caller, "tick", []);
     const held = gate();
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    fakeClock();
     let cutShort: string;
     try {
       // A caller that waits five seconds, as a workflow step's attempt
@@ -1440,15 +1549,11 @@ describe("an App call's invocation", { timeout: 60_000 }, () => {
         )
       );
       await entered(held, call);
-      await runInDurableObject(host, async () => {
-        await vi.advanceTimersByTimeAsync(5000);
-      });
-      cutShort = await call;
+      await advance(host, 5000);
+      cutShort = await bounded(call, "the call's deadline");
       // Its code never settles: it is stopped as its time from its turn
       // is up, which it is.
-      await runInDurableObject(host, async () => {
-        await vi.advanceTimersByTimeAsync(1);
-      });
+      await advance(host, 1);
     } finally {
       vi.useRealTimers();
     }

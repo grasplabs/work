@@ -1,3 +1,4 @@
+import { whenAborted } from "@grasp-os/shared/deadline";
 import {
   appIdSchema,
   collectionIdSchema,
@@ -1286,23 +1287,32 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
     const setup = await setUp();
     const marker = unique();
     const handed: string[] = [];
+    // How long a hand-over may take. A lease lasts twice that, so a lease
+    // outlives its hand-over by this much: room enough for the writes
+    // around it on a loaded machine, so no lease here runs out while its
+    // hand-over is still going.
+    const timeoutMs = 300;
     // Slower than a hand-over may take: each one fails, and is put back.
     const consumers = consumersFor(marker, async (entry) => {
       handed.push(entry.id);
-      await scheduler.wait(30);
+      // Answers only once its hand-over gave up on it.
+      await outcome(whenAborted(entry.signal));
       return "delivered";
     });
+    const count = 6;
     await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
       key: unique(),
-      intents: Array.from({ length: 12 }, (_, n) => ({
+      intents: Array.from({ length: count }, (_, n) => ({
         kind: "workflow.notify" as const,
         data: { marker, n },
       })),
       consumers,
     });
-    const first = drainSubmissionOutbox(env, consumers, { timeoutMs: 20 });
-    await scheduler.wait(150);
-    await drainSubmissionOutbox(env, consumers, { timeoutMs: 20 });
+    const first = drainSubmissionOutbox(env, consumers, { timeoutMs });
+    // Once a lease taken as the first drain started would have run out,
+    // and long before that drain has handed all of them over.
+    await scheduler.wait(timeoutMs * 3);
+    await drainSubmissionOutbox(env, consumers, { timeoutMs });
     await first;
     const entries = await entriesOf(marker);
     const ids = entries.map(({ id }) => id);
