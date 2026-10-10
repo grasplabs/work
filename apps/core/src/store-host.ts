@@ -1,3 +1,5 @@
+import { auditActorSchema } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
@@ -30,6 +32,7 @@ import {
 import {
   and,
   asc,
+  count,
   eq,
   inArray,
   isNotNull,
@@ -59,6 +62,8 @@ import {
   handOver,
 } from "./outbox-delivery.ts";
 import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
+import { inventoriedDeleted, recordStoreDeleted } from "./store-deletion.ts";
+import type { StoreDeletionMark } from "./store-deletion.ts";
 
 // The host of a business store (data-store.ts is its Durable Object): one
 // object per store, named by the store's ID (data-stores.ts), with a SQLite database of its own that holds all
@@ -194,6 +199,24 @@ const nothingOwed = sql`NOT EXISTS (SELECT 1 FROM ${outbox} WHERE ${outbox.recei
 /** How long a sweep goes on taking pages, at most, as for Knowledge receipts. */
 const sweepBudgetMs = 20_000;
 
+/** Most records a deleted store's purge removes in one transaction. */
+const purgePage = 1000;
+
+/** How long one alarm goes on purging before the next one continues. */
+const purgeBudgetMs = 10_000;
+
+/**
+ * What a deleted store's purge removes, in this order: each table only
+ * once nothing refers to its rows (records name tables, entries receipts).
+ * Fixed names, never an author's.
+ */
+const purgedTables = [
+  "sdk_records",
+  "sdk_change_outbox",
+  "sdk_mutation_receipts",
+  "sdk_tables",
+] as const;
+
 /** The least wait before the alarm comes again, so it never spins. */
 const alarmGapMs = 1000;
 
@@ -211,8 +234,30 @@ const intentOf = (stored: string) => {
   return storeIntentSchema.safeParse(json).data;
 };
 
+/** A deleted store's mark, as its row holds it. */
+const markOf = (row: {
+  deletedAt: number | null;
+  deletedBy: string | null;
+}): StoreDeletionMark => {
+  if (row.deletedAt === null || row.deletedBy === null) {
+    throw new Error("A deleted store has no deletion mark");
+  }
+  return {
+    deletedAt: row.deletedAt,
+    deletedBy: auditActorSchema.parse(JSON.parse(row.deletedBy)),
+  };
+};
+
 const conflict = (table: string, id: string) =>
   dataErrors.create("data.conflict", { table, id });
+
+/** How a deleted store's purge goes, which tests choose. */
+export interface PurgeOptions {
+  /** Rows per transaction. */
+  page?: number;
+  /** How long one alarm goes on purging. */
+  budgetMs?: number;
+}
 
 /** What a sweep depends on, which tests choose. */
 export interface SweepOptions {
@@ -880,8 +925,21 @@ export class StoreHost {
    */
   async runAlarm(
     consumers: OutboxConsumers,
-    sweep: SweepOptions = {}
+    sweep: SweepOptions = {},
+    purge: PurgeOptions = {}
   ): Promise<void> {
+    if (this.#deleted()) {
+      let failed = false;
+      try {
+        await this.#purgeDeleted(purge);
+      } catch (error) {
+        failed = true;
+        log.error("store.purge_failed", errorFields(error));
+      } finally {
+        await this.schedule(failed ? alarmRetryMs : alarmGapMs);
+      }
+      return;
+    }
     let failed = false;
     try {
       await this.drainOutbox(consumers);
@@ -908,6 +966,18 @@ export class StoreHost {
    * nothing the alarm can't act on sets one.
    */
   async schedule(gapMs = alarmGapMs): Promise<void> {
+    if (this.#deleted()) {
+      // Only recording it in core and its purge are left, if anything.
+      const left = this.ctx.storage.sql
+        .exec(
+          `SELECT 1 FROM sdk_store WHERE inventoried_at IS NULL ${purgedTables.map((table) => `UNION ALL SELECT 1 FROM ${table}`).join(" ")} LIMIT 1`
+        )
+        .toArray();
+      if (left.length > 0) {
+        await this.ctx.storage.setAlarm(Date.now() + gapMs);
+      }
+      return;
+    }
     const [entry] = this.#db
       .select({ at: min(outbox.nextAttemptAt) })
       .from(outbox)
@@ -938,6 +1008,125 @@ export class StoreHost {
     }
   }
 
+  /** Whether the store was deleted. */
+  #deleted(): boolean {
+    const bound = this.#db
+      .select({ deletedAt: store.deletedAt })
+      .from(store)
+      .get();
+    return bound !== undefined && bound.deletedAt !== null;
+  }
+
+  /**
+   * Deletes the store for `actor`, unless a receipt still refers to it:
+   * one not yet expired (`data.store_in_use`), which a mutation in flight,
+   * a retry still to come, a live workflow run or an outbox entry still
+   * owed keeps. Checked in the transaction that marks the store deleted
+   * (with who and when), so no claim can land between the check and the
+   * mark; every call after it is refused (`#bind`). Answers when it was
+   * deleted. Deleting a deleted store changes nothing and answers the
+   * first deletion, so core can repeat one its inventory didn't record.
+   * The alarm records it in core, then purges the records.
+   */
+  async close(storeId: StoreId, actor: AuditActor): Promise<StoreDeletionMark> {
+    const id = storeIdSchema.parse(storeId);
+    const deletedBy = JSON.stringify(auditActorSchema.parse(actor));
+    if (this.ctx.id.name !== id) {
+      throw new Error("This object holds another store");
+    }
+    const mark = this.ctx.storage.transactionSync((): StoreDeletionMark => {
+      const now = Date.now();
+      const bound = this.#db
+        .select({
+          storeId: store.storeId,
+          deletedAt: store.deletedAt,
+          deletedBy: store.deletedBy,
+        })
+        .from(store)
+        .get();
+      if (bound === undefined) {
+        // Never used: nothing refers to it.
+        this.#db
+          .insert(store)
+          .values({
+            only: 1,
+            storeId: id,
+            createdAt: now,
+            deletedAt: now,
+            deletedBy,
+          })
+          .run();
+        return { deletedAt: now, deletedBy: actor };
+      }
+      if (bound.storeId !== id) {
+        throw new Error("This object holds another store");
+      }
+      // Deleted already: the first deletion's mark, whoever asks now.
+      if (bound.deletedAt !== null) {
+        return markOf(bound);
+      }
+      const [held] = this.#db
+        .select({ count: count() })
+        .from(receipts)
+        .where(isNull(receipts.expiredAt))
+        .all();
+      const receiptsHeld = held?.count ?? 0;
+      if (receiptsHeld > 0) {
+        throw dataErrors.create("data.store_in_use", {
+          receipts: receiptsHeld,
+        });
+      }
+      this.#db.update(store).set({ deletedAt: now, deletedBy }).run();
+      return { deletedAt: now, deletedBy: actor };
+    });
+    await this.schedule(0);
+    return mark;
+  }
+
+  /**
+   * A deleted store's alarm: records the deletion in core first (store-
+   * deletion.ts), then purges, a page per transaction, table after table,
+   * until nothing is left but the deletion mark or its time is up; the
+   * next alarm continues (`schedule`).
+   */
+  async #purgeDeleted({
+    page: purgePageSize = purgePage,
+    budgetMs = purgeBudgetMs,
+  }: PurgeOptions): Promise<void> {
+    const bound = this.#db.select().from(store).get();
+    if (bound === undefined) {
+      throw new Error("A deleted store has no deletion mark");
+    }
+    if (bound.inventoriedAt === null) {
+      const storeId = storeIdSchema.parse(bound.storeId);
+      await recordStoreDeleted(this.env, storeId, markOf(bound));
+      // Only once core's inventory shows it: a row that went missing
+      // (or a batch that didn't land) is retried, never purged past.
+      if (!(await inventoriedDeleted(this.env, storeId))) {
+        throw new Error("Core's inventory doesn't show the store deleted");
+      }
+      this.#db.update(store).set({ inventoriedAt: Date.now() }).run();
+    }
+    const started = Date.now();
+    for (const table of purgedTables) {
+      for (;;) {
+        const removed = this.ctx.storage.transactionSync(
+          () =>
+            this.ctx.storage.sql.exec(
+              `DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} LIMIT ?)`,
+              purgePageSize
+            ).rowsWritten
+        );
+        if (removed === 0) {
+          break;
+        }
+        if (Date.now() - started >= budgetMs) {
+          return;
+        }
+      }
+    }
+  }
+
   /** The ID of the table named `name`, or `data.unknown_table`. */
   #tableId(name: string): string {
     const row = this.#db
@@ -963,7 +1152,10 @@ export class StoreHost {
     if (this.ctx.id.name !== id) {
       throw new Error("This object holds another store");
     }
-    const bound = this.#db.select({ storeId: store.storeId }).from(store).get();
+    const bound = this.#db
+      .select({ storeId: store.storeId, deletedAt: store.deletedAt })
+      .from(store)
+      .get();
     if (bound === undefined) {
       this.#db
         .insert(store)
@@ -973,6 +1165,11 @@ export class StoreHost {
     }
     if (bound.storeId !== id) {
       throw new Error("This object holds another store");
+    }
+    // Deleted: refused whatever core's inventory says, so a deleted store
+    // stays deleted even if its inventory row were wrong.
+    if (bound.deletedAt !== null) {
+      throw dataErrors.create("data.store_unavailable");
     }
   }
 }

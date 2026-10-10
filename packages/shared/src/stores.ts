@@ -310,6 +310,12 @@ export interface StoredRecord {
   fields: Record<string, unknown>;
 }
 
+/** Whom a store is shared with, to manage it: a person or a team. */
+export const storeMemberSchema = z.strictObject({
+  type: z.enum(["person", "team"]),
+  id: identifierSchema,
+});
+
 export const dataErrors = defineErrorFamily({
   "data.invalid": "That change isn't valid for this store.",
   "data.unknown_table": "This store has no such table.",
@@ -321,4 +327,6 @@ export const dataErrors = defineErrorFamily({
   "data.store_unavailable": "This store doesn't exist or was deleted.",
   "data.receipt_invalid":
     "This commit doesn't hold a receipt its caller claimed.",
+  "data.store_in_use":
+    "This store can't be deleted while a mutation's receipt still refers to it. Try again once its receipts have expired.",
 });

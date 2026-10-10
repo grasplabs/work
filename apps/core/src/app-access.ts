@@ -12,6 +12,7 @@ import { sourcesOf, sourcesOfApps, unreadableBy } from "./app-provenance.ts";
 import { teamsOf } from "./auth/identity.ts";
 import { apps, appMembers, teamMembers } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { rowsOf as memberRowsOf } from "./sharing.ts";
 
 // Who may do what in an App (App roles). An App is open to:
 //
@@ -42,23 +43,9 @@ import { inList } from "./db/d1.ts";
 /** Who asks, as far as their role in an App goes. */
 export type Person = Pick<Identity, "userId" | "role" | "teams">;
 
-/** The member rows that are `by`'s: their own, or one of their teams'. */
+/** The member rows of Apps that are `by`'s: their own, or one of their teams'. */
 const rowsOf = (by: Pick<Identity, "userId" | "teams">): SQL =>
-  or(
-    and(
-      eq(appMembers.memberType, "person"),
-      eq(appMembers.memberId, by.userId)
-    ),
-    by.teams.length === 0
-      ? undefined
-      : and(
-          eq(appMembers.memberType, "team"),
-          inList(
-            appMembers.memberId,
-            by.teams.map(({ id }) => id)
-          )
-        )
-  ) ?? sql`0`;
+  memberRowsOf(appMembers, by);
 
 /** The highest role `by`'s organization role lets them have in an App. */
 const ceilingOf = (by: Person): AppRole =>

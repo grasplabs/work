@@ -12,8 +12,17 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+
+/** Who creates the stores these tests use: a builder of the organization. */
+const builder: Acting = {
+  userId: "ada",
+  role: "builder",
+  teams: [],
+  staff: false,
+};
 
 // Business stores through core's own way in (data-stores.ts) and each
 // store's Durable Object (data-store.ts): what the operations to come
@@ -61,7 +70,7 @@ const commitIn = async (
 
 /** A new store with a `notes` table. */
 const newStore = async (): Promise<OpenStore> => {
-  const store = await openStore(env, await createStore(env, ada.userId));
+  const store = await openStore(env, await createStore(env, builder));
   await store.defineTables(["notes"]);
   return store;
 };
@@ -148,8 +157,8 @@ describe("stores", () => {
   });
 
   it("mints table IDs, so two stores' tables of one name differ", async () => {
-    const first = await openStore(env, await createStore(env, ada.userId));
-    const second = await openStore(env, await createStore(env, ada.userId));
+    const first = await openStore(env, await createStore(env, builder));
+    const second = await openStore(env, await createStore(env, builder));
     const firstTables = await first.defineTables(["notes", "people"]);
     const secondTables = await second.defineTables(["notes"]);
 
@@ -193,7 +202,7 @@ describe("stores", () => {
   });
 
   it(`holds at most ${storeMaxTables} tables`, async () => {
-    const store = await openStore(env, await createStore(env, ada.userId));
+    const store = await openStore(env, await createStore(env, builder));
     const names = Array.from({ length: storeMaxTables }, (_, n) => `t${n}`);
     await expect(store.defineTables(names)).resolves.toBeDefined();
     await expect(store.defineTables(["oneMore"])).rejects.toMatchObject({
@@ -222,7 +231,7 @@ describe("stores", () => {
   it("serves one store per object, never another addressed at it", async () => {
     const store = await newStore();
     const id = await insertNote(store);
-    const other = await createStore(env, ada.userId);
+    const other = await createStore(env, builder);
     const misaddressed = async () =>
       await objectOf(store.id).get(other, "notes", id);
     await expect(misaddressed()).rejects.toThrow(
