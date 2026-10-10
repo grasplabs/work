@@ -1,4 +1,6 @@
 import type {
+  RunActivity,
+  RunActivityQuery,
   RunsPage,
   RunFilter,
   WorkflowDetail,
@@ -11,6 +13,7 @@ import { RpcTarget } from "capnweb";
 
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
+import { runActivity } from "./activity.ts";
 import {
   dryRunWorkflow,
   listAllRuns,
@@ -85,6 +88,13 @@ export class WorkflowsRpc extends RpcTarget implements WorkflowsApi {
     return await withPerson(
       this.#check,
       async (by) => await listAllRuns(this.#env, by, filter)
+    );
+  }
+
+  async activity(query?: RunActivityQuery): Promise<RunActivity> {
+    return await withPerson(
+      this.#check,
+      async (by) => await runActivity(this.#env, by, query)
     );
   }
 
