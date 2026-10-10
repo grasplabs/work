@@ -153,6 +153,7 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "CF_VERSION_METADATA",
   "COMPOSIO_API_KEY",
   "CONNECT",
+  "DATA_STORES",
   "DB",
   "DEV_SKIP_ROUTER_SECRET",
   "DURABLE_OBJECT_JURISDICTION",
