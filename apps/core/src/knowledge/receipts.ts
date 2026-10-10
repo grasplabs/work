@@ -65,10 +65,11 @@ import {
 //   nothing commits only its outcome, and only while the record is still
 //   at that version (`current`), so a stale no-op is a conflict too.
 // - A receipt expires under a commit, or a commit under the sweep: a
-//   receipt is kept from its commit, which sets its `retain_until` in its
-//   batch, and the commit is refused once the sweep expired its receipt
-//   (`open`); the sweep's batch checks again that each receipt is still
-//   due, and drops the outcomes only of those it expired.
+//   receipt is kept a retention from each claim and from its commit,
+//   which set its `retain_until`, so a claim in flight is never swept; a
+//   commit is refused all the same once the sweep expired its receipt
+//   (`open`, defence in depth); the sweep's batch checks again that each
+//   receipt is still due, and drops the outcomes only of those it expired.
 // - A key crosses callers or resources: a receipt's ID hashes its whole
 //   scope with the key (the person, the chain of Apps, the App's version
 //   and method, the collection, its permission and the operation), so the
@@ -201,8 +202,11 @@ export const claim = async (
 ): Promise<{ claim: Claim } | { outcome: DocumentSummary }> => {
   const id = await receiptIdOf(submission);
   const db = drizzle(env.KNOWLEDGE);
+  const retainUntil = new Date(now.getTime() + submissionRetentionDays * dayMs);
   // One statement: a new receipt, or the fence moved on, but only for the
-  // same input, before it expired and before it committed.
+  // same input, before it expired and before it committed. Either way it
+  // is kept at least a retention from now, so the sweep never takes a
+  // receipt whose claim is in flight (`open` stays as a backstop).
   const claimed = await db
     .insert(submissionReceipts)
     .values({
@@ -215,11 +219,14 @@ export const claim = async (
       inputHash,
       fence: 1,
       createdAt: now,
-      retainUntil: new Date(now.getTime() + submissionRetentionDays * dayMs),
+      retainUntil,
     })
     .onConflictDoUpdate({
       target: submissionReceipts.id,
-      set: { fence: sql`${submissionReceipts.fence} + 1` },
+      set: {
+        fence: sql`${submissionReceipts.fence} + 1`,
+        retainUntil: sql`max(${submissionReceipts.retainUntil}, ${retainUntil.getTime()})`,
+      },
       setWhere: and(
         eq(submissionReceipts.inputHash, inputHash),
         isNull(submissionReceipts.expiredAt),

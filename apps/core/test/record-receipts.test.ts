@@ -860,7 +860,7 @@ describe("record save receipts", { timeout: 60_000 }, () => {
     }).toStrictEqual({ raced: true, again: saved, versions: 1 });
   });
 
-  it("refuse a commit to a receipt the sweep expired between its claim and its batch", async () => {
+  it("never sweep a receipt claimed again past its retention while that claim is in flight", async () => {
     const setup = await setUp();
     const { admin, app, collectionId, permissionId } = setup;
     const path = `notes/${unique()}.md`;
@@ -884,6 +884,7 @@ describe("record save receipts", { timeout: 60_000 }, () => {
     const late = await outcome(
       directSave(setup, input, {
         key,
+        // The sweep runs between the claim and the commit.
         last: async () => {
           await sweepReceipts(env, new Date());
         },
@@ -892,9 +893,6 @@ describe("record save receipts", { timeout: 60_000 }, () => {
     expect({
       late,
       versions: await versionsAt(collectionId, path),
-    }).toStrictEqual({
-      late: "submission.expired",
-      versions: 0,
-    });
+    }).toStrictEqual({ late: "ok", versions: 1 });
   });
 });
