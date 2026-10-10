@@ -13,12 +13,7 @@ import type {
 import { actorOf, auditProvenanceMaxItems } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { errorFields, log } from "@grasp-os/shared/log";
-import {
-  canBuild,
-  isAdmin,
-  roleErrors,
-  roleSchema,
-} from "@grasp-os/shared/roles";
+import { isAdmin, roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { RpcTarget } from "capnweb";
 import { and, asc, eq, isNotNull, ne, or } from "drizzle-orm";
@@ -29,7 +24,6 @@ import { hasSources, sourcesOf, unreadableBy } from "./app-provenance.ts";
 import { appFor } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, notRemoved, organizationId } from "./auth/auth.ts";
-import { memberRole } from "./auth/identity.ts";
 import {
   appMembers,
   members,
@@ -42,6 +36,8 @@ import { appHost } from "./durable-objects.ts";
 import type { PersonAccess } from "./knowledge/access.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { memberEntry, requireNotStaff, requireSharable } from "./sharing.ts";
+import type { SharingRules } from "./sharing.ts";
 
 // Sharing an App: whom it is open to besides its owner and the admins,
 // and in which role (app-access.ts). Its builders share it with people and
@@ -120,67 +116,22 @@ const namedMembers = async (
 const invalid = (issue: string) =>
   appErrors.create("app.member_invalid", { issues: [issue] });
 
-/**
- * The audit entry of a change by `by` to whom `app` is shared with. The
- * role is the one they have now, or had until unshared.
- */
-const memberEntry = (
+/** What sharing an App with someone allows (sharing.ts). */
+const sharingRules = (app: App, member: NewAppMember): SharingRules => ({
+  owner: app.owner,
+  builds: member.role === "builder",
+  invalid,
+  ownerIssue: "id: They own the App, and always build it.",
+  buildsIssue: "role: Only the organization's admins and builders build Apps.",
+});
+
+/** The audit entry of a change by `by` to whom `app` is shared with. */
+const appMemberEntry = (
   by: Identity,
   action: "app.member.added" | "app.member.removed",
   app: App,
   member: AppMemberRef & { role: string }
-): AuditEntry => ({
-  actor: actorOf(by),
-  action,
-  target: { type: "app", id: app.id },
-  detail: { memberType: member.type, member: member.id, role: member.role },
-});
-
-/** Refuses Grasp staff: they never decide whom a client's App reaches. */
-const requireNotStaff = (by: Identity): void => {
-  if (by.staff) {
-    throw roleErrors.create("role.forbidden");
-  }
-};
-
-/**
- * Refuses sharing `app` with `member` in their role: only with someone in
- * the organization now, or one of its teams; never with its owner, who
- * always builds it; and as a builder only with someone whose role in the
- * organization builds Apps. A team can be made builders whatever its
- * people's roles: each builds only if their own role allows it.
- */
-const requireSharable = async (
-  env: Env,
-  app: App,
-  member: NewAppMember
-): Promise<void> => {
-  if (member.type === "team") {
-    const team = await drizzle(env.DB)
-      .select({ id: teams.id })
-      .from(teams)
-      .where(
-        and(eq(teams.id, member.id), eq(teams.organizationId, organizationId))
-      )
-      .get();
-    if (!team) {
-      throw invalid("id: There's no such team.");
-    }
-    return;
-  }
-  if (member.id === app.owner) {
-    throw invalid("id: They own the App, and always build it.");
-  }
-  const role = await memberRole(env.DB, member.id);
-  if (role === undefined) {
-    throw invalid("id: There's no such member of the organization.");
-  }
-  if (member.role === "builder" && !canBuild(role)) {
-    throw invalid(
-      "role: Only the organization's admins and builders build Apps."
-    );
-  }
-};
+): AuditEntry => memberEntry(by, action, { type: "app", id: app.id }, member);
 
 /**
  * Restarts the App's server code after someone was unshared, so it lets go
@@ -333,7 +284,7 @@ export const addMember = async (
   const found = await appFor(env, by, app, "builder");
   requireNotStaff(by);
   const member = appErrors.parse("app.invalid", newAppMemberSchema, input);
-  await requireSharable(env, found, member);
+  await requireSharable(env, member, sharingRules(found, member));
   await requireReadable(env, by, found, member);
   const db = drizzle(env.DB);
   const row: Row = {
@@ -353,7 +304,10 @@ export const addMember = async (
         set: { role: row.role, addedBy: row.addedBy, addedAt: row.addedAt },
         setWhere: ne(appMembers.role, row.role),
       }),
-    outboxedIfChanged(db, memberEntry(by, "app.member.added", found, member)),
+    outboxedIfChanged(
+      db,
+      appMemberEntry(by, "app.member.added", found, member)
+    ),
   ]);
   const [added] = await namedMembers(env, rowOf(found, member));
   // Unshared since the batch above: nothing of it stands.
@@ -396,7 +350,7 @@ export const removeMember = async (
       .returning(),
     outboxedIfChanged(
       db,
-      memberEntry(by, "app.member.removed", found, {
+      appMemberEntry(by, "app.member.removed", found, {
         ...member,
         role: before.role,
       })

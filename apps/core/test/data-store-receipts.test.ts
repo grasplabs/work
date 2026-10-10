@@ -9,6 +9,7 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { defaultMaxAttempts } from "../src/outbox-delivery.ts";
@@ -18,6 +19,14 @@ import type {
   OutboxEntry,
 } from "../src/outbox-delivery.ts";
 import { StoreHost } from "../src/store-host.ts";
+
+/** Who creates the stores these tests use: a builder of the organization. */
+const builder: Acting = {
+  userId: "ada",
+  role: "builder",
+  teams: [],
+  staff: false,
+};
 
 // A business store's receipts and outbox (data-store.ts), from the threat
 // model in its header: what a mutation's attempts rely on to commit once,
@@ -38,7 +47,7 @@ const scope = {
 
 /** A new store with a `notes` table. */
 const newStore = async (): Promise<OpenStore> => {
-  const store = await openStore(env, await createStore(env, "ada"));
+  const store = await openStore(env, await createStore(env, builder));
   await store.defineTables(["notes"]);
   return store;
 };

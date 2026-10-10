@@ -32,6 +32,18 @@ export const store = sqliteTable(
     createdAt: integer("created_at").notNull(),
     /** How many commits the store has made: each commit's place in order. */
     commits: integer().notNull().default(0),
+    /**
+     * When the store was deleted: from then on the object serves nothing,
+     * and its alarm purges what it held, keeping only this row.
+     */
+    deletedAt: integer("deleted_at"),
+    /** Who deleted it, as the audit log names them (JSON). */
+    deletedBy: text("deleted_by"),
+    /**
+     * When core's inventory was found to record the deletion: the purge
+     * waits for it, so no record goes unaudited.
+     */
+    inventoriedAt: integer("inventoried_at"),
   },
   (table) => [check("sdk_store_only", sql`${table.only} = 1`)]
 );
