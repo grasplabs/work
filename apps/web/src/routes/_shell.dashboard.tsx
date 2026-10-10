@@ -11,8 +11,8 @@ import { NotLoaded } from "../load-from-core.tsx";
 
 // The dashboard, as the prototype's (`routes/dashboard.tsx`): what waits
 // on the person, each with its next step; under it the widget board,
-// where the workflows and engines stand and what could be better, from
-// the daily signals; and, for admins, the latest of what Grasp and people
+// where the workflows and engines stand, the runs this week, and what
+// could be better, from the daily signals; and, for admins, the latest of what Grasp and people
 // did. The prototype's weekly board report is left out: every number
 // there comes from hours core doesn't have. It replaces the Notifications
 // page and Settings' pending approvals, which lead here.

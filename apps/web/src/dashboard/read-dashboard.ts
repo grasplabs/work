@@ -16,6 +16,7 @@ import { listWorkflows, openableApps } from "../workflows/reads.ts";
 import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
 import { readNotifications } from "./failed-workflows.tsx";
+import { fullDays } from "./runs.ts";
 import type { Signals } from "./signals.tsx";
 import { decidesRequests } from "./to-do.tsx";
 import type { Waiting } from "./to-do.tsx";
@@ -23,8 +24,8 @@ import type { Board, EnginesRead } from "./widget-board.tsx";
 
 // What the dashboard reads, each part on its own so one that fails or
 // hangs leaves the rest: what waits on the person, what the widget board
-// shows (the workflows, the engines, the signals), and, for admins, the
-// latest of the audit trail.
+// shows (the workflows, the engines, the runs over time, the signals),
+// and, for admins, the latest of the audit trail.
 
 /** The catalog and connections, as integrations: those whose access ran out are on the list. */
 const readIntegrations = async (session: Session) => {
@@ -223,9 +224,14 @@ export const readDashboard = async (
     async (session) => await readSignals(session, identity)
   );
   const engines = readEngines(core, workflows);
+  // The full view's days, once: the block shows the last week of them.
+  const runs = loadFromCore(
+    core,
+    async (session) => await session.workflows.activity({ days: fullDays })
+  );
   const activity = isAdmin(identity.role)
     ? loadFromCore(core, readActivity)
     : undefined;
   const waiting = await readWaiting(core, identity);
-  return { waiting, board: { workflows, engines, signals }, activity };
+  return { waiting, board: { workflows, engines, runs, signals }, activity };
 };

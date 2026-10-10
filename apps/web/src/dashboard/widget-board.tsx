@@ -1,5 +1,5 @@
 import type { App } from "@grasp-os/shared/apps";
-import type { WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
 import { buttonVariants } from "@grasp-os/ui/components/button";
 import {
   Tooltip,
@@ -18,6 +18,7 @@ import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { byState, enginesOf, stateOf, workflowStates } from "./board.ts";
 import type { Engines, EngineWorkflows, WorkflowState } from "./board.ts";
+import { RunsWidget } from "./runs-widget.tsx";
 import { CouldBeBetter } from "./signals.tsx";
 import type { Signals } from "./signals.tsx";
 import { WidgetBlock, WidgetLoading } from "./widget-block.tsx";
@@ -26,7 +27,8 @@ import { WidgetBlock, WidgetLoading } from "./widget-block.tsx";
 // prototype lays it out (`components/dashboard/widget-board.tsx`): blocks
 // of one size, one column, two side by side where the board is wide
 // enough. Each opens in full. In a fixed order: where the workflows
-// stand, each engine's workflows, and what could be better. Each comes
+// stand, each engine's workflows, the runs this week, and what could be
+// better. Each comes
 // as it is read, so a slow one holds back no other. The prototype's own
 // layout, widgets Grasp makes, moving blocks and adding one, and the
 // hours and euros its widgets count, aren't here: core keeps none of it.
@@ -41,6 +43,7 @@ export interface EnginesRead {
 export interface Board {
   workflows: Promise<Loaded<WorkflowSummary[]>>;
   engines: Promise<Loaded<EnginesRead>>;
+  runs: Promise<Loaded<RunActivity>>;
   signals: Promise<Loaded<Signals>>;
 }
 
@@ -434,6 +437,18 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
               />
             ) : (
               <NotRead loaded={loaded} title={t`Engines`} />
+            )
+          }
+        </Await>
+        <Await
+          fallback={<WidgetLoading title={t`Runs this week`} />}
+          promise={board.runs}
+        >
+          {(loaded) =>
+            loaded.state === "ready" ? (
+              <RunsWidget activity={loaded.data} />
+            ) : (
+              <NotRead loaded={loaded} title={t`Runs this week`} />
             )
           }
         </Await>

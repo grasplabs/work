@@ -323,6 +323,14 @@ msgstr "{run}: completed"
 msgid "{run}: failed"
 msgstr "{run}: failed"
 
+#: src/dashboard/runs-widget.tsx
+msgid "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
+msgstr "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
+
+#: src/dashboard/runs-widget.tsx
+msgid "{runs, plural, one {of # run} other {of # runs}}"
+msgstr "{runs, plural, one {of # run} other {of # runs}}"
+
 #: src/screens/screen-frame.tsx
 msgid "{screen} app"
 msgstr "{screen} app"
@@ -354,6 +362,10 @@ msgstr "{title} on {connection}"
 #: src/connections/integration-row.tsx
 msgid "{toolCount, plural, one {# tool} other {# tools}}"
 msgstr "{toolCount, plural, one {# tool} other {# tools}}"
+
+#: src/dashboard/runs-widget.tsx
+msgid "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
+msgstr "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
@@ -404,6 +416,10 @@ msgstr "**Grasp:**"
 #: src/chat/chat-markdown.ts
 msgid "**You:**"
 msgstr "**You:**"
+
+#: src/dashboard/runs-widget.tsx
+msgid "<0>{without}</0> without a person"
+msgstr "<0>{without}</0> without a person"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "A .txt, .vtt, .srt or .docx file, or pasted text."
@@ -731,6 +747,7 @@ msgstr "Approve the apps of version {version}"
 msgid "Approve the packages for {engine}"
 msgstr "Approve the packages for {engine}"
 
+#: src/dashboard/runs-widget.tsx
 #: src/engines/screen-approval.tsx
 msgid "Approved"
 msgstr "Approved"
@@ -900,6 +917,7 @@ msgstr "By person"
 msgid "By the end of the month"
 msgstr "By the end of the month"
 
+#: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.settings.spend.tsx
 msgid "By workflow"
 msgstr "By workflow"
@@ -1124,6 +1142,7 @@ msgstr "Committed by a person."
 msgid "Compared with version {current}, which runs now."
 msgstr "Compared with version {current}, which runs now."
 
+#: src/dashboard/runs-widget.tsx
 #: src/workflows/runs.tsx
 msgid "Completed"
 msgstr "Completed"
@@ -1290,6 +1309,10 @@ msgstr "Data processing agreement signed"
 msgid "Data rules"
 msgstr "Data rules"
 
+#: src/dashboard/runs-widget.tsx
+msgid "Day"
+msgstr "Day"
+
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
 msgid "Day"
@@ -1324,6 +1347,10 @@ msgstr "Decision"
 #: src/routes/decisions.$decision.tsx
 msgid "Decision not found"
 msgstr "Decision not found"
+
+#: src/dashboard/runs-widget.tsx
+msgid "Decisions"
+msgstr "Decisions"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Default: {fallback}"
@@ -1483,6 +1510,7 @@ msgstr "Edit"
 msgid "Email"
 msgstr "Email"
 
+#: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -1630,6 +1658,7 @@ msgid "Extracting"
 msgstr "Extracting"
 
 #: src/chat/thread.tsx
+#: src/dashboard/runs-widget.tsx
 #: src/knowledge/uploads.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
@@ -2392,6 +2421,10 @@ msgstr "No permissions."
 msgid "No runs match these filters."
 msgstr "No runs match these filters."
 
+#: src/dashboard/runs-widget.tsx
+msgid "No runs this week."
+msgstr "No runs this week."
+
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "No runs yet."
 msgstr "No runs yet."
@@ -2731,6 +2764,10 @@ msgstr "Open in chat"
 msgid "Open it anyway"
 msgstr "Open it anyway"
 
+#: src/dashboard/runs-widget.tsx
+msgid "Open now"
+msgstr "Open now"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Open since Grasp's go on {since}."
 msgstr "Open since Grasp's go on {since}."
@@ -3055,6 +3092,10 @@ msgstr "Reject the packages for {engine}"
 msgid "Reject this request?"
 msgstr "Reject this request?"
 
+#: src/dashboard/runs-widget.tsx
+msgid "Rejected"
+msgstr "Rejected"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Rejected by {name} on {date}."
 msgstr "Rejected by {name} on {date}."
@@ -3218,6 +3259,10 @@ msgstr "Run"
 msgid "Running"
 msgstr "Running"
 
+#: src/dashboard/runs-widget.tsx
+msgid "Running or cancelled"
+msgstr "Running or cancelled"
+
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "Runs"
 msgstr "Runs"
@@ -3236,13 +3281,26 @@ msgstr "Runs {how} {count, plural, one {# fewer time} other {# fewer times}} ({n
 msgid "Runs {how} {count, plural, one {# more time} other {# more times}} ({now} now)"
 msgstr "Runs {how} {count, plural, one {# more time} other {# more times}} ({now} now)"
 
+#: src/dashboard/runs-widget.tsx
+msgid "Runs by the day they started"
+msgstr "Runs by the day they started"
+
 #: src/chat/builds-state.ts
 msgid "Runs now"
 msgstr "Runs now"
 
+#: src/dashboard/runs-widget.tsx
+msgid "Runs over the last {fullDays} days, by the day they started and how they stand now."
+msgstr "Runs over the last {fullDays} days, by the day they started and how they stand now."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 msgstr "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
+
+#: src/dashboard/runs-widget.tsx
+#: src/dashboard/widget-board.tsx
+msgid "Runs this week"
+msgstr "Runs this week"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Said yes"
@@ -3532,6 +3590,10 @@ msgstr "Stages"
 #: src/knowledge/document.tsx
 msgid "Start again from version {newerVersion}"
 msgstr "Start again from version {newerVersion}"
+
+#: src/dashboard/runs-widget.tsx
+msgid "Started"
+msgstr "Started"
 
 #: src/activity/audit-words.ts
 msgid "Started a chat"
@@ -4056,6 +4118,10 @@ msgstr "Through Composio, which keeps the access in its own cloud. Your workflow
 msgid "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
 msgstr "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
 
+#: src/dashboard/runs-widget.tsx
+msgid "Timed out"
+msgstr "Timed out"
+
 #: src/activity/audit-log.tsx
 msgid "To"
 msgstr "To"
@@ -4229,6 +4295,7 @@ msgstr "Waiting for you"
 msgid "Waiting for you: {title}"
 msgstr "Waiting for you: {title}"
 
+#: src/dashboard/runs-widget.tsx
 #: src/dashboard/widget-board.tsx
 msgid "Waiting on a person"
 msgstr "Waiting on a person"
@@ -4430,6 +4497,7 @@ msgstr "Worked out how knowledge is used"
 msgid "Worked out what could be improved"
 msgstr "Worked out what could be improved"
 
+#: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflows-table.tsx
