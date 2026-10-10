@@ -219,7 +219,7 @@ export const claim = async (
   }
   // New work stages nothing that nothing would take: it would only be
   // settled away unread.
-  if (intents.some(({ kind }) => consumers[kind] === undefined)) {
+  if (intents.some(({ kind }) => !Object.hasOwn(consumers, kind))) {
     throw submissionErrors.create("submission.intent_unsupported");
   }
   const db = drizzle(env.KNOWLEDGE);

@@ -43,9 +43,13 @@ import type { DrainOptions, OutboxConsumers } from "../outbox-delivery.ts";
 // - An entry nobody takes is settled away unread: a kind with no consumer
 //   can't be staged (receipts.ts, `claim`).
 // - An entry's consumer goes in a later release: its receipt is kept while
-//   the entry is owed, so it would be kept forever. A drain settles such
-//   an entry as `outbox.no_consumer`, owed to nobody, under its lease like
-//   any other, and the sweep expires its receipt.
+//   the entry is owed, so it would be kept forever. A drain counts a
+//   missing consumer as a failed hand-over, backing off like any other,
+//   and past `maxAttempts` settles the entry as `outbox.no_consumer`, owed
+//   to nobody, so the sweep expires its receipt. Not at once: under
+//   version skew (a release adds a consumer and commits its entries, then
+//   a rollback or the previous release runs the drain) settling at once
+//   would drop entries the next release takes.
 //
 // Who consumes what comes with each kind's delivery: invalidations with
 // live queries, workflow notifications (GRA-372) and starts (GRA-376).
@@ -108,7 +112,9 @@ interface Drain {
  * back for later when the hand-over failed (settled as
  * `outbox.attempts_exhausted` past the drain's `maxAttempts`), only while
  * the drain still holds that lease. An entry whose kind has no consumer
- * any more is settled as `outbox.no_consumer`, under the same lease.
+ * here counts as a failed hand-over, so a rollback that lacks a newer
+ * release's consumer only delays its entries; past `maxAttempts` it is
+ * settled as `outbox.no_consumer`.
  */
 const handOne = async (env: Env, drain: Drain, id: string): Promise<void> => {
   const db = drizzle(env.KNOWLEDGE);
@@ -124,20 +130,18 @@ const handOne = async (env: Env, drain: Drain, id: string): Promise<void> => {
     isNull(submissionOutbox.settledAt),
     eq(submissionOutbox.nextAttemptAt, until)
   );
-  const consumer = drain.consumers[leased.kind];
-  if (consumer === undefined) {
-    await db
-      .update(submissionOutbox)
-      .set({ settledAt: drain.clock(), undeliverable: "outbox.no_consumer" })
-      .where(held);
-    return;
-  }
+  const consumer = Object.hasOwn(drain.consumers, leased.kind)
+    ? drain.consumers[leased.kind]
+    : undefined;
   const { attempts } = leased;
-  const handed = await handOver(
-    consumer,
-    { id, intent: intentOf(leased.intent), attempts },
-    drain.timeoutMs
-  );
+  const handed: Handed =
+    consumer === undefined
+      ? { failed: new Error(`Nothing here takes ${leased.kind}.`) }
+      : await handOver(
+          consumer,
+          { id, intent: intentOf(leased.intent), attempts },
+          drain.timeoutMs
+        );
   const handedAt = drain.clock();
   if ("settled" in handed) {
     await db
@@ -163,7 +167,10 @@ const handOne = async (env: Env, drain: Drain, id: string): Promise<void> => {
         ? {
             attempts: failed,
             settledAt: handedAt,
-            undeliverable: "outbox.attempts_exhausted",
+            undeliverable:
+              consumer === undefined
+                ? "outbox.no_consumer"
+                : "outbox.attempts_exhausted",
           }
         : {
             attempts: failed,

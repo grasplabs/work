@@ -1100,7 +1100,7 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
     });
   });
 
-  it("answer a committed save's retry with its outcome, though its intent's consumer has gone since, and settle the entry as owed to nobody so the receipt expires", async () => {
+  it("answer a committed save's retry with its outcome, though its intent's consumer has gone since, and settle the entry as owed to nobody only after its attempts, so the receipt expires", async () => {
     const setup = await setUp();
     const path = `notes/${unique()}.md`;
     const key = `consumer-gone-${unique()}`;
@@ -1121,7 +1121,18 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       key,
       intents,
     });
+    // Draining with no consumers touches every due entry in this file's
+    // shared database, not only this test's: each counts a failed attempt.
     await drainSubmissionOutbox(env, {});
+    const kept = await entriesOf(marker);
+    await drainSubmissionOutbox(
+      env,
+      {},
+      {
+        now: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        maxAttempts: 2,
+      }
+    );
     const entries = await entriesOf(marker);
     await sweepReceipts(env, new Date(Date.now() + 31 * dayMs));
     // Past its retention, under a release whose consumer is back.
@@ -1136,6 +1147,7 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       retried,
       again,
       versions: await versionsAt(setup.collectionId, path),
+      kept: kept.map(({ settled, attempts }) => ({ settled, attempts })),
       entries: entries.map(({ settled, undeliverable }) => ({
         settled,
         undeliverable,
@@ -1145,8 +1157,48 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       retried: "ok",
       again: saved,
       versions: 1,
+      kept: [{ settled: false, attempts: 1 }],
       entries: [{ settled: true, undeliverable: "outbox.no_consumer" }],
       expired: "submission.expired",
+    });
+  });
+
+  it("wait out a release without their consumer, such as a rollback, and are handed over once it is back", async () => {
+    const setup = await setUp();
+    const marker = unique();
+    const handed: OutboxEntry[] = [];
+    const consumers = consumersFor(marker, async (entry) => {
+      handed.push(entry);
+      return await Promise.resolve("delivered");
+    });
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key: unique(),
+      intents: [{ kind: "workflow.notify", data: { marker } }],
+      consumers,
+    });
+    // The previous release runs the drain: it has no consumer for these.
+    // Draining with no consumers touches every due entry in this file's
+    // shared database, not only this test's.
+    await drainSubmissionOutbox(env, {});
+    const rolledBack = await entriesOf(marker);
+    await drainSubmissionOutbox(env, consumers, {
+      now: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    const back = await entriesOf(marker);
+    expect({
+      rolledBack: rolledBack.map(({ settled, attempts }) => ({
+        settled,
+        attempts,
+      })),
+      handed: handed.map(({ id, attempts }) => ({ id, attempts })),
+      back: back.map(({ settled, undeliverable }) => ({
+        settled,
+        undeliverable,
+      })),
+    }).toStrictEqual({
+      rolledBack: [{ settled: false, attempts: 1 }],
+      handed: [{ id: rolledBack[0]?.id, attempts: 1 }],
+      back: [{ settled: true, undeliverable: null }],
     });
   });
 
