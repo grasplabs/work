@@ -1,11 +1,13 @@
 CREATE TABLE `submission_outcomes` (
 	`receipt_id` text PRIMARY KEY NOT NULL,
 	`fence` integer NOT NULL,
+	`open` integer NOT NULL,
 	`on_time` integer NOT NULL,
 	`current` integer NOT NULL,
 	`outcome` text NOT NULL,
 	`committed_at` integer NOT NULL,
 	FOREIGN KEY (`receipt_id`,`fence`) REFERENCES `submission_receipts`(`id`,`fence`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "submission_outcomes_open" CHECK("submission_outcomes"."open" = 1),
 	CONSTRAINT "submission_outcomes_on_time" CHECK("submission_outcomes"."on_time" = 1),
 	CONSTRAINT "submission_outcomes_current" CHECK("submission_outcomes"."current" = 1)
 );

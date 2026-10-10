@@ -43,7 +43,11 @@ import {
 //   the fence it claimed. The commit is a row whose foreign key is the
 //   receipt at that fence (`submission_outcomes`), in the save's own
 //   batch, so the database refuses it, and the whole save, once another
-//   attempt claimed the receipt since.
+//   attempt claimed the receipt since. The fence orders claims, not
+//   attempts: an older attempt that claims last holds it. That is
+//   harmless, as every attempt under a receipt has the same input (other
+//   input is refused before it claims), so whichever commits makes the
+//   same change, and the others answer its outcome or write nothing.
 // - A call is killed or times out after its save was prepared: nothing is
 //   visible before the batch, and the batch checks the call's deadline by
 //   the database's own clock (`on_time`), so a batch sent late commits
@@ -60,17 +64,30 @@ import {
 //   fails the other with `knowledge.conflict`. A save that changes
 //   nothing commits only its outcome, and only while the record is still
 //   at that version (`current`), so a stale no-op is a conflict too.
+// - A receipt expires under a commit, or a commit under the sweep: a
+//   receipt is kept from its commit, which sets its `retain_until` in its
+//   batch, and the commit is refused once the sweep expired its receipt
+//   (`open`); the sweep's batch checks again that each receipt is still
+//   due, and drops the outcomes only of those it expired.
 // - A key crosses callers or resources: a receipt's ID hashes its whole
 //   scope with the key (the person, the chain of Apps, the App's version
 //   and method, the collection, its permission and the operation), so the
 //   same key elsewhere is another receipt, and the caller is authorized
-//   in full before a receipt is read, so a key never lets anyone read an
-//   outcome they couldn't make now.
+//   in full before a receipt is claimed, and again (its last check)
+//   before an outcome is answered, so a key never lets anyone read an
+//   outcome they couldn't make now. A last check that fails says nothing
+//   about whether the save committed, and answers its own error.
 
 const dayMs = 24 * 60 * 60 * 1000;
 
-/** Most receipts one sweep expires, and most tombstones it deletes. */
+/** Most receipts one page of a sweep expires, or tombstones it deletes. */
 const sweepPage = 100;
+
+/** How long one sweep goes on taking pages, at most. */
+const sweepBudgetMs = 20_000;
+
+/** How much later a receipt kept for its live run is looked at again. */
+const liveRunRecheckMs = dayMs;
 
 /** Where a record save comes from, which its receipt is scoped to. */
 export interface SubmissionScope {
@@ -120,7 +137,10 @@ export const submissionKey = (
   stepKey === undefined
     ? { key: ["call", key ?? crypto.randomUUID()], runId: null }
     : {
-        key: ["step", stepKey, key ?? inputHash],
+        key:
+          key === undefined
+            ? ["step", stepKey, "input", inputHash]
+            : ["step", stepKey, "key", key],
         runId: runOfStepKey(stepKey) ?? null,
       };
 
@@ -228,23 +248,27 @@ export const claim = async (
 };
 
 /**
- * The statement that commits `held`'s outcome, `outcome`, in the batch of
- * its save: refused, with the batch, unless `held` still has the
- * receipt's fence and its deadline hasn't passed by the database's
- * clock, and, for a save that changes nothing (`unchanged`), unless the
- * document is still at the version the save expected.
+ * The statements that commit `held`'s outcome, `outcome`, first in the
+ * batch of its save: refused, with the batch, unless `held` still has the
+ * receipt's fence, the receipt hasn't expired, and its deadline hasn't
+ * passed by the database's clock, and, for a save that changes nothing
+ * (`unchanged`), unless the document is still at the version the save
+ * expected. The receipt is then kept `submissionRetentionDays` from the
+ * commit.
  */
 export const commitOf = (
   env: Env,
   held: Claim,
   outcome: DocumentSummary,
   unchanged?: { documentId: string; version: number }
-): BatchItem<"sqlite"> =>
-  drizzle(env.KNOWLEDGE)
-    .insert(submissionOutcomes)
-    .values({
+): [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] => {
+  const db = drizzle(env.KNOWLEDGE);
+  const now = new Date();
+  return [
+    db.insert(submissionOutcomes).values({
       receiptId: held.id,
       fence: held.fence,
+      open: sql`NOT EXISTS (SELECT 1 FROM ${submissionReceipts} WHERE ${submissionReceipts.id} = ${held.id} AND ${submissionReceipts.expiredAt} IS NOT NULL)`,
       // Milliseconds since the epoch, by the database's clock.
       onTime: sql`(unixepoch('subsec') * 1000) < ${held.deadline}`,
       current:
@@ -252,8 +276,47 @@ export const commitOf = (
           ? true
           : sql`EXISTS (SELECT 1 FROM ${documents} WHERE ${documents.id} = ${unchanged.documentId} AND ${documents.currentVersion} = ${unchanged.version})`,
       outcome: JSON.stringify(outcome),
-      committedAt: new Date(),
-    });
+      committedAt: now,
+    }),
+    db
+      .update(submissionReceipts)
+      .set({
+        retainUntil: new Date(now.getTime() + submissionRetentionDays * dayMs),
+      })
+      .where(
+        and(
+          eq(submissionReceipts.id, held.id),
+          eq(submissionReceipts.fence, held.fence)
+        )
+      ),
+  ];
+};
+
+/**
+ * A save's last check before its batch failed: what it threw, kept apart
+ * from the batch's own failures, as it says nothing about whether the
+ * save committed (`settled`).
+ */
+export class LastCheckFailedError extends Error {
+  readonly refusal: unknown;
+
+  constructor(refusal: unknown) {
+    super("A save's last check failed");
+    this.name = "LastCheckFailedError";
+    this.refusal = refusal;
+  }
+}
+
+/** `check`, with what it throws as a `LastCheckFailedError`. */
+export const lastChecked =
+  (check: () => Promise<void>): (() => Promise<void>) =>
+  async () => {
+    try {
+      await check();
+    } catch (error) {
+      throw new LastCheckFailedError(error);
+    }
+  };
 
 /** Whether D1 refused a write for the check `name`, however it was wrapped. */
 const failedCheck = (error: unknown, name: string): boolean =>
@@ -279,6 +342,11 @@ export const settled = async (
   held: Claim,
   error: unknown
 ): Promise<DocumentSummary> => {
+  // Its last check failed: the caller may not be allowed any more, and
+  // whatever the check threw is the answer.
+  if (error instanceof LastCheckFailedError) {
+    throw error.refusal;
+  }
   // Refused before its batch, or by it for a reason of its own: the
   // caller may not even be allowed any more, so no outcome is read. A
   // conflict is the batch's, after every check: another attempt of the
@@ -296,6 +364,9 @@ export const settled = async (
   }
   if (receipt !== undefined && receipt.fence !== held.fence) {
     throw submissionErrors.create("submission.superseded");
+  }
+  if (failedCheck(error, "submission_outcomes_open")) {
+    throw submissionErrors.create("submission.expired");
   }
   if (failedCheck(error, "submission_outcomes_on_time")) {
     throw appErrors.create("app.caller_invalid");
@@ -327,13 +398,13 @@ const liveRuns = async (
 };
 
 /**
- * Expires the receipts kept long enough, at most a page of each a call:
- * those past their `retain_until` whose run, if any, is no longer live
- * lose their outcome and stay as tombstones; tombstones older than
- * `submissionTombstoneDays` go. A receipt whose run is live is kept, and
- * looked at again the next time. Run by the cron trigger.
+ * Expires one page of the receipts due by `now`, and answers how many
+ * were due. One whose run is live is looked at again a day later, out of
+ * the way of the rest; the others lose their outcome and stay as
+ * tombstones. The batch checks again that each is still due, so a commit
+ * landing meanwhile, which keeps its receipt from then, keeps it.
  */
-export const sweepReceipts = async (env: Env, now: Date): Promise<void> => {
+const expirePage = async (env: Env, now: Date): Promise<number> => {
   const db = drizzle(env.KNOWLEDGE);
   const due = await db
     .select({ id: submissionReceipts.id, runId: submissionReceipts.runId })
@@ -346,24 +417,53 @@ export const sweepReceipts = async (env: Env, now: Date): Promise<void> => {
     )
     .orderBy(asc(submissionReceipts.retainUntil), asc(submissionReceipts.id))
     .limit(sweepPage);
+  if (due.length === 0) {
+    return 0;
+  }
   const live = await liveRuns(
     env,
     due.flatMap(({ runId }) => (runId === null ? [] : [runId]))
   );
-  const expiring = due
-    .filter(({ runId }) => runId === null || !live.has(runId))
-    .map(({ id }) => id);
-  if (expiring.length > 0) {
-    await db.batch([
-      db
-        .delete(submissionOutcomes)
-        .where(inList(submissionOutcomes.receiptId, expiring)),
-      db
-        .update(submissionReceipts)
-        .set({ expiredAt: now })
-        .where(inList(submissionReceipts.id, expiring)),
-    ]);
-  }
+  const kept = due.flatMap(({ id, runId }) =>
+    runId !== null && live.has(runId) ? [id] : []
+  );
+  const expiring = due.flatMap(({ id, runId }) =>
+    runId !== null && live.has(runId) ? [] : [id]
+  );
+  const stillDue = (ids: readonly string[]) =>
+    and(
+      inList(submissionReceipts.id, ids),
+      isNull(submissionReceipts.expiredAt),
+      lte(submissionReceipts.retainUntil, now)
+    );
+  await db.batch([
+    db
+      .update(submissionReceipts)
+      .set({ retainUntil: new Date(now.getTime() + liveRunRecheckMs) })
+      .where(stillDue(kept)),
+    db
+      .update(submissionReceipts)
+      .set({ expiredAt: now })
+      .where(stillDue(expiring)),
+    // Only the outcomes of the receipts this page expired.
+    db
+      .delete(submissionOutcomes)
+      .where(
+        and(
+          inList(submissionOutcomes.receiptId, expiring),
+          sql`${submissionOutcomes.receiptId} IN (SELECT ${submissionReceipts.id} FROM ${submissionReceipts} WHERE ${submissionReceipts.expiredAt} = ${now.getTime()})`
+        )
+      ),
+  ]);
+  return due.length;
+};
+
+/**
+ * Deletes one page of the tombstones older than `submissionTombstoneDays`
+ * by `now`, and answers how many there were.
+ */
+const deleteTombstonePage = async (env: Env, now: Date): Promise<number> => {
+  const db = drizzle(env.KNOWLEDGE);
   const gone = await db
     .select({ id: submissionReceipts.id })
     .from(submissionReceipts)
@@ -386,4 +486,44 @@ export const sweepReceipts = async (env: Env, now: Date): Promise<void> => {
       )
     );
   }
+  return gone.length;
+};
+
+/**
+ * Runs `page` until one comes back short, or `budgetMs` has passed since
+ * `started`.
+ */
+const paged = async (
+  page: () => Promise<number>,
+  started: number,
+  budgetMs: number
+): Promise<void> => {
+  for (;;) {
+    // One page after the other: each reads what the last left.
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const count = await page();
+    if (count < sweepPage || Date.now() - started >= budgetMs) {
+      return;
+    }
+  }
+};
+
+/**
+ * Expires the receipts kept long enough by `now`, and deletes the
+ * tombstones kept long enough, a page at a time until a page comes back
+ * short or `budgetMs` has passed (expirePage, deleteTombstonePage). Run by
+ * the cron trigger; what is left goes in the next run.
+ */
+export const sweepReceipts = async (
+  env: Env,
+  now: Date,
+  budgetMs = sweepBudgetMs
+): Promise<void> => {
+  const started = Date.now();
+  await paged(async () => await expirePage(env, now), started, budgetMs);
+  await paged(
+    async () => await deleteTombstonePage(env, now),
+    started,
+    budgetMs
+  );
 };

@@ -49,7 +49,13 @@ import {
   parseRecord,
   savedFields,
 } from "./frontmatter.ts";
-import { claim, commitOf, inputHashOf, settled } from "./receipts.ts";
+import {
+  claim,
+  commitOf,
+  inputHashOf,
+  lastChecked,
+  settled,
+} from "./receipts.ts";
 import type { Claim, Submission } from "./receipts.ts";
 import { keptSetters } from "./record-types.ts";
 import type { DeclaredTypes } from "./record-types.ts";
@@ -372,12 +378,18 @@ export const saveRecordAsDelegate = async (
   const inputHash = await inputHashOf(json);
   const claimed = await claim(env, submissionOf(inputHash), inputHash);
   if ("outcome" in claimed) {
+    // Answered only to a caller who may still make it: checked last, as a
+    // save is.
+    await checked.lastCheck?.();
     return claimed.outcome;
   }
+  const { lastCheck: last } = checked;
   try {
     return await writeRecord(
       env,
-      checked,
+      last === undefined
+        ? checked
+        : { ...checked, lastCheck: lastChecked(last) },
       collection,
       parsed,
       setter,

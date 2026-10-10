@@ -364,15 +364,15 @@ export interface Write {
    */
   purge?: true;
   /**
-   * The statement that commits the write's receipt (knowledge/
+   * The statements that commit the write's receipt (knowledge/
    * receipts.ts, `commitOf`), given what the write answers and, for a
-   * write that changes nothing, the version it must still find: it goes
-   * first in the batch, which it refuses whole when it fails.
+   * write that changes nothing, the version it must still find: they go
+   * first in the batch, which the first refuses whole when it fails.
    */
   commit?: (
     outcome: DocumentSummary,
     unchanged?: { documentId: string; version: number }
-  ) => BatchItem<"sqlite">;
+  ) => [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]];
   /**
    * Set when `text` is the text of the version at `ifVersion` already:
    * with a `commit`, nothing is written but the receipt, and only while
@@ -580,17 +580,15 @@ const committed = (
   if (write.unchanged === true && existing !== undefined) {
     const outcome = toSummary(existing);
     return {
-      items: [
-        write.commit(outcome, {
-          documentId: existing.id,
-          version: existing.currentVersion,
-        }),
-      ],
+      items: write.commit(outcome, {
+        documentId: existing.id,
+        version: existing.currentVersion,
+      }),
       outcome,
     };
   }
   const outcome = toSummary(row);
-  return { items: [write.commit(outcome), ...change], outcome };
+  return { items: [...write.commit(outcome), ...change], outcome };
 };
 
 /**

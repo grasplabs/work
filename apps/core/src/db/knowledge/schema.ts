@@ -348,7 +348,8 @@ export const knowledgeSignalDismissals = sqliteTable(
  * contract, and the key. Claimed before the save is prepared, with the
  * hash of its input, and claimed again by every later attempt, which
  * moves its `fence` on: only the attempt holding the current fence can
- * commit (`submission_outcomes`). Kept `retain_until`, past which its
+ * commit (`submission_outcomes`). Kept until `retain_until`, which its
+ * commit sets (from its claim until then), past which its
  * outcome goes and it stays as a tombstone (`expired_at`), so the key
  * reused is refused as expired; tombstones go once old enough too. A
  * workflow step's receipt names its run (`run_id`), kept while the run
@@ -391,7 +392,8 @@ export const submissionReceipts = sqliteTable(
  * receipt has one exactly when its change committed. The row is also the
  * commit's check, which the database makes inside the batch: one per
  * receipt (a second commit fails its primary key), only at the receipt's
- * current fence (a superseded attempt fails the foreign key), only before
+ * current fence (a superseded attempt fails the foreign key), only while
+ * the receipt hasn't expired (`open`), only before
  * the attempt's deadline by the database's own clock (`on_time`), and,
  * for a save that changes nothing, only while the record is still at the
  * version it expected (`current`). Any of them failing fails the batch.
@@ -401,6 +403,7 @@ export const submissionOutcomes = sqliteTable(
   {
     receiptId: text("receipt_id").primaryKey(),
     fence: integer().notNull(),
+    open: integer({ mode: "boolean" }).notNull(),
     onTime: integer("on_time", { mode: "boolean" }).notNull(),
     current: integer({ mode: "boolean" }).notNull(),
     /** JSON: what the submission answered (a document summary). */
@@ -412,6 +415,7 @@ export const submissionOutcomes = sqliteTable(
       columns: [table.receiptId, table.fence],
       foreignColumns: [submissionReceipts.id, submissionReceipts.fence],
     }),
+    check("submission_outcomes_open", sql`${table.open} = 1`),
     check("submission_outcomes_on_time", sql`${table.onTime} = 1`),
     check("submission_outcomes_current", sql`${table.current} = 1`),
   ]

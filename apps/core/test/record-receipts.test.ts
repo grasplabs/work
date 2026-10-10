@@ -4,6 +4,7 @@ import {
   permissionIdSchema,
 } from "@grasp-os/shared/ids";
 import type { AppId, CollectionId, PermissionId } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
@@ -199,6 +200,21 @@ const directSave = async (
         deadline
       )
   );
+
+/** Knowledge's database, with `first` run before each batch is sent. */
+const beforeBatch = (
+  first: () => Promise<void>,
+  real: D1Database = env.KNOWLEDGE
+): D1Database =>
+  // SAFETY: an object whose prototype is `real` is a database: it has
+  // every member, and its batch is replaced below.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  Object.assign(Object.create(real) as D1Database, {
+    batch: async (statements: D1PreparedStatement[]) => {
+      await first();
+      return await real.batch(statements);
+    },
+  });
 
 /**
  * Knowledge's database, with every batch answered by a lost connection
@@ -445,6 +461,104 @@ describe("record saves under an idempotency key", { timeout: 60_000 }, () => {
     }).toStrictEqual({ refused: "permission.denied", versions: 1 });
   });
 
+  it("answer a retry only while its caller may still write, and nothing when its last check fails", async () => {
+    const setup = await setUp();
+    const { admin, app, collectionId } = setup;
+    const other = await signedInApi(idp, "admin");
+    const key = `again-${unique()}`;
+    const path = `notes/${unique()}.md`;
+    const save = async () =>
+      summaryOf(
+        await callApp(env, app, as(other.userId), "save", [
+          "NOTES",
+          docSave(path, "Plan"),
+          { idempotencyKey: key },
+        ])
+      );
+    const first = versionOf(await save());
+    await admin.api.members.setRole(other.userId, "user");
+    const demoted = await save();
+    const directKey = `direct-${unique()}`;
+    const directPath = `notes/${unique()}.md`;
+    await directSave(setup, docSave(directPath, "Plan"), { key: directKey });
+    const refused = await outcome(
+      directSave(setup, docSave(directPath, "Plan"), {
+        key: directKey,
+        last: async () => {
+          await Promise.resolve();
+          throw permissionErrors.create("permission.denied");
+        },
+      })
+    );
+    const brokenPath = `notes/${unique()}.md`;
+    const broken = await outcome(
+      directSave(setup, docSave(brokenPath, "Plan"), {
+        key: directKey.replace("direct", "broken"),
+        // Another attempt makes the save, then the last check itself
+        // fails: that says nothing about whether this one committed.
+        last: async () => {
+          await directSave(setup, docSave(brokenPath, "Plan"), {
+            key: directKey.replace("direct", "broken"),
+          });
+          throw new Error("The admission check failed.");
+        },
+      })
+    );
+    expect({
+      first,
+      demoted,
+      refused,
+      broken,
+      versions: await versionsAt(collectionId, path),
+    }).toStrictEqual({
+      first: 1,
+      demoted: { error: "knowledge.forbidden" },
+      refused: "permission.denied",
+      broken: "Error: The admission check failed.",
+      versions: 1,
+    });
+  });
+
+  it("keep a workflow step's keyed saves apart from those it keys by their input", async () => {
+    const setup = await setUp();
+    const { admin, app, collectionId, permissionId } = setup;
+    const stepKey = `${crypto.randomUUID()}:save`;
+    const stepSave = async (input: ReturnType<typeof docSave>, key?: string) =>
+      await saveRecordAsDelegate(
+        env,
+        {
+          subject: { type: "app", appId: app },
+          onBehalfOf: admin.userId,
+          mode: "workflow",
+          appVersion: 1,
+        },
+        { type: "app", appId: app },
+        permissionId,
+        collectionId,
+        input,
+        { app, method: "save" },
+        undefined,
+        (inputHash) => ({
+          ...submissionOf(
+            admin,
+            app,
+            collectionId,
+            permissionId,
+            "",
+            inputHash,
+            Date.now() + 60_000
+          ),
+          ...submissionKey(stepKey, key, inputHash),
+        })
+      );
+    const first = docSave(`notes/${unique()}.md`, "First");
+    const second = docSave(`notes/${unique()}.md`, "Second");
+    await stepSave(first);
+    // Keyed with what the first save's input hashes to.
+    const keyed = await outcome(stepSave(second, await inputHashOf(first)));
+    expect(keyed).toBe("ok");
+  });
+
   it("don't commit once the call's deadline passed, by the database's clock, though the last check before the batch said yes", async () => {
     const setup = await setUp();
     const path = `notes/${unique()}.md`;
@@ -579,11 +693,7 @@ describe("record save receipts", { timeout: 60_000 }, () => {
     await directSave(setup, input, { key });
     await stepSave();
     const swept = async (days: number) => {
-      // Every receipt due by then, a page at a time.
-      for (let page = 0; page < 20; page += 1) {
-        // oxlint-disable-next-line no-await-in-loop -- one page after the other
-        await sweepReceipts(env, new Date(Date.now() + days * dayMs));
-      }
+      await sweepReceipts(env, new Date(Date.now() + days * dayMs));
     };
     await swept(29);
     const within = await directSave(setup, input, { key });
@@ -606,6 +716,185 @@ describe("record save receipts", { timeout: 60_000 }, () => {
       // Past every trace of the key, it can't be told from a new one: the
       // save is tried again, and its version check refuses it.
       afterTombstone: "knowledge.conflict",
+    });
+  });
+
+  it("don't stall behind a live run's receipts: the others due expire in the same sweep", async () => {
+    const setup = await setUp();
+    const { admin, app, collectionId, permissionId } = setup;
+    const runId = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at) VALUES (?, ?, 'saver', 1, ?, 'running', ?)"
+    )
+      .bind(runId, app, admin.userId, Date.now())
+      .run();
+    const claimedAt = async (
+      key: Json,
+      daysAgo: number,
+      runOf: string | null
+    ) => {
+      const inputHash = await inputHashOf({ key });
+      await claim(
+        env,
+        {
+          ...submissionOf(
+            admin,
+            app,
+            collectionId,
+            permissionId,
+            "",
+            inputHash,
+            Date.now() + 60_000
+          ),
+          key,
+          runId: runOf,
+        },
+        inputHash,
+        new Date(Date.now() - daysAgo * dayMs)
+      );
+      return inputHash;
+    };
+    // More of the run's receipts due than a page holds, due first.
+    await Promise.all(
+      Array.from({ length: 120 }, async (_, index) => {
+        await claimedAt(
+          ["step", `${runId}:s${index}`, "input", `${index}`],
+          32,
+          runId
+        );
+      })
+    );
+    const plainKey: Json = ["call", `plain-${unique()}`];
+    const plainHash = await claimedAt(plainKey, 31, null);
+    await sweepReceipts(env, new Date());
+    await expect(
+      outcome(
+        claim(
+          env,
+          {
+            ...submissionOf(
+              admin,
+              app,
+              collectionId,
+              permissionId,
+              "",
+              plainHash,
+              Date.now() + 60_000
+            ),
+            key: plainKey,
+          },
+          plainHash
+        )
+      )
+    ).resolves.toBe("submission.expired");
+  });
+
+  it("count their retention from the commit, not the first claim", async () => {
+    const setup = await setUp();
+    const { admin, app, collectionId, permissionId } = setup;
+    const path = `notes/${unique()}.md`;
+    const key = `late-commit-${unique()}`;
+    const input = docSave(path, "Plan");
+    const inputHash = await inputHashOf(input);
+    // An attempt claimed it 30 days ago and was killed.
+    await claim(
+      env,
+      submissionOf(
+        admin,
+        app,
+        collectionId,
+        permissionId,
+        key,
+        inputHash,
+        Date.now() + 60_000
+      ),
+      inputHash,
+      new Date(Date.now() - 30 * dayMs)
+    );
+    const saved = await directSave(setup, input, { key });
+    await sweepReceipts(env, new Date(Date.now() + 60_000));
+    await expect(directSave(setup, input, { key })).resolves.toStrictEqual(
+      saved
+    );
+  });
+
+  it("keep the outcome of a commit landing between the sweep's read and its batch", async () => {
+    const setup = await setUp();
+    const { admin, app, collectionId, permissionId } = setup;
+    const path = `notes/${unique()}.md`;
+    const key = `racing-${unique()}`;
+    const input = docSave(path, "Plan");
+    const inputHash = await inputHashOf(input);
+    await claim(
+      env,
+      submissionOf(
+        admin,
+        app,
+        collectionId,
+        permissionId,
+        key,
+        inputHash,
+        Date.now() + 60_000
+      ),
+      inputHash,
+      new Date(Date.now() - 31 * dayMs)
+    );
+    let saved: unknown;
+    let raced = false;
+    await sweepReceipts(
+      {
+        ...env,
+        KNOWLEDGE: beforeBatch(async () => {
+          if (!raced) {
+            raced = true;
+            saved = await directSave(setup, input, { key });
+          }
+        }),
+      },
+      new Date()
+    );
+    expect({
+      raced,
+      again: await directSave(setup, input, { key }),
+      versions: await versionsAt(collectionId, path),
+    }).toStrictEqual({ raced: true, again: saved, versions: 1 });
+  });
+
+  it("refuse a commit to a receipt the sweep expired between its claim and its batch", async () => {
+    const setup = await setUp();
+    const { admin, app, collectionId, permissionId } = setup;
+    const path = `notes/${unique()}.md`;
+    const key = `expiring-${unique()}`;
+    const input = docSave(path, "Plan");
+    const inputHash = await inputHashOf(input);
+    await claim(
+      env,
+      submissionOf(
+        admin,
+        app,
+        collectionId,
+        permissionId,
+        key,
+        inputHash,
+        Date.now() + 60_000
+      ),
+      inputHash,
+      new Date(Date.now() - 31 * dayMs)
+    );
+    const late = await outcome(
+      directSave(setup, input, {
+        key,
+        last: async () => {
+          await sweepReceipts(env, new Date());
+        },
+      })
+    );
+    expect({
+      late,
+      versions: await versionsAt(collectionId, path),
+    }).toStrictEqual({
+      late: "submission.expired",
+      versions: 0,
     });
   });
 });
