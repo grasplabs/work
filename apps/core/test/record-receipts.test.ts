@@ -15,15 +15,7 @@ import { z } from "zod";
 
 import { callApp } from "../src/app.ts";
 import type { AppCallerInput } from "../src/app.ts";
-import {
-  defaultMaxAttempts as maxAttempts,
-  drainSubmissionOutbox,
-} from "../src/knowledge/outbox.ts";
-import type {
-  OutboxConsumer,
-  OutboxConsumers,
-  OutboxEntry,
-} from "../src/knowledge/outbox.ts";
+import { drainSubmissionOutbox } from "../src/knowledge/outbox.ts";
 import {
   claim,
   inputHashOf,
@@ -32,6 +24,12 @@ import {
 } from "../src/knowledge/receipts.ts";
 import type { Submission } from "../src/knowledge/receipts.ts";
 import { saveRecordAsDelegate } from "../src/knowledge/records.ts";
+import { defaultMaxAttempts as maxAttempts } from "../src/outbox-delivery.ts";
+import type {
+  OutboxConsumer,
+  OutboxConsumers,
+  OutboxEntry,
+} from "../src/outbox-delivery.ts";
 import { restrict } from "../src/restricted.ts";
 import { release, requestGranted, serverBuilt } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
