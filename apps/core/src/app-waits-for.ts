@@ -157,7 +157,11 @@ const roundOf = (
  * `limit` Apps wait, directly or through others, for the call's chain;
  * past that, it may not be. In a round wider than what's left, holds from
  * chains that share an App already asked go first: they go on along a
- * chain the walk is already on.
+ * chain the walk is already on. The walk keeps only the first path it
+ * found to each hold (`foundIn`): should that path break while another
+ * closes a real cycle, the call waits until its deadline, as before.
+ * Each path is asked about again at most once, and none once the call no
+ * longer waits.
  */
 export const waitsOn = async (walk: WaitsFor): Promise<boolean> => {
   const { self, holding, holds, ask, limit, signal } = walk;
@@ -168,6 +172,17 @@ export const waitsOn = async (walk: WaitsFor): Promise<boolean> => {
   /** Apps asked, and those whose holder the walk has found. */
   const asked = new Set<AppId>();
   const known = new Set<AppId>();
+  /** The cycles asked about again, by the turn and the hold closing each. */
+  const rechecked = new Set<string>();
+  /** Whether the cycle `closing` closes, found in `from`'s queue, still holds. */
+  const closes = async (from: Hold, closing: Hold): Promise<boolean> => {
+    const path = `${keyOf(from)} ${keyOf(closing)}`;
+    if (signal.aborted || rechecked.has(path)) {
+      return false;
+    }
+    rechecked.add(path);
+    return await stillWaits(walk, stepsBack(foundIn, from, closing), closing);
+  };
   let pending = holding.filter(({ app }) => app !== self);
   while (pending.length > 0 && !signal.aborted) {
     const round = roundOf(pending, asked, known, limit);
@@ -195,7 +210,7 @@ export const waitsOn = async (walk: WaitsFor): Promise<boolean> => {
         if (
           closing !== undefined &&
           // oxlint-disable-next-line no-await-in-loop -- rare: only once a cycle is found
-          (await stillWaits(walk, stepsBack(foundIn, from, closing), closing))
+          (await closes(from, closing))
         ) {
           return true;
         }

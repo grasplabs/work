@@ -38,7 +38,7 @@ const walk = async (
     selfHolds = (call: string): boolean => call === selfHolder,
     failing = new Set<string>(),
     signal = new AbortController().signal,
-    onAsk = (_asking: string): void => {
+    onAsk = (_asking: string, _turns: readonly string[]): void => {
       // Nothing changes as the walk asks, unless a test says so.
     },
   } = {}
@@ -50,7 +50,7 @@ const walk = async (
     holds: selfHolds,
     ask: async (asking, turns) => {
       asked.push(asking);
-      onAsk(asking);
+      onAsk(asking, turns);
       if (failing.has(asking)) {
         throw new Error("No answer");
       }
@@ -193,18 +193,26 @@ describe("the walk back through Apps' queues", () => {
     const ended = Array.from({ length: 31 }, (_, at) => [
       { app: app("a"), call: `ended-${at}` },
     ]);
-    const { found, asked } = await walk(
+    // How often the walk asked A before it found the cycle and asked
+    // about it again (about A's current turn alone).
+    let askedAWalking = 0;
+    const found = await foundBy(
       [held("b")],
       {
         [app("b")]: { holder: "b", waiting: [...ended, [held("a")]] },
         [app("a")]: { holder: "a", waiting: [[held("self")]] },
       },
-      { limit: 2 }
+      {
+        limit: 2,
+        onAsk: (asking, turns) => {
+          askedAWalking += asking === app("a") && turns.length > 1 ? 1 : 0;
+        },
+      }
     );
-    expect({
-      found,
-      askedA: asked.filter((asking) => asking === app("a")).length,
-    }).toStrictEqual({ found: true, askedA: 2 });
+    expect({ found, askedAWalking }).toStrictEqual({
+      found: true,
+      askedAWalking: 1,
+    });
   });
 
   it("refuses nothing once a cycle it found broke while it went on", async () => {
@@ -259,6 +267,52 @@ describe("the walk back through Apps' queues", () => {
       }
     );
     expect({ found, asked }).toStrictEqual({ found: false, asked: [app("a")] });
+  });
+
+  it("asks about each cycle found again at most once, and none once the call no longer waits", async () => {
+    // Ten calls waiting for A each close the same cycle, which breaks as
+    // the walk asks about it again.
+    const queues: Queues = {
+      [app("a")]: {
+        holder: "a",
+        waiting: Array.from({ length: 10 }, () => [held("self")]),
+      },
+    };
+    let askedA = 0;
+    const once = await walk([held("a")], queues, {
+      onAsk: (asking) => {
+        askedA += asking === app("a") ? 1 : 0;
+        if (askedA === 2) {
+          queues[app("a")] = { holder: "a", waiting: [] };
+        }
+      },
+    });
+    // Three cycles found in one round; as the first is asked about again,
+    // it has broken and the call stops waiting.
+    const left = new AbortController();
+    const three: Queues = {
+      [app("a")]: { holder: "a", waiting: [[held("self")]] },
+      [app("b")]: { holder: "b", waiting: [[held("self")]] },
+      [app("c")]: { holder: "c", waiting: [[held("self")]] },
+    };
+    let askedAgain = 0;
+    const stopped = await walk([held("a"), held("b"), held("c")], three, {
+      signal: left.signal,
+      onAsk: (asking) => {
+        askedAgain += asking === app("a") ? 1 : 0;
+        if (askedAgain === 2) {
+          three[app("a")] = { holder: "a", waiting: [] };
+          left.abort();
+        }
+      },
+    });
+    expect({ once, stopped }).toStrictEqual({
+      once: { found: false, asked: [app("a"), app("a")] },
+      stopped: {
+        found: false,
+        asked: [app("a"), app("b"), app("c"), app("a")],
+      },
+    });
   });
 });
 
