@@ -1,7 +1,8 @@
 /**
- * Workspace Durable Object SQLite: chats and agent state. Migrates itself on
- * first wake-up after a release.
+ * Workspace Durable Object SQLite: chats, agent state, and its person's
+ * dashboard. Migrates itself on first wake-up after a release.
  */
+import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
 import type { ChatId } from "@grasp-os/shared/ids";
 import {
   foreignKey,
@@ -154,4 +155,31 @@ export const chatAttachments = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [primaryKey({ columns: [table.chatId, table.runId] })]
+);
+
+/**
+ * A person's own dashboard, once they changed it: a row for each person
+ * who saved one, so a board they took every widget off reads as empty,
+ * and one never saved as none (the board as it begins). Kept in their
+ * own Workspace object (`personalWorkspaceId` in chats-rpc.ts).
+ */
+export const dashboards = sqliteTable("dashboards", {
+  personId: text("person_id").primaryKey(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/**
+ * The widgets on a person's dashboard (`dashboards`), a row each, in
+ * order of `position` from 0. Saving replaces them all.
+ */
+export const dashboardWidgets = sqliteTable(
+  "dashboard_widgets",
+  {
+    personId: text("person_id")
+      .notNull()
+      .references(() => dashboards.personId),
+    position: integer().notNull(),
+    widgetId: text("widget_id").$type<StandardWidgetId>().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.personId, table.position] })]
 );

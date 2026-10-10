@@ -13,7 +13,7 @@ import {
 } from "@grasp-os/ui/components/tooltip";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Maximize2Icon } from "lucide-react";
-import { useId, useState } from "react";
+import { createContext, use, useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { LoadingLines } from "../frame/page-states.tsx";
@@ -23,7 +23,15 @@ import { DashboardCard, DashboardCardHeader } from "./dashboard-card.tsx";
 // (`components/dashboard/widget-board.tsx`, `widget-parts.tsx`): every
 // block as high as the next whatever is in it, its title with a button
 // that opens it in full, and what doesn't fit fading out at its foot. In
-// full, a dialog has the title and the whole of it.
+// full, a dialog has the title and the whole of it. On the board, the
+// buttons that move a block and take it off stand beside its title too
+// (`WidgetControls`).
+
+/**
+ * What the board puts beside a block's title, before its own button: the
+ * way to move it and take it off (widget-board.tsx). None elsewhere.
+ */
+export const WidgetControls = createContext<ReactNode>(null);
 
 /** One widget's block, and its full view when it has one. */
 export const WidgetBlock = ({
@@ -45,29 +53,37 @@ export const WidgetBlock = ({
   const { t } = useLingui();
   const id = useId();
   const [open, setOpen] = useState(false);
+  const controls = use(WidgetControls);
   const opens = t`Open ${title} in full`;
+  const fullButton =
+    full === undefined ? null : (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              aria-label={opens}
+              onClick={() => {
+                setOpen(true);
+              }}
+              size="icon-sm"
+              variant="ghost"
+            />
+          }
+        >
+          <Maximize2Icon />
+        </TooltipTrigger>
+        <TooltipContent>{opens}</TooltipContent>
+      </Tooltip>
+    );
   return (
     <DashboardCard className="h-80" id={id}>
       <DashboardCardHeader
         actions={
-          full === undefined ? undefined : (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    aria-label={opens}
-                    onClick={() => {
-                      setOpen(true);
-                    }}
-                    size="icon-sm"
-                    variant="ghost"
-                  />
-                }
-              >
-                <Maximize2Icon />
-              </TooltipTrigger>
-              <TooltipContent>{opens}</TooltipContent>
-            </Tooltip>
+          controls === null && fullButton === null ? undefined : (
+            <>
+              {controls}
+              {fullButton}
+            </>
           )
         }
         count={count}

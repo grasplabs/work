@@ -5,6 +5,7 @@ import { AppsRpc } from "./apps-rpc.ts";
 import { AuditRpc } from "./audit-rpc.ts";
 import { ChatsRpc } from "./chats-rpc.ts";
 import { ConnectionsRpc } from "./connections.ts";
+import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
 import { DependenciesRpc } from "./dependencies/rpc.ts";
 import { MemoryRpc } from "./knowledge/memory-rpc.ts";
@@ -57,6 +58,7 @@ export class SessionRpc extends RpcTarget implements SessionApi {
   readonly #pendingActions: PendingActionsRpc;
   readonly #signals: SignalsRpc;
   readonly #chats: ChatsRpc;
+  readonly #dashboard: DashboardRpc;
   readonly #notifications: NotificationsRpc;
   readonly #onboarding: OnboardingRpc;
   readonly #onboardingStaff: OnboardingStaffRpc;
@@ -85,6 +87,7 @@ export class SessionRpc extends RpcTarget implements SessionApi {
     this.#pendingActions = new PendingActionsRpc(env, full);
     this.#signals = new SignalsRpc(env, full);
     this.#chats = new ChatsRpc(env, full);
+    this.#dashboard = new DashboardRpc(env, full);
     this.#notifications = new NotificationsRpc(env, full);
     this.#onboarding = new OnboardingRpc(env, check);
     this.#onboardingStaff = new OnboardingStaffRpc(env, check);
@@ -109,6 +112,10 @@ export class SessionRpc extends RpcTarget implements SessionApi {
 
   get chats(): ChatsRpc {
     return this.#chats;
+  }
+
+  get dashboard(): DashboardRpc {
+    return this.#dashboard;
   }
 
   get apps(): AppsRpc {

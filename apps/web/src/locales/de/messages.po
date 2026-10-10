@@ -355,9 +355,21 @@ msgstr "{team} (Team)"
 msgid "{teamName}'s lead hasn't talked yet: the team goes ahead without their map of its work"
 msgstr "Die Leitung von {teamName} hat noch nicht gesprochen: Das Team macht ohne ihre Übersicht über seine Arbeit weiter"
 
+#: src/dashboard/widget-board.tsx
+msgid "{title} added to the dashboard."
+msgstr "{title} wurde zum Dashboard hinzugefügt."
+
+#: src/dashboard/widget-board.tsx
+msgid "{title} is now in place {place} of {count}."
+msgstr "{title} steht jetzt an Stelle {place} von {count}."
+
 #: src/chat/held-writes.tsx
 msgid "{title} on {connection}"
 msgstr "{title} auf {connection}"
+
+#: src/dashboard/widget-board.tsx
+msgid "{title} removed from the dashboard."
+msgstr "{title} wurde vom Dashboard entfernt."
 
 #: src/connections/integration-row.tsx
 msgid "{toolCount, plural, one {# tool} other {# tools}}"
@@ -520,6 +532,10 @@ msgstr "Aktivität"
 #: src/activity/audit-log.tsx
 msgid "Actor ID"
 msgstr "Akteur-ID"
+
+#: src/dashboard/widget-board.tsx
+msgid "Add a widget"
+msgstr "Widget hinzufügen"
 
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Add a word"
@@ -871,6 +887,10 @@ msgstr "Automatisch"
 #: src/routes/_shell.integrations.index.tsx
 msgid "Available"
 msgstr "Verfügbar"
+
+#: src/dashboard/widget-board.tsx
+msgid "Back to how it began"
+msgstr "Wieder wie am Anfang"
 
 #: src/knowledge/document.tsx
 msgid "Back to the current version"
@@ -1259,6 +1279,7 @@ msgid "Copy the answer"
 msgstr "Antwort kopieren"
 
 #: src/dashboard/signals.tsx
+#: src/dashboard/widget-board.tsx
 msgid "Could be better"
 msgstr "Könnte besser sein"
 
@@ -1464,6 +1485,10 @@ msgstr "Fertig"
 #: src/knowledge/uploads.tsx
 msgid "Download {name}"
 msgstr "{name} herunterladen"
+
+#: src/dashboard/widget-board.tsx
+msgid "Drag to move, or use the arrow keys"
+msgstr "Zum Verschieben ziehen oder die Pfeiltasten verwenden"
 
 #: src/knowledge/uploads.tsx
 msgid "Drop files here"
@@ -2291,6 +2316,10 @@ msgstr "Mehr zu {title}"
 msgid "More will be sent than is shown above. Read exactly what will be sent before you confirm."
 msgstr "Es wird mehr gesendet, als oben angezeigt wird. Lesen Sie genau, was gesendet wird, bevor Sie bestätigen."
 
+#: src/dashboard/widget-board.tsx
+msgid "Move {title}"
+msgstr "{title} verschieben"
+
 #: src/activity/audit-words.ts
 msgid "Moved old entries out of the audit trail"
 msgstr "Alte Einträge aus dem Audit-Trail ausgelagert"
@@ -3117,6 +3146,10 @@ msgstr "Entfernen"
 msgid "Remove {name}?"
 msgstr "{name} entfernen?"
 
+#: src/dashboard/widget-board.tsx
+msgid "Remove {title}"
+msgstr "{title} entfernen"
+
 #: src/routes/_shell.onboarding.stephen.tsx
 msgid "Remove: {item}"
 msgstr "Entfernen: {item}"
@@ -3843,6 +3876,10 @@ msgstr "Die Plattform des Unternehmens bleibt geschlossen, bis Grasp das Go gibt
 #: src/onboarding/kickoff-errors.ts
 msgid "The conversation couldn't be read just now. Try again in a moment."
 msgstr "Das Gespräch konnte gerade nicht gelesen werden. Versuchen Sie es gleich noch einmal."
+
+#: src/dashboard/widget-board.tsx
+msgid "The dashboard is back to how it began."
+msgstr "Das Dashboard ist wieder wie am Anfang."
 
 #: src/onboarding/staff-words.ts
 msgid "The data processing agreement isn't signed"
