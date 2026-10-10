@@ -292,6 +292,7 @@ describe("canonical manifests", () => {
     ).toBe("schema.unknown_table");
     for (const declared of [
       { tables: { notes: { read: "everyone" } } },
+      { tables: { notes: { read: null } } },
       { tables: { notes: { read: "owner", delete: "owner" } } },
       { tables: { notes: "owner" } },
       { tables: [] },
@@ -513,6 +514,20 @@ describe("reading a manifest", () => {
         delete notesOf(json).access;
       }),
       "schema.invalid_manifest",
+    ],
+    [
+      "access modes given as null",
+      changed((json) => {
+        notesOf(json).access = { read: null, write: null };
+      }),
+      "schema.invalid_access",
+    ],
+    [
+      "one access mode given as null",
+      changed((json) => {
+        notesOf(json).access = { read: "owner", write: null };
+      }),
+      "schema.invalid_access",
     ],
     [
       "an access mode that doesn't exist",

@@ -175,8 +175,15 @@ const tableAccessOf = (table: string, declared: unknown): ManifestAccess => {
   const known =
     isPlainObject(declared) &&
     Object.keys(declared).every((key) => key === "read" || key === "write");
-  const read = known ? (ownValue(declared, "read") ?? "none") : undefined;
-  const write = known ? (ownValue(declared, "write") ?? "none") : undefined;
+  // Only a mode left out is `none`; any other value, `null` included, must
+  // be a mode. A manifest read back always has both (`readTable`), so there
+  // nothing is filled in.
+  const modeOf = (key: "read" | "write"): unknown => {
+    const mode = known ? ownValue(declared, key) : null;
+    return mode === undefined ? "none" : mode;
+  };
+  const read = modeOf("read");
+  const write = modeOf("write");
   if (!(isAccessMode(read) && isAccessMode(write))) {
     return refuse(
       "schema.invalid_access",
