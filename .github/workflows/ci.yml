@@ -51,10 +51,21 @@ jobs:
       # per CPU measured about 6% faster.
       # Nothing in Vitest times out a test worker stuck after its tests (see
       # apps/core/vite.config.ts): this step timeout is the only backstop, so
-      # a hang fails here after 16 minutes, with no earlier warning, instead
-      # of at the job's limit: half again over the slowest pass.
-      - run: vp test --maxWorkers=100%
+      # a hang fails here after 16 minutes, instead of at the job's limit:
+      # half again over the slowest pass. A minute before that, the stall
+      # reporter prints the files and tests still running, and each finished
+      # test is in the test-progress artifact (scripts/stall-reporter.ts).
+      - run: vp test --maxWorkers=100% --reporter=default --reporter=./scripts/stall-reporter.ts
         timeout-minutes: 16
+        env:
+          GRASP_STALL_REPORT_AFTER_MINUTES: 15
+          GRASP_TEST_PROGRESS_FILE: ${{ runner.temp }}/test-progress.log
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-progress
+          path: ${{ runner.temp }}/test-progress.log
+          retention-days: 14
       - run: vp run -r build
       # The console isn't deployed from here (see deploy-staging): check that
       # its build is a Worker wrangler would deploy. No credentials needed.
