@@ -117,6 +117,10 @@ msgstr "{count, plural, one {# modification attend que vous la confirmiez ou la 
 msgid "{count, plural, one {# file} other {# files}}"
 msgstr "{count, plural, one {# fichier} other {# fichiers}}"
 
+#: src/dashboard/widget-board.tsx
+msgid "{count, plural, one {# more engine with no workflows to show} other {# more engines with no workflows to show}}"
+msgstr "{count, plural, one {# moteur de plus sans workflow à afficher} other {# moteurs de plus sans workflow à afficher}}"
+
 #: src/knowledge/timeline.tsx
 msgid "{count, plural, one {# version} other {# versions}}"
 msgstr "{count, plural, one {# version} other {# versions}}"
@@ -2408,7 +2412,6 @@ msgstr "Aucun workflow ne demande d’attention : rien n’attend de décision, 
 msgid "No workflows to test."
 msgstr "Aucun workflow à tester."
 
-#: src/dashboard/widget-board.tsx
 #: src/routes/_shell.engines.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "No workflows yet"

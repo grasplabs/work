@@ -17,7 +17,7 @@ import { formatDate } from "../format.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { byState, enginesOf, stateOf, workflowStates } from "./board.ts";
-import type { EngineWorkflows, WorkflowState } from "./board.ts";
+import type { Engines, EngineWorkflows, WorkflowState } from "./board.ts";
 import { CouldBeBetter } from "./signals.tsx";
 import type { Signals } from "./signals.tsx";
 import { WidgetBlock, WidgetLoading } from "./widget-block.tsx";
@@ -265,12 +265,20 @@ const RanOf = ({ engine }: { engine: EngineWorkflows }) => {
   );
 };
 
+/** How many engines there are with no workflow to show, if any. */
+const Others = ({ count }: { count: number }) =>
+  count === 0 ? null : (
+    <p className="text-muted-foreground border-t pt-3 text-xs first:border-t-0 first:pt-0">
+      <Plural
+        one="# more engine with no workflows to show"
+        other="# more engines with no workflows to show"
+        value={count}
+      />
+    </p>
+  );
+
 /** In full: each engine with its workflows, each with where it stands, opening it. */
-const EngineSections = ({
-  engines,
-}: {
-  engines: readonly EngineWorkflows[];
-}) => {
+const EngineSections = ({ engines, others }: Engines) => {
   const { i18n } = useLingui();
   return (
     <div className="flex flex-col">
@@ -292,40 +300,35 @@ const EngineSections = ({
               <RanOf engine={engine} />
             </span>
           </h3>
-          {engine.workflows.length === 0 ? (
-            <p className="text-muted-foreground @lg:col-span-3">
-              <Trans>No workflows yet</Trans>
-            </p>
-          ) : (
-            <ul className="flex min-w-0 flex-col gap-2 @lg:col-span-3">
-              {engine.workflows.map((workflow) => {
-                const state = stateOf(workflow);
-                return (
-                  <li
-                    className="flex items-center gap-2.5"
-                    key={workflow.workflow}
+          <ul className="flex min-w-0 flex-col gap-2 @lg:col-span-3">
+            {engine.workflows.map((workflow) => {
+              const state = stateOf(workflow);
+              return (
+                <li
+                  className="flex items-center gap-2.5"
+                  key={workflow.workflow}
+                >
+                  <Dot small state={state} />
+                  <Link
+                    className="min-w-0 flex-1 truncate hover:underline"
+                    params={{
+                      app: workflow.app,
+                      workflow: workflow.workflow,
+                    }}
+                    to="/workflows/$app/$workflow"
                   >
-                    <Dot small state={state} />
-                    <Link
-                      className="min-w-0 flex-1 truncate hover:underline"
-                      params={{
-                        app: workflow.app,
-                        workflow: workflow.workflow,
-                      }}
-                      to="/workflows/$app/$workflow"
-                    >
-                      {workflow.workflow}
-                    </Link>
-                    <span className="text-muted-foreground flex-none">
-                      {i18n._(stateNames[state])}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+                    {workflow.workflow}
+                  </Link>
+                  <span className="text-muted-foreground flex-none">
+                    {i18n._(stateNames[state])}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         </section>
       ))}
+      <Others count={others} />
     </div>
   );
 };
@@ -349,11 +352,11 @@ const EnginesWidget = ({
       </WidgetBlock>
     );
   }
-  const engines = enginesOf(apps, rows);
+  const { engines, others } = enginesOf(apps, rows);
   return (
     <WidgetBlock
       count={engines.length}
-      full={<EngineSections engines={engines} />}
+      full={<EngineSections engines={engines} others={others} />}
       title={title}
     >
       <ul className="flex flex-col">
@@ -383,6 +386,7 @@ const EnginesWidget = ({
           </li>
         ))}
       </ul>
+      <Others count={others} />
     </WidgetBlock>
   );
 };

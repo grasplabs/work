@@ -88,10 +88,11 @@ describe("each engine's workflows", () => {
       workflow("check", { lastRun: null }, "invoices"),
       workflow("welcome", { failed: 1 }, "people"),
     ];
-    const engines = enginesOf(
+    const { engines, others } = enginesOf(
       [engine("people"), engine("invoices"), engine("empty")],
       rows
     );
+    expect(others).toBe(1);
     expect(
       engines.map(({ app, workflows, ran }) => ({
         app: app.id,
@@ -101,14 +102,13 @@ describe("each engine's workflows", () => {
     ).toStrictEqual([
       { app: "people", workflows: ["welcome"], ran: 1 },
       { app: "invoices", workflows: ["send", "check"], ran: 1 },
-      { app: "empty", workflows: [], ran: 0 },
     ]);
   });
 
   it("leaves out workflows of engines the person can't open", () => {
     expect(
       enginesOf([engine("invoices")], [workflow("other", {}, "elsewhere")])
-    ).toStrictEqual([{ app: engine("invoices"), workflows: [], ran: 0 }]);
+    ).toStrictEqual({ engines: [], others: 1 });
   });
 });
 

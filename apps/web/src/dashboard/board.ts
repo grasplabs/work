@@ -59,16 +59,28 @@ export interface EngineWorkflows {
   ran: number;
 }
 
+/** The engines on the board, and how many more there are with no workflow to show. */
+export interface Engines {
+  engines: EngineWorkflows[];
+  /**
+   * Engines listed with no workflow the overview shows: none made yet,
+   * or shared ones whose data the person can't read, which the overview
+   * leaves out. Told apart from neither, so counted, never drawn empty.
+   */
+  others: number;
+}
+
 /**
- * Each engine the person can open, in the order given, with its
- * workflows as the overview lists them. A workflow of an engine not
- * given is left out: the board shows the engines the person can open.
+ * Each engine with a workflow the person can see, in the order given,
+ * with its workflows as the overview lists them, and how many others
+ * there are. A workflow of an engine not given is left out: the board
+ * shows the engines the person can open.
  */
 export const enginesOf = (
   apps: readonly App[],
   rows: readonly WorkflowSummary[]
-): EngineWorkflows[] =>
-  apps.map((app) => {
+): Engines => {
+  const all = apps.map((app) => {
     const workflows = rows.filter((row) => row.app === app.id);
     return {
       app,
@@ -76,6 +88,9 @@ export const enginesOf = (
       ran: workflows.filter(({ lastRun }) => lastRun !== null).length,
     };
   });
+  const engines = all.filter(({ workflows }) => workflows.length > 0);
+  return { engines, others: all.length - engines.length };
+};
 
 /** Every kind of signal the board counts, improvement and Knowledge; an unanswered question is one kind for both. */
 export type SignalKind = ImprovementSignal["kind"] | KnowledgeSignal["kind"];
