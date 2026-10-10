@@ -5,6 +5,8 @@ import { modelSpendListed } from "@grasp-os/shared/models";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { modelLedger } from "../src/model-ledger.ts";
+import type { LedgerScope } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall, ModelsEnv } from "../src/models.ts";
 import { fakeGateway } from "./ai-gateway.ts";
@@ -55,6 +57,15 @@ const envWith = (config?: unknown) => {
   };
   return coreEnv;
 };
+
+/** A scope the ledger counts spend in, with no budget. */
+const counted = (scope: "user" | "workflow", key: string): LedgerScope => ({
+  scope,
+  key,
+  limitMicros: null,
+  alertMicros: null,
+  names: {},
+});
 
 /** The settings as an admin reads them from `coreEnv`. */
 const settingsIn = async (
@@ -245,25 +256,45 @@ describe("model settings", { timeout: 60_000 }, () => {
       budgets: { workflow: { limit: 5 }, user: { limit: 1 } },
     });
     const period = coreEnv.MODEL_BUDGET_MONTH;
+    if (period === undefined) {
+      throw new Error("Each test counts in a month of its own");
+    }
     // Spend already counted for people and an App no longer here: one more
     // person than are listed, the two who spent most tied.
     const people = Array.from({ length: modelSpendListed + 1 }, (_, index) => ({
       key: `gone-${String(index).padStart(3, "0")}`,
       micros: index < 2 ? 900_000 : 1000 + index,
     }));
-    const spend = env.DB.prepare(
-      "INSERT INTO model_spend (scope, key, period, spent_micros) VALUES (?, ?, ?, ?)"
-    );
-    await env.DB.batch([
-      ...people.map(({ key, micros }) =>
-        spend.bind("user", key, period, micros)
-      ),
-      spend.bind(
-        "workflow",
-        JSON.stringify(["gone-app", "digest"]),
+    // Each charged through the ledger: a micro a token.
+    const ledger = modelLedger(env);
+    const spend = async (scope: LedgerScope, micros: number) => {
+      const id = crypto.randomUUID();
+      await ledger.admit({
+        id,
         period,
-        5000
-      ),
+        scopes: [scope],
+        model: workersAi,
+        price: {
+          version: "test",
+          input: 1_000_000,
+          output: 1_000_000,
+          cacheRead: 0,
+          cacheWrite: 0,
+        },
+        reservedMicros: micros,
+        actor: { type: "person", userId: "someone" },
+        reconcileAt: Date.now() + 60_000,
+      });
+      await ledger.settle(id, {
+        by: "usage",
+        tokens: { input: micros, output: 0, cacheRead: 0, cacheWrite: 0 },
+      });
+    };
+    await Promise.all([
+      ...people.map(async ({ key, micros }) => {
+        await spend(counted("user", key), micros);
+      }),
+      spend(counted("workflow", JSON.stringify(["gone-app", "digest"])), 5000),
     ]);
 
     const settings = await settingsIn(coreEnv);

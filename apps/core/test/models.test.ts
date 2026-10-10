@@ -225,9 +225,16 @@ describe("model gateway", { timeout: 30_000 }, () => {
         // answer it kept would be someone else's.
         skipsCache: headers.get("cf-aig-skip-cache"),
       }).toStrictEqual({ logsPayload: "false", skipsCache: "true" });
-      expect(
-        JSON.parse(headers.get("cf-aig-metadata") ?? "null")
-      ).toStrictEqual({ purpose: "chat.turn", actor: "person" });
+      // Identifiers only: why, for what kind of caller, and the provider
+      // request's own ID, which the model ledger keeps it under.
+      const { providerRequest, ...metadata } = z
+        .object({ providerRequest: z.uuid() })
+        .catchall(z.unknown())
+        .parse(JSON.parse(headers.get("cf-aig-metadata") ?? "null"));
+      expect([metadata, typeof providerRequest]).toStrictEqual([
+        { purpose: "chat.turn", actor: "person" },
+        "string",
+      ]);
     }
     // Nor could core send one: its env holds no provider key or gateway token.
     expect(
