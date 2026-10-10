@@ -1589,7 +1589,21 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       await this.#leaveToWatchdog("workflow_run_read_failed", error);
       return undefined;
     }
-    return fresh === undefined ? undefined : { run: fresh, notified: true };
+    if (fresh === undefined) {
+      return undefined;
+    }
+    // Due now (its wake passed, it was resumed, took an event, or was
+    // restarted, while the delivery was out): its activation gets an
+    // alarm of its own, with the handler's whole wall time, rather than
+    // what the delivery left of this one, which its first attempt, always
+    // claimed, could run past.
+    // The delivery's end set the alarm to the run's own, which is now (or
+    // past) for a run that is due (#settleAlarm): the next alarm comes at
+    // once, and this one ends here.
+    if (activatesNow(fresh)) {
+      return undefined;
+    }
+    return { run: fresh, notified: true };
   }
 
   /**

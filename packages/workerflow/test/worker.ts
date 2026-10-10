@@ -18,6 +18,8 @@ import {
   checkpoint,
   effect,
   handled,
+  handledAt,
+  tick,
   measuredClock,
   hostNotifications,
   notifyFailures,
@@ -679,6 +681,33 @@ export const definitions: Record<string, WorkflowDefinition> = {
   },
   // Two steps at once, for a host whose handlers have little wall time.
   // Two steps side by side, each with a timeout of half a second.
+  // A sleep the params give (in ms), then a step whose timeout takes most
+  // of a budgeted handler's second.
+  "budget-napper": {
+    run: async (event, step) => {
+      await step.sleep("nap", durationIn(event.payload, 1000));
+      return await step.do(
+        "after",
+        { timeout: 900 },
+        async (context) => await effect(event.instanceId, "after", context)
+      );
+    },
+  },
+  // A step, then one whose timeout takes most of a budgeted handler's
+  // second: a pause asked for during the first stops before the second.
+  "budget-pair": {
+    run: async (event, step) => {
+      await step.do(
+        "first",
+        async (context) => await effect(event.instanceId, "first", context)
+      );
+      return await step.do(
+        "second",
+        { timeout: 900 },
+        async (context) => await effect(event.instanceId, "second", context)
+      );
+    },
+  },
   // One step whose timeout takes most of a budgeted handler's second.
   "near-budget": {
     run: async (event, step) =>
@@ -1092,6 +1121,7 @@ export class TestRuns extends WorkflowRun {
       await super.alarm();
     } finally {
       handled.push(this.ctx.id.toString());
+      handledAt.push({ object: this.ctx.id.toString(), order: tick() });
     }
   }
 

@@ -14,6 +14,7 @@ import {
   ended,
   journalOf,
   newId,
+  pastTime,
   runObject,
   suspendedOn,
   until,
@@ -22,7 +23,10 @@ import {
 } from "./helpers.ts";
 import {
   checkpointsReached,
+  effectsOf,
   handled,
+  handledAt,
+  tick,
   eventOf,
   hold,
   notifiedOf,
@@ -648,5 +652,162 @@ describe("writes while a delivery is out", () => {
     });
 
     expect(writes.count).toBeLessThanOrEqual(2);
+  });
+});
+
+/**
+ * That the attempt at `step` ran in an activation of an alarm of its own,
+ * taken after the release (`releasedAt`, its place in `tick`'s order):
+ * some alarm handler of the run's object ended between the release and
+ * the attempt's effect, and the attempt's deadline
+ * fit the activation's wall time.
+ */
+const ranInFreshAlarm = async (
+  definition: string,
+  id: string,
+  step: string,
+  releasedAt: number,
+  occurrence = 0
+): Promise<{ separateAlarm: boolean; fits: boolean }> => {
+  const object = runObject(definition, id, env.BUDGETED_RUNS).id.toString();
+  const effectAt = effectsOf(id, step)[occurrence]?.order ?? 0;
+  const journal = await journalOf(definition, id, env.BUDGETED_RUNS);
+  const ordinal = journal.steps.find((row) => row.name === step)?.ordinal;
+  const attempt = journal.attempts.find((row) => row.ordinal === ordinal);
+  const activation = journal.activations.find(
+    (row) => row.generation === attempt?.generation
+  );
+  return {
+    separateAlarm: handledAt.some(
+      (handler) =>
+        handler.object === object &&
+        handler.order > releasedAt &&
+        handler.order < effectAt
+    ),
+    fits:
+      attempt !== undefined &&
+      activation !== undefined &&
+      attempt.deadline <= activation.started_at + budgetedHandlerMs,
+  };
+};
+
+describe("a run that comes due during an alarm's delivery", () => {
+  it("runs in an alarm of its own when its wake passes during the delivery", async () => {
+    const id = newId();
+    notifyFailures.set(id, 1);
+    // The delivery after the failure's backoff, by an alarm the run's
+    // wake hasn't come for yet.
+    const delivery = hold(id, "notify", 2);
+    await warningsDuring(async () => {
+      await workflow("budget-napper", env.BUDGETED_RUNS).create({
+        id,
+        params: { duration: 1500 },
+      });
+      await delivery.held;
+    });
+    const journal = await journalOf("budget-napper", id, env.BUDGETED_RUNS);
+    const wake = journal.run.wake_at ?? 0;
+    // Held past the wake.
+    await pastTime(wake + 900);
+
+    const releasedAt = tick();
+    delivery.release();
+    await ended("budget-napper", id, env.BUDGETED_RUNS);
+
+    await expect(
+      ranInFreshAlarm("budget-napper", id, "after", releasedAt)
+    ).resolves.toStrictEqual({ separateAlarm: true, fits: true });
+  });
+
+  it("runs in an alarm of its own when it is resumed during the delivery", async () => {
+    const id = newId();
+    const first = hold(id, "first");
+    await workflow("budget-pair", env.BUDGETED_RUNS).create({ id });
+    await first.held;
+    await until("the outbox to empty", async () => {
+      const { run } = await journalOf("budget-pair", id, env.BUDGETED_RUNS);
+      return run.notify_at === null ? true : undefined;
+    });
+    // The pause's delivery fails; the alarm's after the backoff is held.
+    notifyFailures.set(id, 1);
+    const delivery = hold(id, "notify", checkpointsReached(id, "notify") + 2);
+    const instance = await workflow("budget-pair", env.BUDGETED_RUNS).get(id);
+    await warningsDuring(async () => {
+      await instance.pause();
+      first.release();
+      await delivery.held;
+    });
+    // A stub of its own: one made before the hold can't be used from here.
+    const resumer = await workflow("budget-pair", env.BUDGETED_RUNS).get(id);
+    await resumer.resume();
+
+    const releasedAt = tick();
+    delivery.release();
+    await ended("budget-pair", id, env.BUDGETED_RUNS);
+
+    await expect(
+      ranInFreshAlarm("budget-pair", id, "second", releasedAt)
+    ).resolves.toStrictEqual({ separateAlarm: true, fits: true });
+  });
+
+  it("runs in an alarm of its own when it is restarted during the delivery before its purge", async () => {
+    const id = newId();
+    notifyFailures.set(id, 2);
+    const purging = new Workflow(env.BUDGETED_RUNS, "near-budget", {
+      retentionLimits: { minMs: 1, maxMs: 60_000 },
+      retention: { successRetention: 60_000, errorRetention: 60_000 },
+    });
+    // Two deliveries fail; the third, before the purge, is held.
+    const beforePurge = hold(id, "notify", 3);
+    await warningsDuring(async () => {
+      await purging.create({ id, retention: { successRetention: 2500 } });
+      await beforePurge.held;
+    });
+    // A stub of its own: one made before the hold can't be used from here.
+    const restarter = await purging.get(id);
+    await restarter.restart();
+
+    const releasedAt = tick();
+    beforePurge.release();
+    await until("the restarted run to run its step", () =>
+      effectsOf(id, "long").length === 2 ? true : undefined
+    );
+    await ended("near-budget", id, env.BUDGETED_RUNS);
+
+    await expect(
+      ranInFreshAlarm("near-budget", id, "long", releasedAt, 1)
+    ).resolves.toStrictEqual({ separateAlarm: true, fits: true });
+  });
+});
+
+describe("a paused run terminated during an alarm's delivery", () => {
+  it("keeps its purge alarm, as the run read after the delivery says", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await suspendedOn("napper", id, "nap");
+    await outboxEmpty("napper", id);
+    const instance = await workflow("napper").get(id);
+    // The pause's delivery fails; the alarm's after the backoff is held.
+    notifyFailures.set(id, 1);
+    const delivery = hold(id, "notify", checkpointsReached(id, "notify") + 2);
+    await warningsDuring(async () => {
+      await instance.pause();
+      await delivery.held;
+    });
+    // A stub of its own: one made before the hold can't be used from here.
+    const terminator = await workflow("napper").get(id);
+    await terminator.terminate();
+
+    delivery.release();
+    await outboxEmpty("napper", id);
+
+    const purge = await until("the purge alarm to be set", async () => {
+      const { run } = await journalOf("napper", id);
+      const alarm = await alarmOf("napper", id);
+      return run.purge_at !== null && alarm === run.purge_at
+        ? alarm
+        : undefined;
+    });
+    expect(purge).toBeGreaterThan(Date.now());
   });
 });
