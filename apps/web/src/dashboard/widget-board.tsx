@@ -20,7 +20,7 @@ import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Await, Link } from "@tanstack/react-router";
 import { GripVerticalIcon, PlusIcon, XIcon } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
 
@@ -542,6 +542,8 @@ const shapeOf = (grid: HTMLElement | null): GridShape | null => {
  */
 interface Press {
   id: StandardWidgetId;
+  /** The pointer that took hold of it: another one, a second finger, is ignored. */
+  pointer: number;
   fromX: number;
   fromY: number;
   moved: boolean;
@@ -684,32 +686,53 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
   const [dragged, setDragged] = useState<StandardWidgetId | null>(null);
   const grid = useRef<HTMLDivElement>(null);
   const press = useRef<Press | null>(null);
+  /** Ends the drag under way, if any, without saving it. */
+  const stopDrag = useRef<(() => void) | null>(null);
+  /** The layout core last took: what a refused save goes back to. */
+  const confirmed = useRef(board.layout);
+  /** Saves go one at a time, in order, so the last to end is the last made. */
+  const queue = useRef<Promise<void>>(Promise.resolve());
   /** Saves started, so only the latest one's refusal puts the board back. */
   const saves = useRef(0);
   const titleOf = (id: StandardWidgetId) => i18n._(widgetTitles[id]);
 
-  const save = async (
-    next: readonly StandardWidgetId[],
-    before: readonly StandardWidgetId[],
-    said: string
-  ) => {
+  // A save that core refuses, with no later one to come, puts the board
+  // back to what core last took: never to a layout only this page had.
+  const save = async (next: readonly StandardWidgetId[], said: string) => {
     setWidgets(next);
     setFailure(undefined);
     setAnnouncement(said);
     saves.current += 1;
     const started = saves.current;
-    await run(
-      async (session) => {
-        await session.dashboard.saveLayout({ widgets: [...next] });
-      },
-      (reason) => {
-        if (saves.current === started) {
-          setWidgets(before);
+    const previous = queue.current;
+    const saving = (async () => {
+      await previous;
+      const saved = await run(
+        async (session) => {
+          await session.dashboard.saveLayout({ widgets: [...next] });
+          return true;
+        },
+        (reason) => {
+          setFailure(reason);
         }
-        setFailure(reason);
+      );
+      if (saved === true) {
+        confirmed.current = next;
+      } else if (saves.current === started) {
+        setWidgets(confirmed.current);
       }
-    );
+    })();
+    queue.current = saving;
+    await saving;
   };
+
+  // A drag the board is left in the middle of ends there, unsaved.
+  useEffect(
+    () => () => {
+      stopDrag.current?.();
+    },
+    []
+  );
 
   const placeSaid = (
     id: StandardWidgetId,
@@ -738,7 +761,7 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
     // which takes the keys off it: they go back to it at once.
     const grip = event.currentTarget;
     flushSync(() => {
-      void save(next, widgets, placeSaid(id, next));
+      void save(next, placeSaid(id, next));
     });
     grip.focus();
   };
@@ -747,26 +770,17 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
     const title = titleOf(id);
     void save(
       removeWidget(widgets, id),
-      widgets,
       t`${title} removed from the dashboard.`
     );
   };
 
   const add = (id: StandardWidgetId) => {
     const title = titleOf(id);
-    void save(
-      addWidget(widgets, id),
-      widgets,
-      t`${title} added to the dashboard.`
-    );
+    void save(addWidget(widgets, id), t`${title} added to the dashboard.`);
   };
 
   const reset = () => {
-    void save(
-      defaultWidgets,
-      widgets,
-      t`The dashboard is back to how it began.`
-    );
+    void save(defaultWidgets, t`The dashboard is back to how it began.`);
   };
 
   // A drag follows the pointer over the whole page, so a block that moves
@@ -788,8 +802,13 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
     if (!byGrip && !byTitle) {
       return;
     }
+    // One drag at a time: another finger pressing meanwhile takes nothing.
+    if (press.current !== null) {
+      return;
+    }
     press.current = {
       id,
+      pointer: event.pointerId,
       fromX: event.clientX,
       fromY: event.clientY,
       moved: false,
@@ -798,7 +817,7 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
     };
     const follow = (moved: globalThis.PointerEvent) => {
       const held = press.current;
-      if (held === null) {
+      if (held === null || moved.pointerId !== held.pointer) {
         return;
       }
       if (!held.moved) {
@@ -820,17 +839,27 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
         setWidgets(held.order);
       }
     };
-    const drop = () => {
+    const stop = () => {
       window.removeEventListener("pointermove", follow);
+      // oxlint-disable-next-line no-use-before-define -- each takes the other off
       window.removeEventListener("pointerup", drop);
+      // oxlint-disable-next-line no-use-before-define -- each takes the other off
       window.removeEventListener("pointercancel", drop);
-      const held = press.current;
       press.current = null;
+      stopDrag.current = null;
+    };
+    const drop = (ended: globalThis.PointerEvent) => {
+      const held = press.current;
+      if (held === null || ended.pointerId !== held.pointer) {
+        return;
+      }
+      stop();
       setDragged(null);
-      if (held !== null && held.moved && held.order !== held.before) {
-        void save(held.order, held.before, placeSaid(held.id, held.order));
+      if (held.moved && held.order !== held.before) {
+        void save(held.order, placeSaid(held.id, held.order));
       }
     };
+    stopDrag.current = stop;
     window.addEventListener("pointermove", follow);
     window.addEventListener("pointerup", drop);
     window.addEventListener("pointercancel", drop);
