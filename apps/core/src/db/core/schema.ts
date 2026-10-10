@@ -1056,63 +1056,6 @@ export const workflowParamValues = sqliteTable(
 );
 
 /**
- * What model calls cost, in millionths of a US dollar, per budget and
- * month (model-rules.ts): `scope` is the budget's (`deployment`, `workflow`
- * or `user`), `key` what it counts within it (the deployment, a workflow
- * or a person, as JSON), and `period` the UTC month, such as `2026-09`.
- * Only ever added to, in one statement, so concurrent calls never lose
- * each other's cost. `model_spend_top_idx` reads a budget's month most
- * first, ties by `key` descending, without sorting (`budgetSpend`).
- */
-export const modelSpend = sqliteTable(
-  "model_spend",
-  {
-    scope: text({ enum: ["deployment", "workflow", "user"] }).notNull(),
-    key: text().notNull(),
-    period: text().notNull(),
-    spentMicros: integer("spent_micros").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.scope, table.key, table.period] }),
-    index("model_spend_top_idx").on(
-      table.scope,
-      table.period,
-      table.spentMicros,
-      table.key
-    ),
-  ]
-);
-
-/**
- * The budget alerts admins got, one per budget, month, kind (`alert` at
- * the alert threshold, `exhausted` at the limit) and threshold value in
- * millionths of a dollar (model-budgets.ts): an alert is stored only with
- * a new row here, so each value alerts once a month, however often the
- * config changes it.
- */
-export const modelBudgetAlerts = sqliteTable(
-  "model_budget_alerts",
-  {
-    scope: text({ enum: ["deployment", "workflow", "user"] }).notNull(),
-    key: text().notNull(),
-    period: text().notNull(),
-    kind: text({ enum: ["alert", "exhausted"] }).notNull(),
-    thresholdMicros: integer("threshold_micros").notNull(),
-  },
-  (table) => [
-    primaryKey({
-      columns: [
-        table.scope,
-        table.key,
-        table.period,
-        table.kind,
-        table.thresholdMicros,
-      ],
-    }),
-  ]
-);
-
-/**
  * The catalog entries an admin stopped offering (connections.ts): one row
  * each, by its source (`native` or `composio`) and its ID there. Nobody
  * starts connecting a hidden entry, admins included, until an admin offers
