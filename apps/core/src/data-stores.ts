@@ -1,13 +1,8 @@
-import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
-import {
-  canBuild,
-  isAdmin,
-  requireBuilder,
-  roleErrors,
-} from "@grasp-os/shared/roles";
+import { canBuild, isAdmin, requireBuilder } from "@grasp-os/shared/roles";
 import { dataErrors, storeMemberSchema } from "@grasp-os/shared/stores";
 import type {
   ClaimInput,
@@ -16,20 +11,22 @@ import type {
   Committed,
   StoredRecord,
 } from "@grasp-os/shared/stores";
-import { and, eq, exists, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, exists, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { auditedBatch, outboxed, outboxedEventWhere } from "./audit-outbox.ts";
-import { organizationId } from "./auth/auth.ts";
-import { memberRole } from "./auth/identity.ts";
+import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
-import {
-  businessStoreMembers,
-  businessStores,
-  teams,
-} from "./db/core/schema.ts";
-import { inList } from "./db/d1.ts";
+import { businessStoreMembers, businessStores } from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
+import {
+  memberEntry,
+  requireNotStaff,
+  requireSharable,
+  rowsOf,
+  stillMembers,
+} from "./sharing.ts";
+import type { MemberRef } from "./sharing.ts";
+import { recordStoreDeleted } from "./store-deletion.ts";
 
 // The deployment's business stores, as core finds them: its inventory in
 // core D1 (`business_stores`) says which stores exist, and each store's
@@ -51,8 +48,9 @@ import { inJurisdiction } from "./durable-objects.ts";
 //   is read from the database at each call (role, ownership, membership
 //   by person or team, capped by the organization role). Anyone without
 //   it gets `data.store_unavailable`, as for a store that doesn't exist,
-//   so they learn nothing of it. Grasp staff manage as admins but never
-//   share a store: whom a client's data reaches is the client's decision.
+//   so they learn nothing of it. Grasp staff never share, unshare or
+//   delete a store: whom a client's data reaches, and whether it is
+//   destroyed, is the client's decision. A refused deletion is audited.
 // - A store is deleted while something still relies on it: the store's
 //   own object refuses (`data.store_in_use`) while any receipt not yet
 //   expired refers to it, which an attempt in flight, a retry to come, a
@@ -60,11 +58,14 @@ import { inJurisdiction } from "./durable-objects.ts";
 //   the deletion mark are one transaction in the object, so no claim lands
 //   in between, and every call after the mark is refused there, whatever
 //   core's inventory says.
-// - A deletion stops half-way: the object is marked first, then the
-//   inventory row and its audit event in one batch. Deleting again
-//   repeats only what is missing (marking is idempotent, and the event is
-//   stored only by the batch that marks the row), and a store marked in
-//   its object is refused even while its inventory row lags.
+// - A deletion stops half-way, or its records go unaudited: the object is
+//   marked first, with who deleted it and when; then the inventory row and
+//   the `store.deleted` event in one batch, which core runs at once and
+//   the object's alarm runs again before it purges anything, until it
+//   succeeds (store-deletion.ts). The event's ID and content come from
+//   the mark alone, and only the batch that marks the row stores it, so it
+//   is stored once whichever runs first; a store marked in its object is
+//   refused even while its inventory row lags.
 // - A deleted store comes back: its ID is never minted again (random), its
 //   object keeps its deletion mark after purging its records, and its
 //   inventory row keeps `deleted_at`.
@@ -84,11 +85,7 @@ export interface OpenStore {
 /** The audit entry of a change to `store` by `by`: identifiers only. */
 const storeEntry = (
   by: Acting,
-  action:
-    | "store.created"
-    | "store.deleted"
-    | "store.member.added"
-    | "store.member.removed",
+  action: "store.created" | "store.delete_refused",
   store: StoreId,
   detail: AuditEntry["detail"] = {}
 ): AuditEntry => ({
@@ -98,9 +95,19 @@ const storeEntry = (
   detail,
 });
 
+/** Whom a store is shared with to manage it, as its managers see it. */
+export interface StoreManager {
+  type: "person" | "team";
+  id: string;
+  role: "manage";
+  addedBy: string;
+  addedAt: string;
+}
+
 /**
- * Creates a store owned by `by`, who must build, audited with its
- * inventory row, and answers its ID. Its object starts empty on first use.
+ * Creates a store owned by `by`, who must build, as for creating an App,
+ * audited with its inventory row, and answers its ID. Its object starts
+ * empty on first use.
  */
 export const createStore = async (env: Env, by: Acting): Promise<StoreId> => {
   requireBuilder(by);
@@ -120,21 +127,20 @@ export const createStore = async (env: Env, by: Acting): Promise<StoreId> => {
 
 /**
  * The live store `id` if `by` manages it: an admin, its creator, or a
- * person or team it is shared with in role `manage`, and only while their
- * role in the organization builds. Otherwise `data.store_unavailable`, as
- * for a store that doesn't exist.
+ * person or team still in the organization it is shared with in role
+ * `manage`, and only while their role in the organization builds.
+ * Otherwise `data.store_unavailable`, as for a store that doesn't exist.
  */
 const managedBy = async (
   env: Env,
   by: Acting,
   id: string
-): Promise<StoreId> => {
+): Promise<{ id: StoreId; owner: string }> => {
   const parsed = storeIdSchema.safeParse(id);
   if (!parsed.success || !canBuild(by.role)) {
     throw dataErrors.create("data.store_unavailable");
   }
   const db = drizzle(env.DB);
-  const teamIds = by.teams.map((team) => team.id);
   const shared = db
     .select({ one: sql`1` })
     .from(businessStoreMembers)
@@ -142,22 +148,12 @@ const managedBy = async (
       and(
         eq(businessStoreMembers.storeId, businessStores.id),
         eq(businessStoreMembers.role, "manage"),
-        or(
-          and(
-            eq(businessStoreMembers.memberType, "person"),
-            eq(businessStoreMembers.memberId, by.userId)
-          ),
-          teamIds.length === 0
-            ? undefined
-            : and(
-                eq(businessStoreMembers.memberType, "team"),
-                inList(businessStoreMembers.memberId, teamIds)
-              )
-        )
+        rowsOf(businessStoreMembers, by),
+        stillMembers(businessStoreMembers)
       )
     );
   const row = await db
-    .select({ id: businessStores.id })
+    .select({ id: businessStores.id, owner: businessStores.ownerId })
     .from(businessStores)
     .where(
       and(
@@ -172,44 +168,58 @@ const managedBy = async (
   if (row === undefined) {
     throw dataErrors.create("data.store_unavailable");
   }
-  return parsed.data;
+  return { id: parsed.data, owner: row.owner };
 };
 
 /**
- * Deletes store `id` for `by`, who must manage it: refused with
- * `data.store_in_use` while a receipt not yet expired refers to it (the
- * store's object decides, data-store.ts). The object is marked deleted
- * first, then the inventory row, audited in the same batch; repeating a
- * deletion that stopped half-way finishes it, auditing it once.
+ * Deletes store `id` for `by`, who must manage it and isn't Grasp staff:
+ * refused with `data.store_in_use`, and audited, while a receipt not yet
+ * expired refers to it (the store's object decides, store-host.ts). The
+ * object is marked deleted first, with `by` and the time; then the
+ * inventory row and its event, which the object's alarm also ensures
+ * before it purges anything, so they happen even if this call stops here.
  */
 export const deleteStore = async (
   env: Env,
   by: Acting,
   id: string
 ): Promise<void> => {
-  const storeId = await managedBy(env, by, id);
-  await inJurisdiction(env, env.DATA_STORES).getByName(storeId).close(storeId);
-  const db = drizzle(env.DB);
-  const event = createAuditEvent(
-    storeEntry(by, "store.deleted", storeId),
-    "core"
-  );
-  await auditedBatch(env, db, [
-    db
-      .update(businessStores)
-      .set({ deletedAt: new Date() })
-      .where(
-        and(eq(businessStores.id, storeId), isNull(businessStores.deletedAt))
-      ),
-    outboxedEventWhere(db, event, sql`changes() > 0`),
-  ]);
+  requireNotStaff(by);
+  const store = await managedBy(env, by, id);
+  const actor = by.actor ?? actorOf(by);
+  let marked: { deletedAt: number };
+  try {
+    marked = await inJurisdiction(env, env.DATA_STORES)
+      .getByName(store.id)
+      .close(store.id, actor);
+  } catch (error) {
+    if (dataErrors.codeOf(error) === "data.store_in_use") {
+      const db = drizzle(env.DB);
+      await auditedBatch(env, db, [
+        outboxed(db, storeEntry(by, "store.delete_refused", store.id)),
+      ]);
+    }
+    throw error;
+  }
+  await recordStoreDeleted(env, store.id, actor, marked.deletedAt);
 };
+
+/** The rules for sharing a store (sharing.ts). */
+const sharingRules = (owner: string) => ({
+  owner,
+  builds: true,
+  invalid: (issue: string) =>
+    dataErrors.create("data.invalid", { issues: [issue] }),
+  ownerIssue: "id: They created the store, and always manage it.",
+  buildsIssue:
+    "role: Only the organization's admins and builders manage stores.",
+});
 
 /**
  * Shares store `id` with a person or team in role `manage`, for `by`, who
- * must manage it and isn't Grasp staff. A person must be in the
- * organization in a role that builds; a team must exist. Sharing again
- * changes nothing.
+ * must manage it and isn't Grasp staff, as for Apps: a person in the
+ * organization in a role that builds, never its creator; or a team that
+ * exists. Sharing again changes and records nothing.
  */
 export const shareStore = async (
   env: Env,
@@ -217,44 +227,20 @@ export const shareStore = async (
   id: string,
   input: unknown
 ): Promise<void> => {
-  if (by.staff) {
-    throw roleErrors.create("role.forbidden");
-  }
-  const storeId = await managedBy(env, by, id);
-  const member = dataErrors.parse("data.invalid", storeMemberSchema, input);
-  const db = drizzle(env.DB);
-  if (member.type === "team") {
-    const team = await db
-      .select({ id: teams.id })
-      .from(teams)
-      .where(
-        and(eq(teams.id, member.id), eq(teams.organizationId, organizationId))
-      )
-      .get();
-    if (team === undefined) {
-      throw dataErrors.create("data.invalid", { issues: ["No such team"] });
-    }
-  } else {
-    const role = await memberRole(env.DB, member.id);
-    if (role === undefined || !canBuild(role)) {
-      throw dataErrors.create("data.invalid", {
-        issues: ["Only the organization's admins and builders manage stores"],
-      });
-    }
-  }
-  const event = createAuditEvent(
-    storeEntry(by, "store.member.added", storeId, {
-      memberType: member.type,
-      member: member.id,
-      role: "manage",
-    }),
-    "core"
+  requireNotStaff(by);
+  const store = await managedBy(env, by, id);
+  const member: MemberRef = dataErrors.parse(
+    "data.invalid",
+    storeMemberSchema,
+    input
   );
+  await requireSharable(env, member, sharingRules(store.owner));
+  const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db
       .insert(businessStoreMembers)
       .values({
-        storeId,
+        storeId: store.id,
         memberType: member.type,
         memberId: member.id,
         role: "manage",
@@ -262,14 +248,25 @@ export const shareStore = async (
         addedAt: new Date(),
       })
       .onConflictDoNothing(),
-    outboxedEventWhere(db, event, sql`changes() > 0`),
+    outboxedIfChanged(
+      db,
+      memberEntry(
+        by,
+        "store.member.added",
+        { type: "store", id: store.id },
+        {
+          ...member,
+          role: "manage",
+        }
+      )
+    ),
   ]);
 };
 
 /**
  * Stops sharing store `id` with a person or team, for `by`, who must
  * manage it and isn't Grasp staff. Unsharing someone it isn't shared with
- * changes nothing.
+ * changes and records nothing.
  */
 export const unshareStore = async (
   env: Env,
@@ -277,31 +274,71 @@ export const unshareStore = async (
   id: string,
   input: unknown
 ): Promise<void> => {
-  if (by.staff) {
-    throw roleErrors.create("role.forbidden");
-  }
-  const storeId = await managedBy(env, by, id);
-  const member = dataErrors.parse("data.invalid", storeMemberSchema, input);
-  const db = drizzle(env.DB);
-  const event = createAuditEvent(
-    storeEntry(by, "store.member.removed", storeId, {
-      memberType: member.type,
-      member: member.id,
-    }),
-    "core"
+  requireNotStaff(by);
+  const store = await managedBy(env, by, id);
+  const member: MemberRef = dataErrors.parse(
+    "data.invalid",
+    storeMemberSchema,
+    input
   );
+  const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db
       .delete(businessStoreMembers)
       .where(
         and(
-          eq(businessStoreMembers.storeId, storeId),
+          eq(businessStoreMembers.storeId, store.id),
           eq(businessStoreMembers.memberType, member.type),
           eq(businessStoreMembers.memberId, member.id)
         )
       ),
-    outboxedEventWhere(db, event, sql`changes() > 0`),
+    outboxedIfChanged(
+      db,
+      memberEntry(
+        by,
+        "store.member.removed",
+        { type: "store", id: store.id },
+        {
+          ...member,
+          role: "manage",
+        }
+      )
+    ),
   ]);
+};
+
+/**
+ * Whom store `id` is shared with to manage it, for `by`, who must manage
+ * it: the people still in the organization and the teams that still
+ * exist, in the order they were shared.
+ */
+export const storeManagers = async (
+  env: Env,
+  by: Acting,
+  id: string
+): Promise<StoreManager[]> => {
+  const store = await managedBy(env, by, id);
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(businessStoreMembers)
+    .where(
+      and(
+        eq(businessStoreMembers.storeId, store.id),
+        stillMembers(businessStoreMembers)
+      )
+    )
+    .orderBy(
+      asc(businessStoreMembers.addedAt),
+      asc(businessStoreMembers.memberType),
+      asc(businessStoreMembers.memberId)
+    );
+  return rows.map((row) => ({
+    type: row.memberType,
+    id: row.memberId,
+    role: row.role,
+    addedBy: row.addedBy,
+    addedAt: row.addedAt.toISOString(),
+  }));
 };
 
 /**

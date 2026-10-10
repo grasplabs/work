@@ -37,6 +37,13 @@ export const store = sqliteTable(
      * and its alarm purges what it held, keeping only this row.
      */
     deletedAt: integer("deleted_at"),
+    /** Who deleted it, as the audit log names them (JSON). */
+    deletedBy: text("deleted_by"),
+    /**
+     * When core's inventory was found to record the deletion: the purge
+     * waits for it, so no record goes unaudited.
+     */
+    inventoriedAt: integer("inventoried_at"),
   },
   (table) => [check("sdk_store_only", sql`${table.only} = 1`)]
 );

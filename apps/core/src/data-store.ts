@@ -1,3 +1,4 @@
+import type { AuditActor } from "@grasp-os/shared/audit";
 import type { StoreId } from "@grasp-os/shared/ids";
 import type {
   ClaimInput,
@@ -57,8 +58,11 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /** `StoreHost.close`. */
-  async close(storeId: StoreId): Promise<void> {
-    await this.#host.close(storeId);
+  async close(
+    storeId: StoreId,
+    actor: AuditActor
+  ): Promise<{ deletedAt: number }> {
+    return await this.#host.close(storeId, actor);
   }
 
   /** `StoreHost.commit`, with the deployment's outbox consumers. */

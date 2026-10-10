@@ -1,3 +1,5 @@
+import { auditActorSchema } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
@@ -59,6 +61,7 @@ import {
   handOver,
 } from "./outbox-delivery.ts";
 import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
+import { recordStoreDeleted } from "./store-deletion.ts";
 
 // The host of a business store (data-store.ts is its Durable Object): one
 // object per store, named by the store's ID (data-stores.ts), with a SQLite database of its own that holds all
@@ -200,6 +203,18 @@ const purgePage = 1000;
 /** How long one alarm goes on purging before the next one continues. */
 const purgeBudgetMs = 10_000;
 
+/**
+ * What a deleted store's purge removes, in this order: each table only
+ * once nothing refers to its rows (records name tables, entries receipts).
+ * Fixed names, never an author's.
+ */
+const purgedTables = [
+  "sdk_records",
+  "sdk_change_outbox",
+  "sdk_mutation_receipts",
+  "sdk_tables",
+] as const;
+
 /** The least wait before the alarm comes again, so it never spins. */
 const alarmGapMs = 1000;
 
@@ -219,6 +234,14 @@ const intentOf = (stored: string) => {
 
 const conflict = (table: string, id: string) =>
   dataErrors.create("data.conflict", { table, id });
+
+/** How a deleted store's purge goes, which tests choose. */
+export interface PurgeOptions {
+  /** Rows per transaction. */
+  page?: number;
+  /** How long one alarm goes on purging. */
+  budgetMs?: number;
+}
 
 /** What a sweep depends on, which tests choose. */
 export interface SweepOptions {
@@ -886,11 +909,19 @@ export class StoreHost {
    */
   async runAlarm(
     consumers: OutboxConsumers,
-    sweep: SweepOptions = {}
+    sweep: SweepOptions = {},
+    purge: PurgeOptions = {}
   ): Promise<void> {
     if (this.#deleted()) {
-      this.#purge();
-      await this.schedule();
+      let failed = false;
+      try {
+        await this.#purgeDeleted(purge);
+      } catch (error) {
+        failed = true;
+        log.error("store.purge_failed", errorFields(error));
+      } finally {
+        await this.schedule(failed ? alarmRetryMs : alarmGapMs);
+      }
       return;
     }
     let failed = false;
@@ -920,10 +951,10 @@ export class StoreHost {
    */
   async schedule(gapMs = alarmGapMs): Promise<void> {
     if (this.#deleted()) {
-      // Only its purge is left, if anything.
+      // Only recording it in core and its purge are left, if anything.
       const left = this.ctx.storage.sql
         .exec(
-          "SELECT 1 FROM sdk_tables UNION ALL SELECT 1 FROM sdk_mutation_receipts LIMIT 1"
+          `SELECT 1 FROM sdk_store WHERE inventoried_at IS NULL ${purgedTables.map((table) => `UNION ALL SELECT 1 FROM ${table}`).join(" ")} LIMIT 1`
         )
         .toArray();
       if (left.length > 0) {
@@ -971,21 +1002,26 @@ export class StoreHost {
   }
 
   /**
-   * Deletes the store, unless a receipt still refers to it: one not yet
-   * expired (`data.store_in_use`), which a mutation in flight, a retry
-   * still to come, a live workflow run or an outbox entry still owed
-   * keeps. Checked in the transaction that marks the store deleted, so no
-   * claim can land between the check and the mark; every call after it is
-   * refused (`#bind`). Deleting a deleted store changes nothing, so core
-   * can repeat a deletion its inventory didn't record. The records go
-   * afterwards, a page at a time, on the alarm (`#purge`).
+   * Deletes the store for `actor`, unless a receipt still refers to it:
+   * one not yet expired (`data.store_in_use`), which a mutation in flight,
+   * a retry still to come, a live workflow run or an outbox entry still
+   * owed keeps. Checked in the transaction that marks the store deleted
+   * (with who and when), so no claim can land between the check and the
+   * mark; every call after it is refused (`#bind`). Answers when it was
+   * deleted. Deleting a deleted store changes nothing and answers the
+   * first deletion, so core can repeat one its inventory didn't record.
+   * The alarm records it in core, then purges the records.
    */
-  async close(storeId: StoreId): Promise<void> {
+  async close(
+    storeId: StoreId,
+    actor: AuditActor
+  ): Promise<{ deletedAt: number }> {
     const id = storeIdSchema.parse(storeId);
+    const deletedBy = JSON.stringify(auditActorSchema.parse(actor));
     if (this.ctx.id.name !== id) {
       throw new Error("This object holds another store");
     }
-    this.ctx.storage.transactionSync(() => {
+    const deletedAt = this.ctx.storage.transactionSync((): number => {
       const now = Date.now();
       const bound = this.#db
         .select({ storeId: store.storeId, deletedAt: store.deletedAt })
@@ -995,15 +1031,21 @@ export class StoreHost {
         // Never used: nothing refers to it.
         this.#db
           .insert(store)
-          .values({ only: 1, storeId: id, createdAt: now, deletedAt: now })
+          .values({
+            only: 1,
+            storeId: id,
+            createdAt: now,
+            deletedAt: now,
+            deletedBy,
+          })
           .run();
-        return;
+        return now;
       }
       if (bound.storeId !== id) {
         throw new Error("This object holds another store");
       }
       if (bound.deletedAt !== null) {
-        return;
+        return bound.deletedAt;
       }
       const [held] = this.#db
         .select({ count: count() })
@@ -1016,38 +1058,58 @@ export class StoreHost {
           receipts: receiptsHeld,
         });
       }
-      this.#db.update(store).set({ deletedAt: now }).run();
+      this.#db.update(store).set({ deletedAt: now, deletedBy }).run();
+      return now;
     });
     await this.schedule(0);
+    return { deletedAt };
   }
 
   /**
-   * Purges a deleted store, a page of records per transaction, until
-   * nothing is left but its deletion mark or its time is up; the next
-   * alarm continues (`schedule`).
+   * A deleted store's alarm: records the deletion in core first (store-
+   * deletion.ts), then purges, a page per transaction, table after table,
+   * until nothing is left but the deletion mark or its time is up; the
+   * next alarm continues (`schedule`).
    */
-  #purge(): void {
-    const started = Date.now();
-    for (;;) {
-      const removed = this.ctx.storage.transactionSync(
-        () =>
-          this.ctx.storage.sql.exec(
-            "DELETE FROM sdk_records WHERE rowid IN (SELECT rowid FROM sdk_records LIMIT ?)",
-            purgePage
-          ).rowsWritten
+  async #purgeDeleted({
+    page: purgePageSize = purgePage,
+    budgetMs = purgeBudgetMs,
+  }: PurgeOptions): Promise<void> {
+    const mark = this.#db.select().from(store).get();
+    if (
+      mark === undefined ||
+      mark.deletedAt === null ||
+      mark.deletedBy === null
+    ) {
+      throw new Error("A deleted store has no deletion mark");
+    }
+    if (mark.inventoriedAt === null) {
+      await recordStoreDeleted(
+        this.env,
+        storeIdSchema.parse(mark.storeId),
+        auditActorSchema.parse(JSON.parse(mark.deletedBy)),
+        mark.deletedAt
       );
-      if (removed === 0) {
-        break;
-      }
-      if (Date.now() - started >= purgeBudgetMs) {
-        return;
+      this.#db.update(store).set({ inventoriedAt: Date.now() }).run();
+    }
+    const started = Date.now();
+    for (const table of purgedTables) {
+      for (;;) {
+        const removed = this.ctx.storage.transactionSync(
+          () =>
+            this.ctx.storage.sql.exec(
+              `DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} LIMIT ?)`,
+              purgePageSize
+            ).rowsWritten
+        );
+        if (removed === 0) {
+          break;
+        }
+        if (Date.now() - started >= budgetMs) {
+          return;
+        }
       }
     }
-    this.ctx.storage.transactionSync(() => {
-      this.#db.delete(outbox).run();
-      this.#db.delete(receipts).run();
-      this.#db.delete(tables).run();
-    });
   }
 
   /** The ID of the table named `name`, or `data.unknown_table`. */

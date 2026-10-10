@@ -1,6 +1,7 @@
+import { actorOf } from "@grasp-os/shared/audit";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Commit, Committed, Held } from "@grasp-os/shared/stores";
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -10,11 +11,13 @@ import {
   deleteStore,
   openStore,
   shareStore,
+  storeManagers,
   unshareStore,
 } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { allEvents } from "./audit-events.ts";
+import { outcome } from "./sign-in.ts";
 
 // A business store's lifecycle (data-stores.ts, store-host.ts), from the
 // threat model in data-stores.ts: who may create, share and delete a
@@ -118,6 +121,24 @@ const expireReceipts = async (id: string): Promise<void> => {
   });
 };
 
+/** All a caller can see of what it was refused with. */
+const seen = (error: unknown) =>
+  error instanceof Error
+    ? {
+        ...Object.fromEntries(Object.entries(error)),
+        errorName: error.name,
+        errorMessage: error.message,
+      }
+    : error;
+
+/** How many records store `id`'s object still holds. */
+const recordsLeft = async (id: string): Promise<number> =>
+  await runInDurableObject(objectOf(id), (_instance, state) =>
+    Number(
+      state.storage.sql.exec("SELECT count(*) AS n FROM sdk_records").one().n
+    )
+  );
+
 /** The events about store `id`, by action. */
 const eventsOf = async (id: string): Promise<string[]> => {
   const events = await allEvents();
@@ -189,9 +210,12 @@ describe("deleting stores", () => {
     await deleteStore(env, byPerson, viaPerson);
     await deleteStore(env, byTeam, viaTeam);
     await deleteStore(env, admin, viaAdmin);
-    await deleteStore(env, staff, viaStaff);
+    // Whether a client's data is destroyed is the client's decision.
+    await expect(deleteStore(env, staff, viaStaff)).rejects.toMatchObject({
+      code: "role.forbidden",
+    });
     await Promise.all(
-      stores.map(async (id) => {
+      [mine, viaPerson, viaTeam, viaAdmin].map(async (id) => {
         await expect(openStore(env, id)).rejects.toMatchObject({
           code: "data.store_unavailable",
         });
@@ -224,9 +248,85 @@ describe("deleting stores", () => {
     const other = await person("builder");
     const staff: Acting = { ...(await person("admin")), staff: true };
     const id = await createStore(env, owner);
+    await shareStore(env, owner, id, { type: "person", id: other.userId });
     await expect(
       shareStore(env, staff, id, { type: "person", id: other.userId })
     ).rejects.toMatchObject({ code: "role.forbidden" });
+    await expect(
+      unshareStore(env, staff, id, { type: "person", id: other.userId })
+    ).rejects.toMatchObject({ code: "role.forbidden" });
+    await expect(storeManagers(env, owner, id)).resolves.toHaveLength(1);
+  });
+
+  it("lets only managers share, unshare and list managers, store by store", async () => {
+    const owner = await person("builder");
+    const manager = await person("builder");
+    const stranger = await person("builder");
+    const mine = await createStore(env, owner);
+    const other = await createStore(env, owner);
+    await shareStore(env, owner, mine, { type: "person", id: manager.userId });
+
+    const refused = await Promise.all(
+      [
+        shareStore(env, stranger, mine, {
+          type: "person",
+          id: stranger.userId,
+        }),
+        unshareStore(env, stranger, mine, {
+          type: "person",
+          id: manager.userId,
+        }),
+        storeManagers(env, stranger, mine),
+        // Managing one store grants nothing on another.
+        shareStore(env, manager, other, { type: "person", id: manager.userId }),
+        deleteStore(env, manager, other),
+      ].map(async (attempt) => await outcome(attempt))
+    );
+    expect(refused).toStrictEqual(
+      Array.from({ length: 5 }, () => "data.store_unavailable")
+    );
+    await expect(storeManagers(env, manager, mine)).resolves.toMatchObject([
+      {
+        type: "person",
+        id: manager.userId,
+        role: "manage",
+        addedBy: owner.userId,
+      },
+    ]);
+    // Never with its creator, who always manages it.
+    await expect(
+      shareStore(env, owner, mine, { type: "person", id: owner.userId })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+  });
+
+  it("audits sharing and unsharing only when they change something", async () => {
+    const owner = await person("builder");
+    const other = await person("builder");
+    const id = await createStore(env, owner);
+    const member = { type: "person", id: other.userId } as const;
+    await shareStore(env, owner, id, member);
+    await shareStore(env, owner, id, member);
+    await unshareStore(env, owner, id, member);
+    await unshareStore(env, owner, id, member);
+    await expect(eventsOf(id)).resolves.toStrictEqual([
+      "store.created",
+      "store.member.added",
+      "store.member.removed",
+    ]);
+  });
+
+  it("answers a store that doesn't exist and one not theirs alike", async () => {
+    const owner = await person("builder");
+    const stranger = await person("builder");
+    const id = await createStore(env, owner);
+    const missing = await deleteStore(env, stranger, crypto.randomUUID()).catch(
+      (error: unknown) => error
+    );
+    const unmanaged = await deleteStore(env, stranger, id).catch(
+      (error: unknown) => error
+    );
+    expect(seen(missing)).toMatchObject({ code: "data.store_unavailable" });
+    expect(seen(missing)).toStrictEqual(seen(unmanaged));
   });
 
   it("is refused while a receipt refers to the store, and allowed once they expired", async () => {
@@ -237,6 +337,10 @@ describe("deleting stores", () => {
     await expect(deleteStore(env, owner, store.id)).rejects.toMatchObject({
       code: "data.store_in_use",
     });
+    await expect(eventsOf(store.id)).resolves.toStrictEqual([
+      "store.created",
+      "store.delete_refused",
+    ]);
     // Still there, and still serving.
     await expect(commitNote(store, owner)).resolves.toHaveProperty("inserted");
 
@@ -312,7 +416,7 @@ describe("deleting stores", () => {
     const store = await storeOf(owner);
     // The object was marked; the inventory batch never ran.
     await inHost(store.id, async (host) => {
-      await host.close(store.id);
+      await host.close(store.id, actorOf(owner));
     });
 
     await deleteStore(env, owner, store.id);
@@ -333,9 +437,10 @@ describe("deleting stores", () => {
     await expireReceipts(store.id);
     await deleteStore(env, owner, store.id);
 
-    await expect(
-      runDurableObjectAlarm(objectOf(store.id))
-    ).resolves.toBeTruthy();
+    // Its alarm, run here rather than waited for (its own may have run).
+    await inHost(store.id, async (host) => {
+      await host.runAlarm({});
+    });
     const left = await runInDurableObject(
       objectOf(store.id),
       (_instance, state) => ({
@@ -359,5 +464,98 @@ describe("deleting stores", () => {
       receipts: 0,
       deleted: 1,
     });
+  });
+
+  it("records a deletion core never recorded before purging anything, auditing it once", async () => {
+    const owner = await person("builder");
+    const store = await storeOf(owner);
+    await commitNote(store, owner);
+    await expireReceipts(store.id);
+    // The object is marked; core's call stops there, and nobody retries.
+    await inHost(store.id, async (host) => {
+      await host.close(store.id, actorOf(owner));
+      await host.ctx.storage.deleteAlarm();
+    });
+    // Its alarm: run here, in the test's own request, rather than on its
+    // own schedule, which the test can't wait for.
+    await inHost(store.id, async (host) => {
+      await host.runAlarm({});
+    });
+
+    const row = await env.DB.prepare(
+      "SELECT deleted_at FROM business_stores WHERE id = ?"
+    )
+      .bind(store.id)
+      .first<{ deleted_at: number | null }>();
+    expect(row?.deleted_at).not.toBeNull();
+    const logged = await allEvents();
+    const events = logged.filter(({ target }) => target?.id === store.id);
+    expect(
+      events.map(({ action, actor }) => ({ action, actor }))
+    ).toStrictEqual([
+      {
+        action: "store.created",
+        actor: { type: "person", userId: owner.userId },
+      },
+      {
+        action: "store.deleted",
+        actor: { type: "person", userId: owner.userId },
+      },
+    ]);
+    await expect(recordsLeft(store.id)).resolves.toBe(0);
+    // Core's own recording, coming late, adds nothing.
+    await deleteStore(env, owner, store.id).catch(() => {});
+    await expect(eventsOf(store.id)).resolves.toStrictEqual([
+      "store.created",
+      "store.deleted",
+    ]);
+  });
+
+  it("audits concurrent deletions once", async () => {
+    const owner = await person("builder");
+    const admin = await person("admin");
+    const store = await storeOf(owner);
+    await Promise.allSettled([
+      deleteStore(env, owner, store.id),
+      deleteStore(env, admin, store.id),
+    ]);
+    await expect(eventsOf(store.id)).resolves.toStrictEqual([
+      "store.created",
+      "store.deleted",
+    ]);
+  });
+
+  it("purges a page at a time, resuming on the next alarm", async () => {
+    const owner = await person("builder");
+    const store = await storeOf(owner);
+    await Promise.all([
+      commitNote(store, owner),
+      commitNote(store, owner),
+      commitNote(store, owner),
+    ]);
+    await expireReceipts(store.id);
+    // Marked, with its own alarm held off, so the test runs each one.
+    await inHost(store.id, async (host) => {
+      await host.close(store.id, actorOf(owner));
+      await host.ctx.storage.deleteAlarm();
+    });
+
+    const left: number[] = [];
+    for (let alarm = 0; alarm < 4; alarm += 1) {
+      // One alarm after the other, each with no time for a second page.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await inHost(store.id, async (host) => {
+        await host.runAlarm({}, {}, { page: 1, budgetMs: 0 });
+      });
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      left.push(await recordsLeft(store.id));
+    }
+    expect(left).toStrictEqual([2, 1, 0, 0]);
+    // Its alarm stays set while anything is left to purge.
+    const alarm = await runInDurableObject(
+      objectOf(store.id),
+      async (_instance, state) => await state.storage.getAlarm()
+    );
+    expect(alarm).not.toBeNull();
   });
 });

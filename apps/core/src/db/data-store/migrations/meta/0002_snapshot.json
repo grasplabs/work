@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1cb76ffa-37a6-44af-afb9-e2f3f37e5fd4",
+  "id": "32d3e457-f7c7-4fcc-9337-e36ba37523b2",
   "prevId": "94211608-cec8-446e-b3f8-097e463c8e7d",
   "tables": {
     "sdk_change_outbox": {
@@ -381,6 +381,20 @@
         },
         "deleted_at": {
           "name": "deleted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "inventoried_at": {
+          "name": "inventoried_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
