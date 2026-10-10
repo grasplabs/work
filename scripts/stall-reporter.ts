@@ -50,7 +50,10 @@ export interface ReportedCase {
   result: () => { readonly state: string };
 }
 
-/** Where the reporter writes, and when it reports; the env's by default. */
+/**
+ * Where the reporter writes, and when it reports. Given any of them, the
+ * env isn't read at all: what is left out is off.
+ */
 export interface StallReporterOptions {
   /** Minutes after the process started; no report when unset. */
   reportAfterMinutes?: number;
@@ -61,6 +64,12 @@ export interface StallReporterOptions {
   /** Where the report goes. */
   write?: (text: string) => void;
 }
+
+/** The settings CI gives in the env (.github/workflows/ci.yml). */
+const fromEnv = (): StallReporterOptions => ({
+  reportAfterMinutes: positiveFromEnv("GRASP_STALL_REPORT_AFTER_MINUTES"),
+  progressFile: process.env.GRASP_TEST_PROGRESS_FILE,
+});
 
 const moduleName = (testModule: ReportedModule): string =>
   `${testModule.project.name} ${testModule.relativeModuleId}`;
@@ -77,19 +86,21 @@ export default class StallReporter implements Reporter {
   readonly #write: (text: string) => void;
   #timer: NodeJS.Timeout | undefined;
 
-  // Vitest constructs a reporter given by path with no options of ours:
-  // everything then comes from the env.
-  constructor(options: StallReporterOptions = {}) {
-    this.#reportAfterMinutes =
-      options.reportAfterMinutes ??
-      positiveFromEnv("GRASP_STALL_REPORT_AFTER_MINUTES");
+  // Vitest constructs a reporter given by path with no settings, or an
+  // empty object: everything then comes from the env, and only then.
+  constructor(given?: StallReporterOptions) {
+    const options =
+      given === undefined || Object.keys(given).length === 0
+        ? fromEnv()
+        : given;
+    this.#reportAfterMinutes = options.reportAfterMinutes;
     this.#uptimeSeconds = options.uptimeSeconds ?? (() => process.uptime());
     this.#write =
       options.write ??
       ((text) => {
         process.stdout.write(text);
       });
-    const file = options.progressFile ?? process.env.GRASP_TEST_PROGRESS_FILE;
+    const file = options.progressFile;
     this.#progress =
       file === undefined || file === ""
         ? undefined
