@@ -2,6 +2,7 @@ import type {
   WorkflowRollbackContext,
   WorkflowStepContext,
 } from "../src/contracts.ts";
+import type { RunNotification } from "../src/notifications.ts";
 
 /** One effect as the outside system received it. */
 export interface Effect {
@@ -13,6 +14,8 @@ export interface Effect {
   receipt: string;
   /** When it arrived. */
   at: number;
+  /** Its place among effects and handlers' ends (`tick`). */
+  order?: number;
   /** For an undoing: what the rollback was given of its step. */
   undoing?: {
     stepKey: string;
@@ -30,6 +33,18 @@ export interface Effect {
  * runs the main Worker's objects in the test's isolate.
  */
 export const effects: Effect[] = [];
+
+/**
+ * A count the effects, the alarm handlers' ends and a test's own marks
+ * take their place in: their order, where the clock (which stands still
+ * within a turn) could give two the same time.
+ */
+const ordering = { next: 0 };
+
+export const tick = (): number => {
+  ordering.next += 1;
+  return ordering.next;
+};
 
 const holds = new Map<
   string,
@@ -101,6 +116,7 @@ export const effect = async (
     attempt: context.attempt,
     receipt,
     at: Date.now(),
+    order: tick(),
   });
   const entry = holds.get(holdKey(run, label, context.attempt));
   if (entry !== undefined) {
@@ -110,8 +126,26 @@ export const effect = async (
   return receipt;
 };
 
+/**
+ * What the run objects' host took of their notifications, in the order it
+ * took them (worker.ts).
+ */
+export const hostNotifications: RunNotification[] = [];
+
+/** How many more deliveries the host fails, by instance ID. */
+export const notifyFailures = new Map<string, number>();
+
+/** Instance IDs whose next delivery the host never answers. */
+export const notifyHangs = new Set<string>();
+
+export const notifiedOf = (run: string): RunNotification[] =>
+  hostNotifications.filter((notification) => notification.instanceId === run);
+
 /** Each run object whose alarm handler has returned, by its ID. */
 export const handled: string[] = [];
+
+/** The same, with each handler's place in that order. */
+export const handledAt: { object: string; order: number }[] = [];
 
 /**
  * The engine's warnings while `during` runs (log.ts writes them through

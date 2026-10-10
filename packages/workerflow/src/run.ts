@@ -155,11 +155,19 @@ import {
   readStep,
   removeJournal,
   nextTombstoneExpiry,
+  notifyDue,
   expireTombstones,
   startRetentionIn,
 } from "./journal.ts";
 import type { Journal, RunRow, StepType } from "./journal.ts";
 import { warnRecovered } from "./log.ts";
+import {
+  failedIn,
+  defaultNotifyTimeoutMs,
+  readPending,
+  takenIn,
+} from "./notifications.ts";
+import type { RunNotification } from "./notifications.ts";
 import { maxRetentionLimitMs } from "./retention.ts";
 import {
   defaultMaxRunStreamBytes,
@@ -168,6 +176,9 @@ import {
 } from "./streams.ts";
 import { Subscription } from "./subscription.ts";
 import type { SubscriptionResult } from "./subscription.ts";
+
+/** What `WorkflowRun.notify` is handed. */
+export type { RunNotification } from "./notifications.ts";
 
 /** What `WorkflowRun.journal()` returns. */
 export type { Journal } from "./journal.ts";
@@ -544,6 +555,67 @@ const forgetIn = (
   );
 };
 
+/**
+ * Awaits the host's answer, or fails once `ms` have passed without it: a
+ * host that never answers counts as one that failed.
+ */
+const answeredWithin = async (
+  answer: Promise<void> | void,
+  ms: number
+): Promise<void> => {
+  const deadline = Promise.withResolvers<never>();
+  const timer = setTimeout(() => {
+    deadline.reject(
+      new Error(`The host didn't take its notifications within ${ms} ms`)
+    );
+  }, ms);
+  try {
+    await Promise.race([answer, deadline.promise]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/**
+ * The longest a host may give `notify`: a minute, well under an alarm
+ * handler's wall time, which an alarm's delivery comes out of.
+ */
+const maxNotifyTimeoutMs = 60_000;
+
+/** How much one delivery hands over, and whether a backoff holds it. */
+interface DeliveryLimits {
+  readonly batches: number;
+  readonly force: boolean;
+}
+
+/**
+ * Whether an alarm now runs an activation of the run: it is queued, runs
+ * (an activation died), rolls back with its next step due, or waits and
+ * its wake has come.
+ */
+const activatesNow = (run: RunRow): boolean => {
+  if (
+    run.status === "queued" ||
+    run.status === "running" ||
+    run.status === "waitingForPause"
+  ) {
+    return true;
+  }
+  if (run.status === "waiting" || run.status === "rollingBack") {
+    return run.wake_at === null || run.wake_at <= Date.now();
+  }
+  return false;
+};
+
+/**
+ * Whether the run's outbox is due: at once whenever it holds anything,
+ * whatever time it was stamped with, but not in a failed host's backoff,
+ * unless `force`.
+ */
+const isDue = (run: RunRow, force: boolean): boolean =>
+  run.notify_at !== null &&
+  (force || run.notify_failures === 0 || run.notify_at <= Date.now());
+
 /** How long a tombstone holds by default: 30 days. */
 export const defaultTombstoneMs = 30 * 24 * 60 * 60 * 1000;
 
@@ -551,24 +623,33 @@ export const defaultTombstoneMs = 30 * 24 * 60 * 60 * 1000;
 const maxTombstoneMs = 365 * 24 * 60 * 60 * 1000;
 
 /**
- * The object's storage, with its one alarm shared by the run and the
- * object's tombstones: every alarm the engine sets is moved to the oldest
- * tombstone's expiry when that comes first, and an alarm it deletes is
- * left at that expiry while a tombstone is left. So a run created under
- * an ID after another was deleted, whatever it does (runs, waits, pauses,
- * ends), never keeps a tombstone past its horizon; alarm() expires what
- * is due, then does the run's own work. `written` is called after each
- * transaction commits, so subscriptions waiting for the next event read
- * again: every write that changes the run's state after its creation is
- * one. Everything else is the storage's own, failures included.
+ * The object's storage, with its one alarm shared by the run, the
+ * notifications its host hasn't taken (notifications.ts) and the object's
+ * tombstones: every alarm the engine sets is moved to the next of those
+ * obligations when that comes first, and an alarm it deletes is left at
+ * it while one is left. So a run created under an ID after another was
+ * deleted, whatever it does (runs, waits, pauses, ends), never keeps a
+ * tombstone past its horizon, nor a notification from its host; alarm()
+ * does what is due, then the run's own work. `written` is called after
+ * each transaction commits, so subscriptions waiting for the next event
+ * read again and notifications go out: every write that changes the
+ * run's state after its creation is one. Everything else is the storage's
+ * own, failures included.
  */
 const sharingAlarm = (
   storage: DurableObjectStorage,
   horizon: () => number,
+  notifyObligation: () => number | null,
   written: () => void
 ): DurableObjectStorage => {
-  const expiry = (): number | null =>
-    nextTombstoneExpiry(storage.sql, horizon());
+  const expiry = (): number | null => {
+    const tombstone = nextTombstoneExpiry(storage.sql, horizon());
+    const notify = notifyObligation();
+    if (tombstone === null || notify === null) {
+      return tombstone ?? notify;
+    }
+    return Math.min(tombstone, notify);
+  };
   const earliest = (time: number | Date): number => {
     const at = typeof time === "number" ? time : time.getTime();
     const tombstone = expiry();
@@ -666,10 +747,34 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         return defaultTombstoneMs;
       }
     },
+    () => this.#notifyObligation(),
     () => {
       this.#wakeObservers();
+      this.#deliverSoon();
     }
   );
+
+  /** When the batch out to the host was handed over, if one is out. */
+  #handedAt: number | undefined;
+
+  /**
+   * When the outbox next needs the alarm: when it is due, but while a
+   * batch is out to the host, not before that batch's timeout, so the
+   * alarm doesn't come again and again for what is already out.
+   */
+  #notifyObligation(): number | null {
+    const due = notifyDue(this.ctx.storage.sql);
+    if (due === null || this.#handedAt === undefined) {
+      return due;
+    }
+    let timeout: number;
+    try {
+      timeout = this.#notifyTimeout();
+    } catch {
+      timeout = defaultNotifyTimeoutMs;
+    }
+    return Math.max(due, this.#handedAt + timeout);
+  }
 
   /**
    * How long a subscription's `next` may wait for an event, in ms: a
@@ -693,6 +798,234 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       );
     }
     return ms;
+  }
+
+  /**
+   * How long `notify` may take, in whole milliseconds from 1 to a minute,
+   * before it counts as failed: 30 s by default. A host that never answers
+   * can't hold the run's alarm up for longer; and a delivery a dead
+   * process cut off is handed over again once this has passed.
+   */
+  protected readonly notifyTimeoutMs: number = defaultNotifyTimeoutMs;
+
+  /**
+   * Takes the run's notifications (notifications.ts): resolves once the
+   * host has them for good, and throws (or takes longer than
+   * `notifyTimeoutMs`) when it doesn't, so they are handed over again,
+   * after a backoff. They come in order, each at least once: the host
+   * keeps, per run (`runId`), the greatest `sequence` it applied and
+   * ignores one at or below it. Called outside any of the run's writes,
+   * one call at a time per run object; but a call that timed out may still
+   * be going when the same notifications are handed over again, so the
+   * two can overlap, and the host must apply each sequence once whichever
+   * arrives first. By default the host takes nothing.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- the host's hook; by default it takes nothing
+  protected notify(
+    _notifications: readonly RunNotification[]
+  ): Promise<void> | void {
+    // Nothing to tell: the notifications are dropped as taken.
+  }
+
+  /** The delivery out to the host, if one is. */
+  #delivery: Promise<void> | undefined;
+
+  /**
+   * Hands what is due of the outbox to the host (#deliverDue reads what
+   * is): once the write that called this has gone with its alarm write,
+   * a microtask later, so the host's code never runs inside the run's own
+   * turn.
+   */
+  #deliverSoon(): void {
+    // One read of the outbox's due time: an empty one costs no more.
+    try {
+      if (notifyDue(this.ctx.storage.sql) === null) {
+        return;
+      }
+    } catch {
+      return;
+    }
+    // One follow-up at most: writes while a delivery is out (or while the
+    // follow-up waits for it) are all taken by the follow-up's read.
+    if (this.#followUp) {
+      return;
+    }
+    this.#followUp = true;
+    queueMicrotask(() => {
+      void this.#deliverFollowUp();
+    });
+  }
+
+  /** Whether a delivery is queued for the writes since the last began. */
+  #followUp = false;
+
+  /**
+   * The follow-up delivery: once the one out has ended, it reads the
+   * outbox afresh; writes from its start on queue the next.
+   */
+  async #deliverFollowUp(): Promise<void> {
+    while (this.#delivery !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one delivery at a time
+      await this.#delivery;
+    }
+    this.#followUp = false;
+    await this.#deliver({ batches: Number.POSITIVE_INFINITY, force: false });
+  }
+
+  /**
+   * Delivers what is due to the host, one delivery at a time: a second
+   * waits for the one out, then reads the outbox again.
+   */
+  async #deliver(limits: DeliveryLimits): Promise<void> {
+    while (this.#delivery !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one delivery at a time
+      await this.#delivery;
+    }
+    const delivery = (async (): Promise<void> => {
+      try {
+        await this.#deliverDue(limits);
+      } finally {
+        this.#handedAt = undefined;
+        this.#delivery = undefined;
+      }
+      await this.#settleAlarm();
+    })();
+    this.#delivery = delivery;
+    await delivery;
+  }
+
+  /**
+   * The host's timeout, checked: whole milliseconds from 1 to a minute
+   * (`maxNotifyTimeoutMs`). One the host got wrong refuses a run's start, and fails
+   * each delivery (logged), never runs with a value no timer keeps.
+   */
+  #notifyTimeout(): number {
+    const ms = this.notifyTimeoutMs;
+    if (!Number.isSafeInteger(ms) || ms < 1 || ms > maxNotifyTimeoutMs) {
+      throw new TypeError(
+        `A run's notifyTimeoutMs is a whole number of milliseconds from 1 to ${maxNotifyTimeoutMs}: ${String(ms)}`
+      );
+    }
+    return ms;
+  }
+
+  /**
+   * Hands the host what it hasn't taken, a batch at a time, in order, up
+   * to `limits.batches`, and drops each batch once it has. Due at once,
+   * whatever time the outbox was stamped with, unless the host failed
+   * and its backoff isn't over (`limits.force`: even then, once, before a
+   * purge). A failure (the host's, or storage's) is logged, never
+   * thrown: the alarm, brought forward to the outbox's due time by the
+   * write that filled it, hands it over again.
+   */
+  async #deliverDue(limits: DeliveryLimits): Promise<void> {
+    const storage = this.#store;
+    const { sql } = storage;
+    for (let batches = 0; batches < limits.batches; batches += 1) {
+      let batch: RunNotification[];
+      try {
+        const run = this.#run();
+        if (run === undefined || !isDue(run, limits.force)) {
+          return;
+        }
+        batch = readPending(sql, run);
+      } catch (error) {
+        warnRecovered("workflow_notify_read_failed", error);
+        return;
+      }
+      const last = batch.at(-1);
+      try {
+        if (last !== undefined) {
+          // Checked before the host is called: a timeout no timer keeps
+          // hands nothing over.
+          const timeout = this.#notifyTimeout();
+          this.#handedAt = Date.now();
+          // oxlint-disable-next-line no-await-in-loop -- one batch at a time, in order
+          await answeredWithin(this.notify(batch), timeout);
+        }
+      } catch (error) {
+        warnRecovered("workflow_notify_failed", error);
+        this.#putOff(last?.runId ?? "");
+        return;
+      }
+      try {
+        const taken = storage.transactionSync((): boolean => {
+          const run = this.#run();
+          // The run the host was told of, not one created since under
+          // the same ID.
+          if (
+            run === undefined ||
+            (last !== undefined && run.run_uid !== last.runId)
+          ) {
+            return false;
+          }
+          takenIn(sql, last?.sequence ?? 0);
+          return true;
+        });
+        if (!taken) {
+          return;
+        }
+      } catch (error) {
+        // Handed over again by the alarm: at least once.
+        warnRecovered("workflow_notify_take_failed", error);
+        return;
+      }
+    }
+  }
+
+  /**
+   * Sets the alarm, once a delivery has ended, to exactly the earlier of
+   * what the run itself needs and what the outbox does: the run's own is
+   * none for a paused run, an ended run's purge, the watchdog of an
+   * activation that holds the run (its lease), else its wake (now if it
+   * has none: it is due); the outbox's, when it is due again (a failed
+   * host's backoff), or none once it is empty. Read and written in one
+   * turn, so the alarm says what the run and its outbox are now: brought
+   * neither back from the run's own wake, nor left early. A failure
+   * leaves the alarm as it was, which finds nothing to do and sets it
+   * again (alarm()).
+   */
+  async #settleAlarm(): Promise<void> {
+    const storage = this.#store;
+    try {
+      const run = this.#run();
+      if (run === undefined) {
+        return;
+      }
+      let own: number | null = null;
+      if (hasEnded(run)) {
+        own = run.purge_at;
+      } else if (run.status === "paused") {
+        own = null;
+      } else if (run.lease_until === null) {
+        own = run.wake_at ?? Date.now();
+      } else {
+        own = run.lease_until;
+      }
+      // The shared alarm brings it forward to the outbox and tombstones.
+      await (own === null ? storage.deleteAlarm() : storage.setAlarm(own));
+    } catch (error) {
+      warnRecovered("workflow_alarm_set_failed", error);
+    }
+  }
+
+  /**
+   * Puts the next delivery off after the host failed to take the batch of
+   * the run `runId`; the delivery's end then sets the alarm to it
+   * (#settleAlarm). A run created since under the same ID isn't put off
+   * for another run's failure.
+   */
+  #putOff(runId: string): void {
+    const storage = this.#store;
+    try {
+      storage.transactionSync(() => {
+        if (this.#run()?.run_uid === runId) {
+          failedIn(storage.sql, Date.now());
+        }
+      });
+    } catch (error) {
+      warnRecovered("workflow_notify_put_off_failed", error);
+    }
   }
 
   /**
@@ -808,6 +1141,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     // Refused before any run exists, rather than at its first alarm.
     this.#rollbackLimits();
     this.#subscriptionWait();
+    this.#notifyTimeout();
     const horizon = this.#tombstoneHorizon();
     // The binding resolved and bounded these; this method is the run's
     // boundary, so it refuses anything that isn't a time above 0 and within
@@ -886,12 +1220,16 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     if (run.status === "paused") {
       return;
     }
-    // An alarm that is only the tombstones' expiry may not be the run's
-    // own. It is set again from what the run waits for: a waiting run's
-    // wake (the earlier tombstone's expiry still wins, through the shared
-    // alarm, and nothing replays), anything else now.
+    // An alarm that is only the tombstones' expiry, or the outbox's due
+    // time, may not be the run's own. It is set again from what the run
+    // waits for: a waiting run's wake (the earlier obligation still wins,
+    // through the shared alarm, and nothing replays), anything else now.
     const alarm = await this.#store.getAlarm();
-    if (alarm === null || alarm === this.#tombstoneExpiry()) {
+    if (
+      alarm === null ||
+      alarm === this.#tombstoneExpiry() ||
+      alarm === notifyDue(this.ctx.storage.sql)
+    ) {
       await this.#store.setAlarm(ownWake(run));
     }
   }
@@ -1193,19 +1531,102 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
+   * Hands the host one batch of the notifications that are due, before the
+   * alarm reads the run, so a long outbox doesn't eat into the wall time
+   * of the activation after it: the rest go out after, from the write that
+   * dropped the batch. `none`: the host has taken them all. `later`: some
+   * wait out a failed host's backoff, or a delivery already out has them.
+   * `delivered`: a batch went out. `force`: even in a backoff, before a
+   * purge that would drop them. A failure is the delivery's to recover
+   * (#deliverDue), never the alarm's.
+   */
+  async #notifyDue(force: boolean): Promise<"none" | "later" | "delivered"> {
+    let run: RunRow | undefined;
+    try {
+      run = this.#run();
+    } catch {
+      return "none";
+    }
+    if (run?.notify_at === null || run === undefined) {
+      return "none";
+    }
+    if (!isDue(run, force) || this.#delivery !== undefined) {
+      return "later";
+    }
+    await this.#deliver({ batches: 1, force });
+    return "delivered";
+  }
+
+  /**
+   * What the host hasn't taken goes out before the alarm does anything of
+   * the run's; the run may have changed meanwhile (a command, an event),
+   * so it is read again after. `notified`: the outbox may have been what
+   * the alarm came for. Undefined when there is no run left to act on: it
+   * was removed, or reading it failed (left to the watchdog).
+   */
+  async #afterNotifying(
+    run: RunRow
+  ): Promise<{ run: RunRow; notified: boolean } | undefined> {
+    // An alarm that runs an activation hands the host nothing first: the
+    // activation's first write starts a delivery beside it (#deliverSoon),
+    // so no delivery time comes out of the handler's wall time before a
+    // first attempt, which always runs (activation.ts), and whose deadline
+    // a delivery first could push past the handler's limit.
+    if (activatesNow(run)) {
+      return { run, notified: false };
+    }
+    // An ended run whose purge is due gets its outbox tried once more.
+    const purgeDue =
+      hasEnded(run) && run.purge_at !== null && run.purge_at <= Date.now();
+    const notified = await this.#notifyDue(purgeDue);
+    if (notified !== "delivered") {
+      return { run, notified: notified === "later" };
+    }
+    let fresh: RunRow | undefined;
+    try {
+      fresh = this.#run();
+    } catch (error) {
+      await this.#leaveToWatchdog("workflow_run_read_failed", error);
+      return undefined;
+    }
+    if (fresh === undefined) {
+      return undefined;
+    }
+    // Due now (its wake passed, it was resumed, took an event, or was
+    // restarted, while the delivery was out): its activation gets an
+    // alarm of its own, with the handler's whole wall time, rather than
+    // what the delivery left of this one, which its first attempt, always
+    // claimed, could run past.
+    // This alarm ends here, and the next comes at once. Written here, not
+    // left to the delivery's end (#settleAlarm), which only logs a write
+    // that failed: with the outbox emptied nothing else would set one, and
+    // the run would be left with no alarm to run it.
+    if (activatesNow(fresh)) {
+      try {
+        await this.#store.setAlarm(Date.now());
+      } catch (error) {
+        await this.#leaveToWatchdog("workflow_alarm_set_failed", error);
+      }
+      return undefined;
+    }
+    return { run: fresh, notified: true };
+  }
+
+  /**
    * An alarm's first job beside a run: the tombstones of an earlier run
    * under this ID that are due go, whatever this run does, and none of
    * its journal is touched. True when that is all the alarm does: the run
    * is paused (a paused run waits for `resume`; the alarm left is the
-   * next tombstone's), or it waits and the alarm was the tombstones', early
-   * for it (it only re-arms the run's wake; no activation replays it). An
-   * ended run goes on to its purge, which re-arms an early alarm.
+   * next obligation's), or it waits and the alarm was the tombstones' or
+   * the notifications' (`notified`), early for it (it only re-arms the
+   * run's wake; no activation replays it). An ended run goes on to its
+   * purge, which re-arms an early alarm.
    */
-  async #tombstonesBeside(run: RunRow): Promise<boolean> {
+  async #tombstonesBeside(run: RunRow, notified: boolean): Promise<boolean> {
     const storage = this.#store;
     let due: boolean;
     try {
-      due = this.#expireDueTombstones(Date.now());
+      due = this.#expireDueTombstones(Date.now()) || notified;
     } catch (error) {
       await this.#leaveToWatchdog("workflow_tombstone_expiry_failed", error);
       return true;
@@ -1218,7 +1639,12 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       }
       return true;
     }
-    const wake = run.status === "waiting" ? run.wake_at : null;
+    // A run rolling back that waits for a rollback's retry waits as one
+    // asleep does.
+    const wake =
+      run.status === "waiting" || run.status === "rollingBack"
+        ? run.wake_at
+        : null;
     if (!due || wake === null || wake <= Date.now()) {
       return false;
     }
@@ -1232,6 +1658,9 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
 
   /** One activation: replays the definition under a new generation. */
   override async alarm(): Promise<void> {
+    // The activation's wall time counts from here, the handler's start:
+    // what a delivery before it took is gone from it.
+    const startedAt = Date.now();
     // The host's settings first, before the run is read or a generation
     // taken: a mistake in them touches no run. It is logged, and the run
     // is left to a watchdog a lease away, the settings fixed by then or
@@ -1269,7 +1698,12 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       await this.#expireTombstones();
       return;
     }
-    if (await this.#tombstonesBeside(run)) {
+    const after = await this.#afterNotifying(run);
+    if (after === undefined) {
+      return;
+    }
+    ({ run } = after);
+    if (await this.#tombstonesBeside(run, after.notified)) {
       return;
     }
     if (hasEnded(run)) {
@@ -1334,6 +1768,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       {
         leaseMs: this.leaseMs,
         handlerBudgetMs: this.handlerBudgetMs,
+        startedAt,
         maxStreamBytes: this.maxStreamOutputBytes,
         maxRunStreamBytes: this.maxRunStreamBytes,
         ...limits,
@@ -1635,7 +2070,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       forgetHistoryIn(sql, command.from === null);
       forgetIn(sql, forget);
       sql.exec(
-        "UPDATE run SET status = 'queued', execution_uid = ?, output = NULL, error = NULL, ended_at = NULL, lease_until = NULL, paused_at = NULL, rollback_trigger = NULL, rollback_end = NULL, rollback = NULL, rollback_replays = 0, purge_at = NULL, wake_at = ?",
+        "UPDATE run SET status = 'queued', execution_uid = ?, output = NULL, error = NULL, ended_at = NULL, lease_until = NULL, paused_at = NULL, rollback_trigger = NULL, rollback_end = NULL, rollback = NULL, rollback_replays = 0, purge_at = NULL, executions = executions + 1, wake_at = ?",
         crypto.randomUUID(),
         now
       );

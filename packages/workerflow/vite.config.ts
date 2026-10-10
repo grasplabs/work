@@ -30,6 +30,8 @@ export default defineProject({
             useSQLite: true,
           },
           MISWAITED: { className: "MiswaitedRuns", useSQLite: true },
+
+          MISTIMED: { className: "MistimedRuns", useSQLite: true },
         },
       },
     }),

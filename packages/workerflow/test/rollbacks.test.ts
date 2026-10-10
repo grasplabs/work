@@ -632,8 +632,11 @@ describe("storage that fails around a rolling back", () => {
     await deliverAlarm("compensated", id);
     const status = await over(id);
 
+    // The activation's alarm write failed, and so did the one the host's
+    // delivery of the run's new status sets as it ends (run.ts): each is
+    // logged, and neither leaves anything but the watchdog.
     expect({
-      events: warnings.map((warning) => eventOf(warning)),
+      events: [...new Set(warnings.map((warning) => eventOf(warning)))],
       undone,
     }).toStrictEqual({ events: ["workflow_alarm_set_failed"], undone: [] });
     expect(watchdog).toBeGreaterThan(
