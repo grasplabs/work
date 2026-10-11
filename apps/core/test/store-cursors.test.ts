@@ -341,6 +341,16 @@ const pageQuery = (index: string | null, order: "asc" | "desc") => ({
   terminal: { kind: "paginate" as const, pageSize: 2, cursor: null },
 });
 
+/** The length of the cursor an anchor of a `length`-character label seals to. */
+const cursorLength = (length: number): number => {
+  const plain = JSON.stringify({
+    id: "n-ada-00000",
+    values: [["x".repeat(length)]],
+  }).length;
+  // IV, ciphertext and GCM tag, unpadded base64url, and 90 around them.
+  return 90 + Math.ceil((4 * (12 + plain + 16)) / 3);
+};
+
 /** The record IDs of `notes`, sorted: for pages whose order ties. */
 const sortedIds = (notes: readonly { _id: string }[]): string[] =>
   idsOf(notes).toSorted();
@@ -649,7 +659,7 @@ describe("seeks", () => {
       env.DATA_STORES.getByName(fixture.store.id),
       async (_instance, state) => {
         const host = new StoreHost(state, env);
-        const found: string[] = [];
+        const found: string[][] = [];
         for (const { query: request, values } of cases) {
           // oxlint-disable-next-line no-await-in-loop -- one case at a time
           const seekPlans = await host.explainPage(
@@ -661,16 +671,69 @@ describe("seeks", () => {
               values,
             }
           );
-          found.push(...seekPlans);
+          found.push(seekPlans);
         }
         return found;
       }
     );
-    expect(plans.length).toBeGreaterThan(cases.length);
-    for (const plan of plans) {
+    for (const plan of plans.flat()) {
       expect(plan).toMatch(/SEARCH sdk_records USING (?:COVERING )?INDEX/u);
       expect(plan).not.toMatch(/TEMP B-TREE|\bSCAN sdk_records\b/u);
     }
+    // After a left-out value, the seek past it is a range on that field,
+    // a constraint of the index search: never a walk filtered after.
+    expect({
+      afterLeftOutRank: /\(<expr>=\? AND <expr>>\?\)/u.test(
+        plans[0]?.[1] ?? ""
+      ),
+      afterLeftOutLabel: /\(<expr>>\?\)/u.test(plans[5]?.[1] ?? ""),
+    }).toStrictEqual({ afterLeftOutRank: true, afterLeftOutLabel: true });
+  });
+
+  it("issue a cursor of exactly the longest length, and fall back to the ID one past it", async () => {
+    let longest = 0;
+    while (cursorLength(longest + 1) <= cursorMaxLength) {
+      longest += 1;
+    }
+    const results: Record<string, { length?: number; next: string[] }> = {};
+    for (const [name, length] of [
+      ["longest", longest],
+      ["past", longest + 1],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one case at a time
+      const fixture = await storeWith("appMembers");
+      // oxlint-disable-next-line no-await-in-loop -- one case at a time
+      await insertNotes(fixture, [
+        { title: "a", label: "x".repeat(length) },
+        { title: "b", label: "y" },
+      ]);
+      const byLabel = () =>
+        dbOf(fixture, scopeOf(fixture.schemaHash))
+          .query("notes")
+          .withIndex("by_label");
+      // oxlint-disable-next-line no-await-in-loop -- one case at a time
+      const first = await byLabel().paginate({ pageSize: 1, cursor: null });
+      // oxlint-disable-next-line no-await-in-loop -- one case at a time
+      const second = await byLabel().paginate({
+        pageSize: 1,
+        cursor: first.nextCursor,
+      });
+      results[name] = {
+        length: first.nextCursor?.length,
+        next: idsOf(second.items),
+      };
+    }
+    // Past the longest, the cursor seals the ID alone: far shorter.
+    expect({
+      longest: results.longest,
+      pastNext: results.past?.next,
+      pastShort:
+        (results.past?.length ?? cursorMaxLength) < cursorMaxLength - 2000,
+    }).toStrictEqual({
+      longest: { length: cursorMaxLength, next: ["n-ada-00001"] },
+      pastNext: ["n-ada-00001"],
+      pastShort: true,
+    });
   });
 
   it("count against one scan bound across all of a page's seeks", async () => {

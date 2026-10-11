@@ -88,8 +88,20 @@ const payloadSchema = z.strictObject({
   values: z.array(anchorValueSchema).max(17).optional(),
 });
 
-const cursorPattern =
-  /^(?<version>0|[1-9]\d{0,3})\.(?<sealed>[A-Za-z0-9_-]{1,4000})\.(?<tag>[A-Za-z0-9_-]{43})\.(?<stable>[A-Za-z0-9_-]{43})$/u;
+/**
+ * The characters of a cursor around its sealed anchor: the version (one
+ * digit today), three dots and two 43-character tags.
+ */
+const cursorFixedLength = 90;
+
+/**
+ * A cursor's text. The sealed anchor's bound follows from the cursor's,
+ * so every cursor `sealCursor` issues is one this reads back.
+ */
+const cursorPattern = new RegExp(
+  String.raw`^(?<version>0|[1-9]\d{0,3})\.(?<sealed>[A-Za-z0-9_-]{1,${cursorMaxLength - cursorFixedLength}})\.(?<tag>[A-Za-z0-9_-]{43})\.(?<stable>[A-Za-z0-9_-]{43})$`,
+  "u"
+);
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -197,6 +209,9 @@ export const sealCursor = async (
 ): Promise<string> => {
   const version = String(cursorVersion);
   for (const content of [anchor, { id: anchor.id }]) {
+    // A random 96-bit IV per cursor: AES-GCM stays sound for 2^32 seals
+    // under one key, far past what one store pages; its key never rotates
+    // (it goes only with the store's purge).
     const iv = crypto.getRandomValues(new Uint8Array(12));
     // One after the other: the shorter only when the longer won't fit.
     // oxlint-disable-next-line no-await-in-loop -- see above
@@ -213,7 +228,9 @@ export const sealCursor = async (
     // oxlint-disable-next-line no-await-in-loop -- see above
     const stable = await tagOf(keys, version, binding, sealed, false);
     const cursor = `${version}.${sealed}.${tag}.${stable}`;
-    if (cursor.length <= cursorMaxLength) {
+    // Only a cursor `openCursor` reads back: otherwise the next page would
+    // be refused, and a record could block everyone's paging past it.
+    if (cursor.length <= cursorMaxLength && cursorPattern.test(cursor)) {
       return cursor;
     }
   }
