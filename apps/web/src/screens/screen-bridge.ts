@@ -83,7 +83,7 @@ const text = (value: unknown): string => {
  * message of the frame's may hold (`request.too_deep`,
  * `request.too_large`), before any of the bridge's code sees them.
  */
-const FrameRpcTarget = boundedRpcTarget({
+export const FrameRpcTarget = boundedRpcTarget({
   depth: rpcArgumentDepth,
   size: screenLimits.rpc.maxMessageSize,
 });
@@ -203,6 +203,16 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
 }
 
 /**
+ * What a frame reaches through its port: the one object `openBridge`
+ * serves, a {@link FrameRpcTarget}.
+ */
+export const frameBridge = (
+  target: FrameTarget,
+  cleanups: (() => void)[]
+): ScreenBridge & InstanceType<typeof FrameRpcTarget> =>
+  new Bridge(target, cleanups);
+
+/**
  * Serves the bridge to `target` on `port`, the page's end of the frame's
  * channel. Returns what closes it: the session ends, the port closes, and
  * what the bridge kept for the frame (its theme observer, the stubs the
@@ -221,7 +231,7 @@ export const openBridge = (
   const cleanups: (() => void)[] = [];
   const session = new RpcSession(
     portTransport(port),
-    new Bridge(target, cleanups),
+    frameBridge(target, cleanups),
     { limits: screenLimits.rpc }
   );
   const frame = session.getRemoteMain();
