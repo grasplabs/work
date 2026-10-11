@@ -14,9 +14,10 @@ import type { Memory } from "@grasp-os/shared/memory";
 import { z } from "zod";
 
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
-import { describeRun, runCode } from "./code-mode.ts";
+import { describeRun, runCode, sourceHash } from "./code-mode.ts";
 import type { CodeRun, CodeRunStatus } from "./code-mode.ts";
 import type { AgentModel } from "./models.ts";
+import type { CodeRunOpening } from "./workspace.ts";
 
 // The agent loop: Pi (pi-agent-core) in Code Mode. The model answers, or
 // calls one tool, `executeCode`, with code against the chat's typed APIs;
@@ -209,16 +210,24 @@ const codeInput = (args: unknown): { code: string } => {
 };
 
 /**
- * The code runs of a chat that are running now. A stub answers only while
- * the run it was made for is open, so code that is still running after its
- * run was cancelled or timed out can't act any more.
+ * The code runs of a chat: each opened with its record, before its code
+ * loads, and closed as it ends. A stub answers, and a write is admitted,
+ * only while the run it was made for is open, so code still running after
+ * its run was cancelled, timed out or lost a permission can't act any
+ * more. `close` says how the run ended: as it says, or `revoked` when a
+ * revocation closed it first.
  */
 export interface CodeRuns {
-  open: () => string;
-  close: (runId: string) => void;
+  open: (opening: CodeRunOpening) => string;
+  close: (runId: string, status: CodeRunStatus) => CodeRunStatus;
 }
 
-/** Runs code with stubs that answer only while the run is open. */
+/**
+ * Runs code with stubs that answer only while the run is open: opened with
+ * its record before the code loads, closed however it ends. A run a
+ * revocation closed ends as `revoked`: what its code returned isn't
+ * handed on, as it may rest on what was revoked.
+ */
 const runOpen = async (
   {
     apis,
@@ -227,18 +236,35 @@ const runOpen = async (
     loader,
     codeTimeoutMs,
   }: Pick<Turn, "apis" | "scope" | "runs" | "loader" | "codeTimeoutMs">,
+  toolCallId: string,
   code: string,
   signal: AbortSignal | undefined
 ): Promise<CodeRun> => {
-  const runId = runs.open();
+  const runId = runs.open({
+    toolCallId,
+    sourceHash: await sourceHash(code),
+    sourceChars: code.length,
+  });
   const env = Object.fromEntries(
     apis.map((api) => [api.name, api.stub({ ...scope, runId })])
   );
+  // `runCode` never throws; should anything else, the run still closes.
+  let ran: CodeRunStatus = "crashed";
+  let ended: CodeRunStatus;
+  let run: CodeRun;
   try {
-    return await runCode(loader, code, env, signal, codeTimeoutMs);
+    run = await runCode(loader, code, env, signal, codeTimeoutMs);
+    ran = run.status;
   } finally {
-    runs.close(runId);
+    ended = runs.close(runId, ran);
   }
+  return ended === run.status
+    ? run
+    : {
+        status: ended,
+        logs: run.logs,
+        error: agentErrors.create("agent.run_revoked").message,
+      };
 };
 
 /** The one tool: runs code against the chat's APIs in a locked isolate. */
@@ -259,9 +285,10 @@ const executeCode = ({
   parameters: codeParameters,
   prepareArguments: codeInput,
   executionMode: "sequential",
-  execute: async (_toolCallId, { code }, signal) => {
+  execute: async (toolCallId, { code }, signal) => {
     const run = await runOpen(
       { apis, scope, runs, loader, codeTimeoutMs },
+      toolCallId,
       code,
       signal
     );

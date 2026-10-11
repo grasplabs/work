@@ -10,6 +10,7 @@ import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
 import {
+  admitEffect,
   auditRefusal,
   auditedCall,
   chatAuthority,
@@ -231,7 +232,10 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
           method: "connections.request",
           detailOf: (asked: AskedConnection) => ({ permission: asked.id }),
         },
-        async () => await askInChat(this.env, scope, ask)
+        async () => {
+          await admitEffect(this.env, scope);
+          return await askInChat(this.env, scope, ask);
+        }
       );
     } catch (error) {
       throw forSandbox(error);
@@ -280,6 +284,8 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
     );
     let result: ConnectResult;
     try {
+      // Admitted as it goes to connect, not only as the call began.
+      await admitEffect(this.env, scope);
       result = await this.env.CONNECT.call(request);
     } catch (error) {
       throw forSandbox(error);

@@ -9,7 +9,14 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  says,
+  setObjectEnv,
+  testRunOpening,
+} from "./agent-chat.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { outlook, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -660,17 +667,59 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("writes nothing from code still running after its run's wall-clock time", async () => {
+    const { chat, person, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        await scheduler.wait(2_000);
+        await env.build.write(app.id, { "screens/late.tsx": "export default () => null;" });
+      };`),
+      says("It ran out of time."),
+    ]);
+    await grant();
+    // Objects share their env: set back however the test ends.
+    await setObjectEnv(chat.stub, { CODE_RUN_TIMEOUT_MS: "1000" });
+    try {
+      await chat.ask("Build it slowly.");
+    } finally {
+      await setObjectEnv(chat.stub, { CODE_RUN_TIMEOUT_MS: "" });
+    }
+    const app = await createdApp(person.api);
+
+    // The code goes on past its run's end; its write is refused, once.
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events.filter(
+            ({ action, detail }) =>
+              action === "agent.call" &&
+              detail.chat === chat.chat.id &&
+              detail.reason === "agent.run_ended"
+          )
+        ).toHaveLength(1);
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    await expect(
+      chat.stub.draft(chatIdSchema.parse(chat.chat.id), app.id)
+    ).resolves.toStrictEqual({ base: null, changes: {}, revision: 0 });
+  });
+
   it("lands a draft write only over the revision it read", async () => {
     const { chat } = await setUp([]);
     const chatId = chatIdSchema.parse(chat.chat.id);
 
-    const saved = await runInDurableObject(chat.stub, (instance) => [
-      instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0),
-      // Another write read revision 0 too, and lost.
-      instance.saveDraft(chatId, "app-1", null, { "a.md": "b" }, [], 0),
-      instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 1),
-      instance.draft(chatId, "app-1"),
-    ]);
+    const saved = await runInDurableObject(chat.stub, (instance) => {
+      const run = instance.openCodeRun(chatId, testRunOpening);
+      return [
+        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, run),
+        // Another write read revision 0 too, and lost.
+        instance.saveDraft(chatId, "app-1", null, { "a.md": "b" }, [], 0, run),
+        instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 1, run),
+        instance.draft(chatId, "app-1"),
+      ];
+    });
 
     expect(saved).toStrictEqual([
       true,
@@ -688,21 +737,24 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { chat } = await setUp([]);
     const chatId = chatIdSchema.parse(chat.chat.id);
 
-    const saved = await runInDurableObject(chat.stub, (instance) => [
-      // A write reads revision 0; meanwhile another creates the draft and
-      // writes its only change back as the base has it.
-      instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0),
-      instance.saveDraft(chatId, "app-1", null, {}, ["a.md"], 1),
-      instance.draft(chatId, "app-1"),
-      // The write that read revision 0 lands on nothing.
-      instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 0),
-      // Nor once the draft is dropped, as a proposal drops it.
-      instance.saveDraft(chatId, "app-1", null, { "c.md": "c" }, [], 2),
-      instance.dropDraft(chatId, "app-1", 3),
-      instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 0),
-      instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 3),
-      instance.draft(chatId, "app-1"),
-    ]);
+    const saved = await runInDurableObject(chat.stub, (instance) => {
+      const run = instance.openCodeRun(chatId, testRunOpening);
+      return [
+        // A write reads revision 0; meanwhile another creates the draft and
+        // writes its only change back as the base has it.
+        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, run),
+        instance.saveDraft(chatId, "app-1", null, {}, ["a.md"], 1, run),
+        instance.draft(chatId, "app-1"),
+        // The write that read revision 0 lands on nothing.
+        instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 0, run),
+        // Nor once the draft is dropped, as a proposal drops it.
+        instance.saveDraft(chatId, "app-1", null, { "c.md": "c" }, [], 2, run),
+        instance.dropDraft(chatId, "app-1", { revision: 3 }),
+        instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 0, run),
+        instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 3, run),
+        instance.draft(chatId, "app-1"),
+      ];
+    });
 
     expect(saved).toStrictEqual([
       true,
@@ -721,12 +773,15 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { chat } = await setUp([]);
     const chatId = chatIdSchema.parse(chat.chat.id);
 
-    const saved = await runInDurableObject(chat.stub, (instance) => [
-      // A first write reads revision 0; a discard runs before it lands.
-      instance.dropDraft(chatId, "app-1"),
-      instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0),
-      instance.draft(chatId, "app-1"),
-    ]);
+    const saved = await runInDurableObject(chat.stub, (instance) => {
+      const run = instance.openCodeRun(chatId, testRunOpening);
+      return [
+        // A first write reads revision 0; a discard runs before it lands.
+        instance.dropDraft(chatId, "app-1", { runId: run }),
+        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, run),
+        instance.draft(chatId, "app-1"),
+      ];
+    });
 
     expect(saved).toStrictEqual([
       true,

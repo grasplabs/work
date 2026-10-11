@@ -30,6 +30,11 @@ interface __BaseEnv_Env {
   AUDIT_ARCHIVE_RETENTION_DAYS?: unknown;
   /** Days an ended workflow run keeps its details (src/workflows/retention.ts). */
   RUN_RETENTION_DAYS?: unknown;
+  /**
+   * `workerd` where core runs on plain workerd (tests, local development,
+   * on-prem), whose isolates don't enforce a CPU limit (src/code-mode.ts).
+   */
+  RUNTIME_PROFILE?: string;
   /** `none` where Durable Objects have no jurisdiction (src/durable-objects.ts). */
   DURABLE_OBJECT_JURISDICTION?: string;
   /**

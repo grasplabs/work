@@ -155,3 +155,38 @@ export const chatAttachments = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.chatId, table.runId] })]
 );
+
+/**
+ * Every code run of a chat's agent, as evidence of what ran and how it
+ * ended: its run ID (the lease its stubs answer to, random and never
+ * reused), the tool call it ran for, the SHA-256 and length of its module
+ * (never the module itself: the transcript has the call), the agent and
+ * runtime it ran on, whether that runtime enforces the CPU limit, and its
+ * status: `running` until it ends, then how it ended (`CodeRunStatus` in
+ * code-mode.ts), or `interrupted` when a restart ended it first. Nothing
+ * here is ever run again: a restart ends a run's lease, and the agent's
+ * next step is a new run with a new ID. Deleted with the chat.
+ */
+export const chatCodeRuns = sqliteTable(
+  "chat_code_runs",
+  {
+    id: text().primaryKey(),
+    chatId: text("chat_id")
+      .$type<ChatId>()
+      .notNull()
+      .references(() => chats.id),
+    toolCallId: text("tool_call_id").notNull(),
+    sourceHash: text("source_hash").notNull(),
+    sourceChars: integer("source_chars").notNull(),
+    agent: text().notNull(),
+    compatibilityDate: text("compatibility_date").notNull(),
+    runtime: text({ enum: ["cloudflare", "workerd"] }).notNull(),
+    cpuLimit: text("cpu_limit", {
+      enum: ["enforced", "cpu_limit_unsupported"],
+    }).notNull(),
+    status: text().notNull(),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [index("chat_code_runs_chat").on(table.chatId, table.startedAt)]
+);

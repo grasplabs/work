@@ -1,4 +1,6 @@
+import piAgentCore from "@earendil-works/pi-agent-core/package.json" with { type: "json" };
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
+import { compatibilityDate } from "@grasp-os/shared/runtime";
 import type { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
 
@@ -56,19 +58,58 @@ export const codeLimits = {
  * short of its CPU time), the runtime stopped it for CPU time
  * (`cpu_exceeded`) or anything else once it ran (`crashed`: memory, say),
  * it ran past its wall-clock time (`wall_expired`, a wait that can never
- * settle too), or the turn was cancelled (`cancelled`). Only the host
- * sets one: the harness returns every outcome of the code, so the code
- * can't make a call reject, nor pick the message a status is read from.
+ * settle too), the turn was cancelled (`cancelled`), a permission of the
+ * agent was revoked while it ran (`revoked`: its lease closed then,
+ * whatever its code went on to do), or a restart ended it first
+ * (`interrupted`, which only its record says). Only the host sets one:
+ * the harness returns every outcome of the code, so the code can't make
+ * a call reject, nor pick the message a status is read from.
  */
-export type CodeRunStatus =
-  | "completed"
-  | "threw"
-  | "refused"
-  | "load_failed"
-  | "cpu_exceeded"
-  | "crashed"
-  | "wall_expired"
-  | "cancelled";
+export const codeRunStatuses = [
+  "completed",
+  "threw",
+  "refused",
+  "load_failed",
+  "cpu_exceeded",
+  "crashed",
+  "wall_expired",
+  "cancelled",
+  "revoked",
+  "interrupted",
+] as const;
+
+export type CodeRunStatus = (typeof codeRunStatuses)[number];
+
+/**
+ * What a run ran on, kept with its record (`chat_code_runs`): the agent
+ * loop's exact version (pi-ai is pinned to the same one in the catalog),
+ * the runtime's compatibility date, and the runtime. Plain workerd (tests,
+ * local development, on-prem, which set `RUNTIME_PROFILE=workerd`) doesn't
+ * enforce the isolate's CPU limit, and says so: a busy loop there runs
+ * until its wall-clock limit lets go of it, still spinning.
+ */
+export const codeRuntime = (env: Pick<Env, "RUNTIME_PROFILE">) => {
+  const workerd = env.RUNTIME_PROFILE === "workerd";
+  return {
+    agent: `${piAgentCore.name}@${piAgentCore.version}`,
+    compatibilityDate,
+    runtime: workerd ? ("workerd" as const) : ("cloudflare" as const),
+    cpuLimit: workerd
+      ? ("cpu_limit_unsupported" as const)
+      : ("enforced" as const),
+  };
+};
+
+/** A module's SHA-256, in hex: what its run's record keeps of it. */
+export const sourceHash = async (code: string): Promise<string> => {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(code)
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+};
 
 /**
  * Most characters of each part of a run that core takes from the isolate:

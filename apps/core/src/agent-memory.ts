@@ -1,6 +1,11 @@
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
-import { chatAuthority, chatContext, requireOpenRun } from "./agent-scope.ts";
+import {
+  admitEffect,
+  chatAuthority,
+  chatContext,
+  requireOpenRun,
+} from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { forSandbox } from "./bindings.ts";
 import { saveUserMemory } from "./knowledge/memory.ts";
@@ -20,6 +25,7 @@ export class MemoryApi extends WorkerEntrypoint<Env, AgentScope> {
     const scope = this.ctx.props;
     await requireOpenRun(this.env, scope, "memory.saveUser");
     try {
+      await admitEffect(this.env, scope);
       const saved = await saveUserMemory(
         this.env,
         chatAuthority(scope),
