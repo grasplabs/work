@@ -217,6 +217,28 @@ export const latestVersion = async (
   return row?.version ?? null;
 };
 
+/**
+ * The version of `app` over `parent` whose files are `tree` and that the
+ * agent of chat `chatId` proposed, if there is one: what a build job
+ * recorded it was about to commit, found committed (build-jobs.ts).
+ */
+export const proposedFromChat = async (
+  env: Env,
+  app: string,
+  { parent, tree }: { parent: number | null; tree: string },
+  chatId: string
+): Promise<number | undefined> => {
+  const version = (parent ?? 0) + 1;
+  const row = await drizzle(env.DB)
+    .select({ tree: appVersions.tree, proposedBy: appVersions.proposedBy })
+    .from(appVersions)
+    .where(and(eq(appVersions.appId, app), eq(appVersions.version, version)))
+    .get();
+  return row?.tree === tree && row.proposedBy?.chatId === chatId
+    ? version
+    : undefined;
+};
+
 /** One of an App's versions, which must exist. */
 export const findVersion = async (
   env: Env,

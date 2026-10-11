@@ -126,6 +126,45 @@ interface LiveTurn {
 /** A build job, with the chat's agent and person it acts for. */
 export type BuildJob = BuildJobRow & { agentId: string; personId: string };
 
+/** A job's result, as far as a check's settling reads it. */
+const checkResultSchema = z.looseObject({ passed: z.boolean() });
+const proposalResultSchema = z.looseObject({ check: checkResultSchema });
+
+/**
+ * `end`, once the check its job took is settled (`settle`, with whether it
+ * passed: never unless the job completed with a check that passed), with
+ * the checks failed in a row since in its result, as an in-call check
+ * answers with them.
+ */
+const settledEnd = (
+  job: BuildJobRow,
+  end: BuildJobEnd,
+  settle: (passed: boolean) => number
+): BuildJobEnd => {
+  if (end.status !== "completed") {
+    settle(false);
+    return end;
+  }
+  const result: unknown = JSON.parse(end.result);
+  if (job.kind === "check") {
+    const check = checkResultSchema.parse(result);
+    const failedInARow = settle(check.passed);
+    return {
+      status: "completed",
+      result: JSON.stringify({ ...check, failedInARow }),
+    };
+  }
+  const proposal = proposalResultSchema.parse(result);
+  const failedInARow = settle(proposal.check.passed);
+  return {
+    status: "completed",
+    result: JSON.stringify({
+      ...proposal,
+      check: { ...proposal.check, failedInARow },
+    }),
+  };
+};
+
 /** What the agent of a chat is told as a build job it submitted ends. */
 const jobEnded = (job: BuildJobRow, end: BuildJobEnd): string => {
   if (end.status === "cancelled") {
@@ -1485,21 +1524,33 @@ export class Workspace extends DurableObject<Env> {
    * same step as the check that the run is open (build-jobs.ts): bound to
    * the run's turn, the draft of App `appId` as it is now (its revision),
    * and the authority the run acts on (granted when it opened). Its ID is
-   * random. Null once the chat has as many jobs running as it may.
+   * random. Each job is one of the draft's checks this turn, taken here as
+   * an in-call check takes one (`takeCheck`, against `maxFailedChecks`) and
+   * settled as the job ends (`endBuildJob`), so jobs don't get the repair
+   * loop past its limit. Refused, taking nothing, once the chat has as
+   * many jobs running as it may (`jobs`) or the draft's checks this turn
+   * are spent (`checks`).
    */
   openBuildJob(
     chatId: ChatId,
     runId: string,
-    job: Pick<BuildJobOpening, "appId" | "kind" | "message">
-  ): { id: string; revision: number } | null {
+    job: Pick<BuildJobOpening, "appId" | "kind" | "message">,
+    maxFailedChecks: number
+  ): { id: string; revision: number } | { refused: "jobs" | "checks" } {
     const lease = this.admitFromCodeRun(chatId, runId);
     const turn = this.#turns.get(chatId);
     if (lease.call !== "open" || turn === undefined) {
       throw runRefusal(lease.call === "revoked" ? "revoked" : "ended");
     }
+    if (this.#jobs.full(chatId)) {
+      return { refused: "jobs" };
+    }
+    if (!this.takeCheck(chatId, job.appId, maxFailedChecks)) {
+      return { refused: "checks" };
+    }
     const id = crypto.randomUUID();
     const { revision } = this.draft(chatId, job.appId);
-    const opened = this.#jobs.open({
+    this.#jobs.open({
       ...job,
       id,
       chatId,
@@ -1508,7 +1559,12 @@ export class Workspace extends DurableObject<Env> {
       revision,
       grantedAt: lease.openedAt,
     });
-    return opened ? { id, revision } : null;
+    return { id, revision };
+  }
+
+  /** The chat's running build jobs, with when each was submitted. */
+  runningBuildJobs(chatId: ChatId): { id: string; createdAt: Date }[] {
+    return this.#jobs.running(chatId);
   }
 
   /**
@@ -1547,10 +1603,21 @@ export class Workspace extends DurableObject<Env> {
   endBuildJob(chatId: unknown, id: string, end: BuildJobEnd): boolean {
     const chat = chatIdSchema.safeParse(chatId);
     const job = chat.success ? this.#jobs.byId(chat.data, id) : undefined;
-    if (job === undefined || !this.#jobs.end(job.chatId, id, end)) {
+    if (job?.status !== "running") {
       return false;
     }
     const turn = this.#turns.get(job.chatId);
+    // The check it took settles against its turn's count, as it ends: one
+    // that didn't pass adds to the draft's checks failed in a row. Once its
+    // turn has ended, nothing settles: the count was that turn's, and the
+    // next question starts the count again anyway (`#turn`).
+    const settled =
+      turn?.id === job.turnId
+        ? settledEnd(job, end, (passed) =>
+            this.settleCheck(job.chatId, job.appId, passed)
+          )
+        : end;
+    this.#jobs.end(job.chatId, id, settled);
     if (turn?.id === job.turnId) {
       turn.events.push({
         role: "system",

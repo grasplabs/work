@@ -1,3 +1,5 @@
+import { agentErrors } from "@grasp-os/shared/agent";
+import { appErrors } from "@grasp-os/shared/apps";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -5,12 +7,16 @@ import { z } from "zod";
 
 import {
   chatOf,
+  codeResults,
   codeStep,
+  model,
   pausedReply,
+  pointAtGateway,
   says,
   transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
+import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -59,6 +65,25 @@ export default workflowTests(definition, [
 ]);
 `,
 };
+
+/** The screen with its button restyled, which @shadcn/lint refuses. */
+const restyled = desk.replace(
+  '<Button variant="outline">',
+  '<Button className="rounded-full">'
+);
+
+/** Code that finds the App the agent created, by its name, as `app`. */
+const findApp = `const [app] = (await env.apps.list()).filter(({ name }) => name === ${JSON.stringify(appName)});`;
+
+/** The code of the error a job's record holds, if any. */
+const errorCode = (error: string | null): string | null =>
+  error === null
+    ? null
+    : z.object({ code: z.string() }).parse(JSON.parse(error)).code;
+
+/** What a code step returned, as JSON. */
+const returned = (text: string | undefined): unknown =>
+  z.unknown().parse(JSON.parse(text?.replace("Returned:\n", "") ?? "null"));
 
 /** Creates the App, writes a draft that passes, and submits its proposal. */
 const submitProposal = `export default async (self, env) => {
@@ -129,6 +154,31 @@ const holdFiles = (held: (method: string, key: unknown) => boolean) => {
       env.FILES = files;
     },
   };
+};
+
+/**
+ * Makes every write of a check's test results to core's files take `ms`
+ * longer: the files as they were, to set back.
+ */
+const slowTestResults = (ms: number): typeof env.FILES => {
+  const { FILES: files } = env;
+  env.FILES = new Proxy(files, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "put" && typeof value === "function") {
+        return async (...args: unknown[]): Promise<unknown> => {
+          if (typeof args[0] === "string" && args[0].includes("tests")) {
+            await scheduler.wait(ms);
+          }
+          return await Reflect.apply(value, target, args);
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return files;
 };
 
 /** A job's check, building the draft's screens: no code run builds them. */
@@ -428,23 +478,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     ]);
     // Keeping the check's test results, after the commit and before the
     // job records its receipt, takes seconds: long enough to cut it off.
-    const { FILES: files } = env;
-    env.FILES = new Proxy(files, {
-      get: (target, property) => {
-        const value: unknown = Reflect.get(target, property);
-        if (property === "put" && typeof value === "function") {
-          return async (...args: unknown[]): Promise<unknown> => {
-            if (typeof args[0] === "string" && args[0].includes("tests")) {
-              await scheduler.wait(4000);
-            }
-            return await Reflect.apply(value, target, args);
-          };
-        }
-        return typeof value === "function"
-          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-          : value;
-      },
-    });
+    const files = slowTestResults(4000);
     try {
       await chat.ask("Build an invoice desk for invoices@");
       const job = await submittedJob(chat.stub, chat.chat.id);
@@ -481,5 +515,269 @@ describe("build jobs", { timeout: 180_000 }, () => {
     } finally {
       env.FILES = files;
     }
+  });
+
+  it("keeps the version a commit landed with when the job is revoked before its commit runs again", async () => {
+    const { admin, builder, chat } = await setUp([
+      codeStep(submitProposal),
+      says("Submitted."),
+    ]);
+    const { collectionId } = await collectionWithNote(admin.api, {
+      name: `Handbook ${crypto.randomUUID()}`,
+      access: "everyone",
+    });
+    const handbook = await requestGranted(
+      idp,
+      admin,
+      readCollection(chat.agent, collectionId, "HANDBOOK")
+    );
+    // The first try is still keeping test results, its receipt unrecorded,
+    // long after its second try has ended.
+    const files = slowTestResults(20_000);
+    try {
+      await chat.ask("Build an invoice desk for invoices@");
+      const job = await submittedJob(chat.stub, chat.chat.id);
+      await vi.waitFor(
+        async () => {
+          const { versions } = await createdApp(builder);
+          expect(versions).toHaveLength(1);
+        },
+        { timeout: 60_000, interval: 50 }
+      );
+      await admin.api.permissions.revoke(handbook);
+      const instance = await env.WORKFLOWS.get(job.id);
+      await instance.restart({ from: { name: "commit" } });
+
+      // Refused, but what it committed stays its receipt.
+      const ended = await endedJob(chat.stub, chat.chat.id, job.id);
+      const { versions } = await createdApp(builder);
+      expect({ ended, versions: versions.length }).toMatchObject({
+        ended: { status: "revoked", version: 1, result: null },
+        versions: 1,
+      });
+    } finally {
+      env.FILES = files;
+    }
+  });
+
+  it("counts job checks with the repair loop, and refuses a sixth once five failed in a row", async () => {
+    const waitForJob = (
+      submit: string
+    ) => `export default async (self, env) => {
+      ${findApp}
+      const { job } = await env.build.submit(app.id, ${submit});
+      for (let poll = 0; poll < 80; poll += 1) {
+        const view = await env.build.job(job);
+        if (view.status !== "running") {
+          return { status: view.status, passed: view.result.passed, failedInARow: view.result.failedInARow };
+        }
+        await scheduler.wait(300);
+      }
+      return "still running";
+    };`;
+    const failingCheck = codeStep(waitForJob('{ kind: "check" }'));
+    const { chat } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
+        return app.id;
+      };`),
+      failingCheck,
+      codeStep(waitForJob('{ kind: "check" }')),
+      codeStep(waitForJob('{ kind: "check" }')),
+      codeStep(waitForJob('{ kind: "check" }')),
+      codeStep(waitForJob('{ kind: "check" }')),
+      codeStep(`export default async (self, env) => {
+        ${findApp}
+        const tried = async (call) => { try { await call(); return "done"; } catch (error) { return error.message; } };
+        return {
+          submit: await tried(() => env.build.submit(app.id, { kind: "check" })),
+          propose: await tried(() => env.build.submit(app.id, { kind: "propose", message: "A desk" })),
+          check: await tried(() => env.build.check(app.id)),
+        };
+      };`),
+      says("The desk still fails its checks: the button is restyled."),
+    ]);
+
+    await chat.ask("Build an invoice desk for invoices@");
+
+    const results = await codeResults(chat.stub, chat.chat.id);
+    const exhausted = appErrors.create("app.checks_exhausted").message;
+    expect(results.slice(1).map(({ text }) => returned(text))).toStrictEqual([
+      ...[1, 2, 3, 4, 5].map((failedInARow) => ({
+        status: "completed",
+        passed: false,
+        failedInARow,
+      })),
+      { submit: exhausted, propose: exhausted, check: exhausted },
+    ]);
+  });
+
+  it("holds a chat to three running jobs, submitted at once too, and frees the place of one whose instance ended", async () => {
+    // The model takes its time over its next step, which submits a fifth.
+    const waiting = pausedReply(
+      {
+        ...codeStep(`export default async (self, env) => {
+          ${findApp}
+          try { return (await env.build.submit(app.id, { kind: "check" })).status; } catch (error) { return error.message; }
+        };`),
+        text: "Submitting another.",
+      },
+      3
+    );
+    const { chat } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": desk })});
+        return await Promise.all([1, 2, 3, 4].map(() =>
+          env.build.submit(app.id, { kind: "check" }).then(({ job }) => job, (error) => error.message)
+        ));
+      };`),
+      waiting.reply,
+      says("Checking."),
+    ]);
+    const checking = holdFiles(screenBuilds);
+    let submitted: unknown;
+    let fifth: unknown;
+    let ended: Awaited<ReturnType<typeof endedJob>>;
+    try {
+      const answering = chat.ask("Build an invoice desk for invoices@");
+      await vi.waitFor(
+        async () => {
+          const [result] = await codeResults(chat.stub, chat.chat.id);
+          expect(result).toBeDefined();
+          submitted = returned(result?.text);
+        },
+        { timeout: 60_000, interval: 50 }
+      );
+      const jobs = z.array(z.string()).parse(submitted);
+      const [first] = jobs;
+      // Its instance ends behind the record's back: the record still runs.
+      const instance = await env.WORKFLOWS.get(first ?? "");
+      await instance.terminate();
+      waiting.release();
+      await answering;
+      const results = await codeResults(chat.stub, chat.chat.id);
+      fifth = results[1]?.text;
+      ended = await endedJob(chat.stub, chat.chat.id, first ?? "");
+    } finally {
+      checking.restore();
+    }
+    const exhausted = agentErrors.create("agent.jobs_exhausted").message;
+    const all = z.array(z.string()).parse(submitted);
+    expect({
+      refused: all.filter((job) => job === exhausted).length,
+      started: all.filter((job) => job !== exhausted).length,
+      fifth,
+      ended: { status: ended.status, code: errorCode(ended.error) },
+    }).toStrictEqual({
+      refused: 1,
+      started: 3,
+      fifth: "Returned:\nrunning",
+      ended: { status: "failed", code: "internal.unexpected" },
+    });
+  });
+
+  it("hands on nothing of a job whose person stopped building its App while it ran", async () => {
+    const other = await signedInApi(idp, "builder");
+    const { id: shared } = await other.api.apps.create({ name: "Shared" });
+    const { builder, chat } = await setUp([
+      codeStep(`export default async (self, env) => {
+        await env.build.write(${JSON.stringify(shared)}, ${JSON.stringify({ "screens/desk.tsx": desk })});
+        return await env.build.submit(${JSON.stringify(shared)}, { kind: "check" });
+      };`),
+      says("Submitted."),
+    ]);
+    await other.api.apps.members.add(shared, {
+      type: "person",
+      id: builder.userId,
+      role: "builder",
+    });
+    const checking = holdFiles(screenBuilds);
+    let job: z.infer<typeof jobRowSchema>;
+    try {
+      await chat.ask("Check the shared App");
+      job = await submittedJob(chat.stub, chat.chat.id);
+      await checking.reached();
+      // They use it from now on, but no longer build it.
+      await other.api.apps.members.add(shared, {
+        type: "person",
+        id: builder.userId,
+        role: "user",
+      });
+    } finally {
+      checking.restore();
+    }
+    const ended = await endedJob(chat.stub, chat.chat.id, job.id);
+    expect({
+      status: ended.status,
+      result: ended.result,
+      code: errorCode(ended.error),
+    }).toStrictEqual({
+      status: "failed",
+      result: null,
+      code: "role.forbidden",
+    });
+  });
+
+  it("commits nothing once its chat turned restricted while the job checked", async () => {
+    const { builder, chat } = await setUp([
+      codeStep(submitProposal),
+      says("Submitted."),
+    ]);
+    const checking = holdFiles(screenBuilds);
+    let job: z.infer<typeof jobRowSchema>;
+    try {
+      await chat.ask("Build an invoice desk for invoices@");
+      job = await submittedJob(chat.stub, chat.chat.id);
+      await checking.reached();
+      await chat.stub.restrictChat(chat.chat.id);
+    } finally {
+      checking.restore();
+    }
+    const ended = await endedJob(chat.stub, chat.chat.id, job.id);
+    const { versions } = await createdApp(builder);
+    expect({
+      status: ended.status,
+      version: ended.version,
+      code: errorCode(ended.error),
+      versions,
+    }).toStrictEqual({
+      status: "failed",
+      version: null,
+      code: "permission.restricted",
+      versions: [],
+    });
+  });
+
+  it("reads as none to another chat's code", async () => {
+    const { chat } = await setUp([
+      codeStep(submitProposal),
+      says("Submitted."),
+    ]);
+    await chat.ask("Build an invoice desk for invoices@");
+    const job = await submittedJob(chat.stub, chat.chat.id);
+    // Another chat of the same person, with the same agent.
+    const another = await chat.stub.createChat(
+      "Questions",
+      chat.personId,
+      chat.agent.agentId
+    );
+    await pointAtGateway(
+      chat.stub,
+      fakeGateway(
+        codeStep(`export default async (self, env) => {
+          try { return (await env.build.job(${JSON.stringify(job.id)})).status; } catch (error) { return error.message; }
+        };`),
+        says("There's no such job here.")
+      )
+    );
+
+    await chat.stub.ask(another.id, { text: "How's that build?", model });
+
+    const [result] = await codeResults(chat.stub, another.id);
+    expect(result?.text).toBe(
+      `Returned:\n${agentErrors.create("agent.job_not_found").message}`
+    );
   });
 });

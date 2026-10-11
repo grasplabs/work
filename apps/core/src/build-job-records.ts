@@ -1,6 +1,6 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { ChatId } from "@grasp-os/shared/ids";
-import { and, count, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
@@ -15,6 +15,13 @@ import { chatBuildJobs } from "./db/workspace/schema.ts";
 
 /** Most build jobs a chat may have running at once. */
 export const maxRunningJobs = 3;
+
+/**
+ * Most build job records a chat keeps, newest first: what its agent may
+ * still read with `env.build.job`. Each holds at most one bounded check or
+ * proposal, so this bounds what jobs keep in the chat's object.
+ */
+export const jobRecordsKept = 100;
 
 /** A build job's row. */
 export type BuildJobRow = typeof chatBuildJobs.$inferSelect;
@@ -55,21 +62,30 @@ export class BuildJobRecords {
     this.#db = db;
   }
 
-  /** Records a new job as running: `false` once the chat has too many. */
-  open(opening: BuildJobOpening): boolean {
-    const [running] = this.#db
-      .select({ jobs: count() })
+  /** Whether the chat has as many jobs running as it may. */
+  full(chatId: ChatId): boolean {
+    return this.running(chatId).length >= maxRunningJobs;
+  }
+
+  /** The chat's running jobs, with when each was submitted. */
+  running(chatId: ChatId): { id: string; createdAt: Date }[] {
+    return this.#db
+      .select({ id: chatBuildJobs.id, createdAt: chatBuildJobs.createdAt })
       .from(chatBuildJobs)
       .where(
         and(
-          eq(chatBuildJobs.chatId, opening.chatId),
+          eq(chatBuildJobs.chatId, chatId),
           eq(chatBuildJobs.status, "running")
         )
       )
       .all();
-    if ((running?.jobs ?? 0) >= maxRunningJobs) {
-      return false;
-    }
+  }
+
+  /**
+   * Records a new job as running, and forgets the chat's oldest ended jobs
+   * past {@link jobRecordsKept}: a running job is never forgotten.
+   */
+  open(opening: BuildJobOpening): void {
     this.#db
       .insert(chatBuildJobs)
       .values({
@@ -79,7 +95,16 @@ export class BuildJobRecords {
         createdAt: new Date(),
       })
       .run();
-    return true;
+    this.#db
+      .delete(chatBuildJobs)
+      .where(
+        and(
+          eq(chatBuildJobs.chatId, opening.chatId),
+          ne(chatBuildJobs.status, "running"),
+          sql`${chatBuildJobs.id} NOT IN (SELECT ${chatBuildJobs.id} FROM ${chatBuildJobs} WHERE ${chatBuildJobs.chatId} = ${opening.chatId} ORDER BY ${chatBuildJobs.createdAt} DESC LIMIT ${jobRecordsKept})`
+        )
+      )
+      .run();
   }
 
   /** The chat's job `id`; none for another chat's. */

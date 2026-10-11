@@ -153,10 +153,12 @@ export const runEngine = (env: Env): RunEngine => ({
   },
   createInternal: async ({ id, workflow, input }) => {
     // Tagged with the workflow it is: the dispatcher runs it by that.
+    // Kept, once ended, as long as an App's run is.
     await wrapWorkflowBinding({ internal: workflow }).create({
       id,
       params: input,
       locationHint: "weur",
+      ...retentionOf(env),
     });
   },
   status: async (id): Promise<InstanceStatus | undefined> => {

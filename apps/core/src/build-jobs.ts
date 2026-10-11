@@ -5,8 +5,6 @@ import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { WorkflowStepConfig } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import {
@@ -31,12 +29,12 @@ import {
   draftFiles,
   draftOverLatest,
   proposeDraft,
+  proposedFromChat,
   versionTree,
 } from "./apps.ts";
 import type { Acting } from "./auth/identity.ts";
 import { memberOf } from "./auth/identity.ts";
 import type { BuildJobEnd } from "./build-job-records.ts";
-import { appVersions } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
 import { grantedPermissions } from "./permissions.ts";
 import { keepTests, reviewVersion } from "./version-review.ts";
@@ -65,7 +63,8 @@ import type { BuildJob, Draft } from "./workspace.ts";
 //   nothing else. Each step reads the chat's agent and person from the
 //   Workspace object and checks again what a build call does: the agent's
 //   own permission to build Apps, the person still a member and a builder
-//   of the App, the chat not restricted.
+//   of the App, the chat not restricted. Its last step checks all of it
+//   once more before it hands on what the job came to.
 // - Revocation: it acts on the authority of the code run that submitted
 //   it, granted when that run opened. Each step, and each write right
 //   before it commits, reads revocations since then (`admitJob`): one
@@ -74,18 +73,29 @@ import type { BuildJob, Draft } from "./workspace.ts";
 //   receipt: it stays, proposed for review, and is never said to be undone.
 // - Cancellation: cancelling the turn that submitted it, or deleting the
 //   chat, ends it; every later step and write is refused, and its instance
-//   is terminated.
+//   is terminated. Once its turn has ended, deleting the chat is the only
+//   way to stop it, short of a revocation: it then runs to its end, bound
+//   by its steps and its draft's revision.
 // - Replay and double effects: a step that finished isn't run again. A
 //   commit run again (its first try cut off after the version committed)
 //   finds the version it recorded it was about to commit, and takes it as
-//   its own rather than committing another (`committedBefore`). The job
-//   ends once, however often its last step runs.
+//   its own rather than committing another (`reconcileReceipt`), before
+//   it asks to be admitted: a commit that landed keeps its receipt, the
+//   version, even when the job is then refused and ends revoked or
+//   cancelled. The job ends once, however often its last step runs.
 // - Another chat's job, or a guessed ID: a job's ID is random, and every
 //   read and admission is the chat's own; another's reads as none.
 // - A draft written after the job was submitted: the job is bound to the
 //   draft's revision then, and fails with `app.conflict` once it changed.
-// - Exhaustion: a chat has at most three jobs running at once
-//   (build-job-records.ts), and the engine bounds each one's steps.
+// - The repair loop: each job takes one of its draft's checks this turn,
+//   as an in-call check does, and settles it as it ends (workspace.ts), so
+//   jobs can't get the agent past the checks failed in a row it may make.
+// - Exhaustion: a chat has at most three jobs running at once, and keeps
+//   the records of its latest hundred (build-job-records.ts). A job whose
+//   instance ended or is gone while its record says it runs is failed,
+//   freeing its place (`env.build.submit` and `env.build.job`). The engine
+//   bounds each one's steps, and keeps an ended instance as long as an
+//   App's run.
 
 /** What the dispatcher hands a job (`env.build.submit`). */
 export const buildJobInputSchema = z.strictObject({
@@ -184,6 +194,30 @@ interface JobStep {
 }
 
 /**
+ * The chat's person as the job acts for them, and the job's App, once the
+ * agent may still build it for them, as a build call checks it: the
+ * agent's own permission to build Apps, the person still a member and a
+ * builder of the App, and the chat not restricted.
+ */
+const authorize = async (
+  env: Env,
+  scope: Omit<AgentScope, "runId">,
+  job: BuildJob
+): Promise<{ by: Acting; app: AppId }> => {
+  const permissions = await grantedPermissions(env, chatAuthority(scope));
+  if (!buildsApps(permissions)) {
+    throw readDenied("write");
+  }
+  const person = await memberOf(env.DB, scope.personId);
+  if (person === undefined) {
+    throw permissionErrors.create("permission.person_inactive");
+  }
+  const by = await buildingAs(env, scope, person);
+  const { id: app } = await appFor(env, by, job.appId, "builder");
+  return { by, app };
+};
+
+/**
  * Runs one step of the job as its chat's person, once it is admitted
  * (`admitJob`) and the agent may still build the App for them, as a
  * build call checks it: recorded as `agent.call` however it ends.
@@ -221,16 +255,7 @@ const asJob = async <T>(
       { ...scope, runId: job.runId },
       { method, detail: { job: job.id, app: job.appId } },
       async () => {
-        const permissions = await grantedPermissions(env, chatAuthority(scope));
-        if (!buildsApps(permissions)) {
-          throw readDenied("write");
-        }
-        const person = await memberOf(env.DB, scope.personId);
-        if (person === undefined) {
-          throw permissionErrors.create("permission.person_inactive");
-        }
-        const by = await buildingAs(env, scope, person);
-        const { id: app } = await appFor(env, by, job.appId, "builder");
+        const { by, app } = await authorize(env, scope, job);
         return await run({ job, scope, app, by });
       }
     );
@@ -277,6 +302,8 @@ const checkStep = async (env: Env, step: JobStep): Promise<Checked> => {
       Object.fromEntries(files)
     );
     return {
+      // The checks failed in a row are settled as the job ends, and set
+      // in its result then (workspace.ts).
       check: { ...check, failedInARow: 0, maxFailedChecks },
       over: null,
     };
@@ -300,26 +327,33 @@ const checkStep = async (env: Env, step: JobStep): Promise<Checked> => {
 };
 
 /**
- * The version of `app` over `parent` with `tree` that this chat's agent
- * proposed, if there is one: what a job recorded it was about to commit,
- * and committed before its step was cut off.
+ * Records, as the job's receipt, the version it recorded it was about to
+ * commit and did commit, if it did, before anything else of a commit run
+ * again: whether or not the job may still act, as what it committed stays.
+ * The version, if there is one.
  */
-const committedBefore = async (
+const reconcileReceipt = async (
   env: Env,
-  app: AppId,
-  parent: number | null,
-  tree: string,
-  chatId: string
+  input: JobInput
 ): Promise<number | undefined> => {
-  const version = (parent ?? 0) + 1;
-  const row = await drizzle(env.DB)
-    .select({ tree: appVersions.tree, proposedBy: appVersions.proposedBy })
-    .from(appVersions)
-    .where(and(eq(appVersions.appId, app), eq(appVersions.version, version)))
-    .get();
-  return row?.tree === tree && row.proposedBy?.chatId === chatId
-    ? version
-    : undefined;
+  const chats = workspace(env, input.workspaceId);
+  const job = await chats.buildJob(input.chatId, input.jobId);
+  if (job?.version !== null) {
+    return job?.version;
+  }
+  if (job.intendedTree === null) {
+    return undefined;
+  }
+  const version = await proposedFromChat(
+    env,
+    job.appId,
+    { parent: job.intendedParent, tree: job.intendedTree },
+    job.chatId
+  );
+  if (version !== undefined) {
+    await chats.recordBuildReceipt(job.chatId, job.id, version);
+  }
+  return version;
 };
 
 /**
@@ -337,16 +371,8 @@ const commitStep = async (
 ): Promise<Proposal> => {
   const { job, scope, app, by } = step;
   const chats = workspace(env, scope.workspaceId);
+  // Its receipt, recorded before this step was admitted (`reconcileReceipt`).
   let version = job.version ?? undefined;
-  if (version === undefined && job.intendedTree !== null) {
-    version = await committedBefore(
-      env,
-      app,
-      job.intendedParent,
-      job.intendedTree,
-      scope.chatId
-    );
-  }
   let { tree } = checked.over;
   if (version === undefined) {
     const over = await draftOverLatest(
@@ -462,24 +488,23 @@ const jobSteps = async (
       reviewUnavailable: false,
     });
   }
-  const proposed = await jobStep(
-    step,
-    "commit",
-    async () =>
-      await asJob(
-        env,
-        input,
-        "build.job.commit",
-        async (job) => await commitStep(env, job, { check, over })
-      )
-  );
+  const proposed = await jobStep(step, "commit", async () => {
+    await reconcileReceipt(env, input);
+    return await asJob(
+      env,
+      input,
+      "build.job.commit",
+      async (job) => await commitStep(env, job, { check, over })
+    );
+  });
   return proposed.ok ? completed(proposed.value) : proposed.end;
 };
 
 /**
  * Runs (or resumes) a build job (dispatcher.ts): its steps, then a last
- * step that ends it, once. A job that completed is admitted once more
- * there, so one revoked meanwhile hands on nothing.
+ * step that ends it, once. A job that completed is admitted and authorized
+ * once more there, so one revoked meanwhile, or whose person can no longer
+ * build its App, hands on nothing.
  */
 export const runBuildJob = async (
   env: Env,
@@ -505,7 +530,11 @@ export const runBuildJob = async (
         if (job === undefined) {
           throw jobRefusal("cancelled");
         }
-        await admitJob(env, scopeOf(input, job), job.id);
+        const scope = scopeOf(input, job);
+        await admitJob(env, scope, job.id);
+        // Its person may have lost the App, or the chat turned restricted,
+        // since its last step: what it came to isn't handed on then.
+        await authorize(env, scope, job);
       } catch (error) {
         ending = endFor(error);
       }

@@ -39,6 +39,7 @@ import {
   draftOverLatest,
   latestVersion,
   proposeDraft,
+  proposedFromChat,
 } from "./apps.ts";
 import type { Acting, Member } from "./auth/identity.ts";
 import { jobView } from "./build-job-records.ts";
@@ -452,6 +453,48 @@ const jobRequestSchema = z.discriminatedUnion("kind", [
  * the engine counts as one whose start was cut off.
  */
 const orphanedJobMs = 60_000;
+
+/** Where the engine has an instance that has ended. */
+const endedInstances = new Set(["complete", "errored", "terminated"]);
+
+/** How a job that never ran, or whose instance went, ends. */
+const jobNotStarted = {
+  status: "failed",
+  error: JSON.stringify({
+    code: "internal.unexpected",
+    message: "The build job couldn't run. Submit it again.",
+  }),
+} as const;
+
+/**
+ * Fails the chat's jobs whose record says they run while the engine has
+ * ended their instance (terminated, errored or complete without their last
+ * step), or has none a minute after they were submitted (their start was
+ * cut off): each frees its place among the chat's running jobs, and
+ * settles its check. A job's own last step wins a race with this: a job
+ * ends once.
+ */
+const failDeadJobs = async (
+  env: Env,
+  workspaceId: AgentScope["workspaceId"],
+  chatId: AgentScope["chatId"]
+): Promise<void> => {
+  const chats = workspace(env, workspaceId);
+  const engine = runEngine(env);
+  const running = await chats.runningBuildJobs(chatId);
+  await Promise.all(
+    running.map(async ({ id, createdAt }) => {
+      const instance = await engine.status(id);
+      const dead =
+        instance === undefined
+          ? Date.now() - createdAt.getTime() > orphanedJobMs
+          : endedInstances.has(instance.status);
+      if (dead) {
+        await chats.endBuildJob(chatId, id, jobNotStarted);
+      }
+    })
+  );
+};
 
 /** What proposing a draft did. */
 export interface Proposal {
@@ -996,14 +1039,19 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
             throw appErrors.create("app.nothing_to_commit");
           }
         }
+        // A job whose instance is gone holds no place.
+        await failDeadJobs(this.env, workspaceId, chatId);
         await admitEffect(this.env, this.ctx.props);
-        const opened = await chats.openBuildJob(chatId, runId, {
-          appId: id,
-          kind,
-          message: message ?? null,
-        });
-        if (opened === null) {
-          throw agentErrors.create("agent.jobs_exhausted");
+        const opened = await chats.openBuildJob(
+          chatId,
+          runId,
+          { appId: id, kind, message: message ?? null },
+          maxFailedChecks
+        );
+        if ("refused" in opened) {
+          throw opened.refused === "jobs"
+            ? agentErrors.create("agent.jobs_exhausted")
+            : appErrors.create("app.checks_exhausted");
         }
         try {
           await runEngine(this.env).createInternal({
@@ -1012,15 +1060,14 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
             input: { workspaceId, chatId, jobId: opened.id },
           });
         } catch (error) {
-          // No instance runs it: it ends here, failed.
+          // No instance runs it: it ends here, failed, with the engine's
+          // own words in the log only.
+          log.error("agent.job_start_failed", {
+            jobId: opened.id,
+            ...errorFields(error),
+          });
           await chats
-            .endBuildJob(chatId, opened.id, {
-              status: "failed",
-              error: JSON.stringify({
-                code: "internal.unexpected",
-                message: messageOf(error),
-              }),
-            })
+            .endBuildJob(chatId, opened.id, jobNotStarted)
             .catch(logCountFailure);
           throw error;
         }
@@ -1035,14 +1082,16 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
 
   /**
    * One of this chat's build jobs (`submit`): how it stands, and once it
-   * has ended, what it came to. Another chat's reads as none. A job whose
-   * start was cut off, so that the engine has no instance of it a minute
-   * on, is recorded as failed here.
+   * has ended, what it came to. Another chat's reads as none, and so does
+   * one of an App the person no longer builds. A job whose instance ended
+   * or is gone while its record says it runs is recorded as failed here
+   * (`failDeadJobs`); one that committed before it ended has its version
+   * recorded, whatever ended it.
    */
   async job(id: unknown): Promise<BuildJobView> {
     return await this.#build(
       "build.job",
-      async () => {
+      async (by) => {
         const { workspaceId, chatId } = this.ctx.props;
         const chats = workspace(this.env, workspaceId);
         const found =
@@ -1050,22 +1099,21 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         if (found === undefined) {
           throw agentErrors.create("agent.job_not_found");
         }
-        if (
-          found.status === "running" &&
-          Date.now() - found.createdAt.getTime() > orphanedJobMs &&
-          (await runEngine(this.env).status(found.id)) === undefined
-        ) {
-          await chats.endBuildJob(chatId, found.id, {
-            status: "failed",
-            error: JSON.stringify({
-              code: "internal.unexpected",
-              message: "The job's start was cut off.",
-            }),
-          });
-          const ended = await chats.buildJob(chatId, found.id);
-          return jobView(ended ?? found);
+        await this.#buildable(by, found.appId);
+        await failDeadJobs(this.env, workspaceId, chatId);
+        if (found.version === null && found.intendedTree !== null) {
+          const version = await proposedFromChat(
+            this.env,
+            found.appId,
+            { parent: found.intendedParent, tree: found.intendedTree },
+            chatId
+          );
+          if (version !== undefined) {
+            await chats.recordBuildReceipt(chatId, found.id, version);
+          }
         }
-        return jobView(found);
+        const now = await chats.buildJob(chatId, found.id);
+        return jobView(now ?? found);
       },
       (view) => ({ job: view.id, status: view.status })
     );
