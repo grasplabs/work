@@ -96,8 +96,9 @@ export class StoreReader {
    */
   async read(request: ReadRequest): Promise<QueryAnswer> {
     let result: Awaited<ReturnType<OpenStore["read"]>>;
+    const staged = this.#staged?.();
     try {
-      result = await this.#store.read(this.#scope, request, this.#staged?.());
+      result = await this.#store.read(this.#scope, request, staged);
     } catch (error) {
       // A read that failed after it looked at records still depended on
       // them: count what the store says it read, then fail as it did,
@@ -107,6 +108,15 @@ export class StoreReader {
     }
     const { value, generations } = result;
     this.#record(generations);
+    // A record this mutation already changed is checked by its write's
+    // own expected revision (or is new): a guard on it would compare the
+    // commit's base with the revision the staged read showed, and fail.
+    const changing =
+      request.kind === "get" &&
+      (staged?.writes.some(
+        (write) => write.table === request.table && write.id === request.id
+      ) ??
+        false);
     // Once per record: an operation reading a record again and again
     // still hands its commit one guard for it (a later assertion of
     // another revision would have failed its read with a conflict).
@@ -114,6 +124,7 @@ export class StoreReader {
       request.kind === "get" &&
       request.expectedRevision !== null &&
       value !== null &&
+      !changing &&
       !this.#guards.some(
         ({ table, id }) => table === request.table && id === request.id
       )

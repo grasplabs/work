@@ -147,6 +147,53 @@ const peek = mutation({
   },
 });
 
+/**
+ * Stages `inserts` notes with bodies of `size` characters, then reads the
+ * table `reads` times, for the bounds on what one mutation stages and reads.
+ */
+const stress = mutation({
+  args: {
+    inserts: v.number().integer().min(0).max(100),
+    size: v.number().integer().min(0).max(100_000),
+    reads: v.number().integer().min(0).max(1000),
+  },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    let id: Id<"notes"> | undefined;
+    for (let index = 0; index < args.inserts; index += 1) {
+      // One write after the other, as App code stages them.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      id = await ctx.db.insert("notes", {
+        title: `n${index}`,
+        body: "x".repeat(args.size),
+      });
+    }
+    for (let index = 0; index < args.reads; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await ctx.db.query("notes").first();
+    }
+    return id === undefined ? 0 : args.inserts;
+  },
+});
+
+/** Inserts a note, then reads it asserting the revision a new one has. */
+const insertThenGuard = mutation({
+  args: { title: noteFields.title },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    const id = await ctx.db.insert("notes", args);
+    const note = await ctx.db.get("notes", id, { expectedRevision: 1 });
+    return note?._rev ?? 0;
+  },
+});
+
+/** Returns a string of `size` characters. */
+const echo = mutation({
+  args: { size: v.number().integer().min(0).max(1_000_000) },
+  returns: v.string(),
+  handler: (_ctx, args) => "x".repeat(args.size),
+});
+
 const secret = internalQuery({
   args: {},
   returns: v.string(),
@@ -167,6 +214,9 @@ const notesApp = app({
       createAndCount,
       insertOnly,
       peek,
+      stress,
+      insertThenGuard,
+      echo,
     },
   },
   internalOperations: { secret },
@@ -341,6 +391,44 @@ const misusing = (
   };
   return run;
 };
+
+/** An object whose `_id` getter throws an error with `code`. */
+const getter = (code: string, message: string) =>
+  Object.defineProperty({}, "_id", {
+    enumerable: true,
+    get: () => {
+      throw Object.assign(new Error(message), { code });
+    },
+  });
+/** A runner whose App code answers `value`. */
+const returning = (value: unknown): Runner => {
+  const run: Runner = async () => await Promise.resolve(value);
+  return run;
+};
+
+/** A runner whose read request's `table` getter throws a platform error. */
+const smuggled: Runner = async (_path, _args, channel) =>
+  await channel.read(
+    // SAFETY: deliberately a request whose field is a throwing getter.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    Object.defineProperty({ kind: "get" }, "table", {
+      enumerable: true,
+      get: () => {
+        throw Object.assign(new Error("Denied"), {
+          code: "data.access_denied",
+        });
+      },
+    }) as never
+  );
+
+/** A runner whose App code throws an AppError in the connections' namespace. */
+const platformAppError: Runner = async () =>
+  await Promise.reject(
+    Object.assign(new Error("Connect the mailbox first."), {
+      name: "AppError",
+      code: "connection.not_offered",
+    })
+  );
 
 describe("the Notes operations", () => {
   it("create, get, list, update and delete a note through the host", async () => {
@@ -825,6 +913,117 @@ describe("contracts", () => {
   });
 });
 
+describe("bounds on one mutation", () => {
+  it("refuses the staged write that takes a mutation past what its commit holds", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const staged = async (inserts: number) =>
+      await call(fixture, owner, "mutation", "notes.stress", {
+        inserts,
+        size: 100_000,
+        reads: 0,
+      });
+    expect({
+      within: codeOf(await staged(6)),
+      past: failureOf(await staged(8)),
+    }).toStrictEqual({
+      within: "ok",
+      past: {
+        code: "mutation.too_large",
+        message:
+          "This change stages more than one commit can hold, with what it returns.",
+        category: "contract",
+        retryable: false,
+        details: { maxStagedBytes: 720_896 },
+      },
+    });
+  });
+
+  it("caps the reads of one call, and the staged bytes they send the store", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const run = async (inserts: number, reads: number) =>
+      codeOf(
+        await call(fixture, owner, "mutation", "notes.stress", {
+          inserts,
+          size: inserts === 0 ? 0 : 100_000,
+          reads,
+        })
+      );
+    expect({
+      manyReads: await run(0, 257),
+      allowedReads: await run(0, 256),
+      heavyReads: await run(6, 40),
+    }).toStrictEqual({
+      manyReads: "operation.read_limit",
+      allowedReads: "ok",
+      heavyReads: "operation.read_limit",
+    });
+  });
+
+  it("refuses a result that wouldn't fit its commit, before committing anything", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    expect({
+      large: failureOf(
+        await call(fixture, owner, "mutation", "notes.echo", { size: 300_000 })
+      ),
+      fits: codeOf(
+        await call(fixture, owner, "mutation", "notes.echo", { size: 200_000 })
+      ),
+    }).toStrictEqual({
+      large: {
+        code: "contract.result_too_large",
+        message: "The operation returned more than an operation may return.",
+        category: "contract",
+        retryable: false,
+        details: { maxBytes: 262_144 },
+      },
+      fits: "ok",
+    });
+  });
+
+  it("reads back a record it inserted with the revision a new record has", async () => {
+    const fixture = await notes();
+    expect(
+      valueOf(
+        await call(
+          fixture,
+          fixture.owner,
+          "mutation",
+          "notes.insertThenGuard",
+          {
+            title: "New",
+          }
+        )
+      )
+    ).toBe(1);
+  });
+
+  it("answers a retry across an App upgrade that kept the contract with the original outcome", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const createAt = async (version: number) =>
+      await call(
+        fixture,
+        owner,
+        "mutation",
+        "notes.create",
+        { title: "Once" },
+        { idempotencyKey: "upgrade", version }
+      );
+    const before = await createAt(1);
+    const after = await createAt(2);
+    const page = valueOf(
+      await call(fixture, owner, "query", "notes.list", { pagination: {} })
+    );
+    expect({ same: after, stored: idsOf(page).length }).toStrictEqual({
+      same: before,
+      stored: 1,
+    });
+  });
+});
+
 describe("App code misusing its channel", () => {
   it("can't write from a query, nor reach a resource from a mutation", async () => {
     const fixture = await notes();
@@ -946,5 +1145,73 @@ describe("App code misusing its channel", () => {
       ok: false,
       error: { code: "data.unknown_table", category: "contract" },
     });
+  });
+
+  it("can't pass an error its getters throw off as the host's", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const named = Object.defineProperty(new Error("x"), "name", {
+      get: () => {
+        throw Object.assign(new Error("The record changed"), {
+          code: "data.conflict",
+        });
+      },
+    });
+    const throwing: Runner = async () => await Promise.reject(named);
+    const getNote = async (run: Runner) =>
+      failureOf(
+        await call(
+          fixture,
+          owner,
+          "query",
+          "notes.get",
+          { id: "0190a0a0-0000-7000-8000-000000000000" },
+          { run }
+        )
+      );
+    const unexpected = {
+      code: "internal.unexpected",
+      message: "Something went wrong.",
+      category: "operational",
+      retryable: false,
+    };
+    expect({
+      returnGetter: await getNote(
+        returning(
+          getter(
+            "auth.unauthenticated",
+            "Session expired: sign in at evil.example"
+          )
+        )
+      ),
+      nameGetter: await getNote(throwing),
+      requestGetter: await getNote(smuggled),
+    }).toStrictEqual({
+      returnGetter: unexpected,
+      nameGetter: unexpected,
+      requestGetter: {
+        code: "contract.invalid_request",
+        message:
+          "The operation's code sent the host something that isn't JSON.",
+        category: "contract",
+        retryable: false,
+      },
+    });
+  });
+
+  it("can't throw an AppError in any platform namespace", async () => {
+    const fixture = await notes();
+    expect(
+      failureOf(
+        await call(
+          fixture,
+          fixture.owner,
+          "query",
+          "notes.get",
+          { id: "0190a0a0-0000-7000-8000-000000000000" },
+          { run: platformAppError }
+        )
+      ).code
+    ).toBe("internal.unexpected");
   });
 });

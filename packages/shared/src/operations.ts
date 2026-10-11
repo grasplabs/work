@@ -1,4 +1,9 @@
-import { defineErrorFamily, isExpectedCode } from "./errors.ts";
+import { platformErrorNamespaces } from "./error-namespaces.ts";
+import {
+  defineErrorFamily,
+  expectedNamespaces,
+  isExpectedCode,
+} from "./errors.ts";
 import type { Json } from "./json.ts";
 import { valueDepth } from "./value-depth.ts";
 
@@ -61,6 +66,12 @@ export const operationErrors = defineErrorFamily({
     "The operation built a query its schema doesn't allow.",
   "contract.invalid_write":
     "The operation staged a change its schema doesn't allow.",
+  "contract.invalid_request":
+    "The operation's code sent the host something that isn't JSON.",
+  "mutation.too_large":
+    "This change stages more than one commit can hold, with what it returns.",
+  "operation.read_limit":
+    "This call read the store more often, or with more staged changes, than one call may.",
   "mutation.concurrent_change":
     "The records changed while this change was made. Try again.",
 });
@@ -81,6 +92,7 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "data.scan_limit": "source",
   "data.index_required": "source",
   "contract.invalid_query": "source",
+  "mutation.too_large": "contract",
   "effect.outcome_unknown": "uncertain",
 };
 
@@ -119,9 +131,23 @@ export const categoryOf = (code: string): ErrorCategory => {
 export const isRetryableCode = (code: string): boolean =>
   retryableCodes.has(code);
 
-/** Whether `code` is a platform error's, which App code can't throw as its own. */
-export const isPlatformCode = (code: unknown): code is string =>
-  isExpectedCode(code);
+/**
+ * Whether `code` is, or could pass for, a platform error's, which App code
+ * can't throw as its own: an expected code of any family loaded, or any
+ * code in a namespace a family or the SDK uses, from the live registry as
+ * well as the list the SDK carries.
+ */
+export const isPlatformCode = (code: unknown): code is string => {
+  if (typeof code !== "string") {
+    return false;
+  }
+  const namespace = code.slice(0, Math.max(code.indexOf("."), 0));
+  return (
+    isExpectedCode(code) ||
+    platformErrorNamespaces.has(namespace) ||
+    expectedNamespaces().has(namespace)
+  );
+};
 
 /**
  * A JSON copy of `value` (null, strings, booleans, finite numbers, dense
@@ -173,4 +199,113 @@ export const jsonOf = (value: unknown, depth = 1): Json | undefined => {
     Object.defineProperty(copy, key, { enumerable: true, value: item });
   }
   return copy;
+};
+
+const encoder = new TextEncoder();
+
+/** What `jsonWithin`'s walk answers for a value that isn't a scalar. */
+const notScalar = Symbol("not a scalar");
+
+/** The bytes of `text` as UTF-8, without encoding text plainly too long. */
+const stringBytes = (text: string, remaining: number): number =>
+  text.length > remaining
+    ? Number.POSITIVE_INFINITY
+    : encoder.encode(JSON.stringify(text)).byteLength;
+
+/**
+ * `value` as `jsonOf` copies it, with the bytes of its JSON text, if those
+ * are at most `maxBytes`: counted as the walk goes, which stops as soon as
+ * the count passes the limit (`"too_large"`), so a large value costs no
+ * more than the limit to refuse. Undefined for what isn't JSON.
+ */
+export const jsonWithin = (
+  value: unknown,
+  maxBytes: number
+): { json: Json; bytes: number } | "too_large" | undefined => {
+  let used = 0;
+  let over = false;
+  const spend = (bytes: number): boolean => {
+    used += bytes;
+    over = used > maxBytes;
+    return !over;
+  };
+  /** A scalar's copy, or undefined; `notScalar` when `item` isn't one. */
+  const scalar = (item: unknown): Json | undefined | typeof notScalar => {
+    if (item === null) {
+      return spend(4) ? null : undefined;
+    }
+    if (typeof item === "string") {
+      return spend(stringBytes(item, maxBytes - used)) ? item : undefined;
+    }
+    if (typeof item === "boolean") {
+      return spend(item ? 4 : 5) ? item : undefined;
+    }
+    if (typeof item === "number") {
+      return Number.isFinite(item) && spend(JSON.stringify(item).length)
+        ? item
+        : undefined;
+    }
+    return notScalar;
+  };
+  const array = (item: unknown[], depth: number): Json | undefined => {
+    const items: Json[] = [];
+    if (!spend(2 + Math.max(item.length - 1, 0))) {
+      return undefined;
+    }
+    for (let index = 0; index < item.length; index += 1) {
+      const entry = Object.hasOwn(item, index)
+        ? // oxlint-disable-next-line no-use-before-define -- arrays and objects nest each other
+          walk(item[index], depth + 1)
+        : undefined;
+      if (entry === undefined) {
+        return undefined;
+      }
+      items.push(entry);
+    }
+    return items;
+  };
+  const object = (item: object, depth: number): Json | undefined => {
+    const prototype: unknown = Reflect.getPrototypeOf(item);
+    if (prototype !== Object.prototype && prototype !== null) {
+      return undefined;
+    }
+    const entries = Object.entries(item);
+    if (!spend(2 + Math.max(entries.length - 1, 0))) {
+      return undefined;
+    }
+    const copy: Record<string, Json> = {};
+    for (const [key, entry] of entries) {
+      if (
+        key === "__proto__" ||
+        !spend(stringBytes(key, maxBytes - used) + 1)
+      ) {
+        return undefined;
+      }
+      // oxlint-disable-next-line no-use-before-define -- arrays and objects nest each other
+      const copied = walk(entry, depth + 1);
+      if (copied === undefined) {
+        return undefined;
+      }
+      Object.defineProperty(copy, key, { enumerable: true, value: copied });
+    }
+    return copy;
+  };
+  const walk = (item: unknown, depth: number): Json | undefined => {
+    if (over || depth > valueDepth) {
+      return undefined;
+    }
+    const copied = scalar(item);
+    if (copied !== notScalar) {
+      return copied;
+    }
+    if (typeof item !== "object" || item === null) {
+      return undefined;
+    }
+    return Array.isArray(item) ? array(item, depth) : object(item, depth);
+  };
+  const json = walk(value, 1);
+  if (over) {
+    return "too_large";
+  }
+  return json === undefined ? undefined : { json, bytes: used };
 };

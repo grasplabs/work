@@ -14,15 +14,19 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import {
   appErrorDetailsMaxBytes,
   appErrorMessageMaxLength,
+  invocationMaxReads,
   isAppErrorCode,
+  mutationResultMaxBytes,
   operationInputMaxBytes,
   operationResultMaxBytes,
+  stagedReadMaxBytes,
 } from "@grasp-os/shared/operation-limits";
 import {
   categoryOf,
   isPlatformCode,
   isRetryableCode,
   jsonOf,
+  jsonWithin,
   operationErrors,
 } from "@grasp-os/shared/operations";
 import type {
@@ -35,7 +39,11 @@ import {
   writeRequestSchema,
 } from "@grasp-os/shared/store-queries";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
-import { commitMaxWrites, dataErrors } from "@grasp-os/shared/stores";
+import {
+  commitMaxWrites,
+  dataErrors,
+  stagedMaxBytes,
+} from "@grasp-os/shared/stores";
 import type {
   StagedWrites,
   StoreFields,
@@ -181,6 +189,8 @@ type ValueDescriptorLike = OperationManifest["args"];
 /** What the host derives from a manifest once. */
 interface Compiled {
   readonly hash: Promise<string>;
+  /** Each function's receipt contract, once computed (`contractIdOf`). */
+  readonly contracts: Map<string, Promise<string>>;
   readonly args: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
   readonly returns: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
   readonly tables: ReadonlyMap<string, CheckedTable>;
@@ -223,6 +233,7 @@ const compiledOf = (manifest: AppManifest): Compiled => {
   }
   const compiled: Compiled = {
     hash: schemaHash(manifest.schema),
+    contracts: new Map(),
     args,
     returns,
     tables,
@@ -247,6 +258,56 @@ const issuesOf = (
   issues.map(({ path = [], message }) =>
     path.length === 0 ? message : `${path.map(String).join(".")}: ${message}`
   );
+
+/**
+ * Errors the host made or got from its own subsystems (the store, the
+ * App's roles, the channel's capabilities): the only expected errors a
+ * caller gets as they are (`payloadOf`). An error with an expected code
+ * that App code made, or one its getters threw while the host read what
+ * it returned, is never among them.
+ */
+const hostErrors = new WeakSet<object>();
+
+/** `error`, branded as the host's. */
+const hostError = <Failure extends Error>(error: Failure): Failure => {
+  hostErrors.add(error);
+  return error;
+};
+
+/** Brands an expected error the host raised to App code (the channel's). */
+const trust = (error: Error): void => {
+  hostErrors.add(error);
+};
+
+/**
+ * Runs `work`, host code that touches no App value, branding the expected
+ * errors it throws as the host's.
+ */
+const trusted = async <Answer>(
+  work: () => Answer | Promise<Answer>
+): Promise<Answer> => {
+  try {
+    return await work();
+  } catch (error) {
+    if (isExpectedError(error)) {
+      hostErrors.add(error);
+    }
+    throw error;
+  }
+};
+
+/**
+ * Runs `work`, which reads a value App code made: whatever it throws (a
+ * getter's error among them) becomes an unexpected failure, logged.
+ */
+const fromApp = <Answer>(work: () => Answer): Answer => {
+  try {
+    return work();
+  } catch (error) {
+    log.error("operation.app_value_threw", errorFields(error));
+    throw Object.assign(new Error("Unexpected failure"), { unexpected: true });
+  }
+};
 
 /**
  * The function `reference` names in the App's public tree, of its kind:
@@ -275,25 +336,30 @@ const publicOperation = (
   return operation;
 };
 
-/** `args` as the function's `args` normalize them, read as JSON and bounded. */
+/**
+ * `args` as the function's `args` normalize them, read as JSON and bounded:
+ * measured as they are read, so input past the limit costs no more than
+ * the limit to refuse. The bytes a call carries over the wire, before any
+ * of this, are bounded where calls enter core (GRA-245).
+ */
 const admittedArgs = (
   compiled: Compiled,
   operation: OperationManifest,
   args: unknown
 ): Json => {
-  const json = jsonOf(args);
-  if (json === undefined) {
-    throw operationErrors.create("contract.invalid_args", {
-      issues: ["The arguments aren't JSON"],
-    });
-  }
-  if (bytesOf(json) > operationInputMaxBytes) {
+  const read = jsonWithin(args, operationInputMaxBytes);
+  if (read === "too_large") {
     throw operationErrors.create("contract.input_too_large", {
       maxBytes: operationInputMaxBytes,
     });
   }
+  if (read === undefined) {
+    throw operationErrors.create("contract.invalid_args", {
+      issues: ["The arguments aren't JSON"],
+    });
+  }
   const schema = compiled.args.get(operation.path);
-  const result = schema?.["~standard"].validate(json);
+  const result = schema?.["~standard"].validate(read.json);
   if (result === undefined || result.issues !== undefined) {
     throw operationErrors.create("contract.invalid_args", {
       issues: issuesOf(result?.issues ?? []),
@@ -308,43 +374,81 @@ const admittedArgs = (
 
 /**
  * What a handler returned, if its contract allows it exactly: JSON within
- * `operationResultMaxBytes`, valid, and already as the contract
- * normalizes it (no default left out, nothing to trim).
+ * `maxBytes`, valid, and already as the contract normalizes it (no default
+ * left out, nothing to trim). The value is App code's: reading it can run
+ * its getters, so anything reading it throws becomes `internal.unexpected`
+ * (`fromApp`), never an error the caller would take for the host's.
  */
 const checkedReturn = (
   compiled: Compiled,
   operation: OperationManifest,
-  value: unknown
+  value: unknown,
+  maxBytes: number
 ): Json => {
-  const json = jsonOf(value);
-  if (json === undefined) {
-    throw operationErrors.create("contract.invalid_return", {
-      issues: ["The value isn't JSON"],
-    });
+  const read = fromApp(() => jsonWithin(value, maxBytes));
+  if (read === "too_large") {
+    throw hostError(
+      operationErrors.create("contract.result_too_large", { maxBytes })
+    );
   }
-  if (bytesOf(json) > operationResultMaxBytes) {
-    throw operationErrors.create("contract.result_too_large", {
-      maxBytes: operationResultMaxBytes,
-    });
+  if (read === undefined) {
+    throw hostError(
+      operationErrors.create("contract.invalid_return", {
+        issues: ["The value isn't JSON"],
+      })
+    );
   }
+  const { json } = read;
   const result = compiled.returns
     .get(operation.path)
     ?.["~standard"].validate(json);
   if (result === undefined || result.issues !== undefined) {
-    throw operationErrors.create("contract.invalid_return", {
-      issues: issuesOf(result?.issues ?? []),
-    });
+    throw hostError(
+      operationErrors.create("contract.invalid_return", {
+        issues: issuesOf(result?.issues ?? []),
+      })
+    );
   }
   const normalized = jsonOf(result.value);
   if (
     normalized === undefined ||
     canonicalJson(normalized) !== canonicalJson(json)
   ) {
-    throw operationErrors.create("contract.invalid_return", {
-      issues: ["The value isn't in the form its contract normalizes it to"],
-    });
+    throw hostError(
+      operationErrors.create("contract.invalid_return", {
+        issues: ["The value isn't in the form its contract normalizes it to"],
+      })
+    );
   }
   return json;
+};
+
+/**
+ * The receipt contract of `operation`: its path and a fingerprint of its
+ * argument and return descriptors, which a compatible revision of the App
+ * keeps, so a retry across such an upgrade gets the outcome it had (spec
+ * 9.5: the receipt identity holds the contract ID and version, and host
+ * contract IDs survive compatible revisions, 7.1).
+ */
+const contractIdOf = async (
+  compiled: Compiled,
+  operation: OperationManifest
+): Promise<string> => {
+  const known = compiled.contracts.get(operation.path);
+  if (known !== undefined) {
+    return await known;
+  }
+  const made = (async () => {
+    const hash = await sha256Hex(
+      canonicalJson(
+        // Descriptors are JSON data, as the manifest holds them.
+        jsonOf({ args: operation.args, returns: operation.returns }) ?? null
+      )
+    );
+    return `${operation.path}@${hash.slice(0, 32)}`;
+  })();
+  compiled.contracts.set(operation.path, made);
+  return await made;
 };
 
 /** Domain failures App code threw, as the host rebuilt them: code and details. */
@@ -352,6 +456,27 @@ const domainFailures = new WeakMap<
   object,
   { readonly code: string; readonly details: Json | undefined }
 >();
+
+/**
+ * `error` as a run of App code may end with it: a failure the host
+ * decided (its own branded errors, a rebuilt domain failure, an
+ * unexpected one), or anything else, which nothing decided and so is
+ * unexpected. What a run throws passes through this before any host code
+ * that brands errors can see it.
+ */
+const sealed = (error: unknown): unknown => {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    (hostErrors.has(error) ||
+      domainFailures.has(error) ||
+      Object.hasOwn(error, "unexpected"))
+  ) {
+    return error;
+  }
+  log.error("operation.unsealed_failure", errorFields(error));
+  return Object.assign(new Error("Unexpected failure"), { unexpected: true });
+};
 
 /** The SDK's own refusals of a query or write App code built wrongly. */
 const sdkDefinitionCodes: ReadonlySet<unknown> = new Set([
@@ -380,40 +505,66 @@ const failureOf = (
   requestId: string,
   path: string
 ): Error => {
-  const code = field(thrown, "code");
-  const message = field(thrown, "message");
-  if (field(thrown, "name") === "AppError" && isAppErrorCode(code)) {
-    const rawDetails = field(thrown, "details");
-    const details =
-      rawDetails === undefined ? undefined : appErrorDetailsOf(rawDetails);
+  // Every read of what App code threw may run its getters: what they
+  // throw is an unexpected failure, never taken for the host's.
+  let failure: {
+    code: unknown;
+    message: unknown;
+    name: unknown;
+    details: unknown;
+  };
+  try {
+    failure = {
+      code: field(thrown, "code"),
+      message: field(thrown, "message"),
+      name: field(thrown, "name"),
+      details: field(thrown, "details"),
+    };
+  } catch (error) {
+    log.error("operation.failure_threw", {
+      requestId,
+      path,
+      ...errorFields(error),
+    });
+    return Object.assign(new Error("Unexpected failure"), { unexpected: true });
+  }
+  const { code, message, name } = failure;
+  if (name === "AppError" && isAppErrorCode(code) && !isPlatformCode(code)) {
+    const details = fromApp(() =>
+      failure.details === undefined
+        ? undefined
+        : appErrorDetailsOf(failure.details)
+    );
     if (
       typeof message !== "string" ||
       message.length === 0 ||
       message.length > appErrorMessageMaxLength ||
-      (rawDetails !== undefined && details === undefined)
+      (failure.details !== undefined && details === undefined)
     ) {
-      return operationErrors.create("contract.invalid_error", {
-        maxMessageLength: appErrorMessageMaxLength,
-        maxDetailsBytes: appErrorDetailsMaxBytes,
-      });
+      return hostError(
+        operationErrors.create("contract.invalid_error", {
+          maxMessageLength: appErrorMessageMaxLength,
+          maxDetailsBytes: appErrorDetailsMaxBytes,
+        })
+      );
     }
-    const failure = new Error(message);
-    domainFailures.set(failure, { code, details });
-    return failure;
+    const domain = new Error(message);
+    domainFailures.set(domain, { code, details });
+    return domain;
   }
   if (typeof code === "string" && isPlatformCode(code)) {
     const raised = open.raised(code);
     if (raised !== undefined) {
-      return raised;
+      return hostError(raised);
     }
   }
   if (sdkDefinitionCodes.has(code)) {
-    return operationErrors.create("contract.invalid_query");
+    return hostError(operationErrors.create("contract.invalid_query"));
   }
   log.error("operation.failed", {
     requestId,
     path,
-    ...errorFields(thrown),
+    code: typeof code === "string" ? code : undefined,
   });
   return Object.assign(new Error("Unexpected failure"), { unexpected: true });
 };
@@ -465,7 +616,9 @@ const payloadOf = (
       ...(details === undefined ? {} : { details }),
     };
   }
-  if (isExpectedError(error)) {
+  // Only an expected error the host made or got from its own subsystems
+  // counts: one with a platform code from anywhere else is unexpected.
+  if (isExpectedError(error) && hostErrors.has(error)) {
     const details = safeDetails(error.details);
     return {
       code: error.code,
@@ -476,7 +629,7 @@ const payloadOf = (
       ...(details === undefined ? {} : { details }),
     };
   }
-  if (field(error, "unexpected") !== true) {
+  if (error instanceof Error && !Object.hasOwn(error, "unexpected")) {
     log.error("operation.failed", { requestId, path, ...errorFields(error) });
   }
   return {
@@ -532,6 +685,8 @@ const settle = async (
 interface Staging {
   /** When they were staged: the time the records they change are stamped with. */
   readonly stagedAt: number;
+  /** The bytes of the writes staged so far, as UTF-8 JSON. */
+  readonly bytes: () => number;
   readonly stage: (request: unknown) => Promise<unknown>;
   readonly preview: () => StagedWrites | undefined;
   readonly writes: () => StagedWrites["writes"];
@@ -582,6 +737,22 @@ const stagingFor = (
   stagedAt: number
 ): Staging => {
   const writes: StagedWrites["writes"] = [];
+  let staged = 2;
+  /**
+   * Stages `write`, refused (`mutation.too_large`) when it would take the
+   * staged writes past `stagedMaxBytes`, so what a mutation stages always
+   * fits its commit, with its result.
+   */
+  const push = (write: StagedWrites["writes"][number]): void => {
+    const bytes = bytesOf(write) + 1;
+    if (staged + bytes > stagedMaxBytes) {
+      throw operationErrors.create("mutation.too_large", {
+        maxStagedBytes: stagedMaxBytes,
+      });
+    }
+    staged += bytes;
+    writes.push(write);
+  };
   const stage = async (request: unknown): Promise<unknown> => {
     const write = operationErrors.parse(
       "contract.invalid_write",
@@ -604,7 +775,7 @@ const stagingFor = (
     }
     if (write.kind === "insert") {
       const id = mintRecordId(stagedAt);
-      writes.push({
+      push({
         op: "insert",
         table: write.table,
         id,
@@ -613,7 +784,7 @@ const stagingFor = (
       return await Promise.resolve(id);
     }
     if (write.kind === "replace") {
-      writes.push({
+      push({
         op: "replace",
         table: write.table,
         id: write.id,
@@ -623,7 +794,7 @@ const stagingFor = (
       return null;
     }
     if (write.kind === "delete") {
-      writes.push({
+      push({
         op: "delete",
         table: write.table,
         id: write.id,
@@ -665,7 +836,7 @@ const stagingFor = (
         });
       }
     }
-    writes.push({
+    push({
       op: "patch",
       table: write.table,
       id: write.id,
@@ -677,6 +848,7 @@ const stagingFor = (
   };
   return {
     stagedAt,
+    bytes: () => staged,
     stage,
     preview: () =>
       writes.length === 0 ? undefined : { stagedAt, writes: [...writes] },
@@ -697,6 +869,35 @@ const scopeOf = async (
   consumer: { ...invocation.consumer },
 });
 
+/** What one run of a function may still read: its reads, and staged bytes sent. */
+interface ReadBudget {
+  reads: number;
+  shipped: number;
+}
+
+/** A new run's read budget. */
+const readBudget = (): ReadBudget => ({ reads: 0, shipped: 0 });
+
+/**
+ * Spends one read of `budget`, sending `staged` bytes of staged writes
+ * with it: `operation.read_limit` past `invocationMaxReads` reads or
+ * `stagedReadMaxBytes` sent, so one call can't make the store apply its
+ * staged writes without end.
+ */
+const spendRead = (budget: ReadBudget, staged: number): void => {
+  budget.reads += 1;
+  budget.shipped += staged;
+  if (
+    budget.reads > invocationMaxReads ||
+    budget.shipped > stagedReadMaxBytes
+  ) {
+    throw operationErrors.create("operation.read_limit", {
+      maxReads: invocationMaxReads,
+      maxStagedBytes: stagedReadMaxBytes,
+    });
+  }
+};
+
 /** Runs a query: its reads one state of the store (`readConsistently`). */
 const runQuery = async (
   app: HostedApp,
@@ -705,45 +906,68 @@ const runQuery = async (
   operation: OperationManifest,
   args: Json
 ): Promise<Json> => {
-  const scope = await scopeOf(
-    compiled,
-    invocation,
-    await invocation.authorize()
+  const scope = await trusted(
+    async () =>
+      await scopeOf(compiled, invocation, await invocation.authorize())
   );
-  return await readConsistently(invocation.store, scope, async (reader) => {
-    const open = openChannel({
-      requestId: invocation.requestId,
-      path: operation.path,
-      read: async (request) => await readFor(operation, reader, request),
-      refusals: {
-        read: "operation.no_database",
-        write: "operation.read_only",
-        call: "operation.read_only",
-        resource: "operation.no_resources",
-      },
-    });
-    try {
-      const outcome = await settle(app.run(operation.path, args, open.channel));
-      if ("thrown" in outcome) {
-        throw failureOf(
-          outcome.thrown,
-          open,
-          invocation.requestId,
-          operation.path
-        );
-      }
-      return checkedReturn(compiled, operation, outcome.value);
-    } finally {
-      open.end();
-    }
-  });
+  return await trusted(
+    async () =>
+      await readConsistently(invocation.store, scope, async (reader) => {
+        const budget = readBudget();
+        const open = openChannel({
+          requestId: invocation.requestId,
+          path: operation.path,
+          read: async (request) => {
+            spendRead(budget, 0);
+            return await readFor(operation, reader, request);
+          },
+          trust,
+          refusals: {
+            read: "operation.no_database",
+            write: "operation.read_only",
+            call: "operation.read_only",
+            resource: "operation.no_resources",
+          },
+        });
+        try {
+          const outcome = await settle(
+            app.run(operation.path, args, open.channel)
+          );
+          if ("thrown" in outcome) {
+            throw failureOf(
+              outcome.thrown,
+              open,
+              invocation.requestId,
+              operation.path
+            );
+          }
+          return checkedReturn(
+            compiled,
+            operation,
+            outcome.value,
+            operationResultMaxBytes
+          );
+        } catch (error) {
+          throw sealed(error);
+        } finally {
+          open.end();
+        }
+      })
+  );
 };
+
+/** Whether two role readings differ. */
+const rolesDiffer = (one: WriterRoles, other: WriterRoles): boolean =>
+  one.appMember !== other.appMember || one.appBuilder !== other.appBuilder;
 
 /**
  * Runs a mutation under its receipt: claimed first (a submission that
  * committed already answers its outcome), run, its return checked, the
- * caller authorized again, then committed with its guards and read set;
- * run again when a commit finds its reads stale.
+ * caller authorized again, then committed with its guards and read set.
+ * It runs again, within `queryMaxReruns`, when a commit finds its reads
+ * stale, or when the caller's roles changed since its reads were scoped,
+ * so nothing it read under roles the caller no longer has is committed or
+ * kept with its receipt.
  */
 const runMutation = async (
   app: HostedApp,
@@ -761,34 +985,45 @@ const runMutation = async (
           idempotencyKeySchema,
           options.idempotencyKey
         );
-  const roles = await invocation.authorize();
-  const scope = await scopeOf(compiled, invocation, roles);
   const { store } = invocation;
-  const claimed = await store.claim({
-    scope: {
-      principal: invocation.principal,
-      resource: invocation.consumer.resourceId,
-      binding: null,
-      contractId: operation.path,
-      contractVersion: invocation.consumer.resourceVersion,
-      operationKind: "mutation",
-    },
-    key: ["call", key],
-    inputHash: await sha256Hex(canonicalJson(args)),
-    runId: invocation.runId,
-    deadline: invocation.deadline,
-  });
+  let roles = await trusted(invocation.authorize);
+  const claimed = await trusted(
+    async () =>
+      await store.claim({
+        scope: {
+          principal: invocation.principal,
+          resource: invocation.consumer.resourceId,
+          binding: null,
+          // The contract, not the App's version: a retry across an upgrade
+          // that kept the function's contract gets the outcome it had.
+          contractId: await contractIdOf(compiled, operation),
+          contractVersion: 1,
+          operationKind: "mutation",
+        },
+        key: ["call", key],
+        inputHash: await sha256Hex(canonicalJson(args)),
+        runId: invocation.runId,
+        deadline: invocation.deadline,
+      })
+  );
   if ("outcome" in claimed) {
     return claimed.outcome.result;
   }
   for (let run = 0; run <= queryMaxReruns; run += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one run after the other
+    const scope = await scopeOf(compiled, invocation, roles);
     const staging = stagingFor(compiled, operation, Date.now());
     const reader = new StoreReader(store, scope, staging.preview);
+    const budget = readBudget();
     const open = openChannel({
       requestId: invocation.requestId,
       path: operation.path,
-      read: async (request) => await readFor(operation, reader, request),
+      read: async (request) => {
+        spendRead(budget, staging.bytes());
+        return await readFor(operation, reader, request);
+      },
       write: staging.stage,
+      trust,
       refusals: {
         read: "operation.no_database",
         write: "operation.read_only",
@@ -807,7 +1042,7 @@ const runMutation = async (
       if ("thrown" in outcome) {
         // A failure torn reads may have caused is a stale run too.
         // oxlint-disable-next-line no-await-in-loop -- see above
-        if (!(await reader.isCurrent())) {
+        if (!(await trusted(async () => await reader.isCurrent()))) {
           continue;
         }
         throw failureOf(
@@ -817,25 +1052,39 @@ const runMutation = async (
           operation.path
         );
       }
-      value = checkedReturn(compiled, operation, outcome.value);
+      value = checkedReturn(
+        compiled,
+        operation,
+        outcome.value,
+        mutationResultMaxBytes
+      );
+    } catch (error) {
+      throw sealed(error);
     } finally {
       open.end();
     }
     // oxlint-disable-next-line no-await-in-loop -- see above
-    const current = await invocation.authorize();
+    const current = await trusted(invocation.authorize);
+    if (rolesDiffer(current, roles)) {
+      roles = current;
+      continue;
+    }
     try {
       // oxlint-disable-next-line no-await-in-loop -- see above
-      const committed = await store.commit({
-        principal: { userId: invocation.principal },
-        roles: current,
-        schemaHash: scope.schemaHash,
-        receipt: claimed.held,
-        stagedAt: staging.stagedAt,
-        guards: [...reader.guards()],
-        readSet: reader.readSet(),
-        writes: staging.writes(),
-        result: value,
-      });
+      const committed = await trusted(
+        async () =>
+          await store.commit({
+            principal: { userId: invocation.principal },
+            roles: current,
+            schemaHash: scope.schemaHash,
+            receipt: claimed.held,
+            stagedAt: staging.stagedAt,
+            guards: [...reader.guards()],
+            readSet: reader.readSet(),
+            writes: staging.writes(),
+            result: value,
+          })
+      );
       return committed.result;
     } catch (error) {
       if (dataErrors.codeOf(error) !== "data.reads_changed") {
@@ -843,9 +1092,9 @@ const runMutation = async (
       }
     }
   }
-  throw operationErrors.create("mutation.concurrent_change", {
-    retryable: true,
-  });
+  throw hostError(
+    operationErrors.create("mutation.concurrent_change", { retryable: true })
+  );
 };
 
 /**
@@ -862,9 +1111,15 @@ export const callOperation = async (
 ): Promise<OperationResult> => {
   const path = typeof reference.path === "string" ? reference.path : "";
   try {
-    const compiled = compiledOf(app.manifest);
-    const operation = publicOperation(app.manifest, reference);
-    const admitted = admittedArgs(compiled, operation, args);
+    const { compiled, operation, admitted } = await trusted(() => {
+      const known = compiledOf(app.manifest);
+      const found = publicOperation(app.manifest, reference);
+      return {
+        compiled: known,
+        operation: found,
+        admitted: admittedArgs(known, found, args),
+      };
+    });
     const value =
       operation.kind === "query"
         ? await runQuery(app, compiled, invocation, operation, admitted)

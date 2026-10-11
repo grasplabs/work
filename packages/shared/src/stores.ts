@@ -48,6 +48,15 @@ export const documentMaxBytes = 128 * 1024;
 export const commitMaxInputBytes = 1024 * 1024;
 
 /**
+ * The most bytes of writes one mutation may stage, as UTF-8 JSON: what is
+ * left of a commit's bound after its result (at most 256 KiB,
+ * `mutationResultMaxBytes`) and its guards and read set (at most 100 and
+ * 64, well within 64 KiB), so a mutation that stages within it always fits
+ * its commit. The operation host refuses the write that passes it.
+ */
+export const stagedMaxBytes = commitMaxInputBytes - 256 * 1024 - 64 * 1024;
+
+/**
  * How deeply a record's JSON may nest: a field's value gets `valueDepth`
  * levels, counted from the field (its value is level 1, its leaf
  * included), as deep as any value may be.

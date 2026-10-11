@@ -1,8 +1,9 @@
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import type { CodedError } from "@grasp-os/shared/errors";
+import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { operationErrors } from "@grasp-os/shared/operations";
+import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import { RpcTarget } from "cloudflare:workers";
 
 // The one authority an App's code is handed for one invocation of one of
@@ -39,6 +40,8 @@ export interface ChannelCapabilities {
   readonly write?: Capability;
   readonly call?: Capability;
   readonly resource?: Capability;
+  /** Brands an expected error the channel raised as the host's. */
+  readonly trust: (error: Error) => void;
   /** The refusal for each capability it hasn't. */
   readonly refusals: Readonly<
     Record<
@@ -47,6 +50,25 @@ export interface ChannelCapabilities {
     >
   >;
 }
+
+/**
+ * What App code passed, as plain JSON copies: read once, here, so no
+ * capability ever runs a getter of App code's (whose error would pass for
+ * the host's), and a value that isn't JSON is refused as it arrives.
+ */
+const plainArgs = (args: readonly unknown[]): unknown[] =>
+  args.map((arg) => {
+    let copy: Json | undefined;
+    try {
+      copy = jsonOf(arg);
+    } catch {
+      copy = undefined;
+    }
+    if (copy === undefined) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    return copy;
+  });
 
 /** What a channel and the host that made it share. */
 interface ChannelState {
@@ -101,9 +123,10 @@ class Channel extends RpcTarget implements OperationChannel {
       if (capability === undefined) {
         throw operationErrors.create(this.#capabilities.refusals[name]);
       }
-      return await capability(...args);
+      return await capability(...plainArgs(args));
     } catch (error) {
       if (isExpectedError(error)) {
+        this.#capabilities.trust(error);
         this.#state.raised.set(error.code, error);
         throw error;
       }
@@ -119,6 +142,7 @@ class Channel extends RpcTarget implements OperationChannel {
       });
       // Cap'n Web and Workers RPC send a stack; this one has none to send.
       opaque.stack = undefined;
+      this.#capabilities.trust(opaque);
       this.#state.raised.set(opaque.code, opaque);
       throw opaque;
     }

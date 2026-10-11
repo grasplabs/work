@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 
-import { familyNamespaces } from "../src/error-namespaces.ts";
+import { familyNamespaces, sdkNamespaces } from "../src/error-namespaces.ts";
 import { expectedNamespaces } from "../src/errors.ts";
 
 // The SDK refuses an App error code in any of the platform's namespaces
@@ -40,8 +40,12 @@ describe("the platform's error namespaces", () => {
         await load();
       })
     );
-    expect([...familyNamespaces]).toStrictEqual(
-      [...expectedNamespaces()].toSorted()
-    );
+    const registered = [...expectedNamespaces()].toSorted();
+    expect({
+      families: [...familyNamespaces],
+      sdkOverlap: sdkNamespaces.filter((namespace) =>
+        registered.includes(namespace)
+      ),
+    }).toStrictEqual({ families: registered, sdkOverlap: [] });
   });
 });

@@ -1283,6 +1283,31 @@ describe("a commit's read set", () => {
   });
 });
 
+describe("a commit's staging time", () => {
+  it("stamps its records, and is refused more than a minute ahead of the store's clock", async () => {
+    const store = await newStore();
+    const write = insertInto("notes");
+    const stagedAt = Date.now() - 5000;
+    const ahead = commitIn(store, {
+      principal: ada,
+      schemaHash,
+      stagedAt: Date.now() + 120_000,
+      writes: [insertInto("notes")],
+    });
+    await expect(ahead).rejects.toMatchObject({ code: "data.invalid" });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash,
+      stagedAt,
+      writes: [write],
+    });
+    await expect(store.get("notes", write.id)).resolves.toMatchObject({
+      createdAt: stagedAt,
+      updatedAt: stagedAt,
+    });
+  });
+});
+
 describe("a staged read", () => {
   it("sees the writes it is handed as their commit would make them, and keeps none", async () => {
     const store = await newStore();
