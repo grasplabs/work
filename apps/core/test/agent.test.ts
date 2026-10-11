@@ -2516,10 +2516,10 @@ describe("chat agent code output", () => {
 const byText = (a: string, b: string): number => a.localeCompare(b, "en");
 
 describe("chat agent code run retention", () => {
-  it("leaves nothing held after many runs, whether they complete, throw or fail to load", async () => {
+  it("keeps no open lease or output after many runs, whether they complete, throw or fail to load", async () => {
     const kinds = [
-      "export default async () => { console.log('ran'); return 1; };",
-      "export default async () => { throw new Error('nope'); };",
+      "export default async (self, env) => { console.log((await env.chat.info()).chatId); return 1; };",
+      "export default async (self, env) => { await env.chat.info(); throw new Error('nope'); };",
       "export default async () => {",
     ];
     const turns = 4;
@@ -2535,12 +2535,11 @@ describe("chat agent code run retention", () => {
       await ask("Run them.");
     }
 
-    // Measured in the object: what its runs hold now, not what their
-    // cleanup is meant to do.
+    // Read from the object's own state after the runs, not inferred from
+    // their cleanup. What the runtime holds for them can't be read.
     await expect(
       runInDurableObject(stub, (instance) => instance.codeRunRetention())
     ).resolves.toStrictEqual({
-      handles: 0,
       open: 0,
       closed: turns * 10,
       outputs: 0,

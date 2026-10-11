@@ -430,41 +430,6 @@ const parsed = (
 
 const notAResult = "The run returned more than it may, or not a result.";
 
-/**
- * The handles code runs hold: each run's entrypoint into its isolate, and
- * the stubs of its env, from when the run starts until it lets go of them
- * (`release`). One per Workspace object, so an object that is reset takes
- * its own with it. Measured, so a test sees that repeated runs leave none
- * behind rather than trusting the cleanup.
- */
-export class HeldHandles {
-  readonly #held = new Set<object>();
-
-  /** How many handles runs hold now. */
-  get size(): number {
-    return this.#held.size;
-  }
-
-  /** Takes `handle` as held by a run, until {@link release}. */
-  hold<T extends object>(handle: T): T {
-    this.#held.add(handle);
-    return handle;
-  }
-
-  /** Lets go of a run's handle: disposed, where it can be, and forgotten. */
-  release(handle: object): void {
-    const dispose: unknown = Reflect.get(handle, Symbol.dispose);
-    if (typeof dispose === "function") {
-      try {
-        Reflect.apply(dispose, handle, []);
-      } catch {
-        // Already disposed, or its isolate is gone: let go all the same.
-      }
-    }
-    this.#held.delete(handle);
-  }
-}
-
 /** How a run is limited and followed, besides its code and env. */
 export interface RunOptions {
   /** Cancels the run. */
@@ -476,8 +441,6 @@ export interface RunOptions {
    * a line after that is dropped, whenever the isolate sends it.
    */
   onOutput?: (line: string) => void;
-  /** Where the run's entrypoint is held while it runs. */
-  handles?: HeldHandles;
 }
 
 /**
@@ -491,16 +454,10 @@ export const runCode = async (
   loader: WorkerLoader,
   code: string,
   env: Readonly<Record<string, Fetcher>>,
-  {
-    signal,
-    timeoutMs = codeLimits.timeoutMs,
-    onOutput,
-    handles = new HeldHandles(),
-  }: RunOptions = {}
+  { signal, timeoutMs = codeLimits.timeoutMs, onOutput }: RunOptions = {}
 ): Promise<CodeRun> => {
   const limit = deadline(timeoutMs, signal);
   let over = false;
-  let entry: Fetcher<Harness> | undefined;
   // What the isolate streams is checked like what it returns: a string,
   // no longer than a line may be, and only while the run is open.
   const stream = (line: unknown): void => {
@@ -525,13 +482,9 @@ export const runCode = async (
       env,
       limits: { ...sandbox.limits, subRequests: codeLimits.subRequests },
     });
-    const harnessEntry = handles.hold(worker.getEntrypoint<Harness>());
-    entry = harnessEntry;
+    const entry = worker.getEntrypoint<Harness>();
     const verified = parsed(
-      await Promise.race([
-        harnessEntry.verify(stream),
-        whenAborted(limit.signal),
-      ])
+      await Promise.race([entry.verify(stream), whenAborted(limit.signal)])
     );
     // An outcome that isn't one the harness returns came from the code,
     // which may change anything in its isolate: it didn't load (verify)
@@ -548,7 +501,7 @@ export const runCode = async (
     }
     phase = "run";
     const ran = parsed(
-      await Promise.race([harnessEntry.run(stream), whenAborted(limit.signal)])
+      await Promise.race([entry.run(stream), whenAborted(limit.signal)])
     );
     if (ran === undefined) {
       return ended("threw", notAResult);
@@ -590,9 +543,6 @@ export const runCode = async (
   } finally {
     over = true;
     limit.clear();
-    if (entry !== undefined) {
-      handles.release(entry);
-    }
   }
 };
 

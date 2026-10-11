@@ -74,7 +74,6 @@ import {
   codeTimeoutMs,
   cutMarker,
   cutToBytes,
-  HeldHandles,
   redact,
   utf8Bytes,
 } from "./code-mode.ts";
@@ -399,9 +398,6 @@ export class Workspace extends DurableObject<Env> {
    * {@link endedRunsKept}: a run forgotten answers as ended, unlogged.
    */
   readonly #codeRuns = new Map<string, CodeRunLease>();
-
-  /** What this object's code runs hold while they run (code-mode.ts). */
-  readonly #handles = new HeldHandles();
 
   /**
    * What the code step running now in each chat has logged, as its
@@ -898,7 +894,6 @@ export class Workspace extends DurableObject<Env> {
           output: (runId, callId, line) => {
             this.codeRunOutput(chat.id, runId, callId, line);
           },
-          handles: this.#handles,
         },
         loader: this.env.LOADER,
         codeTimeoutMs: codeTimeoutMs(this.env),
@@ -1189,17 +1184,13 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * What code runs hold in this object now, measured: the handles runs
-   * hold (their entrypoints and env stubs), open and closed leases, and
-   * outputs shown. After any number of runs, none open: no handles, no
-   * open leases, no output, and at most {@link endedRunsKept} closed.
+   * What code runs keep in this object now, read from its own state:
+   * leases open and closed, and outputs held. After any number of runs,
+   * none open and no output, and at most {@link endedRunsKept} closed.
+   * What the runtime holds for them (isolates, RPC sessions) isn't here:
+   * workerd offers no signal of it to read.
    */
-  codeRunRetention(): {
-    handles: number;
-    open: number;
-    closed: number;
-    outputs: number;
-  } {
+  codeRunRetention(): { open: number; closed: number; outputs: number } {
     let open = 0;
     for (const lease of this.#codeRuns.values()) {
       if (!("closed" in lease)) {
@@ -1207,7 +1198,6 @@ export class Workspace extends DurableObject<Env> {
       }
     }
     return {
-      handles: this.#handles.size,
       open,
       closed: this.#codeRuns.size - open,
       outputs: this.#outputs.size,

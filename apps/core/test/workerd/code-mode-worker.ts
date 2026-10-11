@@ -95,6 +95,7 @@ const runCase = async ({ code, timeoutMs, cancelAfterMs }: Case) => {
     }, cancelAfterMs);
   }
   const streamed: string[] = [];
+  const started = Date.now();
   const run: CodeRun = await runCode(
     env.LOADER,
     code,
@@ -111,6 +112,8 @@ const runCase = async ({ code, timeoutMs, cancelAfterMs }: Case) => {
   return {
     status: run.status,
     text: text.slice(0, 400),
+    ending: text.slice(-200),
+    ms: Date.now() - started,
     bytes: utf8Bytes(text),
     cut: text.includes(cutMarker),
     streamed: streamed.length,

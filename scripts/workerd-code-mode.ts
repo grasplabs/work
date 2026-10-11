@@ -24,23 +24,32 @@ import { z } from "zod";
 const ATTEMPTS = 100;
 const RETRY_DELAY_MS = 100;
 const out = mkdtempSync(path.join(tmpdir(), "grasp-os-code-mode-"));
-const worker = path.join(
-  import.meta.dirname,
-  "../apps/core/test/workerd/code-mode-worker.ts"
-);
+const core = path.join(import.meta.dirname, "../apps/core");
+const worker = path.join(core, "test/workerd/code-mode-worker.ts");
 
+// Bundled as core's own deploy bundles (workerd-smoke.ts): Wrangler's dry
+// run, from a config of the Worker's own, so the bundle is what Wrangler
+// would ship and nothing but the frozen install is needed.
+const config = path.join(out, "wrangler.jsonc");
+writeFileSync(
+  config,
+  JSON.stringify({
+    name: "code-mode-smoke",
+    main: worker,
+    compatibility_date: "2026-09-15",
+  })
+);
 execFileSync(
-  "esbuild",
+  "wrangler",
   [
-    worker,
-    "--bundle",
-    "--format=esm",
-    "--platform=neutral",
-    "--main-fields=module,main",
-    "--external:cloudflare:*",
-    `--outfile=${path.join(out, "worker.js")}`,
+    "deploy",
+    "--dry-run",
+    "--outdir",
+    path.join(out, "bundle"),
+    "--config",
+    config,
   ],
-  { stdio: "inherit" }
+  { cwd: core, stdio: "inherit" }
 );
 
 const freePort = async (): Promise<number> => {
@@ -66,7 +75,7 @@ const config :Workerd.Config = (
 );
 
 const main :Workerd.Worker = (
-  modules = [(name = "worker.js", esModule = embed "worker.js")],
+  modules = [(name = "worker.js", esModule = embed "bundle/code-mode-worker.js")],
   compatibilityDate = "2026-09-15",
   bindings = [(name = "LOADER", workerLoader = ())],
 );
@@ -106,6 +115,8 @@ const answerSchema = z.object({
       text: z.string(),
       bytes: z.number(),
       cut: z.boolean(),
+      ending: z.string(),
+      ms: z.number(),
       streamed: z.number(),
     })
   ),
@@ -117,22 +128,43 @@ const server = spawn(
   { stdio: "inherit" }
 );
 
+/** The longest the cases may take together, start to answer. */
+const ANSWER_TIMEOUT_MS = 120_000;
+
+/**
+ * What the Worker answers, once workerd takes the request: a refused
+ * connection (workerd still starting) is tried again, until it answers or
+ * {@link ANSWER_TIMEOUT_MS} passes; anything else fails the run at once.
+ */
 const fetchResults = async (): Promise<z.infer<typeof answerSchema>> => {
-  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
+  const until = Date.now() + ANSWER_TIMEOUT_MS;
+  for (let attempt = 0; ; attempt += 1) {
     if (server.exitCode !== null) {
       throw new Error(`workerd exited with ${server.exitCode}`);
     }
     try {
       // oxlint-disable-next-line no-await-in-loop -- polled until workerd answers
-      const response = await fetch(`http://127.0.0.1:${PORT}/`);
+      const response = await fetch(`http://127.0.0.1:${PORT}/`, {
+        signal: AbortSignal.timeout(Math.max(1, until - Date.now())),
+      });
+      if (!response.ok) {
+        throw new Error(`the Worker answered ${response.status}`);
+      }
       // oxlint-disable-next-line no-await-in-loop -- the one answer
       return answerSchema.parse(await response.json());
-    } catch {
+    } catch (error) {
+      const refused =
+        error instanceof TypeError &&
+        error.cause instanceof Error &&
+        "code" in error.cause &&
+        error.cause.code === "ECONNREFUSED";
+      if (!refused || attempt >= ATTEMPTS || Date.now() >= until) {
+        throw error;
+      }
       // oxlint-disable-next-line no-await-in-loop -- polled until workerd answers
       await sleep(RETRY_DELAY_MS);
     }
   }
-  throw new Error("workerd never answered");
 };
 
 try {
@@ -167,9 +199,15 @@ try {
     flood === undefined ||
     flood.bytes > 64 * 1024 ||
     !flood.cut ||
-    flood.streamed === 0
+    flood.streamed === 0 ||
+    !flood.ending.includes("Error (threw):\nError: the end")
   ) {
     problems.push(`flood: ${JSON.stringify(flood)}`);
+  }
+  const { waitsPastItsTime } = results;
+  // Its limit is a second: let go at it, not at its minute-long wait.
+  if ((waitsPastItsTime?.ms ?? Infinity) > 5000) {
+    problems.push(`waitsPastItsTime took ${waitsPastItsTime?.ms} ms`);
   }
   if (problems.length > 0) {
     throw new Error(`Code Mode on plain workerd:\n${problems.join("\n")}`);
