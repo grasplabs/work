@@ -37,7 +37,7 @@ import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -46,11 +46,13 @@ import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
 import {
+  sdkArtifactDeletions,
   sdkReleaseManifests,
   sdkResourceBindings,
   sdkStoreOwners,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
+import { finishDeletion } from "./release-retention.ts";
 import { sandbox } from "./sandbox.ts";
 import { buildAppCode } from "./screens.ts";
 
@@ -378,6 +380,45 @@ const verifiedRelease = async (
 };
 
 /**
+ * The manifest in `text`, the release of `key`'s: canonical, of the known
+ * shape, and naming that release; `version.manifest_corrupt` otherwise.
+ */
+const manifestOf = (
+  text: string,
+  key: { app: AppId; version: number }
+): ReleaseManifest => {
+  let manifest: ReleaseManifest;
+  try {
+    manifest = releaseManifestSchema.parse(JSON.parse(text));
+  } catch {
+    throw versionErrors.create("version.manifest_corrupt");
+  }
+  if (
+    manifest.resourceId !== key.app ||
+    manifest.resourceVersion !== key.version ||
+    canonicalText(manifest) !== text
+  ) {
+    throw versionErrors.create("version.manifest_corrupt");
+  }
+  return manifest;
+};
+
+/** Whether the host's record of the store binding is the manifest's. */
+const bindingAgrees = (
+  manifest: ReleaseManifest,
+  binding: { targetId: string; schemaHash: string } | undefined
+): boolean => {
+  const [store] = manifest.dataStoreBindings;
+  if (store === undefined || binding === undefined) {
+    return store === undefined && binding === undefined;
+  }
+  return (
+    binding.targetId === store.storeId &&
+    binding.schemaHash === store.schemaHash
+  );
+};
+
+/**
  * The sealed release of `app`'s `version`, verified: its manifest's text
  * against its hash, then every artifact's bytes against theirs, the
  * contracts against the manifest's contract hash and the registration
@@ -399,6 +440,7 @@ export const loadRelease = async (
       .select({
         manifest: sdkReleaseManifests.manifest,
         hash: sdkReleaseManifests.manifestHash,
+        revokedAt: sdkReleaseManifests.revokedAt,
       })
       .from(sdkReleaseManifests)
       .where(
@@ -427,6 +469,10 @@ export const loadRelease = async (
   if (row === undefined) {
     throw versionErrors.create("version.not_sealed");
   }
+  // Revoked: it runs no more, whatever else holds (its bytes stay).
+  if (row.revokedAt !== null) {
+    throw versionErrors.create("version.revoked");
+  }
   const hash = await sha256Hex(row.manifest);
   if (
     hash !== row.hash ||
@@ -436,29 +482,11 @@ export const loadRelease = async (
     log.error("release.manifest_corrupt", { app, version });
     throw versionErrors.create("version.manifest_corrupt");
   }
-  let manifest: ReleaseManifest;
-  try {
-    manifest = releaseManifestSchema.parse(JSON.parse(row.manifest));
-  } catch {
-    throw versionErrors.create("version.manifest_corrupt");
-  }
-  if (
-    manifest.resourceId !== app ||
-    manifest.resourceVersion !== version ||
-    canonicalText(manifest) !== row.manifest
-  ) {
-    throw versionErrors.create("version.manifest_corrupt");
-  }
+  const manifest = manifestOf(row.manifest, { app, version });
   // The host's own record of the binding and the manifest's must agree:
   // neither alone routes a call. Checked on every load, as the record is
   // read on every load.
-  const [store] = manifest.dataStoreBindings;
-  if (
-    (store === undefined) !== (binding === undefined) ||
-    (store !== undefined &&
-      (binding?.targetId !== store.storeId ||
-        binding.schemaHash !== store.schemaHash))
-  ) {
+  if (!bindingAgrees(manifest, binding)) {
     log.error("release.binding_mismatch", { app, version });
     throw versionErrors.create("version.manifest_corrupt");
   }
@@ -479,6 +507,51 @@ export const loadRelease = async (
     verified.delete(hash);
     throw error;
   }
+};
+
+/** How many times a seal tries to reserve past artifacts being deleted. */
+const reserveAttempts = 3;
+
+/**
+ * Reserves `hashes` for release `key` (release-retention.ts), so no sweep
+ * deletes their bytes once this release names them. Where a sweep is
+ * deleting one already, its deletion is finished first (the bytes go),
+ * and the reservation tried again: the seal stores the bytes after this.
+ */
+const reserveArtifacts = async (
+  env: Env,
+  key: { app: AppId; version: number },
+  hashes: readonly string[]
+): Promise<void> => {
+  const unique = [...new Set(hashes)];
+  for (let attempt = 1; attempt <= reserveAttempts; attempt += 1) {
+    const now = Date.now();
+    // One batch, one transaction: each reserved only where no deletion
+    // mark is.
+    // oxlint-disable-next-line no-await-in-loop -- tried again in turn
+    await env.DB.batch(
+      unique.map((sha256) =>
+        env.DB.prepare(
+          `INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at)
+           SELECT ?1, ?2, ?3, ?4 WHERE NOT EXISTS (SELECT 1 FROM sdk_artifact_deletions WHERE sha256 = ?1)
+           ON CONFLICT (sha256, app_id, version) DO NOTHING`
+        ).bind(sha256, key.app, key.version, now)
+      )
+    );
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const marked = await drizzle(env.DB)
+      .select({ sha256: sdkArtifactDeletions.sha256 })
+      .from(sdkArtifactDeletions)
+      .where(inArray(sdkArtifactDeletions.sha256, unique));
+    if (marked.length === 0) {
+      return;
+    }
+    for (const { sha256 } of marked) {
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await finishDeletion(env, sha256);
+    }
+  }
+  throw new Error("The release's artifacts kept being deleted as it sealed");
 };
 
 /** The empty dependency lock: server code imports no packages. */
@@ -649,8 +722,15 @@ export const sealRelease = async (
   const text = canonicalText(releaseManifest);
   const hash = await sha256Hex(text);
 
-  // The bytes first, each under its hash: a manifest never names a missing
-  // artifact. Storing the same bytes again changes nothing.
+  // Reserved first, so no retention sweep deletes bytes this release will
+  // name (release-retention.ts); then the bytes, each under its hash, so a
+  // manifest never names a missing artifact. Storing the same bytes again
+  // changes nothing.
+  await reserveArtifacts(
+    env,
+    { app, version },
+    artifacts.map(({ entry }) => entry.sha256)
+  );
   await Promise.all(
     artifacts.map(async ({ entry, bytes }) => {
       // The very bytes hashed, so what is stored is what the hash names.
