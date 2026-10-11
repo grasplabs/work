@@ -217,8 +217,14 @@ export const revokedSince = async (
         // From the millisecond the run opened, that one included. No
         // margin before it: a revocation just before a run opened is in
         // the grants the run's calls read, and a margin would end the
-        // next run after any revoke.
+        // next run after any revoke. The accepted residual is clock skew
+        // between machines: the Workspace object's clock and the one of
+        // the request that revoked may differ by a few milliseconds.
         gte(permissions.revokedAt, new Date(since)),
+        // Granted once: both ways a permission becomes active set
+        // granted_at with it (`grantPermission`, and a person's own
+        // decision in chat-connections.ts), so only a request declined
+        // before anyone granted it is revoked without one.
         isNotNull(permissions.grantedAt),
         or(isNull(permissions.chatId), eq(permissions.chatId, chatId))
       )
@@ -296,8 +302,10 @@ export const requireOpenRun = async (
  * the lease's own check last, right before the effect. A write into the
  * Workspace object checks the lease once more in its own transaction.
  *
- * With `method`, a refusal is recorded here, once a run (for a call that
- * nothing else records); without, its caller records it (`auditedCall`).
+ * With `method`, a refusal is recorded here (for a call that nothing else
+ * records): the one that found a revocation, or one from a run that had
+ * ended; without, its caller records it (`auditedCall`). So a revoked
+ * run's refusals are recorded per refused call, not once per run.
  */
 export const admitEffect = async (
   env: Env,

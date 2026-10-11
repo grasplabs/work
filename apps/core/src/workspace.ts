@@ -1029,10 +1029,13 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Ends a code run of the chat's turn: first asks whether a permission of
-   * its agent was revoked since it opened, so a revocation its code never
-   * called after is still noticed (and recorded once), then closes it
-   * (`closeCodeRun`) as revoked or as it ended.
+   * Ends a code run of the chat's turn. Its lease closes first, at once
+   * and whatever follows, so nothing it still does is admitted from here
+   * on. Then revocations since it opened are read once more, so one its
+   * code never called after is still noticed: the run is recorded as
+   * revoked (once), and the turn hands on nothing of it. A read that
+   * fails counts as a revocation: the run's result is withheld rather
+   * than trusted unchecked.
    */
   async #endCodeRun(
     scope: Omit<AgentScope, "runId">,
@@ -1040,19 +1043,43 @@ export class Workspace extends DurableObject<Env> {
     status: CodeRunStatus
   ): Promise<CodeRunStatus> {
     const admission = this.admitFromCodeRun(scope.chatId, runId);
-    if (
-      admission.call === "open" &&
-      (await revokedSince(this.env, scope, admission.openedAt)) &&
-      this.revokeCodeRun(scope.chatId, runId)
-    ) {
-      await auditAgentCall(
-        this.env,
-        scope,
-        { method: "executeCode" },
-        { outcome: "refused", reason: "agent.run_revoked" }
-      );
+    const ended = this.closeCodeRun(scope.chatId, runId, status);
+    if (admission.call !== "open" || ended === "revoked") {
+      return ended;
     }
-    return this.closeCodeRun(scope.chatId, runId, status);
+    let revoked: boolean;
+    try {
+      revoked = await revokedSince(this.env, scope, admission.openedAt);
+    } catch (error) {
+      log.error("agent.revocation_read_failed", {
+        chatId: scope.chatId,
+        runId,
+        ...errorFields(error),
+      });
+      revoked = true;
+    }
+    if (!revoked) {
+      return ended;
+    }
+    this.#db
+      .update(chatCodeRuns)
+      .set({ status: "revoked" })
+      .where(
+        and(
+          eq(chatCodeRuns.id, runId),
+          eq(chatCodeRuns.chatId, scope.chatId),
+          eq(chatCodeRuns.status, ended)
+        )
+      )
+      .run();
+    // Recorded through the outbox, which never fails the turn.
+    await auditAgentCall(
+      this.env,
+      scope,
+      { method: "executeCode" },
+      { outcome: "refused", reason: "agent.run_revoked" }
+    );
+    return "revoked";
   }
 
   /**

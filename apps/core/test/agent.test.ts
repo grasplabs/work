@@ -1470,6 +1470,69 @@ const revokedRow = async (
     .run();
 };
 
+/** Points the object's database at `db` (objects may share their env). */
+const setObjectDb = async (stub: WorkspaceStub, db: D1Database) => {
+  await runInDurableObject(stub, (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv === "object" && objectEnv !== null) {
+      Reflect.set(objectEnv, "DB", db);
+    }
+  });
+};
+
+/**
+ * Runs `during` with every read of revocations the object makes (the
+ * permissions query `revokedSince` sends) first going through `before`:
+ * a wait, or a throw. The rest of its database is untouched. Set back
+ * however it ends.
+ */
+const withRevocationReads = async (
+  stub: WorkspaceStub,
+  before: () => Promise<void>,
+  during: () => Promise<void>
+): Promise<void> => {
+  const real = env.DB;
+  const slowed = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        if (property === "bind") {
+          return (...args: unknown[]) => slowed(target.bind(...args));
+        }
+        return async (...args: unknown[]): Promise<unknown> => {
+          await before();
+          return await Reflect.apply(value, target, args);
+        };
+      },
+    });
+  const db = new Proxy(real, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string) => {
+          const statement = target.prepare(query);
+          // Only `revokedSince`'s read: revocations since a run opened.
+          return query.includes('"permissions"."revoked_at" >=')
+            ? slowed(statement)
+            : statement;
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  await setObjectDb(stub, db);
+  try {
+    await during();
+  } finally {
+    await setObjectDb(stub, real);
+  }
+};
+
 /** The chat's code run records, oldest first, as the object keeps them. */
 const runRecords = async (stub: WorkspaceStub, chatId: string) =>
   await runInDurableObject(stub, (_instance, state) =>
@@ -1742,6 +1805,86 @@ describe("chat agent code run leases", () => {
       "cpu_limit_unsupported",
       "cpu_limit_unsupported",
       "enforced",
+    ]);
+  });
+
+  it("closes a run's lease as it ends whatever the revocation read does, and withholds its result when the read fails", async () => {
+    const { stub, chat, ask } = await newChat(
+      codeStep(
+        "export default async () => { console.log('read'); return 'secret'; };"
+      ),
+      says("Done.")
+    );
+
+    await withRevocationReads(
+      stub,
+      async () => {
+        await Promise.resolve();
+        throw new Error("D1 is down for a moment");
+      },
+      async () => {
+        await ask("Return it.");
+      }
+    );
+
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      {
+        isError: true,
+        text: `Error (revoked):\n${agentErrors.create("agent.run_revoked").message}`,
+      },
+    ]);
+    const [record] = await runRecords(stub, chat.id);
+    expect(record?.status).toBe("revoked");
+    await expect(
+      runInDurableObject(stub, (instance) =>
+        instance.admitFromCodeRun(
+          chatIdSchema.parse(chat.id),
+          String(record?.id)
+        )
+      )
+    ).resolves.toStrictEqual({ call: "ended" });
+  });
+
+  it("admits nothing a run does while its end reads revocations", async () => {
+    // The run ends at its wall clock while its code still waits; the code
+    // calls during the slow read of revocations that follows.
+    const { stub, chat, ask } = await newChat(
+      codeStep(
+        "export default async (self, env) => { await scheduler.wait(1_300); await env.chat.attachments(); };"
+      ),
+      says("Done.")
+    );
+    await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1000" });
+    try {
+      await withRevocationReads(
+        stub,
+        async () => {
+          await scheduler.wait(2000);
+        },
+        async () => {
+          await ask("Wait, then look.");
+        }
+      );
+    } finally {
+      await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "" });
+    }
+
+    await vi.waitFor(
+      async () => {
+        await expect(
+          refusalsIn(chat.id, "agent.run_ended")
+        ).resolves.toStrictEqual([
+          {
+            method: "chat.attachments",
+            outcome: "refused",
+            reason: "agent.run_ended",
+          },
+        ]);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "wall_expired",
     ]);
   });
 
