@@ -3,6 +3,7 @@ import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import type { CodedError } from "@grasp-os/shared/errors";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { isAppErrorCode } from "@grasp-os/shared/operation-limits";
 import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { rpcArgumentDepth } from "@grasp-os/shared/screens";
@@ -28,7 +29,8 @@ import { commitMaxInputBytes } from "@grasp-os/shared/stores";
 //   caller: anything unexpected becomes `internal.unexpected`, its cause
 //   logged under the request ID.
 // It remembers the expected errors it raised, so the host can tell one
-// App code rethrew from a code it made up (`raised`).
+// App code rethrew from a code it made up (`raised`). A domain failure of
+// a function this one called passes through as the `AppError` it was.
 
 /** One capability of a channel: how the host answers it. */
 type Capability = (...args: unknown[]) => Promise<unknown>;
@@ -87,6 +89,12 @@ const copyOf = (error: CodedError): CodedError => {
   return copy;
 };
 
+/** An `AppError` as the host rebuilt it for App code (operations.ts). */
+const isAppFailure = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.name === "AppError" &&
+  isAppErrorCode(Reflect.get(error, "code"));
+
 /** What a channel and the host that made it share. */
 interface ChannelState {
   ended: boolean;
@@ -126,8 +134,8 @@ class Channel extends ChannelTarget implements OperationChannel {
     return await this.#use("write", [request]);
   }
 
-  async call(path: unknown, args: unknown): Promise<unknown> {
-    return await this.#use("call", [path, args]);
+  async call(kind: unknown, path: unknown, args: unknown): Promise<unknown> {
+    return await this.#use("call", [kind, path, args]);
   }
 
   async resource(
@@ -154,6 +162,11 @@ class Channel extends ChannelTarget implements OperationChannel {
     } catch (error) {
       if (isExpectedError(error)) {
         throw this.#raise(error);
+      }
+      // A domain failure of a function this one called, as the host
+      // rebuilt it: App code may handle it, or throw it on.
+      if (isAppFailure(error)) {
+        throw error;
       }
       const { requestId, path } = this.#capabilities;
       log.error("operation.channel_failed", {
