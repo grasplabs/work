@@ -1,9 +1,16 @@
 import type {
+  HeldDecision,
+  HeldHow,
   HeldRequest,
   ModelBudget,
   ModelSettings,
   ModelSpender,
 } from "@grasp-os/shared/models";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
@@ -157,32 +164,83 @@ const SpentBy = ({
   );
 };
 
-/** What an admin decides about a held reservation. */
-type Decision = "release" | "charge";
+/**
+ * A decision that changed nothing, on a held reservation now gone from the
+ * list: someone decided it first, or it was no longer held.
+ */
+interface Unchanged {
+  id: string;
+  model: string;
+  decision: HeldDecision & { state: "already_decided" | "not_held" };
+}
+
+/** What stands for a reservation decided before, in words. */
+const UnchangedNotice = ({ unchanged }: { unchanged: Unchanged }) => {
+  const { t } = useLingui();
+  const { model, decision } = unchanged;
+  let what = t`It is no longer held.`;
+  if (decision.state === "already_decided") {
+    const when = new Date(decision.decidedAt).toLocaleString();
+    const amount = dollars(decision.amount);
+    what =
+      decision.how === "charge"
+        ? t`It was charged ${amount} on ${when}.`
+        : t`It was released on ${when}, charging nothing.`;
+  }
+  return (
+    <Alert>
+      <AlertTitle>
+        {decision.state === "already_decided"
+          ? t`Already decided: ${model}`
+          : t`No longer held: ${model}`}
+      </AlertTitle>
+      <AlertDescription>
+        {what} <Trans>Your decision changed nothing.</Trans>
+      </AlertDescription>
+    </Alert>
+  );
+};
 
 /**
  * One held reservation, and its two decisions: release what it holds, or
  * charge all of it. Each asks first; core audits it in the admin's name.
  */
-const HeldRow = ({ held }: { held: HeldRequest }) => {
+const HeldRow = ({
+  held,
+  onUnchanged,
+}: {
+  held: HeldRequest;
+  onUnchanged: (unchanged: Unchanged) => void;
+}) => {
   const { t } = useLingui();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
-  const [deciding, setDeciding] = useState<Decision>();
+  const [deciding, setDeciding] = useState<HeldHow>();
+  const [releaseOnly, setReleaseOnly] = useState(false);
   const { id, model, sentAt } = held;
   const amount = dollars(held.amount);
-  const decide = async (how: Decision): Promise<void> => {
+  const decide = async (how: HeldHow): Promise<void> => {
     setDeciding(undefined);
-    await run(async (session) => {
+    const decision = await run(async (session) => {
+      let answered: HeldDecision | undefined;
       await changeThenRefresh(
         async () => {
-          await session.models.resolveHeld(id, how);
+          answered = await session.models.resolveHeld(id, how);
         },
         async () => {
           await router.invalidate({ sync: true });
         }
       );
+      return answered;
     });
+    if (decision?.state === "release_only") {
+      setReleaseOnly(true);
+    } else if (
+      decision?.state === "already_decided" ||
+      decision?.state === "not_held"
+    ) {
+      onUnchanged({ id, model, decision });
+    }
   };
   return (
     <li className="flex flex-col gap-2 border-t px-5 py-3">
@@ -206,7 +264,7 @@ const HeldRow = ({ held }: { held: HeldRequest }) => {
             <Trans>Release</Trans>
           </Button>
           <Button
-            disabled={busy}
+            disabled={busy || releaseOnly}
             size="sm"
             variant="outline"
             onClick={() => {
@@ -256,6 +314,11 @@ const HeldRow = ({ held }: { held: HeldRequest }) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {releaseOnly ? (
+        <ErrorText>
+          {t`This one can only be released: a budget record it counts against is damaged, so charging it would count against a wrong total. Contact Grasp.`}
+        </ErrorText>
+      ) : null}
       <ErrorText>{failure}</ErrorText>
     </li>
   );
@@ -267,18 +330,41 @@ const HeldRow = ({ held }: { held: HeldRequest }) => {
  */
 const Held = ({ held }: { held: readonly HeldRequest[] }) => {
   const { t } = useLingui();
-  if (held.length === 0) {
+  // Decisions that changed nothing, newest first: their rows are gone from
+  // the list once it is read again, so what stands is shown here instead.
+  const [unchanged, setUnchanged] = useState<readonly Unchanged[]>([]);
+  if (held.length === 0 && unchanged.length === 0) {
     return null;
   }
   const total = dollars(held.reduce((sum, { amount }) => sum + amount, 0));
   return (
     <SettingsSection
-      description={t`${total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full.`}
+      description={
+        held.length === 0
+          ? t`Nothing is held for review now.`
+          : t`${total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full.`
+      }
       title={t`Held for review`}
     >
+      {unchanged.length === 0 ? null : (
+        <div className="flex flex-col gap-2 border-t px-5 py-3">
+          {unchanged.map((one) => (
+            <UnchangedNotice key={one.id} unchanged={one} />
+          ))}
+        </div>
+      )}
       <ul>
         {held.map((one) => (
-          <HeldRow held={one} key={one.id} />
+          <HeldRow
+            held={one}
+            key={one.id}
+            onUnchanged={(added) => {
+              setUnchanged((shown) => [
+                added,
+                ...shown.filter(({ id }) => id !== added.id),
+              ]);
+            }}
+          />
         ))}
       </ul>
     </SettingsSection>

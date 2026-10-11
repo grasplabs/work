@@ -421,7 +421,7 @@ describe("the model ledger", () => {
     });
   });
 
-  it("lists quarantined requests, and releases or charges each as a person decides, once, audited", async () => {
+  it("lists quarantined requests, and releases or charges each as a person decides, once, audited, answering a later decision with the first", async () => {
     const ledger = newLedger();
     const [released, charged] = [
       admission(30, [budget(1000, "fay")]),
@@ -438,6 +438,7 @@ describe("the model ledger", () => {
       userId: `admin-${crypto.randomUUID()}`,
     } as const;
 
+    const before = Date.now();
     const resolved = await Promise.all([
       ledger.resolveQuarantined(released.id, "release", admin),
       ledger.resolveQuarantined(charged.id, "charge", admin),
@@ -450,7 +451,13 @@ describe("the model ledger", () => {
         .map(({ id, reservedMicros, model }) => [id, reservedMicros, model])
         .toSorted(byJson),
       resolved,
-      again,
+      again: {
+        ...again,
+        decidedAt:
+          "decidedAt" in again &&
+          again.decidedAt >= before &&
+          again.decidedAt <= Date.now(),
+      },
       after: await ledger.quarantined(10),
       fay: await spendOf(ledger, "fay"),
       audited: events
@@ -463,11 +470,17 @@ describe("the model ledger", () => {
         [charged.id, 20, "workers-ai/test"],
       ].toSorted(byJson),
       resolved: [
-        { state: "settled", chargedMicros: 0 },
-        { state: "settled", chargedMicros: 20 },
+        { state: "decided", how: "release", chargedMicros: 0 },
+        { state: "decided", how: "charge", chargedMicros: 20 },
       ],
-      // Settled already: a second decision changes nothing.
-      again: { state: "not_held" },
+      // Decided already: a second decision changes nothing, and is told
+      // what stands.
+      again: {
+        state: "already_decided",
+        how: "release",
+        chargedMicros: 0,
+        decidedAt: true,
+      },
       after: [],
       fay: { key: "fay", spentMicros: 20, reservedMicros: 0 },
       audited: [
@@ -501,35 +514,106 @@ describe("the model ledger", () => {
     expect(delivered).toBeTruthy();
   });
 
-  it("refuses a decision on a held request whose budget record is missing, leaving it held and unaudited", async () => {
+  it("lets a person only release a request held for its damaged spend, clearing what a damaged scope holds to nothing, audited", async () => {
     const ledger = newLedger();
     const key = `kim-${crypto.randomUUID()}`;
-    const held = admission(30, [budget(1000, key)]);
+    const workflow = `flow-${crypto.randomUUID()}`;
+    const held = admission(
+      30,
+      [
+        budget(1000, key),
+        {
+          scope: "workflow",
+          key: workflow,
+          limitMicros: null,
+          alertMicros: null,
+          names: {},
+        },
+        {
+          scope: "deployment",
+          key: "deployment",
+          limitMicros: null,
+          alertMicros: null,
+          names: {},
+        },
+      ],
+      { reconcileAt: Date.now() + 1000 }
+    );
     await ledger.admit(held);
-    await corrupt(ledger, "scopes", "not JSON", held.id);
-    await ledger.settle(held.id, { by: "refused" });
+    // The ledger's own data gone wrong: the person's spend holds less than
+    // the request reserved, and the workflow's is gone.
     await runInDurableObject(ledger, (_instance, state) => {
-      state.storage.sql.exec("DELETE FROM spend WHERE key = ?", key);
+      state.storage.sql.exec(
+        "UPDATE spend SET reserved_micros = 10 WHERE scope = 'user' AND key = ?",
+        key
+      );
+      state.storage.sql.exec(
+        "DELETE FROM spend WHERE scope = 'workflow' AND key = ?",
+        workflow
+      );
     });
+    // Settling it takes the person's spend below nothing, so every try at
+    // reconciling it fails, and it is held for a person after three.
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runInDurableObject(ledger, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE requests SET reconcile_at = ? WHERE id = ?",
+          Date.now() - 1,
+          held.id
+        );
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runDurableObjectAlarm(ledger);
+    }
+    const listed = await ledger.quarantined(10);
     const admin = {
       type: "person",
       userId: `admin-${crypto.randomUUID()}`,
     } as const;
 
-    const decided = await ledger.resolveQuarantined(held.id, "charge", admin);
+    const charged = await ledger.resolveQuarantined(held.id, "charge", admin);
+    const stillHeld = await ledger.quarantined(10);
+    const released = await ledger.resolveQuarantined(held.id, "release", admin);
+    const again = await ledger.resolveQuarantined(held.id, "release", admin);
     await runDurableObjectAlarm(ledger);
     const events = await allEvents();
-    const stillHeld = await ledger.quarantined(10);
     expect({
-      decided,
-      held: stillHeld.map(({ id }) => id),
-      audited: events.filter(
-        ({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin)
+      listed: listed.map(({ id }) => id),
+      charged,
+      stillHeld: stillHeld.map(({ id }) => id),
+      released,
+      again: again.state,
+      after: await ledger.quarantined(10),
+      spend: await ledger.spendOf(
+        "2400-01",
+        ["user", "workflow", "deployment"],
+        10
       ),
+      audited: events
+        .filter(({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin))
+        .map(({ action, detail }) => [
+          action,
+          detail.request,
+          detail.charged,
+          detail.damaged,
+        ]),
     }).toStrictEqual({
-      decided: { state: "spend_missing" },
-      held: [held.id],
-      audited: [],
+      listed: [held.id],
+      // A charge would count against a wrong total: refused, still held.
+      charged: { state: "release_only" },
+      stillHeld: [held.id],
+      released: { state: "decided", how: "release", chargedMicros: 0 },
+      again: "already_decided",
+      after: [],
+      // Cleared to nothing, never below it; the healthy scope released as
+      // usual; the missing one left missing.
+      spend: {
+        user: [{ key, spentMicros: 0, reservedMicros: 0 }],
+        workflow: [],
+        deployment: [{ key: "deployment", spentMicros: 0, reservedMicros: 0 }],
+      },
+      audited: [["model.spend.released", held.id, 0, "user,workflow"]],
     });
   });
 

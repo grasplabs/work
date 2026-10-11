@@ -644,6 +644,10 @@ msgstr "Alle Workflow-Tests bestehen."
 msgid "Allowed models"
 msgstr "Erlaubte Modelle"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "Already decided: {model}"
+msgstr "Bereits entschieden: {model}"
+
 #: src/connections/connection-list.tsx
 msgid "An admin"
 msgstr "Ein Admin"
@@ -1989,6 +1993,10 @@ msgstr "Er hat keine Parameter."
 msgid "It has no steps."
 msgstr "Er hat keine Schritte."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "It is no longer held."
+msgstr "Er wird nicht mehr zurückgehalten."
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "It isn't offered to your organization: offer it on its Overview before connecting it."
 msgstr "Es wird Ihrer Organisation nicht angeboten: Bieten Sie es in der Übersicht an, bevor Sie es verbinden."
@@ -2016,6 +2024,14 @@ msgstr "Er läuft nicht mehr (er konnte etwas ändern)."
 #: src/chat/builds.tsx
 msgid "It no longer runs."
 msgstr "Er läuft nicht mehr."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "It was charged {amount} on {when}."
+msgstr "Am {when} wurden {amount} dafür berechnet."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "It was released on {when}, charging nothing."
+msgstr "Er wurde am {when} freigegeben, ohne Kosten."
 
 #: src/knowledge/uploads.tsx
 msgid "It's past the first {pageMaxLimit} files listed: open it from here."
@@ -2416,6 +2432,10 @@ msgstr "Noch keine Dateien."
 msgid "No integrations match your search."
 msgstr "Keine Integration passt zu Ihrer Suche."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "No longer held: {model}"
+msgstr "Nicht mehr zurückgehalten: {model}"
+
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
 msgstr "Läuft nicht mehr {how}"
@@ -2620,6 +2640,10 @@ msgstr "Bisher ist nichts gelaufen."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
 msgstr "Hier ist noch nichts."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Nothing is held for review now."
+msgstr "Derzeit wird nichts zur Prüfung zurückgehalten."
 
 #: src/dashboard/pile-cards.tsx
 msgid "Nothing is sent or changed on {connection}."
@@ -4138,6 +4162,10 @@ msgstr "Dieser Link ist abgelaufen. Bitten Sie die Person, die ihn geschickt hat
 msgid "This month so far"
 msgstr "Bisher in diesem Monat"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "This one can only be released: a budget record it counts against is damaged, so charging it would count against a wrong total. Contact Grasp."
+msgstr "Dieser kann nur freigegeben werden: Ein Budgeteintrag, auf den er angerechnet wird, ist beschädigt, sodass eine Berechnung auf eine falsche Summe angerechnet würde. Wenden Sie sich an Grasp."
+
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Diese Seite wurde nicht geladen"
@@ -4672,6 +4700,10 @@ msgstr "Ihr Konto"
 #: src/chat/chat-list.tsx
 msgid "Your chats show up here."
 msgstr "Ihre Chats erscheinen hier."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Your decision changed nothing."
+msgstr "Ihre Entscheidung hat nichts geändert."
 
 #: src/routes/guest.tsx
 msgid "Your message"

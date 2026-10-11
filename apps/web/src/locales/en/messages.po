@@ -644,6 +644,10 @@ msgstr "All workflow tests pass."
 msgid "Allowed models"
 msgstr "Allowed models"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "Already decided: {model}"
+msgstr "Already decided: {model}"
+
 #: src/connections/connection-list.tsx
 msgid "An admin"
 msgstr "An admin"
@@ -1989,6 +1993,10 @@ msgstr "It has no parameters."
 msgid "It has no steps."
 msgstr "It has no steps."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "It is no longer held."
+msgstr "It is no longer held."
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "It isn't offered to your organization: offer it on its Overview before connecting it."
 msgstr "It isn't offered to your organization: offer it on its Overview before connecting it."
@@ -2016,6 +2024,14 @@ msgstr "It no longer runs (it could change things)."
 #: src/chat/builds.tsx
 msgid "It no longer runs."
 msgstr "It no longer runs."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "It was charged {amount} on {when}."
+msgstr "It was charged {amount} on {when}."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "It was released on {when}, charging nothing."
+msgstr "It was released on {when}, charging nothing."
 
 #: src/knowledge/uploads.tsx
 msgid "It's past the first {pageMaxLimit} files listed: open it from here."
@@ -2416,6 +2432,10 @@ msgstr "No files yet."
 msgid "No integrations match your search."
 msgstr "No integrations match your search."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "No longer held: {model}"
+msgstr "No longer held: {model}"
+
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
 msgstr "No longer runs {how}"
@@ -2620,6 +2640,10 @@ msgstr "Nothing has run yet."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
 msgstr "Nothing here yet."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Nothing is held for review now."
+msgstr "Nothing is held for review now."
 
 #: src/dashboard/pile-cards.tsx
 msgid "Nothing is sent or changed on {connection}."
@@ -4138,6 +4162,10 @@ msgstr "This link has expired. Ask whoever sent it for a new one."
 msgid "This month so far"
 msgstr "This month so far"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "This one can only be released: a budget record it counts against is damaged, so charging it would count against a wrong total. Contact Grasp."
+msgstr "This one can only be released: a budget record it counts against is damaged, so charging it would count against a wrong total. Contact Grasp."
+
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "This page didn't load"
@@ -4672,6 +4700,10 @@ msgstr "Your account"
 #: src/chat/chat-list.tsx
 msgid "Your chats show up here."
 msgstr "Your chats show up here."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Your decision changed nothing."
+msgstr "Your decision changed nothing."
 
 #: src/routes/guest.tsx
 msgid "Your message"

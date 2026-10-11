@@ -67,6 +67,12 @@ import type { PinnedPrice } from "./model-prices.ts";
 //   with the same input under its ID answers the first, and other input
 //   under it is refused. A release that would leave a scope's
 //   reservations below nothing is refused by the database (`CHECK`).
+// - A request is held because its spend is damaged (that `CHECK` failed,
+//   or a scope's spend is gone): a person can still release it, which
+//   clears what a damaged scope holds to nothing, audited with the damaged
+//   scopes; it is never charged (`resolveQuarantined`).
+// - A person decides a request someone already decided: the first
+//   decision stands, and the second is answered with it, never as done.
 // - A model with no safe price or output bound: the gateway admits no
 //   such request against a budget (model-prices.ts); its price and bound
 //   are pinned here when admitted, so a later catalog never reprices it.
@@ -236,16 +242,27 @@ export type Settled =
   | { state: "quarantined" }
   | { state: "missing" };
 
+/** What a person decides about a held request. */
+export type HeldHow = "release" | "charge";
+
 /**
- * What a person's decision on a held request came to: settled at what it
- * charged; `not_held` for a request that exists but isn't held (settled
- * since, or never set aside); `missing` for none.
+ * What a person's decision on a held request came to: `decided` now, at
+ * what it charged; `already_decided` by an earlier decision, someone
+ * else's maybe, which stands, with what it decided and when; and
+ * `release_only` for a charge refused on a request whose spend is damaged,
+ * still held. `not_held` for a request that exists but was never set aside
+ * (the gateway settled it); `missing` for none.
  */
 export type Decided =
-  | { state: "settled"; chargedMicros: number }
+  | { state: "decided"; how: HeldHow; chargedMicros: number }
+  | {
+      state: "already_decided";
+      how: HeldHow;
+      chargedMicros: number;
+      decidedAt: number;
+    }
+  | { state: "release_only" }
   | { state: "not_held" }
-  /** One of its scopes has no spend to count the decision against. */
-  | { state: "spend_missing" }
   | { state: "missing" };
 
 const namesSchema = z.record(z.string(), z.string());
@@ -300,6 +317,26 @@ const scopesOf = (row: RequestRow): LedgerScope[] | undefined =>
  */
 const actorOf = (row: RequestRow): AuditActor =>
   auditActorSchema.safeParse(jsonOf(row.actor)).data ?? { type: "system" };
+
+/**
+ * What an earlier decision on `row` came to, for a later one: the decision
+ * that stands when a person settled it, and `not_held` when it was never
+ * held for one (still under way, or settled by the gateway).
+ */
+const decidedBefore = (row: RequestRow): Decided => {
+  if (
+    row.state !== "settled" ||
+    (row.settledBy !== "released" && row.settledBy !== "charged")
+  ) {
+    return { state: "not_held" };
+  }
+  return {
+    state: "already_decided",
+    how: row.settledBy === "charged" ? "charge" : "release",
+    chargedMicros: row.chargedMicros ?? 0,
+    decidedAt: row.settledAt ?? 0,
+  };
+};
 
 /** The deployment's model ledger, in the EU unless turned off. */
 export const modelLedger = (
@@ -566,12 +603,23 @@ export class ModelLedger extends DurableObject<Env> {
    * Settles a quarantined request as a person decided: releases what it
    * holds, or charges all of it, against the scopes its admission
    * recorded apart from its JSON (`request_scopes`), and audits who did,
-   * in one transaction. A request that isn't quarantined (settled since,
-   * say) is left as it is, and answered as it stands.
+   * in one transaction. A request already decided is left as it is, and
+   * answered with that decision.
+   *
+   * A request can be held because its spend is damaged: a scope's spend
+   * row missing, or holding less than the request reserved, which only
+   * the ledger's own data going wrong leaves behind. Settling it as usual
+   * would take that spend below nothing, which the `CHECK` refuses, so it
+   * would stay held until the month rolled over. Such a request can only
+   * be released: what a damaged scope holds is cleared to nothing rather
+   * than taken below it, a missing row is left missing, and the audit
+   * event names the damaged scopes. Never charged: a charge would count
+   * money against a spend row that is already wrong, so it is refused,
+   * the request still held.
    */
   async resolveQuarantined(
     id: string,
-    how: "release" | "charge",
+    how: HeldHow,
     by: AuditActor
   ): Promise<Decided> {
     const actor = auditActorSchema.parse(by);
@@ -585,20 +633,17 @@ export class ModelLedger extends DurableObject<Env> {
         return { state: "missing" };
       }
       if (row.state !== "quarantined") {
-        return { state: "not_held" };
+        return decidedBefore(row);
       }
-      const keys = this.#db
+      const counted = this.#db
         .select()
         .from(requestScopes)
         .where(eq(requestScopes.requestId, id))
-        .all();
-      // Each scope it holds against must have its spend to release from or
-      // charge to: without one, the decision couldn't be counted, so it is
-      // refused, the request still held, and nothing audited.
-      const counted = keys.every(
-        (kept) =>
-          this.#db
-            .select({ key: spend.key })
+        .all()
+        .map((kept) => ({
+          kept,
+          holds: this.#db
+            .select({ reservedMicros: spend.reservedMicros })
             .from(spend)
             .where(
               and(
@@ -607,11 +652,16 @@ export class ModelLedger extends DurableObject<Env> {
                 eq(spend.period, row.period)
               )
             )
-            .get() !== undefined
+            .get()?.reservedMicros,
+        }));
+      const damaged = counted.filter(
+        ({ holds }) => holds === undefined || holds < row.reservedMicros
       );
-      if (!counted) {
-        log.error("model.held_spend_missing", { request: id });
-        return { state: "spend_missing" };
+      if (damaged.length > 0) {
+        log.error("model.held_spend_damaged", { request: id, how });
+        if (how === "charge") {
+          return { state: "release_only" };
+        }
       }
       const charged = how === "charge" ? row.reservedMicros : 0;
       this.#db
@@ -619,16 +669,22 @@ export class ModelLedger extends DurableObject<Env> {
         .set({
           state: "settled",
           chargedMicros: charged,
-          settledBy: "decided",
+          settledBy: how === "charge" ? "charged" : "released",
           settledAt: Date.now(),
         })
         .where(eq(requests.id, id))
         .run();
-      for (const kept of keys) {
+      for (const { kept, holds } of counted) {
+        if (holds === undefined) {
+          continue;
+        }
         const after = this.#db
           .update(spend)
           .set({
-            reservedMicros: sql`${spend.reservedMicros} - ${row.reservedMicros}`,
+            reservedMicros:
+              holds < row.reservedMicros
+                ? 0
+                : sql`${spend.reservedMicros} - ${row.reservedMicros}`,
             spentMicros: sql`${spend.spentMicros} + ${charged}`,
           })
           .where(
@@ -665,9 +721,16 @@ export class ModelLedger extends DurableObject<Env> {
           model: row.model,
           period: row.period,
           charged: charged / microsPerDollar,
+          damaged:
+            damaged.length === 0
+              ? null
+              : damaged
+                  .map(({ kept }) => kept.scope)
+                  .toSorted()
+                  .join(","),
         },
       });
-      return { state: "settled", chargedMicros: charged };
+      return { state: "decided", how, chargedMicros: charged };
     });
     this.#deliverIfStored();
     await Promise.resolve();

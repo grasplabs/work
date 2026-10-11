@@ -344,7 +344,7 @@ describe("model settings", { timeout: 60_000 }, () => {
     expect(user?.spent[0]?.amount).toBe(0.9);
   });
 
-  it("show admins the reservations held for review, and let them release or charge each, audited, and nobody else", async () => {
+  it("show admins the reservations held for review, and let them release or charge each, audited, telling them when one was already decided, and nobody else", async () => {
     const coreEnv = envWith({
       gateway: "grasp-os-test",
       models: [workersAi],
@@ -404,8 +404,13 @@ describe("model settings", { timeout: 60_000 }, () => {
         builderCore.authenticate().models.resolveHeld(releasing, "release")
       )
     ).resolves.toBe("role.forbidden");
-    await admin.models.resolveHeld(releasing, "release");
-    await admin.models.resolveHeld(charging, "charge");
+    const before = Date.now();
+    const decided = [
+      await admin.models.resolveHeld(releasing, "release"),
+      await admin.models.resolveHeld(charging, "charge"),
+    ];
+    // Someone else's decision came first: this one changes nothing.
+    const again = await admin.models.resolveHeld(charging, "release");
     await runDurableObjectAlarm(ledger);
     const events = await allEvents();
     const spentNow = await ledger.spendOf(period, ["user"], 1000);
@@ -414,6 +419,14 @@ describe("model settings", { timeout: 60_000 }, () => {
       shown: ours(shown.held)
         .map(({ id, amount, model }) => [id, amount, model])
         .toSorted(byJson),
+      decided,
+      again: {
+        ...again,
+        decidedAt:
+          "decidedAt" in again &&
+          Date.parse(again.decidedAt) >= before &&
+          Date.parse(again.decidedAt) <= Date.now(),
+      },
       after: ours(await admin.models.held()),
       spent: spentNow.user?.find((row) => row.key === key),
       audited: events
@@ -430,6 +443,16 @@ describe("model settings", { timeout: 60_000 }, () => {
         [releasing, 0.01, workersAi],
         [charging, 0.02, workersAi],
       ].toSorted(byJson),
+      decided: [
+        { state: "decided", how: "release", amount: 0 },
+        { state: "decided", how: "charge", amount: 0.02 },
+      ],
+      again: {
+        state: "already_decided",
+        how: "charge",
+        amount: 0.02,
+        decidedAt: true,
+      },
       after: [],
       spent: { key, spentMicros: 20_000, reservedMicros: 0 },
       audited: [
