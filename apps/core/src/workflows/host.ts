@@ -1144,6 +1144,9 @@ export class RunHost extends RpcTarget {
     try {
       return await asking;
     } catch (error) {
+      // Settled: stop holding later attempts on it before this one waits,
+      // or they would await the same settled promise again and again.
+      this.#stopAsking(attempt.step, asking);
       if (modelErrors.codeOf(error) === "model.budget_busy") {
         const details =
           typeof error === "object" && error !== null && "details" in error
@@ -1156,9 +1159,13 @@ export class RunHost extends RpcTarget {
       }
       throw error;
     } finally {
-      if (this.#asking.get(attempt.step) === asking) {
-        this.#asking.delete(attempt.step);
-      }
+      this.#stopAsking(attempt.step, asking);
+    }
+  }
+
+  #stopAsking(step: string, asking: Promise<unknown>): void {
+    if (this.#asking.get(step) === asking) {
+      this.#asking.delete(step);
     }
   }
 
