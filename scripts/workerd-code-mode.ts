@@ -1,8 +1,9 @@
 /**
  * Code Mode on plain workerd: bundles the executor core runs
  * (apps/core/src/code-mode.ts) into a small Worker
- * (apps/core/test/workerd/code-mode-worker.ts), serves it on plain workerd
- * with a Worker Loader (no Wrangler, no Miniflare), and checks every case
+ * (apps/core/test/workerd/code-mode-worker.ts) with Wrangler's dry run,
+ * serves it on plain workerd with a Worker Loader (Wrangler only bundles;
+ * no Wrangler dev server, no Miniflare), and checks every case
  * ends as it does in core: the module contract, its failures, the limits,
  * cancellation, streamed output and the output budget.
  *
@@ -22,6 +23,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 
 const ATTEMPTS = 100;
+/** Most lines a run may log (`codeLimits.logLines` in code-mode.ts). */
+const LOG_LINES = 1000;
 const RETRY_DELAY_MS = 100;
 const out = mkdtempSync(path.join(tmpdir(), "grasp-os-code-mode-"));
 const core = path.join(import.meta.dirname, "../apps/core");
@@ -100,6 +103,7 @@ const expected = {
     neverSettles: "wall_expired",
     waitsPastItsTime: "wall_expired",
     cancelled: "cancelled",
+    manyLines: "completed",
     flood: "threw",
   },
 };
@@ -200,11 +204,17 @@ try {
     flood.bytes > 64 * 1024 ||
     !flood.cut ||
     flood.streamed === 0 ||
+    // Never more lines than a run may log, whatever it wrote.
+    flood.streamed > LOG_LINES ||
     !flood.ending.includes("Error (threw):\nError: the end")
   ) {
     problems.push(`flood: ${JSON.stringify(flood)}`);
   }
-  const { waitsPastItsTime } = results;
+  const { manyLines, waitsPastItsTime } = results;
+  // Five thousand lines written: never more streamed than a run may log.
+  if (manyLines === undefined || manyLines.streamed !== LOG_LINES) {
+    problems.push(`manyLines streamed ${manyLines?.streamed} lines`);
+  }
   // Its limit is a second: let go at it, not at its minute-long wait.
   if ((waitsPastItsTime?.ms ?? Infinity) > 5000) {
     problems.push(`waitsPastItsTime took ${waitsPastItsTime?.ms} ms`);

@@ -62,6 +62,9 @@ const cases: Record<string, Case> = {
     code: "export default async () => { await scheduler.wait(60_000); };",
     cancelAfterMs: 300,
   },
+  manyLines: {
+    code: "export default async () => { for (let i = 0; i < 5000; i++) console.log(i); return 'done'; };",
+  },
   flood: {
     code: "export default async () => { for (let i = 0; i < 5000; i++) console.log('é'.repeat(200)); throw new Error('the end'); };",
   },
