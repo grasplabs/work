@@ -12,6 +12,7 @@ import {
 } from "@grasp-os/sdk/host";
 import type { AppManifest, OperationManifest } from "@grasp-os/sdk/host";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
+import { appCallLimits } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -95,8 +96,9 @@ import {
 //   manifest, hashed here; no channel method takes any of them.
 // - A query writes, a mutation reaches outside, an action holds the
 //   database: each kind's channel has only its capabilities, whatever the
-//   App code sends (operation-channel.ts), and actions don't run in this
-//   release's host at all yet.
+//   App code sends (operation-channel.ts): an action reaches data only
+//   through the App's queries and mutations it lists, each an invocation
+//   of its own.
 // - A function's access is widened past its declaration: every read and
 //   staged write is checked against the verbs inspection gave the
 //   function (its kind and `operationAccess`, narrowing only), and the
@@ -714,6 +716,17 @@ interface Staging {
   /** The bytes of the writes staged so far, as UTF-8 JSON. */
   readonly bytes: () => number;
   readonly stage: (request: unknown) => Promise<unknown>;
+  /**
+   * The first write the host refused to stage, if any: App code may not
+   * have waited for it, or may have caught it, but its change set lost a
+   * write, so the mutation can't commit as though it hadn't.
+   */
+  readonly refused: () => Error | undefined;
+  /**
+   * Remembers a refused write: told by the channel, wherever the write
+   * was refused (at its boundary, before staging, included).
+   */
+  readonly remember: (error: Error) => void;
   readonly preview: () => StagedWrites | undefined;
   readonly writes: () => StagedWrites["writes"];
 }
@@ -779,6 +792,7 @@ const stagingFor = (
     staged += bytes;
     writes.push(write);
   };
+  let refused: Error | undefined;
   const stage = async (request: unknown): Promise<unknown> => {
     const write = operationErrors.parse(
       "contract.invalid_write",
@@ -876,6 +890,10 @@ const stagingFor = (
     stagedAt,
     bytes: () => staged,
     stage,
+    refused: () => refused,
+    remember: (error: Error) => {
+      refused ??= error;
+    },
     preview: () =>
       writes.length === 0 ? undefined : { stagedAt, writes: [...writes] },
     writes: () => [...writes],
@@ -1198,7 +1216,7 @@ const scopeOf = async (
  * own function and three nested in it, as calls between Apps
  * (`appCallLimits.depth`).
  */
-export const callMaxDepth = 3;
+export const callMaxDepth = appCallLimits.depth;
 
 /** One function's run, and where it sits in the call it belongs to. */
 interface Run {
@@ -1229,8 +1247,27 @@ export const callMaxResourceRequests = 32;
 interface CallBudget {
   nested: number;
   requests: number;
-  readonly reads: ReadBudget;
+  /**
+   * The current run's reads: each run of the call's own function (a
+   * query run again for stale reads, a mutation's next attempt) starts a
+   * fresh one, which everything nested in that run shares. The limits are
+   * per run, as their names say; the bounded number of reruns bounds the
+   * whole call.
+   */
+  reads: ReadBudget;
 }
+
+/**
+ * The read budget of a run of `run`'s function: a fresh one, shared by
+ * what it calls, when it is the call's own function; the run it is nested
+ * in's otherwise, so nested calls never multiply what one run reads.
+ */
+const runReads = (run: Run): ReadBudget => {
+  if (run.depth === 0) {
+    run.budget.reads = readBudget();
+  }
+  return run.budget.reads;
+};
 
 /** A new call's budget. */
 const callBudget = (): CallBudget => ({
@@ -1313,8 +1350,15 @@ const trackedCalls = (
         if (left <= 0) {
           throw hostError(operationErrors.create("operation.unfinished_call"));
         }
+        // The timer is cleared once the calls settle first, so no wait is
+        // left pending past the run.
+        const timer = new AbortController();
         // oxlint-disable-next-line no-await-in-loop -- until none is left
-        await Promise.race([Promise.allSettled(running), scheduler.wait(left)]);
+        await Promise.race([
+          Promise.allSettled(running),
+          scheduler.wait(left, { signal: timer.signal }).catch(() => null),
+        ]);
+        timer.abort();
       }
       return unfinished?.error;
     },
@@ -1326,6 +1370,11 @@ const staleRun = new Error("A run's reads went stale");
 
 /** The capabilities one handler's channel gets, besides its refusals. */
 interface Capabilities {
+  /** Told of every refused or failed use, as the channel's `refused`. */
+  readonly onRefused?: (
+    name: "read" | "write" | "call" | "resource",
+    error: Error
+  ) => void;
   readonly read?: (request: unknown) => Promise<unknown>;
   readonly write?: (request: unknown) => Promise<unknown>;
   readonly call?: (
@@ -1343,22 +1392,14 @@ interface Capabilities {
 /** Why each kind's channel refuses what it hasn't. */
 const refusalsOf = {
   query: {
-    read: "operation.no_database",
     write: "operation.read_only",
     call: "operation.read_only",
     resource: "operation.no_resources",
   },
-  mutation: {
-    read: "operation.no_database",
-    write: "operation.read_only",
-    call: "operation.not_found",
-    resource: "operation.no_resources",
-  },
+  mutation: { resource: "operation.no_resources" },
   action: {
     read: "operation.no_database",
     write: "operation.no_database",
-    call: "operation.not_found",
-    resource: "operation.no_resources",
   },
 } as const;
 
@@ -1382,6 +1423,9 @@ const runHandler = async (
     path: operation.path,
     ...calls.capabilities,
     trust,
+    ...(capabilities.onRefused === undefined
+      ? {}
+      : { refused: capabilities.onRefused }),
     refusals: refusalsOf[operation.kind],
   });
   try {
@@ -1587,7 +1631,7 @@ const runQuery = async (
   return await trusted(
     async () =>
       await readConsistently(invocation.store, scope, async (reader) => {
-        const budget = run.budget.reads;
+        const budget = runReads(run);
         return await runHandler(run, operation, args, {
           read: async (request) => {
             spendRead(budget, 0);
@@ -1640,7 +1684,7 @@ const runMutation = async (
     const scope = await scopeOf(compiled, invocation, roles);
     const staging = stagingFor(compiled, operation, Date.now());
     const reader = new StoreReader(store, scope, staging.preview);
-    const budget = run.budget.reads;
+    const budget = runReads(run);
     const spend = () => {
       spendRead(budget, staging.bytes());
     };
@@ -1659,6 +1703,14 @@ const runMutation = async (
             return await readFor(operation, reader, request);
           },
           write: staging.stage,
+          // Any write refused, at the channel's boundary or in staging,
+          // fails the mutation (`refused`); calls and resources stay
+          // catchable.
+          onRefused: (name, error) => {
+            if (name === "write") {
+              staging.remember(error);
+            }
+          },
           call: async (kind, path, callArgs) =>
             await nestedCall(
               run,
@@ -1675,6 +1727,10 @@ const runMutation = async (
         continue;
       }
       throw error;
+    }
+    const refusedWrite = staging.refused();
+    if (refusedWrite !== undefined) {
+      throw sealed(hostError(refusedWrite));
     }
     // oxlint-disable-next-line no-await-in-loop -- see above
     const current = await trusted(invocation.authorize);
