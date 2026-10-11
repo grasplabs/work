@@ -220,6 +220,32 @@ describe("a query's descriptor", () => {
     );
   });
 
+  test("refuses at its terminal a query binding more than 64 values", async () => {
+    const { db, requests } = recording([]);
+    // SAFETY: a test ID; the host decides whether a record has it.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const author = "p1" as Id<"people">;
+    let query = db
+      .query("notes")
+      .withIndex("by_author_rank", (range) =>
+        range.eq("author", author).gte("rank", 1).lt("rank", 9)
+      );
+    for (let index = 0; index < 61; index += 1) {
+      query = query.filter({ title: { neq: `t${index}` } });
+    }
+    // Three range values and 61 conditions, 64 in all: read.
+    await query.first();
+    // One more is refused before anything is read.
+    let caught: unknown;
+    try {
+      await query.filter({ title: { neq: "last" } }).first();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(QueryDefinitionError);
+    expect(requests).toHaveLength(1);
+  });
+
   test("copies what it is given: a list changed later changes nothing", async () => {
     const { db, requests } = recording([]);
     const ranks = [1, 2];

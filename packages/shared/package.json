@@ -27,6 +27,7 @@
     "./interview-links": "./src/interview-links.ts",
     "./kickoff": "./src/kickoff.ts",
     "./http": "./src/http.ts",
+    "./identifier": "./src/identifier.ts",
     "./ids": "./src/ids.ts",
     "./json": "./src/json.ts",
     "./knowledge": "./src/knowledge.ts",

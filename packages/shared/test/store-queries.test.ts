@@ -29,6 +29,13 @@ const deepFilter = (depth: number): unknown => {
   return node;
 };
 
+/** A condition binding one value. */
+const leaf = (index: number) => ({
+  field: "title",
+  op: "neq",
+  value: `v${index}`,
+});
+
 /** An equality bound on `field`. */
 const eq = (field: string) => ({ field, op: "eq", value: "a" });
 
@@ -148,18 +155,67 @@ describe("a query descriptor", () => {
   });
 
   it("refuses a wide filter before visiting its members", () => {
-    const leaf = { field: "title", op: "eq", value: "a" };
-    const wide = { or: Array.from({ length: 262_144 }, () => leaf) };
+    const condition = { field: "title", op: "eq", value: "a" };
+    const wide = { or: Array.from({ length: 262_144 }, () => condition) };
     const started = Date.now();
     expect(accepts(query({ filter: wide }))).toBeFalsy();
     // Refused from its list's length, not after reading every member.
     expect(Date.now() - started).toBeLessThan(1000);
     expect(
-      accepts(query({ filter: { or: Array.from({ length: 63 }, () => leaf) } }))
+      accepts(
+        query({ filter: { or: Array.from({ length: 63 }, () => condition) } })
+      )
     ).toBeTruthy();
     expect(
-      accepts(query({ filter: { or: Array.from({ length: 64 }, () => leaf) } }))
+      accepts(
+        query({ filter: { or: Array.from({ length: 64 }, () => condition) } })
+      )
     ).toBeFalsy();
+  });
+
+  it("refuses a long range before reading its bounds", () => {
+    const long = Array.from({ length: 1_000_000 }, () => "not a bound");
+    const result = queryRequestSchema.safeParse(query({ range: long }));
+    expect(result.error?.issues.map(({ message }) => message)).toStrictEqual([
+      "An index range holds at most 17 bounds",
+    ]);
+  });
+
+  it("binds at most 64 values across its range and filter, an `in` counting once", () => {
+    const range = [
+      ...Array.from({ length: 15 }, (_, index) => eq(`f${index}`)),
+      { field: "f15", op: "gt", value: 1 },
+      { field: "f15", op: "lt", value: 9 },
+    ];
+    const conditions = (count: number) =>
+      Array.from({ length: count }, (_, index) => leaf(index));
+    const longIn = {
+      field: "rank",
+      op: "in",
+      values: [...Array.from({ length: 99 }, (_, index) => index), null],
+    };
+    // 17 range values, 46 conditions and one `in`: 64.
+    expect(
+      accepts(query({ range, filter: { and: [...conditions(46), longIn] } }))
+    ).toBeTruthy();
+    expect(
+      accepts(query({ range, filter: { and: [...conditions(47), longIn] } }))
+    ).toBeFalsy();
+    // Null binds nothing, and neither does `exists`.
+    expect(
+      accepts(
+        query({
+          range,
+          filter: {
+            and: [
+              ...conditions(47),
+              { field: "rank", op: "eq", value: null },
+              { field: "rank", op: "exists", value: true },
+            ],
+          },
+        })
+      )
+    ).toBeTruthy();
   });
 
   it("refuses terminals out of bounds", () => {

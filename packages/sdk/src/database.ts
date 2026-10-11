@@ -1,3 +1,4 @@
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import {
   cursorMaxLength,
   filterMaxDepth,
@@ -7,6 +8,7 @@ import {
   queryMaxStringLength,
 } from "@grasp-os/shared/store-limits";
 import {
+  boundValuesIssue,
   filterBudgetIssue,
   rangeShapeIssue,
   readDescriptorVersion,
@@ -129,7 +131,7 @@ type NumericField<Document> = {
  * doesn't; a field holds a value, holds an explicit null, or is left out:
  * - `eq` with a value, `gt`, `gte`, `lt`, `lte` and `neq` match only a
  *   field that holds a value: `{ neq: "a" }` matches values other than
- *   "a", never null or a field left out;
+ *   "a", never null or a field left out, and `{ neq: null }` any value;
  * - `{ eq: null }`, and `in` listing null, match an explicit null only;
  * - `{ exists: false }` matches a field left out only, and
  *   `{ exists: true }` null or a value.
@@ -860,12 +862,17 @@ const pageTerminal = (options: unknown): QueryTerminal => {
 /** The query `query`, with the modifiers and terminals reading it. */
 const queryOf = (query: QueryState, execute: ReadExecutor): RuntimeQuery => {
   const run = async (terminal: QueryTerminal): Promise<unknown> => {
+    const filter = filterOf(query.filters);
+    const issue = boundValuesIssue(query.range, filter);
+    if (issue !== undefined) {
+      refuse("query.invalid_filter", `${issue}.`);
+    }
     const request: QueryRequest = {
       descriptorVersion: readDescriptorVersion,
       table: query.table,
       index: query.index,
       range: [...query.range],
-      filter: filterOf(query.filters),
+      filter,
       order: query.order,
       terminal,
     };
@@ -957,7 +964,11 @@ export const databaseReader = <Tables extends AnyTables>(
   const reader: RuntimeReader = {
     get: async (table: unknown, id: unknown, options?: unknown) => {
       const { name } = stateOf(table);
-      if (typeof id !== "string" || id === "" || id.length > 256) {
+      if (
+        typeof id !== "string" ||
+        id === "" ||
+        id.length > identifierMaxLength
+      ) {
         return refuse("query.invalid_terminal", "`get` takes a record ID.");
       }
       return await execute({

@@ -2,6 +2,7 @@ import {
   filterMaxDepth,
   filterMaxInValues,
   filterMaxNodes,
+  queryMaxBoundValues,
   rangeMaxBounds,
 } from "./store-limits.ts";
 
@@ -22,7 +23,8 @@ import {
 // explicit null, or is left out; in order, left out < null < value.
 // - `eq` with a value, `gt`, `gte`, `lt`, `lte` and `neq` match only a
 //   record whose field holds a value: `neq: x` matches values other than
-//   `x`, never null or a field left out.
+//   `x`, never null or a field left out, and `neq: null` matches any
+//   value.
 // - `eq: null`, and `in` listing null, match an explicit null only, never
 //   a field left out.
 // - `exists: false` matches a field left out only; `exists: true`, null
@@ -222,4 +224,40 @@ export const rangeShapeIssue = (
   return shaped
     ? undefined
     : "An index range is equality on the index's first fields, then a lower and/or an upper bound on the next one";
+};
+
+/** How many values `node` binds as SQL parameters, counted iteratively. */
+const filterBoundValues = (node: FilterNode): number => {
+  let values = 0;
+  const stack: FilterNode[] = [node];
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    stack.push(...filterChildren(next));
+    if (!("field" in next)) {
+      continue;
+    }
+    if (next.op === "in") {
+      // The list's values, null aside, bind as one JSON value.
+      values += next.values.some((value) => value !== null) ? 1 : 0;
+    } else if (next.op !== "exists" && next.value !== null) {
+      values += 1;
+    }
+  }
+  return values;
+};
+
+/**
+ * Why a query's range and filter together bind more values than
+ * `queryMaxBoundValues`, or undefined if they don't: what keeps a store's
+ * statement within its SQLite's parameter limit.
+ */
+export const boundValuesIssue = (
+  range: readonly RangeBound[],
+  filter: FilterNode | null
+): string | undefined => {
+  const values =
+    range.filter(({ value }) => value !== null).length +
+    (filter === null ? 0 : filterBoundValues(filter));
+  return values > queryMaxBoundValues
+    ? `A query's range and filter compare with at most ${queryMaxBoundValues} values (an \`in\` counts once)`
+    : undefined;
 };

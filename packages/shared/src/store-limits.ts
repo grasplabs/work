@@ -51,5 +51,15 @@ export const filterMaxDepth = 8;
 /** The most conditions and logic nodes one filter holds, all told. */
 export const filterMaxNodes = 64;
 
+/**
+ * The most values a query's descriptor binds as SQL parameters: one per
+ * condition with a value (an `in` binds its list as one JSON value), one
+ * per range bound with a value. A Durable Object's SQLite binds at most
+ * 100 parameters per statement, and the host adds its own: the owner (1)
+ * and, for a page, a cursor's seek (at most two per index field and the
+ * record ID, 34), which leaves 65; 64 keeps a bound to spare.
+ */
+export const queryMaxBoundValues = 64;
+
 /** The longest a pagination cursor may be, in characters (spec 9.2: 4 KiB). */
 export const cursorMaxLength = 4096;

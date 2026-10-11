@@ -12,6 +12,7 @@ import {
   storeNamePattern,
 } from "./store-limits.ts";
 import {
+  boundValuesIssue,
   filterBudgetIssue,
   rangeShapeIssue,
   readDescriptorVersion,
@@ -74,10 +75,23 @@ const rangeBoundSchema = z.strictObject({
   value: scalarSchema,
 }) satisfies z.ZodType<RangeBound>;
 
-/** A range: bounded, then checked for the shape of an index range. */
+/**
+ * A range: its length checked before any bound is read, then each bound,
+ * then the shape of an index range.
+ */
 const rangeSchema = z
-  .array(rangeBoundSchema)
-  .max(rangeMaxBounds)
+  .unknown()
+  .transform((value, context) => {
+    if (Array.isArray(value) && value.length > rangeMaxBounds) {
+      context.addIssue({
+        code: "custom",
+        message: `An index range holds at most ${rangeMaxBounds} bounds`,
+      });
+      return z.NEVER;
+    }
+    return value;
+  })
+  .pipe(z.array(rangeBoundSchema))
   .superRefine((range, context) => {
     const issue = rangeShapeIssue(range);
     if (issue !== undefined) {
@@ -153,15 +167,22 @@ const terminalSchema = z.union([
   }),
 ]) satisfies z.ZodType<QueryTerminal>;
 
-export const queryRequestSchema = z.strictObject({
-  descriptorVersion: z.literal(readDescriptorVersion),
-  table: nameSchema,
-  index: nameSchema.nullable(),
-  range: rangeSchema,
-  filter: filterSchema.nullable(),
-  order: z.enum(["asc", "desc"]),
-  terminal: terminalSchema,
-}) satisfies z.ZodType<QueryRequest>;
+export const queryRequestSchema = z
+  .strictObject({
+    descriptorVersion: z.literal(readDescriptorVersion),
+    table: nameSchema,
+    index: nameSchema.nullable(),
+    range: rangeSchema,
+    filter: filterSchema.nullable(),
+    order: z.enum(["asc", "desc"]),
+    terminal: terminalSchema,
+  })
+  .superRefine(({ range, filter }, context) => {
+    const issue = boundValuesIssue(range, filter);
+    if (issue !== undefined) {
+      context.addIssue({ code: "custom", message: issue });
+    }
+  }) satisfies z.ZodType<QueryRequest>;
 
 export const getRequestSchema = z.strictObject({
   table: nameSchema,
