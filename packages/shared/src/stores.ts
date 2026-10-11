@@ -12,6 +12,7 @@ import {
   storeNameMaxLength,
   storeNamePattern,
 } from "./store-limits.ts";
+import { valueDepth } from "./value-depth.ts";
 
 // Business stores: a deployment's structured records, each store one
 // Durable Object with its own SQLite database (apps/core/src/data-store.ts),
@@ -46,8 +47,12 @@ export const documentMaxBytes = 128 * 1024;
  */
 export const commitMaxInputBytes = 1024 * 1024;
 
-/** How deeply a record's JSON may nest. */
-export const documentMaxDepth = 32;
+/**
+ * How deeply a record's JSON may nest: a field's value gets `valueDepth`
+ * levels, counted from the field (its value is level 1, its leaf
+ * included), as deep as any value may be.
+ */
+export const documentMaxDepth = valueDepth;
 
 // The counts below bound what one commit or store holds: a commit is one
 // synchronous transaction in one store, and holds the store while it

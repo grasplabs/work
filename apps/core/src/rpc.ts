@@ -210,6 +210,8 @@ export const rpcResponse = async (
     // here: the product's own calls share this connection, and a
     // document or an App's files are longer than a screen's message. A
     // screen's call is held to its bytes where it lands (screens-rpc.ts).
+    // The depth is each message's: a value built from what earlier
+    // messages sent, by referring to them, isn't bounded by it (GRA-423).
     limits: {
       maxDepth: screenLimits.rpc.maxDepth,
       maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,

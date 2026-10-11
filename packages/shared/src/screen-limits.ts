@@ -25,7 +25,10 @@ export const screenModulePath = "/screen-modules";
  * A value passed straight as an argument (a run's input, a decision's
  * answer) has one level around it, and an answer, the message's own
  * expression, none: this shape is the deepest. Arrays and objects count
- * alike.
+ * alike. So a value passed straight as an argument may be 33 levels deep
+ * on the wire, on purpose: one more than values may nest, refused where
+ * it is checked (no schema nests deeper than `valueDepth`), as bounding
+ * each shape apart would take a limit of each call's own.
  */
 const rpcWrapperLevels = 2;
 
@@ -49,12 +52,17 @@ export const screenLimits = {
    * size is its text's, in UTF-16 code units. A browser's connection to
    * core takes the depth and the digits too (core's rpc.ts).
    *
-   * The depth bounds how far Cap'n Web recurses into a message from an
-   * untrusted side, so it is no deeper than a value may nest plus the
+   * The depth bounds how far Cap'n Web recurses into each message from
+   * an untrusted side, so it is no deeper than a value may nest plus the
    * levels a screen's call wraps it in: a value as deep as values may be
    * arrives, one level deeper ends the session. Each level more lets
    * every message recurse once more; what a message holds in all stays
    * bounded by its size.
+   *
+   * It bounds one message, not the value a call ends up with: a message
+   * can refer to what earlier ones sent (Cap'n Web's pipelining), so a
+   * value built over several messages can be deeper. That is bounded
+   * where values reach core, not here (GRA-423).
    */
   rpc: {
     maxDepth: valueDepth + rpcWrapperLevels,
