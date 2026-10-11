@@ -4,6 +4,7 @@ import { databaseReader } from "@grasp-os/sdk/database";
 import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { Commit, StoreFields } from "@grasp-os/shared/stores";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -31,8 +32,9 @@ const builder: Acting = {
 };
 
 const schema = defineSchema({
-  notes: defineTable({ title: v.string() }),
+  notes: defineTable({ title: v.string() }).index("by_title", ["title"]),
   people: defineTable({ name: v.string() }),
+  drafts: defineTable({ title: v.string() }),
 });
 
 interface Fixture {
@@ -49,6 +51,8 @@ const storeWithNotes = async (): Promise<Fixture> => {
         tables: {
           notes: { read: "appMembers", write: "appMembers" },
           people: { read: "appMembers", write: "appMembers" },
+          // Read by the App's builders only: refused to Ada's reads.
+          drafts: { read: "appBuilders", write: "appMembers" },
         },
       })
     )
@@ -434,6 +438,92 @@ describe("a read that fails after reading", () => {
     expect({ answer, runs }).toStrictEqual({
       answer: { unique: true, count: 1 },
       runs: 2,
+    });
+  });
+});
+
+describe("a read refused before reading", () => {
+  it("depends on no record: a handler's fallback is answered in one run while its table changes", async () => {
+    const fixture = await storeWithNotes();
+    let runs = 0;
+    const answer = await readConsistently(
+      fixture.store,
+      fixture.scope,
+      async (reader) => {
+        runs += 1;
+        let drafts: number | "denied" = "denied";
+        try {
+          drafts = await dbOver(reader).query("drafts").count();
+        } catch {
+          // Not Ada's to read: the handler answers without them.
+        }
+        // Another caller keeps changing the table Ada may not read.
+        await commit(fixture, [
+          { op: "insert", table: "drafts", fields: { title: `run ${runs}` } },
+        ]);
+        return drafts;
+      }
+    );
+    expect({ answer, runs }).toStrictEqual({ answer: "denied", runs: 1 });
+  });
+
+  it("fails with its refusal in one run while its table changes", async () => {
+    const fixture = await storeWithNotes();
+    let runs = 0;
+    const failure = await failureOf(
+      readConsistently(fixture.store, fixture.scope, async (reader) => {
+        runs += 1;
+        try {
+          return await dbOver(reader).query("drafts").count();
+        } finally {
+          // Another caller changes the table after the refusal, before
+          // the run's reads are checked.
+          await commit(fixture, [
+            { op: "insert", table: "drafts", fields: { title: `run ${runs}` } },
+          ]);
+        }
+      })
+    );
+    expect({ code: failure.code, runs }).toStrictEqual({
+      code: "data.access_denied",
+      runs: 1,
+    });
+  });
+
+  it("fails with an index the store lacks in one run while its table changes", async () => {
+    const fixture = await storeWithNotes();
+    // A damaged store: its indexes gone, so SQLite refuses the statement.
+    await runInDurableObject(
+      env.DATA_STORES.getByName(fixture.store.id),
+      (_instance, state) => {
+        for (const { name } of state.storage.sql
+          .exec<{ name: string }>(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'sdk\\_ix\\_%' ESCAPE '\\'"
+          )
+          .toArray()) {
+          state.storage.sql.exec(`DROP INDEX ${name}`);
+        }
+      }
+    );
+    let runs = 0;
+    const failure = await failureOf(
+      readConsistently(fixture.store, fixture.scope, async (reader) => {
+        runs += 1;
+        try {
+          return await dbOver(reader)
+            .query("notes")
+            .withIndex("by_title", (range) => range.eq("title", "a"))
+            .collect();
+        } finally {
+          // Another caller changes the table after the refusal, before
+          // the run's reads are checked.
+          await insertNote(fixture, { title: `run ${runs}` });
+        }
+      })
+    );
+    expect({ code: failure.code, runs }).toStrictEqual({
+      code: "data.index_required",
+      runs: 1,
     });
   });
 });

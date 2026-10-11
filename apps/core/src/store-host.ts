@@ -97,6 +97,7 @@ import type {
   PageAnswer,
   PinnedSchema,
   QueryAnswer,
+  RecordSql,
 } from "./store-queries.ts";
 
 // The host of a business store (data-store.ts is its Durable Object): one
@@ -564,11 +565,11 @@ export class StoreHost {
     const table = read.kind === "get" ? read.table : read.query.table;
     return this.ctx.storage.transactionSync((): ReadResult => {
       this.#bind(storeId, false);
-      const value = this.#withGenerations(pinned, table, () =>
+      const value = this.#withGenerations(pinned, table, (statements) =>
         indexRequired(() =>
           read.kind === "get"
-            ? readRecord(this.ctx.storage.sql, pinned, reader, read)
-            : runQuery(this.ctx.storage.sql, pinned, reader, read.query)
+            ? readRecord(statements, pinned, reader, read)
+            : runQuery(statements, pinned, reader, read.query)
         )
       );
       return { value, generations: this.#generationsOf(pinned, [table]) };
@@ -577,20 +578,43 @@ export class StoreHost {
 
   /**
    * `read()`, with the generation of `table` added to a data error it
-   * fails with (`details.generations`), taken in the same transaction:
-   * a read that failed after it looked at records (`data.not_unique`,
-   * `data.result_limit`, ...) depended on them as much as one that
-   * answered, and its reader must count it (store-reader.ts).
+   * fails with (`details.generations`), taken in the same transaction,
+   * once it has read records: a read that failed after it looked at them
+   * (`data.not_unique`, `data.result_limit`, ...) depended on them as much
+   * as one that answered, and its reader must count it (store-reader.ts).
+   * One refused before it ran a statement (`data.access_denied`, an
+   * unknown table or index, an invalid query) depended on no record, and
+   * carries none: counting it would rerun its reader for every commit to
+   * a table it never read, and answer `query.concurrent_change` for what
+   * is a refusal.
    */
   #withGenerations<Answer>(
     pinned: PinnedSchema,
     table: string,
-    read: () => Answer
+    read: (statements: RecordSql) => Answer
   ): Answer {
+    const storage = this.ctx.storage.sql;
+    let readRecords = false;
+    const counted: RecordSql = {
+      exec: <Row extends Record<string, SqlStorageValue>>(
+        query: string,
+        ...bindings: unknown[]
+      ): SqlStorageCursor<Row> => {
+        const cursor = storage.exec<Row>(query, ...bindings);
+        // Only once SQLite took the statement: one it refused (an index
+        // the store lacks) read nothing.
+        readRecords = true;
+        return cursor;
+      },
+    };
     try {
-      return read();
+      return read(counted);
     } catch (error) {
-      if (error instanceof Error && dataErrors.codeOf(error) !== undefined) {
+      if (
+        readRecords &&
+        error instanceof Error &&
+        dataErrors.codeOf(error) !== undefined
+      ) {
         const details: unknown = Reflect.get(error, "details");
         Reflect.set(error, "details", {
           ...(typeof details === "object" && details !== null ? details : {}),
@@ -696,9 +720,9 @@ export class StoreHost {
     const { read, generations } = this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
       return {
-        read: this.#withGenerations(pinned, query.table, () =>
+        read: this.#withGenerations(pinned, query.table, (statements) =>
           indexRequired(() =>
-            readPage(this.ctx.storage.sql, pinned, reader, query, anchor)
+            readPage(statements, pinned, reader, query, anchor)
           )
         ),
         generations: this.#generationsOf(pinned, [query.table]),

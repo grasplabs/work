@@ -245,6 +245,12 @@ const accessOf = (
   };
 };
 
+/**
+ * What a read reads records through: SQLite's statements, and nothing
+ * else of the store, so the host can tell whether a read ever ran one.
+ */
+export type RecordSql = Pick<SqlStorage, "exec">;
+
 /** A record's row, as a read selects it. */
 export interface ReadRow extends Record<string, SqlStorageValue> {
   record_id: string;
@@ -462,7 +468,7 @@ const scanned = (scan: Scan, bytes: number): void => {
  * see. A different `expectedRevision` on one it may see is a conflict.
  */
 export const readRecord = (
-  sql: SqlStorage,
+  sql: RecordSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   request: GetRequest
@@ -615,7 +621,7 @@ export interface Match {
  * no further, and whoever reads past a bound gets `data.scan_limit`.
  */
 export const matchesOf = (
-  sql: SqlStorage,
+  sql: RecordSql,
   plan: Plan,
   shared?: Scan
 ): IterableIterator<Match, undefined> => {
@@ -858,7 +864,7 @@ const seeksAfter = (
  * is gone.
  */
 const anchorValuesOf = (
-  sql: SqlStorage,
+  sql: RecordSql,
   table: ReadTable,
   scope: ReadScope,
   orderFields: readonly string[],
@@ -887,7 +893,7 @@ const anchorValuesOf = (
  * in order: one per seek, each an index range of its own.
  */
 export const pagePlans = (
-  sql: SqlStorage,
+  sql: RecordSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   query: QueryRequest,
@@ -895,6 +901,10 @@ export const pagePlans = (
 ): Plan[] => {
   const table = readableTable(pinned, scope, query.table);
   const { orderFields } = accessOf(pinned, table, query);
+  // A cursor that carries only the record ID has its anchor read first, so
+  // a page that then fails with `data.index_required` has read a record,
+  // carries its table's generation (store-host.ts) and may rerun under
+  // commits. Accepted: only a damaged store lacks its indexes.
   const seeks: (Seek | undefined)[] =
     anchor === null
       ? [undefined]
@@ -923,7 +933,7 @@ export const pagePlans = (
  * bounds of every other terminal apply across all of a page's seeks.
  */
 export const readPage = (
-  sql: SqlStorage,
+  sql: RecordSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   query: QueryRequest,
@@ -975,7 +985,7 @@ export const readPage = (
  * model above says. A page is read with `readPage`.
  */
 export const runQuery = (
-  sql: SqlStorage,
+  sql: RecordSql,
   pinned: PinnedSchema,
   scope: ReadScope,
   query: QueryRequest
