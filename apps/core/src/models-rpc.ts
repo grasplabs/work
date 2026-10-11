@@ -1,6 +1,8 @@
 import { actorOf } from "@grasp-os/shared/audit";
-import { heldListed, modelErrors } from "@grasp-os/shared/models";
+import { heldListed } from "@grasp-os/shared/models";
 import type {
+  HeldDecision,
+  HeldHow,
   HeldRequest,
   ModelSettings,
   ModelsApi,
@@ -25,7 +27,9 @@ import type { SessionCheck } from "./session-check.ts";
 //
 // And the reservations the model ledger set aside because it couldn't read
 // them to settle (model-ledger.ts): admins see what they hold, and release
-// each or charge it in full, which the ledger audits in their name.
+// each or charge it in full, which the ledger audits in their name. Each
+// decision answers what it came to: done, or decided before, with what
+// stands.
 
 const heldIdSchema = z.uuid();
 const howSchema = z.enum(["release", "charge"]);
@@ -71,29 +75,49 @@ export class ModelsRpc extends CoreRpcTarget implements ModelsApi {
     });
   }
 
-  async resolveHeld(id: string, how: "release" | "charge"): Promise<void> {
-    await withPerson(this.#check, async (person) => {
+  async resolveHeld(id: string, how: HeldHow): Promise<HeldDecision> {
+    return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
       const decided = await modelLedger(this.#env).resolveQuarantined(
         heldIdSchema.parse(id),
         howSchema.parse(how),
         actorOf(person)
       );
-      // Still held: the admin is told, rather than it seeming done.
-      if (decided.state === "spend_missing") {
-        throw modelErrors.create("model.held_unresolvable");
+      if (decided.state === "decided") {
+        return {
+          state: "decided",
+          how: decided.how,
+          amount: decided.chargedMicros / microsPerDollar,
+        };
       }
+      // Told apart from done, so an admin who acted on a request someone
+      // else decided sees what stands rather than their own decision.
+      if (decided.state === "already_decided") {
+        return {
+          state: "already_decided",
+          how: decided.how,
+          amount: decided.chargedMicros / microsPerDollar,
+          decidedAt: new Date(decided.decidedAt).toISOString(),
+        };
+      }
+      if (decided.state === "release_only") {
+        return { state: "release_only" };
+      }
+      return { state: "not_held" };
     });
   }
 
   async #held(): Promise<HeldRequest[]> {
     const rows = await modelLedger(this.#env).quarantined(heldListed);
-    return rows.map(({ id, model, period, reservedMicros, dispatchedAt }) => ({
-      id,
-      model,
-      period,
-      amount: reservedMicros / microsPerDollar,
-      sentAt: new Date(dispatchedAt).toISOString(),
-    }));
+    return rows.map(
+      ({ id, model, period, reservedMicros, dispatchedAt, releaseOnly }) => ({
+        id,
+        model,
+        period,
+        amount: reservedMicros / microsPerDollar,
+        sentAt: new Date(dispatchedAt).toISOString(),
+        releaseOnly,
+      })
+    );
   }
 }

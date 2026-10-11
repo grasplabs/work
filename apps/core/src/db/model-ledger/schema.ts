@@ -53,9 +53,12 @@ export const requests = sqliteTable(
     state: text({
       enum: ["dispatched", "unknown", "settled", "quarantined"],
     }).notNull(),
-    /** How it settled: by its usage, refused, never sent, or in full. */
+    /**
+     * How it settled: by its usage, refused, never sent, or in full; or as
+     * a person decided a held request, released or charged.
+     */
     settledBy: text("settled_by", {
-      enum: ["usage", "refused", "unsent", "reconciled", "decided"],
+      enum: ["usage", "refused", "unsent", "reconciled", "released", "charged"],
     }),
     /** Who or what asked, as JSON, for the alerts it causes. */
     actor: text().notNull(),

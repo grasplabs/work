@@ -421,7 +421,7 @@ describe("the model ledger", () => {
     });
   });
 
-  it("lists quarantined requests, and releases or charges each as a person decides, once, audited", async () => {
+  it("lists quarantined requests, and releases or charges each as a person decides, once, audited, answering a later decision with the first", async () => {
     const ledger = newLedger();
     const [released, charged] = [
       admission(30, [budget(1000, "fay")]),
@@ -438,6 +438,7 @@ describe("the model ledger", () => {
       userId: `admin-${crypto.randomUUID()}`,
     } as const;
 
+    const before = Date.now();
     const resolved = await Promise.all([
       ledger.resolveQuarantined(released.id, "release", admin),
       ledger.resolveQuarantined(charged.id, "charge", admin),
@@ -447,10 +448,21 @@ describe("the model ledger", () => {
     const events = await allEvents();
     expect({
       listed: listed
-        .map(({ id, reservedMicros, model }) => [id, reservedMicros, model])
+        .map(({ id, reservedMicros, model, releaseOnly }) => [
+          id,
+          reservedMicros,
+          model,
+          releaseOnly,
+        ])
         .toSorted(byJson),
       resolved,
-      again,
+      again: {
+        ...again,
+        decidedAt:
+          "decidedAt" in again &&
+          again.decidedAt >= before &&
+          again.decidedAt <= Date.now(),
+      },
       after: await ledger.quarantined(10),
       fay: await spendOf(ledger, "fay"),
       audited: events
@@ -458,16 +470,23 @@ describe("the model ledger", () => {
         .map(({ action, detail }) => [action, detail.request, detail.charged])
         .toSorted(byJson),
     }).toStrictEqual({
+      // Their spend is whole: either decision may be made.
       listed: [
-        [released.id, 30, "workers-ai/test"],
-        [charged.id, 20, "workers-ai/test"],
+        [released.id, 30, "workers-ai/test", false],
+        [charged.id, 20, "workers-ai/test", false],
       ].toSorted(byJson),
       resolved: [
-        { state: "settled", chargedMicros: 0 },
-        { state: "settled", chargedMicros: 20 },
+        { state: "decided", how: "release", chargedMicros: 0 },
+        { state: "decided", how: "charge", chargedMicros: 20 },
       ],
-      // Settled already: a second decision changes nothing.
-      again: { state: "not_held" },
+      // Decided already: a second decision changes nothing, and is told
+      // what stands.
+      again: {
+        state: "already_decided",
+        how: "release",
+        chargedMicros: 0,
+        decidedAt: true,
+      },
       after: [],
       fay: { key: "fay", spentMicros: 20, reservedMicros: 0 },
       audited: [
@@ -501,36 +520,280 @@ describe("the model ledger", () => {
     expect(delivered).toBeTruthy();
   });
 
-  it("refuses a decision on a held request whose budget record is missing, leaving it held and unaudited", async () => {
+  it("lets a person only release a request held for its damaged spend, clearing what a damaged scope holds to nothing, audited", async () => {
     const ledger = newLedger();
     const key = `kim-${crypto.randomUUID()}`;
-    const held = admission(30, [budget(1000, key)]);
+    const workflow = `flow-${crypto.randomUUID()}`;
+    const held = admission(
+      30,
+      [
+        budget(1000, key),
+        {
+          scope: "workflow",
+          key: workflow,
+          limitMicros: null,
+          alertMicros: null,
+          names: {},
+        },
+        {
+          scope: "deployment",
+          key: "deployment",
+          limitMicros: null,
+          alertMicros: null,
+          names: {},
+        },
+      ],
+      { reconcileAt: Date.now() + 1000 }
+    );
     await ledger.admit(held);
-    await corrupt(ledger, "scopes", "not JSON", held.id);
-    await ledger.settle(held.id, { by: "refused" });
+    // The ledger's own data gone wrong: the person's spend holds less than
+    // the request reserved, and the workflow's is gone.
     await runInDurableObject(ledger, (_instance, state) => {
-      state.storage.sql.exec("DELETE FROM spend WHERE key = ?", key);
+      state.storage.sql.exec(
+        "UPDATE spend SET reserved_micros = 10 WHERE scope = 'user' AND key = ?",
+        key
+      );
+      state.storage.sql.exec(
+        "DELETE FROM spend WHERE scope = 'workflow' AND key = ?",
+        workflow
+      );
     });
+    // Settling it takes the person's spend below nothing, so every try at
+    // reconciling it fails, and it is held for a person after three.
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runInDurableObject(ledger, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE requests SET reconcile_at = ? WHERE id = ?",
+          Date.now() - 1,
+          held.id
+        );
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runDurableObjectAlarm(ledger);
+    }
+    const listed = await ledger.quarantined(10);
     const admin = {
       type: "person",
       userId: `admin-${crypto.randomUUID()}`,
     } as const;
 
-    const decided = await ledger.resolveQuarantined(held.id, "charge", admin);
+    const charged = await ledger.resolveQuarantined(held.id, "charge", admin);
+    const stillHeld = await ledger.quarantined(10);
+    const released = await ledger.resolveQuarantined(held.id, "release", admin);
+    const again = await ledger.resolveQuarantined(held.id, "release", admin);
     await runDurableObjectAlarm(ledger);
     const events = await allEvents();
-    const stillHeld = await ledger.quarantined(10);
     expect({
-      decided,
-      held: stillHeld.map(({ id }) => id),
-      audited: events.filter(
-        ({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin)
+      listed: listed.map(({ id, releaseOnly }) => [id, releaseOnly]),
+      charged,
+      stillHeld: stillHeld.map(({ id }) => id),
+      released,
+      again: again.state,
+      after: await ledger.quarantined(10),
+      spend: await ledger.spendOf(
+        "2400-01",
+        ["user", "workflow", "deployment"],
+        10
       ),
+      audited: events
+        .filter(({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin))
+        .map(({ action, detail }) => ({ action, ...detail })),
     }).toStrictEqual({
-      decided: { state: "spend_missing" },
-      held: [held.id],
-      audited: [],
+      // Listed as release-only from the start.
+      listed: [[held.id, true]],
+      // A charge would count against a wrong total: refused, still held.
+      charged: { state: "release_only" },
+      stillHeld: [held.id],
+      released: { state: "decided", how: "release", chargedMicros: 0 },
+      again: "already_decided",
+      after: [],
+      // Rebuilt from the open requests on it, none: nothing, never below
+      // it. The healthy scope released as usual; the missing one, which no
+      // other request holds against, left missing.
+      spend: {
+        user: [{ key, spentMicros: 0, reservedMicros: 0 }],
+        workflow: [],
+        deployment: [{ key: "deployment", spentMicros: 0, reservedMicros: 0 }],
+      },
+      audited: [
+        {
+          action: "model.spend.released",
+          request: held.id,
+          model: "workers-ai/test",
+          period: "2400-01",
+          charged: 0,
+          damaged: 2,
+          "damaged.0.scope": "user",
+          "damaged.0.key": key,
+          "damaged.0.held": 0.00001,
+          "damaged.0.rebuilt": 0,
+          "damaged.1.scope": "workflow",
+          "damaged.1.key": workflow,
+          "damaged.1.held": null,
+          "damaged.1.rebuilt": null,
+        },
+      ],
     });
+  });
+
+  it("rebuilds a damaged scope from the other requests open on it when a person releases a held one, so theirs still settle and are counted", async () => {
+    const ledger = newLedger();
+    const key = `lea-${crypto.randomUUID()}`;
+    const workflow = {
+      scope: "workflow",
+      key: `flow-${crypto.randomUUID()}`,
+      limitMicros: null,
+      alertMicros: null,
+      names: {},
+    } as const;
+    const first = admission(30, [budget(1000, key), workflow], {
+      reconcileAt: Date.now() + 1000,
+    });
+    const second = admission(10, [budget(1000, key), workflow]);
+    await ledger.admit(first);
+    await ledger.admit(second);
+    // The person's spend should hold 40 for the two; damaged, it holds 25.
+    // The workflow's is gone.
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE spend SET reserved_micros = 25 WHERE scope = 'user' AND key = ?",
+        key
+      );
+      state.storage.sql.exec(
+        "DELETE FROM spend WHERE scope = 'workflow' AND key = ?",
+        workflow.key
+      );
+    });
+    // Settling the first takes the spend below nothing: held after three
+    // failed tries. The second is still under way.
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runInDurableObject(ledger, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE requests SET reconcile_at = ? WHERE id = ?",
+          Date.now() - 1,
+          first.id
+        );
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runDurableObjectAlarm(ledger);
+    }
+    const listed = await ledger.quarantined(10);
+    const admin = {
+      type: "person",
+      userId: `admin-${crypto.randomUUID()}`,
+    } as const;
+
+    const released = await ledger.resolveQuarantined(
+      first.id,
+      "release",
+      admin
+    );
+    const holding = await ledger.spendOf("2400-01", ["user", "workflow"], 10);
+    const settled = await ledger.settle(second.id, {
+      by: "usage",
+      tokens: { input: 2, output: 2, cacheRead: 0, cacheWrite: 0 },
+    });
+    await runDurableObjectAlarm(ledger);
+    const events = await allEvents();
+    expect({
+      listed: listed.map(({ id, releaseOnly }) => [id, releaseOnly]),
+      released: released.state,
+      holding,
+      settled,
+      after: await ledger.spendOf("2400-01", ["user", "workflow"], 10),
+      audited: events
+        .filter(({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin))
+        .map(({ detail }) => [
+          detail.damaged,
+          detail["damaged.0.held"],
+          detail["damaged.0.rebuilt"],
+          detail["damaged.1.held"],
+          detail["damaged.1.rebuilt"],
+        ]),
+    }).toStrictEqual({
+      listed: [[first.id, true]],
+      released: "decided",
+      // What the second still reserves, by the ledger's own records; the
+      // workflow's spend recreated for it.
+      holding: {
+        user: [{ key, spentMicros: 0, reservedMicros: 10 }],
+        workflow: [{ key: workflow.key, spentMicros: 0, reservedMicros: 10 }],
+      },
+      // The second settles at what it used, and is counted.
+      settled: { state: "settled", chargedMicros: 4 },
+      after: {
+        user: [{ key, spentMicros: 4, reservedMicros: 0 }],
+        workflow: [{ key: workflow.key, spentMicros: 4, reservedMicros: 0 }],
+      },
+      audited: [[2, 0.000025, 0.00001, null, 0.00001]],
+    });
+  });
+
+  it("refuses an admission with more scopes than the gateway counts, reserving nothing", async () => {
+    const ledger = newLedger();
+    const scopes: LedgerScope[] = [
+      { ...budget(1000, "max"), scope: "deployment", key: "deployment" },
+      { ...budget(1000, "max"), scope: "workflow", key: "flow" },
+      budget(1000, "max"),
+      { ...budget(1000, "max"), scope: "run", key: "run" },
+    ];
+    const fits = admission(10, scopes);
+    const tooMany = admission(10, [...scopes, budget(1000, "nia")]);
+
+    const refused = await ledger.admit(tooMany).then(
+      () => "admitted",
+      () => "refused"
+    );
+    const admitted = await ledger.admit(fits);
+    expect({
+      refused,
+      admitted: admitted.ok,
+      nia: await spendOf(ledger, "nia"),
+    }).toStrictEqual({ refused: "refused", admitted: true, nia: undefined });
+  });
+
+  it("lists at most six damaged scopes in a decision's audit event, counting all, and still settles it", async () => {
+    const ledger = newLedger();
+    const held = admission(10, [budget(1000, `oz-${crypto.randomUUID()}`)]);
+    await ledger.admit(held);
+    // Stored data naming more scopes than any admission may, none with
+    // spend: every one damaged.
+    await runInDurableObject(ledger, (_instance, state) => {
+      for (let extra = 0; extra < 7; extra += 1) {
+        state.storage.sql.exec(
+          "INSERT INTO request_scopes (request_id, scope, key) VALUES (?, 'run', ?)",
+          held.id,
+          `run-${extra}`
+        );
+      }
+      state.storage.sql.exec("DELETE FROM spend WHERE period = '2400-01'");
+    });
+    await corrupt(ledger, "scopes", "not JSON", held.id);
+    await ledger.settle(held.id, { by: "refused" });
+    const admin = {
+      type: "person",
+      userId: `admin-${crypto.randomUUID()}`,
+    } as const;
+
+    const released = await ledger.resolveQuarantined(held.id, "release", admin);
+    await runDurableObjectAlarm(ledger);
+    const events = await allEvents();
+    const event = events.find(
+      ({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin)
+    );
+    const listed = new Set(
+      Object.keys(event?.detail ?? {})
+        .filter((name) => name.startsWith("damaged."))
+        .map((name) => name.split(".")[1])
+    );
+    expect({
+      released: released.state,
+      after: await ledger.quarantined(10),
+      damaged: event?.detail.damaged,
+      listed: listed.size,
+    }).toStrictEqual({ released: "decided", after: [], damaged: 8, listed: 6 });
   });
 
   it("alerts admins when a decided charge takes a budget past its threshold", async () => {
