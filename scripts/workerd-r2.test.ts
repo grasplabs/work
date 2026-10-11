@@ -4,8 +4,10 @@
  * each test's steps on its `FILES` and `OTHER` buckets and answers what R2
  * returned, or the error it threw: the calls core makes.
  */
-import { writeFileSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -68,7 +70,10 @@ const run = async (env, step) => {
       return described(await bucket.put(step.key, body, options));
     }
     case "get": {
-      const object = await bucket.get(step.key, step.options);
+      const options = step.rangeHeader === undefined
+        ? step.options
+        : { range: new Headers({ range: step.rangeHeader }) };
+      const object = await bucket.get(step.key, options);
       if (object === null) return null;
       if (!("body" in object)) return { ...described(object), body: "none" };
       const bytes = new Uint8Array(await object.arrayBuffer());
@@ -80,7 +85,7 @@ const run = async (env, step) => {
     case "head":
       return described(await bucket.head(step.key));
     case "delete":
-      await bucket.delete(step.keys ?? step.key);
+      await bucket.delete(step.keys ?? (step.manyKeys === undefined ? step.key : Array.from({ length: step.manyKeys }, (_, i) => "k" + i)));
       return "deleted";
     case "list": {
       const listed = await bucket.list(step.options);
@@ -109,6 +114,32 @@ const run = async (env, step) => {
       const bytes = new Uint8Array(await new Blob(pieces).arrayBuffer());
       const now = await bucket.get(step.key);
       return { body: { size: bytes.byteLength, sha256: await sha256(bytes) }, now: await now.text() };
+    }
+    case "racePuts": {
+      // Writers all start before any finishes: each streams its body in
+      // pieces, with a pause between them.
+      const write = async (_, index) => {
+        const body = new FixedLengthStream(step.pieces * step.pieceSize);
+        const put = bucket.put(step.key, body.readable, { onlyIf: { etagDoesNotMatch: "*" } });
+        const out = body.writable.getWriter();
+        for (let piece = 0; piece < step.pieces; piece += 1) {
+          await out.write(new Uint8Array(step.pieceSize).fill(index + 1));
+          await scheduler.wait(5);
+        }
+        await out.close();
+        return (await put) === null ? [] : [index + 1];
+      };
+      const won = (await Promise.all(Array.from({ length: step.writers }, write))).flat();
+      const stored = new Uint8Array(await (await bucket.get(step.key)).arrayBuffer());
+      return { won, storedFills: [...new Set(stored)], storedSize: stored.byteLength };
+    }
+    case "putStalled": {
+      // Sends part of a body and never the rest: the put never ends.
+      const body = new FixedLengthStream(step.sent * 2);
+      const put = bucket.put(step.key, body.readable);
+      const writer = body.writable.getWriter();
+      await writer.write(new Uint8Array(step.sent).fill(1));
+      return await put;
     }
     case "expected":
       return { size: step.size, sha256: await sha256(generated(step.size)) };
@@ -139,7 +170,9 @@ type Step = Record<string, unknown> & {
     | "delete"
     | "list"
     | "expected"
-    | "getWhileReplaced";
+    | "getWhileReplaced"
+    | "racePuts"
+    | "putStalled";
   bucket?: "FILES" | "OTHER";
 };
 
@@ -154,12 +187,15 @@ const serve = async (
   storage = storageDir()
 ): Promise<{
   run: (steps: Step[]) => Promise<Results>;
+  /** Sends steps without waiting for their answer. */
+  send: (steps: Step[]) => void;
   stop: () => Promise<void>;
+  kill: () => Promise<void>;
 }> => {
   const out = tempDir();
   writeFileSync(path.join(out, "test.js"), testWorker);
   writeR2Service(out);
-  const { url, stop } = await serveOnWorkerd(
+  const { url, stop, kill } = await serveOnWorkerd(
     out,
     (address) => `using Workerd = import "/workerd/workerd.capnp";
 
@@ -185,9 +221,67 @@ const config :Workerd.Config = (
       });
       return resultsSchema.parse(await response.json());
     },
+    send: (steps) => {
+      // Its answer never comes, or comes after workerd is gone.
+      fetch(url, { method: "POST", body: JSON.stringify(steps) }).catch(
+        () => {}
+      );
+    },
     stop,
+    kill,
   };
 };
+
+/** The chunks one SQLite file of the R2 service holds. */
+const chunksIn = (file: string): number => {
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    // Only a bucket's file has the table; workerd keeps others there.
+    const hasChunks =
+      db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chunks'"
+        )
+        .get() !== undefined;
+    return hasChunks
+      ? z
+          .object({ n: z.number() })
+          .parse(db.prepare("SELECT count(*) AS n FROM chunks").get()).n
+      : 0;
+  } finally {
+    db.close();
+  }
+};
+
+/** The chunks the R2 service's buckets hold, read from their SQLite files. */
+const storedChunks = (storage: string): number => {
+  const dir = path.join(storage, "R2Store");
+  const files = existsSync(dir)
+    ? readdirSync(dir).filter((file) => file.endsWith(".sqlite"))
+    : [];
+  return files
+    .map((file) => chunksIn(path.join(dir, file)))
+    .reduce((total, n) => total + n, 0);
+};
+
+/** Waits until `holds` does, or fails after `attempts` tries. */
+const eventually = async (
+  holds: () => boolean,
+  attempts = 200
+): Promise<void> => {
+  if (holds()) {
+    return;
+  }
+  if (attempts === 0) {
+    throw new Error("it never happened");
+  }
+  await sleep(25);
+  await eventually(holds, attempts - 1);
+};
+
+/** Whether a result is an error saying `message`. */
+const refused = (result: unknown, message: string): boolean =>
+  JSON.stringify(result).includes(message);
 
 /** The ok value of each result, or its error. */
 const values = (results: Results): unknown[] =>
@@ -381,6 +475,98 @@ describe("the on-prem R2 service", () => {
       ])
     );
     expect(read).toStrictEqual({ body: expected, now: "replaced" });
+  });
+
+  it("lets exactly one of many concurrent write-once puts in, and keeps its body", async () => {
+    const { run } = await serve();
+    const writers = 8;
+    const pieces = 4;
+    const pieceSize = 256 * 1024;
+    const [raced] = values(
+      await run([
+        {
+          op: "racePuts",
+          bucket: "FILES",
+          key: "stretch",
+          writers,
+          pieces,
+          pieceSize,
+        },
+      ])
+    );
+    const { won, storedFills, storedSize } = z
+      .object({
+        won: z.array(z.number()),
+        storedFills: z.array(z.number()),
+        storedSize: z.number(),
+      })
+      .parse(raced);
+    expect({ winners: won.length, storedFills, storedSize }).toStrictEqual({
+      winners: 1,
+      storedFills: won,
+      storedSize: pieces * pieceSize,
+    });
+  });
+
+  it("removes what a put cut off by a crash left behind, when it starts again", async () => {
+    const storage = storageDir();
+    const first = await serve(storage);
+    first.send([
+      { op: "putStalled", bucket: "FILES", key: "k", sent: 3 * 1024 * 1024 },
+    ]);
+    // Its first chunks are on disk before workerd dies.
+    await eventually(() => storedChunks(storage) > 0);
+    await first.kill();
+    const leftBehind = storedChunks(storage);
+
+    const second = await serve(storage);
+    const [head] = values(
+      await second.run([{ op: "head", bucket: "FILES", key: "k" }])
+    );
+    await second.stop();
+    expect({
+      leftBehind: leftBehind > 0,
+      head,
+      after: storedChunks(storage),
+    }).toStrictEqual({
+      leftBehind: true,
+      head: null,
+      after: 0,
+    });
+  });
+
+  it("refuses what R2 refuses: metadata over 2 KiB in bytes, a bad cursor, an empty range, over 1000 keys to delete", async () => {
+    const { run } = await serve();
+    const results = values(
+      await run([
+        { op: "put", bucket: "FILES", key: "k", text: "value" },
+        {
+          op: "put",
+          bucket: "FILES",
+          key: "meta",
+          text: "x",
+          // 1100 characters, but 2200 bytes.
+          options: { customMetadata: { note: "é".repeat(1100) } },
+        },
+        { op: "list", bucket: "FILES", options: { cursor: "not a cursor" } },
+        { op: "get", bucket: "FILES", key: "k", rangeHeader: "bytes=-0" },
+        { op: "delete", bucket: "FILES", manyKeys: 1001 },
+        { op: "head", bucket: "FILES", key: "k" },
+      ])
+    );
+    expect({
+      metadata: refused(results[1], "metadata headers exceed"),
+      cursor: refused(results[2], "cursor is not valid"),
+      range: refused(results[3], "range is not satisfiable"),
+      delete: refused(results[4], "up to 1000 keys"),
+      kept: picked(results[5], ["key"]),
+    }).toStrictEqual({
+      metadata: true,
+      cursor: true,
+      range: true,
+      delete: true,
+      kept: { key: "k" },
+    });
   });
 
   it("deletes one key or many", async () => {

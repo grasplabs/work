@@ -43,6 +43,7 @@ const maxKeyBytes = 1024;
 const maxCustomMetadataBytes = 2048;
 const maxListKeys = 1000;
 const maxListKeysWithMetadata = 100;
+const maxDeleteKeys = 1000;
 
 const schema = `
 CREATE TABLE IF NOT EXISTS objects (
@@ -334,7 +335,10 @@ const headerRange = (header: string, size: number): ByteRange | undefined => {
   }
   if (start === "") {
     const suffix = Math.min(Number(end), size);
-    return suffix === 0 ? undefined : { start: size - suffix, end: size - 1 };
+    if (suffix === 0) {
+      throw invalidRange();
+    }
+    return { start: size - suffix, end: size - 1 };
   }
   const first = Number(start);
   const last = end === "" ? size - 1 : Math.min(Number(end), size - 1);
@@ -526,8 +530,127 @@ const newVersion = (): string =>
 const base64Encode = (text: string): string =>
   btoa(String.fromCodePoint(...new TextEncoder().encode(text)));
 
-const base64Decode = (text: string): string =>
-  new TextDecoder().decode(base64Bytes(text));
+/** A list cursor's key: what `base64Encode` made of it, or a 400. */
+const cursorKey = (cursor: string): string => {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
+      base64Bytes(cursor)
+    );
+  } catch {
+    throw invalidArgument("The cursor is not valid.");
+  }
+};
+
+const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
+
+/** Orders strings as SQLite does: by their UTF-8 bytes. */
+const compareUtf8 = (a: string, b: string): number => {
+  const [left, right] = [utf8(a), utf8(b)];
+  const length = Math.min(left.byteLength, right.byteLength);
+  for (let i = 0; i < length; i += 1) {
+    const difference = (left[i] ?? 0) - (right[i] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return left.byteLength - right.byteLength;
+};
+
+const maxCodePoint = 0x10_ff_ff;
+const surrogates = { first: 0xd8_00, last: 0xdf_ff };
+
+/**
+ * The least string after every string that starts with `prefix`: its last
+ * code point that can be, made one greater. UTF-8's byte order is code
+ * point order, so keys from `prefix` up to it are exactly its keys. None
+ * when no string comes after them all.
+ */
+const prefixEnd = (prefix: string): string | undefined => {
+  const codePoints: number[] = [];
+  for (const char of prefix) {
+    codePoints.push(char.codePointAt(0) ?? 0);
+  }
+  while (codePoints.length > 0) {
+    const last = (codePoints.pop() ?? 0) + 1;
+    if (last <= maxCodePoint) {
+      const next = last === surrogates.first ? surrogates.last + 1 : last;
+      return String.fromCodePoint(...codePoints, next);
+    }
+  }
+  return undefined;
+};
+
+/**
+ * The keys a list reads, as a range of the primary key SQLite can search:
+ * from the prefix, or after `startAfter` when that's later, up to the end
+ * of the prefix.
+ */
+const keyRange = (
+  prefix: string,
+  startAfter: string | undefined
+): { sql: string; bindings: string[] } => {
+  const after =
+    startAfter !== undefined && compareUtf8(startAfter, prefix) >= 0;
+  const conditions = [after ? "key > ?" : "key >= ?"];
+  const bindings = [after && startAfter !== undefined ? startAfter : prefix];
+  const end = prefixEnd(prefix);
+  if (end !== undefined) {
+    conditions.push("key < ?");
+    bindings.push(end);
+  }
+  return { sql: conditions.join(" AND "), bindings };
+};
+
+/** Where a list starts: after its cursor's key or `startAfter`, the later. */
+const startAfterOf = (request: R2Request): string | undefined => {
+  const { startAfter, cursor } = request;
+  if (cursor === undefined) {
+    return startAfter;
+  }
+  const after = cursorKey(cursor);
+  return startAfter === undefined || compareUtf8(after, startAfter) > 0
+    ? after
+    : startAfter;
+};
+
+/** One entry of a list page: an object, or the keys under a delimited prefix. */
+interface ListGroup {
+  prefix?: string;
+  row: ObjectRow;
+  lastKey: string;
+}
+
+/**
+ * A list page's entries from `rows` in key order: up to `limit` of them,
+ * and whether there are more. Keys sharing a delimited prefix are next to
+ * each other, so each group ends where the next begins, and only the rows
+ * of this page and the first of the next are read.
+ */
+const groupsOf = (
+  rows: Iterable<ObjectRow>,
+  prefix: string,
+  delimiter: string | undefined,
+  limit: number
+): { groups: ListGroup[]; truncated: boolean } => {
+  const groups: ListGroup[] = [];
+  for (const row of rows) {
+    const at =
+      delimiter === undefined ? -1 : row.key.indexOf(delimiter, prefix.length);
+    const delimited =
+      delimiter === undefined || at === -1
+        ? undefined
+        : row.key.slice(0, at + delimiter.length);
+    const current = groups.at(-1);
+    if (delimited !== undefined && current?.prefix === delimited) {
+      current.lastKey = row.key;
+    } else if (groups.length === limit) {
+      return { groups, truncated: true };
+    } else {
+      groups.push({ prefix: delimited, row, lastKey: row.key });
+    }
+  }
+  return { groups, truncated: false };
+};
 
 /** One bucket: a SQLite Durable Object that answers R2's client. */
 export class R2Store extends DurableObject<R2Env> {
@@ -685,6 +808,11 @@ export class R2Store extends DurableObject<R2Env> {
     const metadata = requestOf(JSON.parse(new TextDecoder().decode(prefix)));
     if (metadata.method === "delete") {
       const keys = metadata.objects ?? [keyOf(metadata.object)];
+      if (keys.length > maxDeleteKeys) {
+        throw invalidArgument(
+          `You can delete up to ${maxDeleteKeys} keys at once.`
+        );
+      }
       this.#delete(keys.map(keyOf));
       return new Response();
     }
@@ -720,7 +848,7 @@ export class R2Store extends DurableObject<R2Env> {
     const key = keyOf(request.object);
     const customMetadata = request.customFields;
     const metadataBytes = Object.entries(customMetadata).reduce(
-      (total, [k, v]) => total + k.length + v.length,
+      (total, [k, v]) => total + utf8(k).byteLength + utf8(v).byteLength,
       0
     );
     if (metadataBytes > maxCustomMetadataBytes) {
@@ -864,62 +992,34 @@ export class R2Store extends DurableObject<R2Env> {
     if (include.length > 0) {
       limit = Math.min(limit, maxListKeysWithMetadata);
     }
-    let { startAfter } = request;
-    if (request.cursor !== undefined) {
-      const after = base64Decode(request.cursor);
-      if (startAfter === undefined || after > startAfter) {
-        startAfter = after;
-      }
-    }
+    const startAfter = startAfterOf(request);
     const delimiter =
       request.delimiter === undefined || request.delimiter === ""
         ? undefined
         : request.delimiter;
-    const { sql } = this.ctx.storage;
-    // A row past the limit says there are more.
-    const rows = sql
-      .exec<ObjectRow & { last_key: string; group_key: string }>(
-        `SELECT max(key) AS last_key,
-          iif(
-            :delimiter IS NOT NULL AND instr(substr(key, length(:prefix) + 1), :delimiter) > 0,
-            'p:' || substr(key, 1, length(:prefix) + instr(substr(key, length(:prefix) + 1), :delimiter) + length(:delimiter) - 1),
-            'k:' || key
-          ) AS group_key,
-          key, version, size, etag, uploaded, checksums, http_metadata, custom_metadata
-        FROM objects
-        WHERE substr(key, 1, length(:prefix)) = :prefix
-          AND (:start_after IS NULL OR key > :start_after)
-        GROUP BY group_key
-        ORDER BY last_key
-        LIMIT :limit`
-          .replaceAll(":delimiter", "?1")
-          .replaceAll(":prefix", "?2")
-          .replaceAll(":start_after", "?3")
-          .replaceAll(":limit", "?4"),
-        delimiter ?? null,
-        prefix,
-        startAfter ?? null,
-        limit + 1
-      )
-      .toArray();
-    const truncated = rows.length > limit;
-    const page = rows.slice(0, limit);
+    // The prefix's keys are one range of the primary key, read in order:
+    // a page reads its own rows and the first of the next, no more.
+    const { sql: where, bindings } = keyRange(prefix, startAfter);
+    const rows = this.ctx.storage.sql.exec<ObjectRow>(
+      `SELECT * FROM objects WHERE ${where} ORDER BY key`,
+      ...bindings
+    );
+    const { groups, truncated } = groupsOf(rows, prefix, delimiter, limit);
     const withHttp = include.includes(0);
     const withCustom = include.includes(1);
-    const objects = page
-      .filter(({ group_key: group }) => group.startsWith("k:"))
-      .map((row) =>
+    const objects = groups
+      .filter((group) => group.prefix === undefined)
+      .map(({ row }) =>
         propertiesOf({
           ...row,
-          key: row.last_key,
           http_metadata: withHttp ? row.http_metadata : "{}",
           custom_metadata: withCustom ? row.custom_metadata : "{}",
         })
       );
-    const delimitedPrefixes = page
-      .filter(({ group_key: group }) => group.startsWith("p:"))
-      .map(({ group_key: group }) => group.slice(2));
-    const last = page.at(-1)?.last_key;
+    const delimitedPrefixes = groups.flatMap((group) =>
+      group.prefix === undefined ? [] : [group.prefix]
+    );
+    const last = groups.at(-1)?.lastKey;
     return {
       objects,
       truncated,

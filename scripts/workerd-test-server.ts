@@ -83,6 +83,8 @@ export interface Served {
   /** Where the test Worker answers. */
   url: string;
   stop: () => Promise<void>;
+  /** Kills workerd at once (SIGKILL), as a crash would, mid-request too. */
+  kill: () => Promise<void>;
 }
 
 /**
@@ -112,6 +114,10 @@ export const serveOnWorkerd = async (
     url,
     stop: async () => {
       workerd.kill();
+      await once(workerd, "exit");
+    },
+    kill: async () => {
+      workerd.kill("SIGKILL");
       await once(workerd, "exit");
     },
   };
