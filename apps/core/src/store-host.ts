@@ -196,6 +196,15 @@ const indexRequired = <Answer>(read: () => Answer): Answer => {
   }
 };
 
+/**
+ * What a read answers: its value, and the generation of the table it
+ * read, at the moment it read it (`sdk_tables.generation`).
+ */
+export interface ReadResult {
+  value: QueryAnswer;
+  generations: Record<string, number>;
+}
+
 /** A store's record, as staged in a commit. */
 interface Staged {
   /** Its table's name, for what a refusal says. */
@@ -537,7 +546,7 @@ export class StoreHost {
     storeId: StoreId,
     scope: ReadScope,
     request: ReadRequest
-  ): Promise<QueryAnswer> {
+  ): Promise<ReadResult> {
     const reader = dataErrors.parse("data.invalid", readScopeSchema, scope);
     const read = dataErrors.parse(
       "data.invalid_query",
@@ -548,14 +557,101 @@ export class StoreHost {
     if (read.kind === "query" && read.query.terminal.kind === "paginate") {
       return await this.#page(storeId, reader, pinned, read.query);
     }
-    return this.ctx.storage.transactionSync((): QueryAnswer => {
+    const table = read.kind === "get" ? read.table : read.query.table;
+    return this.ctx.storage.transactionSync((): ReadResult => {
       this.#bind(storeId, false);
-      return indexRequired(() =>
-        read.kind === "get"
-          ? readRecord(this.ctx.storage.sql, pinned, reader, read)
-          : runQuery(this.ctx.storage.sql, pinned, reader, read.query)
+      const value = this.#withGenerations(pinned, table, () =>
+        indexRequired(() =>
+          read.kind === "get"
+            ? readRecord(this.ctx.storage.sql, pinned, reader, read)
+            : runQuery(this.ctx.storage.sql, pinned, reader, read.query)
+        )
+      );
+      return { value, generations: this.#generationsOf(pinned, [table]) };
+    });
+  }
+
+  /**
+   * `read()`, with the generation of `table` added to a data error it
+   * fails with (`details.generations`), taken in the same transaction:
+   * a read that failed after it looked at records (`data.not_unique`,
+   * `data.result_limit`, ...) depended on them as much as one that
+   * answered, and its reader must count it (store-reader.ts).
+   */
+  #withGenerations<Answer>(
+    pinned: PinnedSchema,
+    table: string,
+    read: () => Answer
+  ): Answer {
+    try {
+      return read();
+    } catch (error) {
+      if (error instanceof Error && dataErrors.codeOf(error) !== undefined) {
+        const details: unknown = Reflect.get(error, "details");
+        Reflect.set(error, "details", {
+          ...(typeof details === "object" && details !== null ? details : {}),
+          generations: this.#generationsOf(pinned, [table]),
+        });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * The current generation of each of `names` (tables of this store):
+   * what a reader compares its read set with when its reads are done.
+   * A table the store doesn't hold is left out, which no read set matches.
+   */
+  generations(
+    storeId: StoreId,
+    names: readonly string[]
+  ): Record<string, number> {
+    const parsed = dataErrors.parse(
+      "data.invalid",
+      z.array(tableNameSchema).max(storeMaxTables),
+      names
+    );
+    return this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      const rows = this.#db
+        .select({ name: tables.name, generation: tables.generation })
+        .from(tables)
+        .where(inArray(tables.name, parsed))
+        .all();
+      return Object.fromEntries(
+        rows.map(({ name, generation }) => [name, generation])
       );
     });
+  }
+
+  /** The generations of tables `names` of the pinned schema, now. */
+  #generationsOf(
+    pinned: PinnedSchema,
+    names: readonly string[]
+  ): Record<string, number> {
+    const byId = new Map<string, string>();
+    for (const name of names) {
+      const tableId = Object.hasOwn(pinned.tableIds, name)
+        ? pinned.tableIds[name]
+        : undefined;
+      if (tableId !== undefined) {
+        byId.set(tableId, name);
+      }
+    }
+    if (byId.size === 0) {
+      return {};
+    }
+    const rows = this.#db
+      .select({ tableId: tables.tableId, generation: tables.generation })
+      .from(tables)
+      .where(inArray(tables.tableId, [...byId.keys()]))
+      .all();
+    return Object.fromEntries(
+      rows.map(({ tableId, generation }) => [
+        byId.get(tableId) ?? tableId,
+        generation,
+      ])
+    );
   }
 
   /**
@@ -570,7 +666,7 @@ export class StoreHost {
     reader: ReadScope,
     pinned: PinnedSchema,
     query: QueryRequest
-  ): Promise<PageAnswer> {
+  ): Promise<ReadResult> {
     const { terminal } = query;
     if (terminal.kind !== "paginate") {
       throw new Error("Not a page");
@@ -593,20 +689,26 @@ export class StoreHost {
       terminal.cursor === null
         ? null
         : await openCursor(keys, binding, terminal.cursor);
-    const read = this.ctx.storage.transactionSync(() => {
+    const { read, generations } = this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
-      return indexRequired(() =>
-        readPage(this.ctx.storage.sql, pinned, reader, query, anchor)
-      );
-    });
-    if (read.hasMore && read.last !== undefined) {
       return {
-        items: read.items,
-        nextCursor: await sealCursor(keys, binding, read.last),
-        hasMore: true,
+        read: this.#withGenerations(pinned, query.table, () =>
+          indexRequired(() =>
+            readPage(this.ctx.storage.sql, pinned, reader, query, anchor)
+          )
+        ),
+        generations: this.#generationsOf(pinned, [query.table]),
       };
-    }
-    return { items: read.items, nextCursor: null, hasMore: false };
+    });
+    const value: PageAnswer =
+      read.hasMore && read.last !== undefined
+        ? {
+            items: read.items,
+            nextCursor: await sealCursor(keys, binding, read.last),
+            hasMore: true,
+          }
+        : { items: read.items, nextCursor: null, hasMore: false };
+    return { value, generations };
   }
 
   /**
@@ -965,6 +1067,10 @@ export class StoreHost {
   /** Writes what a commit staged, changing only the records it changed. */
   #flush(staged: readonly Staged[], ownerId: string, schemaHash: string): void {
     const now = Date.now();
+    // The tables whose records this commit changes: each one's generation
+    // moves on once, so a read of it (even one that matched nothing) is
+    // known to be stale.
+    const changed = new Set<string>();
     for (const { table, tableId, recordId, base, fields } of staged) {
       const where = and(
         eq(records.tableId, tableId),
@@ -973,6 +1079,7 @@ export class StoreHost {
       if (fields === null) {
         if (base !== undefined) {
           this.#db.delete(records).where(where).run();
+          changed.add(tableId);
         }
         continue;
       }
@@ -1001,7 +1108,9 @@ export class StoreHost {
             schemaHash,
           })
           .run();
+        changed.add(tableId);
       } else if (valueJson !== base.valueJson) {
+        changed.add(tableId);
         this.#db
           .update(records)
           .set({
@@ -1013,6 +1122,13 @@ export class StoreHost {
           .where(where)
           .run();
       }
+    }
+    if (changed.size > 0) {
+      this.#db
+        .update(tables)
+        .set({ generation: sql`${tables.generation} + 1` })
+        .where(inArray(tables.tableId, [...changed]))
+        .run();
     }
   }
 
