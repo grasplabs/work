@@ -199,6 +199,10 @@ const runWorkflow = async (
     const run: HostedRun = {
       ...pinned.data,
       runId,
+      // The engine's record of the run, never its input.
+      ...(row.rootRunId === null
+        ? {}
+        : { rootRunId: runIdSchema.parse(row.rootRunId) }),
       authority,
       collections: bindings,
       connections,

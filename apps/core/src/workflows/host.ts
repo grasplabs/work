@@ -90,6 +90,12 @@ export interface HostedRun {
   workflow: WorkflowId;
   version: number;
   runId: RunId;
+  /**
+   * The root of its lineage, for a run another run started: from its
+   * row, read on every load, so a restart or replay keeps it. None for a
+   * run that is its own root.
+   */
+  rootRunId?: RunId;
   /** Who the run acts for in this execution. */
   authority: Authority;
   /** Its collections' stubs, by binding name (`runBindingsFor`). */
