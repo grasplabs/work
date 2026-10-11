@@ -47,6 +47,12 @@ export interface WorkflowSeed {
    * the people who start the others.
    */
   scheduled?: boolean;
+  /**
+   * The input field the day each run starts goes in (YYYY-MM-DD), for a
+   * workflow whose result depends on it: runs are started today and moved
+   * back, so it can't read the day from the clock.
+   */
+  dateInput?: string;
   /** The runs of the last 30 days, oldest first. */
   runs: (draw: Draw) => RunPlan[];
 }
@@ -401,15 +407,30 @@ export default workflow(
       limit: money({ label: "Compliance approves compensation above", currency: "EUR", default: 25000 }),
       compliance: person({ label: "Who approves compensation", default: "role:admin" }),
     },
-    input: z.object({ client: z.string(), about: z.string(), compensation: z.number() }),
+    input: z.object({
+      client: z.string(),
+      about: z.string(),
+      compensation: z.number(),
+      /** The day it came in, as YYYY-MM-DD. */
+      received: z.string(),
+    }),
   },
   async (step, { input, params }) => {
     const registered = await step.do(
       "register",
       { description: "Register the complaint and set the acknowledgement deadline", locked: true },
       async () => {
-        const due = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10);
-        return { client: input.client, about: input.about, acknowledgeBy: due };
+        // Two working days after the day it came in.
+        const due = new Date(\`\${input.received}T00:00:00Z\`);
+        let workingDays = 0;
+        while (workingDays < 2) {
+          due.setUTCDate(due.getUTCDate() + 1);
+          const day = due.getUTCDay();
+          if (day !== 0 && day !== 6) {
+            workingDays += 1;
+          }
+        }
+        return { client: input.client, about: input.about, acknowledgeBy: due.toISOString().slice(0, 10) };
       }
     );
     if (input.compensation <= params.limit) {
@@ -435,20 +456,25 @@ import complaint from "./complaint-acknowledgement.ts";
 
 export default workflowTests(complaint, [
   {
-    name: "offers small compensation without asking",
-    input: { client: "K. Mulder", about: "Waiting on the phone", compensation: 2500 },
-    mocks: { register: { client: "K. Mulder", about: "Waiting on the phone", acknowledgeBy: "2026-10-13" } },
+    name: "offers small compensation without asking, and acknowledges within two working days",
+    input: { client: "K. Mulder", about: "Waiting on the phone", compensation: 2500, received: "2026-10-05" },
     expect: {
-      output: { client: "K. Mulder", about: "Waiting on the phone", acknowledgeBy: "2026-10-13", compensation: 2500, approvedBy: null },
+      output: { client: "K. Mulder", about: "Waiting on the phone", acknowledgeBy: "2026-10-07", compensation: 2500, approvedBy: null },
+    },
+  },
+  {
+    name: "acknowledges a complaint from a Friday by Tuesday",
+    input: { client: "R. Bos", about: "A late answer", compensation: 0, received: "2026-10-09" },
+    expect: {
+      output: { client: "R. Bos", about: "A late answer", acknowledgeBy: "2026-10-13", compensation: 0, approvedBy: null },
     },
   },
   {
     name: "asks compliance for larger compensation",
-    input: { client: "M. Hendriks", about: "The valuation", compensation: 75000 },
-    mocks: { register: { client: "M. Hendriks", about: "The valuation", acknowledgeBy: "2026-10-13" } },
+    input: { client: "M. Hendriks", about: "The valuation", compensation: 75000, received: "2026-10-05" },
     decisions: { "approve-compensation": { approved: true, by: "joost" } },
     expect: {
-      output: { client: "M. Hendriks", about: "The valuation", acknowledgeBy: "2026-10-13", compensation: 75000, approvedBy: "joost" },
+      output: { client: "M. Hendriks", about: "The valuation", acknowledgeBy: "2026-10-07", compensation: 75000, approvedBy: "joost" },
     },
   },
 ]);
@@ -493,6 +519,7 @@ Every question and complaint that reaches customer service.
       id: "complaint-acknowledgement",
       code: complaintAcknowledgement,
       tests: complaintAcknowledgementTests,
+      dateInput: "received",
       deciders: { compliance: "Compliance" },
       runs: (draw) =>
         Array.from({ length: 11 }, (_, index) => {
@@ -736,6 +763,7 @@ Finance's own engine.
       code: weeklyReport,
       tests: weeklyReportTests,
       scheduled: true,
+      dateInput: "week",
       runs: () =>
         Array.from({ length: 4 }, () => ({ by: "eva" as const, input: {} })),
     },

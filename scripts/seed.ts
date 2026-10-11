@@ -117,11 +117,9 @@ const seedPeople = async (): Promise<{
   sessions: Map<PersonKey, Session>;
   teams: Map<TeamName, string>;
 }> => {
-  // Signs the admin in first: what refuses anything but a local stack.
-  await signInAs(admin.email);
-  await mapLimited(people, signInsAtOnce, async ({ email }) => {
-    await signInAs(email);
-  });
+  // The admin first, the stack's configured admin anyway: signing in
+  // refuses anything but a local stack, and nobody else signs in until
+  // the stack is known to be this checkout's.
   const adminSession = await sessionOf(admin.email);
   let teams: Map<TeamName, string>;
   try {
@@ -135,6 +133,9 @@ const seedPeople = async (): Promise<{
         "The core answering at localhost doesn't keep its state in this checkout: run the seed from the checkout `vp run dev` runs from."
       );
     }
+    await mapLimited(people, signInsAtOnce, async ({ email }) => {
+      await signInAs(email);
+    });
     const members = await adminSession.api.members.list();
     for (const person of people satisfies readonly Person[]) {
       const member = members.find(({ email }) => email === person.email);

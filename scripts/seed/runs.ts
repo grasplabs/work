@@ -85,7 +85,11 @@ const startTimes = (
     const mondays = Array.from(
       { length: historyDays },
       (_, back) => today - back * dayMs
-    ).filter((day) => new Date(day).getUTCDay() === 1);
+    ).filter(
+      // Mondays whose run has started: not this morning's, before 7:00.
+      (day) =>
+        new Date(day).getUTCDay() === 1 && day + scheduleHourUtc * hourMs < now
+    );
     return plans.map(
       (_, index) =>
         (mondays[plans.length - 1 - index] ?? today - index * 7 * dayMs) +
@@ -243,7 +247,13 @@ const backdate = (
       const decisions = z.array(decisionRowSchema).parse(decisionsOf.all(id));
       for (const decision of decisions) {
         const openedAt = shift(decision.opened_at);
-        const expiresAt = openedAt + (decision.expires_at - decision.opened_at);
+        // An open decision keeps the deadline the engine waits until, so
+        // it can be answered for as long as its run waits; an answered
+        // one's moves with it.
+        const expiresAt =
+          decision.decided_at === null
+            ? decision.expires_at
+            : openedAt + (decision.expires_at - decision.opened_at);
         let decidedAt: number | null = null;
         if (decision.decided_at !== null) {
           decidedAt = Math.min(
@@ -306,12 +316,25 @@ export const seedRuns = async ({
     const draw = drawFor(`${engine}:${workflow.id}`);
     const plans = workflow.runs(draw);
     const times = startTimes(workflow, plans, draw, now);
-    return plans.map((plan, index) => ({
-      workflow,
-      plan,
-      at: times[index] ?? now,
-      answerAfter: draw.between(20, 26 * 60) * minuteMs,
-    }));
+    return plans.map((plan, index) => {
+      const at = times[index] ?? now;
+      const { dateInput } = workflow;
+      return {
+        workflow,
+        plan:
+          dateInput === undefined
+            ? plan
+            : {
+                ...plan,
+                input: {
+                  ...plan.input,
+                  [dateInput]: new Date(at).toISOString().slice(0, 10),
+                },
+              },
+        at,
+        answerAfter: draw.between(20, 26 * 60) * minuteMs,
+      };
+    });
   });
 
   const started: Started[] = [];
