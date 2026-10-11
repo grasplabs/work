@@ -210,7 +210,13 @@ export default class StallReporter implements Reporter {
 
   // A file counts as running from when it is collected: Vitest's worker
   // sends that it started its tests in a batch a moment later, which a
-  // test that blocks the worker at once keeps from ever leaving.
+  // test that blocks the worker at once keeps from ever leaving. The quiet
+  // file rule assumes a file is collected just before its tests run, one
+  // file per task. A pool that collected a batch of files up front (one
+  // worker running several files, as `isolate: false` could) would leave
+  // the later ones quiet while they wait, and end the run wrongly. Core's
+  // `isolate: false` files are collected one at a time, each just before
+  // it runs (checked with Vitest 4.1 and one worker).
   onTestModuleCollected(testModule: ReportedModule): void {
     this.#started(testModule);
   }

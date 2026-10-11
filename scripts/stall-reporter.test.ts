@@ -55,14 +55,15 @@ const test = (
 };
 
 /**
- * A reporter that ends the run once a test runs 50 ms past its timeout,
- * looking every 10 ms: `ended` counts how often it did.
+ * A reporter that ends the run once a test runs `graceSeconds` (50 ms by
+ * default) past its timeout, looking every 10 ms: `ended` counts how often
+ * it did.
  */
-const ending = () => {
+const ending = (graceSeconds = 0.05) => {
   const written: string[] = [];
   const state = { ended: 0 };
   const reporter = new StallReporter({
-    overdueGraceSeconds: 0.05,
+    overdueGraceSeconds: graceSeconds,
     overdueCheckMs: 10,
     write: (text) => {
       written.push(text);
@@ -243,7 +244,9 @@ describe("a test past its timeout", () => {
   });
 
   it("leaves a run alone whose tests Vitest reports, timed out or not", async () => {
-    const { reporter, written, state } = ending();
+    // A 200 ms grace: the timed-out test is reported well within it, however
+    // late the 40 ms wait ends on a loaded machine.
+    const { reporter, written, state } = ending(0.2);
     const builds = file("package-builds");
     const timedOut = test(builds, "times out", { timeout: 20 });
     const untimed = test(builds, "has no timeout", {});
@@ -259,6 +262,29 @@ describe("a test past its timeout", () => {
     await reporter.onTestRunEnd();
 
     expect({ ended: state.ended, written }).toStrictEqual({
+      ended: 0,
+      written: [],
+    });
+  });
+
+  it("leaves a file alone while it is quiet for less than its tests may take, and once it ends", async () => {
+    // Every test of the file has a timeout, so its quiet is checked: 20 ms
+    // and a 200 ms grace.
+    const { reporter, written, state } = ending(0.2);
+    const builds = file("package-builds");
+    const done = test(builds, "builds", { timeout: 20 });
+    test(builds, "resolves", { timeout: 20 });
+    reporter.onTestRunStart();
+    reporter.onTestModuleCollected(builds);
+    reporter.onTestCaseReady(done);
+    reporter.onTestCaseResult(done);
+    await wait(40);
+    const whileQuiet = state.ended;
+    reporter.onTestModuleEnd(builds);
+    await wait(pastTheGrace);
+
+    expect({ whileQuiet, ended: state.ended, written }).toStrictEqual({
+      whileQuiet: 0,
       ended: 0,
       written: [],
     });

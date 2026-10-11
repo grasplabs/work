@@ -58,16 +58,20 @@ jobs:
       # again over the slowest pass. A minute before that, the reporter
       # prints the files and tests still running, and each finished test is
       # in the test-progress artifact. "0 files, 0 tests" there means the
-      # hang is in teardown or in shutting the pool down. Reporters given here replace Vitest's defaults, so
-      # github-actions is listed for the inline failure annotations.
+      # hang is in teardown or in shutting the pool down. Reporters given
+      # here replace Vitest's defaults, so github-actions is listed for the
+      # inline failure annotations.
       - run: vp test --maxWorkers=100% --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts
         timeout-minutes: 16
         env:
           GRASP_STALL_REPORT_AFTER_MINUTES: 15
-          # Past its own timeout and the hooks around it (the longest hook
-          # timeout, workerflow's process tests' 120 s, before and after),
-          # a test Vitest still hasn't reported never will be: the reporter
-          # names it and ends the run then, not at the step's timeout.
+          # Seconds past a test's own timeout (counted for each attempt):
+          # room for the hooks around it, which have timeouts of their own.
+          # The longest is 120 s, set by workerflow's process tests
+          # (packages/workerflow/vite.process.config.ts); the rest use
+          # Vitest's 10 s. 300 s covers that 120 s before and after a test,
+          # with headroom for a loaded runner. Only lower it below twice the
+          # longest hook timeout if that drops.
           GRASP_TEST_OVERDUE_GRACE_SECONDS: 300
           GRASP_TEST_PROGRESS_FILE: ${{ runner.temp }}/test-progress.log
       - if: failure()
