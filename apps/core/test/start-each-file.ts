@@ -11,11 +11,12 @@
  */
 import { applyD1Migrations, reset } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { vi } from "vite-plus/test";
+import { afterEach, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { installBuiltinsFirst } from "./builtins-first.ts";
 import { configuredEnv } from "./configured-env.ts";
+import { closeOpenSockets } from "./open-sockets.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
 /** Migrations, read by vite.config.ts into bindings. */
@@ -64,3 +65,5 @@ await startEmpty();
 if (await installBuiltinsFirst()) {
   await startEmpty();
 }
+
+afterEach(closeOpenSockets);
