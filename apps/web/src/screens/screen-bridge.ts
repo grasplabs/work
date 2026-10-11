@@ -1,4 +1,9 @@
 import type { ScreenBridge, Theme } from "@grasp-os/sdk/screen-runtime";
+import { requestErrors } from "@grasp-os/shared/errors";
+import {
+  accountedTransport,
+  rpcCopyNodeBounds,
+} from "@grasp-os/shared/rpc-accounting";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { portTransport } from "@grasp-os/shared/screen-port";
 import {
@@ -229,8 +234,23 @@ export const openBridge = (
   onBroken: () => void
 ): (() => void) => {
   const cleanups: (() => void)[] = [];
+  // Cap'n Web copies in full every value one message refers to from an
+  // earlier one, before any of the bridge's code runs, so a screen could
+  // crash its tab with a chain of tiny messages the way an unbounded
+  // connection could crash core. The accountant wraps the port, parses each
+  // message once, and ends the session once those copies would outgrow one
+  // message's budget or the session's (the shared node bounds, with the
+  // port's own message size); `onBroken` then tells the page, as for any
+  // other way the session ends.
   const session = new RpcSession(
-    portTransport(port),
+    accountedTransport(
+      portTransport(port),
+      {
+        ...rpcCopyNodeBounds,
+        maxMessageBytes: screenLimits.rpc.maxMessageSize,
+      },
+      () => requestErrors.create("request.too_expensive")
+    ),
     frameBridge(target, cleanups),
     { limits: screenLimits.rpc }
   );

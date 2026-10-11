@@ -519,4 +519,29 @@ describe("the page's bridge to a screen", () => {
       broken: 0,
     });
   });
+
+  it("ends the session over references that would copy without end, and a fresh screen still works", async () => {
+    const frame = rawFramed();
+    // Push "x", then each message an array of two references to the one
+    // before: a copy that doubles each step, as GRA-424's probe does.
+    frame.push("x");
+    for (let level = 1; level <= 16; level += 1) {
+      frame.push([
+        [
+          ["pipeline", level],
+          ["pipeline", level],
+        ],
+      ]);
+    }
+    await vi.waitFor(() => {
+      expect(frame.broken.times).toBe(1);
+    });
+    frame.close();
+
+    // The tab lives: a fresh bridge still answers a call.
+    const fresh = framed();
+    const answered = await outcome(fresh.page.call("notes", []));
+    fresh.close();
+    expect(answered).toBe("answered");
+  });
 });

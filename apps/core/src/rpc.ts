@@ -6,13 +6,18 @@ import {
 } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { CoreApi, Identity, SignInOption } from "@grasp-os/shared/rpc";
+import { accountedTransport } from "@grasp-os/shared/rpc-accounting";
 import { screenLimits } from "@grasp-os/shared/screens";
-import { newWebSocketRpcSession } from "capnweb";
+import { RpcSession, WebSocketTransport } from "capnweb";
 
 import { oidcProviders, signInConfig } from "./auth/config.ts";
 import { identify } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
-import { browserMessageSize, CoreRpcTarget } from "./rpc-target.ts";
+import {
+  browserMessageSize,
+  coreRpcAccounting,
+  CoreRpcTarget,
+} from "./rpc-target.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import { SessionRpc } from "./session-rpc.ts";
 
@@ -235,36 +240,49 @@ export const rpcResponse = async (
   });
   server.accept();
 
-  newWebSocketRpcSession(server, await browserApi(env, headers, server), {
-    // What a browser sends is untrusted, a screen's calls among it: no
-    // deeper and no longer numbers than a screen's port takes
-    // (`screenLimits.rpc`). A message may be longer than a screen's:
-    // the product's own calls share this connection, and a document or
-    // an App's files are longer than a screen's message. A screen's call
-    // is held to its bytes where it lands (screens-rpc.ts).
-    // These bound each message. A value built from what earlier messages
-    // sent, by referring to them, is held to the same depth and size by
-    // every target it is passed to (rpc-target.ts).
-    limits: {
-      maxDepth: screenLimits.rpc.maxDepth,
-      maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
-      maxMessageSize: browserMessageSize,
-    },
-    onSendError: (error) => {
-      // Every call of the tab goes over this one connection, so each
-      // failure gets a request ID of its own for the person to quote, and
-      // its log line names the connection's too.
-      const failureId = crypto.randomUUID();
-      const sent = toClientError(error, failureId);
-      if (sent && open) {
-        log.error("rpc.failed", {
-          requestId: failureId,
-          connectionRequestId: requestId,
-          ...errorFields(error),
-        });
-      }
-      return sent;
-    },
-  });
+  // What a browser sends is untrusted, a screen's calls among it, and it is
+  // reachable signed out: bound it before Cap'n Web expands it. Cap'n Web
+  // bounds each message's depth, numbers and size (`maxDepth`,
+  // `maxBigIntDigits`, `maxMessageSize`), but copies in full every value a
+  // message refers to from an earlier one, before any target runs; the
+  // accountant wraps the transport and ends the connection once those
+  // copies would outgrow one message's budget or the connection's
+  // (`coreRpcAccounting`). What a value held by a target gets is bounded
+  // again where it lands (rpc-target.ts), and a screen's call to its bytes
+  // (screens-rpc.ts).
+  const transport = accountedTransport(
+    new WebSocketTransport(server),
+    coreRpcAccounting,
+    () => requestErrors.create("request.too_expensive")
+  );
+  // The session runs itself from its read loop; the socket and the
+  // transport keep it reachable for as long as the connection is open.
+  const connection = new RpcSession(
+    transport,
+    await browserApi(env, headers, server),
+    {
+      limits: {
+        maxDepth: screenLimits.rpc.maxDepth,
+        maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
+        maxMessageSize: browserMessageSize,
+      },
+      onSendError: (error) => {
+        // Every call of the tab goes over this one connection, so each
+        // failure gets a request ID of its own for the person to quote, and
+        // its log line names the connection's too.
+        const failureId = crypto.randomUUID();
+        const sent = toClientError(error, failureId);
+        if (sent && open) {
+          log.error("rpc.failed", {
+            requestId: failureId,
+            connectionRequestId: requestId,
+            ...errorFields(error),
+          });
+        }
+        return sent;
+      },
+    }
+  );
+  void connection;
   return new Response(null, { status: 101, webSocket: client });
 };
