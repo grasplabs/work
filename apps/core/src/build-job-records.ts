@@ -83,7 +83,8 @@ export class BuildJobRecords {
 
   /**
    * Records a new job as running, and forgets the chat's oldest ended jobs
-   * past {@link jobRecordsKept}: a running job is never forgotten.
+   * past {@link jobRecordsKept}, newest by when they were submitted, then
+   * by the order they were recorded in: a running job is never forgotten.
    */
   open(opening: BuildJobOpening): void {
     this.#db
@@ -101,7 +102,7 @@ export class BuildJobRecords {
         and(
           eq(chatBuildJobs.chatId, opening.chatId),
           ne(chatBuildJobs.status, "running"),
-          sql`${chatBuildJobs.id} NOT IN (SELECT ${chatBuildJobs.id} FROM ${chatBuildJobs} WHERE ${chatBuildJobs.chatId} = ${opening.chatId} ORDER BY ${chatBuildJobs.createdAt} DESC LIMIT ${jobRecordsKept})`
+          sql`${chatBuildJobs.id} NOT IN (SELECT ${chatBuildJobs.id} FROM ${chatBuildJobs} WHERE ${chatBuildJobs.chatId} = ${opening.chatId} ORDER BY ${chatBuildJobs.createdAt} DESC, rowid DESC LIMIT ${jobRecordsKept})`
         )
       )
       .run();

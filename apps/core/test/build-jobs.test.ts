@@ -1,10 +1,14 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
+import { chatIdSchema } from "@grasp-os/shared/ids";
+import { roleErrors } from "@grasp-os/shared/roles";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/durable-sqlite";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { BuildJobRecords, jobRecordsKept } from "../src/build-job-records.ts";
 import {
   chatOf,
   codeResults,
@@ -717,6 +721,90 @@ describe("build jobs", { timeout: 180_000 }, () => {
       status: "failed",
       result: null,
       code: "role.forbidden",
+    });
+  });
+
+  it("keeps a chat's latest hundred ended job records, and every running one", async () => {
+    const { chat } = await setUp([]);
+    const chatId = chatIdSchema.parse(chat.chat.id);
+    const job = (id: string) => ({
+      id,
+      chatId,
+      turnId: "turn",
+      runId: "run",
+      appId: "app",
+      kind: "check" as const,
+      message: null,
+      revision: 1,
+      grantedAt: 0,
+    });
+    const ended = Array.from(
+      { length: jobRecordsKept + 5 },
+      (_, at) => `ended-${String(at).padStart(3, "0")}`
+    );
+    const kept = await runInDurableObject(chat.stub, (_instance, state) => {
+      // What the chat's object keeps its jobs in, as it keeps them.
+      const records = new BuildJobRecords(drizzle(state.storage));
+      // The oldest, still running as the others come and go.
+      records.open(job("running"));
+      for (const id of ended) {
+        records.open(job(id));
+        records.end(chatId, id, { status: "cancelled" });
+      }
+      return state.storage.sql
+        .exec<{ id: string }>(
+          "SELECT id FROM chat_build_jobs WHERE chat_id = ? ORDER BY id",
+          chatId
+        )
+        .toArray()
+        .map(({ id }) => id);
+    });
+    expect(kept).toStrictEqual(
+      [...ended.slice(-jobRecordsKept), "running"].toSorted()
+    );
+  });
+
+  it("refuses to read a job to a person who no longer builds its App, and keeps its record", async () => {
+    const other = await signedInApi(idp, "builder");
+    const { id: shared } = await other.api.apps.create({ name: "Shared" });
+    const { builder, chat } = await setUp([
+      codeStep(`export default async (self, env) => {
+        await env.build.write(${JSON.stringify(shared)}, ${JSON.stringify({ "screens/desk.tsx": desk })});
+        return await env.build.submit(${JSON.stringify(shared)}, { kind: "check" });
+      };`),
+      says("Submitted."),
+    ]);
+    await other.api.apps.members.add(shared, {
+      type: "person",
+      id: builder.userId,
+      role: "builder",
+    });
+    await chat.ask("Check the shared App");
+    const job = await submittedJob(chat.stub, chat.chat.id);
+    await endedJob(chat.stub, chat.chat.id, job.id);
+    // They use it from now on, but no longer build it.
+    await other.api.apps.members.add(shared, {
+      type: "person",
+      id: builder.userId,
+      role: "user",
+    });
+    await pointAtGateway(
+      chat.stub,
+      fakeGateway(
+        codeStep(`export default async (self, env) => {
+          try { return (await env.build.job(${JSON.stringify(job.id)})).status; } catch (error) { return error.message; }
+        };`),
+        says("You no longer build that App.")
+      )
+    );
+
+    await chat.ask("How did that check go?");
+
+    const results = await codeResults(chat.stub, chat.chat.id);
+    const record = await chat.stub.buildJob(chat.chat.id, job.id);
+    expect({ read: results.at(-1)?.text, kept: record?.id }).toStrictEqual({
+      read: `Returned:\n${roleErrors.create("role.forbidden").message}`,
+      kept: job.id,
     });
   });
 
