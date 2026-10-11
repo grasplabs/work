@@ -194,6 +194,64 @@ const echo = mutation({
   handler: (_ctx, args) => "x".repeat(args.size),
 });
 
+/**
+ * Patches a note, reads it back (at the revision its staged change shows),
+ * and patches it again at that revision: one commit, one revision more.
+ */
+const editTwice = mutation({
+  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    await ctx.db.patch(
+      "notes",
+      args.id,
+      { title: "first" },
+      { expectedRevision: args.expectedRevision }
+    );
+    const staged = await ctx.db.get("notes", args.id);
+    await ctx.db.patch(
+      "notes",
+      args.id,
+      { body: "second" },
+      { expectedRevision: staged?._rev ?? 0 }
+    );
+    return staged?._rev ?? 0;
+  },
+});
+
+/** Takes the first title off its arguments, then inserts a note of it. */
+const takeFirst = mutation({
+  args: { titles: v.array(noteFields.title).min(1) },
+  returns: v.string(),
+  handler: async (ctx, args) => {
+    const title = args.titles.shift() ?? "";
+    await ctx.db.insert("notes", { title });
+    await ctx.db.query("notes").first();
+    return title;
+  },
+});
+
+/**
+ * Reads note `id` asserting its revision, falling back to inserting
+ * another note when the assertion fails.
+ */
+const guardedOrFallback = mutation({
+  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  returns: v.string(),
+  handler: async (ctx, args) => {
+    try {
+      await ctx.db.get("notes", args.id, {
+        expectedRevision: args.expectedRevision,
+      });
+    } catch {
+      await ctx.db.insert("notes", { title: "fallback" });
+      return "fallback";
+    }
+    await ctx.db.query("notes").first();
+    return "guarded";
+  },
+});
+
 const secret = internalQuery({
   args: {},
   returns: v.string(),
@@ -217,6 +275,9 @@ const notesApp = app({
       stress,
       insertThenGuard,
       echo,
+      editTwice,
+      takeFirst,
+      guardedOrFallback,
     },
   },
   internalOperations: { secret },
@@ -910,6 +971,121 @@ describe("contracts", () => {
         )
       )
     ).toBe("data.cursor_expired");
+  });
+});
+
+describe("a mutation's own staged state", () => {
+  it("lets a later write assert the revision an earlier one's staged read showed", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const id = idOf(
+      valueOf(
+        await call(fixture, owner, "mutation", "notes.create", { title: "t" })
+      )
+    );
+    const shown = valueOf(
+      await call(fixture, owner, "mutation", "notes.editTwice", {
+        id,
+        expectedRevision: 1,
+      })
+    );
+    expect({
+      shown,
+      stored: valueOf(await call(fixture, owner, "query", "notes.get", { id })),
+    }).toMatchObject({
+      shown: 2,
+      stored: { _rev: 2, title: "first", body: "second" },
+    });
+  });
+
+  it("gives every run its arguments as admitted, whatever an earlier run did to them", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    let runs = 0;
+    // Another caller commits after the first run read the table: it runs
+    // again, and must take the first title again.
+    const run: Runner = async (path, args, channel) => {
+      runs += 1;
+      const answer = await runFunction(notesApp, path, args, channel);
+      if (runs === 1) {
+        await call(fixture, owner, "mutation", "notes.create", {
+          title: "meanwhile",
+        });
+      }
+      return answer;
+    };
+    const taken = valueOf(
+      await call(
+        fixture,
+        owner,
+        "mutation",
+        "notes.takeFirst",
+        { titles: ["first", "second"] },
+        { run }
+      )
+    );
+    const page = valueOf(
+      await call(fixture, owner, "query", "notes.list", { pagination: {} })
+    );
+    const items = fieldOf(page, "items");
+    const titles =
+      typeof items === "object" && items !== null && !isObject(items)
+        ? items.map((item) => fieldOf(item, "title"))
+        : [];
+    expect({
+      runs,
+      taken,
+      titles: titles.map(String).toSorted((a, b) => a.localeCompare(b)),
+    }).toStrictEqual({
+      runs: 2,
+      taken: "first",
+      titles: ["first", "meanwhile"],
+    });
+  });
+
+  it("refuses a stale guard at once, never running again to a fallback", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const id = idOf(
+      valueOf(
+        await call(fixture, owner, "mutation", "notes.create", { title: "t" })
+      )
+    );
+    let runs = 0;
+    // Another caller changes the guarded record after the first run read it.
+    const run: Runner = async (path, args, channel) => {
+      runs += 1;
+      const answer = await runFunction(notesApp, path, args, channel);
+      if (runs === 1) {
+        await call(fixture, owner, "mutation", "notes.update", {
+          id,
+          expectedRevision: 1,
+          title: "changed",
+          body: "",
+        });
+      }
+      return answer;
+    };
+    const result = await call(
+      fixture,
+      owner,
+      "mutation",
+      "notes.guardedOrFallback",
+      { id, expectedRevision: 1 },
+      { run }
+    );
+    const page = valueOf(
+      await call(fixture, owner, "query", "notes.list", { pagination: {} })
+    );
+    expect({
+      code: codeOf(result),
+      runs,
+      stored: idsOf(page).length,
+    }).toStrictEqual({
+      code: "data.conflict",
+      runs: 1,
+      stored: 1,
+    });
   });
 });
 

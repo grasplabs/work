@@ -670,6 +670,13 @@ const readFor = async (
   return await reader.read(read);
 };
 
+/**
+ * A run's own copy of the admitted arguments: App code can change what it
+ * is handed, and a run that comes again (a stale read set, a role change)
+ * must get them as admitted, as their hash in the receipt says.
+ */
+const fresh = (args: Json): Json => structuredClone(args);
+
 /** Settles `promise`, without throwing: what it answered or threw. */
 const settle = async (
   promise: Promise<unknown>
@@ -931,7 +938,7 @@ const runQuery = async (
         });
         try {
           const outcome = await settle(
-            app.run(operation.path, args, open.channel)
+            app.run(operation.path, fresh(args), open.channel)
           );
           if ("thrown" in outcome) {
             throw failureOf(
@@ -1038,7 +1045,9 @@ const runMutation = async (
       // One run after the other: a rerun exists only because the last
       // one's reads went stale.
       // oxlint-disable-next-line no-await-in-loop -- see above
-      const outcome = await settle(app.run(operation.path, args, open.channel));
+      const outcome = await settle(
+        app.run(operation.path, fresh(args), open.channel)
+      );
       if ("thrown" in outcome) {
         // A failure torn reads may have caused is a stale run too.
         // oxlint-disable-next-line no-await-in-loop -- see above

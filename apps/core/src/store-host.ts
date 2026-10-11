@@ -1046,18 +1046,24 @@ export class StoreHost {
       ) {
         throw submissionErrors.create("submission.intent_unsupported");
       }
-      const current = this.#generationsOf(pinned, Object.keys(readSet));
-      for (const [table, generation] of Object.entries(readSet)) {
-        if (current[table] !== generation) {
-          throw dataErrors.create("data.reads_changed", { table });
-        }
-      }
+      // The explicit guards first: a record the mutation asserted a
+      // revision of, now at another, is a conflict for its caller
+      // (`data.conflict`), never a stale read set to run again for, which
+      // could commit a fallback its rerun reached instead.
       const { staged, inserted } = this.#apply(
         pinned,
         principal.userId,
         roles,
         writes,
-        guards
+        guards,
+        () => {
+          const current = this.#generationsOf(pinned, Object.keys(readSet));
+          for (const [table, generation] of Object.entries(readSet)) {
+            if (current[table] !== generation) {
+              throw dataErrors.create("data.reads_changed", { table });
+            }
+          }
+        }
       );
       this.#flush(staged, principal.userId, schemaHash, stagedAt);
       const counted = this.#db
@@ -1123,7 +1129,8 @@ export class StoreHost {
     principal: string,
     roles: WriterRoles,
     writes: readonly StoredWrite[],
-    guards: readonly { table: string; id: string; expectedRevision: number }[]
+    guards: readonly { table: string; id: string; expectedRevision: number }[],
+    afterGuards?: () => void
   ): { staged: Staged[]; inserted: string[] } {
     const tableIdOf = (table: string): string => {
       const tableId = Object.hasOwn(pinned.tableIds, table)
@@ -1192,8 +1199,22 @@ export class StoreHost {
       const entry = stage(table, tableId, recordId);
       const { fields, base } = entry;
       const revision = base?.revision ?? 1;
+      // A record an earlier write of this commit changed is shown to the
+      // mutation's staged reads at the revision its commit will give it
+      // (one more, once, if its fields differ): a later write may assert
+      // that, as well as the revision it was read at before the change.
+      const shown =
+        base !== undefined &&
+        fields !== null &&
+        storedText(fields) !== base.valueJson
+          ? base.revision + 1
+          : revision;
       const owned = base === undefined || base.ownerId === principal;
-      if (fields === null || revision !== expected || (own && !owned)) {
+      if (
+        fields === null ||
+        (expected !== revision && expected !== shown) ||
+        (own && !owned)
+      ) {
         throw conflict(table, recordId);
       }
       return { entry, fields };
@@ -1208,6 +1229,7 @@ export class StoreHost {
         false
       );
     }
+    afterGuards?.();
     const inserted: string[] = [];
     for (const write of writes) {
       const { tableId, own } = writable(write.table);
