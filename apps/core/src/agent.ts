@@ -221,6 +221,11 @@ const codeInput = (args: unknown): { code: string } => {
 export interface CodeRuns {
   open: (opening: CodeRunOpening) => string;
   close: (runId: string, status: CodeRunStatus) => Promise<CodeRunStatus>;
+  /**
+   * A line the run's code logged, for the chat to show as it runs: taken
+   * only while the run is open, for the code step it runs for.
+   */
+  output: (runId: string, toolCallId: string, line: string) => void;
 }
 
 /**
@@ -239,8 +244,9 @@ const runOpen = async (
   }: Pick<Turn, "apis" | "scope" | "runs" | "loader" | "codeTimeoutMs">,
   toolCallId: string,
   code: string,
-  signal: AbortSignal | undefined
-): Promise<CodeRun> => {
+  signal: AbortSignal | undefined,
+  onOutput: (runId: string, line: string) => void
+): Promise<{ runId: string; run: CodeRun }> => {
   const runId = runs.open({
     toolCallId,
     sourceHash: await sourceHash(code),
@@ -254,7 +260,13 @@ const runOpen = async (
   let ended: CodeRunStatus;
   let run: CodeRun;
   try {
-    run = await runCode(loader, code, env, signal, codeTimeoutMs);
+    run = await runCode(loader, code, env, {
+      signal,
+      timeoutMs: codeTimeoutMs,
+      onOutput: (line) => {
+        onOutput(runId, line);
+      },
+    });
     ran = run.status;
   } finally {
     ended = await runs.close(runId, ran);
@@ -262,13 +274,41 @@ const runOpen = async (
   // A run a revocation closed, as it ran or as it ended, hands on nothing
   // of what it did: not what it returned, nor what it logged, which could
   // carry what return can't.
-  return ended === "revoked"
-    ? {
-        status: ended,
-        logs: [],
-        error: agentErrors.create("agent.run_revoked").message,
-      }
-    : run;
+  return {
+    runId,
+    run:
+      ended === "revoked"
+        ? {
+            status: ended,
+            logs: [],
+            error: agentErrors.create("agent.run_revoked").message,
+          }
+        : run,
+  };
+};
+
+/**
+ * How a code step's result says it went: as it runs (its output streams
+ * through pi's tool updates) and how it ended, with the run it was.
+ */
+interface CodeStepDetails {
+  status: CodeRunStatus | "running";
+  runId: string;
+}
+
+/** The run and logged line a code step's tool update carries, if one does. */
+const codeStepUpdateSchema = z.object({
+  content: z.tuple([z.object({ type: z.literal("text"), text: z.string() })]),
+  details: z.object({ status: z.literal("running"), runId: z.string() }),
+});
+
+const codeStepLine = (
+  update: unknown
+): { runId: string; text: string } | undefined => {
+  const parsed = codeStepUpdateSchema.safeParse(update);
+  return parsed.success
+    ? { runId: parsed.data.details.runId, text: parsed.data.content[0].text }
+    : undefined;
 };
 
 /** The one tool: runs code against the chat's APIs in a locked isolate. */
@@ -281,7 +321,7 @@ const executeCode = ({
 }: Pick<
   Turn,
   "apis" | "scope" | "runs" | "loader" | "codeTimeoutMs"
->): AgentTool<typeof codeParameters, { status: CodeRunStatus }> => ({
+>): AgentTool<typeof codeParameters, CodeStepDetails> => ({
   name: "executeCode",
   label: "Run code",
   description:
@@ -289,19 +329,27 @@ const executeCode = ({
   parameters: codeParameters,
   prepareArguments: codeInput,
   executionMode: "sequential",
-  execute: async (toolCallId, { code }, signal) => {
-    const run = await runOpen(
+  execute: async (toolCallId, { code }, signal, onUpdate) => {
+    const { runId, run } = await runOpen(
       { apis, scope, runs, loader, codeTimeoutMs },
       toolCallId,
       code,
-      signal
+      signal,
+      // Each line as the code logs it, as one of pi's tool updates: pi
+      // drops an update once the step has settled.
+      (from, line) => {
+        onUpdate?.({
+          content: [{ type: "text", text: line }],
+          details: { status: "running", runId: from },
+        });
+      }
     );
     // Only the text the model reads is kept, with how the run ended: it is
     // bounded, and the run's own output (which the transcript stores)
     // needn't be. A run that didn't complete is a failed result.
     return {
       content: [{ type: "text", text: describeRun(run) }],
-      details: { status: run.status },
+      details: { status: run.status, runId },
       isError: run.status !== "completed",
     };
   },
@@ -668,6 +716,13 @@ export const runTurn = async ({
     (event) => {
       if (event.type === "message_end" && isMessage(event.message)) {
         keep(event.message);
+      }
+      if (event.type === "tool_execution_update") {
+        const update: unknown = event.partialResult;
+        const line = codeStepLine(update);
+        if (line !== undefined) {
+          runs.output(line.runId, event.toolCallId, line.text);
+        }
       }
       if (
         event.type === "message_update" &&
