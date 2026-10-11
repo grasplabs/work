@@ -15,6 +15,7 @@ import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { StoreHost } from "../src/store-host.ts";
+import { memberRoles, newRecordId } from "./store-schemas.ts";
 
 // Reads of a business store through core's way in and the store's Durable
 // Object: what `ctx.db` (sdk/src/database.ts) asks, as the store answers
@@ -59,7 +60,9 @@ const notesSchema = (read: AccessMode) => {
     text: manifestText(
       schemaManifest(schema, {
         tables: {
-          notes: { read, write: read },
+          // Written by its owner when nobody may read it, so it has
+          // records a read must still be refused.
+          notes: { read, write: read === "none" ? "owner" : read },
           people: { read: "appMembers", write: "appMembers" },
         },
       })
@@ -125,10 +128,13 @@ const insert = async (
   }
   const { inserted } = await store.commit({
     principal: { userId: principal },
+    roles: memberRoles,
+    stagedAt: Date.now(),
     schemaHash,
     receipt: claimed.held,
     writes: fields.map((note) => ({
       op: "insert" as const,
+      id: newRecordId(),
       table: "notes",
       fields: note,
     })),
@@ -689,9 +695,18 @@ describe("more owners, more tables", () => {
       inserted: [person],
     } = await fixture.store.commit({
       principal: { userId: "ada" },
+      roles: memberRoles,
+      stagedAt: Date.now(),
       schemaHash: fixture.schemaHash,
       receipt: claimed.held,
-      writes: [{ op: "insert", table: "people", fields: { name: "Ada" } }],
+      writes: [
+        {
+          op: "insert",
+          id: newRecordId(),
+          table: "people",
+          fields: { name: "Ada" },
+        },
+      ],
     });
     const db = dbOf(fixture, scopeOf(fixture.schemaHash));
     expect({

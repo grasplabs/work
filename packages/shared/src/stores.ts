@@ -151,6 +151,13 @@ const storeWriteSchema = z.discriminatedUnion("op", [
   z.strictObject({
     op: z.literal("insert"),
     table: tableNameSchema,
+    /**
+     * The new record's ID, which core minted when the write was staged
+     * (`mintRecordId`), so the mutation could read and return it before
+     * its commit: never one App code chose. A record that exists already
+     * under it is a conflict.
+     */
+    id: recordIdSchema,
     fields: fieldsSchema,
   }),
   z
@@ -260,43 +267,89 @@ export const storeIntentSchema = z.strictObject({
 });
 
 /**
- * One commit: the writes a mutation staged and the revisions it read, for
- * whom (`principal`, who owns what it inserts), under which schema, by
- * the attempt holding its receipt (`receipt`), with what it stages for
- * its outbox (`intents`). All of it commits, its receipt's outcome and
- * outbox entries included, or none of it.
+ * Whether the person a commit or a read is for is a member or a builder
+ * of the App it comes through, as core resolved it for the invocation:
+ * what `appMembers` and `appBuilders` tables require.
+ */
+export const writerRolesSchema = z.strictObject({
+  appMember: z.boolean(),
+  appBuilder: z.boolean(),
+});
+export type WriterRoles = z.infer<typeof writerRolesSchema>;
+
+/**
+ * The generation of each table a mutation's reads saw (its read set): a
+ * commit is refused (`data.reads_changed`) once any has moved on, so a
+ * mutation never commits on reads another commit made stale.
+ */
+const readSetSchema = z
+  .record(tableNameSchema, z.number().int().min(0))
+  .refine((readSet) => Object.keys(readSet).length <= storeMaxTables, {
+    message: `At most ${storeMaxTables} tables`,
+  });
+
+/** The writes a mutation staged, and when: what its reads see before commit. */
+export const stagedWritesSchema = z.strictObject({
+  /**
+   * When core staged them, in milliseconds since the epoch: the time the
+   * records they change are stamped with, the same in the reads that see
+   * them before the commit as in the commit.
+   */
+  stagedAt: z.number().int().min(0),
+  writes: z.array(storeWriteSchema).max(commitMaxWrites),
+});
+export type StagedWrites = z.input<typeof stagedWritesSchema>;
+
+/**
+ * One commit: the writes a mutation staged (at `stagedAt`) and what it
+ * read (its guards and read set), for whom (`principal`, who owns what it
+ * inserts, with the `roles` core resolved for them just before), under
+ * which schema, whose access the store enforces on every write, by the
+ * attempt holding its receipt (`receipt`), with what it returned
+ * (`result`, kept for a retry of the same submission) and what it stages
+ * for its outbox (`intents`). All of it commits, its receipt's outcome
+ * and outbox entries included, or none of it.
  */
 export const commitSchema = z
   .strictObject({
     storeId: storeIdSchema,
     principal: z.strictObject({ userId: identifierSchema }),
+    roles: writerRolesSchema,
     schemaHash: schemaHashSchema,
     receipt: z.strictObject({
       receiptId: sha256Schema,
       fence: z.number().int().min(1),
     }),
+    stagedAt: z.number().int().min(0),
     guards: z.array(revisionGuardSchema).max(commitMaxGuards).default([]),
+    readSet: readSetSchema.default({}),
     writes: z.array(storeWriteSchema).max(commitMaxWrites),
     intents: z.array(storeIntentSchema).max(commitMaxIntents).default([]),
+    result: fieldValueSchema.default(null),
   })
   .refine(
-    ({ guards, writes, intents }) =>
-      encoder.encode(JSON.stringify({ guards, writes, intents })).byteLength <=
-      commitMaxInputBytes,
+    ({ guards, readSet, writes, intents, result }) =>
+      encoder.encode(
+        JSON.stringify({ guards, readSet, writes, intents, result })
+      ).byteLength <= commitMaxInputBytes,
     {
-      message: `At most ${commitMaxInputBytes} bytes of writes, guards and intents`,
+      message: `At most ${commitMaxInputBytes} bytes of writes, guards, intents and result`,
     }
   );
 export type Commit = z.input<typeof commitSchema>;
 
 /**
- * What a commit made: the IDs of the records it inserted, in order, and
- * its place in the store's order of commits.
+ * What a commit made: the IDs of the records it inserted, in order, its
+ * place in the store's order of commits, and what the mutation returned.
+ * It crosses RPC as JSON text (RPC types can't carry `Json` deeply), read
+ * back with this schema.
  */
-export interface Committed {
-  inserted: string[];
-  commit: number;
-}
+export const committedSchema = z.strictObject({
+  inserted: z.array(z.string()),
+  commit: z.number().int(),
+  result: fieldValueSchema,
+});
+export type Committed = z.infer<typeof committedSchema>;
 
 /**
  * What a store answers when handed a schema: the schema's hash, which its
@@ -344,6 +397,9 @@ export const dataErrors = defineErrorFamily({
   "data.unknown_schema": "This store wasn't handed that schema.",
   "data.unknown_index": "That table has no such index.",
   "data.access_denied": "You can't read this table.",
+  "data.write_denied": "You can't change records of this table.",
+  "data.reads_changed":
+    "The records this change read changed before it committed. Try again.",
   "data.invalid_query": "That query isn't valid for this table.",
   "data.scan_limit": `A query reads at most ${queryMaxScannedEntries} entries and ${queryMaxScannedBytes} bytes. Narrow it with an index range, or page through it.`,
   "data.result_limit": `This query matches more than ${queryMaxResults} records. Page through them instead.`,

@@ -16,6 +16,7 @@ import {
   readConsistently,
   StoreReader,
 } from "../src/store-reader.ts";
+import { memberRoles, newRecordId } from "./store-schemas.ts";
 
 // A query operation's reads as one state of the store (spec 6.3), through
 // core's way into a store and its Durable Object: the host-side reader
@@ -94,6 +95,8 @@ const commit = async (
   }
   const { inserted } = await store.commit({
     principal: { userId: "ada" },
+    roles: memberRoles,
+    stagedAt: Date.now(),
     schemaHash,
     receipt: claimed.held,
     writes,
@@ -106,7 +109,12 @@ const insertNote = async (
   fields?: StoreFields
 ): Promise<string> => {
   const [id] = await commit(fixture, [
-    { op: "insert", table: "notes", fields: fields ?? { title: "a" } },
+    {
+      op: "insert",
+      id: newRecordId(),
+      table: "notes",
+      fields: fields ?? { title: "a" },
+    },
   ]);
   return id ?? "";
 };
@@ -224,7 +232,12 @@ describe("a query's reads", () => {
     const reader = new StoreReader(fixture.store, fixture.scope);
     await dbOver(reader).query("notes").collect();
     await commit(fixture, [
-      { op: "insert", table: "people", fields: { name: "Grace" } },
+      {
+        op: "insert",
+        id: newRecordId(),
+        table: "people",
+        fields: { name: "Grace" },
+      },
     ]);
     // A patch to the value the record already holds changes nothing.
     await commit(fixture, [
@@ -359,8 +372,18 @@ describe("generations", () => {
     const notes = await readerOf("notes");
     const people = await readerOf("people");
     await commit(fixture, [
-      { op: "insert", table: "notes", fields: { title: "b" } },
-      { op: "insert", table: "people", fields: { name: "Grace" } },
+      {
+        op: "insert",
+        id: newRecordId(),
+        table: "notes",
+        fields: { title: "b" },
+      },
+      {
+        op: "insert",
+        id: newRecordId(),
+        table: "people",
+        fields: { name: "Grace" },
+      },
     ]);
     expect({
       afterDelete: await deleted.isCurrent(),

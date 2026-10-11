@@ -1,0 +1,950 @@
+import {
+  AppError,
+  app,
+  defineSchema,
+  defineTable,
+  v,
+  paginationOptionsValidator,
+  paginationResultValidator,
+} from "@grasp-os/sdk";
+import type { Id } from "@grasp-os/sdk";
+import { inspectApp, manifestText } from "@grasp-os/sdk/host";
+import { runFunction } from "@grasp-os/sdk/runner";
+import type { OperationChannel } from "@grasp-os/sdk/runner";
+import { serverModule } from "@grasp-os/sdk/server";
+import type { AppId } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
+import type { OperationResult } from "@grasp-os/shared/operations";
+import type { Role } from "@grasp-os/shared/roles";
+import { env } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { describe, expect, it } from "vite-plus/test";
+
+import { operationRoles } from "../src/app-access.ts";
+import { createApp } from "../src/apps.ts";
+import type { Acting } from "../src/auth/identity.ts";
+import { createStore, openStore } from "../src/data-stores.ts";
+import type { OpenStore } from "../src/data-stores.ts";
+import { appMembers } from "../src/db/core/schema.ts";
+import { callOperation } from "../src/operations.ts";
+import type { HostedApp, Invocation, Runner } from "../src/operations.ts";
+
+// An App's server functions run through core's operation host
+// (operations.ts) against a real business store and the App's real roles:
+// the complete Notes operations of spec 9.4 end to end, then the ways the
+// host can be misused, from its threat model. App code runs here as the
+// SDK's runner runs it; "malicious" runners stand for App code that talks
+// to its channel directly, as code in an isolate could.
+
+const noteFields = {
+  title: v.string().trim().min(1).max(200),
+  body: v.string().max(100_000).default(""),
+  summary: v.string().max(10_000).nullable().default(null),
+};
+
+const schema = defineSchema({
+  notes: defineTable(noteFields)
+    .index("by_updated", ["_updatedAt"])
+    .index("by_title", ["title"]),
+});
+
+const { query, mutation, internalQuery, doc } = serverModule(schema);
+
+const list = query({
+  args: { pagination: paginationOptionsValidator },
+  returns: paginationResultValidator(doc("notes")),
+  handler: async (ctx, args) =>
+    await ctx.db
+      .query("notes")
+      .withIndex("by_updated")
+      .order("desc")
+      .paginate(args.pagination),
+});
+
+const get = query({
+  args: { id: v.id("notes") },
+  returns: doc("notes").nullable(),
+  handler: async (ctx, args) => await ctx.db.get("notes", args.id),
+});
+
+const create = mutation({
+  args: { title: noteFields.title, body: noteFields.body },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});
+
+const update = mutation({
+  args: {
+    id: v.id("notes"),
+    expectedRevision: v.number().integer().min(1),
+    title: noteFields.title,
+    body: v.string().max(100_000),
+  },
+  returns: doc("notes"),
+  handler: async (ctx, args) => {
+    const previous = await ctx.db.get("notes", args.id, {
+      expectedRevision: args.expectedRevision,
+    });
+    if (!previous) {
+      throw new AppError("note.not_found", "The note is unavailable.");
+    }
+    await ctx.db.patch(
+      "notes",
+      args.id,
+      { title: args.title, body: args.body },
+      { expectedRevision: args.expectedRevision }
+    );
+    const updated = await ctx.db.get("notes", args.id);
+    if (!updated) {
+      throw new AppError("note.not_found", "The note is unavailable.");
+    }
+    return updated;
+  },
+});
+
+const remove = mutation({
+  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.delete("notes", args.id, {
+      expectedRevision: args.expectedRevision,
+    });
+    return null;
+  },
+});
+
+/** Inserts a note, then reads the table in the same staged state. */
+const createAndCount = mutation({
+  args: { title: noteFields.title },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    await ctx.db.insert("notes", { title: args.title });
+    const all = await ctx.db.query("notes").collect();
+    return all.length;
+  },
+});
+
+/** Narrowed by `operationAccess` to inserting only. */
+const insertOnly = mutation({
+  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.delete("notes", args.id, {
+      expectedRevision: args.expectedRevision,
+    });
+    return null;
+  },
+});
+
+/** Narrowed by `operationAccess` to inserting only: it may not read. */
+const peek = mutation({
+  args: { id: v.id("notes") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.get("notes", args.id);
+    return null;
+  },
+});
+
+const secret = internalQuery({
+  args: {},
+  returns: v.string(),
+  handler: () => "internal",
+});
+
+const notesApp = app({
+  name: "Notes",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: {
+    notes: {
+      list,
+      get,
+      create,
+      update,
+      remove,
+      createAndCount,
+      insertOnly,
+      peek,
+    },
+  },
+  internalOperations: { secret },
+  operationAccess: {
+    "notes.insertOnly": { tables: { notes: { insert: true } } },
+    "notes.peek": { tables: { notes: { insert: true } } },
+  },
+  screens: {},
+  uses: [],
+});
+
+const { manifest } = inspectApp(notesApp);
+
+/** The Notes App as the host runs it, with `run` in place of its runner. */
+const hosted = (run?: Runner): HostedApp => ({
+  manifest,
+  run:
+    run ??
+    (async (path, args, channel) =>
+      await runFunction(notesApp, path, args, channel)),
+});
+
+/** A person of the organization in `role`, as their session has them. */
+const person = async (role: Role): Promise<Acting> => {
+  const userId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO organizations (id, name, slug, created_at) VALUES ('organization', 'Acme', 'acme', ?)"
+    ).bind(Date.now()),
+    env.DB.prepare(
+      "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)"
+    ).bind(userId, "Person", `${userId}@acme.test`, Date.now(), Date.now()),
+    env.DB.prepare(
+      "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, ?, ?)"
+    ).bind(crypto.randomUUID(), userId, role, Date.now()),
+  ]);
+  return { userId, role, teams: [], staff: false };
+};
+
+interface Fixture {
+  readonly owner: Acting;
+  readonly appId: AppId;
+  readonly store: OpenStore;
+}
+
+/** A Notes App of a builder's, with its store holding the Notes schema. */
+const notes = async (): Promise<Fixture> => {
+  const owner = await person("builder");
+  const { id: appId } = await createApp(env, owner, { name: "Notes" });
+  const store = await openStore(env, await createStore(env, owner));
+  await store.defineTables(manifestText(manifest.schema));
+  return { owner, appId, store };
+};
+
+/** Shares the fixture's App with `by`, as a user of its screens. */
+const share = async ({ appId, owner }: Fixture, by: Acting) => {
+  await drizzle(env.DB).insert(appMembers).values({
+    appId,
+    memberType: "person",
+    memberId: by.userId,
+    role: "user",
+    addedBy: owner.userId,
+    addedAt: new Date(),
+  });
+};
+
+/** Stops sharing the fixture's App with `by`. */
+const unshare = async ({ appId }: Fixture, by: Acting) => {
+  await drizzle(env.DB)
+    .delete(appMembers)
+    .where(
+      and(eq(appMembers.appId, appId), eq(appMembers.memberId, by.userId))
+    );
+};
+
+/** An invocation for `by` through the fixture's App at `version`. */
+const invocationOf = (
+  { appId, store }: Fixture,
+  by: Acting,
+  version = 1
+): Invocation => ({
+  principal: by.userId,
+  consumer: { resourceId: appId, resourceVersion: version },
+  store,
+  requestId: crypto.randomUUID(),
+  deadline: Date.now() + 60_000,
+  runId: null,
+  authorize: async () => await operationRoles(env, by, appId),
+});
+
+/** Calls `path` of kind `kind` for `by`. */
+const call = async (
+  fixture: Fixture,
+  by: Acting,
+  kind: string,
+  path: string,
+  args: unknown,
+  more: { run?: Runner; idempotencyKey?: string; version?: number } = {}
+): Promise<OperationResult> =>
+  await callOperation(
+    hosted(more.run),
+    invocationOf(fixture, by, more.version),
+    { path, kind },
+    args,
+    more.idempotencyKey === undefined
+      ? {}
+      : { idempotencyKey: more.idempotencyKey }
+  );
+
+/** The value of a call that succeeded; fails the test otherwise. */
+const valueOf = (result: OperationResult): Json => {
+  if (!result.ok) {
+    throw new Error(`The call failed: ${result.error.code}`);
+  }
+  return result.value;
+};
+
+/** The error code of a call that failed, or "ok". */
+const codeOf = (result: OperationResult): string =>
+  result.ok ? "ok" : result.error.code;
+
+/** A note's ID, as callers pass one. */
+const idOf = (value: Json): Id<"notes"> => {
+  if (typeof value !== "string") {
+    throw new TypeError("Not an ID");
+  }
+  // SAFETY: a value the host answered for `v.id("notes")`.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return value as Id<"notes">;
+};
+
+/** A JSON object: `Array.isArray` doesn't narrow a readonly array type. */
+const isObject = (
+  value: Json | undefined
+): value is Readonly<Record<string, Json | undefined>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** A field of a JSON object. */
+const fieldOf = (value: Json | undefined, key: string): Json | undefined =>
+  isObject(value) && Object.hasOwn(value, key) ? value[key] : undefined;
+
+/** The IDs of a page's notes, in order. */
+const idsOf = (page: Json): (Json | undefined)[] => {
+  const items = fieldOf(page, "items");
+  const notesOf: readonly Json[] =
+    typeof items === "object" && items !== null && !isObject(items)
+      ? items
+      : [];
+  return notesOf.map((item) => fieldOf(item, "_id"));
+};
+
+/**
+ * A failed call's error without its request ID, which must be there: a
+ * new one each call, so what else it says can be compared whole.
+ */
+const failureOf = (result: OperationResult) => {
+  if (result.ok) {
+    throw new Error("The call succeeded");
+  }
+  const { requestId, ...rest } = result.error;
+  expect(requestId).toMatch(/^[0-9a-f-]{36}$/u);
+  return rest;
+};
+
+/** A runner that does `misuse` with its channel, then answers null. */
+const misusing = (
+  misuse: (channel: OperationChannel) => Promise<unknown>
+): Runner => {
+  const run: Runner = async (_path, _args, channel) => {
+    await misuse(channel);
+    return null;
+  };
+  return run;
+};
+
+describe("the Notes operations", () => {
+  it("create, get, list, update and delete a note through the host", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    // The caller leaves out `body`: its default fills it; the store's
+    // `summary` default fills the rest.
+    const id = idOf(
+      valueOf(
+        await call(fixture, owner, "mutation", "notes.create", {
+          title: "  Launch  ",
+        })
+      )
+    );
+    const created = valueOf(
+      await call(fixture, owner, "query", "notes.get", { id })
+    );
+    expect(created).toMatchObject({
+      _id: id,
+      _ownerId: owner.userId,
+      _rev: 1,
+      title: "Launch",
+      body: "",
+      summary: null,
+    });
+
+    const updated = valueOf(
+      await call(fixture, owner, "mutation", "notes.update", {
+        id,
+        expectedRevision: 1,
+        title: "Launch day",
+        body: "Agenda",
+      })
+    );
+    // What the mutation returned is exactly what committed.
+    const read = valueOf(
+      await call(fixture, owner, "query", "notes.get", { id })
+    );
+    expect(updated).toStrictEqual(read);
+    expect(read).toMatchObject({
+      _rev: 2,
+      title: "Launch day",
+      body: "Agenda",
+    });
+
+    const second = idOf(
+      valueOf(
+        await call(fixture, owner, "mutation", "notes.create", {
+          title: "Retro",
+        })
+      )
+    );
+    const page = valueOf(
+      await call(fixture, owner, "query", "notes.list", {
+        pagination: { pageSize: 1 },
+      })
+    );
+    expect(fieldOf(page, "hasMore")).toBeTruthy();
+    const cursor = fieldOf(page, "nextCursor");
+    const rest = valueOf(
+      await call(fixture, owner, "query", "notes.list", {
+        pagination: { pageSize: 1, cursor },
+      })
+    );
+    const removed = valueOf(
+      await call(fixture, owner, "mutation", "notes.remove", {
+        id,
+        expectedRevision: 2,
+      })
+    );
+    expect({
+      listed: [...idsOf(page), ...idsOf(rest)],
+      removed,
+      afterwards: valueOf(
+        await call(fixture, owner, "query", "notes.get", { id })
+      ),
+    }).toStrictEqual({ listed: [second, id], removed: null, afterwards: null });
+  });
+
+  it("refuses a stale edit, and a missing note, as domain failures that change nothing", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const id = idOf(
+      valueOf(
+        await call(fixture, owner, "mutation", "notes.create", {
+          title: "Draft",
+        })
+      )
+    );
+    const stale = await call(fixture, owner, "mutation", "notes.update", {
+      id,
+      expectedRevision: 3,
+      title: "X",
+      body: "",
+    });
+    expect(stale).toMatchObject({
+      ok: false,
+      error: { code: "data.conflict", category: "domain", retryable: false },
+    });
+    await call(fixture, owner, "mutation", "notes.remove", {
+      id,
+      expectedRevision: 1,
+    });
+    const missing = await call(fixture, owner, "mutation", "notes.update", {
+      id,
+      expectedRevision: 1,
+      title: "X",
+      body: "",
+    });
+    expect(failureOf(missing)).toStrictEqual({
+      code: "note.not_found",
+      message: "The note is unavailable.",
+      category: "domain",
+      retryable: false,
+    });
+  });
+
+  it("answers a retried submission its outcome, and refuses its key for other input", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const first = await call(
+      fixture,
+      owner,
+      "mutation",
+      "notes.create",
+      { title: "Once" },
+      { idempotencyKey: "k1" }
+    );
+    const retry = await call(
+      fixture,
+      owner,
+      "mutation",
+      "notes.create",
+      { title: "Once" },
+      { idempotencyKey: "k1" }
+    );
+    expect(retry).toStrictEqual(first);
+    const other = await call(
+      fixture,
+      owner,
+      "mutation",
+      "notes.create",
+      { title: "Twice" },
+      { idempotencyKey: "k1" }
+    );
+    expect(codeOf(other)).toBe("submission.key_conflict");
+    const page = valueOf(
+      await call(fixture, owner, "query", "notes.list", { pagination: {} })
+    );
+    expect(fieldOf(page, "items")).toHaveLength(1);
+  });
+
+  it("lets a mutation read what it staged, as its commit will make it", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    await call(fixture, owner, "mutation", "notes.create", { title: "One" });
+    expect(
+      valueOf(
+        await call(fixture, owner, "mutation", "notes.createAndCount", {
+          title: "Two",
+        })
+      )
+    ).toBe(2);
+    // A staged read keeps nothing: the store holds what committed only.
+    const page = valueOf(
+      await call(fixture, owner, "query", "notes.list", { pagination: {} })
+    );
+    expect(fieldOf(page, "items")).toHaveLength(2);
+  });
+});
+
+describe("a mutation's commit", () => {
+  it("stamps the records it changes with the time it staged them, as its staged reads saw", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const id = idOf(
+      valueOf(
+        await call(fixture, owner, "mutation", "notes.create", { title: "a" })
+      )
+    );
+    // Time passes between the handler's staged read and the commit.
+    const run: Runner = async (path, args, channel) => {
+      const answer = await runFunction(notesApp, path, args, channel);
+      await scheduler.wait(20);
+      return answer;
+    };
+    const returned = valueOf(
+      await call(
+        fixture,
+        owner,
+        "mutation",
+        "notes.update",
+        { id, expectedRevision: 1, title: "b", body: "" },
+        { run }
+      )
+    );
+    expect(returned).toStrictEqual(
+      valueOf(await call(fixture, owner, "query", "notes.get", { id }))
+    );
+  });
+
+  it("runs the mutation again when a commit made its reads stale", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    let runs = 0;
+    // Another caller commits after the first run read the table.
+    const run: Runner = async (path, args, channel) => {
+      runs += 1;
+      const answer = await runFunction(notesApp, path, args, channel);
+      if (runs === 1) {
+        await call(fixture, owner, "mutation", "notes.create", {
+          title: "Meanwhile",
+        });
+      }
+      return answer;
+    };
+    const counted = valueOf(
+      await call(
+        fixture,
+        owner,
+        "mutation",
+        "notes.createAndCount",
+        { title: "Mine" },
+        { run }
+      )
+    );
+    const page = valueOf(
+      await call(fixture, owner, "query", "notes.list", { pagination: {} })
+    );
+    expect({ runs, counted, stored: idsOf(page).length }).toStrictEqual({
+      runs: 2,
+      counted: 2,
+      stored: 2,
+    });
+  });
+});
+
+describe("who a call is for", () => {
+  it("is the App's roles, read from the App: an outsider is refused, a member sees their own notes only", async () => {
+    const fixture = await notes();
+    const outsider = await person("user");
+    const member = await person("user");
+    await share(fixture, member);
+    await call(fixture, fixture.owner, "mutation", "notes.create", {
+      title: "Owner's",
+    });
+    await expect(
+      call(fixture, outsider, "query", "notes.list", { pagination: {} })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "app.not_found", category: "authorization" },
+    });
+    const own = valueOf(
+      await call(fixture, member, "mutation", "notes.create", {
+        title: "Member's",
+      })
+    );
+    const page = valueOf(
+      await call(fixture, member, "query", "notes.list", { pagination: {} })
+    );
+    expect(idsOf(page)).toStrictEqual([own]);
+  });
+
+  it("is authorized again just before a mutation commits", async () => {
+    const fixture = await notes();
+    const member = await person("user");
+    await share(fixture, member);
+    // The member loses the App while their mutation runs.
+    const run: Runner = async (path, args, channel) => {
+      const answer = await runFunction(notesApp, path, args, channel);
+      await unshare(fixture, member);
+      return answer;
+    };
+    const result = await call(
+      fixture,
+      member,
+      "mutation",
+      "notes.create",
+      { title: "Late" },
+      { run }
+    );
+    expect(codeOf(result)).toBe("app.not_found");
+    const page = valueOf(
+      await call(fixture, fixture.owner, "query", "notes.list", {
+        pagination: {},
+      })
+    );
+    expect(fieldOf(page, "items")).toStrictEqual([]);
+  });
+
+  it("can't be named by App code: a read carrying a scope is refused", async () => {
+    const fixture = await notes();
+    const victim = await person("user");
+    await share(fixture, victim);
+    await call(fixture, victim, "mutation", "notes.create", {
+      title: "Private",
+    });
+    const run: Runner = async (_path, _args, channel) => {
+      // Deliberately ill-typed, as a hostile App would call it.
+      const read = async (request: unknown): Promise<unknown> =>
+        await Reflect.apply(channel.read, channel, [request]);
+      return await read({
+        kind: "query",
+        query: {
+          descriptorVersion: 1,
+          table: "notes",
+          index: null,
+          range: [],
+          filter: null,
+          order: "asc",
+          terminal: { kind: "collect" },
+        },
+        // What a hostile App would try: another person, and builder rights.
+        scope: { principal: victim.userId, appBuilder: true },
+      });
+    };
+    await expect(
+      call(
+        fixture,
+        fixture.owner,
+        "query",
+        "notes.get",
+        { id: "0190a0a0-0000-7000-8000-000000000000" },
+        { run }
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "data.invalid_query" },
+    });
+  });
+});
+
+describe("paths", () => {
+  it("refuse an internal or unknown path alike, and a call of the wrong kind", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    expect({
+      internal: codeOf(await call(fixture, owner, "query", "secret", {})),
+      unknown: codeOf(await call(fixture, owner, "query", "notes.missing", {})),
+      kind: codeOf(
+        await call(fixture, owner, "mutation", "notes.get", { id: "x" })
+      ),
+    }).toStrictEqual({
+      internal: "operation.not_found",
+      unknown: "operation.not_found",
+      kind: "operation.kind_mismatch",
+    });
+  });
+});
+
+describe("contracts", () => {
+  it("refuse input past 128 KiB before validating it, and input that doesn't fit", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    expect({
+      large: codeOf(
+        await call(fixture, owner, "mutation", "notes.create", {
+          title: "a",
+          body: "x".repeat(128 * 1024),
+        })
+      ),
+      extraKey: codeOf(
+        await call(fixture, owner, "mutation", "notes.create", {
+          title: "a",
+          _ownerId: "u",
+        })
+      ),
+      empty: codeOf(
+        await call(fixture, owner, "mutation", "notes.create", { title: "  " })
+      ),
+    }).toStrictEqual({
+      large: "contract.input_too_large",
+      extraKey: "contract.invalid_args",
+      empty: "contract.invalid_args",
+    });
+  });
+
+  it("refuse a return the contract doesn't allow, and commit nothing", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const run: Runner = async (path, args, channel) => {
+      await runFunction(notesApp, path, args, channel);
+      return "not-an-id";
+    };
+    expect(
+      codeOf(
+        await call(
+          fixture,
+          owner,
+          "mutation",
+          "notes.create",
+          { title: "a" },
+          { run }
+        )
+      )
+    ).toBe("contract.invalid_return");
+    const page = valueOf(
+      await call(fixture, owner, "query", "notes.list", { pagination: {} })
+    );
+    expect(fieldOf(page, "items")).toStrictEqual([]);
+  });
+
+  it("refuse a return that is valid only once normalized, rather than repair it", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const id = idOf(
+      valueOf(
+        await call(fixture, owner, "mutation", "notes.create", { title: "a" })
+      )
+    );
+    // The note as stored, with a title the contract would trim.
+    const run: Runner = async (path, args, channel) => {
+      const note = await runFunction(notesApp, path, args, channel);
+      return typeof note === "object" && note !== null
+        ? { ...note, title: " a " }
+        : note;
+    };
+    expect(
+      codeOf(await call(fixture, owner, "query", "notes.get", { id }, { run }))
+    ).toBe("contract.invalid_return");
+  });
+
+  it("narrow a function to its `operationAccess` at run time", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const id = idOf(
+      valueOf(
+        await call(fixture, owner, "mutation", "notes.create", {
+          title: "Keep",
+        })
+      )
+    );
+    await expect(
+      call(fixture, owner, "mutation", "notes.insertOnly", {
+        id,
+        expectedRevision: 1,
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "data.write_denied", category: "authorization" },
+    });
+  });
+
+  it("keep a function from reading a table its `operationAccess` leaves out", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const id = idOf(
+      valueOf(
+        await call(fixture, owner, "mutation", "notes.create", {
+          title: "Keep",
+        })
+      )
+    );
+    expect(
+      failureOf(await call(fixture, owner, "mutation", "notes.peek", { id }))
+    ).toMatchObject({ code: "data.access_denied", category: "authorization" });
+  });
+
+  it("answer an expired cursor once the App's version moved on, so the list restarts", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    await call(fixture, owner, "mutation", "notes.create", { title: "a" });
+    await call(fixture, owner, "mutation", "notes.create", { title: "b" });
+    const page = valueOf(
+      await call(fixture, owner, "query", "notes.list", {
+        pagination: { pageSize: 1 },
+      })
+    );
+    const cursor = fieldOf(page, "nextCursor");
+    expect(
+      codeOf(
+        await call(
+          fixture,
+          owner,
+          "query",
+          "notes.list",
+          { pagination: { pageSize: 1, cursor } },
+          { version: 2 }
+        )
+      )
+    ).toBe("data.cursor_expired");
+  });
+});
+
+describe("App code misusing its channel", () => {
+  it("can't write from a query, nor reach a resource from a mutation", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const insert = {
+      kind: "insert",
+      table: "notes",
+      fields: { title: "Smuggled" },
+    } as const;
+    const fromQuery = await call(
+      fixture,
+      owner,
+      "query",
+      "notes.get",
+      { id: "0190a0a0-0000-7000-8000-000000000000" },
+      { run: misusing(async (channel) => await channel.write(insert)) }
+    );
+    const fromMutation = await call(
+      fixture,
+      owner,
+      "mutation",
+      "notes.remove",
+      { id: "0190a0a0-0000-7000-8000-000000000000", expectedRevision: 1 },
+      {
+        run: misusing(
+          async (channel) =>
+            await channel.resource("mail", "call", ["send", {}])
+        ),
+      }
+    );
+    expect([codeOf(fromQuery), codeOf(fromMutation)]).toStrictEqual([
+      "operation.read_only",
+      "operation.no_resources",
+    ]);
+    const page = valueOf(
+      await call(fixture, owner, "query", "notes.list", { pagination: {} })
+    );
+    expect(fieldOf(page, "items")).toStrictEqual([]);
+  });
+
+  it("can't use a channel after its call ended", async () => {
+    const fixture = await notes();
+    let kept: OperationChannel | undefined;
+    await call(
+      fixture,
+      fixture.owner,
+      "query",
+      "notes.list",
+      { pagination: {} },
+      {
+        run: async (path, args, channel) => {
+          kept = channel;
+          return await runFunction(notesApp, path, args, channel);
+        },
+      }
+    );
+    await expect(
+      kept?.write({ kind: "insert", table: "notes", fields: { title: "Late" } })
+    ).rejects.toMatchObject({ code: "operation.ended" });
+  });
+
+  it("can't pass a platform error off as the host's, nor leak a cause", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const thrown = async (failure: Error) => {
+      const run: Runner = async () => await Promise.reject(failure);
+      return await call(
+        fixture,
+        owner,
+        "query",
+        "notes.get",
+        { id: "0190a0a0-0000-7000-8000-000000000000" },
+        { run }
+      );
+    };
+    const forged = await thrown(
+      Object.assign(new Error("The record changed"), { code: "data.conflict" })
+    );
+    const sql = await thrown(
+      new Error("SQLITE_ERROR: no such column: secret_token near SELECT")
+    );
+    const disguised = await thrown(
+      Object.assign(new Error("No"), {
+        name: "AppError",
+        code: "auth.unauthenticated",
+      })
+    );
+    expect([forged, sql, disguised].map(failureOf)).toStrictEqual(
+      Array.from({ length: 3 }, () => ({
+        code: "internal.unexpected",
+        message: "Something went wrong.",
+        category: "operational",
+        retryable: false,
+      }))
+    );
+  });
+
+  it("keeps a platform error the host itself raised to it", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    // App code rethrows the store's refusal: it is the store's, so it stands.
+    const result = await call(
+      fixture,
+      owner,
+      "mutation",
+      "notes.remove",
+      { id: "0190a0a0-0000-7000-8000-000000000000", expectedRevision: 1 },
+      {
+        run: async (_path, _args, channel) =>
+          await channel.read({
+            kind: "get",
+            table: "missing",
+            id: "x",
+            expectedRevision: null,
+          }),
+      }
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "data.unknown_table", category: "contract" },
+    });
+  });
+});
