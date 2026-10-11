@@ -3,6 +3,7 @@ import {
   cursorMaxLength,
   filterMaxDepth,
   filterMaxInValues,
+  filterMaxNodes,
   queryDefaultPageSize,
   queryMaxResults,
   queryMaxStringLength,
@@ -10,6 +11,7 @@ import {
 import {
   boundValuesIssue,
   filterBudgetIssue,
+  filterChildren,
   rangeShapeIssue,
   readDescriptorVersion,
 } from "@grasp-os/shared/store-reads";
@@ -27,6 +29,7 @@ import { indexBase, tablesOf } from "./schema.ts";
 import type {
   AnyTable,
   IndexBase,
+  IndexDefinition,
   SchemaDefinition,
   TableState,
 } from "./schema.ts";
@@ -466,20 +469,21 @@ const fits = (value: unknown, base: IndexBase, allowNull: boolean): boolean => {
 
 /** What a range builder recorded, and the table and index it was made for. */
 interface RecordedRange {
-  readonly owner: string;
+  readonly owner: IndexDefinition;
   readonly bounds: readonly RangeBound[];
 }
 
 /** Every range builder this module made, with what it recorded. */
 const ranges = new WeakMap<object, RecordedRange>();
 
-/** Which range builders belong to: one table's one index. */
-const ownerOf = (table: string, index: string): string =>
-  JSON.stringify([table, index]);
-
 /** Where a range being built is: its owner, fields left and bounds so far. */
 interface RangeState {
-  readonly owner: string;
+  /**
+   * The index it is built for: the very definition of the schema the
+   * reader reads, so a range built by another reader, even over a schema
+   * with the same names, is no range of this one.
+   */
+  readonly owner: IndexDefinition;
   readonly table: TableState;
   /** The index fields not yet bounded. */
   readonly fields: readonly string[];
@@ -563,7 +567,7 @@ const rangeOf = (range: RangeState): IndexRange => {
   });
   ranges.set(built, {
     owner: range.owner,
-    bounds: Object.freeze(range.bounds),
+    bounds: Object.freeze(range.bounds.map((bound) => Object.freeze(bound))),
   });
   return built;
 };
@@ -680,11 +684,32 @@ const fieldNodes = (
   });
 };
 
-/** An author's filter object, as the tree a descriptor holds. */
+/** The nodes a query's filters may still add, counted as they are built. */
+interface NodeBudget {
+  nodes: number;
+}
+
+/** Counts `count` more nodes against `budget`, refusing past the bound. */
+const spend = (budget: NodeBudget, count: number): void => {
+  budget.nodes += count;
+  if (budget.nodes > filterMaxNodes) {
+    refuse(
+      "query.invalid_filter",
+      `A query's filters hold at most ${filterMaxNodes} nodes, all together.`
+    );
+  }
+};
+
+/**
+ * An author's filter object, as the tree a descriptor holds: every node
+ * counted against `budget` as it is built, and a list's length before any
+ * of its members, so no filter is built past the bound.
+ */
 const filterTree = (
   table: TableState,
   filter: unknown,
-  depth: number
+  depth: number,
+  budget: NodeBudget
 ): FilterNode => {
   if (depth > filterMaxDepth) {
     return refuse(
@@ -713,18 +738,56 @@ const filterTree = (
           `\`${key}\` is a list of at least one filter.`
         );
       }
+      // Counted before any member is built: a list too long fails at once.
+      if (budget.nodes + 1 + value.length > filterMaxNodes) {
+        spend(budget, 1 + value.length);
+      }
+      spend(budget, 1);
       const children = value.map((child) =>
-        filterTree(table, child, depth + 1)
+        filterTree(table, child, depth + 1, budget)
       );
       nodes.push(key === "AND" ? { and: children } : { or: children });
     } else if (key === "NOT") {
-      nodes.push({ not: filterTree(table, value, depth + 1) });
+      spend(budget, 1);
+      nodes.push({ not: filterTree(table, value, depth + 1, budget) });
     } else {
-      nodes.push(...fieldNodes(table, key, value));
+      const conditions = fieldNodes(table, key, value);
+      spend(budget, conditions.length);
+      nodes.push(...conditions);
     }
   }
   const [only, ...others] = nodes;
-  return only !== undefined && others.length === 0 ? only : { and: nodes };
+  if (only !== undefined && others.length === 0) {
+    return only;
+  }
+  spend(budget, 1);
+  return { and: nodes };
+};
+
+/** How many nodes `filters` hold, all told, counted without recursion. */
+const nodeCount = (filters: readonly FilterNode[]): number => {
+  let count = 0;
+  const stack = [...filters];
+  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+    count += 1;
+    stack.push(...filterChildren(node));
+  }
+  return count;
+};
+
+/** `node` and everything in it, frozen: a query's state is plain data. */
+const deepFreeze = <Node extends FilterNode>(node: Node): Node => {
+  const stack: object[] = [node];
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    Object.freeze(next);
+    const children: unknown[] = Object.values(next);
+    for (const child of children) {
+      if (typeof child === "object" && child !== null) {
+        stack.push(child);
+      }
+    }
+  }
+  return node;
 };
 
 /** A count a terminal takes, checked: a whole number from `min` to 100. */
@@ -867,7 +930,9 @@ const queryOf = (query: QueryState, execute: ReadExecutor): RuntimeQuery => {
     if (issue !== undefined) {
       refuse("query.invalid_filter", `${issue}.`);
     }
-    const request: QueryRequest = {
+    // A copy of its own for the executor: what it does with it can't
+    // change this query or any read after.
+    const request: QueryRequest = structuredClone({
       descriptorVersion: readDescriptorVersion,
       table: query.table,
       index: query.index,
@@ -875,12 +940,20 @@ const queryOf = (query: QueryState, execute: ReadExecutor): RuntimeQuery => {
       filter,
       order: query.order,
       terminal,
-    };
+    });
     return await execute({ kind: "query", query: request });
   };
   return Object.freeze({
     filter: (filter: unknown) => {
-      const filters = [...query.filters, filterTree(query.state, filter, 0)];
+      // The filters so far, and the `and` that holds them once there are
+      // two, count against the same budget as the new one.
+      const budget: NodeBudget = {
+        nodes: nodeCount(query.filters) + (query.filters.length > 0 ? 1 : 0),
+      };
+      const filters = [
+        ...query.filters,
+        deepFreeze(filterTree(query.state, filter, 0, budget)),
+      ];
       const issue = filterBudgetIssue(filterOf(filters));
       if (issue !== undefined) {
         refuse(
@@ -1011,7 +1084,7 @@ export const databaseReader = <Tables extends AnyTables>(
               "An index range is built by a function of the range."
             );
           }
-          const owner = ownerOf(name, declared.name);
+          const owner = declared;
           const built = build(
             rangeOf({
               owner,

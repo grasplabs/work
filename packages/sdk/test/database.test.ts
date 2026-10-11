@@ -246,6 +246,53 @@ describe("a query's descriptor", () => {
     expect(requests).toHaveLength(1);
   });
 
+  test("hands each read its own descriptor: what the executor changes changes nothing after", async () => {
+    const requests: ReadRequest[] = [];
+    const db = databaseReader(notesSchema, async (request) => {
+      requests.push(structuredClone(request));
+      // A careless or hostile executor changes what it was handed.
+      if (request.kind === "query") {
+        request.query.range.length = 0;
+        const { filter } = request.query;
+        if (filter !== null && "values" in filter) {
+          filter.values.push(99);
+        }
+      }
+      return await Promise.resolve([]);
+    });
+    const query = db
+      .query("notes")
+      .withIndex("by_title", (range) => range.eq("title", "a"))
+      .filter({ rank: { in: [1] } });
+    await query.collect();
+    await query.collect();
+    const [first, second] = requests;
+    expect(second).toStrictEqual(first);
+  });
+
+  test("refuses a huge filter list before building its members", () => {
+    const { db } = recording([]);
+    const huge = Array.from({ length: 1_000_000 }, () => ({ title: "a" }));
+    const started = Date.now();
+    expect(() => db.query("notes").filter({ OR: huge })).toThrow(
+      QueryDefinitionError
+    );
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  test("counts a query's earlier filters against the same 64 nodes", () => {
+    const { db } = recording([]);
+    let query = db.query("notes").filter({ rank: { gt: 0 } });
+    // 62 filters and the `and` holding them: 63 nodes.
+    for (let index = 1; index < 62; index += 1) {
+      query = query.filter({ title: { neq: `t${index}` } });
+    }
+    expect(() => query.filter({ title: "a" })).not.toThrow();
+    expect(() => query.filter({ title: "a", done: true })).toThrow(
+      QueryDefinitionError
+    );
+  });
+
   test("copies what it is given: a list changed later changes nothing", async () => {
     const { db, requests } = recording([]);
     const ranks = [1, 2];
@@ -377,6 +424,22 @@ describe("a query the schema doesn't allow", () => {
     });
     await refusedWith("query.invalid_range", () =>
       notes().withIndex("by_author_rank", () => other)
+    );
+    // A range built by another reader, over a schema with the same names.
+    const twin = databaseReader(
+      defineSchema({
+        people: defineTable({ name: v.string() }),
+        notes: defineTable({ title: v.string() }).index("by_title", ["title"]),
+      }),
+      async () => await Promise.resolve([])
+    );
+    let foreign: unknown;
+    twin.query("notes").withIndex("by_title", (range) => {
+      foreign = range.eq("title", "a");
+      return range.eq("title", "a");
+    });
+    await refusedWith("query.invalid_range", () =>
+      notes().withIndex("by_title", () => foreign)
     );
     // Null only where the field may hold null.
     await refusedWith("query.invalid_range", () =>
