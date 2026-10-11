@@ -4,6 +4,7 @@ import { databaseWriter } from "../src/database.ts";
 import { inspectApp } from "../src/host.ts";
 import { AppError, app, resource } from "../src/index.ts";
 import type { AppDefinition } from "../src/index.ts";
+import { runFunction } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
 
@@ -592,5 +593,42 @@ describe("ctx.db for writing", () => {
     await expect(looseInsert("missing", { title: "a" })).rejects.toThrow(
       "no such table"
     );
+  });
+});
+
+describe("the runner", () => {
+  test("hands App code a called function's domain failure as its own AppError class, as it arrives across an isolate", async () => {
+    const recover = server.action({
+      args: {},
+      returns: v.string(),
+      uses: [create],
+      handler: async (ctx) => {
+        try {
+          await ctx.runMutation(create, { title: "a" });
+          return "accepted";
+        } catch (error) {
+          return error instanceof AppError
+            ? `${error.code}: ${error.message}`
+            : "not an AppError";
+        }
+      },
+    });
+    const registered = notes({
+      operations: { notes: { list, create, recover } },
+    });
+    // What crosses an isolate boundary: an Error named AppError, its class lost.
+    const crossed = Object.assign(new Error("Notes are closed."), {
+      name: "AppError",
+      code: "note.closed",
+    });
+    const channel = {
+      read: async () => await Promise.resolve(null),
+      write: async () => await Promise.resolve(null),
+      call: async () => await Promise.reject(crossed),
+      resource: async () => await Promise.resolve(null),
+    };
+    await expect(
+      runFunction(registered, "notes.recover", {}, channel)
+    ).resolves.toBe("note.closed: Notes are closed.");
   });
 });

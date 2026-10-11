@@ -323,6 +323,72 @@ const conditional = action({
   },
 });
 
+/** Catches a called mutation's domain failure by its class. */
+const recoverByClass = action({
+  args: {},
+  returns: v.string(),
+  uses: [reject],
+  handler: async (ctx) => {
+    try {
+      await ctx.runMutation(reject, {});
+      return "accepted";
+    } catch (error) {
+      return error instanceof AppError ? error.code : "not an AppError";
+    }
+  },
+});
+
+/** Starts a mutation and returns without waiting for it. */
+const fireAndForget = action({
+  args: { title: v.string() },
+  returns: v.null(),
+  uses: [create],
+  handler: (ctx, args) => {
+    void ctx.runMutation(create, { title: args.title });
+    return null;
+  },
+});
+
+/** Races a mutation against an answer ready at once. */
+const raced = action({
+  args: { title: v.string() },
+  returns: v.string(),
+  uses: [create],
+  handler: async (ctx, args) =>
+    await Promise.race([
+      ctx.runMutation(create, { title: args.title }).then(() => "mutation"),
+      Promise.resolve("first"),
+    ]),
+});
+
+/** Races a mutation that fails against an answer ready at once. */
+const racedFailure = action({
+  args: {},
+  returns: v.string(),
+  uses: [reject],
+  handler: async (ctx) => {
+    const rejected = ctx.runMutation(reject, {});
+    rejected.catch(() => null);
+    return await Promise.race([
+      rejected.then(() => "mutation"),
+      Promise.resolve("first"),
+    ]);
+  },
+});
+
+/** Starts a mutation a little after it has returned. */
+const startLater = action({
+  args: { title: v.string() },
+  returns: v.null(),
+  uses: [create],
+  handler: (ctx, args) => {
+    setTimeout(() => {
+      ctx.runMutation(create, { title: args.title }).catch(() => null);
+    }, 5);
+    return null;
+  },
+});
+
 const streaming = action({
   args: {},
   returns: v.null(),
@@ -351,6 +417,11 @@ const notesApp = app({
       sendMailToo,
       createOnly,
       conditional,
+      recoverByClass,
+      fireAndForget,
+      raced,
+      racedFailure,
+      startLater,
     },
     chain: { level0, level1, level2, level3, level4 },
   },
@@ -1128,5 +1199,114 @@ describe("failures across the host's boundary", () => {
       unknown: "effect.outcome_unknown",
       revoked: "resource.unavailable",
     });
+  });
+});
+
+describe("an action's nested calls", () => {
+  it("hand App code a called function's domain failure as the SDK's AppError", async () => {
+    const fixture = await notes();
+    expect(
+      valueOf(await call(fixture, "action", "actions.recoverByClass", {}))
+    ).toBe("note.rejected");
+  });
+
+  it("finish before the action does, even when it doesn't wait for them", async () => {
+    const fixture = await notes();
+    // The mutations take a while: one the action left running would still
+    // be running when it answered.
+    const slow: Runner = async (path, args, channel) => {
+      if (path === "notes.create") {
+        await scheduler.wait(100);
+      }
+      return await defaultRun(path, args, channel);
+    };
+    const forgotten = codeOf(
+      await call(
+        fixture,
+        "action",
+        "actions.fireAndForget",
+        { title: "a" },
+        {
+          run: slow,
+        }
+      )
+    );
+    const countedAfterForgotten = await noteCount(fixture);
+    const raceAnswer = valueOf(
+      await call(
+        fixture,
+        "action",
+        "actions.raced",
+        { title: "b" },
+        {
+          run: slow,
+        }
+      )
+    );
+    expect({
+      forgotten,
+      // The forgotten note and the probe.
+      countedAfterForgotten,
+      raced: raceAnswer,
+      // And now the raced note and a second probe too.
+      countedAfterRaced: await noteCount(fixture),
+    }).toStrictEqual({
+      forgotten: "ok",
+      countedAfterForgotten: 2,
+      raced: "first",
+      countedAfterRaced: 4,
+    });
+  });
+
+  it("hand App code that talks to its channel directly the SDK's AppError too", async () => {
+    const fixture = await notes();
+    const direct: Runner = async (called, args, channel) => {
+      if (called !== "actions.recoverByClass") {
+        return await defaultRun(called, args, channel);
+      }
+      try {
+        await channel.call("mutation", "notes.reject", {});
+        return "accepted";
+      } catch (error) {
+        return error instanceof AppError ? error.code : "not an AppError";
+      }
+    };
+    expect(
+      valueOf(
+        await call(
+          fixture,
+          "action",
+          "actions.recoverByClass",
+          {},
+          {
+            run: direct,
+          }
+        )
+      )
+    ).toBe("note.rejected");
+  });
+
+  it("fail the action when one it didn't wait for fails", async () => {
+    const fixture = await notes();
+    expect(
+      failureOf(await call(fixture, "action", "actions.racedFailure", {}))
+    ).toStrictEqual({
+      code: "note.rejected",
+      message: "Notes are closed today.",
+      category: "domain",
+      retryable: false,
+    });
+  });
+
+  it("can't be started once the action has finished", async () => {
+    const fixture = await notes();
+    expect(
+      codeOf(
+        await call(fixture, "action", "actions.startLater", { title: "late" })
+      )
+    ).toBe("ok");
+    await scheduler.wait(300);
+    // Only the probe: the late mutation was refused.
+    await expect(noteCount(fixture)).resolves.toBe(1);
   });
 });

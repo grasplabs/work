@@ -1,10 +1,12 @@
 import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 
+import { AppError } from "./app-error.ts";
 import { inspectApp } from "./app.ts";
 import { databaseReader, databaseWriter } from "./database.ts";
 import { isResource } from "./resources.ts";
 import type { AnyResource } from "./resources.ts";
 import type { AnyFunction, FunctionKind } from "./server.ts";
+import type { JsonValue } from "./value-descriptor.ts";
 
 // How an App's server functions run where its code runs: the runner looks
 // a registered function up by path, builds the context of its kind over
@@ -50,6 +52,32 @@ const unknownFunction = (): Error =>
   Object.assign(new Error("There is no such operation."), {
     code: "operation.not_found",
   });
+
+/**
+ * A called function's domain failure as this code's own `AppError` class,
+ * which App code catches with `instanceof`: the host sends it as an error
+ * named `AppError`, which crossing an isolate leaves a plain `Error`.
+ * Anything else as it came.
+ */
+const asAppError = (error: unknown): unknown => {
+  if (
+    !(error instanceof Error) ||
+    error.name !== "AppError" ||
+    error instanceof AppError
+  ) {
+    return error;
+  }
+  const code: unknown = Reflect.get(error, "code");
+  const details: unknown = Reflect.get(error, "details");
+  try {
+    // SAFETY: the constructor checks every part, and throws for any it
+    // refuses, which leaves the error as it came.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return new AppError(code as string, error.message, details as JsonValue);
+  } catch {
+    return error;
+  }
+};
 
 /** The path of `reference` among `fn`'s `uses`, or a refusal. */
 const usedPath = (
@@ -127,8 +155,17 @@ export const runFunction = async (
   };
   const read = async (request: ReadRequest) => await channel.read(request);
   const caller =
-    (kind: FunctionKind) => async (reference: unknown, callArgs: unknown) =>
-      await channel.call(kind, usedPath(paths, fn, reference), callArgs);
+    (kind: FunctionKind) => async (reference: unknown, callArgs: unknown) => {
+      try {
+        return await channel.call(
+          kind,
+          usedPath(paths, fn, reference),
+          callArgs
+        );
+      } catch (error) {
+        throw asAppError(error);
+      }
+    };
   let ctx: object;
   if (fn.kind === "query") {
     ctx = { db: databaseReader(schema, read) };

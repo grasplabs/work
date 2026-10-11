@@ -51,6 +51,8 @@ export const operationErrors = defineErrorFamily({
   "operation.no_resources":
     "Only an action uses resources; queries and mutations never reach outside the App.",
   "operation.ended": "This operation's call has ended.",
+  "operation.unfinished_call":
+    "The operation left a call it started running past its deadline.",
   "operation.unsupported":
     "This operation needs a capability this release doesn't run yet.",
   "operation.call_limit":

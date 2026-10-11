@@ -1,4 +1,10 @@
-import type { ValueSchema, AnyResource, ResourceKind } from "@grasp-os/sdk";
+import { AppError } from "@grasp-os/sdk";
+import type {
+  AnyResource,
+  JsonValue,
+  ResourceKind,
+  ValueSchema,
+} from "@grasp-os/sdk";
 import {
   schemaFromDescriptor,
   schemaHash,
@@ -1247,6 +1253,74 @@ const spendCall = (budget: CallBudget, what: "nested" | "requests"): void => {
   }
 };
 
+/**
+ * `capabilities`, each use tracked while it runs: once the handler has
+ * settled (`settle`), a new use is refused (`operation.ended`), and
+ * `settle` waits for those still running, at most until `deadline`
+ * (past which the store refuses whatever they would commit). It answers
+ * the failure of the first that was still running when the handler
+ * settled and then failed: one the handler never waited for, so it could
+ * neither handle it nor report it. One the handler waited for is its own
+ * to have handled, and doesn't fail the run again.
+ */
+const trackedCalls = (
+  capabilities: Capabilities,
+  deadline: number
+): {
+  capabilities: Capabilities;
+  settle: () => Promise<unknown>;
+} => {
+  let handlerSettled = false;
+  const running = new Set<Promise<unknown>>();
+  let unfinished: { error: unknown } | undefined;
+  const track = <Args extends unknown[]>(
+    use: ((...args: Args) => Promise<unknown>) | undefined
+  ) =>
+    use === undefined
+      ? undefined
+      : async (...args: Args): Promise<unknown> => {
+          if (handlerSettled) {
+            throw operationErrors.create("operation.ended");
+          }
+          const call = use(...args);
+          const watched = (async () => {
+            try {
+              await call;
+            } catch (error) {
+              if (handlerSettled && unfinished === undefined) {
+                unfinished = { error };
+              }
+            }
+          })();
+          running.add(watched);
+          try {
+            return await call;
+          } finally {
+            running.delete(watched);
+          }
+        };
+  return {
+    capabilities: {
+      read: track(capabilities.read),
+      write: track(capabilities.write),
+      call: track(capabilities.call),
+      resource: track(capabilities.resource),
+    },
+    settle: async () => {
+      handlerSettled = true;
+      while (running.size > 0) {
+        const left = deadline - Date.now();
+        if (left <= 0) {
+          throw operationErrors.create("operation.unfinished_call");
+        }
+        // oxlint-disable-next-line no-await-in-loop -- until none is left
+        await Promise.race([Promise.allSettled(running), scheduler.wait(left)]);
+      }
+      return unfinished?.error;
+    },
+  };
+};
+
 /** Thrown by a run whose failure came from stale reads: run it again. */
 const staleRun = new Error("A run's reads went stale");
 
@@ -1302,10 +1376,11 @@ const runHandler = async (
   capabilities: Capabilities,
   stale?: () => Promise<boolean>
 ): Promise<Json> => {
+  const calls = trackedCalls(capabilities, run.invocation.deadline);
   const open = openChannel({
     requestId: run.invocation.requestId,
     path: operation.path,
-    ...capabilities,
+    ...calls.capabilities,
     trust,
     refusals: refusalsOf[operation.kind],
   });
@@ -1313,12 +1388,23 @@ const runHandler = async (
     const outcome = await settle(
       run.app.run(operation.path, fresh(args), open.channel)
     );
+    // What it started and didn't wait for still runs: the run ends once
+    // that has settled, and fails with what failed of it.
+    const unfinished = await calls.settle();
     if ("thrown" in outcome) {
       if (stale !== undefined && (await stale())) {
         throw staleRun;
       }
       throw failureOf(
         outcome.thrown,
+        open,
+        run.invocation.requestId,
+        operation.path
+      );
+    }
+    if (unfinished !== undefined) {
+      throw failureOf(
+        unfinished,
         open,
         run.invocation.requestId,
         operation.path
@@ -1389,11 +1475,15 @@ const stagedQuery = async (
 const forCaller = (error: unknown, requestId: string): Error => {
   const domain = error instanceof Error ? domainFailures.get(error) : undefined;
   if (error instanceof Error && domain !== undefined) {
-    return Object.assign(new Error(error.message), {
-      name: "AppError",
-      code: domain.code,
-      ...(domain.details === undefined ? {} : { details: domain.details }),
-    });
+    // A fresh `AppError` each time, of the SDK's own class (what App code
+    // catches with `instanceof` when it runs in this isolate; across one,
+    // the SDK's runner rebuilds it): nothing the host keeps, so nothing
+    // App code does to it reaches a caller.
+    // SAFETY: details a domain failure carries are JSON, as
+    // `appErrorDetailsOf` copied them.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const details = structuredClone(domain.details) as JsonValue | undefined;
+    return new AppError(domain.code, error.message, details);
   }
   if (isExpectedError(error) && hostErrors.has(error)) {
     return error;
