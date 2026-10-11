@@ -17,3 +17,27 @@ export const storeNameMaxLength = 64;
 
 /** The most tables a store may define. */
 export const storeMaxTables = 64;
+
+// The bounds of one read of a store (`ctx.db`): what a query's descriptor
+// may hold, and what one terminal returns. Checked by the SDK as a query is
+// built and again by the store's host, which trusts no descriptor. The
+// host's own until the runtime policy module sets validated quotas, which
+// may only lower them.
+
+/** The most records `take`, `collect` and one page return. */
+export const queryMaxResults = 100;
+
+/** How many records a page holds when its caller doesn't say. */
+export const queryDefaultPageSize = 50;
+
+/** The most values one filter's `in` lists. */
+export const filterMaxInValues = 100;
+
+/** How deeply a filter's `AND`, `OR` and `NOT` may nest. */
+export const filterMaxDepth = 8;
+
+/** The most conditions and logic nodes one filter holds, all told. */
+export const filterMaxNodes = 64;
+
+/** The longest a pagination cursor may be, in characters (spec 9.2: 4 KiB). */
+export const cursorMaxLength = 4096;

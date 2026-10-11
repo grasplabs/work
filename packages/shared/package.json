@@ -57,6 +57,7 @@
     "./signals": "./src/signals.ts",
     "./statistics": "./src/statistics.ts",
     "./store-limits": "./src/store-limits.ts",
+    "./store-queries": "./src/store-queries.ts",
     "./stores": "./src/stores.ts",
     "./submissions": "./src/submissions.ts",
     "./token-bucket": "./src/token-bucket.ts",

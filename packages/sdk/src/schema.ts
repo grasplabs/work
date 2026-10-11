@@ -306,7 +306,7 @@ const checkUnique = (names: readonly string[], what: string): void => {
   }
 };
 
-type IndexBase = "string" | "number" | "boolean";
+export type IndexBase = "string" | "number" | "boolean";
 
 /** The base type of each kind whose values are all of one scalar type. */
 const scalarBases: Readonly<
@@ -334,7 +334,9 @@ const isNullOnly = (descriptor: ValueDescriptor): boolean =>
  * base type whatever its members, with null and absence besides. Undefined
  * for anything else, which no index may name.
  */
-const indexBase = (descriptor: ValueDescriptor): IndexBase | undefined => {
+export const indexBase = (
+  descriptor: ValueDescriptor
+): IndexBase | undefined => {
   if (descriptor.kind === "literal") {
     const type = typeof descriptor.value;
     return type === "string" || type === "number" || type === "boolean"
