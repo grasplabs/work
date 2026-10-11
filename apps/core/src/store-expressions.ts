@@ -1,8 +1,9 @@
 // The one place a business store's SQL names a field (store-host.ts): the
 // expression for each field a read may order or compare by, shared by the
 // index DDL (store-indexes.ts), index ranges, filters, ordering and cursor
-// seeks. SQLite matches an expression index by the text of its
-// expression, so every use must come from here, character for character.
+// seeks. SQLite uses an expression index only for a query whose
+// expression parses to the same expression as the index's, so every use
+// must come from here, never be written out by hand.
 //
 // Managed fields are the fixed columns of `sdk_records`. A declared field
 // is read from the record's JSON document, and three states stay apart:
@@ -11,14 +12,20 @@
 // value is itself. So, ascending, a field left out sorts first, then
 // null, then values (JSON numbers are finite, and every number sorts
 // before every string in SQLite), and `= -9e999` finds explicit nulls
-// only.
+// only. That rests on no stored document holding a number that reads as
+// negative infinity: a commit accepts finite numbers only (stores.ts),
+// and canonical JSON writes them as JSON.stringify does, never as
+// `-1e999`.
 //
 // Conditions are two-valued (shared/store-reads.ts gives their meaning):
 // every condition's SQL is 0 or 1, never NULL, so `NOT` is plain negation
 // and a field left out can't vanish through SQL's three-valued logic.
-// Comparisons and `neq` match values only, by a lower bound of the
-// field's base type that excludes the sentinel and NULL; `eq` and `in`
-// with null match the sentinel only; `exists` tests for NULL.
+// Comparisons and `neq` match values only, guarded below by the field's
+// base type (which excludes the sentinel and NULL) and, for numbers and
+// booleans, above by `< ''` (which excludes text, sorting above every
+// number); `eq` and `in` with null match the sentinel only; `in` binds its
+// list as one JSON value, read with `json_each`, so its SQL stays flat
+// however long the list; `exists` tests for NULL.
 //
 // No author's name becomes SQL unchecked: a field name must be an
 // identifier (letters, digits and underscores, from a letter) and appears
@@ -92,12 +99,28 @@ export const tableIdLiteral = (tableId: string): string => {
 export type ComparedBase = "string" | "number" | "boolean";
 
 /**
- * The SQL term that keeps only values of `base` in `expression`, below
- * every value of that type: for an upper bound without a lower one, so it
- * neither matches null (the sentinel) nor a field left out (NULL).
+ * The term below every value of `base` in `expression`: what keeps a
+ * comparison, or an upper bound alone, from matching null (the sentinel)
+ * or a field left out (NULL), and a string from matching a number.
  */
-export const valuesOnly = (expression: string, base: ComparedBase): string =>
+const lowerGuard = (expression: string, base: ComparedBase): string =>
   base === "string" ? `${expression} >= ''` : `${expression} > ${nullSentinel}`;
+
+/**
+ * The term above every value of `base` in `expression`, if one is needed:
+ * text sorts above every number in SQLite, so a number or boolean bounded
+ * only below would match text; strings have nothing above them in JSON.
+ */
+const upperGuard = (
+  expression: string,
+  base: ComparedBase
+): string | undefined => (base === "string" ? undefined : `${expression} < ''`);
+
+/** The terms that keep only values of `base` in `expression`. */
+const valuesOnly = (expression: string, base: ComparedBase): string =>
+  [lowerGuard(expression, base), upperGuard(expression, base)]
+    .filter((term) => term !== undefined)
+    .join(" AND ");
 
 /** A scalar as a bound parameter: booleans as SQLite stores them. */
 export const parameterOf = (
@@ -170,10 +193,23 @@ const conditionSql = (types: FieldTypes, node: FilterCondition): Fragment => {
     if (!node.values.every((value) => fits(value, base, nullable))) {
       throw invalid(`\`${node.field}.in\` lists values of its type only`);
     }
-    if (node.values.length === 0) {
+    const values = node.values.filter((value) => value !== null);
+    const terms: Fragment[] = [];
+    if (values.length > 0) {
+      // One JSON parameter, flat however long the list. `json_each`
+      // reads numbers as numbers, strings as text and booleans as 1 and
+      // 0, as `json_extract` does, so its values compare like the field's.
+      terms.push({
+        sql: `${expression} IN (SELECT value FROM json_each(?))`,
+        params: [JSON.stringify(values)],
+      });
+    }
+    if (values.length < node.values.length) {
+      terms.push(equals(expression, null));
+    }
+    if (terms.length === 0) {
       return { sql: "0", params: [] };
     }
-    const terms = node.values.map((value) => equals(expression, value));
     return {
       sql: `IFNULL((${terms.map(({ sql }) => sql).join(" OR ")}), 0)`,
       params: terms.flatMap(({ params }) => params),
@@ -232,7 +268,10 @@ export const filterSql = (types: FieldTypes, node: FilterNode): Fragment => {
  * The terms of one index field's bounds, for a WHERE clause SQLite reads
  * an index range from: equality (null only on a field that may hold it,
  * matching an explicit null), or a lower and/or upper bound, which match
- * values only (an upper bound alone gets the base type's lower bound).
+ * values only (a bound on one side gets its base type's guard on the
+ * other). Unlike a filter's, these terms aren't guarded against NULL: they
+ * must stay top-level conjuncts of the WHERE clause, never under OR or
+ * NOT (a cursor's seek included), where NULL would change what matches.
  */
 export const rangeSql = (
   types: FieldTypes,
@@ -264,7 +303,11 @@ export const rangeSql = (
   const lower = bounds.some(({ op }) => op === "gt" || op === "gte");
   const upper = bounds.some(({ op }) => op === "lt" || op === "lte");
   if (upper && !lower) {
-    terms.push(valuesOnly(expression, base));
+    terms.push(lowerGuard(expression, base));
+  }
+  const above = upperGuard(expression, base);
+  if (lower && !upper && above !== undefined) {
+    terms.push(above);
   }
   return { sql: terms.join(" AND "), params };
 };

@@ -2,6 +2,8 @@ import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
 import type { AccessMode } from "@grasp-os/sdk/host";
 import { storeMaxIndexes } from "@grasp-os/shared/store-limits";
+import { queryRequestSchema } from "@grasp-os/shared/store-queries";
+import type { FilterNode, RangeBound } from "@grasp-os/shared/store-reads";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -11,9 +13,12 @@ import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import {
   fieldExpression,
+  filterSql,
   nullSentinel,
+  rangeSql,
   tableIdLiteral,
 } from "../src/store-expressions.ts";
+import type { FieldTypes } from "../src/store-expressions.ts";
 
 // A store's declared indexes as real SQLite indexes (store-indexes.ts):
 // installed when a store is handed a schema, named by their definitions,
@@ -50,6 +55,38 @@ const notesManifest = (
       tables: { notes: { read, write: read } },
     })
   );
+};
+
+/**
+ * A schema of `tables` tables of 32 string fields, each with 32 indexes,
+ * the `index`th by the fields `fieldsOf(index)`.
+ */
+const manyIndexes = (
+  tables: number,
+  fieldsOf: (index: number) => [string, ...string[]]
+): string => {
+  const fields = Object.fromEntries(
+    Array.from({ length: 32 }, (_, index) => [`f${index}`, v.string()])
+  );
+  const declared = Object.fromEntries(
+    Array.from({ length: tables }, (_, tableIndex) => {
+      let table = defineTable(fields);
+      for (let index = 0; index < 32; index += 1) {
+        table = table.index(`by_${index}`, fieldsOf(index));
+      }
+      return [`t${tableIndex}`, table];
+    })
+  );
+  return manifestText(schemaManifest(defineSchema(declared)));
+};
+
+/** The notes' fields as the pinned schema types them. */
+const notesTypes: FieldTypes = {
+  base: (field) =>
+    (({ title: "string", rank: "number", done: "boolean" }) as const)[
+      field === "rank" || field === "done" ? field : "title"
+    ],
+  nullable: (field) => field === "rank",
 };
 
 const newStore = async (): Promise<OpenStore> =>
@@ -202,30 +239,35 @@ describe("declared indexes", () => {
   it(`are at most ${storeMaxIndexes} per store, refused before any is created`, async () => {
     const store = await newStore();
     // Nine tables of 32 single-field indexes: 288 in all.
-    const fields = Object.fromEntries(
-      Array.from({ length: 32 }, (_, index) => [`f${index}`, v.string()])
-    );
-    const tables = Object.fromEntries(
-      Array.from({ length: 9 }, (_, tableIndex) => {
-        let table = defineTable(fields);
-        for (let index = 0; index < 32; index += 1) {
-          const key: [string] = [`f${index}`];
-          table = table.index(`by_f${index}`, key);
-        }
-        return [`t${tableIndex}`, table];
-      })
-    );
-    const tooMany = manifestText(schemaManifest(defineSchema(tables)));
+    const tooMany = manyIndexes(9, (index) => [`f${index}`]);
     await expect(store.defineTables(tooMany)).rejects.toMatchObject({
       code: "data.too_many_indexes",
     });
     await expect(indexesOf(store)).resolves.toStrictEqual([]);
     await expect(schemasOf(store)).resolves.toStrictEqual([]);
   });
+
+  it(`count the indexes kept for older schemas against the ${storeMaxIndexes}`, async () => {
+    const store = await newStore();
+    // Seven tables of 32 indexes, 224, kept for the schema that has them.
+    const older = await store.defineTables(
+      manyIndexes(7, (index) => [`f${index}`])
+    );
+    // A newer schema of other indexes on the same tables adds 224 more.
+    const newer = manyIndexes(7, (index) => [
+      `f${index}`,
+      `f${(index + 1) % 32}`,
+    ]);
+    await expect(store.defineTables(newer)).rejects.toMatchObject({
+      code: "data.too_many_indexes",
+    });
+    await expect(indexesOf(store)).resolves.toHaveLength(224);
+    await expect(schemasOf(store)).resolves.toStrictEqual([older.schemaHash]);
+  });
 });
 
 describe("SQLite's plans", () => {
-  it("read a declared index for equality, ranges and its order, with no sort", async () => {
+  it("read a declared index for the emitter's ranges and its order, with no sort", async () => {
     const store = await newStore();
     const defined = await store.defineTables(
       notesManifest([["by_done_rank", ["done", "rank"]]], "owner")
@@ -233,23 +275,140 @@ describe("SQLite's plans", () => {
     const [index] = await indexesOf(store);
     const name = index?.name ?? "";
     const table = tableIdLiteral(defined.tables.notes ?? "");
-    const done = fieldExpression("done");
-    const rank = fieldExpression("rank");
-    const prefix = `SELECT record_id FROM sdk_records INDEXED BY ${name} WHERE table_id = ${table} AND owner_id = ?`;
-    for (const [sql, params] of [
-      [`${prefix} AND ${done} = ? ORDER BY ${rank}, record_id LIMIT 10`, [1]],
+    const done = rangeSql(notesTypes, "done", [
+      { field: "done", op: "eq", value: false },
+    ]);
+    const rank = (...bounds: RangeBound[]) =>
+      rangeSql(notesTypes, "rank", bounds);
+    const filter = filterSql(notesTypes, {
+      not: { field: "title", op: "in", values: ["a", "b"] },
+    });
+    // Every shape of range, the filter as the computed column it is,
+    // ordered by the index's columns past those the range holds equal.
+    const byRank = `${fieldExpression("rank")} DESC, record_id DESC`;
+    const cases: [(typeof done)[], string][] = [
+      [[done], byRank],
       [
-        `${prefix} AND ${done} = ? AND ${rank} > ? AND ${rank} <= ? ORDER BY ${rank} DESC, record_id DESC LIMIT 10`,
-        [1, 2, 5],
+        [
+          done,
+          rank(
+            { field: "rank", op: "gt", value: 2 },
+            { field: "rank", op: "lte", value: 5 }
+          ),
+        ],
+        byRank,
       ],
-      [`${prefix} ORDER BY ${done}, ${rank}, record_id LIMIT 10`, []],
-    ] as const) {
+      [
+        [done, rank({ field: "rank", op: "eq", value: null })],
+        "record_id DESC",
+      ],
+      [[done, rank({ field: "rank", op: "lt", value: 5 })], byRank],
+      [[done, rank({ field: "rank", op: "gte", value: 5 })], byRank],
+    ];
+    for (const [fragments, order] of cases) {
+      const where = fragments.map(({ sql }) => sql).join(" AND ");
+      const sql = `SELECT record_id, ${filter.sql} AS matched FROM sdk_records INDEXED BY ${name} WHERE table_id = ${table} AND owner_id = ? AND ${where} ORDER BY ${order} LIMIT 10`;
       // oxlint-disable-next-line no-await-in-loop -- one plan at a time
-      const plan = await planOf(store, sql, "ada", ...params);
-      expect(plan).toContain(`USING INDEX ${name} (owner_id=?`);
-      expect(plan).not.toContain("TEMP B-TREE");
-      expect(plan).not.toMatch(/\bSCAN sdk_records\b/u);
+      const plan = await planOf(
+        store,
+        sql,
+        ...filter.params,
+        "ada",
+        ...fragments.flatMap(({ params }) => params)
+      );
+      expect(plan).toContain(`USING INDEX ${name} (owner_id=? AND <expr>=?`);
+      expect(plan).not.toMatch(/TEMP B-TREE|\bSCAN sdk_records\b/u);
     }
+  });
+
+  it("run the largest descriptor a store accepts, within its SQLite's limits", async () => {
+    const store = await newStore();
+    const keys: [string, ...string[]] = [
+      "f0",
+      ...Array.from({ length: 15 }, (_, index) => `f${index + 1}`),
+    ];
+    const number = v.number().nullable();
+    const numbers: Record<string, typeof number> = {};
+    for (const key of keys) {
+      numbers[key] = number;
+    }
+    const defined = await store.defineTables(
+      manifestText(
+        schemaManifest(
+          defineSchema({
+            wide: defineTable(numbers).index("by_all", keys),
+          }),
+          { tables: { wide: { read: "owner", write: "owner" } } }
+        )
+      )
+    );
+    const [index] = await indexesOf(store);
+    // Fifteen fields equal, the last bounded both ways: 17 values.
+    const range: RangeBound[] = [
+      ...keys
+        .slice(0, 15)
+        .map((field) => ({ field, op: "eq" as const, value: 1 })),
+      { field: "f15", op: "gt", value: 0 },
+      { field: "f15", op: "lt", value: 9 },
+    ];
+    // Eight deep, 56 nodes, 46 conditions and the longest `in`: 47 values.
+    let filter: FilterNode = {
+      and: [
+        ...Array.from({ length: 46 }, (_, position) => ({
+          field: "f1",
+          op: "neq" as const,
+          value: position + 100,
+        })),
+        {
+          field: "f0",
+          op: "in",
+          values: [...Array.from({ length: 99 }, (_, value) => value), null],
+        },
+      ],
+    };
+    for (let level = 0; level < 7; level += 1) {
+      filter = { not: filter };
+    }
+    const descriptor = {
+      descriptorVersion: 1,
+      table: "wide",
+      index: "by_all",
+      range,
+      filter,
+      order: "asc",
+      terminal: { kind: "collect" },
+    };
+    // The store's boundary accepts it: it is the most it takes.
+    expect(queryRequestSchema.safeParse(descriptor).success).toBeTruthy();
+    const types: FieldTypes = {
+      base: () => "number",
+      nullable: () => true,
+    };
+    const terms = [
+      ...range
+        .slice(0, 15)
+        .map((bound) => rangeSql(types, bound.field, [bound])),
+      rangeSql(types, "f15", range.slice(15)),
+    ];
+    const condition = filterSql(types, filter);
+    const params = [
+      ...condition.params,
+      "ada",
+      ...terms.flatMap((term) => term.params),
+    ];
+    // 47 filter values, the owner and 17 range values.
+    expect(params).toHaveLength(65);
+    const rows = await runInDurableObject(
+      env.DATA_STORES.getByName(store.id),
+      (_instance, state) =>
+        state.storage.sql
+          .exec(
+            `SELECT record_id, ${condition.sql} AS matched FROM sdk_records INDEXED BY ${index?.name ?? ""} WHERE table_id = ${tableIdLiteral(defined.tables.wide ?? "")} AND owner_id = ? AND ${terms.map(({ sql }) => sql).join(" AND ")} ORDER BY ${fieldExpression("f15")}, record_id LIMIT 10001`,
+            ...params
+          )
+          .toArray()
+    );
+    expect(rows).toStrictEqual([]);
   });
 
   it("read the fixed default-order indexes when a query names no index", async () => {

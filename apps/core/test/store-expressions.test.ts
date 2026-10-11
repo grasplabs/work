@@ -29,6 +29,7 @@ const builder: Acting = {
 const bases = new Map<string, ComparedBase>([
   ["rank", "number"],
   ["title", "string"],
+  ["done", "boolean"],
 ]);
 const types: FieldTypes = {
   base: (field) => bases.get(field),
@@ -44,16 +45,19 @@ const documents = {
 } as const;
 
 /**
- * The IDs of the notes `where` matches, in the store's SQLite: a fresh
- * store holding the four notes above.
+ * The IDs of the notes `fragments` match, in the store's SQLite: a fresh
+ * store holding `held` (the four notes above unless given).
  */
-const matching = async (...fragments: Fragment[]): Promise<string[]> => {
+const matchingIn = async (
+  held: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
+  ...fragments: Fragment[]
+): Promise<string[]> => {
   const store = await openStore(env, await createStore(env, builder));
   const { tables } = await store.defineTables(tablesManifest("notes"));
   return await runInDurableObject(
     env.DATA_STORES.getByName(store.id),
     (_instance, state) => {
-      for (const [id, document] of Object.entries(documents)) {
+      for (const [id, document] of Object.entries(held)) {
         state.storage.sql.exec(
           "INSERT INTO sdk_records (table_id, record_id, owner_id, revision, created_at, updated_at, value_json, schema_hash) VALUES (?, ?, 'ada', 1, 1, 1, ?, ?)",
           tables.notes ?? "",
@@ -73,6 +77,10 @@ const matching = async (...fragments: Fragment[]): Promise<string[]> => {
     }
   );
 };
+
+/** The IDs of the four notes above that `fragments` match. */
+const matching = async (...fragments: Fragment[]): Promise<string[]> =>
+  await matchingIn(documents, ...fragments);
 
 /** A filter node as App code could send any: the emitter checks it. */
 const loose = (node: unknown): FilterNode =>
@@ -179,5 +187,59 @@ describe("index range bounds", () => {
     expect(() =>
       rangeSql(types, "title", [{ field: "title", op: "eq", value: null }])
     ).toThrow(expect.objectContaining({ code: "data.invalid_query" }));
+  });
+});
+
+describe("lists and types", () => {
+  it("match `in` as the field's values compare, numbers, strings and booleans alike", async () => {
+    const held = {
+      int: { title: "a", rank: 2, done: true },
+      real: { title: "b", rank: 2.5, done: false },
+      text: { title: "2", rank: 7, done: false },
+      null: { title: "c", rank: null },
+    };
+    const cases: [FilterNode, string[]][] = [
+      [{ field: "rank", op: "in", values: [2, 2.5] }, ["int", "real"]],
+      // 2.0 is the number 2; "2" is text, which no number equals.
+      [{ field: "rank", op: "in", values: [2] }, ["int"]],
+      [{ field: "title", op: "in", values: ["2", "a"] }, ["int", "text"]],
+      [{ field: "done", op: "in", values: [true] }, ["int"]],
+      [{ field: "done", op: "in", values: [false] }, ["real", "text"]],
+      [{ field: "rank", op: "in", values: [7, null] }, ["null", "text"]],
+    ];
+    for (const [condition, expected] of cases) {
+      // oxlint-disable-next-line no-await-in-loop -- one case at a time
+      await expect(
+        matchingIn(held, filterSql(types, condition))
+      ).resolves.toStrictEqual(expected);
+    }
+  });
+
+  it("keep a list of a hundred values flat, and bind it once", () => {
+    const fragment = filterSql(types, {
+      field: "rank",
+      op: "in",
+      values: [...Array.from({ length: 99 }, (_, index) => index), null],
+    });
+    expect(fragment.params).toHaveLength(1);
+    expect(fragment.sql).toContain("json_each(?)");
+  });
+
+  it("never let a lower bound on a number reach text, which sorts above it", async () => {
+    // Text where a number belongs can't come through a commit's checks
+    // in an operation, but the store doesn't rely on that.
+    const held = {
+      number: { title: "a", rank: 3 },
+      text: { title: "b", rank: "9" },
+    };
+    expect({
+      filter: await matchingIn(held, filterSql(types, rank("gt", 1))),
+      range: await matchingIn(held, rangeSql(types, "rank", [bound("gte", 1)])),
+      neq: await matchingIn(held, filterSql(types, rank("neq", 5))),
+    }).toStrictEqual({
+      filter: ["number"],
+      range: ["number"],
+      neq: ["number"],
+    });
   });
 });
