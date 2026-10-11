@@ -128,16 +128,26 @@ void db.query("notes").paginate({ pageSize: 0 });
 expectTypeOf(db.query("notes")).not.toHaveProperty("all");
 expectTypeOf(db.query("notes")).not.toExtend<AsyncIterable<Note>>();
 expectTypeOf(db.query("notes")).not.toExtend<Iterable<Note>>();
-// A query is ordered once.
+// A query is ordered once, before or after its filters.
 expectTypeOf(db.query("notes").order("asc")).not.toHaveProperty("order");
+expectTypeOf(
+  db.query("notes").order("asc").filter({ title: "a" })
+).not.toHaveProperty("order");
+expectTypeOf(
+  db.query("notes").filter({ title: "a" }).order("desc").take(3)
+).resolves.toEqualTypeOf<Note[]>();
 
 // Aggregates take numeric fields.
 expectTypeOf(
   db.query("notes").aggregate({ operation: "sum", field: "rank" })
 ).resolves.toEqualTypeOf<number>();
 expectTypeOf(
-  db.query("notes").aggregate({ operation: "max", field: "_updatedAt" })
+  db.query("notes").aggregate({ operation: "max", field: "rank" })
 ).resolves.toEqualTypeOf<number | null>();
+// @ts-expect-error -- aggregates take declared fields, not managed ones
+void db.query("notes").aggregate({ operation: "max", field: "_updatedAt" });
+// @ts-expect-error -- a count names no field
+void db.query("notes").aggregate({ operation: "count", field: "rank" });
 // @ts-expect-error -- `title` isn't numeric
 void db.query("notes").aggregate({ operation: "sum", field: "title" });
 // @ts-expect-error -- `sum` names its field

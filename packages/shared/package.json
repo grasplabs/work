@@ -58,6 +58,7 @@
     "./statistics": "./src/statistics.ts",
     "./store-limits": "./src/store-limits.ts",
     "./store-queries": "./src/store-queries.ts",
+    "./store-reads": "./src/store-reads.ts",
     "./stores": "./src/stores.ts",
     "./submissions": "./src/submissions.ts",
     "./token-bucket": "./src/token-bucket.ts",

@@ -15,6 +15,9 @@ export const storeNamePattern = /^[A-Za-z][A-Za-z0-9_]*$/u;
 /** The longest table, field or index name. */
 export const storeNameMaxLength = 64;
 
+/** The most fields one index orders by. */
+export const indexMaxFields = 16;
+
 /** The most tables a store may define. */
 export const storeMaxTables = 64;
 
@@ -29,6 +32,15 @@ export const queryMaxResults = 100;
 
 /** How many records a page holds when its caller doesn't say. */
 export const queryDefaultPageSize = 50;
+
+/** The longest string a range or filter compares with, in characters. */
+export const queryMaxStringLength = 4096;
+
+/**
+ * The most bounds one index range holds: equality on every field but the
+ * last, then a lower and an upper bound on the last.
+ */
+export const rangeMaxBounds = indexMaxFields + 1;
 
 /** The most values one filter's `in` lists. */
 export const filterMaxInValues = 100;

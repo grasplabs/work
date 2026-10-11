@@ -1,11 +1,16 @@
 import {
+  cursorMaxLength,
   filterMaxDepth,
   filterMaxInValues,
-  filterMaxNodes,
   queryDefaultPageSize,
   queryMaxResults,
+  queryMaxStringLength,
 } from "@grasp-os/shared/store-limits";
-import { filterSize } from "@grasp-os/shared/store-queries";
+import {
+  filterBudgetIssue,
+  rangeShapeIssue,
+  readDescriptorVersion,
+} from "@grasp-os/shared/store-reads";
 import type {
   FilterNode,
   QueryRequest,
@@ -14,7 +19,7 @@ import type {
   RangeBound,
   RangeOperator,
   ReadRequest,
-} from "@grasp-os/shared/store-queries";
+} from "@grasp-os/shared/store-reads";
 
 import { indexBase, tablesOf } from "./schema.ts";
 import type {
@@ -23,6 +28,7 @@ import type {
   SchemaDefinition,
   TableState,
 } from "./schema.ts";
+import type { ValueDescriptor } from "./value-descriptor.ts";
 import type { Id, ObjectOutput } from "./values.ts";
 
 // `ctx.db` for reading: a record by ID, and queries over a table, typed by
@@ -104,22 +110,35 @@ type FilterField<Document> = {
     : never;
 }[keyof Document & string];
 
-/** The numeric fields of a record, which `sum`, `min` and `max` take. */
+/**
+ * The declared numeric fields of a record, which `sum`, `min` and `max`
+ * take: never a managed field.
+ */
 type NumericField<Document> = {
-  [Key in keyof Document & string]: [NonNullable<Document[Key]>] extends [
-    number,
-  ]
-    ? [NonNullable<Document[Key]>] extends [never]
-      ? never
-      : Key
-    : never;
+  [Key in keyof Document & string]: Key extends `_${string}`
+    ? never
+    : [NonNullable<Document[Key]>] extends [number]
+      ? [NonNullable<Document[Key]>] extends [never]
+        ? never
+        : Key
+      : never;
 }[keyof Document & string];
 
 /**
- * What a filter may say of one field: equal to a value, or a comparison.
- * `null` is a value of its own: `eq: null` matches only an explicit null,
- * never a field left out (`exists: false` matches that), and the
- * comparisons match only values that aren't null.
+ * What a filter may say of one field. A record matches a condition or it
+ * doesn't; a field holds a value, holds an explicit null, or is left out:
+ * - `eq` with a value, `gt`, `gte`, `lt`, `lte` and `neq` match only a
+ *   field that holds a value: `{ neq: "a" }` matches values other than
+ *   "a", never null or a field left out;
+ * - `{ eq: null }`, and `in` listing null, match an explicit null only;
+ * - `{ exists: false }` matches a field left out only, and
+ *   `{ exists: true }` null or a value.
+ *
+ * ```ts
+ * ctx.db.query("notes").filter({ summary: null }); // explicit null only
+ * ctx.db.query("notes").filter({ rank: { exists: false } }); // left out only
+ * ctx.db.query("notes").filter({ rank: { lt: 3 } }); // values below 3 only
+ * ```
  */
 export interface FieldCondition<Value> {
   readonly eq?: Value;
@@ -134,7 +153,9 @@ export interface FieldCondition<Value> {
 
 /**
  * A query's filter: a condition per field (a bare value means `eq`), all
- * of which must hold, and `AND`, `OR` and `NOT` of other filters. Data,
+ * of which must hold, and `AND` and `OR` of at least one filter, and
+ * `NOT`. `NOT` is plain negation: `{ NOT: { title: "a" } }` matches every
+ * record whose title isn't "a", those without a title included. Data,
  * never a function: the host evaluates it.
  */
 export type QueryFilter<Document> = {
@@ -170,7 +191,17 @@ interface LowerBounded<
 /**
  * An index range being built over the index fields `Fields` still free:
  * equality on the next field, or a lower and/or upper bound on it, which
- * ends the range.
+ * ends the range. Lower and upper bounds match values only, so an upper
+ * bound never reaches null or a field left out; `eq` with null matches an
+ * explicit null only.
+ *
+ * ```ts
+ * ctx.db
+ *   .query("notes")
+ *   .withIndex("by_author_rank", (range) =>
+ *     range.eq("author", args.author).gte("rank", 1).lt("rank", 5)
+ *   );
+ * ```
  */
 export type IndexRangeBuilder<
   Document,
@@ -238,15 +269,8 @@ export type PaginationResult<Item> =
   | { items: Item[]; nextCursor: null; hasMore: false }
   | { items: Item[]; nextCursor: string; hasMore: true };
 
-/** A query that can be read: its modifiers so far, and its terminals. */
-export interface Query<Document> {
-  /** Only the records `filter` matches, besides any filter so far. */
-  readonly filter: (filter: QueryFilter<Document>) => Query<Document>;
-  /**
-   * The order to read in, along the index (or by creation time), with the
-   * record ID breaking ties. Ascending unless set.
-   */
-  readonly order: (direction: "asc" | "desc") => Omit<Query<Document>, "order">;
+/** A query's terminals: each reads, bounded. */
+export interface QueryReads<Document> {
   /** At most `count` records, 0 to 100. */
   readonly take: <const Count extends number>(
     count: Bounded<Count, ResultCount>
@@ -265,9 +289,29 @@ export interface Query<Document> {
   >(
     options: PaginationOptions<PageSize>
   ) => Promise<PaginationResult<Document>>;
-  /** A count, or the sum, least or greatest value of a numeric field. */
+  /** A count, or the sum, least or greatest of a declared numeric field. */
   readonly aggregate: Aggregate<Document>;
 }
+
+/**
+ * A query that can be read: its terminals, more filters, and its order
+ * while it has none (`Ordered`): a query is ordered once.
+ */
+export type Query<
+  Document,
+  Ordered extends boolean = false,
+> = QueryReads<Document> & {
+  /** Only the records `filter` matches, besides any filter so far. */
+  readonly filter: (filter: QueryFilter<Document>) => Query<Document, Ordered>;
+} & (Ordered extends true
+    ? unknown
+    : {
+        /**
+         * The order to read in, along the index (or by creation time),
+         * with the record ID breaking ties. Ascending unless set.
+         */
+        readonly order: (direction: "asc" | "desc") => Query<Document, true>;
+      });
 
 /** `aggregate`'s operations. */
 export interface Aggregate<Document> {
@@ -283,10 +327,10 @@ export interface Aggregate<Document> {
 }
 
 /** A query of one table, before an index is chosen. */
-export interface QueryInitializer<
+export type QueryInitializer<
   Table extends AnyTable,
   TableName extends string,
-> extends Query<Doc<Table, TableName>> {
+> = Query<Doc<Table, TableName>> & {
   /**
    * Reads through index `name`, in its order, within the range `range`
    * builds: equality on its first fields, then a lower and/or upper bound
@@ -298,7 +342,7 @@ export interface QueryInitializer<
       range: IndexRangeBuilder<Doc<Table, TableName>, IndexFields<Table, Name>>
     ) => IndexRange
   ) => Query<Doc<Table, TableName>>;
-}
+};
 
 /** What `get` may assert. */
 export interface GetOptions {
@@ -382,7 +426,29 @@ const baseOf = (table: TableState, field: string): IndexBase | undefined => {
   return descriptor === undefined ? undefined : indexBase(descriptor);
 };
 
-/** Whether `value` is a scalar of base type `base` (or null, if allowed). */
+/** Whether a declared field may hold an explicit null. */
+const allowsNull = (descriptor: ValueDescriptor): boolean => {
+  if (descriptor.nullable || descriptor.kind === "null") {
+    return true;
+  }
+  if (descriptor.kind === "literal") {
+    return descriptor.value === null;
+  }
+  return descriptor.kind === "union" && descriptor.members.some(allowsNull);
+};
+
+/** Whether `field` of `table` may hold an explicit null. */
+const nullableField = (table: TableState, field: string): boolean => {
+  const descriptor = Object.hasOwn(table.fields, field)
+    ? table.fields[field]
+    : undefined;
+  return descriptor !== undefined && allowsNull(descriptor);
+};
+
+/**
+ * Whether `value` is a scalar of base type `base`, or null where null is
+ * allowed: a string within the length a descriptor carries.
+ */
 const fits = (value: unknown, base: IndexBase, allowNull: boolean): boolean => {
   if (value === null) {
     return allowNull;
@@ -390,36 +456,63 @@ const fits = (value: unknown, base: IndexBase, allowNull: boolean): boolean => {
   if (base === "number") {
     return typeof value === "number" && Number.isFinite(value);
   }
+  if (base === "string") {
+    return typeof value === "string" && value.length <= queryMaxStringLength;
+  }
   return typeof value === base;
 };
 
+/** What a range builder recorded, and the table and index it was made for. */
+interface RecordedRange {
+  readonly owner: string;
+  readonly bounds: readonly RangeBound[];
+}
+
 /** Every range builder this module made, with what it recorded. */
-const ranges = new WeakMap<object, readonly RangeBound[]>();
+const ranges = new WeakMap<object, RecordedRange>();
+
+/** Which range builders belong to: one table's one index. */
+const ownerOf = (table: string, index: string): string =>
+  JSON.stringify([table, index]);
+
+/** Where a range being built is: its owner, fields left and bounds so far. */
+interface RangeState {
+  readonly owner: string;
+  readonly table: TableState;
+  /** The index fields not yet bounded. */
+  readonly fields: readonly string[];
+  readonly bounds: readonly RangeBound[];
+  /** The field a lower bound was set on, which only its upper bound follows. */
+  readonly lowerOn: string | null;
+  /** Whether an upper bound ended it. */
+  readonly ended: boolean;
+}
 
 /**
- * A range over index fields `fields` (the ones still free), after
- * `bounds`. Each call answers a new range; a call out of order, on the
- * wrong field, or after the range ended is refused.
+ * A range over the index fields still free in `range`. Each call answers a
+ * new range; a call out of order, on the wrong field, or after the range
+ * ended is refused. It belongs to its table's index: another's refuses it.
  */
-const rangeOf = (
-  table: TableState,
-  fields: readonly string[],
-  bounds: readonly RangeBound[],
-  lowerOn: string | null,
-  ended: boolean
-): IndexRange => {
+const rangeOf = (range: RangeState): IndexRange => {
+  /** One more bound on a range, checked: in order, typed, and never null past equality. */
   const add = (
     op: RangeOperator,
     field: unknown,
     value: unknown
   ): IndexRange => {
-    if (ended) {
+    if (range.ended) {
       return refuse(
         "query.invalid_range",
         "An index range ends at its upper bound; nothing can follow it."
       );
     }
-    const expected = lowerOn ?? fields[0];
+    if (range.lowerOn !== null && op !== "lt" && op !== "lte") {
+      return refuse(
+        "query.invalid_range",
+        `After a lower bound on \`${range.lowerOn}\` only an upper bound on it may follow.`
+      );
+    }
+    const expected = range.lowerOn ?? range.fields[0];
     if (typeof field !== "string" || field !== expected) {
       return refuse(
         "query.invalid_range",
@@ -428,61 +521,49 @@ const rangeOf = (
           : `An index range bounds its fields in order: next is \`${expected}\`.`
       );
     }
-    if (lowerOn !== null && op !== "lt" && op !== "lte") {
+    const base = baseOf(range.table, field);
+    const allowNull = op === "eq" && nullableField(range.table, field);
+    if (base === undefined || !fits(value, base, allowNull)) {
       return refuse(
         "query.invalid_range",
-        `After a lower bound on \`${field}\` only an upper bound on it may follow.`
-      );
-    }
-    const base = baseOf(table, field);
-    if (base === undefined || !fits(value, base, op === "eq")) {
-      return refuse(
-        "query.invalid_range",
-        op === "eq"
+        allowNull
           ? `\`${field}\` is compared with a ${base ?? "scalar"} or null.`
           : `\`${field}\` is bounded by a ${base ?? "scalar"}, never null.`
       );
     }
-    // SAFETY: `fits` checked it is a scalar of the field's type, or null.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    const bound = { field, op, value: value as QueryScalar };
-    const next = [...bounds, bound];
+    const bounds = [
+      ...range.bounds,
+      // SAFETY: `fits` checked it is a scalar of the field's type, or null.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      { field, op, value: value as QueryScalar },
+    ];
     if (op === "eq") {
-      return rangeOf(table, fields.slice(1), next, null, false);
+      return rangeOf({ ...range, fields: range.fields.slice(1), bounds });
     }
     if (op === "gt" || op === "gte") {
-      return rangeOf(table, fields.slice(1), next, field, false);
+      return rangeOf({
+        ...range,
+        fields: range.fields.slice(1),
+        bounds,
+        lowerOn: field,
+      });
     }
-    return rangeOf(table, fields, next, null, true);
+    return rangeOf({ ...range, bounds, lowerOn: null, ended: true });
   };
-  const range = Object.freeze({
+
+  const built = Object.freeze({
     "~indexRange": true as const,
-    eq: (field: unknown, value: unknown) =>
-      lowerOn === null
-        ? add("eq", field, value)
-        : refuse(
-            "query.invalid_range",
-            `After a lower bound on \`${lowerOn}\` only an upper bound on it may follow.`
-          ),
-    gt: (field: unknown, value: unknown) =>
-      lowerOn === null
-        ? add("gt", field, value)
-        : refuse(
-            "query.invalid_range",
-            `\`${lowerOn}\` has a lower bound already.`
-          ),
-    gte: (field: unknown, value: unknown) =>
-      lowerOn === null
-        ? add("gte", field, value)
-        : refuse(
-            "query.invalid_range",
-            `\`${lowerOn}\` has a lower bound already.`
-          ),
+    eq: (field: unknown, value: unknown) => add("eq", field, value),
+    gt: (field: unknown, value: unknown) => add("gt", field, value),
+    gte: (field: unknown, value: unknown) => add("gte", field, value),
     lt: (field: unknown, value: unknown) => add("lt", field, value),
     lte: (field: unknown, value: unknown) => add("lte", field, value),
   });
-  ranges.set(range, Object.freeze(bounds));
-  return range;
+  ranges.set(built, {
+    owner: range.owner,
+    bounds: Object.freeze(range.bounds),
+  });
+  return built;
 };
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
@@ -493,15 +574,25 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
   return prototype === Object.prototype || prototype === null;
 };
 
+/** Whether `value` is a plain object with no keys but `allowed`. */
+const hasOnly = (
+  value: unknown,
+  allowed: readonly string[]
+): value is Record<string, unknown> =>
+  isPlainRecord(value) &&
+  Object.keys(value).every((key) => allowed.includes(key));
+
 const comparisonOps = ["eq", "neq", "gt", "gte", "lt", "lte"] as const;
 
-/** One condition of `field.op`, checked against the field's base type. */
+/** One condition of `field.op`, checked against the field's type. */
 const conditionNode = (
+  table: TableState,
   field: string,
   base: IndexBase,
   op: string,
   operand: unknown
 ): FilterNode => {
+  const nullable = nullableField(table, field);
   if (op === "exists") {
     if (typeof operand !== "boolean") {
       return refuse(
@@ -515,16 +606,22 @@ const conditionNode = (
     if (
       !Array.isArray(operand) ||
       operand.length > filterMaxInValues ||
-      !operand.every((item) => fits(item, base, true))
+      !operand.every((item) => fits(item, base, nullable))
     ) {
       return refuse(
         "query.invalid_filter",
-        `\`${field}.in\` lists at most ${filterMaxInValues} values, each a ${base} or null.`
+        `\`${field}.in\` lists at most ${filterMaxInValues} values, each a ${base}${nullable ? " or null" : ""}.`
       );
     }
-    // SAFETY: each item was checked to be a scalar of the field's type.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return { field, op, values: operand as QueryScalar[] };
+    const values: readonly unknown[] = operand;
+    return {
+      field,
+      op,
+      // A copy, so the caller's array can't change the descriptor later.
+      // SAFETY: each item was checked to be a scalar of the field's type.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      values: values.map((item) => item as QueryScalar),
+    };
   }
   const compared = comparisonOps.find((known) => known === op);
   if (compared === undefined) {
@@ -533,7 +630,7 @@ const conditionNode = (
       `\`${field}\` takes \`eq\`, \`neq\`, \`gt\`, \`gte\`, \`lt\`, \`lte\`, \`in\` or \`exists\`.`
     );
   }
-  const allowNull = compared === "eq" || compared === "neq";
+  const allowNull = (compared === "eq" || compared === "neq") && nullable;
   if (!fits(operand, base, allowNull)) {
     return refuse(
       "query.invalid_filter",
@@ -547,7 +644,7 @@ const conditionNode = (
   return { field, op: compared, value: operand as QueryScalar };
 };
 
-/** The conditions a filter object states of `field`. */
+/** The conditions a filter object states of `field`: at least one. */
 const fieldNodes = (
   table: TableState,
   field: string,
@@ -561,16 +658,23 @@ const fieldNodes = (
     );
   }
   if (!isPlainRecord(value)) {
-    return [conditionNode(field, base, "eq", value)];
+    return [conditionNode(table, field, base, "eq", value)];
   }
-  return Object.entries(value).map(([op, operand]) => {
+  const entries = Object.entries(value);
+  if (entries.length === 0) {
+    return refuse(
+      "query.invalid_filter",
+      `\`${field}\` states no condition: leave it out instead.`
+    );
+  }
+  return entries.map(([op, operand]) => {
     if (operand === undefined) {
       return refuse(
         "query.invalid_filter",
         `\`${field}.${op}\` is undefined: leave it out instead.`
       );
     }
-    return conditionNode(field, base, op, operand);
+    return conditionNode(table, field, base, op, operand);
   });
 };
 
@@ -586,10 +690,10 @@ const filterTree = (
       `A filter nests at most ${filterMaxDepth} deep.`
     );
   }
-  if (!isPlainRecord(filter)) {
+  if (!isPlainRecord(filter) || Object.keys(filter).length === 0) {
     return refuse(
       "query.invalid_filter",
-      "A filter is an object of fields and `AND`, `OR` or `NOT`."
+      "A filter is an object of at least one field, `AND`, `OR` or `NOT`."
     );
   }
   const nodes: FilterNode[] = [];
@@ -601,10 +705,10 @@ const filterTree = (
       );
     }
     if (key === "AND" || key === "OR") {
-      if (!Array.isArray(value)) {
+      if (!Array.isArray(value) || value.length === 0) {
         return refuse(
           "query.invalid_filter",
-          `\`${key}\` is a list of filters.`
+          `\`${key}\` is a list of at least one filter.`
         );
       }
       const children = value.map((child) =>
@@ -648,9 +752,21 @@ interface QueryState {
   readonly state: TableState;
   readonly index: string | null;
   readonly range: readonly RangeBound[];
-  readonly filter: FilterNode | null;
+  /** Its filters, each `.filter` one more, all of which must hold. */
+  readonly filters: readonly FilterNode[];
   readonly order: "asc" | "desc";
+  /** Whether `.order` was called: a query is ordered once. */
+  readonly ordered: boolean;
 }
+
+/** A query's filters as one tree, or null for none. */
+const filterOf = (filters: readonly FilterNode[]): FilterNode | null => {
+  const [only, ...others] = filters;
+  if (only === undefined) {
+    return null;
+  }
+  return others.length === 0 ? only : { and: [...filters] };
+};
 
 /**
  * A query as this module builds it: the methods `Query` types, taking
@@ -680,50 +796,104 @@ interface RuntimeReader {
   };
 }
 
+/** The terminal `aggregate(options)` asks for, checked. */
+const aggregateTerminal = (
+  table: TableState,
+  options: unknown
+): QueryTerminal => {
+  if (hasOnly(options, ["operation"]) && options.operation === "count") {
+    return { kind: "aggregate", operation: "count" };
+  }
+  if (!hasOnly(options, ["operation", "field"])) {
+    return refuse(
+      "query.invalid_terminal",
+      "`aggregate` takes `{ operation }` for a count, `{ operation, field }` otherwise."
+    );
+  }
+  const { operation, field } = options;
+  if (operation !== "sum" && operation !== "min" && operation !== "max") {
+    return refuse(
+      "query.invalid_terminal",
+      "`aggregate` takes `count`, `sum`, `min` or `max`; a count names no field."
+    );
+  }
+  if (
+    typeof field !== "string" ||
+    !Object.hasOwn(table.fields, field) ||
+    baseOf(table, field) !== "number"
+  ) {
+    return refuse(
+      "query.invalid_terminal",
+      "`sum`, `min` and `max` take a declared numeric field of the table."
+    );
+  }
+  return { kind: "aggregate", operation, field };
+};
+
+/** The terminal `paginate(options)` asks for, checked. */
+const pageTerminal = (options: unknown): QueryTerminal => {
+  if (!hasOnly(options, ["pageSize", "cursor"])) {
+    return refuse(
+      "query.invalid_terminal",
+      "`paginate` takes `{ pageSize, cursor }`."
+    );
+  }
+  const { pageSize = queryDefaultPageSize, cursor = null } = options;
+  if (
+    cursor !== null &&
+    (typeof cursor !== "string" ||
+      cursor === "" ||
+      cursor.length > cursorMaxLength)
+  ) {
+    return refuse(
+      "query.invalid_terminal",
+      `A cursor is a non-empty string of at most ${cursorMaxLength} characters, or null for the first page.`
+    );
+  }
+  return {
+    kind: "paginate",
+    pageSize: checkedCount(pageSize, 1, "`pageSize`"),
+    cursor,
+  };
+};
+
 /** The query `query`, with the modifiers and terminals reading it. */
 const queryOf = (query: QueryState, execute: ReadExecutor): RuntimeQuery => {
   const run = async (terminal: QueryTerminal): Promise<unknown> => {
     const request: QueryRequest = {
+      descriptorVersion: readDescriptorVersion,
       table: query.table,
       index: query.index,
       range: [...query.range],
-      filter: query.filter,
+      filter: filterOf(query.filters),
       order: query.order,
       terminal,
     };
     return await execute({ kind: "query", query: request });
   };
-  const numericField = (field: unknown): string => {
-    if (typeof field !== "string" || baseOf(query.state, field) !== "number") {
-      return refuse(
-        "query.invalid_terminal",
-        "`sum`, `min` and `max` take a numeric field of the table."
-      );
-    }
-    return field;
-  };
   return Object.freeze({
     filter: (filter: unknown) => {
-      const tree = filterTree(query.state, filter, 0);
-      const combined: FilterNode =
-        query.filter === null ? tree : { and: [query.filter, tree] };
-      const size = filterSize(combined);
-      if (size.nodes > filterMaxNodes || size.depth > filterMaxDepth) {
+      const filters = [...query.filters, filterTree(query.state, filter, 0)];
+      const issue = filterBudgetIssue(filterOf(filters));
+      if (issue !== undefined) {
         refuse(
           "query.invalid_filter",
-          `A query's filters nest at most ${filterMaxDepth} deep and hold at most ${filterMaxNodes} nodes.`
+          `${issue}, all of a query's filters together.`
         );
       }
-      return queryOf({ ...query, filter: combined }, execute);
+      return queryOf({ ...query, filters }, execute);
     },
     order: (direction: unknown) => {
+      if (query.ordered) {
+        return refuse("query.invalid_terminal", "A query is ordered once.");
+      }
       if (direction !== "asc" && direction !== "desc") {
         return refuse(
           "query.invalid_terminal",
           'A query is ordered `"asc"` or `"desc"`.'
         );
       }
-      return queryOf({ ...query, order: direction }, execute);
+      return queryOf({ ...query, order: direction, ordered: true }, execute);
     },
     take: async (count: unknown) =>
       await run({ kind: "take", count: checkedCount(count, 0, "`take`") }),
@@ -731,46 +901,38 @@ const queryOf = (query: QueryState, execute: ReadExecutor): RuntimeQuery => {
     unique: async () => await run({ kind: "unique" }),
     count: async () => await run({ kind: "count" }),
     collect: async () => await run({ kind: "collect" }),
-    paginate: async (options: unknown) => {
-      if (!isPlainRecord(options)) {
-        return refuse(
-          "query.invalid_terminal",
-          "`paginate` takes `{ pageSize, cursor }`."
-        );
-      }
-      const { pageSize = queryDefaultPageSize, cursor = null } = options;
-      if (cursor !== null && (typeof cursor !== "string" || cursor === "")) {
-        return refuse(
-          "query.invalid_terminal",
-          "A cursor is a non-empty string, or null for the first page."
-        );
-      }
-      return await run({
-        kind: "paginate",
-        pageSize: checkedCount(pageSize, 1, "`pageSize`"),
-        cursor,
-      });
-    },
-    aggregate: async (options: unknown) => {
-      const operation = isPlainRecord(options) ? options.operation : undefined;
-      if (operation === "count") {
-        return await run({ kind: "aggregate", operation });
-      }
-      if (operation === "sum" || operation === "min" || operation === "max") {
-        return await run({
-          kind: "aggregate",
-          operation,
-          field: numericField(
-            isPlainRecord(options) ? options.field : undefined
-          ),
-        });
-      }
-      return refuse(
-        "query.invalid_terminal",
-        "`aggregate` takes `count`, `sum`, `min` or `max`."
-      );
-    },
+    paginate: async (options: unknown) => await run(pageTerminal(options)),
+    aggregate: async (options: unknown) =>
+      await run(aggregateTerminal(query.state, options)),
   });
+};
+
+/** The revision `get`'s options assert, or null; refused unless valid. */
+const expectedRevisionOf = (options: unknown): number | null => {
+  if (options === undefined) {
+    return null;
+  }
+  if (!hasOnly(options, ["expectedRevision"])) {
+    return refuse(
+      "query.invalid_terminal",
+      "`get` takes `{ expectedRevision }`, or no options."
+    );
+  }
+  const { expectedRevision } = options;
+  if (expectedRevision === undefined) {
+    return null;
+  }
+  if (
+    typeof expectedRevision !== "number" ||
+    !Number.isSafeInteger(expectedRevision) ||
+    expectedRevision < 1
+  ) {
+    return refuse(
+      "query.invalid_terminal",
+      "`expectedRevision` is a whole number of at least 1."
+    );
+  }
+  return expectedRevision;
 };
 
 /**
@@ -793,29 +955,16 @@ export const databaseReader = <Tables extends AnyTables>(
     return { name: table, state };
   };
   const reader: RuntimeReader = {
-    get: async (table: unknown, id: unknown, options: unknown = {}) => {
+    get: async (table: unknown, id: unknown, options?: unknown) => {
       const { name } = stateOf(table);
-      const expected = isPlainRecord(options)
-        ? options.expectedRevision
-        : undefined;
-      if (
-        typeof id !== "string" ||
-        id === "" ||
-        (expected !== undefined &&
-          (typeof expected !== "number" ||
-            !Number.isSafeInteger(expected) ||
-            expected < 1))
-      ) {
-        return refuse(
-          "query.invalid_terminal",
-          "`get` takes a record ID, and an `expectedRevision` that is a whole number of at least 1."
-        );
+      if (typeof id !== "string" || id === "" || id.length > 256) {
+        return refuse("query.invalid_terminal", "`get` takes a record ID.");
       }
       return await execute({
         kind: "get",
         table: name,
         id,
-        expectedRevision: expected ?? null,
+        expectedRevision: expectedRevisionOf(options),
       });
     },
     query: (table: unknown) => {
@@ -825,12 +974,12 @@ export const databaseReader = <Tables extends AnyTables>(
         state,
         index: null,
         range: [],
-        filter: null,
+        filters: [],
         order: "asc",
+        ordered: false,
       };
-      const query = queryOf(base, execute);
       return Object.freeze({
-        ...query,
+        ...queryOf(base, execute),
         withIndex: (index: unknown, build?: unknown) => {
           const declared =
             typeof index === "string"
@@ -842,30 +991,44 @@ export const databaseReader = <Tables extends AnyTables>(
               `Table \`${name}\` has no such index.`
             );
           }
-          let range: readonly RangeBound[] = [];
-          if (build !== undefined) {
-            if (!isRangeFunction(build)) {
-              return refuse(
-                "query.invalid_range",
-                "An index range is built by a function of the range."
-              );
-            }
-            const built = build(
-              rangeOf(state, declared.fields, [], null, false)
-            );
-            const recorded =
-              typeof built === "object" && built !== null
-                ? ranges.get(built)
-                : undefined;
-            if (recorded === undefined) {
-              return refuse(
-                "query.invalid_range",
-                "An index range's function returns the range it built."
-              );
-            }
-            range = recorded;
+          if (build === undefined) {
+            return queryOf({ ...base, index: declared.name }, execute);
           }
-          return queryOf({ ...base, index: declared.name, range }, execute);
+          if (!isRangeFunction(build)) {
+            return refuse(
+              "query.invalid_range",
+              "An index range is built by a function of the range."
+            );
+          }
+          const owner = ownerOf(name, declared.name);
+          const built = build(
+            rangeOf({
+              owner,
+              table: state,
+              fields: declared.fields,
+              bounds: [],
+              lowerOn: null,
+              ended: false,
+            })
+          );
+          const recorded =
+            typeof built === "object" && built !== null
+              ? ranges.get(built)
+              : undefined;
+          if (recorded === undefined || recorded.owner !== owner) {
+            return refuse(
+              "query.invalid_range",
+              "An index range's function returns the range it built, for this index."
+            );
+          }
+          const issue = rangeShapeIssue(recorded.bounds);
+          if (issue !== undefined) {
+            return refuse("query.invalid_range", `${issue}.`);
+          }
+          return queryOf(
+            { ...base, index: declared.name, range: recorded.bounds },
+            execute
+          );
         },
       });
     },

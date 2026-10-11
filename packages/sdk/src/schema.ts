@@ -1,4 +1,5 @@
 import {
+  indexMaxFields,
   storeMaxTables,
   storeNameMaxLength,
   storeNamePattern,
@@ -61,7 +62,7 @@ export const schemaLimits = Object.freeze({
   /** Indexes on one table. */
   indexesPerTable: 32,
   /** Fields in one index. */
-  fieldsPerIndex: 16,
+  fieldsPerIndex: indexMaxFields,
 } as const);
 
 /**

@@ -119,6 +119,7 @@ describe("a query's descriptor", () => {
     expect(requests).toHaveLength(0);
     await query.take(10);
     expect(onlyQuery(requests)).toStrictEqual({
+      descriptorVersion: 1,
       table: "notes",
       index: "by_title",
       range: [{ field: "title", op: "eq", value: "Launch" }],
@@ -206,6 +207,32 @@ describe("a query's descriptor", () => {
     });
   });
 
+  test("keeps chained filters side by side, however many", async () => {
+    const { db, requests } = recording([]);
+    let query = db.query("notes").filter({ rank: { gt: 0 } });
+    for (let index = 1; index < 12; index += 1) {
+      query = query.filter({ rank: { neq: index } });
+    }
+    await query.first();
+    const { filter } = onlyQuery(requests);
+    expect(filter !== null && "and" in filter ? filter.and : []).toHaveLength(
+      12
+    );
+  });
+
+  test("copies what it is given: a list changed later changes nothing", async () => {
+    const { db, requests } = recording([]);
+    const ranks = [1, 2];
+    const query = db.query("notes").filter({ rank: { in: ranks } });
+    ranks.push(3);
+    await query.collect();
+    expect(onlyQuery(requests).filter).toStrictEqual({
+      field: "rank",
+      op: "in",
+      values: [1, 2],
+    });
+  });
+
   test("carries each terminal and its bounds", async () => {
     const { db, requests } = recording(null);
     const query = db.query("notes");
@@ -215,7 +242,7 @@ describe("a query's descriptor", () => {
     await query.paginate({});
     await query.aggregate({ operation: "count" });
     await query.aggregate({ operation: "sum", field: "rank" });
-    await query.aggregate({ operation: "max", field: "_updatedAt" });
+    await query.aggregate({ operation: "max", field: "rank" });
     expect(
       requests.map(
         (request) => request.kind === "query" && request.query.terminal
@@ -227,7 +254,7 @@ describe("a query's descriptor", () => {
       { kind: "paginate", pageSize: 50, cursor: null },
       { kind: "aggregate", operation: "count" },
       { kind: "aggregate", operation: "sum", field: "rank" },
-      { kind: "aggregate", operation: "max", field: "_updatedAt" },
+      { kind: "aggregate", operation: "max", field: "rank" },
     ]);
   });
 
@@ -316,6 +343,61 @@ describe("a query the schema doesn't allow", () => {
       deep = { NOT: deep };
     }
     await refusedWith("query.invalid_filter", () => notes().filter(deep));
+    // A range built for one index, returned for another.
+    let other: unknown;
+    notes().withIndex("by_title", (range: LooseRange) => {
+      other = range.eq("title", "a");
+      return other;
+    });
+    await refusedWith("query.invalid_range", () =>
+      notes().withIndex("by_author_rank", () => other)
+    );
+    // Null only where the field may hold null.
+    await refusedWith("query.invalid_range", () =>
+      notes().withIndex("by_title", (range: LooseRange) =>
+        range.eq("title", null)
+      )
+    );
+    for (const filter of [
+      { title: null },
+      { title: { in: ["a", null] } },
+      { title: { neq: null } },
+      { title: {} },
+      {},
+      { OR: [] },
+      { AND: [] },
+      { title: "x".repeat(4097) },
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one refusal at a time
+      await refusedWith("query.invalid_filter", () => notes().filter(filter));
+    }
+    // Ordered once, whatever comes between.
+    await refusedWith("query.invalid_terminal", () =>
+      notes().order("asc").filter({ done: true }).order("desc")
+    );
+    await refusedWith(
+      "query.invalid_terminal",
+      async () => await notes().paginate({ cursor: "c".repeat(4097) })
+    );
+    await refusedWith(
+      "query.invalid_terminal",
+      async () => await notes().paginate({ pageSize: 10, extra: true })
+    );
+    await refusedWith(
+      "query.invalid_terminal",
+      async () => await notes().aggregate({ operation: "count", field: "rank" })
+    );
+    await refusedWith(
+      "query.invalid_terminal",
+      async () =>
+        await notes().aggregate({ operation: "max", field: "_updatedAt" })
+    );
+    await refusedWith("query.invalid_terminal", () =>
+      loose.get("notes", "r1", "3")
+    );
+    await refusedWith("query.invalid_terminal", () =>
+      loose.get("notes", "r1", { revision: 3 })
+    );
     await refusedWith(
       "query.invalid_terminal",
       async () => await notes().take(101)
