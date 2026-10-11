@@ -9,6 +9,20 @@ import { allEvents } from "./audit-events.ts";
 // the gateway (models.ts) relies on when a request is admitted, settled,
 // lost or repeated. Each test has a ledger of its own.
 
+/** A run lineage's scope, by its root run, counted with no budget. */
+const lineageOf = (root: string): LedgerScope => ({
+  scope: "run",
+  key: root,
+  limitMicros: null,
+  alertMicros: null,
+  limitRequests: 100,
+  names: { run: root },
+});
+
+/** `rows` in order of their keys. */
+const byKey = <Row extends { key: string }>(rows: Row[] | undefined) =>
+  rows?.toSorted((one, other) => one.key.localeCompare(other.key));
+
 /** Values in order, as their JSON sorts. */
 const byJson = (one: unknown, other: unknown): number =>
   JSON.stringify(one).localeCompare(JSON.stringify(other));
@@ -773,6 +787,96 @@ describe("the model ledger", () => {
         workflow: [{ key: workflow.key, spentMicros: 4, reservedMicros: 0 }],
       },
       audited: [[2, 0.000025, 0.00001, null, 0.00001]],
+    });
+  });
+
+  it("rebuilds a damaged run lineage from its open requests in every month when a person releases a held one, and flags no healthy lineage", async () => {
+    const ledger = newLedger();
+    const key = `lea-${crypto.randomUUID()}`;
+    const damaged = lineageOf(`root-${crypto.randomUUID()}`);
+    const healthy = lineageOf(`root-${crypto.randomUUID()}`);
+    const first = admission(30, [budget(1000, key), damaged, healthy], {
+      reconcileAt: Date.now() + 1000,
+    });
+    // The damaged lineage's other request, a month later.
+    const second = admission(10, [damaged], { period: "2400-02" });
+    await ledger.admit(first);
+    await ledger.admit(second);
+    // The damaged lineage should hold 40 for the two; damaged, it holds 5.
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE spend SET reserved_micros = 5 WHERE scope = 'run' AND key = ?",
+        damaged.key
+      );
+    });
+    // Settling the first takes the lineage's spend below nothing: held
+    // after three failed tries.
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runInDurableObject(ledger, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE requests SET reconcile_at = ? WHERE id = ?",
+          Date.now() - 1,
+          first.id
+        );
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runDurableObjectAlarm(ledger);
+    }
+    const listed = await ledger.quarantined(10);
+    const admin = {
+      type: "person",
+      userId: `admin-${crypto.randomUUID()}`,
+    } as const;
+
+    const released = await ledger.resolveQuarantined(
+      first.id,
+      "release",
+      admin
+    );
+    const holding = await ledger.spendOf("2400-01", ["user", "run"], 10);
+    const settled = await ledger.settle(second.id, {
+      by: "usage",
+      tokens: { input: 2, output: 2, cacheRead: 0, cacheWrite: 0 },
+    });
+    await runDurableObjectAlarm(ledger);
+    const later = await ledger.spendOf("2400-03", ["run"], 10);
+    const events = await allEvents();
+    expect({
+      listed: listed.map(({ id, releaseOnly }) => [id, releaseOnly]),
+      released: released.state,
+      holding: { user: holding.user, run: byKey(holding.run) },
+      settled,
+      after: byKey(later.run),
+      audited: events
+        .filter(({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin))
+        .map(({ detail }) => [
+          detail.damaged,
+          detail["damaged.0.scope"],
+          detail["damaged.0.key"],
+          detail["damaged.0.held"],
+          detail["damaged.0.rebuilt"],
+        ]),
+    }).toStrictEqual({
+      listed: [[first.id, true]],
+      released: "decided",
+      // The damaged lineage holds what the second still reserves, though it
+      // counts in another month; the healthy one released the first as usual.
+      holding: {
+        user: [{ key, spentMicros: 0, reservedMicros: 0 }],
+        run: byKey([
+          { key: damaged.key, spentMicros: 0, reservedMicros: 10 },
+          { key: healthy.key, spentMicros: 0, reservedMicros: 0 },
+        ]),
+      },
+      settled: { state: "settled", chargedMicros: 4 },
+      // A lineage's spend, read in any month.
+      after: byKey([
+        { key: damaged.key, spentMicros: 4, reservedMicros: 0 },
+        { key: healthy.key, spentMicros: 0, reservedMicros: 0 },
+      ]),
+      // Only the damaged lineage.
+      audited: [[1, "run", damaged.key, 0.000005, 0.00001]],
     });
   });
 
