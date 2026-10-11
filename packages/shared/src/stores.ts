@@ -333,6 +333,7 @@ export const dataErrors = defineErrorFamily({
   "data.store_unavailable": "This store doesn't exist or was deleted.",
   "data.receipt_invalid":
     "This commit doesn't hold a receipt its caller claimed.",
+  "data.invalid_query": "That query isn't valid for this table.",
   "data.store_in_use":
     "This store can't be deleted while a mutation's receipt still refers to it. Try again once its receipts have expired.",
 });
