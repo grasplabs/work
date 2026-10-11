@@ -1978,6 +1978,53 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 
+  it("refuses a value a key every object has carries in, a prototype among them", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const raw = await openRawRpc(builder.session);
+    const session = raw.push(["pipeline", 0, ["authenticate"], []]);
+    // A value 30 levels deep, then 100 pushes each an array around the last.
+    let deep = raw.push(wireArrays(30));
+    for (let level = 0; level < 100; level += 1) {
+      deep = raw.push([[["pipeline", deep]]]);
+    }
+    const shallow = raw.push({ approved: true });
+    // `{ [key]: <a pushed value> }` as the App's one argument: Cap'n Web
+    // puts the value in place under the key once the message is checked.
+    const echoed = async (key: string, pushed: number): Promise<unknown> =>
+      rawOutcome(
+        await raw.pull(
+          raw.push([
+            "pipeline",
+            session,
+            ["screens", "call"],
+            [app, "echo", [[{ [key]: ["pipeline", pushed] }]]],
+          ])
+        )
+      );
+
+    const outcomes = {
+      // Its prototype is then the value: refused however shallow.
+      protoDeep: await echoed("__proto__", deep),
+      protoShallow: await echoed("__proto__", shallow),
+      constructorDeep: await echoed("constructor", deep),
+      toJSONDeep: await echoed("toJSON", deep),
+      // As text: equality compares a `constructor` key as the class.
+      constructorShallow: JSON.stringify(await echoed("constructor", shallow)),
+    };
+    raw.close();
+
+    expect(outcomes).toStrictEqual({
+      protoDeep: "request.unsupported_value",
+      protoShallow: "request.unsupported_value",
+      constructorDeep: "request.too_deep",
+      toJSONDeep: "request.too_deep",
+      constructorShallow: JSON.stringify({
+        answered: { constructor: { approved: true } },
+      }),
+    });
+  });
+
   it("refuses an answer fed back into a call deeper than values may be", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);

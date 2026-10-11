@@ -365,6 +365,42 @@ describe("the page's bridge to a screen", () => {
     });
   });
 
+  it("refuses a value a key every object has carries in, a prototype among them", async () => {
+    const frame = rawFramed();
+    let deep = frame.push(wireNested(30));
+    for (let level = 0; level < 100; level += 1) {
+      deep = frame.push([[["pipeline", deep]]]);
+    }
+    const shallow = frame.push({ approved: true });
+    const called = async (key: string, pushed: number): Promise<unknown> =>
+      await frame.pull(
+        frame.push([
+          "pipeline",
+          0,
+          ["call"],
+          ["notes", [[{ [key]: ["pipeline", pushed] }]]],
+        ])
+      );
+
+    const outcomes = {
+      protoDeep: await called("__proto__", deep),
+      protoShallow: await called("__proto__", shallow),
+      constructorDeep: await called("constructor", deep),
+      toJSONDeep: await called("toJSON", deep),
+    };
+    frame.close();
+
+    expect({ outcomes, reached: frame.calls }).toStrictEqual({
+      outcomes: {
+        protoDeep: "request.unsupported_value",
+        protoShallow: "request.unsupported_value",
+        constructorDeep: "request.too_deep",
+        toJSONDeep: "request.too_deep",
+      },
+      reached: [],
+    });
+  });
+
   it("refuses a value held so many times over it is more than a message may hold", async () => {
     const frame = rawFramed();
     // Each push holds the one before twice: 2^20 copies of 1,000 signs.

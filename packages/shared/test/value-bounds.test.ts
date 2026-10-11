@@ -54,6 +54,67 @@ describe("the bounds of a value", () => {
     expect(passedBound([error], roomy)).toBe("depth");
   });
 
+  it("lets an error through as deep as a leaf may be, counting its name and message at its own level", () => {
+    const bare = new Error("deep");
+    expect({
+      atDepth: passedBound([nested(32, bare)], roomy),
+      withDetails: passedBound(
+        [nested(31, Object.assign(new Error("deep"), { code: "x" }))],
+        roomy
+      ),
+      // "Error" and "deep", and one for the error itself: its stack isn't
+      // counted, whatever the runtime made up.
+      size: passedBound([bare], { depth: 32, size: 10 }),
+      pastSize: passedBound([bare], { depth: 32, size: 9 }),
+    }).toStrictEqual({
+      atDepth: undefined,
+      withDetails: undefined,
+      size: undefined,
+      pastSize: "size",
+    });
+  });
+
+  it("refuses an object of a kind it can't measure, wherever it is held", () => {
+    class Invoice {
+      total = 1;
+    }
+    // What a value sent as `__proto__` makes of an object.
+    const inherited: unknown = Object.setPrototypeOf({}, { k: nested(200) });
+    const inheritsAnArray: unknown = Object.setPrototypeOf({}, ["a"]);
+    const inheritsAnError: unknown = Object.setPrototypeOf(
+      {},
+      Object.assign(new Error("x"), { details: nested(200) })
+    );
+    const arrayInheritsAnArray: unknown = Object.setPrototypeOf([], [1]);
+    expect({
+      inherited: passedBound([inherited], roomy),
+      deeper: passedBound([{ a: [inherited] }], roomy),
+      inheritsAnArray: passedBound([inheritsAnArray], roomy),
+      inheritsAnError: passedBound([inheritsAnError], roomy),
+      arrayInheritsAnArray: passedBound([arrayInheritsAnArray], roomy),
+      instance: passedBound([new Invoice()], roomy),
+      leaves: passedBound(
+        [new Date(0), new Uint8Array(2), new ArrayBuffer(2), new Map(), null],
+        roomy
+      ),
+    }).toStrictEqual({
+      inherited: "kind",
+      deeper: "kind",
+      inheritsAnArray: "kind",
+      inheritsAnError: "kind",
+      arrayInheritsAnArray: "kind",
+      instance: "kind",
+      leaves: undefined,
+    });
+  });
+
+  it("walks keys every object has, held as its own", () => {
+    expect({
+      toJSON: passedBound([{ toJSON: nested(32) }], roomy),
+      constructorKey: passedBound([{ constructor: nested(32) }], roomy),
+    }).toStrictEqual({ toJSON: "depth", constructorKey: "depth" });
+  });
+
   it("counts strings, keys and bytes toward the size, and every value held", () => {
     const bounds = { depth: 32, size: 100 };
     expect({
@@ -62,12 +123,14 @@ describe("the bounds of a value", () => {
       past: passedBound(["x".repeat(100)], bounds),
       key: passedBound([{ ["k".repeat(99)]: 1 }], bounds),
       bytes: passedBound([new Uint8Array(100)], bounds),
+      buffer: passedBound([new ArrayBuffer(100)], bounds),
       together: passedBound(["x".repeat(60), "x".repeat(60)], bounds),
     }).toStrictEqual({
       fits: undefined,
       past: "size",
       key: "size",
       bytes: "size",
+      buffer: "size",
       together: "size",
     });
   });

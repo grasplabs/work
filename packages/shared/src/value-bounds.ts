@@ -18,53 +18,139 @@ export interface ValueBounds {
   readonly size: number;
 }
 
-/** Which bound a value passed. */
-export type PassedBound = "depth" | "size";
-
-/** Whether `value` is an object written with braces, and nothing more. */
-const isPlainObject = (value: object): boolean => {
-  const prototype: unknown = Reflect.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-};
+/**
+ * Which bound a value passed: too deep, too big, or holding an object of
+ * a kind it can't be measured by (an unknown prototype).
+ */
+export type PassedBound = "depth" | "size" | "kind";
 
 /**
- * What an object holds, as Cap'n Web and structured clone carry it: an
- * array's elements, a map's keys and values, a set's members, a plain
- * object's or an error's own enumerable keys and values (an error's name,
- * message and stack are strings, counted as its keys' values). A getter
- * is held as nothing: it is never run. Anything else holds nothing that
- * is walked.
+ * The global constructors whose instances are leaves: what Cap'n Web and
+ * structured clone carry that holds no value to walk. Looked up by name,
+ * as not every runtime has every one.
  */
-const heldBy = (value: object): { keys: number; held: unknown[] } => {
-  if (Array.isArray(value)) {
-    return { keys: 0, held: value };
-  }
-  if (value instanceof Map) {
-    const held: unknown[] = [];
-    for (const [key, inner] of value) {
-      held.push(key, inner);
+const leafConstructors = [
+  "Date",
+  "ArrayBuffer",
+  "DataView",
+  "Int8Array",
+  "Uint8Array",
+  // How Cap'n Web reads bytes where the runtime has Node's Buffer.
+  "Buffer",
+  "Uint8ClampedArray",
+  "Int16Array",
+  "Uint16Array",
+  "Int32Array",
+  "Uint32Array",
+  "Float16Array",
+  "Float32Array",
+  "Float64Array",
+  "BigInt64Array",
+  "BigUint64Array",
+  "Blob",
+  "ReadableStream",
+  "WritableStream",
+  "Request",
+  "Response",
+  "Headers",
+  "URL",
+] as const;
+
+/** The error classes Cap'n Web rebuilds an error as, and structured clone. */
+const errorConstructors = [
+  "Error",
+  "EvalError",
+  "RangeError",
+  "ReferenceError",
+  "SyntaxError",
+  "TypeError",
+  "URIError",
+  "AggregateError",
+] as const;
+
+/** The prototypes of what `names` name, of those this runtime has. */
+const prototypesOf = (names: readonly string[]): Set<unknown> => {
+  const prototypes = new Set<unknown>();
+  for (const name of names) {
+    const constructor: unknown = Reflect.get(globalThis, name);
+    if (typeof constructor === "function") {
+      prototypes.add(Reflect.get(constructor, "prototype"));
     }
-    return { keys: 0, held };
   }
-  if (value instanceof Set) {
-    return { keys: 0, held: [...value] };
-  }
-  if (!(value instanceof Error || isPlainObject(value))) {
-    return { keys: 0, held: [] };
-  }
-  let keys = 0;
+  return prototypes;
+};
+
+const leafPrototypes = prototypesOf(leafConstructors);
+const errorPrototypes = prototypesOf(errorConstructors);
+
+/** What an object holds that is walked, and what it counts by itself. */
+interface Held {
+  /** Its keys' lengths, and an error's name and message, toward the size. */
+  size: number;
+  /** The values it holds, each a level deeper. */
+  held: unknown[];
+}
+
+/** An object's own enumerable keys and values; a getter holds nothing. */
+const ownEntries = (value: object): Held => {
+  let size = 0;
   const held: unknown[] = [];
   for (const key of Object.keys(value)) {
-    keys += key.length;
+    size += key.length;
     const property = Reflect.getOwnPropertyDescriptor(value, key);
     if (property !== undefined && "value" in property) {
       held.push(property.value);
     }
   }
-  if (value instanceof Error) {
-    held.push(value.name, value.message, value.stack);
+  return { size, held };
+};
+
+/**
+ * What an object holds, as Cap'n Web and structured clone carry it: an
+ * array's elements, a map's keys and values, a set's members, a plain
+ * object's or an error's own enumerable keys and values. An error's name
+ * and message count toward its size, at its own level; its stack isn't
+ * counted, as the runtime makes one up for an error the sender sent
+ * none for. A leaf holds nothing; an object of an unknown kind is
+ * `undefined`.
+ */
+const heldBy = (value: object): Held | undefined => {
+  // By its own prototype, exactly a built-in one, and nothing it says of
+  // itself. A value's prototype can be set to another value (Cap'n Web
+  // puts a referred value in place under the key it was sent as,
+  // `__proto__` too), and what a prototype holds is read through the
+  // object: so an object of no kind measured here is refused, never a
+  // leaf.
+  const prototype: unknown = Reflect.getPrototypeOf(value);
+  if (Array.isArray(value)) {
+    return prototype === Array.prototype ? { size: 0, held: value } : undefined;
   }
-  return { keys, held };
+  if (value instanceof Map) {
+    if (prototype !== Map.prototype) {
+      return undefined;
+    }
+    const held: unknown[] = [];
+    for (const [key, inner] of value) {
+      held.push(key, inner);
+    }
+    return { size: 0, held };
+  }
+  if (value instanceof Set) {
+    return prototype === Set.prototype
+      ? { size: 0, held: [...value] }
+      : undefined;
+  }
+  if (value instanceof Error) {
+    if (!errorPrototypes.has(prototype)) {
+      return undefined;
+    }
+    const { size, held } = ownEntries(value);
+    return { size: size + value.name.length + value.message.length, held };
+  }
+  if (prototype === Object.prototype || prototype === null) {
+    return ownEntries(value);
+  }
+  return leafPrototypes.has(prototype) ? { size: 0, held: [] } : undefined;
 };
 
 /** What a value counts toward a size by itself, apart from what it holds. */
@@ -72,7 +158,7 @@ const ownSize = (value: unknown): number => {
   if (typeof value === "string") {
     return 1 + value.length;
   }
-  if (ArrayBuffer.isView(value)) {
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
     return 1 + value.byteLength;
   }
   return 1;
@@ -106,8 +192,12 @@ export const passedBound = (
     if (typeof value !== "object" || value === null) {
       continue;
     }
-    const { keys, held } = heldBy(value);
-    size += keys;
+    const contents = heldBy(value);
+    if (contents === undefined) {
+      return "kind";
+    }
+    const { held } = contents;
+    size += contents.size;
     if (size > bounds.size) {
       return "size";
     }

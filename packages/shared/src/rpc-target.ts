@@ -33,7 +33,8 @@ const wrapped = new WeakSet<object>();
 
 /**
  * Refuses `args` past `bounds`: `request.too_deep` or `request.too_large`,
- * never a stack overflow.
+ * never a stack overflow, or `request.unsupported_value` for an object of
+ * no kind a call takes (a prototype set to a value sent as `__proto__`).
  */
 const holdWithin = (args: readonly unknown[], bounds: ValueBounds): void => {
   const passed = passedBound(args, bounds);
@@ -42,6 +43,9 @@ const holdWithin = (args: readonly unknown[], bounds: ValueBounds): void => {
   }
   if (passed === "size") {
     throw requestErrors.create("request.too_large");
+  }
+  if (passed === "kind") {
+    throw requestErrors.create("request.unsupported_value");
   }
 };
 

@@ -5,6 +5,12 @@
  * hides them; areas still scroll). This rule stops code from bringing one
  * back: the ScrollBar part of a scroll area, or a class or selector that
  * shows or styles a bar (`findScrollbar`).
+ *
+ * no-capnweb-namespace: Cap'n Web's `RpcTarget` may only be extended
+ * through a bounded base (@grasp-os/shared/rpc-target), which
+ * `no-restricted-imports` holds for named imports. This rule closes the
+ * other ways to reach it: a namespace import, a dynamic `import()`, and
+ * re-exporting all of Cap'n Web or its `RpcTarget`.
  */
 import { findScrollbar } from "./no-scrollbars.ts";
 
@@ -13,6 +19,9 @@ interface Node {
   value?: unknown;
   name?: Node | string;
   quasis?: { value: { raw: string } }[];
+  source?: Node | null;
+  specifiers?: Node[];
+  local?: Node;
 }
 
 interface Context {
@@ -69,7 +78,70 @@ const noScrollbars = {
   },
 };
 
+/** Whether `node` is the module name `capnweb`, written as a string. */
+const isCapnweb = (node: Node | null | undefined): boolean =>
+  node?.type === "Literal" && node.value === "capnweb";
+
+const noCapnwebNamespace = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "Reach Cap'n Web by named imports only, so its RpcTarget can't be extended unbounded.",
+    },
+    messages: {
+      reached:
+        "Import what you need from capnweb by name: its RpcTarget is extended only through a bounded base (@grasp-os/shared/rpc-target).",
+    },
+    schema: [],
+  },
+  create: (context: Context) => {
+    const report = (node: Node): void => {
+      context.report({ node, messageId: "reached" });
+    };
+    return {
+      ImportDeclaration: (node: Node): void => {
+        if (
+          isCapnweb(node.source) &&
+          (node.specifiers ?? []).some(
+            (specifier) => specifier.type === "ImportNamespaceSpecifier"
+          )
+        ) {
+          report(node);
+        }
+      },
+      ImportExpression: (node: Node): void => {
+        // A module named any other way than a plain string could be it too.
+        if (node.source?.type !== "Literal" || isCapnweb(node.source)) {
+          report(node);
+        }
+      },
+      ExportAllDeclaration: (node: Node): void => {
+        if (isCapnweb(node.source)) {
+          report(node);
+        }
+      },
+      ExportNamedDeclaration: (node: Node): void => {
+        if (
+          isCapnweb(node.source) &&
+          (node.specifiers ?? []).some(
+            (specifier) =>
+              typeof specifier.local === "object" &&
+              (specifier.local.name === "RpcTarget" ||
+                specifier.local.value === "RpcTarget")
+          )
+        ) {
+          report(node);
+        }
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: "grasp" },
-  rules: { "no-scrollbars": noScrollbars },
+  rules: {
+    "no-capnweb-namespace": noCapnwebNamespace,
+    "no-scrollbars": noScrollbars,
+  },
 };
