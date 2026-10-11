@@ -343,7 +343,7 @@ const notesApp = app({
     "notes.insertOnly": { tables: { notes: { insert: true } } },
     "notes.peek": { tables: { notes: { insert: true } } },
   },
-  screens: {},
+  screens: [],
   uses: [],
 });
 

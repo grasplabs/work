@@ -1,12 +1,14 @@
 import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
 
+import type { FilesOperation } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type {
   JsonValue,
   ValueDescriptor,
   ValueSchema,
 } from "./value-descriptor.ts";
-import { descriptorOf } from "./value-schema.ts";
+import { readDescriptor } from "./value-read.ts";
+import { descriptorOf, schemaOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type { Infer } from "./values.ts";
 
@@ -103,6 +105,35 @@ export interface TemplateResource<
 > extends DeclarationBase<"template", Alias> {
   readonly contract: string;
 }
+
+/**
+ * A files requirement (spec 10.7.5, 32.3): what the App's screens may do
+ * with files, through the host. Browser-facing: no function lists it.
+ */
+export interface FilesResource<
+  Alias extends string = string,
+  Operations extends readonly FilesOperation[] = readonly FilesOperation[],
+> {
+  readonly "~resource": "files";
+  readonly alias: Alias;
+  readonly operations: Operations;
+}
+
+/**
+ * A links requirement (spec 10.7.7, 32.3): the exact HTTPS origins the
+ * App's screens may link to. It grants no network access at all.
+ */
+export interface LinksResource<
+  Alias extends string = string,
+  Origins extends readonly string[] = readonly string[],
+> {
+  readonly "~resource": "links";
+  readonly alias: Alias;
+  readonly origins: Origins;
+}
+
+/** A requirement the App's screens use, never its functions. */
+export type BrowserResource = FilesResource | LinksResource;
 
 /** Any resource requirement. */
 export type AnyResource =
@@ -213,9 +244,66 @@ const listMax = 32;
 /** Every declaration `resource` made; nothing else counts as one. */
 const declarations = new WeakSet<object>();
 
-/** Whether `value` is a declaration `resource` made. */
+/** Every browser-facing declaration `resource` made. */
+const browserDeclarations = new WeakSet<object>();
+
+/** Whether `value` is a declaration `resource` made for actions. */
 export const isResource = (value: unknown): value is AnyResource =>
   typeof value === "object" && value !== null && declarations.has(value);
+
+/** Whether `value` is a files or links declaration `resource` made. */
+export const isBrowserResource = (value: unknown): value is BrowserResource =>
+  typeof value === "object" && value !== null && browserDeclarations.has(value);
+
+/** The operations a files resource may declare. */
+const filesOperations: readonly FilesOperation[] = [
+  "upload",
+  "read",
+  "attach",
+  "delete",
+];
+
+/**
+ * An HTTPS origin's form: lower-case host labels or an IP address, and an
+ * optional port. What a URL parser lets through beyond it (a `*`, say) is
+ * no origin a browser navigates to exactly.
+ */
+const originPattern =
+  /^https:\/\/(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?::\d{1,5})?$/u;
+
+/** The most bytes of one link origin. */
+const originMaxLength = 253 + "https://".length + ":65535".length;
+
+/**
+ * An exact HTTPS origin as the URL standard serializes it: scheme, host
+ * and an optional port, nothing else (no path, query, credentials or
+ * wildcard), lower case.
+ */
+const checkedOrigin = (origin: unknown): string => {
+  if (typeof origin !== "string" || origin.length > originMaxLength) {
+    return refuse(
+      "A link origin is an HTTPS origin, e.g. `https://example.com`."
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return refuse(
+      "A link origin is an HTTPS origin, e.g. `https://example.com`."
+    );
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.origin !== origin ||
+    !originPattern.test(origin)
+  ) {
+    return refuse(
+      `\`${origin}\` isn't an exact HTTPS origin: \`https://\`, a host and an optional port, in lower case, with nothing after it.`
+    );
+  }
+  return origin;
+};
 
 const checkedAlias = (alias: unknown): string =>
   typeof alias === "string" && resourceAliasPattern.test(alias)
@@ -292,6 +380,34 @@ const declared = (declaration: AnyResource): AnyResource => {
   const frozen = deepFreeze(declaration);
   declarations.add(frozen);
   return frozen;
+};
+
+/** A browser-facing declaration, frozen and registered as genuine. */
+const declaredForBrowser = (declaration: BrowserResource): BrowserResource => {
+  const frozen = deepFreeze(declaration);
+  browserDeclarations.add(frozen);
+  return frozen;
+};
+
+/** The origins a links declaration lists: 1 to 32 exact HTTPS origins. */
+const checkedOrigins = (origins: unknown): readonly string[] => {
+  if (
+    !Array.isArray(origins) ||
+    origins.length === 0 ||
+    origins.length > listMax
+  ) {
+    return refuse(`A links resource lists between 1 and ${listMax} origins.`);
+  }
+  const listed: readonly unknown[] = origins;
+  const checked: string[] = [];
+  for (const origin of listed) {
+    const exact = checkedOrigin(origin);
+    if (checked.includes(exact)) {
+      refuse(`A links resource lists \`${exact}\` twice.`);
+    }
+    checked.push(exact);
+  }
+  return Object.freeze(checked);
 };
 
 /**
@@ -407,4 +523,108 @@ export const resource = Object.freeze({
       contract: checkedContract(checked.contract),
     }) as TemplateResource<Alias>;
   },
+  /**
+   * What the App's screens may do with files through the host: upload,
+   * read, attach, delete. Listed in the App's `uses`, never a function's.
+   */
+  files: <
+    const Alias extends string,
+    const Operations extends readonly [FilesOperation, ...FilesOperation[]],
+  >(
+    alias: Alias,
+    config: { readonly operations: Operations }
+  ): FilesResource<Alias, Operations> => {
+    const checked = checkedConfig(config, ["operations"]);
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given, and the operations given, in order.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return declaredForBrowser({
+      "~resource": "files",
+      alias: checkedAlias(alias),
+      operations: checkedList(
+        checked.operations,
+        "operations",
+        filesOperations
+      ).filter((operation): operation is FilesOperation =>
+        filesOperations.some((known) => known === operation)
+      ),
+    }) as FilesResource<Alias, Operations>;
+  },
+  /**
+   * The exact HTTPS origins the App's screens may link to. It grants no
+   * network access: a screen still has none.
+   */
+  links: <
+    const Alias extends string,
+    const Origins extends readonly [string, ...string[]],
+  >(
+    alias: Alias,
+    config: { readonly origins: Origins }
+  ): LinksResource<Alias, Origins> => {
+    const checked = checkedConfig(config, ["origins"]);
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given, and the origins given, in order.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return declaredForBrowser({
+      "~resource": "links",
+      alias: checkedAlias(alias),
+      origins: checkedOrigins(checked.origins),
+    }) as LinksResource<Alias, Origins>;
+  },
 });
+
+/**
+ * The declaration `data` describes, as a manifest holds it, declared
+ * again through `resource`: it passes exactly the checks a declaration in
+ * code does, and anything else (an unknown kind or key, a value out of
+ * bounds) throws `ResourceDefinitionError` or `ValueDefinitionError`.
+ * Only the host reads declarations back (host.ts).
+ */
+export const readResourceDeclaration = (
+  data: unknown
+): AnyResource | BrowserResource => {
+  if (!isPlainObject(data)) {
+    return refuse("A resource declaration is an object.");
+  }
+  const { "~resource": kind, alias, ...config } = data;
+  if (typeof alias !== "string") {
+    return refuse("A resource declaration has an alias.");
+  }
+  // Each constructor refuses keys its kind hasn't; `~resource` and the
+  // alias are read here, the rest is its config.
+  // SAFETY: each constructor checks its config at run time.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const loose = config as never;
+  if (kind === "model") {
+    const { structuredOutput, ...rest } = config;
+    // SAFETY: as above.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const modelConfig = {
+      ...rest,
+      ...(structuredOutput === null
+        ? {}
+        : {
+            structuredOutput: schemaOf(
+              readDescriptor(structuredOutput, 1, { nodes: 0 })
+            ),
+          }),
+    } as never;
+    return resource.model(alias, modelConfig);
+  }
+  if (kind === "connector") {
+    return resource.connector(alias, loose);
+  }
+  if (kind === "knowledge") {
+    return resource.knowledge(alias, loose);
+  }
+  if (kind === "template") {
+    return resource.template(alias, loose);
+  }
+  if (kind === "files") {
+    return resource.files(alias, loose);
+  }
+  if (kind === "links") {
+    return resource.links(alias, loose);
+  }
+  return refuse("A resource declaration's kind isn't one this SDK knows.");
+};
