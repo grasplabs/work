@@ -544,4 +544,44 @@ describe("the page's bridge to a screen", () => {
     fresh.close();
     expect(answered).toBe("answered");
   });
+
+  it("ends the session when what the frame never releases holds too much, and a fresh screen still works", async () => {
+    const frame = rawFramed();
+    // Forty values of four thousand small numbers each, never released:
+    // little text (well within what the port holds unread), but a lot of
+    // heap once parsed and kept, which the session's bytes don't allow.
+    const dense = [Array.from({ length: 4000 }, (_value, index) => index % 10)];
+    for (let count = 0; count < 40; count += 1) {
+      frame.push(dense);
+    }
+    await vi.waitFor(() => {
+      expect(frame.broken.times).toBe(1);
+    });
+    frame.close();
+
+    const fresh = framed();
+    const answered = await outcome(fresh.page.call("notes", []));
+    fresh.close();
+    expect(answered).toBe("answered");
+  });
+
+  it("passes a call with the largest input a screen may send, again and again", async () => {
+    const frame = framed();
+    // About 128 KiB of small numbers, each call answered and let go.
+    const largest = Array.from(
+      { length: 40_000 },
+      (_value, index) => index % 10
+    );
+    // One after another: each answered, and let go, before the next.
+    const answers: unknown[] = [];
+    for (let count = 0; count < 5; count += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in turn on purpose: each call must be answered before the next is sent
+      answers.push(await outcome(frame.page.call("notes", [largest])));
+    }
+    frame.close();
+    expect({ answers, broken: frame.broken.times }).toStrictEqual({
+      answers: ["answered", "answered", "answered", "answered", "answered"],
+      broken: 0,
+    });
+  });
 });
