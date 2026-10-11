@@ -42,7 +42,10 @@ export class StoreReader {
   /** The generation of each table read, as first read. */
   readonly #generations = new Map<string, number>();
   readonly #guards: ReadGuard[] = [];
-  /** Whether two reads of one table saw different generations. */
+  /**
+   * Whether two reads of one table saw different generations: stale for
+   * sure, known without asking the store again.
+   */
   #torn = false;
 
   constructor(store: OpenStore, scope: ReadScope) {
@@ -64,10 +67,16 @@ export class StoreReader {
         this.#torn = true;
       }
     }
+    // Once per record: an operation reading a record again and again
+    // still hands its commit one guard for it (a later assertion of
+    // another revision would have failed its read with a conflict).
     if (
       request.kind === "get" &&
       request.expectedRevision !== null &&
-      value !== null
+      value !== null &&
+      !this.#guards.some(
+        ({ table, id }) => table === request.table && id === request.id
+      )
     ) {
       this.#guards.push({
         table: request.table,
@@ -117,12 +126,24 @@ export const readConsistently = async <Answer>(
 ): Promise<Answer> => {
   for (let run = 0; run <= queryMaxReruns; run += 1) {
     const reader = new StoreReader(store, scope);
-    // One run after the other: a rerun exists only because the last failed.
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    const answer = await operation(reader);
+    let answer: { value: Answer } | { error: unknown };
+    try {
+      // One run after the other: a rerun exists only because the last
+      // was stale.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      answer = { value: await operation(reader) };
+    } catch (error) {
+      answer = { error };
+    }
+    // An answer or a failure alike stands only if what was read is still
+    // one state: a failure a torn read caused (a record not found between
+    // two reads, `unique` across an insert) is a stale run too.
     // oxlint-disable-next-line no-await-in-loop -- see above
     if (await reader.isCurrent()) {
-      return answer;
+      if ("error" in answer) {
+        throw answer.error;
+      }
+      return answer.value;
     }
   }
   throw queryErrors.create("query.concurrent_change", { retryable: true });

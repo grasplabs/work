@@ -601,24 +601,29 @@ export class StoreHost {
     pinned: PinnedSchema,
     names: readonly string[]
   ): Record<string, number> {
-    const generations: Record<string, number> = {};
+    const byId = new Map<string, string>();
     for (const name of names) {
       const tableId = Object.hasOwn(pinned.tableIds, name)
         ? pinned.tableIds[name]
         : undefined;
-      const row =
-        tableId === undefined
-          ? undefined
-          : this.#db
-              .select({ generation: tables.generation })
-              .from(tables)
-              .where(eq(tables.tableId, tableId))
-              .get();
-      if (row !== undefined) {
-        generations[name] = row.generation;
+      if (tableId !== undefined) {
+        byId.set(tableId, name);
       }
     }
-    return generations;
+    if (byId.size === 0) {
+      return {};
+    }
+    const rows = this.#db
+      .select({ tableId: tables.tableId, generation: tables.generation })
+      .from(tables)
+      .where(inArray(tables.tableId, [...byId.keys()]))
+      .all();
+    return Object.fromEntries(
+      rows.map(({ tableId, generation }) => [
+        byId.get(tableId) ?? tableId,
+        generation,
+      ])
+    );
   }
 
   /**

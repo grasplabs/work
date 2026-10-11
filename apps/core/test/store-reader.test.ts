@@ -263,3 +263,137 @@ describe("a reader's guards", () => {
     ]);
   });
 });
+
+describe("a query that fails", () => {
+  it("is run again when it failed on a torn read, and fails only as one state does", async () => {
+    const fixture = await storeWithNotes();
+    const id = await insertNote(fixture, { title: "only" });
+    let runs = 0;
+    const failure = await failureOf(
+      readConsistently(fixture.store, fixture.scope, async (reader) => {
+        runs += 1;
+        const db = dbOver(reader);
+        const found = await db.get("notes", noteId(id));
+        if (runs === 1) {
+          await insertNote(fixture, { title: "only" });
+        }
+        // Read after a concurrent insert: not unique on the first run.
+        const unique = await db
+          .query("notes")
+          .filter({ title: "only" })
+          .unique();
+        return { found: found?._id, unique: unique?._id };
+      })
+    );
+    // The first run failed on a torn read and ran again; the second saw
+    // both notes from the start, and fails as one state does.
+    expect({ code: failure.code, runs }).toStrictEqual({
+      code: "data.not_unique",
+      runs: 2,
+    });
+  });
+
+  it("fails at once when its reads were one state", async () => {
+    const fixture = await storeWithNotes();
+    let runs = 0;
+    const failure = await failureOf(
+      readConsistently(fixture.store, fixture.scope, async (reader) => {
+        runs += 1;
+        await dbOver(reader).query("notes").count();
+        throw new Error("The handler's own failure");
+      })
+    );
+    expect({ code: failure.code, runs }).toStrictEqual({
+      code: undefined,
+      runs: 1,
+    });
+  });
+
+  it("succeeds on a rerun when only its first, torn, run failed", async () => {
+    const fixture = await storeWithNotes();
+    const id = await insertNote(fixture, { title: "doomed" });
+    let runs = 0;
+    const answer = await readConsistently(
+      fixture.store,
+      fixture.scope,
+      async (reader) => {
+        runs += 1;
+        const db = dbOver(reader);
+        const count = await db.query("notes").count();
+        if (runs === 1) {
+          await commit(fixture, [
+            { op: "delete", table: "notes", id, expectedRevision: 1 },
+          ]);
+        }
+        const found = await db.get("notes", noteId(id));
+        if (found === null && count > 0) {
+          throw new Error("Counted a note that isn't there");
+        }
+        return { count, found: found?._id ?? null };
+      }
+    );
+    expect({ answer, runs }).toStrictEqual({
+      answer: { count: 0, found: null },
+      runs: 2,
+    });
+  });
+});
+
+describe("generations", () => {
+  it("move on with a delete, and with one commit for every table it writes", async () => {
+    const fixture = await storeWithNotes();
+    const id = await insertNote(fixture);
+    const readerOf = async (table: "notes" | "people") => {
+      const reader = new StoreReader(fixture.store, fixture.scope);
+      await dbOver(reader).query(table).count();
+      return reader;
+    };
+    const deleted = await readerOf("notes");
+    await commit(fixture, [
+      { op: "delete", table: "notes", id, expectedRevision: 1 },
+    ]);
+    const notes = await readerOf("notes");
+    const people = await readerOf("people");
+    await commit(fixture, [
+      { op: "insert", table: "notes", fields: { title: "b" } },
+      { op: "insert", table: "people", fields: { name: "Grace" } },
+    ]);
+    expect({
+      afterDelete: await deleted.isCurrent(),
+      notes: await notes.isCurrent(),
+      people: await people.isCurrent(),
+    }).toStrictEqual({ afterDelete: false, notes: false, people: false });
+  });
+
+  it("are recorded by a page as by any read", async () => {
+    const fixture = await storeWithNotes();
+    await insertNote(fixture);
+    const reader = new StoreReader(fixture.store, fixture.scope);
+    const page = await dbOver(reader)
+      .query("notes")
+      .paginate({ pageSize: 10, cursor: null });
+    const before = await reader.isCurrent();
+    await insertNote(fixture, { title: "later" });
+    expect({
+      items: page.items.length,
+      before,
+      after: await reader.isCurrent(),
+    }).toStrictEqual({ items: 1, before: true, after: false });
+  });
+});
+
+describe("guards, once per record", () => {
+  it("record a record read again and again once", async () => {
+    const fixture = await storeWithNotes();
+    const id = await insertNote(fixture);
+    const reader = new StoreReader(fixture.store, fixture.scope);
+    const db = dbOver(reader);
+    for (let read = 0; read < 150; read += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one read after another
+      await db.get("notes", noteId(id), { expectedRevision: 1 });
+    }
+    expect(reader.guards()).toStrictEqual([
+      { table: "notes", id, expectedRevision: 1 },
+    ]);
+  });
+});
