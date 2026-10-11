@@ -30,6 +30,13 @@ interface __BaseEnv_Env {
   AUDIT_ARCHIVE_RETENTION_DAYS?: unknown;
   /** Days an ended workflow run keeps its details (src/workflows/retention.ts). */
   RUN_RETENTION_DAYS?: unknown;
+  /**
+   * `cloudflare` where core runs on Cloudflare's runtime, which enforces
+   * Code Mode's CPU limit; anything else, unset included, is taken as a
+   * runtime that doesn't (src/code-mode.ts). Tests, local development and
+   * on-prem say `workerd`.
+   */
+  RUNTIME_PROFILE?: string;
   /** `none` where Durable Objects have no jurisdiction (src/durable-objects.ts). */
   DURABLE_OBJECT_JURISDICTION?: string;
   /**

@@ -10,6 +10,7 @@ import {
   codeResults,
   codeStep,
   model,
+  openTestRun,
   pausedReply,
   pointAtGateway,
   says,
@@ -357,7 +358,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       1,
       { "screens/desk.tsx": screen, "app/server.ts": server(true) },
       [],
-      0
+      0,
+      await openTestRun(stub, chatIdSchema.parse(chatId))
     );
     await builder.api.chats.preview(chatId, app);
     // The next write and the check in one step: the panel previews the
@@ -403,7 +405,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       1,
       { "screens/desk.tsx": screen, "app/server.ts": server(true) },
       [],
-      0
+      0,
+      await openTestRun(stub, chatIdSchema.parse(chatId))
     );
     await builder.api.chats.preview(chatId, app);
 
@@ -448,7 +451,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
         1,
         { "screens/desk.tsx": screen, "app/server.ts": mailing },
         [],
-        revision
+        revision,
+        await openTestRun(stub, id)
       );
       return revision + 1;
     };
@@ -540,7 +544,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
         1,
         { "screens/desk.tsx": screen, "app/server.ts": mailing },
         [],
-        revision
+        revision,
+        await openTestRun(stub, id)
       );
       return revision + 1;
     };
@@ -612,7 +617,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
         1,
         { "screens/desk.tsx": screen, "app/server.ts": mailing },
         [],
-        revision
+        revision,
+        await openTestRun(stub, id)
       );
       return revision + 1;
     };

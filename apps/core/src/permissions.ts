@@ -536,7 +536,9 @@ export const requestPermission = async (
   env: Env,
   by: Acting,
   input: unknown,
-  requireAppRole: (app: AppId, role: AppRole) => Promise<unknown>
+  requireAppRole: (app: AppId, role: AppRole) => Promise<unknown>,
+  /** Admits the write, called right before it is committed: throws to refuse it. */
+  admit?: () => Promise<void>
 ): Promise<Permission> => {
   requireBuilder(by);
   if (by.staff) {
@@ -600,6 +602,8 @@ export const requestPermission = async (
   // cover one side only.
   const { subjectType, subjectId } = subjectColumns(subject);
   try {
+    // Admitted last, with nothing slow left before the write.
+    await admit?.();
     await auditedBatch(env, db, [
       insertWhere(
         db,

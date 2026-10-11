@@ -1,5 +1,6 @@
 import type { Message } from "@earendil-works/pi-ai";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
+import type { ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
@@ -177,3 +178,20 @@ export const setObjectEnv = async (
     Object.assign(objectEnv, vars);
   });
 };
+
+/** What a test's own code run records of its module. */
+export const testRunOpening = {
+  toolCallId: "call_test",
+  sourceHash: "0".repeat(64),
+  sourceChars: 0,
+};
+
+/**
+ * Opens a code run of the chat outside any turn, for a test that writes
+ * a draft as the chat's code would: the run every draft write is
+ * admitted against.
+ */
+export const openTestRun = async (
+  stub: WorkspaceStub,
+  chatId: ChatId
+): Promise<string> => await stub.openCodeRun(chatId, testRunOpening);

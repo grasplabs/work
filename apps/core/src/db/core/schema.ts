@@ -352,6 +352,14 @@ export const permissions = sqliteTable(
       table.subjectId,
       table.status
     ),
+    // Revocations of a subject's permissions since a moment: what ends a
+    // chat's code runs (`revokedSince` in agent-scope.ts).
+    index("permissions_revoked_idx").on(
+      table.subjectType,
+      table.subjectId,
+      table.status,
+      table.revokedAt
+    ),
     // The Apps granted to call an App's exports, found from that App
     // (app-provenance.ts): by object, not subject.
     index("permissions_object_idx").on(table.objectType, table.objectId),

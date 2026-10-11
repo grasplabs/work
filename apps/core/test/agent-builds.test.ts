@@ -9,7 +9,17 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  says,
+  pointAtGateway,
+  setObjectEnv,
+  testRunOpening,
+} from "./agent-chat.ts";
+import type { WorkspaceStub } from "./agent-chat.ts";
+import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { outlook, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -146,6 +156,58 @@ const setUp = async (
     });
   };
   return { admin, builder, person, existing, chat, grant };
+};
+
+/**
+ * Runs `during` with the object's code runs limited to a second, and the
+ * calls to core's files `slowed` picks (every read, unless told otherwise)
+ * two seconds slow: a call let in at once outlives its run while it waits
+ * on them. Set back however it ends.
+ */
+const slowFilesDuring = async (
+  stub: WorkspaceStub,
+  during: () => Promise<void>,
+  slowed: (method: string, key: unknown) => boolean = (method) =>
+    method === "get"
+): Promise<void> => {
+  const { FILES: files } = env;
+  const slow = new Proxy(files, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (typeof property === "string" && typeof value === "function") {
+        return async (...args: unknown[]): Promise<unknown> => {
+          if (slowed(property, args[0])) {
+            await scheduler.wait(2000);
+          }
+          return await Reflect.apply(value, target, args);
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1000" });
+  env.FILES = slow;
+  try {
+    await during();
+  } finally {
+    env.FILES = files;
+    await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "" });
+  }
+};
+
+/** The methods of the chat's calls refused because their run had ended. */
+const endedRefusals = async (chatId: string): Promise<unknown[]> => {
+  const events = await allEvents();
+  return events
+    .filter(
+      ({ action, detail }) =>
+        action === "agent.call" &&
+        detail.chat === chatId &&
+        detail.reason === "agent.run_ended"
+    )
+    .map(({ detail }) => detail.method);
 };
 
 /** The App the agent created, as the person's session finds it. */
@@ -660,17 +722,128 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("lands no draft write whose run ran out of time while it was under way", async () => {
+    const { chat, existing, grant } = await setUp([]);
+    await pointAtGateway(
+      chat.stub,
+      fakeGateway(
+        codeStep(`export default async (self, env) => {
+          await env.build.write(${JSON.stringify(existing)}, { "screens/late.tsx": "export default () => null;" });
+        };`),
+        says("It ran out of time.")
+      )
+    );
+    await grant();
+
+    // The write is let in at once, then waits on the App's files past its
+    // run's end: refused as it commits.
+    await slowFilesDuring(chat.stub, async () => {
+      await chat.ask("Write it.");
+    });
+
+    await vi.waitFor(
+      async () => {
+        await expect(endedRefusals(chat.chat.id)).resolves.toStrictEqual([
+          "build.write",
+        ]);
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    await expect(
+      chat.stub.draft(chatIdSchema.parse(chat.chat.id), existing)
+    ).resolves.toStrictEqual({ base: null, changes: {}, revision: 0 });
+  });
+
+  it("commits no proposal whose run ran out of time while it was checked", async () => {
+    const { chat, builder, existing, grant } = await setUp([]);
+    await pointAtGateway(
+      chat.stub,
+      fakeGateway(
+        codeStep(`export default async (self, env) => {
+          await env.build.write(${JSON.stringify(existing)}, { "AGENTS.md": "# Ledger, again\\n" });
+        };`),
+        says("Written."),
+        codeStep(`export default async (self, env) => {
+          await env.build.propose(${JSON.stringify(existing)}, "Again");
+        };`),
+        says("It ran out of time.")
+      )
+    );
+    await grant();
+    await chat.ask("Write it.");
+
+    // Checked past its run's end: the commit after the check is refused.
+    await slowFilesDuring(chat.stub, async () => {
+      await chat.ask("Propose it.");
+    });
+
+    await vi.waitFor(
+      async () => {
+        await expect(endedRefusals(chat.chat.id)).resolves.toStrictEqual([
+          "build.propose",
+        ]);
+      },
+      { timeout: 30_000, interval: 200 }
+    );
+    const listed = await builder.api.apps.list();
+    expect(listed.find(({ id }) => id === existing)?.pendingVersion).toBeNull();
+  });
+
+  it("commits no proposal whose run ran out of time while it stored the version's files, after its last check", async () => {
+    const { chat, builder, existing, grant } = await setUp([]);
+    await pointAtGateway(
+      chat.stub,
+      fakeGateway(
+        codeStep(`export default async (self, env) => {
+          await env.build.write(${JSON.stringify(existing)}, { "AGENTS.md": "# Ledger, once more\\n" });
+        };`),
+        says("Written."),
+        codeStep(`export default async (self, env) => {
+          await env.build.propose(${JSON.stringify(existing)}, "Once more");
+        };`),
+        says("It ran out of time.")
+      )
+    );
+    await grant();
+    await chat.ask("Write it.");
+
+    // Only storing the version's tree is slow: the check and the
+    // admission before it pass, and the run ends while the tree is stored.
+    await slowFilesDuring(
+      chat.stub,
+      async () => {
+        await chat.ask("Propose it.");
+      },
+      (method, key) =>
+        method === "put" && typeof key === "string" && key.includes("/trees/")
+    );
+
+    await vi.waitFor(
+      async () => {
+        await expect(endedRefusals(chat.chat.id)).resolves.toStrictEqual([
+          "build.propose",
+        ]);
+      },
+      { timeout: 30_000, interval: 200 }
+    );
+    const listed = await builder.api.apps.list();
+    expect(listed.find(({ id }) => id === existing)?.pendingVersion).toBeNull();
+  });
+
   it("lands a draft write only over the revision it read", async () => {
     const { chat } = await setUp([]);
     const chatId = chatIdSchema.parse(chat.chat.id);
 
-    const saved = await runInDurableObject(chat.stub, (instance) => [
-      instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0),
-      // Another write read revision 0 too, and lost.
-      instance.saveDraft(chatId, "app-1", null, { "a.md": "b" }, [], 0),
-      instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 1),
-      instance.draft(chatId, "app-1"),
-    ]);
+    const saved = await runInDurableObject(chat.stub, (instance) => {
+      const run = instance.openCodeRun(chatId, testRunOpening);
+      return [
+        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, run),
+        // Another write read revision 0 too, and lost.
+        instance.saveDraft(chatId, "app-1", null, { "a.md": "b" }, [], 0, run),
+        instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 1, run),
+        instance.draft(chatId, "app-1"),
+      ];
+    });
 
     expect(saved).toStrictEqual([
       true,
@@ -688,21 +861,24 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { chat } = await setUp([]);
     const chatId = chatIdSchema.parse(chat.chat.id);
 
-    const saved = await runInDurableObject(chat.stub, (instance) => [
-      // A write reads revision 0; meanwhile another creates the draft and
-      // writes its only change back as the base has it.
-      instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0),
-      instance.saveDraft(chatId, "app-1", null, {}, ["a.md"], 1),
-      instance.draft(chatId, "app-1"),
-      // The write that read revision 0 lands on nothing.
-      instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 0),
-      // Nor once the draft is dropped, as a proposal drops it.
-      instance.saveDraft(chatId, "app-1", null, { "c.md": "c" }, [], 2),
-      instance.dropDraft(chatId, "app-1", 3),
-      instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 0),
-      instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 3),
-      instance.draft(chatId, "app-1"),
-    ]);
+    const saved = await runInDurableObject(chat.stub, (instance) => {
+      const run = instance.openCodeRun(chatId, testRunOpening);
+      return [
+        // A write reads revision 0; meanwhile another creates the draft and
+        // writes its only change back as the base has it.
+        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, run),
+        instance.saveDraft(chatId, "app-1", null, {}, ["a.md"], 1, run),
+        instance.draft(chatId, "app-1"),
+        // The write that read revision 0 lands on nothing.
+        instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 0, run),
+        // Nor once the draft is dropped, as a proposal drops it.
+        instance.saveDraft(chatId, "app-1", null, { "c.md": "c" }, [], 2, run),
+        instance.dropDraft(chatId, "app-1", { revision: 3 }),
+        instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 0, run),
+        instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 3, run),
+        instance.draft(chatId, "app-1"),
+      ];
+    });
 
     expect(saved).toStrictEqual([
       true,
@@ -721,12 +897,15 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { chat } = await setUp([]);
     const chatId = chatIdSchema.parse(chat.chat.id);
 
-    const saved = await runInDurableObject(chat.stub, (instance) => [
-      // A first write reads revision 0; a discard runs before it lands.
-      instance.dropDraft(chatId, "app-1"),
-      instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0),
-      instance.draft(chatId, "app-1"),
-    ]);
+    const saved = await runInDurableObject(chat.stub, (instance) => {
+      const run = instance.openCodeRun(chatId, testRunOpening);
+      return [
+        // A first write reads revision 0; a discard runs before it lands.
+        instance.dropDraft(chatId, "app-1", { runId: run }),
+        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, run),
+        instance.draft(chatId, "app-1"),
+      ];
+    });
 
     expect(saved).toStrictEqual([
       true,

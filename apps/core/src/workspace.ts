@@ -50,9 +50,14 @@ import {
   auditAgentCall,
   chatAuthority,
   chatContext,
+  revokedSince,
   workspaceAgentIdSchema,
 } from "./agent-scope.ts";
-import type { CodeRunCall } from "./agent-scope.ts";
+import type {
+  AgentScope,
+  CodeRunAdmission,
+  CodeRunCall,
+} from "./agent-scope.ts";
 import { isMessage, runTurn } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
 import type { AppAnswer } from "./app.ts";
@@ -62,13 +67,16 @@ import { revokeChatPermissions } from "./chat-connections.ts";
 import { chatMessageOf, partialOf } from "./chat-messages.ts";
 import { ChatWatch } from "./chat-watch.ts";
 import type { ChatListener, ChatState } from "./chat-watch.ts";
-import { codeLimits, codeTimeoutMs } from "./code-mode.ts";
+import { codeLimits, codeRuntime, codeTimeoutMs } from "./code-mode.ts";
+import type { CodeRunStatus } from "./code-run-statuses.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/workspace/migrations/migrations.js";
 import {
   auditOutbox,
   chatAttachments,
+  chatCodeRuns,
   chatDraftFiles,
+  maxToolCallIdChars,
   chatDrafts,
   chatMessages,
   chatSources,
@@ -172,6 +180,29 @@ export const maxChatChars = 4_000_000;
  * one: a few turns' worth (at most 30 runs each).
  */
 const endedRunsKept = 1000;
+
+/**
+ * Most code run records a chat keeps, newest first: a long chat's run
+ * history, bounded (`chat_code_runs`).
+ */
+const codeRunRecordsKept = 1000;
+
+/**
+ * A code run as the object keeps its lease: open, with the API calls it
+ * has made and when it opened (a revocation after that ends it), or
+ * closed, by its end or a revocation, and whether a call after that was
+ * logged yet.
+ */
+type CodeRunLease =
+  | { calls: number; openedAt: number }
+  | { closed: "ended" | "revoked"; reported: boolean };
+
+/** What a code run's record keeps of its module, as it opens. */
+export interface CodeRunOpening {
+  toolCallId: string;
+  sourceHash: string;
+  sourceChars: number;
+}
 
 /**
  * The sources one API call of a code run read from, as it records them:
@@ -296,13 +327,13 @@ export class Workspace extends DurableObject<Env> {
   readonly #turns = new Map<ChatId, AbortController>();
 
   /**
-   * Code runs, as `<chat>/<run>`: the API calls an open run has made, or
-   * that it ended (`reported` once a call after its end was logged). Their
-   * stubs answer only while a run is open and has calls left. In memory, so
-   * a restart ends every run. Ended runs are kept, oldest first, only up to
+   * Code runs' leases, as `<chat>/<run>` (`CodeRunLease`): their stubs
+   * answer, and their writes are admitted, only while a run is open and
+   * has calls left. In memory, so a restart ends every run (its record
+   * says `interrupted`). Closed runs are kept, oldest first, only up to
    * {@link endedRunsKept}: a run forgotten answers as ended, unlogged.
    */
-  readonly #codeRuns = new Map<string, number | "ended" | "reported">();
+  readonly #codeRuns = new Map<string, CodeRunLease>();
 
   /**
    * The response each chat's agent is writing now, as it streams in: what
@@ -371,6 +402,20 @@ export class Workspace extends DurableObject<Env> {
     super(ctx, env);
     migrateOnWake(ctx, migrations);
     this.#closeInterruptedTurns();
+    this.#closeInterruptedRuns();
+  }
+
+  /**
+   * Marks every code run still `running` as `interrupted`: no run is open
+   * when the object wakes, so each was ended by the restart, its lease
+   * with it. Nothing is run again.
+   */
+  #closeInterruptedRuns(): void {
+    this.#db
+      .update(chatCodeRuns)
+      .set({ status: "interrupted", endedAt: new Date() })
+      .where(eq(chatCodeRuns.status, "running"))
+      .run();
   }
 
   /**
@@ -765,14 +810,9 @@ export class Workspace extends DurableObject<Env> {
             ? permissionErrors.create("permission.person_inactive")
             : undefined,
         runs: {
-          open: () => {
-            const runId = crypto.randomUUID();
-            this.#codeRuns.set(`${chat.id}/${runId}`, 0);
-            return runId;
-          },
-          close: (runId) => {
-            this.#endCodeRun(`${chat.id}/${runId}`);
-          },
+          open: (opening) => this.openCodeRun(chat.id, opening),
+          close: async (runId, status) =>
+            await this.#endCodeRun(scope, runId, status),
         },
         loader: this.env.LOADER,
         codeTimeoutMs: codeTimeoutMs(this.env),
@@ -920,17 +960,189 @@ export class Workspace extends DurableObject<Env> {
     return { memory, skills };
   }
 
-  /** Marks a code run ended, and forgets the oldest ended runs past the cap. */
-  #endCodeRun(key: string): void {
-    // Moved to the end, so the map keeps ended runs oldest first.
-    this.#codeRuns.delete(key);
-    this.#codeRuns.set(key, "ended");
-    const ended = [...this.#codeRuns.keys()].filter(
-      (run) => typeof this.#codeRuns.get(run) !== "number"
+  /**
+   * Opens a code run of the chat: its lease, and its record, as `running`
+   * on this runtime. Its ID is random, and the only way its stubs reach
+   * it. Called by the chat's turn as it starts a run (`runTurn`).
+   */
+  openCodeRun(chatId: ChatId, opening: CodeRunOpening): string {
+    const id = crypto.randomUUID();
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .insert(chatCodeRuns)
+        .values({
+          id,
+          chatId,
+          ...opening,
+          toolCallId: opening.toolCallId.slice(0, maxToolCallIdChars),
+          ...codeRuntime(this.env),
+          status: "running",
+          startedAt: new Date(),
+        })
+        .run();
+      // The chat keeps the records of its latest runs only.
+      this.#db
+        .delete(chatCodeRuns)
+        .where(
+          and(
+            eq(chatCodeRuns.chatId, chatId),
+            sql`${chatCodeRuns.id} NOT IN (SELECT ${chatCodeRuns.id} FROM ${chatCodeRuns} WHERE ${chatCodeRuns.chatId} = ${chatId} ORDER BY ${chatCodeRuns.startedAt} DESC LIMIT ${codeRunRecordsKept})`
+          )
+        )
+        .run();
+    });
+    this.#codeRuns.set(`${chatId}/${id}`, { calls: 0, openedAt: Date.now() });
+    return id;
+  }
+
+  /**
+   * Closes a code run of the chat as it ended (`status`), unless a
+   * revocation closed it first: that is how it ended, whatever its code
+   * did after. Records it, and returns how it ended.
+   */
+  closeCodeRun(
+    chatId: ChatId,
+    runId: string,
+    status: CodeRunStatus
+  ): CodeRunStatus {
+    const key = `${chatId}/${runId}`;
+    const lease = this.#codeRuns.get(key);
+    const ended: CodeRunStatus =
+      lease !== undefined && "closed" in lease && lease.closed === "revoked"
+        ? "revoked"
+        : status;
+    if (lease === undefined || !("closed" in lease)) {
+      this.#closeLease(key, "ended");
+    }
+    this.#db
+      .update(chatCodeRuns)
+      .set({ status: ended, endedAt: new Date() })
+      .where(
+        and(
+          eq(chatCodeRuns.id, runId),
+          eq(chatCodeRuns.chatId, chatId),
+          eq(chatCodeRuns.status, "running")
+        )
+      )
+      .run();
+    return ended;
+  }
+
+  /**
+   * Ends a code run of the chat's turn. Its lease closes first, at once
+   * and whatever follows, so nothing it still does is admitted from here
+   * on. Then revocations since it opened are read once more, so one its
+   * code never called after is still noticed: the run is recorded as
+   * revoked (once), and the turn hands on nothing of it. A read that
+   * fails counts as a revocation: the run's result is withheld rather
+   * than trusted unchecked.
+   */
+  async #endCodeRun(
+    scope: Omit<AgentScope, "runId">,
+    runId: string,
+    status: CodeRunStatus
+  ): Promise<CodeRunStatus> {
+    const admission = this.admitFromCodeRun(scope.chatId, runId);
+    const ended = this.closeCodeRun(scope.chatId, runId, status);
+    if (admission.call !== "open" || ended === "revoked") {
+      return ended;
+    }
+    let revoked: boolean;
+    try {
+      revoked = await revokedSince(this.env, scope, admission.openedAt);
+    } catch (error) {
+      log.error("agent.revocation_read_failed", {
+        chatId: scope.chatId,
+        runId,
+        ...errorFields(error),
+      });
+      revoked = true;
+    }
+    if (!revoked) {
+      return ended;
+    }
+    this.#db
+      .update(chatCodeRuns)
+      .set({ status: "revoked" })
+      .where(
+        and(
+          eq(chatCodeRuns.id, runId),
+          eq(chatCodeRuns.chatId, scope.chatId),
+          eq(chatCodeRuns.status, ended)
+        )
+      )
+      .run();
+    // Recorded through the outbox, which never fails the turn.
+    await auditAgentCall(
+      this.env,
+      scope,
+      { method: "executeCode" },
+      { outcome: "refused", reason: "agent.run_revoked" }
     );
+    return "revoked";
+  }
+
+  /**
+   * Closes a code run's lease, and forgets the oldest closed runs past the
+   * cap. Moved to the end, so the map keeps closed runs oldest first.
+   */
+  #closeLease(key: string, closed: "ended" | "revoked"): void {
+    this.#codeRuns.delete(key);
+    this.#codeRuns.set(key, { closed, reported: false });
+    const ended = [...this.#codeRuns.keys()].filter((run) => {
+      const lease = this.#codeRuns.get(run);
+      return lease !== undefined && "closed" in lease;
+    });
     const [oldest] = ended;
     if (ended.length > endedRunsKept && oldest !== undefined) {
       this.#codeRuns.delete(oldest);
+    }
+  }
+
+  /**
+   * Closes an open code run of the chat because a permission of its agent
+   * was revoked after it opened (agent-scope.ts): none of its calls or
+   * writes is admitted from then on. `false` when it was closed already.
+   */
+  revokeCodeRun(chatId: ChatId, runId: string): boolean {
+    const key = `${chatId}/${runId}`;
+    const lease = this.#codeRuns.get(key);
+    if (lease === undefined || "closed" in lease) {
+      return false;
+    }
+    this.#closeLease(key, "revoked");
+    // The call that found the revocation records it: later calls aren't.
+    this.#codeRuns.set(key, { closed: "revoked", reported: true });
+    return true;
+  }
+
+  /**
+   * Whether a code run of the chat may have a write admitted now, without
+   * counting a call: `open` with when it opened, or why not. The check a
+   * write makes as it commits, after its call was let in.
+   */
+  admitFromCodeRun(chatId: ChatId, runId: string): CodeRunAdmission {
+    const lease = this.#codeRuns.get(`${chatId}/${runId}`);
+    if (lease === undefined) {
+      return { call: "ended" };
+    }
+    if ("closed" in lease) {
+      return { call: lease.closed };
+    }
+    return { call: "open", openedAt: lease.openedAt };
+  }
+
+  /**
+   * Refuses a write of a code run whose lease is closed: checked in the
+   * same transaction as the write, so a run that ended or was revoked
+   * writes nothing after.
+   */
+  #requireOpenRun(chatId: ChatId, runId: string): void {
+    const { call } = this.admitFromCodeRun(chatId, runId);
+    if (call !== "open") {
+      throw agentErrors.create(
+        call === "revoked" ? "agent.run_revoked" : "agent.run_ended"
+      );
     }
   }
 
@@ -947,49 +1159,54 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Counts one API call of a code run of the chat, and says whether it may
    * go on (see agent-apis.ts): `open` while the run is open and has made
-   * fewer than {@link codeLimits}' `subRequests` calls, `spent` past that,
-   * and `ended` once the run has ended, or for a run this object doesn't
-   * know (one from before a restart). A call after a run's end is logged
-   * once per run.
+   * fewer than {@link codeLimits}' `subRequests` calls (with when it
+   * opened, which a revocation is checked against), `spent` past that,
+   * `revoked` once a revocation closed it, and `ended` once the run has
+   * ended, or for a run this object doesn't know (one from before a
+   * restart). A call after a run closed is logged once per run.
    */
   callFromCodeRun(chatId: ChatId, runId: string): CodeRunCall {
     const key = `${chatId}/${runId}`;
-    const state = this.#codeRuns.get(key);
-    if (typeof state === "number") {
-      if (state >= codeLimits.subRequests) {
-        // Counted once past the most, so only the first refusal says so.
-        this.#codeRuns.set(key, codeLimits.subRequests + 1);
-        return { call: "spent", first: state === codeLimits.subRequests };
+    const lease = this.#codeRuns.get(key);
+    if (lease === undefined) {
+      return { call: "ended", first: false };
+    }
+    if ("closed" in lease) {
+      if (lease.reported) {
+        return { call: lease.closed, first: false };
       }
-      this.#codeRuns.set(key, state + 1);
-      return { call: "open", first: false };
+      // Code still acting after its run closed: worth seeing in the logs.
+      log.warn("agent.run_ended", { chatId, runId, closed: lease.closed });
+      this.#codeRuns.set(key, { ...lease, reported: true });
+      return { call: lease.closed, first: true };
     }
-    if (state === "ended") {
-      // Code still acting after its run ended: worth seeing in the logs.
-      log.warn("agent.run_ended", { chatId, runId });
-      this.#codeRuns.set(key, "reported");
-      return { call: "ended", first: true };
+    if (lease.calls >= codeLimits.subRequests) {
+      // Counted once past the most, so only the first refusal says so.
+      this.#codeRuns.set(key, { ...lease, calls: codeLimits.subRequests + 1 });
+      return { call: "spent", first: lease.calls === codeLimits.subRequests };
     }
-    return { call: "ended", first: false };
+    this.#codeRuns.set(key, { ...lease, calls: lease.calls + 1 });
+    return { call: "open", first: false, openedAt: lease.openedAt };
   }
 
   /**
    * Records what an API call of a code run of the chat read from (see
-   * agent-apis.ts), before the call hands over what it read: `false`, and
-   * nothing recorded, once the run has ended, so the call must not hand it
-   * over. Each source is kept once, for good; every later model request of
+   * agent-apis.ts), before the call hands over what it read: why not, and
+   * nothing recorded, once the run has ended or a revocation closed it, so
+   * the call must not hand it over (`open` when recorded). Each source is kept once, for good; every later model request of
    * the chat carries them all.
    */
   recordSources(
     chatId: ChatId,
     runId: string,
     ids: readonly string[]
-  ): boolean {
-    if (typeof this.#codeRuns.get(`${chatId}/${runId}`) !== "number") {
-      return false;
+  ): CodeRunAdmission["call"] {
+    const { call } = this.admitFromCodeRun(chatId, runId);
+    if (call !== "open") {
+      return call;
     }
     this.#keepSources(chatId, sourcesSchema.parse(ids));
-    return true;
+    return call;
   }
 
   /**
@@ -1112,6 +1329,7 @@ export class Workspace extends DurableObject<Env> {
       this.ctx.storage.transactionSync(() => {
         this.#db.delete(chatMessages).where(eq(chatMessages.chatId, id)).run();
         this.#db.delete(chatSources).where(eq(chatSources.chatId, id)).run();
+        this.#db.delete(chatCodeRuns).where(eq(chatCodeRuns.chatId, id)).run();
         this.#db
           .delete(chatAttachments)
           .where(eq(chatAttachments.chatId, id))
@@ -1375,7 +1593,8 @@ export class Workspace extends DurableObject<Env> {
    * `base`, and drops its changes to the paths in `unchanged` (back as the
    * base has them), only over the revision `revision` the write read (0:
    * there was none): `false`, and nothing written, when another write
-   * landed since, or the chat is gone.
+   * landed since, or the chat is gone. Refused, in the same transaction,
+   * once the code run `runId` that writes it has closed.
    */
   saveDraft(
     chatId: ChatId,
@@ -1383,9 +1602,11 @@ export class Workspace extends DurableObject<Env> {
     base: number | null,
     changes: Record<string, string | null>,
     unchanged: readonly string[],
-    revision: number
+    revision: number,
+    runId: string
   ): boolean {
     const saved = this.ctx.storage.transactionSync(() => {
+      this.#requireOpenRun(chatId, runId);
       const [row] = this.#db
         .select({ revision: chatDrafts.revision })
         .from(chatDrafts)
@@ -1450,14 +1671,24 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Drops the chat's draft of App `appId`; with `revision`, only while it
-   * is still at that revision (what a proposal committed): `false` when it
-   * changed since, or the chat is gone.
+   * Drops the chat's draft of App `appId`: for an open code run (`runId`,
+   * refused in the same transaction once it has closed), or, once a
+   * proposal committed it, only while it is still at the `revision` it
+   * committed: a proposal the run's lease admitted is followed through
+   * whatever came after. `false` when it changed since, or the chat is
+   * gone.
    */
-  dropDraft(chatId: ChatId, appId: string, revision?: number): boolean {
+  dropDraft(
+    chatId: ChatId,
+    appId: string,
+    by: { runId: string } | { revision: number }
+  ): boolean {
     const dropped = this.ctx.storage.transactionSync(() => {
+      if ("runId" in by) {
+        this.#requireOpenRun(chatId, by.runId);
+      }
       const now = this.draft(chatId, appId);
-      if (revision !== undefined && now.revision !== revision) {
+      if ("revision" in by && now.revision !== by.revision) {
         return false;
       }
       if (this.chatState(chatId) === undefined) {
@@ -1725,10 +1956,12 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Takes one of the Apps the chat's agent may create this turn: `false`
-   * once it created `limit`.
+   * Takes one of the Apps the chat's agent may create this turn, for the
+   * code run `runId`, refused once that run has closed: `false` once it
+   * created `limit`.
    */
-  takeCreate(chatId: ChatId, limit: number): boolean {
+  takeCreate(chatId: ChatId, limit: number, runId: string): boolean {
+    this.#requireOpenRun(chatId, runId);
     const turn = this.#turnBuilds(chatId);
     if (turn.created >= limit) {
       return false;
