@@ -117,6 +117,11 @@ export const requestScopes = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.requestId, table.scope, table.key] }),
+    // The requests that reserved against one scope: what holds a run
+    // lineage's spend when its rows are pruned, what the requests under way
+    // in a full scope hold, and what a damaged scope is rebuilt from
+    // (model-ledger.ts).
+    index("request_scopes_scope_key").on(table.scope, table.key),
   ]
 );
 

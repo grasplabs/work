@@ -705,6 +705,12 @@ export const workflowRuns = sqliteTable(
       table.id
     ),
     uniqueIndex("workflow_runs_trigger_key_idx").on(table.triggerKey),
+    // A lineage's runs by its root, for the model ledger to learn whether
+    // every run of it has ended (src/run-lineage-ends.ts). Only runs
+    // another run started have one.
+    index("workflow_runs_root_idx")
+      .on(table.rootRunId)
+      .where(sql`root_run_id IS NOT NULL`),
     // The retention sweep (src/workflows/retention.ts): ended runs that
     // still have their details, longest ended first, then by ID, which
     // the sweep pages by. Only those: a live run has no `ended_at`, and a
