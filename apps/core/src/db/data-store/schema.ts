@@ -44,6 +44,11 @@ export const store = sqliteTable(
      * waits for it, so no record goes unaudited.
      */
     inventoriedAt: integer("inventoried_at"),
+    /**
+     * The key the store signs its page cursors with (store-cursors.ts):
+     * 32 random bytes in hex, made on first use, never leaving the store.
+     */
+    cursorKey: text("cursor_key"),
   },
   (table) => [check("sdk_store_only", sql`${table.only} = 1`)]
 );
