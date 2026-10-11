@@ -31,6 +31,10 @@ const generated = [
   "packages/*/vendor/**",
 ];
 
+/** Why a target may not extend Cap'n Web's or workerd's RpcTarget itself. */
+const unboundedTarget =
+  "Extend CoreRpcTarget (core) or a boundedRpcTarget (@grasp-os/shared/rpc-target), so every call's arguments are bounded.";
+
 export default defineConfig({
   lint: {
     extends: [core, react, tanstack, vitest, shadcn],
@@ -110,6 +114,69 @@ export default defineConfig({
               ],
             },
           ],
+        },
+      },
+      {
+        // A target a browser or a screen calls must hold what its methods
+        // get to the session's limits: Cap'n Web bounds each message, not
+        // a value built from several (@grasp-os/shared/rpc-target). In
+        // workerd, Cap'n Web's RpcTarget is workerd's own.
+        files: ["apps/core/src/**", "apps/web/src/**"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              paths: [
+                {
+                  name: "capnweb",
+                  importNames: ["RpcTarget"],
+                  message: unboundedTarget,
+                },
+                {
+                  name: "cloudflare:workers",
+                  importNames: ["RpcTarget"],
+                  allowTypeImports: true,
+                  message: unboundedTarget,
+                },
+              ],
+            },
+          ],
+          "grasp/no-unbounded-rpc-target": "error",
+        },
+      },
+      {
+        // No package passes RpcTarget on for core or the frontend to
+        // extend unbounded; the bounded base extends it in place.
+        files: ["packages/**"],
+        rules: {
+          "grasp/no-unbounded-rpc-target": ["error", { reexportsOnly: true }],
+        },
+      },
+      {
+        // A run's host is served over workerd's own RPC to the run's
+        // isolate, never over Cap'n Web, and extends workerd's RpcTarget.
+        files: ["apps/core/src/workflows/host.ts"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              paths: [
+                {
+                  name: "capnweb",
+                  importNames: ["RpcTarget"],
+                  message: unboundedTarget,
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        // A test's stand-ins are called by the test alone.
+        files: ["apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx"],
+        rules: {
+          "no-restricted-imports": "off",
+          "grasp/no-unbounded-rpc-target": "off",
         },
       },
       {

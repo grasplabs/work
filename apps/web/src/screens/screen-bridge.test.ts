@@ -74,6 +74,68 @@ const framed = () => {
   return { ...core, broken, close, page, port: port2 };
 };
 
+/** `nested(depth)` as Cap'n Web writes it: each array as `[[...]]`. */
+const wireNested = (depth: number): unknown => {
+  let value: unknown = "bottom";
+  for (let level = 1; level < depth; level += 1) {
+    value = [[value]];
+  }
+  return value;
+};
+
+/** Whether `value` is an object with a `code`, as an error's own properties travel. */
+const isCoded = (value: unknown): value is { code: unknown } =>
+  typeof value === "object" && value !== null && "code" in value;
+
+/**
+ * A frame that speaks Cap'n Web's messages by hand on its port, as a
+ * screen's code can: `push` sends an expression and gives the ID it gets
+ * (1, 2, ... in order), `pull` what one settled as: its answer, or the
+ * code of its error (written `["error", name, message, stack?, own]`).
+ */
+const rawFramed = () => {
+  const core = coreStandIn();
+  const { port1, port2 } = new MessageChannel();
+  const broken = { times: 0 };
+  const close = openBridge(port1, core.target, () => {
+    broken.times += 1;
+  });
+  const waiting = new Map<number, (outcome: unknown) => void>();
+  port2.addEventListener("message", (event: MessageEvent<unknown>) => {
+    const message: unknown =
+      typeof event.data === "string" ? JSON.parse(event.data) : undefined;
+    if (!Array.isArray(message)) {
+      return;
+    }
+    const kind: unknown = message[0];
+    const id: unknown = message[1];
+    const value: unknown = message[2];
+    if (typeof id !== "number") {
+      return;
+    }
+    if (kind === "resolve") {
+      waiting.get(id)?.({ answered: value });
+    } else if (kind === "reject") {
+      const own = Array.isArray(value) ? value.find(isCoded) : undefined;
+      waiting.get(id)?.(own?.code ?? value);
+    }
+  });
+  port2.start();
+  let pushed = 0;
+  const push = (expression: unknown): number => {
+    port2.postMessage(JSON.stringify(["push", expression]));
+    pushed += 1;
+    return pushed;
+  };
+  const pull = async (id: number): Promise<unknown> => {
+    const settled = Promise.withResolvers<unknown>();
+    waiting.set(id, settled.resolve);
+    port2.postMessage(JSON.stringify(["pull", id]));
+    return await settled.promise;
+  };
+  return { ...core, broken, close, push, pull };
+};
+
 /** How a call of the frame's ended: its answer, or why not. */
 const outcome = async (call: Promise<unknown>): Promise<unknown> => {
   try {
@@ -240,6 +302,150 @@ describe("the page's bridge to a screen", () => {
       // Whole, every level of it.
       reached: [{ method: "notes", args: [nested(valueDepth)] }],
       broken: 1,
+    });
+  });
+
+  it("refuses a value built from many messages deeper than values may be, before it reaches core, and passes one as deep", async () => {
+    const frame = rawFramed();
+    // A value `base` levels deep, then `levels` more pushes, each an array
+    // around the push before: no message is deeper than `base`.
+    const built = (base: number, levels: number): number => {
+      let pushed = frame.push(wireNested(base));
+      for (let level = 0; level < levels; level += 1) {
+        pushed = frame.push([[["pipeline", pushed]]]);
+      }
+      return pushed;
+    };
+    const called = async (pushed: number): Promise<unknown> =>
+      await frame.pull(
+        frame.push([
+          "pipeline",
+          0,
+          ["call"],
+          ["notes", [[["pipeline", pushed]]]],
+        ])
+      );
+
+    const deepest = await called(built(valueDepth - 8, 8));
+    const oneMore = await called(built(valueDepth - 8, 9));
+    // Thousands of levels: refused as such, not by running out of stack.
+    const farDeeper = await called(built(30, 100));
+    // Passed as a run's input, straight.
+    const asInput = await frame.pull(
+      frame.push([
+        "pipeline",
+        0,
+        ["startRun"],
+        ["invoices", ["pipeline", built(30, 100)]],
+      ])
+    );
+    const after = await called(built(1, 0));
+    frame.close();
+
+    expect({
+      deepest,
+      oneMore,
+      farDeeper,
+      asInput,
+      after,
+      reached: frame.calls,
+      broken: frame.broken.times,
+    }).toStrictEqual({
+      deepest: { answered: "answered" },
+      oneMore: "request.too_deep",
+      farDeeper: "request.too_deep",
+      asInput: "request.too_deep",
+      after: { answered: "answered" },
+      reached: [
+        { method: "notes", args: [nested(valueDepth)] },
+        { method: "notes", args: ["bottom"] },
+      ],
+      // The session goes on.
+      broken: 0,
+    });
+  });
+
+  it("refuses a value a key every object has carries in, a prototype and an error's own among them", async () => {
+    const frame = rawFramed();
+    let deep = frame.push(wireNested(30));
+    for (let level = 0; level < 100; level += 1) {
+      deep = frame.push([[["pipeline", deep]]]);
+    }
+    const shallow = frame.push({ approved: true });
+    const called = async (key: string, pushed: number): Promise<unknown> =>
+      await frame.pull(
+        frame.push([
+          "pipeline",
+          0,
+          ["call"],
+          ["notes", [[{ [key]: ["pipeline", pushed] }]]],
+        ])
+      );
+
+    const outcomes = {
+      protoDeep: await called("__proto__", deep),
+      protoShallow: await called("__proto__", shallow),
+      constructorDeep: await called("constructor", deep),
+      toJSONDeep: await called("toJSON", deep),
+      // Cap'n Web gives it `errors` as a property `Object.keys` skips.
+      aggregateDeep: await frame.pull(
+        frame.push([
+          "pipeline",
+          0,
+          ["call"],
+          [
+            "notes",
+            [
+              [
+                [
+                  "error",
+                  "AggregateError",
+                  "m",
+                  null,
+                  { errors: ["pipeline", deep] },
+                ],
+              ],
+            ],
+          ],
+        ])
+      ),
+    };
+    frame.close();
+
+    expect({ outcomes, reached: frame.calls }).toStrictEqual({
+      outcomes: {
+        protoDeep: "request.unsupported_value",
+        protoShallow: "request.unsupported_value",
+        constructorDeep: "request.too_deep",
+        toJSONDeep: "request.too_deep",
+        aggregateDeep: "request.too_deep",
+      },
+      reached: [],
+    });
+  });
+
+  it("refuses a value held so many times over it is more than a message may hold", async () => {
+    const frame = rawFramed();
+    // Each push holds the one before twice: 2^10 copies of 1,000 signs, far
+    // past the bridge's message size. Cap'n Web copies every reference before
+    // the check runs (GRA-424), so more copies only make the test slow.
+    let pushed = frame.push("x".repeat(1000));
+    for (let level = 0; level < 10; level += 1) {
+      pushed = frame.push([
+        [
+          ["pipeline", pushed],
+          ["pipeline", pushed],
+        ],
+      ]);
+    }
+    const held = await frame.pull(
+      frame.push(["pipeline", 0, ["call"], ["notes", [[["pipeline", pushed]]]]])
+    );
+    frame.close();
+
+    expect({ held, reached: frame.calls }).toStrictEqual({
+      held: "request.too_large",
+      reached: [],
     });
   });
 

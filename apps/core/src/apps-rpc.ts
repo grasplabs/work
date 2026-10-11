@@ -5,7 +5,6 @@ import type {
   CurrentExports,
   NewApp,
 } from "@grasp-os/shared/apps";
-import { RpcTarget } from "capnweb";
 
 import { AppBlueprintsRpc } from "./app-blueprints.ts";
 import { AppFilesRpc } from "./app-files-rpc.ts";
@@ -18,6 +17,7 @@ import {
   getApp,
   listApps,
 } from "./apps.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
@@ -27,7 +27,7 @@ import type { SessionCheck } from "./session-check.ts";
  * functions check the person's role in the App and validate what the
  * client sent.
  */
-export class AppsRpc extends RpcTarget implements AppsApi {
+export class AppsRpc extends CoreRpcTarget implements AppsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
   readonly #files: AppFilesRpc;

@@ -3,8 +3,8 @@ import type {
   WorkflowParam,
   WorkflowParamsApi,
 } from "@grasp-os/shared/workflows";
-import { RpcTarget } from "capnweb";
 
+import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { listParams, setParam } from "./params.ts";
@@ -14,7 +14,10 @@ import { listParams, setParam } from "./params.ts";
  * parameters. The param functions check the person's role and validate
  * what the client sent.
  */
-export class WorkflowParamsRpc extends RpcTarget implements WorkflowParamsApi {
+export class WorkflowParamsRpc
+  extends CoreRpcTarget
+  implements WorkflowParamsApi
+{
   readonly #env: Env;
   readonly #check: SessionCheck;
 

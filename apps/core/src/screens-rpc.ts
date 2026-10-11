@@ -20,16 +20,17 @@ import type {
   ScreenRun,
   ScreensApi,
 } from "@grasp-os/shared/screens";
+import { valueDepth } from "@grasp-os/shared/value-depth";
 import type { WorkflowRun } from "@grasp-os/shared/workflows";
-import { RpcTarget } from "capnweb";
 import { z } from "zod";
 
-import { callApp, isPlainData } from "./app.ts";
+import { callApp, isPlainData, plainDataBounds } from "./app.ts";
 import type { AppAnswer } from "./app.ts";
 import { appFor, findVersion, getApp, versionFiles } from "./apps.ts";
 import { appHost } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { recordBuilds } from "./screen-builds.ts";
 import { frameAccess, stageFrame } from "./screen-frame.ts";
@@ -145,7 +146,7 @@ export const admitPreviewCall = async (
 
 /** `answer`, if it is no more than a screen takes in one call. */
 export const withinAnswer = <Answer>(answer: Answer): Answer => {
-  if (jsonBytes(answer) > screenLimits.answerBytes) {
+  if (jsonBytes(answer, screenLimits.answerBytes) > screenLimits.answerBytes) {
     throw screenErrors.create("screen.answer_too_large");
   }
   return answer;
@@ -238,12 +239,19 @@ export const argumentsFor = (
   args: unknown[],
   stillOpen: StillOpen
 ): { passed: unknown[]; callbacks: Disposable[] } => {
-  if (!args.every((arg) => isStub(arg) || isPlainData(arg))) {
+  if (
+    !args.every(
+      (arg) =>
+        isStub(arg) ||
+        // Held to its bytes below, which says so.
+        isPlainData(arg, { ...plainDataBounds, depth: valueDepth })
+    )
+  ) {
     throw screenErrors.create("screen.invalid");
   }
   // Measured without the callbacks, which carry nothing yet.
   const data = args.filter((arg) => !isStub(arg));
-  if (jsonBytes(data) > screenLimits.inputBytes) {
+  if (jsonBytes(data, screenLimits.inputBytes) > screenLimits.inputBytes) {
     throw screenErrors.create("screen.input_too_large");
   }
   const callbacks: Disposable[] = [];
@@ -481,7 +489,7 @@ const errorLog = async (
  * call checks the session first and hands the identity that check returned
  * on; each function checks the person's role.
  */
-export class ScreensRpc extends RpcTarget implements ScreensApi {
+export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 
