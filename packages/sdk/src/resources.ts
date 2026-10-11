@@ -272,9 +272,24 @@ const checkedList = (
   return Object.freeze(names);
 };
 
-/** `declaration`, frozen and registered as genuine. */
+/** `value` with every object and array in it frozen; data only. */
+const deepFreeze = <Value>(value: Value): Value => {
+  if (typeof value === "object" && value !== null) {
+    Object.freeze(value);
+    for (const entry of Object.values(value)) {
+      deepFreeze(entry);
+    }
+  }
+  return value;
+};
+
+/**
+ * `declaration`, frozen all the way down (its lists and a model's output
+ * descriptor included), so nothing changes what was checked before the App
+ * registers it, and registered as genuine.
+ */
 const declared = (declaration: AnyResource): AnyResource => {
-  const frozen = Object.freeze(declaration);
+  const frozen = deepFreeze(declaration);
   declarations.add(frozen);
   return frozen;
 };

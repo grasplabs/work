@@ -214,6 +214,52 @@ describe("access", () => {
   });
 });
 
+describe("resources", () => {
+  test("are frozen all the way down, so nothing checked can change before registration", () => {
+    const model = resource.model("summarizer", {
+      structuredOutput: v.object({ summary: v.string() }),
+      maxOutputTokens: 100,
+    });
+    const knowledge = resource.knowledge("help", {
+      operations: ["search"],
+      collections: ["handbook"],
+    });
+    const connector = resource.connector("mail", {
+      contract: "grasp.mail@1",
+      actions: ["send"],
+    });
+    const template = resource.template("letter", {
+      contract: "grasp.letter@1",
+    });
+    const fields =
+      model.structuredOutput?.kind === "object"
+        ? model.structuredOutput.fields
+        : {};
+    expect({
+      operation: Reflect.set(knowledge.operations, 0, "read"),
+      added: Reflect.set(knowledge.operations, 1, "read"),
+      collection: Reflect.set(knowledge.collections, 0, "secret"),
+      action: Reflect.set(connector.actions, 0, "delete"),
+      output: Reflect.set(fields, "extra", { kind: "string" }),
+      outputKind: Reflect.set(model.structuredOutput ?? {}, "kind", "string"),
+      contract: Reflect.set(template, "contract", "grasp.other@1"),
+    }).toStrictEqual({
+      operation: false,
+      added: false,
+      collection: false,
+      action: false,
+      output: false,
+      outputKind: false,
+      contract: false,
+    });
+    expect([
+      knowledge.operations,
+      connector.actions,
+      model.structuredOutput?.kind,
+    ]).toStrictEqual([["search"], ["send"], "object"]);
+  });
+});
+
 describe("inspection", () => {
   test("hands out a manifest frozen all the way down, and handlers it can't change", () => {
     const registered = notes();
