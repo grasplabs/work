@@ -1,5 +1,6 @@
 import { ValueDefinitionError } from "@grasp-os/sdk";
 import {
+  manifestText,
   readSchemaManifest,
   SchemaDefinitionError,
   schemaHash as hashOf,
@@ -57,6 +58,7 @@ import {
   outbox,
   receipts,
   records,
+  schemas,
   store,
   tables,
 } from "./db/data-store/schema.ts";
@@ -72,6 +74,7 @@ import {
 import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
 import { inventoriedDeleted, recordStoreDeleted } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
+import { installIndexes, planIndexes } from "./store-indexes.ts";
 
 // The host of a business store (data-store.ts is its Durable Object): one
 // object per store, named by the store's ID (data-stores.ts), with a SQLite database of its own that holds all
@@ -224,6 +227,7 @@ const purgeBudgetMs = 10_000;
  */
 const purgedTables = [
   "sdk_records",
+  "sdk_schemas",
   "sdk_change_outbox",
   "sdk_mutation_receipts",
   "sdk_tables",
@@ -333,9 +337,15 @@ export class StoreHost {
    * the caller. A schema that fails a check is refused
    * (`data.invalid_schema`, with the check's code). A table name that
    * differs from an existing one only in case is refused, and so is one
-   * past `storeMaxTables`. Tables are never renamed or removed here, and
-   * nothing is activated: which schema a store holds its records to comes
-   * with schema activation.
+   * past `storeMaxTables`. Then it installs a physical index for each of
+   * the schema's declared indexes it doesn't hold yet (store-indexes.ts;
+   * `data.too_many_indexes` past `storeMaxIndexes`) and records the
+   * manifest under its hash, all in one transaction with the new tables,
+   * so a refusal leaves nothing behind and a read pinned to the schema
+   * finds its indexes whenever it finds the schema. Doing it again
+   * changes nothing. Tables and indexes are never renamed or
+   * removed here, and nothing is activated: which schema a store holds
+   * its records to comes with schema activation.
    */
   async defineTables(
     storeId: StoreId,
@@ -344,54 +354,107 @@ export class StoreHost {
     const read = readSchema(manifest);
     const schemaHash = await hashOf(read.manifest);
     const names = Object.keys(read.manifest.tables);
-    const ids = this.ctx.storage.transactionSync(() => {
-      this.#bind(storeId);
-      const now = Date.now();
-      for (const name of names) {
-        const existing = this.#db
-          .select({ name: tables.name })
-          .from(tables)
-          .where(eq(tables.nameKey, name.toLowerCase()))
-          .get();
-        if (existing !== undefined) {
-          if (existing.name !== name) {
-            throw dataErrors.create("data.table_conflict", {
-              table: name,
-              existing: existing.name,
-            });
-          }
-          continue;
-        }
-        this.#db
-          .insert(tables)
-          .values({
-            tableId: crypto.randomUUID(),
-            name,
-            nameKey: name.toLowerCase(),
-            createdAt: now,
-          })
-          .run();
+    const text = manifestText(read.manifest);
+    // Indexes are named by hashes of definitions that name table IDs, and
+    // hashing is asynchronous: so the IDs of new tables are minted and the
+    // indexes planned first, from the tables as they are, then the tables,
+    // indexes and schema land in one transaction, or nothing does. Should
+    // another call change the tables in between, it plans again.
+    for (let attempt = 1; ; attempt += 1) {
+      const before = this.#tableRows();
+      const known = new Map(before.map(({ name, tableId }) => [name, tableId]));
+      const planned = Object.fromEntries(
+        names.map((name) => [name, known.get(name) ?? crypto.randomUUID()])
+      );
+      // Planned table by table; nothing is written yet.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const plan = await planIndexes(read.manifest, planned);
+      const defined = this.ctx.storage.transactionSync(() =>
+        this.#defineIn(storeId, before, planned, plan, schemaHash, text)
+      );
+      if (defined !== null) {
+        return { schemaHash, ...defined };
       }
-      const all = this.#db
-        .select({ name: tables.name, tableId: tables.tableId })
+      if (attempt >= 3) {
+        throw new Error("The store's tables kept changing while defined");
+      }
+    }
+  }
+
+  /**
+   * `defineTables`' one transaction: the schema's new tables with the IDs
+   * its indexes were planned for, the indexes and the schema; null, with
+   * nothing written, if the tables changed since `before` was read.
+   */
+  #defineIn(
+    storeId: StoreId,
+    before: readonly { name: string; tableId: string }[],
+    planned: Readonly<Record<string, string>>,
+    plan: Awaited<ReturnType<typeof planIndexes>>,
+    schemaHash: string,
+    text: string
+  ): Omit<DefinedTables, "schemaHash"> | null {
+    const names = Object.keys(planned);
+    this.#bind(storeId);
+    if (canonicalJson(this.#tableRows()) !== canonicalJson(before)) {
+      return null;
+    }
+    const now = Date.now();
+    for (const name of names) {
+      const existing = this.#db
+        .select({ name: tables.name })
         .from(tables)
-        .all();
-      if (all.length > storeMaxTables) {
-        throw dataErrors.create("data.too_many_tables");
+        .where(eq(tables.nameKey, name.toLowerCase()))
+        .get();
+      if (existing !== undefined) {
+        if (existing.name !== name) {
+          throw dataErrors.create("data.table_conflict", {
+            table: name,
+            existing: existing.name,
+          });
+        }
+        continue;
       }
-      const schemaTables = new Set(names);
-      return {
-        tables: Object.fromEntries(
-          all
-            .filter(({ name }) => schemaTables.has(name))
-            .map(({ name, tableId }) => [name, tableId])
-        ),
-        storeTables: Object.fromEntries(
-          all.map(({ name, tableId }) => [name, tableId])
-        ),
-      };
-    });
-    return { schemaHash, ...ids };
+      this.#db
+        .insert(tables)
+        .values({
+          tableId: planned[name] ?? crypto.randomUUID(),
+          name,
+          nameKey: name.toLowerCase(),
+          createdAt: now,
+        })
+        .run();
+    }
+    const all = this.#tableRows();
+    if (all.length > storeMaxTables) {
+      throw dataErrors.create("data.too_many_tables");
+    }
+    installIndexes(this.ctx.storage.sql, plan);
+    this.#db
+      .insert(schemas)
+      .values({ schemaHash, manifest: text, createdAt: now })
+      .onConflictDoNothing()
+      .run();
+    const schemaTables = new Set(names);
+    return {
+      tables: Object.fromEntries(
+        all
+          .filter(({ name }) => schemaTables.has(name))
+          .map(({ name, tableId }) => [name, tableId])
+      ),
+      storeTables: Object.fromEntries(
+        all.map(({ name, tableId }) => [name, tableId])
+      ),
+    };
+  }
+
+  /** The store's tables, by name and ID, in a stable order. */
+  #tableRows(): { name: string; tableId: string }[] {
+    return this.#db
+      .select({ name: tables.name, tableId: tables.tableId })
+      .from(tables)
+      .orderBy(asc(tables.tableId))
+      .all();
   }
 
   /** The record `id` of `table`, or null if the store has none. */
@@ -1020,12 +1083,14 @@ export class StoreHost {
   async schedule(gapMs = alarmGapMs): Promise<void> {
     if (this.#deleted()) {
       // Only recording it in core and its purge are left, if anything.
-      const left = this.ctx.storage.sql
-        .exec(
-          `SELECT 1 FROM sdk_store WHERE inventoried_at IS NULL ${purgedTables.map((table) => `UNION ALL SELECT 1 FROM ${table}`).join(" ")} LIMIT 1`
+      // EXISTS terms rather than a UNION: SQLite here caps a compound
+      // SELECT at five terms.
+      const [left] = this.ctx.storage.sql
+        .exec<{ left: number }>(
+          `SELECT (EXISTS (SELECT 1 FROM sdk_store WHERE inventoried_at IS NULL) ${purgedTables.map((table) => `OR EXISTS (SELECT 1 FROM ${table})`).join(" ")}) AS left`
         )
         .toArray();
-      if (left.length > 0) {
+      if (left?.left === 1) {
         await this.ctx.storage.setAlarm(Date.now() + gapMs);
       }
       return;

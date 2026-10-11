@@ -103,8 +103,36 @@ export const records = sqliteTable(
       sql`json_valid(${table.valueJson}) AND json_type(${table.valueJson}) = 'object'`
     ),
     check("sdk_records_updated", sql`${table.updatedAt} >= ${table.createdAt}`),
+    // A table's records in the default order, by creation time with the
+    // record ID breaking ties, and the same per owner: what a query
+    // without an index reads through (store-indexes.ts). Two fixed indexes
+    // serve every table, so a store's tables cost no partial index each.
+    index("sdk_records_created").on(
+      table.tableId,
+      table.createdAt,
+      table.recordId
+    ),
+    index("sdk_records_owner_created").on(
+      table.tableId,
+      table.ownerId,
+      table.createdAt,
+      table.recordId
+    ),
   ]
 );
+
+/**
+ * Every schema the store was handed, by its hash, with its canonical
+ * manifest: what a read pinned to that schema is checked against, and
+ * whose indexes it reads through. Kept as long as the store, so a
+ * consumer pinned to an older schema keeps its indexes (store-indexes.ts);
+ * nothing here is activated, and nothing removes a row.
+ */
+export const schemas = sqliteTable("sdk_schemas", {
+  schemaHash: text("schema_hash").primaryKey(),
+  manifest: text().notNull(),
+  createdAt: integer("created_at").notNull(),
+});
 
 /**
  * A mutation's receipt (data-store.ts), under the hash of its scope and
