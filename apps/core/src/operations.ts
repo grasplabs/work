@@ -23,6 +23,7 @@ import {
 } from "@grasp-os/shared/operation-limits";
 import {
   categoryOf,
+  effectErrors,
   isPlatformCode,
   isRetryableCode,
   jsonOf,
@@ -1046,6 +1047,31 @@ const checkedResourceResult = (
 };
 
 /**
+ * What a provider's failure becomes, from an allow-list: an outcome the
+ * provider couldn't confirm (`effect.outcome_unknown`, connect's
+ * `connect.outcome_unknown` included) as that, kept so nobody repeats the
+ * effect under a fresh key; a binding whose grant was revoked
+ * (`permission.denied`) as `resource.unavailable`; anything else
+ * `internal.unexpected`, its cause logged. Never the provider's own code,
+ * message or details (a connection's ID, the provider's status).
+ */
+const providerFailure = (error: unknown, requestId: string): Error => {
+  const code = isExpectedError(error) ? error.code : undefined;
+  if (code === "effect.outcome_unknown" || code === "connect.outcome_unknown") {
+    return hostError(effectErrors.create("effect.outcome_unknown"));
+  }
+  if (code === "permission.denied") {
+    return hostError(operationErrors.create("resource.unavailable"));
+  }
+  log.error("operation.resource_failed", {
+    requestId,
+    code,
+    ...errorFields(error),
+  });
+  return hostError(internalErrors.create("internal.unexpected", { requestId }));
+};
+
+/**
  * One request of a resource an action declared and uses, as `alias`
  * names it: only a use its declaration allows (`allowedRequest`), its
  * arguments JSON within the operation input limit, through the binding
@@ -1098,13 +1124,17 @@ const resourceCall = async (
   ) {
     throw operationErrors.create("resource.unavailable");
   }
-  const result = jsonOf(
-    await bound.call(method, args, {
+  let answered: unknown;
+  try {
+    answered = await bound.call(method, args, {
       requestId: run.invocation.requestId,
       deadline: run.invocation.deadline,
       idempotencyKey: key.join(":"),
-    })
-  );
+    });
+  } catch (error) {
+    throw providerFailure(error, run.invocation.requestId);
+  }
+  const result = jsonOf(answered);
   if (result === undefined || bytesOf(result) > operationResultMaxBytes) {
     throw operationErrors.create("contract.invalid_resource_result");
   }
@@ -1171,7 +1201,51 @@ interface Run {
   readonly invocation: Invocation;
   /** How many functions it is nested in: 0 for the one the caller named. */
   readonly depth: number;
+  /** What the whole call may still do, shared by every function in it. */
+  readonly budget: CallBudget;
 }
+
+/**
+ * The most functions one call may run nested in its own, at any depth:
+ * past it, `operation.call_limit`. With `callMaxDepth`, it keeps one
+ * action call from fanning out into thousands of invocations.
+ */
+export const callMaxNested = 64;
+
+/** The most resource requests one call may make, at any depth. */
+export const callMaxResourceRequests = 32;
+
+/**
+ * What one call, with everything nested in it, may still do: its nested
+ * calls, its resource requests, and one read budget (reads and staged
+ * bytes sent) shared by every function it runs.
+ */
+interface CallBudget {
+  nested: number;
+  requests: number;
+  readonly reads: ReadBudget;
+}
+
+/** A new call's budget. */
+const callBudget = (): CallBudget => ({
+  nested: 0,
+  requests: 0,
+  reads: readBudget(),
+});
+
+/** Spends one nested call, or one resource request, of `budget`. */
+const spendCall = (budget: CallBudget, what: "nested" | "requests"): void => {
+  budget[what] += 1;
+  if (
+    budget.nested > callMaxNested ||
+    budget.requests > callMaxResourceRequests
+  ) {
+    throw operationErrors.create("operation.call_limit", {
+      maxNested: callMaxNested,
+      maxResourceRequests: callMaxResourceRequests,
+    });
+  }
+};
 
 /** Thrown by a run whose failure came from stale reads: run it again. */
 const staleRun = new Error("A run's reads went stale");
@@ -1281,6 +1355,11 @@ const stagedQuery = async (
   reader: StoreReader,
   spend: () => void
 ): Promise<Json> => {
+  // A mutation runs queries only (inspection and `nestedCall` see to it):
+  // checked again here, where anything else would see its staged state.
+  if (callee.kind !== "query") {
+    throw operationErrors.create("operation.kind_mismatch");
+  }
   const narrowed: OperationManifest = {
     ...callee,
     tables: Object.fromEntries(
@@ -1372,6 +1451,7 @@ const nestedCall = async (
   if (callee.stream !== null) {
     throw operationErrors.create("operation.unsupported");
   }
+  spendCall(run.budget, "nested");
   const admitted = admittedArgs(run.compiled, callee, args);
   const nested: Run = { ...run, depth: run.depth + 1 };
   try {
@@ -1386,7 +1466,13 @@ const nestedCall = async (
       );
     }
     // oxlint-disable-next-line no-use-before-define -- an action's calls run functions of every kind, actions among them
-    return await execute(nested, callee, admitted, await within.derived());
+    return await execute(
+      nested,
+      callee,
+      admitted,
+      // A query needs no key: only what changes something holds a place.
+      callee.kind === "query" ? [] : await within.derived()
+    );
   } catch (error) {
     throw forCaller(error, run.invocation.requestId);
   }
@@ -1406,7 +1492,7 @@ const runQuery = async (
   return await trusted(
     async () =>
       await readConsistently(invocation.store, scope, async (reader) => {
-        const budget = readBudget();
+        const budget = run.budget.reads;
         return await runHandler(run, operation, args, {
           read: async (request) => {
             spendRead(budget, 0);
@@ -1459,7 +1545,7 @@ const runMutation = async (
     const scope = await scopeOf(compiled, invocation, roles);
     const staging = stagingFor(compiled, operation, Date.now());
     const reader = new StoreReader(store, scope, staging.preview);
-    const budget = readBudget();
+    const budget = run.budget.reads;
     const spend = () => {
       spendRead(budget, staging.bytes());
     };
@@ -1548,15 +1634,32 @@ const runAction = async (
   args: Json,
   key: readonly string[]
 ): Promise<Json> => {
-  await trusted(run.invocation.authorize);
-  let calls = 0;
+  const { invocation, compiled } = run;
+  await trusted(invocation.authorize);
+  // What every key this action derives is bound to: who calls it, through
+  // which App, which action's contract with which input, under the call's
+  // key. Two callers, Apps, actions or inputs with one key never share a
+  // derived key, and the same call made again derives the same ones.
+  const scope = await sha256Hex(
+    canonicalJson({
+      principal: invocation.principal,
+      resource: invocation.consumer.resourceId,
+      contract: await contractIdOf(compiled, operation),
+      inputHash: await sha256Hex(canonicalJson(args)),
+      key: [...key],
+    })
+  );
+  // Places count only what changes something (mutations and actions it
+  // calls, resource requests), so a query that runs or not, as the data
+  // has it, moves no later place.
+  let changes = 0;
   let requests = 0;
   const derived = async (
     what: "call" | "resource",
     count: number
   ): Promise<readonly string[]> => [
     "derived",
-    await sha256Hex(canonicalJson([...key, what, count])),
+    await sha256Hex(canonicalJson([scope, what, count])),
   ];
   return await runHandler(run, operation, args, {
     call: async (kind, path, callArgs) =>
@@ -1567,12 +1670,13 @@ const runAction = async (
         {
           type: "action",
           derived: async () => {
-            calls += 1;
-            return await derived("call", calls);
+            changes += 1;
+            return await derived("call", changes);
           },
         }
       ),
     resource: async (alias, method, callArgs) => {
+      spendCall(run.budget, "requests");
       requests += 1;
       return await resourceCall(
         run,
@@ -1632,7 +1736,7 @@ export const callOperation = async (
       };
     });
     const value = await execute(
-      { app, compiled, invocation, depth: 0 },
+      { app, compiled, invocation, depth: 0, budget: callBudget() },
       operation,
       admitted,
       ["call", key]

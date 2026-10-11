@@ -10,10 +10,12 @@ import { inspectApp, manifestText } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
+import { connectErrors } from "@grasp-os/shared/connect";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { effectErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -22,7 +24,12 @@ import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import { callMaxDepth, callOperation } from "../src/operations.ts";
+import {
+  callMaxDepth,
+  callMaxNested,
+  callMaxResourceRequests,
+  callOperation,
+} from "../src/operations.ts";
 import type {
   BoundResource,
   ResourceBindings,
@@ -224,6 +231,98 @@ const readLetter = action({
   },
 });
 
+const remove = mutation({
+  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.delete("notes", args.id, {
+      expectedRevision: args.expectedRevision,
+    });
+    return null;
+  },
+});
+
+/** Reads the table `reads` times. */
+const readMany = internalQuery({
+  args: { reads: v.number().integer().min(0).max(1000) },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    for (let index = 0; index < args.reads; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one read after the other
+      await ctx.db.query("notes").first();
+    }
+    return args.reads;
+  },
+});
+
+/** Runs `calls` queries, each reading `reads` times. */
+const fanOut = action({
+  args: {
+    calls: v.number().integer().min(0).max(1000),
+    reads: v.number().integer().min(0).max(1000),
+  },
+  returns: v.number(),
+  uses: [readMany],
+  handler: async (ctx, args) => {
+    for (let index = 0; index < args.calls; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one call after the other
+      await ctx.runQuery(readMany, { reads: args.reads });
+    }
+    return args.calls;
+  },
+});
+
+/** Sends `count` mails. */
+const sendMany = action({
+  args: { count: v.number().integer().min(0).max(1000) },
+  returns: v.number(),
+  uses: [mail],
+  handler: async (ctx, args) => {
+    for (let index = 0; index < args.count; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one request after the other
+      await ctx.resources.mail.call("send", { to: "ada@acme.test" });
+    }
+    return args.count;
+  },
+});
+
+/** Sends one mail, as `sendMail` does, from another action. */
+const sendMailToo = action({
+  args: { to: v.string().email() },
+  returns: v.null(),
+  uses: [mail],
+  handler: async (ctx, args) => {
+    await ctx.resources.mail.call("send", { to: args.to });
+    return null;
+  },
+});
+
+/** Creates a note, as `compose` does first, from another action. */
+const createOnly = action({
+  args: { title: v.string() },
+  returns: v.id("notes"),
+  uses: [create],
+  handler: async (ctx, args) =>
+    await ctx.runMutation(create, { title: args.title }),
+});
+
+/**
+ * Looks note `id` up, counts the notes only while it exists, then creates
+ * one: how many queries it runs depends on the data.
+ */
+const conditional = action({
+  args: { id: v.id("notes") },
+  returns: v.id("notes"),
+  uses: [get, count, create],
+  handler: async (ctx, args) => {
+    const note = await ctx.runQuery(get, { id: args.id });
+    if (note) {
+      await ctx.runQuery(count, {});
+    }
+    return await ctx.runMutation(create, { title: "conditional" });
+  },
+});
+
 const streaming = action({
   args: {},
   returns: v.null(),
@@ -236,7 +335,7 @@ const notesApp = app({
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
   operations: {
-    notes: { get, create, reject, createAndCount, blindCount },
+    notes: { get, create, reject, createAndCount, blindCount, remove },
     actions: {
       compose,
       createThenFail,
@@ -247,10 +346,15 @@ const notesApp = app({
       searchHelp,
       readLetter,
       streaming,
+      fanOut,
+      sendMany,
+      sendMailToo,
+      createOnly,
+      conditional,
     },
     chain: { level0, level1, level2, level3, level4 },
   },
-  internalOperations: { count },
+  internalOperations: { count, readMany },
   operationAccess: {
     "notes.blindCount": { tables: { notes: { insert: true } } },
   },
@@ -767,6 +871,262 @@ describe("resources", () => {
       hitsWithMore: "contract.invalid_resource_result",
       template: 3,
       otherTemplate: "contract.invalid_resource_result",
+    });
+  });
+});
+
+describe("one call's budget", () => {
+  it("bounds the functions one action runs, at any depth, and their reads together", async () => {
+    const fixture = await notes();
+    const fan = async (calls: number, reads: number) =>
+      codeOf(await call(fixture, "action", "actions.fanOut", { calls, reads }));
+    expect({
+      allowed: await fan(callMaxNested, 0),
+      tooMany: await fan(callMaxNested + 1, 0),
+      readsTogether: await fan(2, 200),
+    }).toStrictEqual({
+      allowed: "ok",
+      tooMany: "operation.call_limit",
+      readsTogether: "operation.read_limit",
+    });
+  });
+
+  it("bounds the resource requests one call makes", async () => {
+    const fixture = await notes();
+    const resources = bindingsOf({
+      mail: bound("connector", "grasp.mail@1", messageSent),
+    });
+    const send = async (requests: number) =>
+      codeOf(
+        await call(
+          fixture,
+          "action",
+          "actions.sendMany",
+          { count: requests },
+          { resources }
+        )
+      );
+    expect({
+      allowed: await send(callMaxResourceRequests),
+      tooMany: await send(callMaxResourceRequests + 1),
+    }).toStrictEqual({ allowed: "ok", tooMany: "operation.call_limit" });
+  });
+});
+
+describe("derived keys", () => {
+  /** The idempotency key the provider got for one mail of `path`, by `fixture`'s owner. */
+  const keySent = async (fixture: Fixture, path: string): Promise<string> => {
+    const seen: string[] = [];
+    await call(
+      fixture,
+      "action",
+      path,
+      { to: "ada@acme.test" },
+      {
+        idempotencyKey: "same",
+        resources: bindingsOf({
+          mail: bound(
+            "connector",
+            "grasp.mail@1",
+            async (_method, _args, context) => {
+              seen.push(context.idempotencyKey);
+              return await Promise.resolve({ messageId: "m" });
+            }
+          ),
+        }),
+      }
+    );
+    return seen[0] ?? "";
+  };
+
+  it("differ across callers, Apps and actions sharing a key", async () => {
+    const first = await notes();
+    const second = await notes();
+    const keys = [
+      await keySent(first, "actions.sendMail"),
+      await keySent(second, "actions.sendMail"),
+      await keySent(first, "actions.sendMailToo"),
+      await keySent(first, "actions.sendMail"),
+    ];
+    expect({
+      acrossCallersAndApps: keys[0] === keys[1],
+      acrossActions: keys[0] === keys[2],
+      sameCall: keys[0] === keys[3],
+    }).toStrictEqual({
+      acrossCallersAndApps: false,
+      acrossActions: false,
+      sameCall: true,
+    });
+  });
+
+  it("never give one action another's outcome under the same key", async () => {
+    const fixture = await notes();
+    const options = { idempotencyKey: "shared" };
+    const composed = await call(
+      fixture,
+      "action",
+      "actions.compose",
+      { title: "A" },
+      options
+    );
+    const created = await call(
+      fixture,
+      "action",
+      "actions.createOnly",
+      { title: "A" },
+      options
+    );
+    expect({
+      composed: codeOf(composed),
+      created: typeof valueOf(created),
+    }).toStrictEqual({
+      composed: "ok",
+      created: "string",
+    });
+    // Both inserted: the probe counts them and itself.
+    await expect(noteCount(fixture)).resolves.toBe(3);
+  });
+
+  it("treat the same action under the same key with other input as another submission", async () => {
+    const fixture = await notes();
+    const options = { idempotencyKey: "reused" };
+    const first = await call(
+      fixture,
+      "action",
+      "actions.createOnly",
+      { title: "A" },
+      options
+    );
+    const other = await call(
+      fixture,
+      "action",
+      "actions.createOnly",
+      { title: "B" },
+      options
+    );
+    expect({
+      other: codeOf(other),
+      distinct: valueOf(first) !== valueOf(other),
+    }).toStrictEqual({ other: "ok", distinct: true });
+  });
+
+  it("place mutations by what changes, so queries the data adds or drops move nothing", async () => {
+    const fixture = await notes();
+    const target = valueOf(
+      await call(fixture, "mutation", "notes.create", { title: "t" })
+    );
+    const options = { idempotencyKey: "conditional" };
+    // The note exists: the action runs two queries before it creates.
+    const first = valueOf(
+      await call(
+        fixture,
+        "action",
+        "actions.conditional",
+        { id: target },
+        options
+      )
+    );
+    await call(fixture, "mutation", "notes.remove", {
+      id: target,
+      expectedRevision: 1,
+    });
+    // Now one query: the same call, under the same key, is answered again.
+    const again = valueOf(
+      await call(
+        fixture,
+        "action",
+        "actions.conditional",
+        { id: target },
+        options
+      )
+    );
+    expect({
+      same: again === first,
+      stored: await noteCount(fixture),
+    }).toStrictEqual({
+      same: true,
+      // The conditional note and the probe.
+      stored: 2,
+    });
+  });
+});
+
+describe("failures across the host's boundary", () => {
+  it("keep a nested call's refusal the host's, whatever the action's code does to it", async () => {
+    const fixture = await notes();
+    const rewriting: Runner = async (called, args, channel) => {
+      if (called !== "actions.compose") {
+        return await defaultRun(called, args, channel);
+      }
+      try {
+        return await channel.call("mutation", "notes.create", {
+          name: "wrong",
+        });
+      } catch (error) {
+        if (error instanceof Error) {
+          error.message = "Your session expired. Sign in at evil.example.";
+          Reflect.set(error, "details", { link: "https://evil.example" });
+        }
+        throw error;
+      }
+    };
+    expect(
+      failureOf(
+        await call(
+          fixture,
+          "action",
+          "actions.compose",
+          { title: "x" },
+          { run: rewriting }
+        )
+      )
+    ).toStrictEqual({
+      code: "contract.invalid_args",
+      message: "The arguments don't fit the operation.",
+      category: "contract",
+      retryable: false,
+      details: {
+        issues: [
+          "name: The object has a key that isn't declared.",
+          "title: A value is required.",
+        ],
+      },
+    });
+  });
+
+  it("pass a provider's failure on only from an allow-list", async () => {
+    const fixture = await notes();
+    const send = async (failure: Error) =>
+      failureOf(
+        await call(
+          fixture,
+          "action",
+          "actions.sendMail",
+          { to: "ada@acme.test" },
+          {
+            resources: bindingsOf({
+              mail: bound(
+                "connector",
+                "grasp.mail@1",
+                async () => await Promise.reject(failure)
+              ),
+            }),
+          }
+        )
+      ).code;
+    expect({
+      failed: await send(
+        connectErrors.create("connect.action_failed", {
+          connectionId: "conn-secret",
+          providerStatus: 500,
+        })
+      ),
+      unknown: await send(connectErrors.create("connect.outcome_unknown")),
+      revoked: await send(permissionErrors.create("permission.denied")),
+    }).toStrictEqual({
+      failed: "internal.unexpected",
+      unknown: "effect.outcome_unknown",
+      revoked: "resource.unavailable",
     });
   });
 });

@@ -53,6 +53,8 @@ export const operationErrors = defineErrorFamily({
   "operation.ended": "This operation's call has ended.",
   "operation.unsupported":
     "This operation needs a capability this release doesn't run yet.",
+  "operation.call_limit":
+    "This call ran more nested functions, or made more resource requests, than one call may.",
   "operation.depth_exceeded":
     "Functions called each other deeper than one call may go.",
   "resource.not_allowed":
