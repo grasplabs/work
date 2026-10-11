@@ -902,6 +902,78 @@ describe("the board page", { timeout: 60_000 }, () => {
     }).toStrictEqual({ frozen: 50, readOnce: true });
   });
 
+  it("stops at a drawn version it is refused, reading none it hadn't started, and answers that refusal once those it had are done", async () => {
+    const { admin, app, map } = await setUp();
+    // First in the Playbook's path order, ahead of every other test's
+    // workflows: more designed workflows than a snapshot reads at once.
+    const folder = `0-refused-${unique()}`;
+    const designed: z.infer<typeof savedSchema>[] = [];
+    for (let index = 0; index < 9; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one call at a time
+      const drawn = await saveWorkflow(map, admin, {
+        path: `${folder}/${index}.md`,
+        ifVersion: 0,
+        record: {
+          type: "workflow",
+          title: `Workflow ${index}`,
+          state: "drawn",
+        },
+      });
+      designed.push(
+        // oxlint-disable-next-line no-await-in-loop -- one call at a time
+        await saveWorkflow(map, admin, {
+          documentId: drawn.id,
+          path: drawn.path,
+          ifVersion: 1,
+          record: {
+            type: "workflow",
+            title: `Workflow ${index}`,
+            state: "designed",
+          },
+        })
+      );
+    }
+    // The first one's drawn version is gone from the store: its read is
+    // refused, while the reads started with it are still on their way.
+    const [refused] = designed;
+    const moved = 1_000_000;
+    const renumber = async (from: number, to: number) => {
+      await env.KNOWLEDGE.prepare(
+        "UPDATE versions SET number = ? WHERE document_id = ? AND number = ?"
+      )
+        .bind(to, refused?.id, from)
+        .run();
+    };
+    await renumber(1, moved);
+    try {
+      let taken: unknown;
+      const events = await auditedDuring(async () => {
+        taken = await call(app, admin.userId, "take", { maturity: 1 });
+      });
+      // Every read of one version is audited as it starts, refused or not.
+      const readsOf = new Map<string, number>();
+      for (const { action, target } of events) {
+        if (action === "knowledge.read" && target?.type === "document") {
+          readsOf.set(target.id, (readsOf.get(target.id) ?? 0) + 1);
+        }
+      }
+      expect({
+        taken,
+        // The refused read and the five started with it, six at once; no
+        // read after the refusal; nothing else read.
+        read: designed.map(({ id }) => readsOf.get(id) ?? 0),
+        reads: [...readsOf.values()].reduce((sum, count) => sum + count, 0),
+      }).toStrictEqual({
+        taken: { error: "knowledge.not_found" },
+        read: [1, 1, 1, 1, 1, 1, 0, 0, 0],
+        reads: 6,
+      });
+    } finally {
+      // The Playbook is shared by this file's tests.
+      await renumber(moved, 1);
+    }
+  });
+
   it("leaves out a workflow that no longer reads as one, and a drawn version a designed one never had", async () => {
     const { admin, app, map } = await setUp();
     const folder = `odd-${unique()}`;
