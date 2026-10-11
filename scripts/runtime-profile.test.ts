@@ -73,7 +73,12 @@ describe("the runtime profile each deployment says", () => {
   });
 
   it("is workerd in the on-prem smoke run on plain workerd", () => {
-    const config = smokeConfig({ port: 8790, routerSecret: "s", modules: [] });
+    const config = smokeConfig({
+      port: 8790,
+      routerSecret: "s",
+      modules: [],
+      storage: "/tmp/storage",
+    });
     const profiles = [
       ...config.matchAll(
         /name = "RUNTIME_PROFILE", text = "(?<value>[^"]*)"/gu

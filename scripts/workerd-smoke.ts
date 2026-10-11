@@ -5,13 +5,20 @@
  */
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { routerSecretHeader } from "../packages/shared/src/router.ts";
-import { smokeConfig } from "./workerd-smoke-config.ts";
+import { d1DatabasesOf, writeD1Service } from "./workerd-d1.ts";
+import { coreWranglerConfig, smokeConfig } from "./workerd-smoke-config.ts";
 import { coreStarted } from "./workerd-smoke-start.ts";
 
 const ROUTER_SECRET = "smoke-router-secret";
@@ -52,9 +59,17 @@ const modules = [
     .map((file) => `(name = "${file}", text = embed "${file}")`),
 ];
 
+// The on-prem profile's D1 service, and core's D1 migrations for it.
+writeD1Service(out, d1DatabasesOf(coreWranglerConfig));
+
+// Durable Objects keep their SQLite databases on disk, as on-prem. Removed
+// with the rest of `out`.
+const storage = path.join(out, "storage");
+mkdirSync(storage);
+
 writeFileSync(
   path.join(out, "config.capnp"),
-  smokeConfig({ port: PORT, routerSecret: ROUTER_SECRET, modules })
+  smokeConfig({ port: PORT, routerSecret: ROUTER_SECRET, modules, storage })
 );
 
 const server = spawn("workerd", ["serve", path.join(out, "config.capnp")], {
