@@ -47,6 +47,15 @@ export interface ChannelCapabilities {
   /** Brands an expected error the channel raised as the host's. */
   readonly trust: (error: Error) => void;
   /**
+   * Told of every use the channel refused or that failed, wherever it
+   * failed (its arguments refused at the boundary included), with the
+   * host's own copy of the error.
+   */
+  readonly refused?: (
+    name: "read" | "write" | "call" | "resource",
+    error: CodedError
+  ) => void;
+  /**
    * The refusal for each capability it hasn't (`operation.not_found` for
    * one without its own).
    */
@@ -168,7 +177,7 @@ class Channel extends ChannelTarget implements OperationChannel {
       return await capability(...plainArgs(args));
     } catch (error) {
       if (isExpectedError(error)) {
-        throw this.#raise(error);
+        throw this.#raise(name, error);
       }
       // A domain failure of a function this one called, as the host
       // rebuilt it: App code may handle it, or throw it on.
@@ -183,6 +192,7 @@ class Channel extends ChannelTarget implements OperationChannel {
         ...errorFields(error),
       });
       throw this.#raise(
+        name,
         internalErrors.create("internal.unexpected", { requestId })
       );
     }
@@ -194,10 +204,14 @@ class Channel extends ChannelTarget implements OperationChannel {
    * so whatever App code does to the error it caught (its message, code or
    * details, now or after a later await) changes nothing the host answers.
    */
-  #raise(error: CodedError): Error {
+  #raise(
+    name: "read" | "write" | "call" | "resource",
+    error: CodedError
+  ): Error {
     const kept = copyOf(error);
     this.#capabilities.trust(kept);
     this.#state.raised.set(kept.code, kept);
+    this.#capabilities.refused?.(name, kept);
     return copyOf(error);
   }
 }

@@ -293,6 +293,19 @@ const assertMany = mutation({
   },
 });
 
+/** Reads each of `ids` asserting it is at revision 1, as a query. */
+const assertManyInQuery = query({
+  args: { ids: v.array(v.id("notes")).max(200) },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    for (const id of args.ids) {
+      // oxlint-disable-next-line no-await-in-loop -- one read after the other
+      await ctx.db.get("notes", id, { expectedRevision: 1 });
+    }
+    return args.ids.length;
+  },
+});
+
 const secret = internalQuery({
   args: {},
   returns: v.string(),
@@ -322,6 +335,7 @@ const notesApp = app({
       readTimes,
       floatingBadWrite,
       assertMany,
+      assertManyInQuery,
     },
   },
   internalOperations: { secret },
@@ -1619,5 +1633,109 @@ describe("App code misusing its channel", () => {
         retryable: false,
       },
     });
+  });
+
+  it("keeps the guard limit to mutations: a plain query may assert as many revisions as it reads", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const ids = await Promise.all(
+      Array.from({ length: 101 }, async (_, index) =>
+        valueOf(
+          await call(fixture, owner, "mutation", "notes.create", {
+            title: `q${index}`,
+          })
+        )
+      )
+    );
+    expect({
+      query: valueOf(
+        await call(fixture, owner, "query", "notes.assertManyInQuery", { ids })
+      ),
+      mutation: codeOf(
+        await call(fixture, owner, "mutation", "notes.assertMany", { ids })
+      ),
+    }).toStrictEqual({ query: 101, mutation: "data.guard_limit" });
+  });
+
+  it("fails a mutation whose write was refused at the channel, before staging", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    // A write that isn't JSON (NaN), caught, then a valid one.
+    const caughtNaN: Runner = async (path, args, channel) => {
+      if (path !== "notes.floatingBadWrite") {
+        return await runFunction(notesApp, path, args, channel);
+      }
+      try {
+        await channel.write({
+          kind: "insert",
+          table: "notes",
+          fields: { title: "bad", body: Number.NaN },
+        });
+      } catch {
+        await channel.write({
+          kind: "insert",
+          table: "notes",
+          fields: { title: "good" },
+        });
+      }
+      return "done";
+    };
+    const result = await call(
+      fixture,
+      owner,
+      "mutation",
+      "notes.floatingBadWrite",
+      {},
+      { run: caughtNaN }
+    );
+    const page = valueOf(
+      await call(fixture, owner, "query", "notes.list", { pagination: {} })
+    );
+    expect({ code: codeOf(result), stored: idsOf(page).length }).toStrictEqual({
+      code: "contract.invalid_request",
+      stored: 0,
+    });
+  });
+
+  it("lets a mutation catch a refused nested call or resource request and still commit", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const caughtOthers: Runner = async (path, args, channel) => {
+      if (path !== "notes.floatingBadWrite") {
+        return await runFunction(notesApp, path, args, channel);
+      }
+      const refused: unknown[] = [];
+      try {
+        await channel.resource("mail", "call", ["send", {}]);
+      } catch (error) {
+        refused.push(error);
+      }
+      try {
+        await channel.call("query", "notes.missing", {});
+      } catch (error) {
+        refused.push(error);
+      }
+      await channel.write({
+        kind: "insert",
+        table: "notes",
+        fields: { title: "kept" },
+      });
+      return `${refused.length}`;
+    };
+    const result = await call(
+      fixture,
+      owner,
+      "mutation",
+      "notes.floatingBadWrite",
+      {},
+      { run: caughtOthers }
+    );
+    const page = valueOf(
+      await call(fixture, owner, "query", "notes.list", { pagination: {} })
+    );
+    expect({
+      value: valueOf(result),
+      stored: idsOf(page).length,
+    }).toStrictEqual({ value: "2", stored: 1 });
   });
 });

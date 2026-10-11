@@ -722,6 +722,11 @@ interface Staging {
    * write, so the mutation can't commit as though it hadn't.
    */
   readonly refused: () => Error | undefined;
+  /**
+   * Remembers a refused write: told by the channel, wherever the write
+   * was refused (at its boundary, before staging, included).
+   */
+  readonly remember: (error: Error) => void;
   readonly preview: () => StagedWrites | undefined;
   readonly writes: () => StagedWrites["writes"];
 }
@@ -788,7 +793,7 @@ const stagingFor = (
     writes.push(write);
   };
   let refused: Error | undefined;
-  const checkedStage = async (request: unknown): Promise<unknown> => {
+  const stage = async (request: unknown): Promise<unknown> => {
     const write = operationErrors.parse(
       "contract.invalid_write",
       writeRequestSchema,
@@ -881,19 +886,14 @@ const stagingFor = (
     });
     return null;
   };
-  const stage = async (request: unknown): Promise<unknown> => {
-    try {
-      return await checkedStage(request);
-    } catch (error) {
-      refused ??= error instanceof Error ? error : new Error(String(error));
-      throw error;
-    }
-  };
   return {
     stagedAt,
     bytes: () => staged,
     stage,
     refused: () => refused,
+    remember: (error: Error) => {
+      refused ??= error;
+    },
     preview: () =>
       writes.length === 0 ? undefined : { stagedAt, writes: [...writes] },
     writes: () => [...writes],
@@ -1370,6 +1370,11 @@ const staleRun = new Error("A run's reads went stale");
 
 /** The capabilities one handler's channel gets, besides its refusals. */
 interface Capabilities {
+  /** Told of every refused or failed use, as the channel's `refused`. */
+  readonly onRefused?: (
+    name: "read" | "write" | "call" | "resource",
+    error: Error
+  ) => void;
   readonly read?: (request: unknown) => Promise<unknown>;
   readonly write?: (request: unknown) => Promise<unknown>;
   readonly call?: (
@@ -1418,6 +1423,9 @@ const runHandler = async (
     path: operation.path,
     ...calls.capabilities,
     trust,
+    ...(capabilities.onRefused === undefined
+      ? {}
+      : { refused: capabilities.onRefused }),
     refusals: refusalsOf[operation.kind],
   });
   try {
@@ -1695,6 +1703,14 @@ const runMutation = async (
             return await readFor(operation, reader, request);
           },
           write: staging.stage,
+          // Any write refused, at the channel's boundary or in staging,
+          // fails the mutation (`refused`); calls and resources stay
+          // catchable.
+          onRefused: (name, error) => {
+            if (name === "write") {
+              staging.remember(error);
+            }
+          },
           call: async (kind, path, callArgs) =>
             await nestedCall(
               run,

@@ -134,8 +134,13 @@ export class StoreReader {
       )
     ) {
       // One more than a commit can check would fail only at the commit,
-      // after the whole mutation ran: refused here, at the read.
-      if (this.#guards.length >= commitMaxGuards) {
+      // after the whole mutation ran: refused here, at the read. Only a
+      // mutation's reader (it stages writes) has guards a commit checks; a
+      // plain query never commits, so its reads are not capped here.
+      if (
+        this.#staged !== undefined &&
+        this.#guards.length >= commitMaxGuards
+      ) {
         throw dataErrors.create("data.guard_limit");
       }
       this.#guards.push({
