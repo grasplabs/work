@@ -3,6 +3,8 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
 import { canBuild, isAdmin, requireBuilder } from "@grasp-os/shared/roles";
+import type { ReadScope } from "@grasp-os/shared/store-queries";
+import type { ReadRequest } from "@grasp-os/shared/store-reads";
 import { dataErrors, storeMemberSchema } from "@grasp-os/shared/stores";
 import type {
   ClaimInput,
@@ -29,6 +31,7 @@ import {
 import type { MemberRef } from "./sharing.ts";
 import { recordStoreDeleted } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
+import type { QueryAnswer } from "./store-queries.ts";
 
 // The deployment's business stores, as core finds them: its inventory in
 // core D1 (`business_stores`) says which stores exist, and each store's
@@ -89,6 +92,11 @@ export interface OpenStore {
   get: (table: string, id: string) => Promise<StoredRecord | null>;
   claim: (claim: Omit<ClaimInput, "storeId">) => Promise<Claimed>;
   commit: (commit: Omit<Commit, "storeId">) => Promise<Committed>;
+  /**
+   * One read for `scope`, which the caller resolved for the invocation
+   * (`StoreHost.read`): never a scope App code supplied.
+   */
+  read: (scope: ReadScope, request: ReadRequest) => Promise<QueryAnswer>;
 }
 
 /** The audit entry of a change to `store` by `by`: identifiers only. */
@@ -388,5 +396,6 @@ export const openStore = async (
     get: async (table, recordId) => await stub.get(storeId, table, recordId),
     claim: async (claim) => await stub.claim({ ...claim, storeId }),
     commit: async (commit) => await stub.commit({ ...commit, storeId }),
+    read: async (scope, request) => await stub.read(storeId, scope, request),
   };
 };

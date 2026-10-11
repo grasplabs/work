@@ -15,6 +15,12 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { storeMaxTables } from "@grasp-os/shared/store-limits";
 import {
+  readRequestSchema,
+  readScopeSchema,
+} from "@grasp-os/shared/store-queries";
+import type { ReadScope } from "@grasp-os/shared/store-queries";
+import type { QueryRequest, ReadRequest } from "@grasp-os/shared/store-reads";
+import {
   claimSchema,
   commitSchema,
   dataErrors,
@@ -75,6 +81,13 @@ import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
 import { inventoriedDeleted, recordStoreDeleted } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { installIndexes, planIndexes } from "./store-indexes.ts";
+import {
+  planQuery,
+  readableTable,
+  readRecord,
+  runQuery,
+} from "./store-queries.ts";
+import type { PinnedSchema, QueryAnswer } from "./store-queries.ts";
 
 // The host of a business store (data-store.ts is its Durable Object): one
 // object per store, named by the store's ID (data-stores.ts), with a SQLite database of its own that holds all
@@ -149,6 +162,30 @@ import { installIndexes, planIndexes } from "./store-indexes.ts";
 // - A caller bends time or delivery: the object's RPC methods take no
 //   clock, consumers or budget; only tests choose them, through this host
 //   inside the object.
+
+/**
+ * `read()`, with SQLite's refusal of an index it doesn't hold (one an
+ * older layout or a damaged store lacks) as `data.index_required`, never
+ * a scan.
+ */
+const indexRequired = <Answer>(read: () => Answer): Answer => {
+  try {
+    return read();
+  } catch (error) {
+    // SQLite's own error, never one of the store's (whose messages may
+    // say as much).
+    if (
+      error instanceof Error &&
+      dataErrors.codeOf(error) === undefined &&
+      /no such index/u.test(error.message)
+    ) {
+      // A store whose indexes don't match its schemas needs looking at.
+      log.error("store.index_missing", errorFields(error));
+      throw dataErrors.create("data.index_required");
+    }
+    throw error;
+  }
+};
 
 /** A store's record, as staged in a commit. */
 interface Staged {
@@ -320,6 +357,8 @@ export class StoreHost {
   readonly ctx: DurableObjectState;
   readonly env: Env;
   readonly #db: DrizzleSqliteDODatabase;
+  /** Each schema read so far, by hash (`#pinned`). */
+  readonly #schemas = new Map<string, PinnedSchema>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
@@ -475,6 +514,99 @@ export class StoreHost {
         .get();
       return row === undefined ? null : toStored(row);
     });
+  }
+
+  /**
+   * Answers one read for `scope`, which core resolved for the invocation:
+   * a record by ID, or a query (store-queries.ts, whose threat model this
+   * follows), checked against the schema `scope` is pinned to as this
+   * store recorded it. The request is untrusted and checked whole.
+   */
+  async read(
+    storeId: StoreId,
+    scope: ReadScope,
+    request: ReadRequest
+  ): Promise<QueryAnswer> {
+    const reader = dataErrors.parse("data.invalid", readScopeSchema, scope);
+    const read = dataErrors.parse(
+      "data.invalid_query",
+      readRequestSchema,
+      request
+    );
+    const pinned = await this.#pinned(storeId, reader.schemaHash);
+    return this.ctx.storage.transactionSync((): QueryAnswer => {
+      this.#bind(storeId, false);
+      return indexRequired(() =>
+        read.kind === "get"
+          ? readRecord(this.ctx.storage.sql, pinned, reader, read)
+          : runQuery(this.ctx.storage.sql, pinned, reader, read.query)
+      );
+    });
+  }
+
+  /**
+   * SQLite's plan for the statement `request` (a query) would run for
+   * `scope`, planned exactly as `read` plans it: for tests, which reach it
+   * through this host inside the object, never over RPC.
+   */
+  async explain(
+    storeId: StoreId,
+    scope: ReadScope,
+    request: QueryRequest
+  ): Promise<string> {
+    const reader = readScopeSchema.parse(scope);
+    const pinned = await this.#pinned(storeId, reader.schemaHash);
+    const table = readableTable(pinned, reader, request.table);
+    const plan = planQuery(pinned, reader, table, request, {
+      documents: true,
+    });
+    return this.ctx.storage.sql
+      .exec<{ detail: string }>(
+        `EXPLAIN QUERY PLAN ${plan.statement}`,
+        ...plan.params
+      )
+      .toArray()
+      .map(({ detail }) => detail)
+      .join("\n");
+  }
+
+  /**
+   * The schema `schemaHash` as this store recorded it, with its tables'
+   * IDs and its indexes' physical names: read and planned once per object,
+   * since neither ever changes for a hash. `data.unknown_schema` for a
+   * hash the store wasn't handed.
+   */
+  async #pinned(storeId: StoreId, schemaHash: string): Promise<PinnedSchema> {
+    const known = this.#schemas.get(schemaHash);
+    if (known !== undefined) {
+      return known;
+    }
+    const row = this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      return this.#db
+        .select({ manifest: schemas.manifest })
+        .from(schemas)
+        .where(eq(schemas.schemaHash, schemaHash))
+        .get();
+    });
+    if (row === undefined) {
+      throw dataErrors.create("data.unknown_schema");
+    }
+    const { manifest } = readSchemaManifest(row.manifest);
+    const tableIds = Object.fromEntries(
+      this.#db
+        .select({ name: tables.name, tableId: tables.tableId })
+        .from(tables)
+        .all()
+        .map(({ name, tableId }) => [name, tableId])
+    );
+    const pinned: PinnedSchema = {
+      manifest,
+      tableIds,
+      indexes: await planIndexes(manifest, tableIds),
+    };
+    this.#schemas.set(schemaHash, pinned);
+    return pinned;
   }
 
   /**
@@ -1264,7 +1396,7 @@ export class StoreHost {
    * object not reached by a store's ID, so no object serves a store it
    * wasn't made for.
    */
-  #bind(storeId: StoreId): void {
+  #bind(storeId: StoreId, create = true): void {
     const id = storeIdSchema.parse(storeId);
     if (this.ctx.id.name !== id) {
       throw new Error("This object holds another store");
@@ -1274,6 +1406,10 @@ export class StoreHost {
       .from(store)
       .get();
     if (bound === undefined) {
+      // A read creates nothing: a store no schema was handed holds none.
+      if (!create) {
+        throw dataErrors.create("data.unknown_schema");
+      }
       this.#db
         .insert(store)
         .values({ only: 1, storeId: id, createdAt: Date.now() })
