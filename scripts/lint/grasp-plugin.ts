@@ -219,6 +219,46 @@ const boundBy = (pattern: Node): unknown[] => {
   return names;
 };
 
+/** A declaration of the module's, out of the export that wraps it. */
+const unwrapped = (statement: Node): Node =>
+  (statement.type === "ExportNamedDeclaration" ||
+    statement.type === "ExportDefaultDeclaration") &&
+  statement.declaration
+    ? statement.declaration
+    : statement;
+
+/** The bindings one statement of the module makes, with their values. */
+const bindingsOf = (statement: Node): { name: unknown; value: Node }[] => {
+  const node = unwrapped(statement);
+  if (node.type === "VariableDeclaration") {
+    return (node.declarations ?? []).flatMap(({ id, init }) =>
+      id && init ? boundBy(id).map((name) => ({ name, value: init })) : []
+    );
+  }
+  if (node.type === "ClassDeclaration" && node.id) {
+    return [{ name: node.id.name, value: node }];
+  }
+  const { expression } = node;
+  if (
+    node.type === "ExpressionStatement" &&
+    expression?.type === "AssignmentExpression" &&
+    expression.left?.type === "Identifier" &&
+    expression.right
+  ) {
+    return [{ name: expression.left.name, value: expression.right }];
+  }
+  return [];
+};
+
+/**
+ * The names the module itself binds, and the values they hold: its
+ * declarations, classes and assignments at the top level. Only these can
+ * be exported; a name a function or block declares inside is another
+ * binding, whatever it's called.
+ */
+const moduleBindings = (program: Node): { name: unknown; value: Node }[] =>
+  (Array.isArray(program.body) ? program.body : []).flatMap(bindingsOf);
+
 /**
  * Whether `node` hands out a name in `names`, or a member of one
  * (`cw.RpcTarget`): as it is, or in what it holds (`valuesOf`).
@@ -270,9 +310,9 @@ const noUnboundedRpcTarget = {
     // a namespace, or a name declared to hold one of them: to tell what
     // an export passes on.
     const locals = new Set<unknown>();
-    // Names declared with a value, to tell which hold a local, and what
-    // each export passes on, both told once the whole file is read: a
-    // name may be declared after the export that names it.
+    // The module's own names and their values, to tell which hold a
+    // local, and what each export passes on, both told once the whole
+    // file is read: a name may be declared after the export that names it.
     const declared: { name: unknown; value: Node }[] = [];
     const exported: { node: Node; passes: Node[]; names: unknown[] }[] = [];
     const reexports = {
@@ -310,19 +350,8 @@ const noUnboundedRpcTarget = {
           exported.push({ node, passes: [node.declaration], names: [] });
         }
       },
-      VariableDeclarator: (node: Node): void => {
-        const { id, init } = node;
-        if (id && init) {
-          for (const name of boundBy(id)) {
-            declared.push({ name, value: init });
-          }
-        }
-      },
-      AssignmentExpression: (node: Node): void => {
-        const { left, right } = node;
-        if (left?.type === "Identifier" && right) {
-          declared.push({ name: left.name, value: right });
-        }
+      Program: (node: Node): void => {
+        declared.push(...moduleBindings(node));
       },
       "Program:exit": (): void => {
         // A name that holds a local is one too, however many hold it on.
