@@ -259,6 +259,25 @@ describe("the memory a session spends expanding references", () => {
     expect(end.code).toBe(3000);
   });
 
+  it("ends a connection that keeps values alive by referring to them and releasing the original", async () => {
+    const connection = await rawRpc(signedOut);
+    // Push a value, refer to it from a new export, release the original,
+    // again and again: each reference keeps its value alive, so it is
+    // charged what it keeps, and the connection's budget runs out.
+    const share = "a".repeat(signedOutRpcAccounting.maxSessionBytes / 3);
+    let id = 0;
+    for (let round = 0; round < 8; round += 1) {
+      connection.send(["push", `${share}${round}`]);
+      id += 1;
+      const original = id;
+      connection.send(["push", ["pipeline", original]]);
+      id += 1;
+      connection.send(["release", original, 1]);
+    }
+    const end = await connection.closed;
+    expect(end.code).toBe(3000);
+  });
+
   it("ends the connection that takes the isolate past what all may hold, and no other", async () => {
     // Each connection holds just under what one that isn't signed in may:
     // within its own budget, but together past the isolate's.

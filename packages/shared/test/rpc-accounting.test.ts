@@ -392,3 +392,84 @@ describe("what every session in an isolate holds together", () => {
     ]);
   });
 });
+
+describe("what a value referring to another keeps alive", () => {
+  it("charges a reference what the referred export holds, so releasing the original frees nothing it kept", () => {
+    const { account } = fresh();
+    // Push a large string, refer to it from a new export, release the
+    // original, again and again: each reference keeps the string alive.
+    const large = "a".repeat(Math.floor(limits.maxSessionBytes * 0.4));
+    const outcomes: (string | undefined)[] = [];
+    let id = 0;
+    for (let round = 0; round < 6; round += 1) {
+      outcomes.push(account(["push", `${large}${round}`]));
+      id += 1;
+      const original = id;
+      outcomes.push(account(["push", ["pipeline", original]]));
+      id += 1;
+      outcomes.push(account(["release", original, 1]));
+    }
+    expect(outcomes).toContain("bytes");
+  });
+});
+
+describe("answers we send", () => {
+  it("refuses, in the session that sends it, an answer that takes the isolate past its limit", () => {
+    const pool = heldPool(limits.maxSessionBytes);
+    const sessions = [1, 2, 3].map(() => messageAccountant(limits, pool));
+    const answer = "s".repeat(Math.floor(limits.maxSessionBytes * 0.4));
+    const outcomes = sessions.map((session) => {
+      session.account(["push", ["pipeline", 0, ["source"], []]]);
+      return session.recordSent(["resolve", 1, answer]);
+    });
+    // The first two fit; the third answer would take the pool past it.
+    expect(outcomes).toStrictEqual([undefined, undefined, "isolate"]);
+  });
+});
+
+describe("our own stubs as the peer releases them", () => {
+  it("forgets a stub of ours at its last release, however many come and go", () => {
+    const { account, recordSent } = fresh();
+    const outcomes: (string | undefined)[] = [];
+    // A fresh stub each time, as a new subscription is, then released.
+    for (let round = 1; round <= 1000; round += 1) {
+      outcomes.push(
+        account(["push", ["pipeline", 0, ["watch"], []]]),
+        recordSent(["resolve", round, ["export", -round]]),
+        account(["release", -round, 1]),
+        account(["release", round, 1])
+      );
+    }
+    expect(outcomes.every((outcome) => outcome === undefined)).toBeTruthy();
+    // Released, the first is unknown again: priced as an answer, not free.
+    expect(
+      account([
+        "push",
+        [
+          [
+            ["pipeline", -1],
+            ["pipeline", -1],
+            ["pipeline", -1],
+            ["pipeline", -1],
+            ["pipeline", -1],
+          ],
+        ],
+      ])
+    ).toBe("copy");
+  });
+
+  it("ends the session on a release of more counts than we gave", () => {
+    const { account, recordSent } = fresh();
+    recordSent([
+      "resolve",
+      1,
+      [
+        [
+          ["export", -1],
+          ["export", -1],
+        ],
+      ],
+    ]);
+    expect(account(["release", -1, 3])).toBe("release");
+  });
+});

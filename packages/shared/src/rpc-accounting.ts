@@ -118,6 +118,13 @@ interface WalkState {
    * decoded length, and `nodeHeapBytes` for each node a reference copies.
    */
   inlineBytes: number;
+  /**
+   * The part of `inlineBytes` a copy of the value shares rather than
+   * duplicates: its strings and byte strings, and those of the exports it
+   * refers to. A value referring to another keeps these alive however its
+   * nodes were copied.
+   */
+  sharedBytes: number;
 }
 
 /**
@@ -151,6 +158,13 @@ interface Exports {
   nodesOf: (id: unknown) => number;
   /** Whether a call through the export is answered by the peer. */
   isPeerHeld: (id: unknown) => boolean;
+  /**
+   * The strings and byte strings the export holds (`sharedBytes`): a copy
+   * of it shares them rather than duplicating them, so a value referring to
+   * it keeps them alive and is charged them too. Its nodes are copied, and
+   * counted as copied nodes.
+   */
+  sharedBytesOf: (id: unknown) => number;
 }
 
 /** A level of the walk: the array of children still to visit, by index. */
@@ -171,7 +185,7 @@ interface WalkFrame {
 const walk = (
   root: unknown,
   limits: RpcAccountingLimits,
-  { nodesOf, isPeerHeld }: Exports
+  { nodesOf, isPeerHeld, sharedBytesOf }: Exports
 ): WalkState => {
   const state: WalkState = {
     nodeCount: 0,
@@ -180,6 +194,7 @@ const walk = (
     holdsPeerStub: false,
     holdsPeerPromise: false,
     inlineBytes: 0,
+    sharedBytes: 0,
   };
   // What a call answered by the peer counts as: the whole budget, so a copy
   // of its answer (a nested call is put in place, copied) is refused.
@@ -204,6 +219,9 @@ const walk = (
         const nodes = nodesOf(value[1]);
         state.copyCost += nodes;
         state.nodeCount += nodes + 1;
+        // The referred export's strings and bytes stay alive as long as this
+        // does, shared rather than copied: counted again, never too little.
+        state.sharedBytes += sharedBytesOf(value[1]);
         if (isPeerHeld(value[1])) {
           state.holdsPeerStub = true;
         }
@@ -225,7 +243,7 @@ const walk = (
       // One byte string: one node, held as its decoded bytes.
       state.nodeCount += 1;
       if (typeof value[1] === "string") {
-        state.inlineBytes += decodedBytes(value[1]);
+        state.sharedBytes += decodedBytes(value[1]);
       }
     } else {
       // A date, an error, a URL and such: one node, measured by its members.
@@ -249,13 +267,13 @@ const walk = (
     } else if (value !== null && typeof value === "object") {
       state.nodeCount += 1;
       for (const key of Object.keys(value)) {
-        state.inlineBytes += stringHeapBytes(key);
+        state.sharedBytes += stringHeapBytes(key);
       }
       frames.push({ items: Object.values(value), index: 0 });
     } else {
       state.nodeCount += 1;
       if (typeof value === "string") {
-        state.inlineBytes += stringHeapBytes(value);
+        state.sharedBytes += stringHeapBytes(value);
       }
     }
   };
@@ -276,7 +294,7 @@ const walk = (
     frame.index += 1;
   }
   // Every node, copied ones among them, costs a node's worth of heap.
-  state.inlineBytes += state.nodeCount * nodeHeapBytes;
+  state.inlineBytes = state.sharedBytes + state.nodeCount * nodeHeapBytes;
   return state;
 };
 
@@ -325,7 +343,7 @@ export const messageAccountant = (
   pool?: HeldPool
 ): {
   account: (message: unknown) => AccountingRefusal | undefined;
-  recordSent: (message: unknown) => void;
+  recordSent: (message: unknown) => AccountingRefusal | undefined;
   dispose: () => void;
 } => {
   const {
@@ -353,11 +371,14 @@ export const messageAccountant = (
   // the peer's first push is 1.
   let nextExport = 1;
 
-  // Our own exports the peer may refer back to (id <= 0), as we sent them:
-  // a stub (`["export", id]`), whose copy is a reference to the same object
-  // and copies no data, or a promise (`["promise", id]`), whose value is our
-  // answer once it settles. The main export is a stub.
-  const ourStubs = new Set<number>([0]);
+  // Our own stubs the peer may refer back to (id < 0), with their refcount
+  // as Cap'n Web keeps it: each time we send a stub (`["export", id]`) it
+  // counts once, and the peer's release takes counts off; at zero Cap'n Web
+  // frees it, and so does this. A copy of a stub is a reference to the same
+  // object and copies no data. A promise we sent (`["promise", id]`) isn't
+  // here: its value is our answer once it settles. The main export (0) is a
+  // stub too.
+  const ourStubs = new Map<number, number>();
 
   // A reference to an export the accountant tracks copies its recorded
   // nodes; to an unknown positive export, the session's whole budget, so an
@@ -375,7 +396,7 @@ export const messageAccountant = (
     if (id > 0) {
       return maxSessionCopyNodes + 1;
     }
-    return ourStubs.has(id) ? 0 : answerNodes;
+    return id === 0 || ourStubs.has(id) ? 0 : answerNodes;
   };
 
   // The peer's exports a call through goes to the peer: a value holding a
@@ -386,8 +407,14 @@ export const messageAccountant = (
   const isPeerHeld = (id: unknown): boolean =>
     typeof id === "number" && peerHeld.has(id);
 
+  // Each export's strings and byte strings, which a value referring to it
+  // keeps alive (`WalkState.sharedBytes`).
+  const sharedOf = new Map<number, number>();
+  const sharedBytesOf = (id: unknown): number =>
+    typeof id === "number" ? (sharedOf.get(id) ?? 0) : 0;
+
   const walkValue = (value: unknown): WalkState =>
-    walk(value, limits, { nodesOf, isPeerHeld });
+    walk(value, limits, { nodesOf, isPeerHeld, sharedBytesOf });
 
   const overWalk = (state: WalkState): AccountingRefusal | undefined => {
     if (state.banned) {
@@ -451,6 +478,7 @@ export const messageAccountant = (
     liveCopyNodes += state.copyCost;
     liveCount += 1;
     holdBytes(id, state.inlineBytes);
+    sharedOf.set(id, state.sharedBytes);
     // The pool is checked only as this session grows it: the session whose
     // message takes the pool past its limit is the one that ends.
     return (
@@ -505,8 +533,31 @@ export const messageAccountant = (
   // A release frees an export only when its refcount reaches zero, as Cap'n
   // Web does; a count that isn't a whole number from one to the refcount is
   // a shape Cap'n Web wouldn't accept, so the session ends. A negative or
-  // main id is one of ours; the accountant doesn't price those, so it only
-  // checks the shape and leaves them be.
+  // main id is one of ours: a stub of ours loses the counts released, and
+  // is forgotten at zero as Cap'n Web frees it.
+  const releaseOurs = (
+    id: number,
+    count: number
+  ): AccountingRefusal | undefined => {
+    if (!Number.isInteger(count) || count < 1) {
+      return "release";
+    }
+    const current = ourStubs.get(id);
+    if (current === undefined) {
+      // The main export, or a promise of ours: nothing tracked to let go.
+      return undefined;
+    }
+    if (count > current) {
+      return "release";
+    }
+    if (count === current) {
+      ourStubs.delete(id);
+    } else {
+      ourStubs.set(id, current - count);
+    }
+    return undefined;
+  };
+
   const accountRelease = (
     id: unknown,
     count: unknown
@@ -515,7 +566,7 @@ export const messageAccountant = (
       return "bad-message";
     }
     if (id <= 0) {
-      return undefined;
+      return releaseOurs(id, count);
     }
     const current = refcount.get(id);
     if (current === undefined) {
@@ -533,6 +584,7 @@ export const messageAccountant = (
     liveCount -= 1;
     holdBytes(id, 0);
     bytesOf.delete(id);
+    sharedOf.delete(id);
     recorded.delete(id);
     held.delete(id);
     refcount.delete(id);
@@ -595,9 +647,7 @@ export const messageAccountant = (
         const items: unknown[] = value;
         const [tag, id] = items;
         if (tag === "export" && typeof id === "number" && id < 0) {
-          ourStubs.add(id);
-        } else if (tag === "promise" && typeof id === "number") {
-          ourStubs.delete(id);
+          ourStubs.set(id, (ourStubs.get(id) ?? 0) + 1);
         }
         for (const item of items) {
           stack.push(item);
@@ -618,10 +668,15 @@ export const messageAccountant = (
   // measuring them is bounded by what we already serialized. Only a
   // still-live export is recorded: one already released must stay unknown,
   // so a later reference to it fails closed rather than being priced.
-  const recordSent = (message: unknown): void => {
+  //
+  // Our answer grows what the session, and the isolate, hold: if it takes
+  // either past its limit, this session is the one responsible, and the
+  // answer is refused before it is sent (the transport ends the session,
+  // and Cap'n Web lets go of its exports).
+  const recordSent = (message: unknown): AccountingRefusal | undefined => {
     noteOurExports(message);
     if (!Array.isArray(message)) {
-      return;
+      return undefined;
     }
     const parts: unknown[] = message;
     const [kind, id, value] = parts;
@@ -630,11 +685,20 @@ export const messageAccountant = (
       typeof id !== "number" ||
       !refcount.has(id)
     ) {
-      return;
+      return undefined;
     }
     const answer = walkValue(value);
     recorded.set(id, Math.min(answer.nodeCount, maxSessionCopyNodes + 1));
+    const before = bytesOf.get(id) ?? 0;
     holdBytes(id, answer.inlineBytes);
+    sharedOf.set(id, answer.sharedBytes);
+    if (answer.inlineBytes <= before) {
+      return undefined;
+    }
+    return (
+      overSession() ??
+      (pool !== undefined && pool.held > pool.limit ? "isolate" : undefined)
+    );
   };
 
   // The session has ended (refused, closed or aborted): Cap'n Web lets go of
@@ -769,7 +833,15 @@ export const accountedTransport = (
   return {
     encodingLevel: "jsonCompatible",
     send: (message: unknown): void => {
-      recordSent(message);
+      const refusal = recordSent(message);
+      if (refusal !== undefined) {
+        // Our answer would hold more than this session or the isolate may:
+        // end the session instead of sending it.
+        const error = onRefused(refusal);
+        dispose();
+        inner.abort?.(error);
+        return;
+      }
       // Cap'n Web's custom-encoding transport sends synchronously; our inner
       // string transports (WebSocket, port) do too.
       void inner.send(JSON.stringify(message));
