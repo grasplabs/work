@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { messageAccountant } from "../src/rpc-accounting.ts";
+import { heldPool, messageAccountant } from "../src/rpc-accounting.ts";
 import type { RpcAccountingLimits } from "../src/rpc-accounting.ts";
 
 // The accounting is pure logic: given the messages a peer sends (and the
@@ -358,5 +358,37 @@ describe("messages the peer may not send", () => {
       outcomes.push(account(["push", "x"]));
     }
     expect(outcomes.at(-1)).toBe("exports");
+  });
+});
+
+describe("what every session in an isolate holds together", () => {
+  it("ends the session that takes the pool past its limit, not the others", () => {
+    const pool = heldPool(limits.maxSessionBytes);
+    const first = messageAccountant(limits, pool);
+    const second = messageAccountant(limits, pool);
+    const third = messageAccountant(limits, pool);
+    const most = "a".repeat(Math.floor(limits.maxSessionBytes * 0.6));
+    const outcomes = [
+      // Each within its own budget; the second takes the pool past it, and
+      // ends, letting go of what it held (as the transport does on refusal).
+      first.account(["push", most]),
+      (() => {
+        const refusal = second.account(["push", most]);
+        second.dispose();
+        return refusal;
+      })(),
+      // The first goes on.
+      first.account(["push", ["pipeline", 0, ["ping"], []]]),
+      // Once the first's push is released, a third has room.
+      first.account(["release", 1, 1]),
+      third.account(["push", most]),
+    ];
+    expect(outcomes).toStrictEqual([
+      undefined,
+      "isolate",
+      undefined,
+      undefined,
+      undefined,
+    ]);
   });
 });

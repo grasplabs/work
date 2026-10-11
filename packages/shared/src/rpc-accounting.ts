@@ -288,12 +288,27 @@ export type AccountingRefusal =
   | "session"
   | "exports"
   | "bytes"
+  | "isolate"
   | "stream"
   | "remap"
   | "release"
   | "unknown-export"
   | "bad-message"
   | "non-text";
+
+/**
+ * What every session in one isolate may hold together, shared by their
+ * accountants: each adds and lets go of its exports' bytes here as it does
+ * its own (`holdBytes`), and lets go of all of them when it ends. A session
+ * whose message takes `held` past `limit` is the one refused (`isolate`).
+ */
+export interface HeldPool {
+  readonly limit: number;
+  held: number;
+}
+
+/** A pool of `limit` bytes, nothing held yet. */
+export const heldPool = (limit: number): HeldPool => ({ limit, held: 0 });
 
 /**
  * Accounts the peer's messages, one session's worth. `account` reads one
@@ -306,10 +321,12 @@ export type AccountingRefusal =
  * not be shared between sessions.
  */
 export const messageAccountant = (
-  limits: RpcAccountingLimits
+  limits: RpcAccountingLimits,
+  pool?: HeldPool
 ): {
   account: (message: unknown) => AccountingRefusal | undefined;
   recordSent: (message: unknown) => void;
+  dispose: () => void;
 } => {
   const {
     maxMessageNodes,
@@ -385,10 +402,24 @@ export const messageAccountant = (
     return undefined;
   };
 
-  /** Sets what export `id` holds inline, adjusting the session's total. */
+  // Once the session has ended, what it held is let go (`dispose`) and
+  // nothing more is charged to it or to the pool.
+  let disposed = false;
+
+  /**
+   * Sets what export `id` holds inline, adjusting the session's total and
+   * the pool's by the same amount.
+   */
   const holdBytes = (id: number, bytes: number): void => {
-    liveBytes += bytes - (bytesOf.get(id) ?? 0);
+    if (disposed) {
+      return;
+    }
+    const delta = bytes - (bytesOf.get(id) ?? 0);
+    liveBytes += delta;
     bytesOf.set(id, bytes);
+    if (pool !== undefined) {
+      pool.held += delta;
+    }
   };
 
   const overSession = (): AccountingRefusal | undefined => {
@@ -420,7 +451,12 @@ export const messageAccountant = (
     liveCopyNodes += state.copyCost;
     liveCount += 1;
     holdBytes(id, state.inlineBytes);
-    return overSession();
+    // The pool is checked only as this session grows it: the session whose
+    // message takes the pool past its limit is the one that ends.
+    return (
+      overSession() ??
+      (pool !== undefined && pool.held > pool.limit ? "isolate" : undefined)
+    );
   };
 
   // A push makes an export, priced by what a later copy of it would
@@ -601,7 +637,20 @@ export const messageAccountant = (
     holdBytes(id, answer.inlineBytes);
   };
 
-  return { account, recordSent };
+  // The session has ended (refused, closed or aborted): Cap'n Web lets go of
+  // its exports, so the pool lets go of what they held.
+  const dispose = (): void => {
+    if (disposed) {
+      return;
+    }
+    if (pool !== undefined) {
+      pool.held -= liveBytes;
+    }
+    liveBytes = 0;
+    disposed = true;
+  };
+
+  return { account, recordSent, dispose };
 };
 
 // Character codes the structural scan watches for.
@@ -702,16 +751,18 @@ export interface TextRpcTransport {
 export const accountedTransport = (
   inner: TextRpcTransport,
   limits: RpcAccountingLimits,
-  onRefused: (refusal: AccountingRefusal) => Error
+  onRefused: (refusal: AccountingRefusal) => Error,
+  pool?: HeldPool
 ): {
   encodingLevel: "jsonCompatible";
   send: (message: unknown) => void;
   receive: () => Promise<unknown>;
   abort: (reason: unknown) => void;
 } => {
-  const { account, recordSent } = messageAccountant(limits);
+  const { account, recordSent, dispose } = messageAccountant(limits, pool);
   const refuse = (refusal: AccountingRefusal): never => {
     const error = onRefused(refusal);
+    dispose();
     inner.abort?.(error);
     throw error;
   };
@@ -724,7 +775,14 @@ export const accountedTransport = (
       void inner.send(JSON.stringify(message));
     },
     receive: async (): Promise<unknown> => {
-      const raw = await inner.receive();
+      let raw: unknown;
+      try {
+        raw = await inner.receive();
+      } catch (error) {
+        // The other side closed, or the transport failed: the session ends.
+        dispose();
+        throw error;
+      }
       if (typeof raw !== "string") {
         return refuse("non-text");
       }
@@ -751,6 +809,9 @@ export const accountedTransport = (
       }
       return parsed;
     },
-    abort: (reason) => inner.abort?.(reason),
+    abort: (reason) => {
+      dispose();
+      inner.abort?.(reason);
+    },
   };
 };

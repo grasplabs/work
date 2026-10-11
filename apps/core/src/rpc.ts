@@ -13,7 +13,12 @@ import { RpcSession, WebSocketTransport } from "capnweb";
 import { oidcProviders, signInConfig } from "./auth/config.ts";
 import { identify } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
-import { coreRpcAccounting, CoreRpcTarget } from "./rpc-target.ts";
+import {
+  coreRpcAccounting,
+  CoreRpcTarget,
+  isolateRpcHeld,
+  signedOutRpcAccounting,
+} from "./rpc-target.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import { SessionRpc } from "./session-rpc.ts";
 
@@ -183,16 +188,29 @@ const sessionApi = (
  * one. Every target the browser can reach from here extends
  * `CoreRpcTarget` (test/rpc-targets.test.ts walks them all).
  */
+/** A connection's API, and whether it is signed in. */
+const browserConnection = async (
+  env: Env,
+  headers: Headers,
+  server: WebSocket
+): Promise<{ api: CoreRpc; signedIn: boolean }> => {
+  const connectedAs = await identify(env, headers);
+  const session = connectedAs
+    ? sessionApi({ env, headers, connectedAs }, server)
+    : undefined;
+  return {
+    api: new CoreRpc(signInOptions(env), session),
+    signedIn: session !== undefined,
+  };
+};
+
 export const browserApi = async (
   env: Env,
   headers: Headers,
   server: WebSocket
 ): Promise<CoreRpc> => {
-  const connectedAs = await identify(env, headers);
-  const session = connectedAs
-    ? sessionApi({ env, headers, connectedAs }, server)
-    : undefined;
-  return new CoreRpc(signInOptions(env), session);
+  const { api } = await browserConnection(env, headers, server);
+  return api;
 };
 
 /**
@@ -246,38 +264,38 @@ export const rpcResponse = async (
   // connection's (`coreRpcAccounting`). What a value held by a target gets
   // is bounded again where it lands (rpc-target.ts), and a screen's call to
   // its bytes (screens-rpc.ts).
+  // A connection that isn't signed in holds little; every connection of the
+  // isolate together holds no more than `isolateRpcHeld`.
+  const { api, signedIn } = await browserConnection(env, headers, server);
   const transport = accountedTransport(
     new WebSocketTransport(server),
-    coreRpcAccounting,
-    () => requestErrors.create("request.too_expensive")
+    signedIn ? coreRpcAccounting : signedOutRpcAccounting,
+    () => requestErrors.create("request.too_expensive"),
+    isolateRpcHeld
   );
   // The session runs itself from its read loop; the socket and the
   // transport keep it reachable for as long as the connection is open.
-  const connection = new RpcSession(
-    transport,
-    await browserApi(env, headers, server),
-    {
-      limits: {
-        maxDepth: screenLimits.rpc.maxDepth,
-        maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
-      },
-      onSendError: (error) => {
-        // Every call of the tab goes over this one connection, so each
-        // failure gets a request ID of its own for the person to quote, and
-        // its log line names the connection's too.
-        const failureId = crypto.randomUUID();
-        const sent = toClientError(error, failureId);
-        if (sent && open) {
-          log.error("rpc.failed", {
-            requestId: failureId,
-            connectionRequestId: requestId,
-            ...errorFields(error),
-          });
-        }
-        return sent;
-      },
-    }
-  );
+  const connection = new RpcSession(transport, api, {
+    limits: {
+      maxDepth: screenLimits.rpc.maxDepth,
+      maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
+    },
+    onSendError: (error) => {
+      // Every call of the tab goes over this one connection, so each
+      // failure gets a request ID of its own for the person to quote, and
+      // its log line names the connection's too.
+      const failureId = crypto.randomUUID();
+      const sent = toClientError(error, failureId);
+      if (sent && open) {
+        log.error("rpc.failed", {
+          requestId: failureId,
+          connectionRequestId: requestId,
+          ...errorFields(error),
+        });
+      }
+      return sent;
+    },
+  });
   void connection;
   return new Response(null, { status: 101, webSocket: client });
 };
