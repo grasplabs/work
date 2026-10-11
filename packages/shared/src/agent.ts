@@ -22,4 +22,11 @@ export const agentErrors = defineErrorFamily({
     "A permission of this chat's agent was revoked while this code run was under way, so its APIs don't answer any more.",
   "agent.run_calls_spent":
     "This code run has made all the API calls one run may. Run the rest in another code step.",
+  "agent.job_not_found": "This chat has no such build job.",
+  "agent.jobs_exhausted":
+    "This chat has as many build jobs running as it may. Wait for one to end, then submit again.",
+  "agent.job_cancelled":
+    "This build job was cancelled, so it does nothing more.",
+  "agent.job_revoked":
+    "A permission of this chat's agent was revoked since this build job was submitted, so it does nothing more.",
 });

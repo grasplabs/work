@@ -64,6 +64,13 @@
       "when": 1791687051646,
       "tag": "0008_chat_code_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791729077847,
+      "tag": "0009_chat_build_jobs",
+      "breakpoints": true
     }
   ]
 }

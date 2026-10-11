@@ -47,6 +47,7 @@ export const screenTests = [
   "test/app-sandbox.test.ts",
   "test/agent-apps.test.ts",
   "test/agent-builds.test.ts",
+  "test/build-jobs.test.ts",
   "test/app-preview.test.ts",
   "test/preview-repairs.test.ts",
   "test/workflows.test.ts",
