@@ -673,6 +673,46 @@ const AddCard = ({
 };
 
 /**
+ * The page's saves of the layout, one queue for every board this page
+ * shows: one at a time, in order, and only the latest layout made is sent,
+ * so a board left with saves still to go never sends them over a newer
+ * board's.
+ */
+const layoutSaves: { queue: Promise<void>; made: number } = {
+  queue: Promise.resolve(),
+  made: 0,
+};
+
+/** How a layout's save ended: saved, refused, or not sent, a newer layout made before its turn. */
+type SaveEnd = "saved" | "refused" | "refusedSinceChanged" | "skipped";
+
+/**
+ * Sends a layout (`send`, true when core took it) once the saves before
+ * it end, unless a newer one was made meanwhile.
+ */
+const queueLayoutSave = async (
+  send: () => Promise<boolean>
+): Promise<SaveEnd> => {
+  layoutSaves.made += 1;
+  const { made } = layoutSaves;
+  const previous = layoutSaves.queue;
+  const saving = (async (): Promise<SaveEnd> => {
+    await previous;
+    if (layoutSaves.made !== made) {
+      return "skipped";
+    }
+    if (await send()) {
+      return "saved";
+    }
+    return layoutSaves.made === made ? "refused" : "refusedSinceChanged";
+  })();
+  layoutSaves.queue = (async () => {
+    await saving;
+  })();
+  return await saving;
+};
+
+/**
  * The board, each widget in its block as its read comes, in the person's
  * order. Each change shows at once and is saved whole; one core refuses
  * goes back, saying why.
@@ -690,10 +730,6 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
   const stopDrag = useRef<(() => void) | null>(null);
   /** The layout core last took: what a refused save goes back to. */
   const confirmed = useRef(board.layout);
-  /** Saves go one at a time, in order, so the last to end is the last made. */
-  const queue = useRef<Promise<void>>(Promise.resolve());
-  /** Saves started, so only the latest one's refusal puts the board back. */
-  const saves = useRef(0);
   const titleOf = (id: StandardWidgetId) => i18n._(widgetTitles[id]);
 
   // A save that core refuses, with no later one to come, puts the board
@@ -702,28 +738,23 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
     setWidgets(next);
     setFailure(undefined);
     setAnnouncement(said);
-    saves.current += 1;
-    const started = saves.current;
-    const previous = queue.current;
-    const saving = (async () => {
-      await previous;
-      const saved = await run(
-        async (session) => {
-          await session.dashboard.saveLayout({ widgets: [...next] });
-          return true;
-        },
-        (reason) => {
-          setFailure(reason);
-        }
-      );
-      if (saved === true) {
-        confirmed.current = next;
-      } else if (saves.current === started) {
-        setWidgets(confirmed.current);
-      }
-    })();
-    queue.current = saving;
-    await saving;
+    const end = await queueLayoutSave(
+      async () =>
+        (await run(
+          async (session) => {
+            await session.dashboard.saveLayout({ widgets: [...next] });
+            return true;
+          },
+          (reason) => {
+            setFailure(reason);
+          }
+        )) === true
+    );
+    if (end === "saved") {
+      confirmed.current = next;
+    } else if (end === "refused") {
+      setWidgets(confirmed.current);
+    }
   };
 
   // A drag the board is left in the middle of ends there, unsaved.
