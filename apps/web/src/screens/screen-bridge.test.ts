@@ -182,8 +182,11 @@ describe("the page's bridge to a screen", () => {
   });
 
   it("serves the frame only an object that holds each call to the frame's bounds", () => {
-    // What `openBridge` serves: a frame reaches nothing else through its
-    // port but what this answers and takes.
+    // What `openBridge` serves, and what every call of a frame's lands on
+    // first. Its answers are its target's: `watchRuns` passes on core's
+    // stub of the subscription, whose calls go back to core over the
+    // page's own connection, to a target core bounds (RunSubscription, a
+    // CoreRpcTarget: core's rpc-targets.test.ts).
     expect(frameBridge(coreStandIn().target, [])).toBeInstanceOf(
       FrameRpcTarget
     );

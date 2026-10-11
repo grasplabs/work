@@ -14,7 +14,9 @@
  * either module or its `RpcTarget` on as an export: re-exported, exported
  * as a default or a declaration's value, or through a name that holds it.
  * Type-only imports and exports pass nothing on at runtime and are left
- * alone. With `reexportsOnly` (packages), only the exports are checked.
+ * alone. Outside packages it also refuses a TypeScript-private or
+ * -protected method, which Cap'n Web calls like any other but types hide.
+ * With `reexportsOnly` (packages), only the exports are checked.
  */
 import { findScrollbar } from "./no-scrollbars.ts";
 
@@ -41,6 +43,10 @@ interface Node {
   alternate?: Node;
   left?: Node;
   right?: Node;
+  arguments?: Node[];
+  body?: Node | Node[];
+  static?: boolean;
+  accessibility?: string;
   importKind?: string;
   exportKind?: string;
 }
@@ -130,60 +136,87 @@ const valueWrappers = new Set([
   "ParenthesizedExpression",
 ]);
 
+/** The parts of `parts` that are nodes. */
+const nodes = (...parts: unknown[]): Node[] => parts.filter(isNode);
+
+/** A class's static fields' values. */
+const staticValues = (node: Node): Node[] => {
+  const members = isNode(node.body) ? node.body.body : undefined;
+  return (Array.isArray(members) ? members : []).flatMap((member: Node) =>
+    member.type === "PropertyDefinition" && member.static === true
+      ? nodes(member.value)
+      : []
+  );
+};
+
+/** What each kind of node holds as its value (`valuesOf`). */
+const valueParts: Record<string, (node: Node) => Node[]> = {
+  VariableDeclaration: (node) =>
+    (node.declarations ?? []).flatMap((declarator) => nodes(declarator.init)),
+  ObjectExpression: (node) =>
+    (node.properties ?? []).flatMap((property) =>
+      nodes(
+        property.type === "SpreadElement" ? property.argument : property.value
+      )
+    ),
+  ArrayExpression: (node) => nodes(...(node.elements ?? [])),
+  ConditionalExpression: (node) => nodes(node.consequent, node.alternate),
+  LogicalExpression: (node) => nodes(node.left, node.right),
+  AssignmentExpression: (node) => nodes(node.right),
+  SequenceExpression: (node) => nodes(node.expressions?.at(-1)),
+  SpreadElement: (node) => nodes(node.argument),
+  CallExpression: (node) => node.arguments ?? [],
+  NewExpression: (node) => node.arguments ?? [],
+  ArrowFunctionExpression: (node) =>
+    isNode(node.body) && node.body.type !== "BlockStatement" ? [node.body] : [],
+  ClassDeclaration: staticValues,
+  ClassExpression: staticValues,
+};
+
 /**
  * What `node`, as a value, may be or hold as it is: itself, what it
  * wraps, a declaration's values, an object's or array's members, either
- * side of a choice. Not what a function or class uses inside, which it
- * doesn't hand out (a class that extends it is the lint's other half).
+ * side of a choice, a call's arguments (`Object.freeze(RpcTarget)`), an
+ * arrow's answer, a class's static fields. Not what a function's body or
+ * a class's methods use inside, which isn't followed (a class that
+ * extends it is the lint's other half).
  */
-const valuesOf = (node: Node): Node[] => {
-  if (valueWrappers.has(node.type)) {
-    return node.expression ? [node.expression] : [];
-  }
-  switch (node.type) {
-    case "VariableDeclaration": {
-      return (node.declarations ?? []).flatMap((declarator) =>
-        declarator.init ? [declarator.init] : []
-      );
-    }
-    case "ObjectExpression": {
-      return (node.properties ?? []).flatMap((property) => {
+const valuesOf = (node: Node): Node[] =>
+  valueWrappers.has(node.type)
+    ? nodes(node.expression)
+    : (valueParts[node.type]?.(node) ?? []);
+
+/**
+ * The names a declaration's pattern binds: `T` of `T`, and of
+ * `{ RpcTarget: T }` and `[T]` alike.
+ */
+const boundBy = (pattern: Node): unknown[] => {
+  const names: unknown[] = [];
+  const pending = [pattern];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    if (next.type === "Identifier") {
+      names.push(next.name);
+    } else if (next.type === "ObjectPattern") {
+      for (const property of next.properties ?? []) {
         const value: unknown =
-          property.type === "SpreadElement"
-            ? property.argument
-            : property.value;
-        return isNode(value) ? [value] : [];
-      });
-    }
-    case "ArrayExpression": {
-      return (node.elements ?? []).filter(
-        (element): element is Node => element !== null
+          property.type === "RestElement" ? property.argument : property.value;
+        if (isNode(value)) {
+          pending.push(value);
+        }
+      }
+    } else if (next.type === "ArrayPattern") {
+      pending.push(
+        ...(next.elements ?? []).filter(
+          (element): element is Node => element !== null
+        )
       );
-    }
-    case "ConditionalExpression": {
-      return [node.consequent, node.alternate].filter(
-        (part): part is Node => part !== undefined
-      );
-    }
-    case "LogicalExpression": {
-      return [node.left, node.right].filter(
-        (part): part is Node => part !== undefined
-      );
-    }
-    case "AssignmentExpression": {
-      return node.right ? [node.right] : [];
-    }
-    case "SequenceExpression": {
-      const last = node.expressions?.at(-1);
-      return last ? [last] : [];
-    }
-    case "SpreadElement": {
-      return node.argument ? [node.argument] : [];
-    }
-    default: {
-      return [];
+    } else if (next.type === "AssignmentPattern" && next.left) {
+      pending.push(next.left);
+    } else if (next.type === "RestElement" && next.argument) {
+      pending.push(next.argument);
     }
   }
+  return names;
 };
 
 /**
@@ -217,6 +250,8 @@ const noUnboundedRpcTarget = {
         "Import what you need from capnweb or cloudflare:workers by name, and don't pass their RpcTarget on: a target extends it only through a bounded base (@grasp-os/shared/rpc-target).",
       createRequire:
         "No createRequire: it loads a module past the checks on what is imported.",
+      hiddenMethod:
+        "Cap'n Web calls a target's private and protected methods too, and type checks can't see them: use a #private method.",
     },
     schema: [
       {
@@ -276,8 +311,17 @@ const noUnboundedRpcTarget = {
         }
       },
       VariableDeclarator: (node: Node): void => {
-        if (node.id?.type === "Identifier" && node.init) {
-          declared.push({ name: node.id.name, value: node.init });
+        const { id, init } = node;
+        if (id && init) {
+          for (const name of boundBy(id)) {
+            declared.push({ name, value: init });
+          }
+        }
+      },
+      AssignmentExpression: (node: Node): void => {
+        const { left, right } = node;
+        if (left?.type === "Identifier" && right) {
+          declared.push({ name: left.name, value: right });
         }
       },
       "Program:exit": (): void => {
@@ -336,6 +380,19 @@ const noUnboundedRpcTarget = {
             Identifier: (node: Node): void => {
               if (node.name === "createRequire") {
                 context.report({ node, messageId: "createRequire" });
+              }
+            },
+            // A target's TypeScript-private method is as callable over
+            // Cap'n Web as a public one, but hidden from the types that
+            // tell which methods may hand out a target
+            // (core's test/rpc-targets.test.ts). In the apps, where the
+            // targets are, methods are public or #private.
+            MethodDefinition: (node: Node): void => {
+              if (
+                node.accessibility === "private" ||
+                node.accessibility === "protected"
+              ) {
+                context.report({ node, messageId: "hiddenMethod" });
               }
             },
           }),

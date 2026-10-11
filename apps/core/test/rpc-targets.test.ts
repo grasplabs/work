@@ -98,11 +98,52 @@ type Member<T> = Exclude<keyof T, keyof RpcTarget> & string;
 type Bounded = InstanceType<typeof CoreRpcTarget>;
 
 /**
+ * The bounded targets a getter or an answer of type `T` may hand out:
+ * each of a union's (`Holder | undefined`), so none hides behind another.
+ */
+type BoundedIn<T> = Extract<NonNullable<T>, Bounded>;
+
+/**
+ * Whether `T` may hand out something callable other than a target typed
+ * as its CoreRpcTarget class: an interface (`ChatsApi`), a stub, a
+ * function. The check can't look into it, so it can't ask for the calls
+ * of its methods: such a getter or answer fails the check instead
+ * (`Unfollowable`), until it is typed as its class.
+ */
+type HidesCallable<T> =
+  true extends HoldsCallable<Exclude<NonNullable<T>, Bounded>> ? true : false;
+
+/**
+ * What the check asks `calls` for at `Path` when it can't look into what's
+ * there: no call can be named so, so the check stays failed.
+ */
+type Unfollowable<Path extends string> =
+  `${Path}: type it as its CoreRpcTarget class`;
+
+/**
+ * Everything the check asks for past `Path`, where `V` is handed out: the
+ * calls of each bounded target's own, and a failure for anything callable
+ * it can't look into.
+ */
+type Past<V, Path extends string, Depth extends unknown[]> =
+  | EachTarget<BoundedIn<V>, `${Path}.`, Depth>
+  | (HidesCallable<V> extends true ? Unfollowable<Path> : never);
+
+/** {@link CallableAnswers} of each target of a union, none if there's none. */
+type EachTarget<T, Prefix extends string, Depth extends unknown[]> = [
+  T,
+] extends [never]
+  ? never
+  : T extends unknown
+    ? CallableAnswers<T, Prefix, [...Depth, 0]>
+    : never;
+
+/**
  * The path, from `T`, of every method that may answer something
  * callable, through every getter and every answer that is a bounded
  * target: as `walk` names them (`authenticate.chats.watch`). Anything
- * else callable a getter or an answer holds, the walk finds unbounded,
- * so there's nothing past it to call.
+ * else callable a getter or an answer may hand out, the check can't look
+ * into, and asks for what no call can satisfy ({@link Unfollowable}).
  */
 type CallableAnswers<
   T,
@@ -113,26 +154,16 @@ type CallableAnswers<
   : {
       [K in Member<T>]: T[K] extends (...args: never) => infer Answer
         ? true extends HoldsCallable<Awaited<Answer>>
-          ?
-              | `${Prefix}${K}`
-              | (Awaited<Answer> extends Bounded
-                  ? CallableAnswers<
-                      Awaited<Answer>,
-                      `${Prefix}${K}.`,
-                      [...Depth, 0]
-                    >
-                  : never)
+          ? `${Prefix}${K}` | Past<Awaited<Answer>, `${Prefix}${K}`, Depth>
           : never
-        : T[K] extends Bounded
-          ? CallableAnswers<T[K], `${Prefix}${K}.`, [...Depth, 0]>
-          : never;
+        : Past<T[K], `${Prefix}${K}`, Depth>;
     }[Member<T>];
 
-/** What `T`'s member `K` hands out: a getter's value, a method's answer. */
+/** What `T`'s member `K` hands out that is followed: its bounded targets. */
 type Next<T, K extends string> = K extends keyof T
   ? T[K] extends (...args: never) => infer Answer
-    ? Awaited<Answer>
-    : T[K]
+    ? BoundedIn<Awaited<Answer>>
+    : BoundedIn<T[K]>
   : never;
 
 /** The target `Path`'s last method is called on. */
