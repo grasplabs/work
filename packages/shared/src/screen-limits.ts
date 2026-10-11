@@ -1,13 +1,36 @@
+import { valueDepth } from "./value-depth.ts";
+
 // The limits and the frame's start, as the page, core and the frame's own
 // runtime all name them. Apart from the rest of what screens share
-// (screens.ts), with nothing imported: the runtime is loaded into every
-// frame, and carries only what it uses.
+// (screens.ts), importing only the depth a value may nest (a constant):
+// the runtime is loaded into every frame, and carries only what it uses.
 
 /** Where the frontend frames screens from: a document core serves. */
 export const screenFramePath = "/screen-frame";
 
 /** Where core serves a screen's modules to its frame, each by its hash. */
 export const screenModulePath = "/screen-modules";
+
+/**
+ * The levels Cap'n Web counts around a value in the deepest shape an
+ * untrusted side sends one: a screen's call, `call(method, [value])`,
+ * through the page's bridge or over a browser's connection to core.
+ * Measured with capnweb 0.12.0, which refuses a message once a level's
+ * depth reaches `maxDepth`, counting from 0 at the message's expression:
+ *
+ * - the call's list of arguments is one level;
+ * - a screen's list of arguments for its App is another, so a value
+ *   `valueDepth` levels deep ends at depth `valueDepth + 1`.
+ *
+ * A value passed straight as an argument (a run's input, a decision's
+ * answer) has one level around it, and an answer, the message's own
+ * expression, none: this shape is the deepest. Arrays and objects count
+ * alike. So a value passed straight as an argument may be 33 levels deep
+ * on the wire, on purpose: one more than values may nest, refused where
+ * it is checked (no schema nests deeper than `valueDepth`), as bounding
+ * each shape apart would take a limit of each call's own.
+ */
+const rpcWrapperLevels = 2;
 
 /**
  * The limits of a screen's start and traffic, in one place. They are the
@@ -28,8 +51,24 @@ export const screenLimits = {
    * Cap'n Web's limits on what a frame sends over its port. A message's
    * size is its text's, in UTF-16 code units. A browser's connection to
    * core takes the depth and the digits too (core's rpc.ts).
+   *
+   * The depth bounds how far Cap'n Web recurses into each message from
+   * an untrusted side, so it is no deeper than a value may nest plus the
+   * levels a screen's call wraps it in: a value as deep as values may be
+   * arrives, one level deeper ends the session. Each level more lets
+   * every message recurse once more; what a message holds in all stays
+   * bounded by its size.
+   *
+   * It bounds one message, not the value a call ends up with: a message
+   * can refer to what earlier ones sent (Cap'n Web's pipelining), so a
+   * value built over several messages can be deeper. That is bounded
+   * where values reach core, not here (GRA-423).
    */
-  rpc: { maxDepth: 32, maxMessageSize: 262_144, maxBigIntDigits: 32 },
+  rpc: {
+    maxDepth: valueDepth + rpcWrapperLevels,
+    maxMessageSize: 262_144,
+    maxBigIntDigits: 32,
+  },
   /** A server call's arguments, as UTF-8 JSON, in bytes. */
   inputBytes: 128 * 1024,
   /** A server call's answer, as UTF-8 JSON, in bytes: more is paged. */

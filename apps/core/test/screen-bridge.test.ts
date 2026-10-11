@@ -1,6 +1,7 @@
 import { kitModuleName, screenRuntime } from "@grasp-os/compiler";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
+import { valueDepth } from "@grasp-os/shared/value-depth";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -60,6 +61,10 @@ export class App extends DurableObject {
 
   whoami(caller: Caller): string {
     return caller.userId;
+  }
+
+  echo(_caller: Caller, value: unknown): unknown {
+    return value;
   }
 
   chatty(_caller: Caller, note: string): string {
@@ -277,10 +282,10 @@ const inAppStorage = async <T>(
 const ended = (outcomes: string[], code: string): number =>
   outcomes.filter((result) => result === code).length;
 
-/** A value nested `depth` arrays deep. */
+/** A value `depth` levels deep: arrays around a leaf, which is a level too. */
 const nestedArrays = (depth: number): unknown => {
   let value: unknown = "bottom";
-  for (let level = 0; level < depth; level += 1) {
+  for (let level = 1; level < depth; level += 1) {
     value = [value];
   }
   return value;
@@ -1877,25 +1882,29 @@ describe("screens", { timeout: 60_000 }, () => {
     }).toStrictEqual({ followed: 20, refused: 5 });
   });
 
-  it("ends a connection that sends a value nested deeper than a screen's may be", async () => {
+  it("passes on a value as deep as values may be, and ends a connection that sends one level more", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
     const attacker = await openRpc(builder.session);
+    const { screens } = attacker.core.authenticate();
 
-    const shallow = await outcome(
-      builder.api.screens.call(app, "whoami", [nestedArrays(20)])
-    );
-    const deep = await outcome(
-      attacker.core
-        .authenticate()
-        .screens.call(app, "whoami", [nestedArrays(40)])
+    // To the App and back, whole.
+    const deepest = await screens.call(app, "echo", [nestedArrays(valueDepth)]);
+    const tooDeep = await outcome(
+      screens.call(app, "echo", [nestedArrays(valueDepth + 1)])
     );
 
     expect({
-      shallow,
-      deepAnswered: deep === "ok",
-      // Only the connection that sent it ends.
+      deepest,
+      tooDeepAnswered: tooDeep === "ok",
+      // The connection that sent it ends, and only that one.
+      afterOnIt: (await outcome(screens.call(app, "whoami", []))) === "ok",
       after: await outcome(builder.api.screens.call(app, "whoami", [])),
-    }).toStrictEqual({ shallow: "ok", deepAnswered: false, after: "ok" });
+    }).toStrictEqual({
+      deepest: nestedArrays(valueDepth),
+      tooDeepAnswered: false,
+      afterOnIt: false,
+      after: "ok",
+    });
   });
 });
