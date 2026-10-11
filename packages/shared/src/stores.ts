@@ -345,6 +345,9 @@ export const dataErrors = defineErrorFamily({
   "data.not_unique": "More than one record matches.",
   "data.incompatible_record":
     "A stored record doesn't fit the schema this read is pinned to.",
+  "data.invalid_cursor": "That cursor isn't one for this query.",
+  "data.cursor_expired":
+    "That cursor no longer applies. Start again from the first page.",
   "data.aggregate_overflow":
     "That aggregate is past the largest number there is.",
   "data.index_required":
