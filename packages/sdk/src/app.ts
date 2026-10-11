@@ -159,6 +159,18 @@ const refuse = (message: string): never => {
   throw new AppDefinitionError(message);
 };
 
+/** `value` with every object and array in it frozen; data only. */
+const deepFreeze = <Value>(value: Value): Value => {
+  // Into frozen objects too: a frozen object can hold one that isn't.
+  if (typeof value === "object" && value !== null) {
+    Object.freeze(value);
+    for (const entry of Object.values(value)) {
+      deepFreeze(entry);
+    }
+  }
+  return value;
+};
+
 /** Every App `app` registered, with its inspection. */
 const inspections = new WeakMap<object, AppInspection>();
 
@@ -532,26 +544,33 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
   }
 
   const made: App<Tables> = Object.freeze({ name, schema });
-  inspections.set(
-    made,
-    Object.freeze({
-      manifest: Object.freeze({
-        name,
-        schema: manifest,
-        operations: Object.freeze(operations),
-        resources: Object.freeze(Object.fromEntries(resources)),
-      }),
-      functions,
-    })
-  );
+  inspections.set(made, {
+    manifest: deepFreeze({
+      name,
+      schema: manifest,
+      operations,
+      resources: Object.fromEntries(resources),
+    }),
+    functions,
+  });
   return made;
 };
 
-/** What the host runs `registered` from; throws for anything `app` didn't make. */
+/**
+ * What the host runs `registered` from; throws for anything `app` didn't
+ * make. The manifest is frozen all the way down, and the handlers are a
+ * copy each time, so nothing a caller does to them changes the App.
+ */
 export const inspectApp = (registered: unknown): AppInspection => {
   const inspection =
     typeof registered === "object" && registered !== null
       ? inspections.get(registered)
       : undefined;
-  return inspection ?? refuse("That isn't an App `app` registered.");
+  if (inspection === undefined) {
+    return refuse("That isn't an App `app` registered.");
+  }
+  return Object.freeze({
+    manifest: inspection.manifest,
+    functions: new Map(inspection.functions),
+  });
 };

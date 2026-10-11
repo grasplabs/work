@@ -214,6 +214,32 @@ describe("access", () => {
   });
 });
 
+describe("inspection", () => {
+  test("hands out a manifest frozen all the way down, and handlers it can't change", () => {
+    const registered = notes();
+    const { manifest, functions } = inspectApp(registered);
+    const verbs = manifest.operations["notes.list"]?.tables.notes;
+    expect(Reflect.set(verbs ?? {}, "insert", true)).toBeFalsy();
+    expect(
+      [
+        manifest,
+        manifest.schema,
+        manifest.schema.tables.notes?.access,
+        manifest.operations["notes.create"]?.uses,
+      ].every((part) => Object.isFrozen(part))
+    ).toBeTruthy();
+    // A caller that ignores the read-only type: its copy changes, not the App.
+    if (functions instanceof Map) {
+      functions.set("notes.list", create);
+    }
+    expect(inspectApp(registered).functions.get("notes.list")).toBe(list);
+    expect(
+      inspectApp(registered).manifest.operations["notes.list"]?.tables.notes
+        ?.insert
+    ).toBeFalsy();
+  });
+});
+
 describe("paths", () => {
   test("public and internal functions get distinct paths from their maps", () => {
     const { manifest, functions } = inspectApp(
@@ -453,6 +479,17 @@ describe(AppError, () => {
 
   test.each([
     ["a platform namespace", "data.conflict", "platform's `data`"],
+    [
+      "the connections' namespace",
+      "connection.not_offered",
+      "platform's `connection`",
+    ],
+    ["the screens' namespace", "screen.invalid", "platform's `screen`"],
+    [
+      "the resources' namespace",
+      "resource.unavailable",
+      "platform's `resource`",
+    ],
     ["another platform namespace", "auth.unauthenticated", "platform's `auth`"],
     ["one segment", "notfound", "dotted"],
     ["upper case", "Note.Missing", "dotted"],

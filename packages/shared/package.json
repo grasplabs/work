@@ -21,6 +21,7 @@
     "./dependencies": "./src/dependencies.ts",
     "./deployment-config": "./src/deployment-config.ts",
     "./encoding": "./src/encoding.ts",
+    "./error-namespaces": "./src/error-namespaces.ts",
     "./error-reports": "./src/error-reports.ts",
     "./errors": "./src/errors.ts",
     "./guests": "./src/guests.ts",

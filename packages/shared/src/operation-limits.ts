@@ -4,6 +4,8 @@
 // sends. Free of dependencies, like store-limits.ts, because the SDK's
 // root module can't bring Zod along.
 
+import { platformErrorNamespaces } from "./error-namespaces.ts";
+
 /**
  * The most bytes of one operation's input, as UTF-8 JSON: the public
  * operation input limit of spec 18.1, checked on the input as sent, before
@@ -40,34 +42,13 @@ export const appErrorCodePattern = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
 
 /**
  * The first segments an App's own error codes can't have: the platform's
- * error families. An App that throws `data.conflict` would otherwise pass
- * its own failure off as the store's, and a caller that branches on the
- * code would act on a conflict that never happened.
+ * error namespaces (error-namespaces.ts, held to the real families by its
+ * test). An App that throws `data.conflict` would otherwise pass its own
+ * failure off as the store's, and a caller that branches on the code would
+ * act on a conflict that never happened.
  */
-export const reservedErrorNamespaces: ReadonlySet<string> = new Set([
-  "app",
-  "audit",
-  "auth",
-  "connect",
-  "contract",
-  "data",
-  "definition",
-  "effect",
-  "internal",
-  "knowledge",
-  "model",
-  "mutation",
-  "operation",
-  "permission",
-  "query",
-  "request",
-  "role",
-  "safety",
-  "schema",
-  "store",
-  "submission",
-  "workflow",
-]);
+export const reservedErrorNamespaces: ReadonlySet<string> =
+  platformErrorNamespaces;
 
 /**
  * Whether `code` may be an App's own error code: the pattern, the length,
