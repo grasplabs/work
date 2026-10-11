@@ -23,6 +23,39 @@ const lineageOf = (root: string): LedgerScope => ({
 const byKey = <Row extends { key: string }>(rows: Row[] | undefined) =>
   rows?.toSorted((one, other) => one.key.localeCompare(other.key));
 
+/**
+ * Makes request `id` as a release before periods were recorded left it:
+ * no period on its scopes, and its run's reservation on the run's monthly
+ * row (2400-01) instead of its lineage's.
+ */
+const asBeforePeriods = async (
+  ledger: ReturnType<typeof newLedger>,
+  id: string,
+  root: string
+): Promise<void> => {
+  await runInDurableObject(ledger, (_instance, state) => {
+    state.storage.sql.exec(
+      "UPDATE request_scopes SET period = NULL WHERE request_id = ?",
+      id
+    );
+    state.storage.sql.exec(
+      "UPDATE spend SET period = '2400-01' WHERE scope = 'run' AND key = ?",
+      root
+    );
+  });
+};
+
+/** A run's spend rows, every period's, in order of period. */
+const runRowsOf = async (ledger: ReturnType<typeof newLedger>, root: string) =>
+  await runInDurableObject(ledger, (_instance, state) =>
+    state.storage.sql
+      .exec<{ period: string; spentMicros: number; reservedMicros: number }>(
+        "SELECT period, spent_micros AS spentMicros, reserved_micros AS reservedMicros FROM spend WHERE scope = 'run' AND key = ? ORDER BY period",
+        root
+      )
+      .toArray()
+  );
+
 /** Values in order, as their JSON sorts. */
 const byJson = (one: unknown, other: unknown): number =>
   JSON.stringify(one).localeCompare(JSON.stringify(other));
@@ -880,68 +913,129 @@ describe("the model ledger", () => {
     });
   });
 
-  it("settles a request only against the spend it reserved, so one with no recorded period leaves a newer lineage's spend alone and is held", async () => {
+  it("settles a request admitted before periods were recorded against its monthly rows, its run's too, and never a newer lineage's", async () => {
     const ledger = newLedger();
+    const key = `lea-${crypto.randomUUID()}`;
     const run = lineageOf(`root-${crypto.randomUUID()}`);
-    const old = admission(30, [run], { reconcileAt: Date.now() + 1000 });
+    const workflow = {
+      scope: "workflow",
+      key: `flow-${crypto.randomUUID()}`,
+      limitMicros: null,
+      alertMicros: null,
+      names: {},
+    } as const;
+    const team = {
+      scope: "deployment",
+      key: "deployment",
+      limitMicros: null,
+      alertMicros: null,
+      names: {},
+    } as const;
+    const old = admission(30, [team, workflow, budget(1000, key), run]);
     await ledger.admit(old);
-    // As a release before periods were recorded left it: no period on its
-    // scope, and its reservation on a monthly row of the run.
-    await runInDurableObject(ledger, (_instance, state) => {
-      state.storage.sql.exec(
-        "UPDATE request_scopes SET period = NULL WHERE request_id = ?",
-        old.id
-      );
-      state.storage.sql.exec(
-        "UPDATE spend SET period = '2400-01' WHERE scope = 'run' AND key = ?",
-        run.key
-      );
-    });
+    await asBeforePeriods(ledger, old.id, run.key);
     // The same run's next request, on its lineage's row.
     const next = admission(40, [run]);
     await ledger.admit(next);
     const used = { input: 2, output: 2, cacheRead: 0, cacheWrite: 0 };
 
-    const oldSettled = await ledger
-      .settle(old.id, { by: "usage", tokens: used })
-      .then(
-        () => "settled",
-        () => "refused"
-      );
-    const lineageAfterOld = await ledger.spendOf("2400-01", ["run"], 10);
+    const oldSettled = await ledger.settle(old.id, {
+      by: "usage",
+      tokens: used,
+    });
+    const monthly = await ledger.spendOf(
+      "2400-01",
+      ["deployment", "workflow", "user"],
+      10
+    );
+    const runRows = await runRowsOf(ledger, run.key);
     const nextSettled = await ledger.settle(next.id, {
       by: "usage",
       tokens: used,
     });
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one try after another
-      await runInDurableObject(ledger, (_instance, state) => {
-        state.storage.sql.exec(
-          "UPDATE requests SET reconcile_at = ? WHERE id = ?",
-          Date.now() - 1,
-          old.id
-        );
-      });
-      // oxlint-disable-next-line no-await-in-loop -- one try after another
-      await runDurableObjectAlarm(ledger);
-    }
-    const listed = await ledger.quarantined(10);
-    const later = await ledger.spendOf("2400-02", ["run"], 10);
+    const after = await runRowsOf(ledger, run.key);
 
     expect({
       oldSettled,
-      lineageAfterOld: lineageAfterOld.run,
+      monthly: {
+        deployment: monthly.deployment,
+        workflow: monthly.workflow,
+        user: monthly.user,
+      },
+      runRows,
       nextSettled,
-      listed: listed.map(({ id, releaseOnly }) => [id, releaseOnly]),
-      lineage: later.run,
+      after,
     }).toStrictEqual({
-      oldSettled: "refused",
-      // The lineage's row holds the next request's whole reservation still.
-      lineageAfterOld: [{ key: run.key, spentMicros: 0, reservedMicros: 40 }],
+      oldSettled: { state: "settled", chargedMicros: 4 },
+      // Its month's rows settled: nothing held, what it used spent.
+      monthly: {
+        deployment: [{ key: "deployment", spentMicros: 4, reservedMicros: 0 }],
+        workflow: [{ key: workflow.key, spentMicros: 4, reservedMicros: 0 }],
+        user: [{ key, spentMicros: 4, reservedMicros: 0 }],
+      },
+      // Its run's monthly row settled; the lineage's still holds the next.
+      runRows: [
+        { period: "2400-01", spentMicros: 4, reservedMicros: 0 },
+        { period: "lineage", spentMicros: 0, reservedMicros: 40 },
+      ],
       nextSettled: { state: "settled", chargedMicros: 4 },
-      // Held for a person, release only: it has no spend it can settle on.
+      after: [
+        { period: "2400-01", spentMicros: 4, reservedMicros: 0 },
+        { period: "lineage", spentMicros: 4, reservedMicros: 0 },
+      ],
+    });
+  });
+
+  it("frees what a held request admitted before periods were recorded reserved in its month when a person releases it, rebuilding from the others of its time", async () => {
+    const ledger = newLedger();
+    const key = `lea-${crypto.randomUUID()}`;
+    const run = lineageOf(`root-${crypto.randomUUID()}`);
+    const old = admission(30, [budget(1000, key), run]);
+    // Another of its time, still under way on the person's month.
+    const other = admission(10, [budget(1000, key)]);
+    await ledger.admit(old);
+    await ledger.admit(other);
+    await asBeforePeriods(ledger, old.id, run.key);
+    await asBeforePeriods(ledger, other.id, run.key);
+    // The person's spend should hold 40 for the two; damaged, it holds 5.
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE spend SET reserved_micros = 5 WHERE scope = 'user' AND key = ?",
+        key
+      );
+    });
+    // Held: its scopes' JSON can't be read to settle it.
+    await corrupt(ledger, "scopes", "not json", old.id);
+    await ledger.settle(old.id, { by: "unknown" });
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE requests SET reconcile_at = ? WHERE id = ?",
+        Date.now() - 1,
+        old.id
+      );
+    });
+    await runDurableObjectAlarm(ledger);
+    const listed = await ledger.quarantined(10);
+    const admin = {
+      type: "person",
+      userId: `admin-${crypto.randomUUID()}`,
+    } as const;
+
+    const released = await ledger.resolveQuarantined(old.id, "release", admin);
+    const user = await spendOf(ledger, key);
+    const runRows = await runRowsOf(ledger, run.key);
+
+    expect({
+      listed: listed.map(({ id, releaseOnly }) => [id, releaseOnly]),
+      released: released.state,
+      user,
+      runRows,
+    }).toStrictEqual({
       listed: [[old.id, true]],
-      lineage: [{ key: run.key, spentMicros: 4, reservedMicros: 0 }],
+      released: "decided",
+      // Rebuilt to what the other still reserves in that month.
+      user: { key, spentMicros: 0, reservedMicros: 10 },
+      runRows: [{ period: "2400-01", spentMicros: 0, reservedMicros: 0 }],
     });
   });
 

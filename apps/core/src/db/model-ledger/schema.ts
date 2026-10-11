@@ -108,8 +108,8 @@ export const requestScopes = sqliteTable(
      * The spend period it reserved against: the request's month, or
      * `lineage` for a run lineage (model-ledger.ts). The request settles,
      * is rebuilt and is summed against exactly this, never one worked out
-     * again later. Null for a request admitted before it was recorded: it
-     * has no period to settle against, and is held for a person.
+     * again later. Null for a request admitted before it was recorded,
+     * which reserved every scope under its own month (`requests.period`).
      */
     period: text(),
     /** The most requests its scope may admit, when admitted; null for none. */

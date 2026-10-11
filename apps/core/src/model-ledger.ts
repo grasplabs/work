@@ -60,9 +60,11 @@ import type { PinnedPrice } from "./model-prices.ts";
 //   scope, the period it reserved against (`request_scopes.period`), and
 //   settles, is rebuilt and is summed against exactly that, never one
 //   worked out again later: so a request settles against what it
-//   reserved, whatever later releases change; one with no period recorded
-//   is held for a person. A lineage whose spend row was lost lost its
-//   request count too: rebuilt, it is used up.
+//   reserved, whatever later releases change. One admitted before periods
+//   were recorded reserved every scope under its own month, a run's on
+//   the run's monthly row, and settles there, never on a lineage's row. A
+//   lineage whose spend row was lost lost its request count too: rebuilt,
+//   it is used up.
 // - The ledger fails or can't be reached: the gateway sends nothing
 //   unless its admission answered yes. An admission whose answer was lost
 //   may have committed: the gateway releases it only if it knows the
@@ -128,8 +130,8 @@ const reconcileRetryMs = 60 * 60 * 1000;
 const maxReconcileFailures = 3;
 
 /**
- * Most damaged scopes one decision's audit event lists, four detail members
- * each: within the event's limit (`auditDetailMaxKeys`) beside its other
+ * Most damaged scopes one decision's audit event lists, up to five detail
+ * members each: within the event's limit (`auditDetailMaxKeys`) beside its other
  * members, however many scopes stored data names. `damaged` counts all.
  */
 const auditedDamagedScopes = 6;
@@ -149,6 +151,20 @@ const lineagePeriod = "lineage";
 /** The period `scope`'s spend counts in, for a request of `period`. */
 const periodOf = (scope: LedgerScopeName, period: string): string =>
   scope === "run" ? lineagePeriod : period;
+
+/**
+ * The period a request reserved against for one of its scopes: the one
+ * its admission recorded, or, for a request admitted before periods were
+ * recorded, its own month, which is what every one of its scopes then
+ * reserved under (a run's too, on the run's monthly row).
+ */
+const reservedPeriod = (
+  kept: { period: string | null },
+  row: { period: string }
+): string => kept.period ?? row.period;
+
+/** `reservedPeriod` in SQL, over a request joined to its scopes. */
+const reservedPeriodSql = sql`coalesce(${requestScopes.period}, ${requests.period})`;
 
 /** Whose spend a scope counts. */
 export type LedgerScopeName = (typeof scopeNames)[number];
@@ -736,7 +752,7 @@ export class ModelLedger extends DurableObject<Env> {
           this.#settleHeldScope(kept, row, charged, actor);
           continue;
         }
-        const after = this.#rebuildScope(kept, holds);
+        const after = this.#rebuildScope(kept, row, holds);
         const at = `damaged.${rebuiltScopes}`;
         rebuiltScopes += 1;
         if (rebuiltScopes > auditedDamagedScopes) {
@@ -774,7 +790,7 @@ export class ModelLedger extends DurableObject<Env> {
 
   /**
    * Releases, or charges, what `row` holds against the healthy scope
-   * `kept`, in the period its admission recorded, and alerts admins to
+   * `kept`, in the period it reserved against, and alerts admins to
    * any threshold a charge takes it past. Inside a transaction.
    */
   #settleHeldScope(
@@ -783,9 +799,6 @@ export class ModelLedger extends DurableObject<Env> {
     charged: number,
     actor: AuditActor
   ): void {
-    if (kept.period === null) {
-      return;
-    }
     const after = this.#db
       .update(spend)
       .set({
@@ -796,7 +809,7 @@ export class ModelLedger extends DurableObject<Env> {
         and(
           eq(spend.scope, kept.scope),
           eq(spend.key, kept.key),
-          eq(spend.period, kept.period)
+          eq(spend.period, reservedPeriod(kept, row))
         )
       )
       .returning({ spentMicros: spend.spentMicros })
@@ -820,24 +833,21 @@ export class ModelLedger extends DurableObject<Env> {
 
   /**
    * Rebuilds the damaged spend of `kept`, which holds `holds` (none when
-   * its row is missing), in the period its admission recorded: its
+   * its row is missing), in the period `row` reserved against: its
    * reservation becomes what the other open requests on it reserve. A
-   * missing row is recreated only when they reserve something, or when
-   * its scope limits requests: the row took the scope's count with it,
-   * so it comes back used up (`requests` at its limit), and the scope
-   * makes no more requests. A request with no period recorded has nothing
-   * to rebuild. What it rebuilt to, none when nothing was written, and
+   * missing row is recreated only when they reserve something, or when it
+   * is a run lineage's: the row took the lineage's count with it, so it
+   * comes back used up (`requests` at its limit), and the lineage makes no
+   * more requests. What it rebuilt to, none when nothing was written, and
    * the count it set. Inside a transaction.
    */
   #rebuildScope(
     kept: typeof requestScopes.$inferSelect,
+    row: { period: string },
     holds: number | undefined
   ): { micros: number | null; requests?: number } {
-    const { period } = kept;
-    if (period === null) {
-      return { micros: null };
-    }
-    const micros = this.#openReservations(kept);
+    const period = reservedPeriod(kept, row);
+    const micros = this.#openReservations({ ...kept, period });
     if (holds !== undefined) {
       this.#db
         .update(spend)
@@ -852,7 +862,8 @@ export class ModelLedger extends DurableObject<Env> {
         .run();
       return { micros };
     }
-    const exhausted = kept.limitRequests ?? undefined;
+    const exhausted =
+      period === lineagePeriod ? (kept.limitRequests ?? undefined) : undefined;
     if (micros === 0 && exhausted === undefined) {
       return { micros: null };
     }
@@ -874,8 +885,7 @@ export class ModelLedger extends DurableObject<Env> {
   /**
    * The scopes `row` reserved against (`request_scopes`), each with what
    * its spend holds in the period it reserved against, and whether that
-   * spend is damaged: missing (or no period recorded), or holding less
-   * than `row` alone reserved.
+   * spend is damaged: missing, or holding less than `row` alone reserved.
    */
   #heldScopes(row: { id: string; period: string; reservedMicros: number }): {
     kept: typeof requestScopes.$inferSelect;
@@ -888,21 +898,17 @@ export class ModelLedger extends DurableObject<Env> {
       .where(eq(requestScopes.requestId, row.id))
       .all()
       .map((kept) => {
-        // No recorded period, no spend to find: damaged.
-        const holds =
-          kept.period === null
-            ? undefined
-            : this.#db
-                .select({ reservedMicros: spend.reservedMicros })
-                .from(spend)
-                .where(
-                  and(
-                    eq(spend.scope, kept.scope),
-                    eq(spend.key, kept.key),
-                    eq(spend.period, kept.period)
-                  )
-                )
-                .get()?.reservedMicros;
+        const holds = this.#db
+          .select({ reservedMicros: spend.reservedMicros })
+          .from(spend)
+          .where(
+            and(
+              eq(spend.scope, kept.scope),
+              eq(spend.key, kept.key),
+              eq(spend.period, reservedPeriod(kept, row))
+            )
+          )
+          .get()?.reservedMicros;
         return {
           kept,
           holds,
@@ -913,18 +919,15 @@ export class ModelLedger extends DurableObject<Env> {
 
   /**
    * What the open requests (under way, lost or held) reserve against
-   * `kept`'s scope in the period it reserved against, as each admission
-   * recorded it: what that spend should hold, by the ledger's own records.
-   * Nothing without a recorded period. Inside a transaction.
+   * `kept`'s scope in `period`, each by the period it reserved against
+   * (`reservedPeriod`): what that spend should hold, by the ledger's own
+   * records. Inside a transaction.
    */
   #openReservations(kept: {
     scope: LedgerScopeName;
     key: string;
-    period: string | null;
+    period: string;
   }): number {
-    if (kept.period === null) {
-      return 0;
-    }
     return (
       this.#db
         .select({
@@ -937,7 +940,7 @@ export class ModelLedger extends DurableObject<Env> {
             inArray(requests.state, ["dispatched", "unknown", "quarantined"]),
             eq(requestScopes.scope, kept.scope),
             eq(requestScopes.key, kept.key),
-            eq(requestScopes.period, kept.period)
+            sql`${reservedPeriodSql} = ${kept.period}`
           )
         )
         .get()?.reserved ?? 0
@@ -1138,7 +1141,7 @@ export class ModelLedger extends DurableObject<Env> {
             eq(requests.state, "dispatched"),
             // Those that reserved against this very spend: a lineage's in
             // whatever month they count in.
-            eq(requestScopes.period, periodOf(scope.scope, period)),
+            sql`${reservedPeriodSql} = ${periodOf(scope.scope, period)}`,
             gt(requests.deadline, now),
             eq(requestScopes.scope, scope.scope),
             eq(requestScopes.key, scope.key)
@@ -1243,10 +1246,11 @@ export class ModelLedger extends DurableObject<Env> {
     );
     let alerted = 0;
     for (const scope of scopes) {
-      const period = periods.get(`${scope.scope}\n${scope.key}`);
-      if (period === undefined || period === null) {
-        throw new Error("A request's scope has no period it reserved against");
+      const recorded = periods.get(`${scope.scope}\n${scope.key}`);
+      if (recorded === undefined) {
+        throw new Error("A request's scope has no record of what it reserved");
       }
+      const period = reservedPeriod({ period: recorded }, row);
       const after = this.#db
         .update(spend)
         .set({
