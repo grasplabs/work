@@ -497,7 +497,7 @@ describe("a chat's Knowledge", setUpTime, () => {
 
     await expect(
       stub.recordSources(chat.id, crypto.randomUUID(), ["collection-1"])
-    ).resolves.toBeFalsy();
+    ).resolves.toBe("ended");
     await ask("Hi.");
 
     const events = await eventsOf(

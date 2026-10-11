@@ -17,7 +17,7 @@ import {
   maxSteps,
   requestChars,
 } from "../src/agent.ts";
-import { codeLimits, sourceHash } from "../src/code-mode.ts";
+import { codeLimits, codeRuntime, sourceHash } from "../src/code-mode.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
   chatOf,
@@ -1442,6 +1442,34 @@ describe("chat agent after a restart", () => {
   });
 });
 
+/**
+ * A revoked permission of `agentId`, stored as a revocation leaves one:
+ * granted before, or (`granted: false`) a request declined before anyone
+ * granted it; held everywhere, or in one chat.
+ */
+const revokedRow = async (
+  agentId: string,
+  { granted, chatId }: { granted: boolean; chatId: string | null }
+) => {
+  await env.DB.prepare(
+    `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+      actions, binding, status, requested_by, requested_at, granted_by, granted_at,
+      revoked_by, revoked_at, chat_id)
+     VALUES (?, 'agent', ?, 'collection', ?, '["read"]', ?, 'revoked', 'test', 0, ?, ?, 'test', ?, ?)`
+  )
+    .bind(
+      crypto.randomUUID(),
+      agentId,
+      crypto.randomUUID(),
+      `R${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`.toUpperCase(),
+      granted ? "test" : null,
+      granted ? 0 : null,
+      Date.now(),
+      chatId
+    )
+    .run();
+};
+
 /** The chat's code run records, oldest first, as the object keeps them. */
 const runRecords = async (stub: WorkspaceStub, chatId: string) =>
   await runInDurableObject(stub, (_instance, state) =>
@@ -1609,6 +1637,112 @@ describe("chat agent code run leases", () => {
       },
       { timeout: 10_000, interval: 100 }
     );
+  });
+
+  it("notices a revocation the code never called after: it ends revoked, and hands on neither its result nor its logs", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { collectionId } = await collectionWithNote(admin.api, {
+      name: `Handbook ${crypto.randomUUID()}`,
+      access: "everyone",
+    });
+    const { stub, chat, agent, ask } = await newChat(
+      codeStep(
+        "export default async (self, env) => { const info = await env.chat.info(); await scheduler.wait(3_000); console.log('leaked', info.chatId); return 'read before the revoke'; };"
+      ),
+      says("Done.")
+    );
+    const permission = await requestGranted(
+      idp,
+      admin,
+      readCollection(agent, collectionId, "HANDBOOK")
+    );
+
+    const reply = ask("Look once.");
+    await vi.waitFor(
+      async () => {
+        await expect(
+          runRecords(stub, chat.id).then((records) => records.length)
+        ).resolves.toBe(1);
+      },
+      { timeout: 10_000 }
+    );
+    await admin.api.permissions.revoke(permission);
+    await reply;
+
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      {
+        isError: true,
+        text: `Error (revoked):\n${agentErrors.create("agent.run_revoked").message}`,
+      },
+    ]);
+    await expect(
+      runRecords(stub, chat.id).then((records) =>
+        records.map(({ status }) => status)
+      )
+    ).resolves.toStrictEqual(["revoked"]);
+    await vi.waitFor(
+      async () => {
+        await expect(
+          refusalsIn(chat.id, "agent.run_revoked")
+        ).resolves.toStrictEqual([
+          {
+            method: "executeCode",
+            outcome: "refused",
+            reason: "agent.run_revoked",
+          },
+        ]);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+  });
+
+  it("leaves a run alone when what was revoked never gave it authority: a request never granted, or another chat's permission", async () => {
+    const { stub, chat, agent, ask } = await newChat(
+      codeStep(
+        "export default async (self, env) => { await env.chat.info(); await scheduler.wait(1_500); return (await env.chat.info()).chatId; };"
+      ),
+      says("Done.")
+    );
+
+    const reply = ask("Look twice.");
+    await vi.waitFor(
+      async () => {
+        await expect(
+          runRecords(stub, chat.id).then((records) => records.length)
+        ).resolves.toBe(1);
+      },
+      { timeout: 10_000 }
+    );
+    // As a person declining the chat's request stores it, and as a
+    // revocation in another of the agent's chats does.
+    await revokedRow(agent.agentId, { granted: false, chatId: chat.id });
+    await revokedRow(agent.agentId, {
+      granted: true,
+      chatId: crypto.randomUUID(),
+    });
+    await reply;
+
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "completed",
+    ]);
+    await expect(
+      refusalsIn(chat.id, "agent.run_revoked")
+    ).resolves.toStrictEqual([]);
+  });
+
+  it("takes a CPU limit as enforced only where the deployment says it runs on Cloudflare", () => {
+    expect(
+      [undefined, "workerd", "Cloudflare", "cloudflare"].map(
+        (profile) =>
+          codeRuntime(profile === undefined ? {} : { RUNTIME_PROFILE: profile })
+            .cpuLimit
+      )
+    ).toStrictEqual([
+      "cpu_limit_unsupported",
+      "cpu_limit_unsupported",
+      "cpu_limit_unsupported",
+      "enforced",
+    ]);
   });
 
   it("ends a run a restart cuts short: its lease closes, its record says interrupted, and nothing runs again", async () => {

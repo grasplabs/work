@@ -4,6 +4,7 @@ import { compatibilityDate } from "@grasp-os/shared/runtime";
 import type { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
 
+import type { CodeRunStatus } from "./code-run-statuses.ts";
 import { sandbox } from "./sandbox.ts";
 
 // Code Mode: the agent acts by writing code against typed APIs, and the
@@ -50,53 +51,25 @@ export const codeLimits = {
 } as const;
 
 /**
- * How a run ended, as the host saw it, never as the code says: it
- * returned (`completed`), threw (`threw`, or sent back what the harness
- * never returns), was refused before it loaded (`refused`: its source is
- * over the limit), its module didn't load or export a function
- * (`load_failed`, including anything the runtime ended while it loaded,
- * short of its CPU time), the runtime stopped it for CPU time
- * (`cpu_exceeded`) or anything else once it ran (`crashed`: memory, say),
- * it ran past its wall-clock time (`wall_expired`, a wait that can never
- * settle too), the turn was cancelled (`cancelled`), a permission of the
- * agent was revoked while it ran (`revoked`: its lease closed then,
- * whatever its code went on to do), or a restart ended it first
- * (`interrupted`, which only its record says). Only the host sets one:
- * the harness returns every outcome of the code, so the code can't make
- * a call reject, nor pick the message a status is read from.
- */
-export const codeRunStatuses = [
-  "completed",
-  "threw",
-  "refused",
-  "load_failed",
-  "cpu_exceeded",
-  "crashed",
-  "wall_expired",
-  "cancelled",
-  "revoked",
-  "interrupted",
-] as const;
-
-export type CodeRunStatus = (typeof codeRunStatuses)[number];
-
-/**
  * What a run ran on, kept with its record (`chat_code_runs`): the agent
- * loop's exact version (pi-ai is pinned to the same one in the catalog),
- * the runtime's compatibility date, and the runtime. Plain workerd (tests,
- * local development, on-prem, which set `RUNTIME_PROFILE=workerd`) doesn't
- * enforce the isolate's CPU limit, and says so: a busy loop there runs
- * until its wall-clock limit lets go of it, still spinning.
+ * loop's exact version (pi-ai is pinned to the same one in the catalog,
+ * and exports no version of its own to read), the runtime's compatibility
+ * date, and whether the runtime enforces the isolate's CPU limit. Only a
+ * deployment that says `RUNTIME_PROFILE=cloudflare` is taken to: anything
+ * else (unset, plain workerd in tests, local development and on-prem, a
+ * typo) records `cpu_limit_unsupported`, so a record never claims a limit
+ * nobody vouched for. On plain workerd a synchronous busy loop isn't even
+ * bounded by the wall clock: it holds the thread the host's timer needs.
  */
 export const codeRuntime = (env: Pick<Env, "RUNTIME_PROFILE">) => {
-  const workerd = env.RUNTIME_PROFILE === "workerd";
+  const cloudflare = env.RUNTIME_PROFILE === "cloudflare";
   return {
     agent: `${piAgentCore.name}@${piAgentCore.version}`,
     compatibilityDate,
-    runtime: workerd ? ("workerd" as const) : ("cloudflare" as const),
-    cpuLimit: workerd
-      ? ("cpu_limit_unsupported" as const)
-      : ("enforced" as const),
+    runtime: cloudflare ? ("cloudflare" as const) : ("workerd" as const),
+    cpuLimit: cloudflare
+      ? ("enforced" as const)
+      : ("cpu_limit_unsupported" as const),
   };
 };
 

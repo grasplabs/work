@@ -50,9 +50,14 @@ import {
   auditAgentCall,
   chatAuthority,
   chatContext,
+  revokedSince,
   workspaceAgentIdSchema,
 } from "./agent-scope.ts";
-import type { CodeRunAdmission, CodeRunCall } from "./agent-scope.ts";
+import type {
+  AgentScope,
+  CodeRunAdmission,
+  CodeRunCall,
+} from "./agent-scope.ts";
 import { isMessage, runTurn } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
 import type { AppAnswer } from "./app.ts";
@@ -63,7 +68,7 @@ import { chatMessageOf, partialOf } from "./chat-messages.ts";
 import { ChatWatch } from "./chat-watch.ts";
 import type { ChatListener, ChatState } from "./chat-watch.ts";
 import { codeLimits, codeRuntime, codeTimeoutMs } from "./code-mode.ts";
-import type { CodeRunStatus } from "./code-mode.ts";
+import type { CodeRunStatus } from "./code-run-statuses.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/workspace/migrations/migrations.js";
 import {
@@ -71,6 +76,7 @@ import {
   chatAttachments,
   chatCodeRuns,
   chatDraftFiles,
+  maxToolCallIdChars,
   chatDrafts,
   chatMessages,
   chatSources,
@@ -174,6 +180,12 @@ export const maxChatChars = 4_000_000;
  * one: a few turns' worth (at most 30 runs each).
  */
 const endedRunsKept = 1000;
+
+/**
+ * Most code run records a chat keeps, newest first: a long chat's run
+ * history, bounded (`chat_code_runs`).
+ */
+const codeRunRecordsKept = 1000;
 
 /**
  * A code run as the object keeps its lease: open, with the API calls it
@@ -799,7 +811,8 @@ export class Workspace extends DurableObject<Env> {
             : undefined,
         runs: {
           open: (opening) => this.openCodeRun(chat.id, opening),
-          close: (runId, status) => this.closeCodeRun(chat.id, runId, status),
+          close: async (runId, status) =>
+            await this.#endCodeRun(scope, runId, status),
         },
         loader: this.env.LOADER,
         codeTimeoutMs: codeTimeoutMs(this.env),
@@ -954,17 +967,30 @@ export class Workspace extends DurableObject<Env> {
    */
   openCodeRun(chatId: ChatId, opening: CodeRunOpening): string {
     const id = crypto.randomUUID();
-    this.#db
-      .insert(chatCodeRuns)
-      .values({
-        id,
-        chatId,
-        ...opening,
-        ...codeRuntime(this.env),
-        status: "running",
-        startedAt: new Date(),
-      })
-      .run();
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .insert(chatCodeRuns)
+        .values({
+          id,
+          chatId,
+          ...opening,
+          toolCallId: opening.toolCallId.slice(0, maxToolCallIdChars),
+          ...codeRuntime(this.env),
+          status: "running",
+          startedAt: new Date(),
+        })
+        .run();
+      // The chat keeps the records of its latest runs only.
+      this.#db
+        .delete(chatCodeRuns)
+        .where(
+          and(
+            eq(chatCodeRuns.chatId, chatId),
+            sql`${chatCodeRuns.id} NOT IN (SELECT ${chatCodeRuns.id} FROM ${chatCodeRuns} WHERE ${chatCodeRuns.chatId} = ${chatId} ORDER BY ${chatCodeRuns.startedAt} DESC LIMIT ${codeRunRecordsKept})`
+          )
+        )
+        .run();
+    });
     this.#codeRuns.set(`${chatId}/${id}`, { calls: 0, openedAt: Date.now() });
     return id;
   }
@@ -1000,6 +1026,33 @@ export class Workspace extends DurableObject<Env> {
       )
       .run();
     return ended;
+  }
+
+  /**
+   * Ends a code run of the chat's turn: first asks whether a permission of
+   * its agent was revoked since it opened, so a revocation its code never
+   * called after is still noticed (and recorded once), then closes it
+   * (`closeCodeRun`) as revoked or as it ended.
+   */
+  async #endCodeRun(
+    scope: Omit<AgentScope, "runId">,
+    runId: string,
+    status: CodeRunStatus
+  ): Promise<CodeRunStatus> {
+    const admission = this.admitFromCodeRun(scope.chatId, runId);
+    if (
+      admission.call === "open" &&
+      (await revokedSince(this.env, scope, admission.openedAt)) &&
+      this.revokeCodeRun(scope.chatId, runId)
+    ) {
+      await auditAgentCall(
+        this.env,
+        scope,
+        { method: "executeCode" },
+        { outcome: "refused", reason: "agent.run_revoked" }
+      );
+    }
+    return this.closeCodeRun(scope.chatId, runId, status);
   }
 
   /**
@@ -1111,21 +1164,22 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Records what an API call of a code run of the chat read from (see
-   * agent-apis.ts), before the call hands over what it read: `false`, and
-   * nothing recorded, once the run has ended, so the call must not hand it
-   * over. Each source is kept once, for good; every later model request of
+   * agent-apis.ts), before the call hands over what it read: why not, and
+   * nothing recorded, once the run has ended or a revocation closed it, so
+   * the call must not hand it over (`open` when recorded). Each source is kept once, for good; every later model request of
    * the chat carries them all.
    */
   recordSources(
     chatId: ChatId,
     runId: string,
     ids: readonly string[]
-  ): boolean {
-    if (this.admitFromCodeRun(chatId, runId).call !== "open") {
-      return false;
+  ): CodeRunAdmission["call"] {
+    const { call } = this.admitFromCodeRun(chatId, runId);
+    if (call !== "open") {
+      return call;
     }
     this.#keepSources(chatId, sourcesSchema.parse(ids));
-    return true;
+    return call;
   }
 
   /**

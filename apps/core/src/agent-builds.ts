@@ -537,6 +537,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    */
   async #creating<T>(create: () => Promise<T>): Promise<T> {
     const { workspaceId, chatId, runId } = this.ctx.props;
+    // Admitted as it takes the create, which a D1 write follows.
+    await admitEffect(this.env, this.ctx.props);
     const taken = await workspace(this.env, workspaceId).takeCreate(
       chatId,
       maxCreatesPerTurn,
@@ -638,6 +640,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         const unchanged = written.flatMap(([path, content]) =>
           (content ?? undefined) === base.get(path) ? [path] : []
         );
+        await admitEffect(this.env, this.ctx.props);
         const saved = await workspace(
           this.env,
           this.ctx.props.workspaceId
@@ -676,6 +679,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       async (by) => {
         const id = await this.#buildable(by, app);
         const { workspaceId, chatId, runId } = this.ctx.props;
+        await admitEffect(this.env, this.ctx.props);
         await workspace(this.env, workspaceId).dropDraft(chatId, id, {
           runId,
         });

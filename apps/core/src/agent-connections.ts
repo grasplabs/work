@@ -284,8 +284,9 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
     );
     let result: ConnectResult;
     try {
-      // Admitted as it goes to connect, not only as the call began.
-      await admitEffect(this.env, scope);
+      // Admitted as it goes to connect, not only as the call began; a
+      // refusal here is recorded here, as nothing else records this call.
+      await admitEffect(this.env, scope, "connections.call");
       result = await this.env.CONNECT.call(request);
     } catch (error) {
       throw forSandbox(error);

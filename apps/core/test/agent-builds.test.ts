@@ -14,9 +14,12 @@ import {
   codeResults,
   codeStep,
   says,
+  pointAtGateway,
   setObjectEnv,
   testRunOpening,
 } from "./agent-chat.ts";
+import type { WorkspaceStub } from "./agent-chat.ts";
+import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { outlook, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -153,6 +156,53 @@ const setUp = async (
     });
   };
   return { admin, builder, person, existing, chat, grant };
+};
+
+/**
+ * Runs `during` with the object's code runs limited to a second, and every
+ * read of core's files two seconds slow: a call let in at once outlives
+ * its run while it waits on them. Set back however it ends.
+ */
+const slowFilesDuring = async (
+  stub: WorkspaceStub,
+  during: () => Promise<void>
+): Promise<void> => {
+  const { FILES: files } = env;
+  const slow = new Proxy(files, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "get" && typeof value === "function") {
+        return async (...args: unknown[]): Promise<unknown> => {
+          await scheduler.wait(2000);
+          return await Reflect.apply(value, target, args);
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1000" });
+  env.FILES = slow;
+  try {
+    await during();
+  } finally {
+    env.FILES = files;
+    await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "" });
+  }
+};
+
+/** The methods of the chat's calls refused because their run had ended. */
+const endedRefusals = async (chatId: string): Promise<unknown[]> => {
+  const events = await allEvents();
+  return events
+    .filter(
+      ({ action, detail }) =>
+        action === "agent.call" &&
+        detail.chat === chatId &&
+        detail.reason === "agent.run_ended"
+    )
+    .map(({ detail }) => detail.method);
 };
 
 /** The App the agent created, as the person's session finds it. */
@@ -667,43 +717,71 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
-  it("writes nothing from code still running after its run's wall-clock time", async () => {
-    const { chat, person, grant } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await scheduler.wait(2_000);
-        await env.build.write(app.id, { "screens/late.tsx": "export default () => null;" });
-      };`),
-      says("It ran out of time."),
-    ]);
+  it("lands no draft write whose run ran out of time while it was under way", async () => {
+    const { chat, existing, grant } = await setUp([]);
+    await pointAtGateway(
+      chat.stub,
+      fakeGateway(
+        codeStep(`export default async (self, env) => {
+          await env.build.write(${JSON.stringify(existing)}, { "screens/late.tsx": "export default () => null;" });
+        };`),
+        says("It ran out of time.")
+      )
+    );
     await grant();
-    // Objects share their env: set back however the test ends.
-    await setObjectEnv(chat.stub, { CODE_RUN_TIMEOUT_MS: "1000" });
-    try {
-      await chat.ask("Build it slowly.");
-    } finally {
-      await setObjectEnv(chat.stub, { CODE_RUN_TIMEOUT_MS: "" });
-    }
-    const app = await createdApp(person.api);
 
-    // The code goes on past its run's end; its write is refused, once.
+    // The write is let in at once, then waits on the App's files past its
+    // run's end: refused as it commits.
+    await slowFilesDuring(chat.stub, async () => {
+      await chat.ask("Write it.");
+    });
+
     await vi.waitFor(
       async () => {
-        const events = await allEvents();
-        expect(
-          events.filter(
-            ({ action, detail }) =>
-              action === "agent.call" &&
-              detail.chat === chat.chat.id &&
-              detail.reason === "agent.run_ended"
-          )
-        ).toHaveLength(1);
+        await expect(endedRefusals(chat.chat.id)).resolves.toStrictEqual([
+          "build.write",
+        ]);
       },
       { timeout: 15_000, interval: 100 }
     );
     await expect(
-      chat.stub.draft(chatIdSchema.parse(chat.chat.id), app.id)
+      chat.stub.draft(chatIdSchema.parse(chat.chat.id), existing)
     ).resolves.toStrictEqual({ base: null, changes: {}, revision: 0 });
+  });
+
+  it("commits no proposal whose run ran out of time while it was checked", async () => {
+    const { chat, builder, existing, grant } = await setUp([]);
+    await pointAtGateway(
+      chat.stub,
+      fakeGateway(
+        codeStep(`export default async (self, env) => {
+          await env.build.write(${JSON.stringify(existing)}, { "AGENTS.md": "# Ledger, again\\n" });
+        };`),
+        says("Written."),
+        codeStep(`export default async (self, env) => {
+          await env.build.propose(${JSON.stringify(existing)}, "Again");
+        };`),
+        says("It ran out of time.")
+      )
+    );
+    await grant();
+    await chat.ask("Write it.");
+
+    // Checked past its run's end: the commit after the check is refused.
+    await slowFilesDuring(chat.stub, async () => {
+      await chat.ask("Propose it.");
+    });
+
+    await vi.waitFor(
+      async () => {
+        await expect(endedRefusals(chat.chat.id)).resolves.toStrictEqual([
+          "build.propose",
+        ]);
+      },
+      { timeout: 30_000, interval: 200 }
+    );
+    const listed = await builder.api.apps.list();
+    expect(listed.find(({ id }) => id === existing)?.pendingVersion).toBeNull();
   });
 
   it("lands a draft write only over the revision it read", async () => {

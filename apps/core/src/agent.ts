@@ -15,7 +15,8 @@ import { z } from "zod";
 
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { describeRun, runCode, sourceHash } from "./code-mode.ts";
-import type { CodeRun, CodeRunStatus } from "./code-mode.ts";
+import type { CodeRun } from "./code-mode.ts";
+import type { CodeRunStatus } from "./code-run-statuses.ts";
 import type { AgentModel } from "./models.ts";
 import type { CodeRunOpening } from "./workspace.ts";
 
@@ -219,7 +220,7 @@ const codeInput = (args: unknown): { code: string } => {
  */
 export interface CodeRuns {
   open: (opening: CodeRunOpening) => string;
-  close: (runId: string, status: CodeRunStatus) => CodeRunStatus;
+  close: (runId: string, status: CodeRunStatus) => Promise<CodeRunStatus>;
 }
 
 /**
@@ -256,15 +257,18 @@ const runOpen = async (
     run = await runCode(loader, code, env, signal, codeTimeoutMs);
     ran = run.status;
   } finally {
-    ended = runs.close(runId, ran);
+    ended = await runs.close(runId, ran);
   }
-  return ended === run.status
-    ? run
-    : {
+  // A run a revocation closed, as it ran or as it ended, hands on nothing
+  // of what it did: not what it returned, nor what it logged, which could
+  // carry what return can't.
+  return ended === "revoked"
+    ? {
         status: ended,
-        logs: run.logs,
+        logs: [],
         error: agentErrors.create("agent.run_revoked").message,
-      };
+      }
+    : run;
 };
 
 /** The one tool: runs code against the chat's APIs in a locked isolate. */

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5bab538b-08ee-4cf1-806a-8ba8b15f0790",
+  "id": "6ff8b1a6-ebe3-4f73-a2c7-318833ab78d1",
   "prevId": "842142da-ee11-4b56-bd29-cd2164d918bc",
   "tables": {
     "audit_outbox": {
@@ -191,6 +191,14 @@
             "started_at"
           ],
           "isUnique": false
+        },
+        "chat_code_runs_running": {
+          "name": "chat_code_runs_running",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false,
+          "where": "status = 'running'"
         }
       },
       "foreignKeys": {
@@ -210,7 +218,16 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "chat_code_runs_status": {
+          "name": "chat_code_runs_status",
+          "value": "\"chat_code_runs\".\"status\" IN ('running', 'completed', 'threw', 'refused', 'load_failed', 'cpu_exceeded', 'crashed', 'wall_expired', 'cancelled', 'revoked', 'interrupted')"
+        },
+        "chat_code_runs_tool_call_id": {
+          "name": "chat_code_runs_tool_call_id",
+          "value": "length(\"chat_code_runs\".\"tool_call_id\") BETWEEN 1 AND 200"
+        }
+      }
     },
     "chat_draft_files": {
       "name": "chat_draft_files",

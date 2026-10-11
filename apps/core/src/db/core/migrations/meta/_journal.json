@@ -393,6 +393,13 @@
       "when": 1791659512125,
       "tag": "0055_business_store_members",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1791687062649,
+      "tag": "0056_permissions_revoked_idx",
+      "breakpoints": true
     }
   ]
 }

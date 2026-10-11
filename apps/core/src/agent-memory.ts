@@ -25,7 +25,8 @@ export class MemoryApi extends WorkerEntrypoint<Env, AgentScope> {
     const scope = this.ctx.props;
     await requireOpenRun(this.env, scope, "memory.saveUser");
     try {
-      await admitEffect(this.env, scope);
+      // Recorded here when refused: knowledge records only a save.
+      await admitEffect(this.env, scope, "memory.saveUser");
       const saved = await saveUserMemory(
         this.env,
         chatAuthority(scope),

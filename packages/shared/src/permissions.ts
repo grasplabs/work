@@ -175,6 +175,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "ROUTER_SECRET",
   "ROUTER_SECRET_PREVIOUS",
   "RUN_RETENTION_DAYS",
+  // Whether Code Mode's CPU limit is enforced (core's src/code-mode.ts).
+  "RUNTIME_PROFILE",
   "SIGN_IN",
   // An App's statistics (core's src/statistics.ts), next to its permissions.
   "STATISTICS",
