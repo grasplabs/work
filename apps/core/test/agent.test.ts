@@ -1728,7 +1728,7 @@ describe("chat agent code run leases", () => {
     });
     const { stub, chat, agent, ask } = await newChat(
       codeStep(
-        "export default async (self, env) => { const info = await env.chat.info(); await scheduler.wait(3_000); console.log('leaked', info.chatId); return 'read before the revoke'; };"
+        "export default async (self, env) => { const reports = await env.chat.attachments(); await scheduler.wait(3_000); console.log('leaked', reports.length); return 'read before the revoke'; };"
       ),
       says("Done.")
     );
@@ -1739,13 +1739,22 @@ describe("chat agent code run leases", () => {
     );
 
     const reply = ask("Look once.");
+    // Revoked once the code's one call was answered, so it calls nothing
+    // after: the run notices the revocation as it ends, not at a call.
     await vi.waitFor(
       async () => {
-        await expect(
-          runRecords(stub, chat.id).then((records) => records.length)
-        ).resolves.toBe(1);
+        const events = await allEvents();
+        expect(
+          events.some(
+            ({ action, detail }) =>
+              action === "agent.call" &&
+              detail.chat === chat.id &&
+              detail.method === "chat.attachments" &&
+              detail.outcome === "ok"
+          )
+        ).toBeTruthy();
       },
-      { timeout: 10_000 }
+      { timeout: 10_000, interval: 50 }
     );
     await admin.api.permissions.revoke(permission);
     await reply;
