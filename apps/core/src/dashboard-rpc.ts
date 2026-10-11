@@ -3,10 +3,10 @@ import {
   dashboardLayoutSchema,
 } from "@grasp-os/shared/dashboard";
 import type { DashboardApi, DashboardLayout } from "@grasp-os/shared/dashboard";
-import { RpcTarget } from "capnweb";
 
 import { personalWorkspaceId } from "./chats-rpc.ts";
 import { workspace } from "./durable-objects.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
@@ -18,7 +18,7 @@ import type { SessionCheck } from "./session-check.ts";
 // see, as marking notifications read does.
 
 /** The signed-in person's dashboard. */
-export class DashboardRpc extends RpcTarget implements DashboardApi {
+export class DashboardRpc extends CoreRpcTarget implements DashboardApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 
