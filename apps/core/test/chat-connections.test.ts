@@ -36,7 +36,7 @@ const setUpTime = { timeout: 90_000 };
 /** A chat's code step running `expression`, returning why it was refused. */
 const tries = (expression: string) =>
   codeStep(
-    `export default async (env) => { try { return await ${expression}; } catch (error) { return error.message; } };`
+    `export default async (self, env) => { try { return await ${expression}; } catch (error) { return error.message; } };`
   );
 
 /** Asking for connection `connectionId` as `binding`, with `actions`. */
@@ -496,7 +496,7 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
     const chats = await personalChatsOf(
       person.userId,
       codeStep(
-        `export default async (env) => {
+        `export default async (self, env) => {
           const tried = async (ask) => { try { return (await env.connections.request({ reason: "To help.", actions: ["mail.search"], ...ask })).binding; } catch (error) { return error.message; } };
           const available = await env.connections.available();
           return {
@@ -680,11 +680,11 @@ describe("a connection the chat's agent asks for", setUpTime, () => {
     const chats = await personalChatsOf(
       person.userId,
       codeStep(
-        `export default async (env) => await Promise.all([${["A", "B", "C", "D", "E", "F", "G"].map((binding) => ask(binding, ["mail.search"])).join(", ")}]);`
+        `export default async (self, env) => await Promise.all([${["A", "B", "C", "D", "E", "F", "G"].map((binding) => ask(binding, ["mail.search"])).join(", ")}]);`
       ),
       says("Some wait."),
       codeStep(
-        `export default async (env) => await Promise.all([${ask("AGAIN", ["mail.search"])}, ${ask("SEND", ["mail.send"])}]);`
+        `export default async (self, env) => await Promise.all([${ask("AGAIN", ["mail.search"])}, ${ask("SEND", ["mail.send"])}]);`
       ),
       says("Asked.")
     );

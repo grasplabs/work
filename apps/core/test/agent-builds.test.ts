@@ -71,7 +71,7 @@ export default workflowTests(definition, [
 const findApp = `const [app] = (await env.apps.list()).filter(({ name }) => name === ${JSON.stringify(appName)});`;
 
 /** Creates the App, writes the restyled screen and a workflow, and checks. */
-const firstTry = `export default async (env) => {
+const firstTry = `export default async (self, env) => {
   const app = await env.build.create({ name: ${JSON.stringify(appName)} });
   await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled, ...intake })});
   const check = await env.build.check(app.id);
@@ -85,7 +85,7 @@ const firstTry = `export default async (env) => {
 };`;
 
 /** Writes the fixed screen, checks again, and dry-runs the workflow. */
-const repair = `export default async (env) => {
+const repair = `export default async (self, env) => {
   ${findApp}
   const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
   const check = await env.build.check(app.id);
@@ -108,7 +108,7 @@ const returned = (text: string | undefined): unknown =>
 
 /** Code that makes each call in turn: what it returned, or its message. */
 const tryEach = (calls: Record<string, string>, before = ""): string =>
-  `export default async (env) => {
+  `export default async (self, env) => {
     ${before}
     const tried = async (call) => { try { return await call(); } catch (error) { return error.message; } };
     const results = {};
@@ -364,13 +364,13 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("keeps the draft apart from what a builder commits meanwhile, both ways", async () => {
     const ledger = `const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");`;
     const { builder, existing, chat, grant } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         ${ledger}
         await env.build.write(app.id, { "notes.md": "the agent's" });
         return await env.build.files(app.id);
       };`),
       says("Written."),
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         ${ledger}
         const draft = await env.build.files(app.id);
         return { notes: draft.files["notes.md"], builder: draft.files["builder.md"] ?? null };
@@ -424,7 +424,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("stops the repair loop after five failed checks in a row, until the next question", async () => {
-    const checks = `export default async (env) => {
+    const checks = `export default async (self, env) => {
       ${findApp}
       const outcomes = [];
       for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -438,13 +438,13 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       return outcomes;
     };`;
     const { chat, grant } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
       };`),
       codeStep(checks),
       says("It still fails: the button is restyled."),
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         ${findApp}
         return (await env.build.check(app.id)).failedInARow;
       };`),
@@ -471,7 +471,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
   it("holds checks started at once to the repair loop's limit", async () => {
     const { chat, grant } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
         const tried = async () => { try { return (await env.build.check(app.id)).passed; } catch (error) { return error.message; } };
@@ -495,7 +495,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
   it("caps the Apps a turn creates, counting none that wasn't created", async () => {
     const { chat, grant } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const tried = async (call) => { try { return await call(); } catch (error) { return error.message; } };
         // Refused as invalid: it creates nothing, and takes no App's place.
         const created = [await tried(async () => (await env.build.create({ name: "" })).name)];
@@ -522,7 +522,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
   it("runs a draft's dry runs without a count of their own, and checks it afterwards", async () => {
     const { chat, grant } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed, ...intake })});
         const runs = [];
@@ -548,7 +548,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("keeps no change that leaves a file as the base has it", async () => {
     const ledger = `const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");`;
     const { existing, chat, grant } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         ${ledger}
         const steps = [];
         steps.push((await env.build.write(app.id, { "notes.md": "new", "gone.md": null })).changed);
@@ -736,13 +736,13 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("fails a check whose build couldn't run, saying so, and passes it once the build can", async () => {
-    const check = `export default async (env) => {
+    const check = `export default async (self, env) => {
       ${findApp}
       const check = await env.build.check(app.id);
       return { passed: check.passed, screens: check.screens, failedInARow: check.failedInARow };
     };`;
     const { chat, grant } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
       };`),
@@ -801,7 +801,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
   it("fails a check whose build doesn't finish within its bound, and proposes nothing", async () => {
     const { chat, grant } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
         const check = await env.build.check(app.id);
@@ -863,7 +863,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
   it("proposes a passing draft for review, and nothing goes live until a builder makes it current", async () => {
     const { person, chat, grant } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed, ...intake })});
         const permission = await env.build.requestPermission(app.id, {
@@ -985,7 +985,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
   it("stands by a proposal once committed, when what follows it fails", async () => {
     const { person, chat, grant } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed, ...intake })});
         const proposal = await env.build.propose(app.id, "A desk");
@@ -1043,7 +1043,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
   it("proposes nothing that fails its checks", async () => {
     const { person, chat, grant } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
         const proposal = await env.build.propose(app.id, "A desk");
@@ -1127,7 +1127,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
   it("proposes over what builders committed since, and never undoes it", async () => {
     const ledger = `const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");`;
-    const propose = `export default async (env) => {
+    const propose = `export default async (self, env) => {
       ${ledger}
       try {
         return (await env.build.propose(app.id, "Notes")).version;
@@ -1136,14 +1136,14 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       }
     };`;
     const { builder, existing, chat, grant } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         ${ledger}
         await env.build.write(app.id, { "notes.md": "the agent's", "AGENTS.md": "# Ledger, by the agent\\n" });
       };`),
       says("Written."),
       codeStep(propose),
       says("Someone changed it meanwhile."),
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         ${ledger}
         await env.build.write(app.id, { "AGENTS.md": "# Ledger\\n\\nWith notes.\\n" });
       };`),

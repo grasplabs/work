@@ -358,7 +358,7 @@ describe("chats", () => {
     await answering(
       ann,
       codeStep(
-        'export default async (env) => await env.connections.call("HELD_MAIL", "mail.send", { to: "ben@acme.test", subject: "Invoice" });'
+        'export default async (self, env) => await env.connections.call("HELD_MAIL", "mail.send", { to: "ben@acme.test", subject: "Invoice" });'
       ),
       reply
     );
@@ -402,7 +402,7 @@ describe("chats", () => {
     await answering(
       ann,
       codeStep(
-        `export default async (env) => { for (const name of ${JSON.stringify(Object.keys(mails))}) { await env.connections.call(name, "mail.send", { to: "ben@acme.test", subject: name }); } };`
+        `export default async (self, env) => { for (const name of ${JSON.stringify(Object.keys(mails))}) { await env.connections.call(name, "mail.send", { to: "ben@acme.test", subject: name }); } };`
       ),
       says("They wait for you.")
     );
@@ -517,7 +517,7 @@ describe("chats", () => {
     await answering(
       ann,
       codeStep(
-        'export default async (env) => await env.connections.call("RACED_MAIL", "mail.send", { to: "ben@acme.test", subject: "Raced" });'
+        'export default async (self, env) => await env.connections.call("RACED_MAIL", "mail.send", { to: "ben@acme.test", subject: "Raced" });'
       ),
       says("It waits for you.")
     );

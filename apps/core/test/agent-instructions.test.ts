@@ -105,7 +105,7 @@ describe("a chat's instructions and memory", setUpTime, () => {
     const { stub, chat, gateway, ask, agent } = await chatOf(
       person.userId,
       codeStep(
-        "export default async (env) => await env.memory.saveUser({ text: 'Prefers short answers.', ifVersion: 0 });"
+        "export default async (self, env) => await env.memory.saveUser({ text: 'Prefers short answers.', ifVersion: 0 });"
       ),
       says("Noted."),
       says("Kort."),
@@ -312,7 +312,7 @@ describe("a chat's instructions and memory", setUpTime, () => {
       person.userId,
       says("Hi."),
       codeStep(
-        "export default async (env) => { try { await env.memory.saveUser({ text: 'Earns a lot.', ifVersion: 0 }); return 'saved'; } catch (error) { return error.message; } };"
+        "export default async (self, env) => { try { await env.memory.saveUser({ text: 'Earns a lot.', ifVersion: 0 }); return 'saved'; } catch (error) { return error.message; } };"
       ),
       says("Can't.")
     );
@@ -361,7 +361,7 @@ describe("a chat's instructions and memory", setUpTime, () => {
     const { ask, agent, stub, chat } = await chatOf(
       person.userId,
       codeStep(
-        `export default async (env) => (await env.knowledge.search(${JSON.stringify(marker)}, { limit: 50 })).hits.length;`
+        `export default async (self, env) => (await env.knowledge.search(${JSON.stringify(marker)}, { limit: 50 })).hits.length;`
       ),
       says("Found them.")
     );
