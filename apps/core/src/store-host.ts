@@ -557,16 +557,44 @@ export class StoreHost {
     if (read.kind === "query" && read.query.terminal.kind === "paginate") {
       return await this.#page(storeId, reader, pinned, read.query);
     }
+    const table = read.kind === "get" ? read.table : read.query.table;
     return this.ctx.storage.transactionSync((): ReadResult => {
       this.#bind(storeId, false);
-      const value = indexRequired(() =>
-        read.kind === "get"
-          ? readRecord(this.ctx.storage.sql, pinned, reader, read)
-          : runQuery(this.ctx.storage.sql, pinned, reader, read.query)
+      const value = this.#withGenerations(pinned, table, () =>
+        indexRequired(() =>
+          read.kind === "get"
+            ? readRecord(this.ctx.storage.sql, pinned, reader, read)
+            : runQuery(this.ctx.storage.sql, pinned, reader, read.query)
+        )
       );
-      const table = read.kind === "get" ? read.table : read.query.table;
       return { value, generations: this.#generationsOf(pinned, [table]) };
     });
+  }
+
+  /**
+   * `read()`, with the generation of `table` added to a data error it
+   * fails with (`details.generations`), taken in the same transaction:
+   * a read that failed after it looked at records (`data.not_unique`,
+   * `data.result_limit`, ...) depended on them as much as one that
+   * answered, and its reader must count it (store-reader.ts).
+   */
+  #withGenerations<Answer>(
+    pinned: PinnedSchema,
+    table: string,
+    read: () => Answer
+  ): Answer {
+    try {
+      return read();
+    } catch (error) {
+      if (error instanceof Error && dataErrors.codeOf(error) !== undefined) {
+        const details: unknown = Reflect.get(error, "details");
+        Reflect.set(error, "details", {
+          ...(typeof details === "object" && details !== null ? details : {}),
+          generations: this.#generationsOf(pinned, [table]),
+        });
+      }
+      throw error;
+    }
   }
 
   /**
@@ -664,8 +692,10 @@ export class StoreHost {
     const { read, generations } = this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
       return {
-        read: indexRequired(() =>
-          readPage(this.ctx.storage.sql, pinned, reader, query, anchor)
+        read: this.#withGenerations(pinned, query.table, () =>
+          indexRequired(() =>
+            readPage(this.ctx.storage.sql, pinned, reader, query, anchor)
+          )
         ),
         generations: this.#generationsOf(pinned, [query.table]),
       };

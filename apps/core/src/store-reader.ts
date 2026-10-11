@@ -35,6 +35,31 @@ export interface ReadGuard {
   readonly expectedRevision: number;
 }
 
+/**
+ * The generations a failed read's error carries (`details.generations`,
+ * StoreHost's `#withGenerations`), taken off it, so App code never sees
+ * them; none for an error raised before anything was read.
+ */
+const takeGenerations = (error: unknown): Record<string, number> => {
+  if (typeof error !== "object" || error === null) {
+    return {};
+  }
+  const details: unknown = Reflect.get(error, "details");
+  if (typeof details !== "object" || details === null) {
+    return {};
+  }
+  const { generations, ...rest }: Record<string, unknown> = { ...details };
+  Reflect.set(error, "details", rest);
+  if (typeof generations !== "object" || generations === null) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(generations).filter((entry): entry is [string, number] =>
+      Number.isSafeInteger(entry[1])
+    )
+  );
+};
+
 /** The host's record of one invocation's reads of one store. */
 export class StoreReader {
   readonly #store: OpenStore;
@@ -58,15 +83,18 @@ export class StoreReader {
    * depended on is recorded, never anything App code says it read.
    */
   async read(request: ReadRequest): Promise<QueryAnswer> {
-    const { value, generations } = await this.#store.read(this.#scope, request);
-    for (const [table, generation] of Object.entries(generations)) {
-      const seen = this.#generations.get(table);
-      if (seen === undefined) {
-        this.#generations.set(table, generation);
-      } else if (seen !== generation) {
-        this.#torn = true;
-      }
+    let result: Awaited<ReturnType<OpenStore["read"]>>;
+    try {
+      result = await this.#store.read(this.#scope, request);
+    } catch (error) {
+      // A read that failed after it looked at records still depended on
+      // them: count what the store says it read, then fail as it did,
+      // without the generations, which are the host's own.
+      this.#record(takeGenerations(error));
+      throw error;
     }
+    const { value, generations } = result;
+    this.#record(generations);
     // Once per record: an operation reading a record again and again
     // still hands its commit one guard for it (a later assertion of
     // another revision would have failed its read with a conflict).
@@ -85,6 +113,18 @@ export class StoreReader {
       });
     }
     return value;
+  }
+
+  /** Counts `generations` (by table) into the invocation's read set. */
+  #record(generations: Readonly<Record<string, number>>): void {
+    for (const [table, generation] of Object.entries(generations)) {
+      const seen = this.#generations.get(table);
+      if (seen === undefined) {
+        this.#generations.set(table, generation);
+      } else if (seen !== generation) {
+        this.#torn = true;
+      }
+    }
   }
 
   /** The revisions the invocation's reads asserted, in order. */

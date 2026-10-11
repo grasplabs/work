@@ -397,3 +397,68 @@ describe("guards, once per record", () => {
     ]);
   });
 });
+
+describe("a read that fails after reading", () => {
+  it("still counts what it read: a caught failure and a later read across a commit rerun", async () => {
+    const fixture = await storeWithNotes();
+    const first = await insertNote(fixture, { title: "twin" });
+    await insertNote(fixture, { title: "twin" });
+    let runs = 0;
+    const answer = await readConsistently(
+      fixture.store,
+      fixture.scope,
+      async (reader) => {
+        runs += 1;
+        const db = dbOver(reader);
+        let unique: string | null = null;
+        try {
+          const twin = await db
+            .query("notes")
+            .filter({ title: "twin" })
+            .unique();
+          unique = twin?._id ?? null;
+        } catch {
+          // Two twins: not unique, caught by the handler.
+        }
+        if (runs === 1) {
+          await commit(fixture, [
+            { op: "delete", table: "notes", id: first, expectedRevision: 1 },
+          ]);
+        }
+        const count = await db.query("notes").count();
+        return { unique: unique !== null, count };
+      }
+    );
+    // The first run saw two twins, then one: never one state. The rerun
+    // sees one twin, unique, and one note.
+    expect({ answer, runs }).toStrictEqual({
+      answer: { unique: true, count: 1 },
+      runs: 2,
+    });
+  });
+});
+
+describe("a failed read's error", () => {
+  it("reaches App code without the generations the host counted", async () => {
+    const fixture = await storeWithNotes();
+    await insertNote(fixture, { title: "twin" });
+    await insertNote(fixture, { title: "twin" });
+    const reader = new StoreReader(fixture.store, fixture.scope);
+    const failure = await failureOf(
+      dbOver(reader).query("notes").filter({ title: "twin" }).unique()
+    );
+    await insertNote(fixture, { title: "later" });
+    expect({
+      code: failure.code,
+      generations:
+        typeof failure.details === "object" &&
+        failure.details !== null &&
+        Object.hasOwn(failure.details, "generations"),
+      counted: await reader.isCurrent(),
+    }).toStrictEqual({
+      code: "data.not_unique",
+      generations: false,
+      counted: false,
+    });
+  });
+});
