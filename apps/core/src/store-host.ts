@@ -23,9 +23,11 @@ import type { QueryRequest, ReadRequest } from "@grasp-os/shared/store-reads";
 import {
   claimSchema,
   commitSchema,
+  committedSchema,
   dataErrors,
   documentMaxBytes,
   recordIdSchema,
+  stagedWritesSchema,
   storeIntentSchema,
   storedFieldsSchema,
   tableNameSchema,
@@ -36,8 +38,10 @@ import type {
   Commit,
   Committed,
   DefinedTables,
+  StagedWrites,
   StoreFields,
   StoredRecord,
+  WriterRoles,
 } from "@grasp-os/shared/stores";
 import {
   submissionErrors,
@@ -259,11 +263,6 @@ const liveRunRecheckMs = dayMs;
 /** Most receipts, tombstones or outbox entries one pass reads at a time. */
 const page = 100;
 
-const committedSchema = z.strictObject({
-  inserted: z.array(z.string()),
-  commit: z.number().int(),
-});
-
 /** A committed receipt's outcome, which `commit` wrote from a `Committed`. */
 const outcomeOf = (stored: string): Committed =>
   committedSchema.parse(JSON.parse(stored));
@@ -351,6 +350,19 @@ const readSchema = (manifest: string): ReadManifest => {
 
 const conflict = (table: string, id: string) =>
   dataErrors.create("data.conflict", { table, id });
+
+/**
+ * How far ahead of this object's clock a commit's staging time may be:
+ * core's clock and the object's are the platform's, and differ by far
+ * less; a time further ahead is refused rather than stamped on records.
+ */
+const stagedAheadMs = 60_000;
+
+/** One write a commit or a preview applies, as checked. */
+type StoredWrite = z.output<typeof stagedWritesSchema>["writes"][number];
+
+/** A preview's staged writes, as checked. */
+type Preview = z.output<typeof stagedWritesSchema>;
 
 /** How a deleted store's purge goes, which tests choose. */
 export interface PurgeOptions {
@@ -550,7 +562,8 @@ export class StoreHost {
   async read(
     storeId: StoreId,
     scope: ReadScope,
-    request: ReadRequest
+    request: ReadRequest,
+    staged?: StagedWrites
   ): Promise<ReadResult> {
     const reader = dataErrors.parse("data.invalid", readScopeSchema, scope);
     const read = dataErrors.parse(
@@ -558,71 +571,121 @@ export class StoreHost {
       readRequestSchema,
       request
     );
+    const preview =
+      staged === undefined
+        ? undefined
+        : dataErrors.parse("data.invalid", stagedWritesSchema, staged);
     const pinned = await this.#pinned(storeId, reader.schemaHash);
     if (read.kind === "query" && read.query.terminal.kind === "paginate") {
-      return await this.#page(storeId, reader, pinned, read.query);
+      return await this.#page(storeId, reader, pinned, read.query, preview);
     }
     const table = read.kind === "get" ? read.table : read.query.table;
-    return this.ctx.storage.transactionSync((): ReadResult => {
-      this.#bind(storeId, false);
-      const value = this.#withGenerations(pinned, table, (statements) =>
-        indexRequired(() =>
-          read.kind === "get"
-            ? readRecord(statements, pinned, reader, read)
-            : runQuery(statements, pinned, reader, read.query)
-        )
-      );
-      return { value, generations: this.#generationsOf(pinned, [table]) };
-    });
+    return this.#readIn(storeId, pinned, reader, table, preview, (statements) =>
+      indexRequired(() =>
+        read.kind === "get"
+          ? readRecord(statements, pinned, reader, read)
+          : runQuery(statements, pinned, reader, read.query)
+      )
+    );
   }
 
   /**
-   * `read()`, with the generation of `table` added to a data error it
-   * fails with (`details.generations`), taken in the same transaction,
-   * once it has read records: a read that failed after it looked at them
-   * (`data.not_unique`, `data.result_limit`, ...) depended on them as much
-   * as one that answered, and its reader must count it (store-reader.ts).
-   * One refused before it ran a statement (`data.access_denied`, an
-   * unknown table or index, an invalid query) depended on no record, and
-   * carries none: counting it would rerun its reader for every commit to
-   * a table it never read, and answer `query.concurrent_change` for what
-   * is a refusal.
+   * Runs `read` (of `table`) in one transaction, with the generation of
+   * `table` taken first: what the read depended on, which a reader
+   * compares later (store-reader.ts), handed back with its answer and
+   * added to a data error it fails with (`details.generations`), since a
+   * read that failed after it looked at records (`data.not_unique`,
+   * `data.result_limit`, ...) depended on them as much as one that
+   * answered.
+   *
+   * With `preview` (a mutation's writes, staged and not yet committed),
+   * the writes are applied first, as its commit would apply them (the
+   * same checks, owner, metadata and staging time), the read sees them,
+   * and the transaction is then rolled back: nothing is kept, and the
+   * generation handed back is the one from before them.
    */
-  #withGenerations<Answer>(
+  #readIn<Answer>(
+    storeId: StoreId,
     pinned: PinnedSchema,
+    reader: ReadScope,
     table: string,
+    preview: Preview | undefined,
     read: (statements: RecordSql) => Answer
-  ): Answer {
-    const storage = this.ctx.storage.sql;
-    let readRecords = false;
-    const counted: RecordSql = {
-      exec: <Row extends Record<string, SqlStorageValue>>(
-        query: string,
-        ...bindings: unknown[]
-      ): SqlStorageCursor<Row> => {
-        const cursor = storage.exec<Row>(query, ...bindings);
-        // Only once SQLite took the statement: one it refused (an index
-        // the store lacks) read nothing.
-        readRecords = true;
-        return cursor;
-      },
-    };
-    try {
-      return read(counted);
-    } catch (error) {
-      if (
-        readRecords &&
-        error instanceof Error &&
-        dataErrors.codeOf(error) !== undefined
-      ) {
-        const details: unknown = Reflect.get(error, "details");
-        Reflect.set(error, "details", {
-          ...(typeof details === "object" && details !== null ? details : {}),
-          generations: this.#generationsOf(pinned, [table]),
-        });
+  ): { value: Answer; generations: Record<string, number> } {
+    const run = () => {
+      this.#bind(storeId, false);
+      const generations = this.#generationsOf(pinned, [table]);
+      let readRecords = false;
+      try {
+        if (preview !== undefined) {
+          const { staged } = this.#apply(
+            pinned,
+            reader.principal,
+            reader,
+            preview.writes,
+            []
+          );
+          this.#flush(
+            staged,
+            reader.principal,
+            reader.schemaHash,
+            preview.stagedAt
+          );
+        }
+        // The read's own statements, counted: only once SQLite took one
+        // has the read looked at records (a refusal before any, such as
+        // `data.access_denied`, depended on none, and carries no
+        // generations, so its reader isn't rerun for every commit).
+        const storage = this.ctx.storage.sql;
+        const counted: RecordSql = {
+          exec: <Row extends Record<string, SqlStorageValue>>(
+            query: string,
+            ...bindings: unknown[]
+          ): SqlStorageCursor<Row> => {
+            const cursor = storage.exec<Row>(query, ...bindings);
+            readRecords = true;
+            return cursor;
+          },
+        };
+        return { value: read(counted), generations };
+      } catch (error) {
+        if (
+          readRecords &&
+          error instanceof Error &&
+          dataErrors.codeOf(error) !== undefined
+        ) {
+          const details: unknown = Reflect.get(error, "details");
+          Reflect.set(error, "details", {
+            ...(typeof details === "object" && details !== null ? details : {}),
+            generations,
+          });
+        }
+        throw error;
       }
-      throw error;
+    };
+    if (preview === undefined) {
+      return this.ctx.storage.transactionSync(run);
     }
+    let answer:
+      | { value: Answer; generations: Record<string, number> }
+      | undefined;
+    // Thrown to end the transaction, so SQLite rolls back everything it
+    // did; told apart from any other failure by identity.
+    const rollback = new Error("Rolled back after a preview");
+    try {
+      this.ctx.storage.transactionSync(() => {
+        answer = run();
+        throw rollback;
+      });
+    } catch (error) {
+      if (error !== rollback) {
+        throw error;
+      }
+    }
+    if (answer === undefined) {
+      throw new Error("A preview's transaction ended without an answer");
+    }
+    return answer;
   }
 
   /**
@@ -693,7 +756,8 @@ export class StoreHost {
     storeId: StoreId,
     reader: ReadScope,
     pinned: PinnedSchema,
-    query: QueryRequest
+    query: QueryRequest,
+    preview: Preview | undefined
   ): Promise<ReadResult> {
     const { terminal } = query;
     if (terminal.kind !== "paginate") {
@@ -717,17 +781,15 @@ export class StoreHost {
       terminal.cursor === null
         ? null
         : await openCursor(keys, binding, terminal.cursor);
-    const { read, generations } = this.ctx.storage.transactionSync(() => {
-      this.#bind(storeId, false);
-      return {
-        read: this.#withGenerations(pinned, query.table, (statements) =>
-          indexRequired(() =>
-            readPage(statements, pinned, reader, query, anchor)
-          )
-        ),
-        generations: this.#generationsOf(pinned, [query.table]),
-      };
-    });
+    const { value: read, generations } = this.#readIn(
+      storeId,
+      pinned,
+      reader,
+      query.table,
+      preview,
+      (statements) =>
+        indexRequired(() => readPage(statements, pinned, reader, query, anchor))
+    );
     const value: PageAnswer =
       read.hasMore && read.last !== undefined
         ? {
@@ -919,14 +981,18 @@ export class StoreHost {
 
   /**
    * Commits a mutation's staged writes in one transaction, with its
-   * receipt's outcome and its outbox entries, or nothing: the attempt
-   * must hold the receipt's current fence (`submission.superseded`)
-   * before its deadline (`submission.deadline_passed`); each guard's
-   * record must still be at the revision read, and each write's record at
-   * its expected revision (a record the commit inserted is at 1),
-   * otherwise `data.conflict`. An attempt whose mutation another attempt
+   * receipt's outcome (its inserted IDs and what it returned) and its
+   * outbox entries, or nothing: the attempt must hold the receipt's
+   * current fence (`submission.superseded`) before its deadline
+   * (`submission.deadline_passed`); every table it read must still be at
+   * the generation it read (`data.reads_changed`); each guard's record
+   * must still be at the revision read, and each write's record at its
+   * expected revision (a record the commit inserted is at 1), otherwise
+   * `data.conflict`. Every write is checked against the access of the
+   * schema it is pinned to, for the principal and the roles core resolved
+   * just before (`#apply`). An attempt whose mutation another attempt
    * committed meanwhile answers that outcome. Inserted records are owned
-   * by the principal and get IDs the store mints. An intent whose kind
+   * by the principal, under the IDs core minted. An intent whose kind
    * nothing in `consumers` takes is refused
    * (`submission.intent_unsupported`).
    */
@@ -934,12 +1000,17 @@ export class StoreHost {
     const {
       storeId,
       principal,
+      roles,
       schemaHash,
       receipt: held,
+      stagedAt,
       guards,
+      readSet,
       writes,
       intents,
+      result,
     } = dataErrors.parse("data.invalid", commitSchema, input);
+    const pinned = await this.#pinned(storeId, schemaHash);
     const committed = this.ctx.storage.transactionSync((): Committed => {
       this.#bind(storeId);
       const now = Date.now();
@@ -965,91 +1036,36 @@ export class StoreHost {
       if (now >= receipt.deadline) {
         throw submissionErrors.create("submission.deadline_passed");
       }
+      if (stagedAt > now + stagedAheadMs) {
+        throw dataErrors.create("data.invalid", {
+          issues: ["stagedAt: Later than the store's clock allows"],
+        });
+      }
       if (
         intents.some(({ kind }) => consumerFor(consumers, kind) === undefined)
       ) {
         throw submissionErrors.create("submission.intent_unsupported");
       }
-      const staged = new Map<string, Staged>();
-      const stage = (table: string, recordId: string): Staged => {
-        const tableId = this.#tableId(table);
-        const key = keyOf(tableId, recordId);
-        const known = staged.get(key);
-        if (known !== undefined) {
-          return known;
+      // The explicit guards first: a record the mutation asserted a
+      // revision of, now at another, is a conflict for its caller
+      // (`data.conflict`), never a stale read set to run again for, which
+      // could commit a fallback its rerun reached instead.
+      const { staged, inserted } = this.#apply(
+        pinned,
+        principal.userId,
+        roles,
+        writes,
+        guards,
+        () => {
+          const current = this.#generationsOf(pinned, Object.keys(readSet));
+          for (const [table, generation] of Object.entries(readSet)) {
+            if (current[table] !== generation) {
+              throw dataErrors.create("data.reads_changed", { table });
+            }
+          }
         }
-        const base = this.#db
-          .select()
-          .from(records)
-          .where(
-            and(eq(records.tableId, tableId), eq(records.recordId, recordId))
-          )
-          .get();
-        const entry: Staged = {
-          table,
-          tableId,
-          recordId,
-          base,
-          fields: base === undefined ? null : fieldsOf(base),
-        };
-        staged.set(key, entry);
-        return entry;
-      };
-      /**
-       * The staged record and its fields, if it exists at `expected`;
-       * otherwise a conflict.
-       */
-      const at = (
-        table: string,
-        recordId: string,
-        expected: number
-      ): { entry: Staged; fields: StoreFields } => {
-        const entry = stage(table, recordId);
-        const { fields } = entry;
-        const revision = entry.base?.revision ?? 1;
-        if (fields === null || revision !== expected) {
-          throw conflict(table, recordId);
-        }
-        return { entry, fields };
-      };
-
-      for (const guard of guards) {
-        at(guard.table, guard.id, guard.expectedRevision);
-      }
-      const inserted: string[] = [];
-      for (const write of writes) {
-        if (write.op === "insert") {
-          const recordId = crypto.randomUUID();
-          const tableId = this.#tableId(write.table);
-          staged.set(keyOf(tableId, recordId), {
-            table: write.table,
-            tableId,
-            recordId,
-            base: undefined,
-            fields: write.fields,
-          });
-          inserted.push(recordId);
-          continue;
-        }
-        const { entry, fields } = at(
-          write.table,
-          write.id,
-          write.expectedRevision
-        );
-        if (write.op === "delete") {
-          entry.fields = null;
-        } else if (write.op === "replace") {
-          entry.fields = write.fields;
-        } else {
-          const unset = new Set(write.unset);
-          entry.fields = Object.fromEntries(
-            Object.entries({ ...fields, ...write.fields }).filter(
-              ([name]) => !unset.has(name)
-            )
-          );
-        }
-      }
-      this.#flush([...staged.values()], principal.userId, schemaHash);
+      );
+      this.#flush(staged, principal.userId, schemaHash, stagedAt);
       const counted = this.#db
         .update(store)
         .set({ commits: sql`${store.commits} + 1` })
@@ -1058,7 +1074,11 @@ export class StoreHost {
       if (counted === undefined) {
         throw new Error("A bound store has no row");
       }
-      const outcome: Committed = { inserted, commit: counted.commits };
+      const outcome: Committed = {
+        inserted,
+        commit: counted.commits,
+        result,
+      };
       this.#db
         .update(receipts)
         .set({
@@ -1092,9 +1112,169 @@ export class StoreHost {
     return committed;
   }
 
-  /** Writes what a commit staged, changing only the records it changed. */
-  #flush(staged: readonly Staged[], ownerId: string, schemaHash: string): void {
-    const now = Date.now();
+  /**
+   * The records `writes` change, as they would be after them, checked
+   * against the store as it is (call it inside a transaction): each
+   * guard's record still at its revision; each write to a table of the
+   * pinned schema that the schema lets `roles` write (`data.write_denied`
+   * otherwise; `data.unknown_table` for a table it hasn't); a record an
+   * `owner` table's write changes owned by `principal`, as one that
+   * doesn't exist and one at another revision are (`data.conflict`, the
+   * same for all three, so a write learns nothing of a record it may not
+   * change); an insert's ID not in use. What a commit writes, and what a
+   * preview applies before its read.
+   */
+  #apply(
+    pinned: PinnedSchema,
+    principal: string,
+    roles: WriterRoles,
+    writes: readonly StoredWrite[],
+    guards: readonly { table: string; id: string; expectedRevision: number }[],
+    afterGuards?: () => void
+  ): { staged: Staged[]; inserted: string[] } {
+    const tableIdOf = (table: string): string => {
+      const tableId = Object.hasOwn(pinned.tableIds, table)
+        ? pinned.tableIds[table]
+        : undefined;
+      if (
+        tableId === undefined ||
+        !Object.hasOwn(pinned.manifest.tables, table)
+      ) {
+        throw dataErrors.create("data.unknown_table", { table });
+      }
+      return tableId;
+    };
+    /** Whether `roles` may write `table`, and whether only their own records. */
+    const writable = (table: string): { tableId: string; own: boolean } => {
+      const tableId = tableIdOf(table);
+      const mode = pinned.manifest.tables[table]?.access.write ?? "none";
+      const admitted =
+        mode === "owner" ||
+        (mode === "appMembers" && (roles.appMember || roles.appBuilder)) ||
+        (mode === "appBuilders" && roles.appBuilder);
+      if (!admitted) {
+        throw dataErrors.create("data.write_denied", { table });
+      }
+      return { tableId, own: mode === "owner" };
+    };
+    const staged = new Map<string, Staged>();
+    const stage = (
+      table: string,
+      tableId: string,
+      recordId: string
+    ): Staged => {
+      const key = keyOf(tableId, recordId);
+      const known = staged.get(key);
+      if (known !== undefined) {
+        return known;
+      }
+      const base = this.#db
+        .select()
+        .from(records)
+        .where(
+          and(eq(records.tableId, tableId), eq(records.recordId, recordId))
+        )
+        .get();
+      const entry: Staged = {
+        table,
+        tableId,
+        recordId,
+        base,
+        fields: base === undefined ? null : fieldsOf(base),
+      };
+      staged.set(key, entry);
+      return entry;
+    };
+    /**
+     * The staged record and its fields, if it exists at `expected` (and,
+     * with `own`, is the principal's); otherwise a conflict.
+     */
+    const at = (
+      table: string,
+      tableId: string,
+      recordId: string,
+      expected: number,
+      own: boolean
+    ): { entry: Staged; fields: StoreFields } => {
+      const entry = stage(table, tableId, recordId);
+      const { fields, base } = entry;
+      const revision = base?.revision ?? 1;
+      // A record an earlier write of this commit changed is shown to the
+      // mutation's staged reads at the revision its commit will give it
+      // (one more, once, if its fields differ): a later write may assert
+      // that, as well as the revision it was read at before the change.
+      const shown =
+        base !== undefined &&
+        fields !== null &&
+        storedText(fields) !== base.valueJson
+          ? base.revision + 1
+          : revision;
+      const owned = base === undefined || base.ownerId === principal;
+      if (
+        fields === null ||
+        (expected !== revision && expected !== shown) ||
+        (own && !owned)
+      ) {
+        throw conflict(table, recordId);
+      }
+      return { entry, fields };
+    };
+
+    for (const guard of guards) {
+      at(
+        guard.table,
+        tableIdOf(guard.table),
+        guard.id,
+        guard.expectedRevision,
+        false
+      );
+    }
+    afterGuards?.();
+    const inserted: string[] = [];
+    for (const write of writes) {
+      const { tableId, own } = writable(write.table);
+      if (write.op === "insert") {
+        const entry = stage(write.table, tableId, write.id);
+        if (entry.base !== undefined || entry.fields !== null) {
+          throw conflict(write.table, write.id);
+        }
+        entry.fields = write.fields;
+        inserted.push(write.id);
+        continue;
+      }
+      const { entry, fields } = at(
+        write.table,
+        tableId,
+        write.id,
+        write.expectedRevision,
+        own
+      );
+      if (write.op === "delete") {
+        entry.fields = null;
+      } else if (write.op === "replace") {
+        entry.fields = write.fields;
+      } else {
+        const unset = new Set(write.unset);
+        entry.fields = Object.fromEntries(
+          Object.entries({ ...fields, ...write.fields }).filter(
+            ([name]) => !unset.has(name)
+          )
+        );
+      }
+    }
+    return { staged: [...staged.values()], inserted };
+  }
+
+  /**
+   * Writes what a commit (or a preview) staged, changing only the records
+   * it changed, stamped with `now`, the time core staged them.
+   */
+  #flush(
+    staged: readonly Staged[],
+    ownerId: string,
+    schemaHash: string,
+    now: number
+  ): void {
     // The tables whose records this commit changes: each one's generation
     // moves on once, so a read of it (even one that matched nothing) is
     // known to be stale.

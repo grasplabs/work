@@ -1,0 +1,208 @@
+import type { OperationChannel } from "@grasp-os/sdk/runner";
+import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
+import type { CodedError } from "@grasp-os/shared/errors";
+import type { Json } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
+import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
+import { rpcArgumentDepth } from "@grasp-os/shared/screens";
+import { commitMaxInputBytes } from "@grasp-os/shared/stores";
+
+// The one authority an App's code is handed for one invocation of one of
+// its server functions (operations.ts): a read, a staged write, a call of
+// another of its functions, a resource, each decided here, by the host,
+// for the invocation's kind. App code can hold on to the channel, or pass
+// it on, so:
+// - what it may do is fixed by the invocation that made it: a query's has
+//   no write, call or resource, a mutation's no resource, and asking
+//   anyway is refused whatever the App code says (`operation.read_only`,
+//   `operation.no_resources`, ...);
+// - it stops working once its invocation ends (`operation.ended`), so a
+//   channel kept from an earlier call acts for no one;
+// - its methods take only what a request is (no scope, principal, role,
+//   schema hash or receipt): who the invocation is for was resolved by
+//   core before the channel existed;
+// - what goes wrong in core reaches App code as an expected error, never
+//   as an unexpected one's message (SQL, a provider's text, a stack),
+//   which App code could otherwise copy into its own error and hand its
+//   caller: anything unexpected becomes `internal.unexpected`, its cause
+//   logged under the request ID.
+// It remembers the expected errors it raised, so the host can tell one
+// App code rethrew from a code it made up (`raised`).
+
+/** One capability of a channel: how the host answers it. */
+type Capability = (...args: unknown[]) => Promise<unknown>;
+
+/** What a channel can do, and why it refuses what it can't. */
+export interface ChannelCapabilities {
+  readonly requestId: string;
+  /** The registered path of the function it runs, for the logs. */
+  readonly path: string;
+  readonly read?: Capability;
+  readonly write?: Capability;
+  readonly call?: Capability;
+  readonly resource?: Capability;
+  /** Brands an expected error the channel raised as the host's. */
+  readonly trust: (error: Error) => void;
+  /** The refusal for each capability it hasn't. */
+  readonly refusals: Readonly<
+    Record<
+      "read" | "write" | "call" | "resource",
+      Parameters<typeof operationErrors.create>[0]
+    >
+  >;
+}
+
+/**
+ * What App code passed, as plain JSON copies: read once, here, so no
+ * capability ever runs a getter of App code's (whose error would pass for
+ * the host's), and a value that isn't JSON is refused as it arrives.
+ */
+const plainArgs = (args: readonly unknown[]): unknown[] =>
+  args.map((arg) => {
+    let copy: Json | undefined;
+    try {
+      copy = jsonOf(arg);
+    } catch {
+      copy = undefined;
+    }
+    if (copy === undefined) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    return copy;
+  });
+
+/**
+ * A fresh copy of expected error `error`: its code, message and details
+ * (as a JSON copy), without a stack to send.
+ */
+const copyOf = (error: CodedError): CodedError => {
+  const copy: CodedError = Object.assign(
+    new Error(error.message),
+    error.details === undefined
+      ? { code: error.code }
+      : { code: error.code, details: structuredClone(error.details) }
+  );
+  copy.stack = undefined;
+  return copy;
+};
+
+/** What a channel and the host that made it share. */
+interface ChannelState {
+  ended: boolean;
+  readonly raised: Map<string, CodedError>;
+}
+
+/**
+ * The channel App code holds: its four methods and nothing else, so over
+ * RPC nothing but them can be called (ending it and reading what it raised
+ * are the host's, on `OpenChannel`).
+ */
+/**
+ * What a channel's methods take, bounded as each call arrives, before any
+ * of its own code runs: as deep as any value, and no larger than one
+ * commit, more than any request App code has reason to send.
+ */
+const ChannelTarget = boundedRpcTarget({
+  depth: rpcArgumentDepth,
+  size: commitMaxInputBytes,
+});
+
+class Channel extends ChannelTarget implements OperationChannel {
+  readonly #capabilities: ChannelCapabilities;
+  readonly #state: ChannelState;
+
+  constructor(capabilities: ChannelCapabilities, state: ChannelState) {
+    super();
+    this.#capabilities = capabilities;
+    this.#state = state;
+  }
+
+  async read(request: unknown): Promise<unknown> {
+    return await this.#use("read", [request]);
+  }
+
+  async write(request: unknown): Promise<unknown> {
+    return await this.#use("write", [request]);
+  }
+
+  async call(path: unknown, args: unknown): Promise<unknown> {
+    return await this.#use("call", [path, args]);
+  }
+
+  async resource(
+    alias: unknown,
+    method: unknown,
+    args: unknown
+  ): Promise<unknown> {
+    return await this.#use("resource", [alias, method, args]);
+  }
+
+  async #use(
+    name: keyof ChannelCapabilities["refusals"],
+    args: unknown[]
+  ): Promise<unknown> {
+    const capability = this.#capabilities[name];
+    try {
+      if (this.#state.ended) {
+        throw operationErrors.create("operation.ended");
+      }
+      if (capability === undefined) {
+        throw operationErrors.create(this.#capabilities.refusals[name]);
+      }
+      return await capability(...plainArgs(args));
+    } catch (error) {
+      if (isExpectedError(error)) {
+        throw this.#raise(error);
+      }
+      const { requestId, path } = this.#capabilities;
+      log.error("operation.channel_failed", {
+        requestId,
+        path,
+        capability: name,
+        ...errorFields(error),
+      });
+      throw this.#raise(
+        internalErrors.create("internal.unexpected", { requestId })
+      );
+    }
+  }
+
+  /**
+   * Raises expected error `error` to App code: the host keeps a copy of
+   * its own (`raised`, branded with `trust`), and App code gets another,
+   * so whatever App code does to the error it caught (its message, code or
+   * details, now or after a later await) changes nothing the host answers.
+   */
+  #raise(error: CodedError): Error {
+    const kept = copyOf(error);
+    this.#capabilities.trust(kept);
+    this.#state.raised.set(kept.code, kept);
+    return copyOf(error);
+  }
+}
+
+/** A channel, as the host that made it holds it. */
+export interface OpenChannel {
+  /** What App code is handed. */
+  readonly channel: OperationChannel;
+  /** Ends the channel: every later use is `operation.ended`. */
+  readonly end: () => void;
+  /**
+   * The expected error of `code` the channel raised to App code, if it
+   * raised one: the host's own copy, never what App code passed back.
+   */
+  readonly raised: (code: string) => CodedError | undefined;
+}
+
+/** A new channel with `capabilities`, for one invocation. */
+export const openChannel = (capabilities: ChannelCapabilities): OpenChannel => {
+  const state: ChannelState = { ended: false, raised: new Map() };
+  return {
+    channel: new Channel(capabilities, state),
+    end: () => {
+      state.ended = true;
+    },
+    raised: (code) => state.raised.get(code),
+  };
+};

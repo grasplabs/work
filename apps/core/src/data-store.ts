@@ -4,10 +4,9 @@ import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-reads";
 import type {
   ClaimInput,
-  Claimed,
   Commit,
-  Committed,
   DefinedTables,
+  StagedWrites,
   StoredRecord,
 } from "@grasp-os/shared/stores";
 import { DurableObject } from "cloudflare:workers";
@@ -63,9 +62,12 @@ export class DataStore extends DurableObject<Env> {
   async read(
     storeId: StoreId,
     scope: ReadScope,
-    request: ReadRequest
+    request: ReadRequest,
+    staged?: StagedWrites
   ): Promise<string> {
-    return JSON.stringify(await this.#host.read(storeId, scope, request));
+    return JSON.stringify(
+      await this.#host.read(storeId, scope, request, staged)
+    );
   }
 
   /** `StoreHost.generations`. */
@@ -73,9 +75,13 @@ export class DataStore extends DurableObject<Env> {
     return this.#host.generations(storeId, names);
   }
 
-  /** `StoreHost.claim`. */
-  async claim(input: ClaimInput): Promise<Claimed> {
-    return await this.#host.claim(input);
+  /**
+   * `StoreHost.claim`, as the JSON text of its `Claimed`: an outcome
+   * carries what its mutation returned, JSON, which RPC types can't carry
+   * deeply (`openStore` parses it).
+   */
+  async claim(input: ClaimInput): Promise<string> {
+    return JSON.stringify(await this.#host.claim(input));
   }
 
   /** `StoreHost.close`. */
@@ -83,9 +89,12 @@ export class DataStore extends DurableObject<Env> {
     return await this.#host.close(storeId, actor);
   }
 
-  /** `StoreHost.commit`, with the deployment's outbox consumers. */
-  async commit(input: Commit): Promise<Committed> {
-    return await this.#host.commit(input, outboxConsumers);
+  /**
+   * `StoreHost.commit`, with the deployment's outbox consumers, as the
+   * JSON text of its `Committed`, as for `claim`.
+   */
+  async commit(input: Commit): Promise<string> {
+    return JSON.stringify(await this.#host.commit(input, outboxConsumers));
   }
 
   /** `StoreHost.runAlarm`, with the deployment's outbox consumers. */
