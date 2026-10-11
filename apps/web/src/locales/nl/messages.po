@@ -201,6 +201,14 @@ msgstr "{limit} per maand voor elk, beheerders krijgen een melding bij {alertAt}
 msgid "{limit} a month, admins alerted at {alertAt}. Calls stop once it's used up."
 msgstr "{limit} per maand, beheerders krijgen een melding bij {alertAt}. Aanroepen stoppen zodra het op is."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{limit} for each run, with the runs it starts, over its whole life, admins alerted at {alertAt}. What each spent so far, this month or before."
+msgstr "{limit} voor elke run, met de runs die hij start, over zijn hele looptijd, beheerders krijgen een melding bij {alertAt}. Wat elk tot nu toe uitgaf, deze maand of eerder."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "{limit} for the run's whole life, admins alerted at {alertAt}. Its calls stop once it's used up or held by calls whose cost isn't settled yet."
+msgstr "{limit} voor de hele looptijd van de run, beheerders krijgen een melding bij {alertAt}. Zijn aanroepen stoppen zodra het op is of vastgehouden wordt door aanroepen waarvan de kosten nog niet vaststaan."
+
 #: src/dashboard/failed-workflows.tsx
 msgid "{link} in {appName} failed"
 msgstr "{link} in {appName} is mislukt"
@@ -930,6 +938,10 @@ msgstr "Tegen het einde van de maand"
 msgid "By workflow"
 msgstr "Per workflow"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "By workflow run"
+msgstr "Per workflowrun"
+
 #: src/activity/audit-words.ts
 msgid "Called a model"
 msgstr "Een model aangeroepen"
@@ -1508,6 +1520,14 @@ msgstr "Elke persoon"
 #: src/routes/_shell.settings.models.tsx
 msgid "Each workflow"
 msgstr "Elke workflow"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Each workflow run, with the runs it starts"
+msgstr "Elke workflowrun, met de runs die hij start"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Each workflow run, with the runs it starts, may make at most 100 model requests, retries included."
+msgstr "Elke workflowrun mag, met de runs die hij start, hooguit 100 modelverzoeken doen, nieuwe pogingen meegeteld."
 
 #: src/chat/chat-list.tsx
 msgctxt "older chats"
@@ -3312,6 +3332,14 @@ msgstr "Regels"
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
 msgstr "Run"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Run {runId}"
+msgstr "Run {runId}"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Run of {workflowId} in {engine}"
+msgstr "Run van {workflowId} in {engine}"
 
 #: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx

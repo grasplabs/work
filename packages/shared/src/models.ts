@@ -12,7 +12,7 @@ export const modelErrors = defineErrorFamily({
   "model.over_budget":
     "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
   "model.run_limit":
-    "This workflow run, with the runs it started, has used all the model calls or model spend one run may have, so no more model calls can be made in it.",
+    "This workflow run, with the runs it started, has reached the most model calls or model spend one run may have: spent, or held for calls whose cost isn't settled yet. No more model calls can be made in it.",
   "model.budget_busy":
     "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
   "model.unpriced":
@@ -24,8 +24,11 @@ export const modelErrors = defineErrorFamily({
     "The model's answer didn't match the expected shape, also when asked again.",
 });
 
-/** Whose spend a budget counts: all calls, each workflow's, each person's. */
-export type ModelBudgetScope = "deployment" | "workflow" | "user";
+/**
+ * Whose spend a budget counts: all calls, each workflow's, each person's,
+ * each run lineage's (a run and the runs it starts).
+ */
+export type ModelBudgetScope = "deployment" | "workflow" | "user" | "run";
 
 /** What spent part of a budget this month, with its name where core has one. */
 export type ModelSpender =
@@ -42,6 +45,16 @@ export type ModelSpender =
       userId: string;
       /** Null once the person is gone. */
       name: string | null;
+    }
+  | {
+      /** A run lineage, by its root run. */
+      type: "run";
+      runId: string;
+      /** Null once the run's record is gone. */
+      appId: string | null;
+      /** Null once the App, or the run's record, is gone. */
+      appName: string | null;
+      workflowId: string | null;
     };
 
 /** Most workflows or people one budget lists the spend of. */
@@ -52,7 +65,8 @@ export interface ModelBudget {
   scope: ModelBudgetScope;
   /**
    * US dollars a month: for the deployment, all its calls together; for a
-   * workflow or a person, each one on its own.
+   * workflow or a person, each one on its own. For a run lineage, each
+   * one on its own, for its whole life.
    */
   limit: number;
   /** The percent of the limit at which admins are alerted. */
@@ -60,10 +74,11 @@ export interface ModelBudget {
   /**
    * This month's spend in US dollars, most first: the deployment's, or
    * that of each workflow or person that spent, at most
-   * {@link modelSpendListed} of them. Empty while nothing was spent.
+   * {@link modelSpendListed} of them; for run lineages, what each spent
+   * in its whole life. Empty while nothing was spent.
    */
   spent: { of: ModelSpender; amount: number }[];
-  /** More workflows or people spent than `spent` lists. */
+  /** More workflows, people or run lineages spent than `spent` lists. */
   more: boolean;
 }
 

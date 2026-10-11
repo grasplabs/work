@@ -84,7 +84,7 @@ const settingsIn = async (
 };
 
 describe("model settings", { timeout: 60_000 }, () => {
-  it("show admins the allowlist, the rules, and this month's spend against each budget, most first, with names", async () => {
+  it("show admins the allowlist, the rules, and the spend against each budget (this month's, a run lineage's whole life), most first, with names", async () => {
     const coreEnv = envWith({
       gateway: "grasp-os-test",
       models: allowed,
@@ -97,6 +97,7 @@ describe("model settings", { timeout: 60_000 }, () => {
         deployment: { limit: 100 },
         workflow: { limit: 5, alertAt: 50 },
         user: { limit: 1 },
+        run: { limit: 2, alertAt: 90 },
       },
     });
     const builder = await signedInApi(idp, "builder");
@@ -210,6 +211,25 @@ describe("model settings", { timeout: 60_000 }, () => {
                   type: "user",
                   userId: other.userId,
                   name: otherName.name,
+                },
+                amount: 0.0045,
+              },
+            ],
+            more: false,
+          },
+          {
+            scope: "run",
+            limit: 2,
+            alertAt: 90,
+            // Each lineage's whole life, by its root run.
+            spent: [
+              {
+                of: {
+                  type: "run",
+                  runId: run.id,
+                  appId: app,
+                  appName: "Invoices",
+                  workflowId: "idle",
                 },
                 amount: 0.0045,
               },

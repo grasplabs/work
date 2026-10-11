@@ -874,8 +874,9 @@ export class ModelLedger extends DurableObject<Env> {
   }
 
   /**
-   * What each of `scopes` spent and holds in `period`, most spent first,
-   * at most `limit` each; ties by key, descending.
+   * What each of `scopes` spent and holds in `period` (a run lineage: in
+   * its whole life), most spent first, at most `limit` each; ties by key,
+   * descending.
    */
   async spendOf(
     period: string,
@@ -891,7 +892,9 @@ export class ModelLedger extends DurableObject<Env> {
           reservedMicros: spend.reservedMicros,
         })
         .from(spend)
-        .where(and(eq(spend.scope, scope), eq(spend.period, period)))
+        .where(
+          and(eq(spend.scope, scope), eq(spend.period, periodOf(scope, period)))
+        )
         .orderBy(desc(spend.spentMicros), desc(spend.key))
         .limit(limit)
         .all();

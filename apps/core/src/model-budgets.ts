@@ -12,14 +12,15 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { apps, users } from "./db/core/schema.ts";
+import { apps, users, workflowRuns } from "./db/core/schema.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type { LedgerScope, LedgerScopeName } from "./model-ledger.ts";
 import { microsPerDollar } from "./model-prices.ts";
 
 // Model budgets, one of the client's rules for model calls (model-rules.ts):
 // what the deployment's calls may cost in a UTC month, all together, per
-// workflow and per person, in US dollars at the providers' list prices.
+// workflow and per person, and per run lineage for its whole life, in US
+// dollars at the providers' list prices.
 //
 // The model ledger (model-ledger.ts) enforces them: before each provider
 // request is sent, a retry too, it reserves the most the request can cost
@@ -191,10 +192,11 @@ const workflowOf = (key: string): [string, string] | undefined => {
   }
 };
 
-/** Names of Apps and people, by ID, as core still has them. */
+/** Names of Apps and people, and root runs' App and workflow, by ID, as core still has them. */
 interface Names {
   apps: ReadonlyMap<string, string>;
   people: ReadonlyMap<string, string>;
+  runs: ReadonlyMap<string, { appId: string; workflowId: string }>;
 }
 
 /** What a spend row counted, by its scope and key; none for a bad key. */
@@ -209,6 +211,16 @@ const spenderOf = (
   if (scope === "user") {
     return { type: "user", userId: key, name: names.people.get(key) ?? null };
   }
+  if (scope === "run") {
+    const run = names.runs.get(key);
+    return {
+      type: "run",
+      runId: key,
+      appId: run?.appId ?? null,
+      appName: run === undefined ? null : (names.apps.get(run.appId) ?? null),
+      workflowId: run?.workflowId ?? null,
+    };
+  }
   const workflow = workflowOf(key);
   if (workflow === undefined) {
     return undefined;
@@ -222,18 +234,33 @@ const spenderOf = (
   };
 };
 
-/** The names of the Apps and people `rows` count spend for. */
+/** The names of the Apps, people and root runs `rows` count spend for. */
 const namesOf = async (
   db: DrizzleD1Database,
   rows: readonly { scope: ModelBudgetScope; key: string }[]
 ): Promise<Names> => {
+  const runIds = rows
+    .filter(({ scope }) => scope === "run")
+    .map(({ key }) => key);
+  const runRows =
+    runIds.length === 0
+      ? []
+      : await db
+          .select({
+            id: workflowRuns.id,
+            appId: workflowRuns.appId,
+            workflowId: workflowRuns.workflowId,
+          })
+          .from(workflowRuns)
+          .where(inArray(workflowRuns.id, runIds));
   const appIds = [
-    ...new Set(
-      rows.flatMap(({ scope, key }) => {
+    ...new Set([
+      ...rows.flatMap(({ scope, key }) => {
         const workflow = scope === "workflow" ? workflowOf(key) : undefined;
         return workflow === undefined ? [] : [workflow[0]];
-      })
-    ),
+      }),
+      ...runRows.map(({ appId }) => appId),
+    ]),
   ];
   const userIds = rows
     .filter(({ scope }) => scope === "user")
@@ -255,12 +282,16 @@ const namesOf = async (
   return {
     apps: new Map(appRows.map(({ id, name }) => [id, name])),
     people: new Map(userRows.map(({ id, name }) => [id, name])),
+    runs: new Map(
+      runRows.map(({ id, appId, workflowId }) => [id, { appId, workflowId }])
+    ),
   };
 };
 
 /**
  * Each budget `budgets` sets, with what was charged against it in
- * `period` (reservations still held are not spend yet), most first (at most `modelSpendListed`, and
+ * `period` (a run lineage's: in its whole life; reservations still held
+ * are not spend yet), most first (at most `modelSpendListed`, and
  * whether more spent), and the names of the Apps and people it counts for
  * where core still has them: for admins to read (models-rpc.ts).
  */
@@ -269,10 +300,12 @@ export const budgetSpend = async (
   budgets: Budgets,
   period: string
 ): Promise<ModelBudget[]> => {
-  const set = (["deployment", "workflow", "user"] as const).flatMap((scope) => {
-    const budget = budgets?.[scope];
-    return budget === undefined ? [] : [{ scope, budget }];
-  });
+  const set = (["deployment", "workflow", "user", "run"] as const).flatMap(
+    (scope) => {
+      const budget = budgets?.[scope];
+      return budget === undefined ? [] : [{ scope, budget }];
+    }
+  );
   if (set.length === 0) {
     return [];
   }
