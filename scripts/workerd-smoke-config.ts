@@ -71,6 +71,8 @@ export const smokeConfig = ({
   return `using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
+  # One JSON line per log, with its level: the smoke reads them.
+  structuredLogging = true,
   services = [
     (name = "core", worker = .core),
     (name = "storage", disk = (path = "${storage}", writable = true)),
