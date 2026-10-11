@@ -1,4 +1,4 @@
-import type { ValueSchema } from "@grasp-os/sdk";
+import type { ValueSchema, AnyResource, ResourceKind } from "@grasp-os/sdk";
 import {
   schemaFromDescriptor,
   schemaHash,
@@ -7,7 +7,7 @@ import {
 import type { AppManifest, OperationManifest } from "@grasp-os/sdk/host";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { isExpectedError } from "@grasp-os/shared/errors";
+import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -53,6 +53,7 @@ import {
   idempotencyKeySchema,
   submissionErrors,
 } from "@grasp-os/shared/submissions";
+import { z } from "zod";
 
 import type { OpenStore } from "./data-stores.ts";
 import { openChannel } from "./operation-channel.ts";
@@ -146,6 +147,8 @@ export interface Invocation {
    * before a mutation commits.
    */
   readonly authorize: () => Promise<WriterRoles>;
+  /** How core binds the App's resources for this call; none bound without it. */
+  readonly resources?: ResourceBindings;
 }
 
 /**
@@ -328,9 +331,9 @@ const publicOperation = (
   if (operation.kind !== kind) {
     throw operationErrors.create("operation.kind_mismatch");
   }
-  // Actions and streams run with the action runtime of a later release:
-  // refused rather than run without it.
-  if (operation.kind === "action" || operation.stream !== null) {
+  // A stream's progress is delivered by the streaming runtime (spec
+  // 10.7.6): refused rather than run without it.
+  if (operation.stream !== null) {
     throw operationErrors.create("operation.unsupported");
   }
   return operation;
@@ -575,6 +578,9 @@ type JsonObject = Readonly<Record<string, Json | undefined>>;
 const isJsonObject = (json: Json | undefined): json is JsonObject =>
   typeof json === "object" && json !== null && !Array.isArray(json);
 
+const isJsonArray = (json: Json | undefined): json is readonly Json[] =>
+  Array.isArray(json);
+
 /** The entries of JSON object `json` whose keys `keep` keeps. */
 const entriesOf = (
   json: Readonly<Record<string, Json | undefined>>,
@@ -618,7 +624,13 @@ const payloadOf = (
   }
   // Only an expected error the host made or got from its own subsystems
   // counts: one with a platform code from anywhere else is unexpected.
-  if (isExpectedError(error) && hostErrors.has(error)) {
+  // The opaque failure a channel raised carries its request ID in its
+  // details; the payload has it at the top, as for any other.
+  if (
+    isExpectedError(error) &&
+    hostErrors.has(error) &&
+    error.code !== "internal.unexpected"
+  ) {
     const details = safeDetails(error.details);
     return {
       code: error.code,
@@ -863,18 +875,241 @@ const stagingFor = (
   };
 };
 
-/** The read scope of an invocation: core's, and the pinned schema's hash. */
-const scopeOf = async (
-  compiled: Compiled,
-  invocation: Invocation,
-  roles: WriterRoles
-): Promise<ReadScope> => ({
-  schemaHash: await compiled.hash,
-  principal: invocation.principal,
-  appMember: roles.appMember,
-  appBuilder: roles.appBuilder,
-  consumer: { ...invocation.consumer },
+/** What a resource's adapter is told of the request it serves. */
+export interface ResourceContext {
+  readonly requestId: string;
+  /** When the call must end, in milliseconds since the epoch. */
+  readonly deadline: number;
+  /**
+   * The request's own key, derived from the action's call key and its
+   * place among the action's requests: the same each time the same call
+   * is made again, so an idempotent provider contract never repeats an
+   * effect, and never one App code chose.
+   */
+  readonly idempotencyKey: string;
+}
+
+/**
+ * A resource as core bound it for an invocation: an approved resource of
+ * the kind declared, the contract it serves, and its adapter, which
+ * reaches the provider (connect, the model gateway, knowledge) and never
+ * hands App code a key, token or unrestricted fetch.
+ */
+export interface BoundResource {
+  readonly kind: ResourceKind;
+  /** The contract a connector's or a template's binding serves; null otherwise. */
+  readonly contract: string | null;
+  readonly call: (
+    method: string,
+    args: readonly Json[],
+    context: ResourceContext
+  ) => Promise<unknown>;
+}
+
+/**
+ * How core binds a declared resource for an invocation, under the App's
+ * grants: the bound resource, or undefined when there is no approved
+ * binding. A declaration alone grants nothing.
+ */
+export type ResourceBindings = (
+  declaration: AnyResource
+) => Promise<BoundResource | undefined>;
+
+/** A knowledge search's request, as the declaration's client sends it. */
+const knowledgeSearchSchema = z.strictObject({
+  text: z.string().min(1).max(1000),
+  limit: z.number().int().min(1).max(20).optional(),
 });
+
+/** A knowledge read's request. */
+const knowledgeReadSchema = z.strictObject({ id: z.string().min(1).max(256) });
+
+/** A model request. */
+const modelRequestSchema = z.strictObject({
+  prompt: z.string().min(1).max(100_000),
+  instructions: z.string().max(20_000).optional(),
+});
+
+/** Each knowledge operation's request. */
+const knowledgeRequests = {
+  search: knowledgeSearchSchema,
+  read: knowledgeReadSchema,
+} as const;
+
+/** A request a resource's declaration doesn't allow. */
+const notAllowed = () => operationErrors.create("resource.not_allowed");
+
+/** An answer a resource's contract doesn't allow. */
+const invalidResult = () =>
+  operationErrors.create("contract.invalid_resource_result");
+
+/** What a knowledge search answers: hits of exactly a title and an excerpt. */
+const knowledgeHitsSchema = z
+  .array(z.strictObject({ title: z.string(), excerpt: z.string() }))
+  .max(20);
+
+/** What a knowledge read answers. */
+const knowledgeDocumentSchema = z.strictObject({
+  title: z.string(),
+  text: z.string(),
+});
+
+/**
+ * The request `method` with `args` makes of `declaration`, if the
+ * declaration allows it: a connector one of its declared actions with an
+ * object of arguments, knowledge one of its declared operations, a model
+ * a prompt, a template a read. `resource.not_allowed` otherwise.
+ */
+const allowedRequest = (
+  declaration: AnyResource,
+  method: unknown,
+  args: readonly Json[]
+): void => {
+  const [first, second] = args;
+  const kind = declaration["~resource"];
+  let allowed: boolean;
+  if (declaration["~resource"] === "connector") {
+    allowed =
+      method === "call" &&
+      args.length === 2 &&
+      typeof first === "string" &&
+      declaration.actions.includes(first) &&
+      isJsonObject(second);
+  } else if (declaration["~resource"] === "knowledge") {
+    const schema =
+      method === "search" || method === "read"
+        ? knowledgeRequests[method]
+        : undefined;
+    allowed =
+      schema !== undefined &&
+      declaration.operations.some((operation) => operation === method) &&
+      args.length === 1 &&
+      schema.safeParse(first).success;
+  } else if (kind === "model") {
+    allowed =
+      method === "generate" &&
+      args.length === 1 &&
+      modelRequestSchema.safeParse(first).success;
+  } else {
+    allowed = method === "read" && args.length === 0;
+  }
+  if (!allowed) {
+    throw notAllowed();
+  }
+};
+
+/**
+ * What a resource answered, if its contract allows it: a model's structured
+ * output (or text), knowledge's hits or document, a template's pinned
+ * version of the declared contract. A connector's answer is checked as JSON
+ * here; its action's own descriptor comes with generated connector
+ * contracts.
+ */
+const checkedResourceResult = (
+  declaration: AnyResource,
+  method: string,
+  result: Json
+): Json => {
+  let valid: boolean;
+  if (declaration["~resource"] === "model") {
+    const { structuredOutput } = declaration;
+    if (structuredOutput === null) {
+      valid = typeof result === "string";
+    } else {
+      const checked =
+        schemaOfDescriptor(structuredOutput)["~standard"].validate(result);
+      const normalized =
+        checked.issues === undefined ? jsonOf(checked.value) : undefined;
+      valid =
+        normalized !== undefined &&
+        canonicalJson(normalized) === canonicalJson(result);
+    }
+  } else if (declaration["~resource"] === "knowledge") {
+    valid = (
+      method === "search" ? knowledgeHitsSchema : knowledgeDocumentSchema
+    ).safeParse(result).success;
+  } else if (declaration["~resource"] === "template") {
+    valid = z
+      .strictObject({
+        contract: z.literal(declaration.contract),
+        version: z.number().int().min(1),
+        content: z.json(),
+      })
+      .safeParse(result).success;
+  } else {
+    valid = true;
+  }
+  if (!valid) {
+    throw invalidResult();
+  }
+  return result;
+};
+
+/**
+ * One request of a resource an action declared and uses, as `alias`
+ * names it: only a use its declaration allows (`allowedRequest`), its
+ * arguments JSON within the operation input limit, through the binding
+ * core resolved for it, which must be of the declared kind and serve the
+ * declared contract (`resource.unavailable` otherwise, and without a
+ * binding). Its answer is checked against the contract before App code
+ * gets it. A provider's own failure reaches App code only as an expected
+ * error the adapter raised (`effect.outcome_unknown` among them), never
+ * as its message.
+ */
+const resourceCall = async (
+  run: Run,
+  operation: OperationManifest,
+  request: { alias: unknown; method: unknown; args: unknown },
+  key: readonly string[]
+): Promise<Json> => {
+  const { alias, method } = request;
+  const declared = operation.uses.some(
+    (use) => use.type === "resource" && use.alias === alias
+  );
+  const declaration =
+    declared &&
+    typeof alias === "string" &&
+    Object.hasOwn(run.app.manifest.resources, alias)
+      ? run.app.manifest.resources[alias]
+      : undefined;
+  if (declaration === undefined || typeof method !== "string") {
+    throw operationErrors.create("resource.not_allowed");
+  }
+  const args = jsonOf(request.args);
+  if (args === undefined || !isJsonArray(args)) {
+    throw operationErrors.create("resource.not_allowed");
+  }
+  if (bytesOf(args) > operationInputMaxBytes) {
+    throw operationErrors.create("contract.input_too_large", {
+      maxBytes: operationInputMaxBytes,
+    });
+  }
+  allowedRequest(declaration, method, args);
+  const bound = await run.invocation.resources?.(declaration);
+  const contract =
+    declaration["~resource"] === "connector" ||
+    declaration["~resource"] === "template"
+      ? declaration.contract
+      : null;
+  if (
+    bound === undefined ||
+    bound.kind !== declaration["~resource"] ||
+    bound.contract !== contract
+  ) {
+    throw operationErrors.create("resource.unavailable");
+  }
+  const result = jsonOf(
+    await bound.call(method, args, {
+      requestId: run.invocation.requestId,
+      deadline: run.invocation.deadline,
+      idempotencyKey: key.join(":"),
+    })
+  );
+  if (result === undefined || bytesOf(result) > operationResultMaxBytes) {
+    throw operationErrors.create("contract.invalid_resource_result");
+  }
+  return checkedResourceResult(declaration, method, result);
+};
 
 /** What one run of a function may still read: its reads, and staged bytes sent. */
 interface ReadBudget {
@@ -905,14 +1140,265 @@ const spendRead = (budget: ReadBudget, staged: number): void => {
   }
 };
 
-/** Runs a query: its reads one state of the store (`readConsistently`). */
-const runQuery = async (
-  app: HostedApp,
+/** Whether two role readings differ. */
+const rolesDiffer = (one: WriterRoles, other: WriterRoles): boolean =>
+  one.appMember !== other.appMember || one.appBuilder !== other.appBuilder;
+
+/** The read scope of an invocation: core's, and the pinned schema's hash. */
+const scopeOf = async (
   compiled: Compiled,
   invocation: Invocation,
+  roles: WriterRoles
+): Promise<ReadScope> => ({
+  schemaHash: await compiled.hash,
+  principal: invocation.principal,
+  appMember: roles.appMember,
+  appBuilder: roles.appBuilder,
+  consumer: { ...invocation.consumer },
+});
+
+/**
+ * How deep functions may call each other within one call: the caller's
+ * own function and three nested in it, as calls between Apps
+ * (`appCallLimits.depth`).
+ */
+export const callMaxDepth = 3;
+
+/** One function's run, and where it sits in the call it belongs to. */
+interface Run {
+  readonly app: HostedApp;
+  readonly compiled: Compiled;
+  readonly invocation: Invocation;
+  /** How many functions it is nested in: 0 for the one the caller named. */
+  readonly depth: number;
+}
+
+/** Thrown by a run whose failure came from stale reads: run it again. */
+const staleRun = new Error("A run's reads went stale");
+
+/** The capabilities one handler's channel gets, besides its refusals. */
+interface Capabilities {
+  readonly read?: (request: unknown) => Promise<unknown>;
+  readonly write?: (request: unknown) => Promise<unknown>;
+  readonly call?: (
+    kind: unknown,
+    path: unknown,
+    args: unknown
+  ) => Promise<unknown>;
+  readonly resource?: (
+    alias: unknown,
+    method: unknown,
+    args: unknown
+  ) => Promise<unknown>;
+}
+
+/** Why each kind's channel refuses what it hasn't. */
+const refusalsOf = {
+  query: {
+    read: "operation.no_database",
+    write: "operation.read_only",
+    call: "operation.read_only",
+    resource: "operation.no_resources",
+  },
+  mutation: {
+    read: "operation.no_database",
+    write: "operation.read_only",
+    call: "operation.not_found",
+    resource: "operation.no_resources",
+  },
+  action: {
+    read: "operation.no_database",
+    write: "operation.no_database",
+    call: "operation.not_found",
+    resource: "operation.no_resources",
+  },
+} as const;
+
+/**
+ * Runs `operation`'s handler with `args` over a channel of `capabilities`,
+ * ended once it settles, and answers its checked return; a failure as the
+ * host decides it (`failureOf`). `stale` says, for a failure, whether the
+ * run's reads went stale, which makes it a run to repeat rather than a
+ * failure: thrown as `Stale`.
+ */
+const runHandler = async (
+  run: Run,
+  operation: OperationManifest,
+  args: Json,
+  capabilities: Capabilities,
+  stale?: () => Promise<boolean>
+): Promise<Json> => {
+  const open = openChannel({
+    requestId: run.invocation.requestId,
+    path: operation.path,
+    ...capabilities,
+    trust,
+    refusals: refusalsOf[operation.kind],
+  });
+  try {
+    const outcome = await settle(
+      run.app.run(operation.path, fresh(args), open.channel)
+    );
+    if ("thrown" in outcome) {
+      if (stale !== undefined && (await stale())) {
+        throw staleRun;
+      }
+      throw failureOf(
+        outcome.thrown,
+        open,
+        run.invocation.requestId,
+        operation.path
+      );
+    }
+    return checkedReturn(
+      run.compiled,
+      operation,
+      outcome.value,
+      operation.kind === "mutation"
+        ? mutationResultMaxBytes
+        : operationResultMaxBytes
+    );
+  } catch (error) {
+    if (error === staleRun) {
+      throw error;
+    }
+    throw sealed(error);
+  } finally {
+    open.end();
+  }
+};
+
+/**
+ * A query a mutation runs: its handler over the mutation's own reader, so
+ * it sees the staged writes and its reads count in the mutation's guards
+ * and read set, each read narrowed to what both functions may read.
+ */
+const stagedQuery = async (
+  run: Run,
+  caller: OperationManifest,
+  callee: OperationManifest,
+  args: Json,
+  reader: StoreReader,
+  spend: () => void
+): Promise<Json> => {
+  const narrowed: OperationManifest = {
+    ...callee,
+    tables: Object.fromEntries(
+      Object.entries(callee.tables).map(([table, verbs]) => [
+        table,
+        {
+          ...verbs,
+          read: verbs.read && (caller.tables[table]?.read ?? false),
+        },
+      ])
+    ),
+  };
+  return await runHandler(run, narrowed, args, {
+    read: async (request) => {
+      spend();
+      return await readFor(narrowed, reader, request);
+    },
+  });
+};
+
+/**
+ * What a failure becomes for App code that called the failing function:
+ * a domain failure the `AppError` it was (App code may handle it or throw
+ * it on), an expected platform error as it is, anything else
+ * `internal.unexpected`, its cause logged already.
+ */
+const forCaller = (error: unknown, requestId: string): Error => {
+  const domain = error instanceof Error ? domainFailures.get(error) : undefined;
+  if (error instanceof Error && domain !== undefined) {
+    return Object.assign(new Error(error.message), {
+      name: "AppError",
+      code: domain.code,
+      ...(domain.details === undefined ? {} : { details: domain.details }),
+    });
+  }
+  if (isExpectedError(error) && hostErrors.has(error)) {
+    return error;
+  }
+  const opaque = internalErrors.create("internal.unexpected", { requestId });
+  opaque.stack = undefined;
+  return opaque;
+};
+
+/**
+ * Runs the function at `path` that `operation` calls with `args`, as
+ * `kind` (`runQuery`, `runMutation`, `runAction`): only one it lists in
+ * its `uses`, of that kind, within the call's depth, under the call's
+ * principal and the callee's own access. A mutation's query runs in the
+ * mutation's staged state, its reads through `reader`, narrowed to what
+ * both may read; an action's calls are invocations of their own, each
+ * authorized again and each mutation committed on its own under a
+ * receipt derived from the action's key (`derived`).
+ */
+const nestedCall = async (
+  run: Run,
+  operation: OperationManifest,
+  request: { kind: unknown; path: unknown; args: unknown },
+  within:
+    | {
+        readonly type: "mutation";
+        readonly reader: StoreReader;
+        /** Spends one of the mutation's reads (`spendRead`). */
+        readonly spend: () => void;
+      }
+    | {
+        readonly type: "action";
+        readonly derived: () => Promise<readonly string[]>;
+      }
+): Promise<Json> => {
+  const { kind, path, args } = request;
+  const used = operation.uses.find(
+    (use) => use.type === "function" && use.path === path
+  );
+  const callee =
+    used !== undefined && typeof path === "string"
+      ? run.app.manifest.operations[path]
+      : undefined;
+  if (callee === undefined) {
+    throw operationErrors.create("operation.not_found");
+  }
+  if (callee.kind !== kind) {
+    throw operationErrors.create("operation.kind_mismatch");
+  }
+  if (run.depth + 1 > callMaxDepth) {
+    throw operationErrors.create("operation.depth_exceeded", {
+      maxDepth: callMaxDepth,
+    });
+  }
+  if (callee.stream !== null) {
+    throw operationErrors.create("operation.unsupported");
+  }
+  const admitted = admittedArgs(run.compiled, callee, args);
+  const nested: Run = { ...run, depth: run.depth + 1 };
+  try {
+    if (within.type === "mutation") {
+      return await stagedQuery(
+        nested,
+        operation,
+        callee,
+        admitted,
+        within.reader,
+        within.spend
+      );
+    }
+    // oxlint-disable-next-line no-use-before-define -- an action's calls run functions of every kind, actions among them
+    return await execute(nested, callee, admitted, await within.derived());
+  } catch (error) {
+    throw forCaller(error, run.invocation.requestId);
+  }
+};
+
+/** Runs a query: its reads one state of the store (`readConsistently`). */
+const runQuery = async (
+  run: Run,
   operation: OperationManifest,
   args: Json
 ): Promise<Json> => {
+  const { invocation, compiled } = run;
   const scope = await trusted(
     async () =>
       await scopeOf(compiled, invocation, await invocation.authorize())
@@ -921,77 +1407,29 @@ const runQuery = async (
     async () =>
       await readConsistently(invocation.store, scope, async (reader) => {
         const budget = readBudget();
-        const open = openChannel({
-          requestId: invocation.requestId,
-          path: operation.path,
+        return await runHandler(run, operation, args, {
           read: async (request) => {
             spendRead(budget, 0);
             return await readFor(operation, reader, request);
           },
-          trust,
-          refusals: {
-            read: "operation.no_database",
-            write: "operation.read_only",
-            call: "operation.read_only",
-            resource: "operation.no_resources",
-          },
         });
-        try {
-          const outcome = await settle(
-            app.run(operation.path, fresh(args), open.channel)
-          );
-          if ("thrown" in outcome) {
-            throw failureOf(
-              outcome.thrown,
-              open,
-              invocation.requestId,
-              operation.path
-            );
-          }
-          return checkedReturn(
-            compiled,
-            operation,
-            outcome.value,
-            operationResultMaxBytes
-          );
-        } catch (error) {
-          throw sealed(error);
-        } finally {
-          open.end();
-        }
       })
   );
 };
 
-/** Whether two role readings differ. */
-const rolesDiffer = (one: WriterRoles, other: WriterRoles): boolean =>
-  one.appMember !== other.appMember || one.appBuilder !== other.appBuilder;
-
 /**
- * Runs a mutation under its receipt: claimed first (a submission that
- * committed already answers its outcome), run, its return checked, the
- * caller authorized again, then committed with its guards and read set.
- * It runs again, within `queryMaxReruns`, when a commit finds its reads
- * stale, or when the caller's roles changed since its reads were scoped,
- * so nothing it read under roles the caller no longer has is committed or
- * kept with its receipt.
+ * Runs a mutation under its receipt (`key`): claimed first (a submission
+ * that committed already answers its outcome), run, its return checked,
+ * the caller authorized again, then committed with its guards and read
+ * set; run again when a commit finds its reads stale.
  */
 const runMutation = async (
-  app: HostedApp,
-  compiled: Compiled,
-  invocation: Invocation,
+  run: Run,
   operation: OperationManifest,
   args: Json,
-  options: CallOptions
+  key: readonly string[]
 ): Promise<Json> => {
-  const key =
-    options.idempotencyKey === undefined
-      ? crypto.randomUUID()
-      : submissionErrors.parse(
-          "submission.key_invalid",
-          idempotencyKeySchema,
-          options.idempotencyKey
-        );
+  const { invocation, compiled } = run;
   const { store } = invocation;
   let roles = await trusted(invocation.authorize);
   const claimed = await trusted(
@@ -1007,7 +1445,7 @@ const runMutation = async (
           contractVersion: 1,
           operationKind: "mutation",
         },
-        key: ["call", key],
+        key: [...key],
         inputHash: await sha256Hex(canonicalJson(args)),
         runId: invocation.runId,
         deadline: invocation.deadline,
@@ -1016,64 +1454,52 @@ const runMutation = async (
   if ("outcome" in claimed) {
     return claimed.outcome.result;
   }
-  for (let run = 0; run <= queryMaxReruns; run += 1) {
+  for (let attempt = 0; attempt <= queryMaxReruns; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one run after the other
     const scope = await scopeOf(compiled, invocation, roles);
     const staging = stagingFor(compiled, operation, Date.now());
     const reader = new StoreReader(store, scope, staging.preview);
     const budget = readBudget();
-    const open = openChannel({
-      requestId: invocation.requestId,
-      path: operation.path,
-      read: async (request) => {
-        spendRead(budget, staging.bytes());
-        return await readFor(operation, reader, request);
-      },
-      write: staging.stage,
-      trust,
-      refusals: {
-        read: "operation.no_database",
-        write: "operation.read_only",
-        // Calls of the App's queries in the staged state come with the
-        // action runtime's nested calls.
-        call: "operation.unsupported",
-        resource: "operation.no_resources",
-      },
-    });
+    const spend = () => {
+      spendRead(budget, staging.bytes());
+    };
     let value: Json;
     try {
       // One run after the other: a rerun exists only because the last
       // one's reads went stale.
       // oxlint-disable-next-line no-await-in-loop -- see above
-      const outcome = await settle(
-        app.run(operation.path, fresh(args), open.channel)
-      );
-      if ("thrown" in outcome) {
-        // A failure torn reads may have caused is a stale run too.
-        // oxlint-disable-next-line no-await-in-loop -- see above
-        if (!(await trusted(async () => await reader.isCurrent()))) {
-          continue;
-        }
-        throw failureOf(
-          outcome.thrown,
-          open,
-          invocation.requestId,
-          operation.path
-        );
-      }
-      value = checkedReturn(
-        compiled,
+      value = await runHandler(
+        run,
         operation,
-        outcome.value,
-        mutationResultMaxBytes
+        args,
+        {
+          read: async (request) => {
+            spend();
+            return await readFor(operation, reader, request);
+          },
+          write: staging.stage,
+          call: async (kind, path, callArgs) =>
+            await nestedCall(
+              run,
+              operation,
+              { kind, path, args: callArgs },
+              { type: "mutation", reader, spend }
+            ),
+        },
+        // A failure torn reads may have caused is a stale run too.
+        async () => !(await trusted(async () => await reader.isCurrent()))
       );
     } catch (error) {
-      throw sealed(error);
-    } finally {
-      open.end();
+      if (error === staleRun) {
+        continue;
+      }
+      throw error;
     }
     // oxlint-disable-next-line no-await-in-loop -- see above
     const current = await trusted(invocation.authorize);
+    // Its reads were scoped for roles the caller no longer has: run again
+    // under the roles they have, so nothing read under the old ones is
+    // committed or kept with the receipt.
     if (rolesDiffer(current, roles)) {
       roles = current;
       continue;
@@ -1107,6 +1533,74 @@ const runMutation = async (
 };
 
 /**
+ * Runs an action: authorized as the call starts, with no database, its
+ * calls of the App's functions each an invocation of its own and its
+ * resources each one call of the binding core resolved (`resourceCall`).
+ * Not one transaction, and never retried whole: a mutation it ran stays
+ * committed whatever it does next. `key` is the call's own key, which
+ * each mutation it runs, and each resource request it makes, derives its
+ * own from by order, so the same call made again under the same key
+ * answers what those already did rather than doing it twice.
+ */
+const runAction = async (
+  run: Run,
+  operation: OperationManifest,
+  args: Json,
+  key: readonly string[]
+): Promise<Json> => {
+  await trusted(run.invocation.authorize);
+  let calls = 0;
+  let requests = 0;
+  const derived = async (
+    what: "call" | "resource",
+    count: number
+  ): Promise<readonly string[]> => [
+    "derived",
+    await sha256Hex(canonicalJson([...key, what, count])),
+  ];
+  return await runHandler(run, operation, args, {
+    call: async (kind, path, callArgs) =>
+      await nestedCall(
+        run,
+        operation,
+        { kind, path, args: callArgs },
+        {
+          type: "action",
+          derived: async () => {
+            calls += 1;
+            return await derived("call", calls);
+          },
+        }
+      ),
+    resource: async (alias, method, callArgs) => {
+      requests += 1;
+      return await resourceCall(
+        run,
+        operation,
+        { alias, method, args: callArgs },
+        await derived("resource", requests)
+      );
+    },
+  });
+};
+
+/** Runs `operation` with `args`, by its kind, under the call key `key`. */
+const execute = async (
+  run: Run,
+  operation: OperationManifest,
+  args: Json,
+  key: readonly string[]
+): Promise<Json> => {
+  if (operation.kind === "query") {
+    return await runQuery(run, operation, args);
+  }
+  if (operation.kind === "mutation") {
+    return await runMutation(run, operation, args, key);
+  }
+  return await runAction(run, operation, args, key);
+};
+
+/**
  * Calls the public function `reference` names of `app` for `invocation`,
  * with `args`: what it returned, or why it failed, as its caller may see
  * it (see the header). Never throws.
@@ -1120,26 +1614,29 @@ export const callOperation = async (
 ): Promise<OperationResult> => {
   const path = typeof reference.path === "string" ? reference.path : "";
   try {
-    const { compiled, operation, admitted } = await trusted(() => {
+    const { compiled, operation, admitted, key } = await trusted(() => {
       const known = compiledOf(app.manifest);
       const found = publicOperation(app.manifest, reference);
       return {
         compiled: known,
         operation: found,
         admitted: admittedArgs(known, found, args),
+        key:
+          options.idempotencyKey === undefined
+            ? crypto.randomUUID()
+            : submissionErrors.parse(
+                "submission.key_invalid",
+                idempotencyKeySchema,
+                options.idempotencyKey
+              ),
       };
     });
-    const value =
-      operation.kind === "query"
-        ? await runQuery(app, compiled, invocation, operation, admitted)
-        : await runMutation(
-            app,
-            compiled,
-            invocation,
-            operation,
-            admitted,
-            options
-          );
+    const value = await execute(
+      { app, compiled, invocation, depth: 0 },
+      operation,
+      admitted,
+      ["call", key]
+    );
     return { ok: true, value };
   } catch (error) {
     return { ok: false, error: payloadOf(error, invocation.requestId, path) };

@@ -4,7 +4,7 @@ import { inspectApp } from "./app.ts";
 import { databaseReader, databaseWriter } from "./database.ts";
 import { isResource } from "./resources.ts";
 import type { AnyResource } from "./resources.ts";
-import type { AnyFunction } from "./server.ts";
+import type { AnyFunction, FunctionKind } from "./server.ts";
 
 // How an App's server functions run where its code runs: the runner looks
 // a registered function up by path, builds the context of its kind over
@@ -27,8 +27,16 @@ export interface OperationChannel {
   readonly read: (request: ReadRequest) => Promise<unknown>;
   /** One staged write: a mutation's only. Answers an insert's minted ID. */
   readonly write: (request: WriteRequest) => Promise<unknown>;
-  /** A call of another of the App's functions, by its registered path. */
-  readonly call: (path: string, args: unknown) => Promise<unknown>;
+  /**
+   * A call of another of the App's functions, by the kind the caller
+   * expects (`runQuery`, `runMutation`, `runAction`) and its registered
+   * path: the host refuses another kind.
+   */
+  readonly call: (
+    kind: FunctionKind,
+    path: string,
+    args: unknown
+  ) => Promise<unknown>;
   /** One call of a resource the function uses: an action's only. */
   readonly resource: (
     alias: string,
@@ -118,8 +126,9 @@ export const runFunction = async (
     schema: Parameters<typeof databaseReader>[0];
   };
   const read = async (request: ReadRequest) => await channel.read(request);
-  const call = async (reference: unknown, callArgs: unknown) =>
-    await channel.call(usedPath(paths, fn, reference), callArgs);
+  const caller =
+    (kind: FunctionKind) => async (reference: unknown, callArgs: unknown) =>
+      await channel.call(kind, usedPath(paths, fn, reference), callArgs);
   let ctx: object;
   if (fn.kind === "query") {
     ctx = { db: databaseReader(schema, read) };
@@ -130,13 +139,13 @@ export const runFunction = async (
         read,
         async (request: WriteRequest) => await channel.write(request)
       ),
-      runQuery: call,
+      runQuery: caller("query"),
     };
   } else {
     ctx = {
-      runQuery: call,
-      runMutation: call,
-      runAction: call,
+      runQuery: caller("query"),
+      runMutation: caller("mutation"),
+      runAction: caller("action"),
       resources: resourcesOf(fn, channel),
     };
   }

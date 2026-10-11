@@ -53,6 +53,14 @@ export const operationErrors = defineErrorFamily({
   "operation.ended": "This operation's call has ended.",
   "operation.unsupported":
     "This operation needs a capability this release doesn't run yet.",
+  "operation.depth_exceeded":
+    "Functions called each other deeper than one call may go.",
+  "resource.not_allowed":
+    "The App didn't declare that use of this resource for this function.",
+  "resource.unavailable":
+    "This resource isn't bound to the App, or its binding doesn't serve the contract the App declared.",
+  "contract.invalid_resource_result":
+    "A resource answered something its contract doesn't allow.",
   "contract.invalid_args": "The arguments don't fit the operation.",
   "contract.input_too_large":
     "The arguments are larger than an operation accepts.",
@@ -76,6 +84,16 @@ export const operationErrors = defineErrorFamily({
     "The records changed while this change was made. Try again.",
 });
 
+/**
+ * Why an effect outside the platform can't be told apart from success or
+ * failure: the provider accepted a request whose outcome is unknown, so
+ * nothing is retried under a fresh key (spec 12).
+ */
+export const effectErrors = defineErrorFamily({
+  "effect.outcome_unknown":
+    "Whether the external request took effect is unknown. It wasn't retried.",
+});
+
 /** The category of each platform code a caller may get, by code. */
 const categories: Readonly<Record<string, ErrorCategory>> = {
   "auth.unauthenticated": "authorization",
@@ -84,6 +102,8 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "role.forbidden": "authorization",
   "permission.denied": "authorization",
   "data.access_denied": "authorization",
+  "resource.unavailable": "authorization",
+  "resource.not_allowed": "contract",
   "data.write_denied": "authorization",
   "data.conflict": "domain",
   "data.not_unique": "domain",
