@@ -1,12 +1,12 @@
 import type { MemoryApi, MemoryCollections } from "@grasp-os/shared/memory";
-import { RpcTarget } from "capnweb";
 
+import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { memoryCollections } from "./memory.ts";
 
 /** Memory for a signed-in person over `/rpc`, as `KnowledgeRpc` is. */
-export class MemoryRpc extends RpcTarget implements MemoryApi {
+export class MemoryRpc extends CoreRpcTarget implements MemoryApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

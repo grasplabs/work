@@ -2,8 +2,8 @@ import type {
   KnowledgeSignals,
   KnowledgeSignalsApi,
 } from "@grasp-os/shared/knowledge-signals";
-import { RpcTarget } from "capnweb";
 
+import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { dismissKnowledgeSignal, listKnowledgeSignals } from "./signals.ts";
@@ -14,7 +14,7 @@ import { dismissKnowledgeSignal, listKnowledgeSignals } from "./signals.ts";
  * and dismisses them.
  */
 export class KnowledgeSignalsRpc
-  extends RpcTarget
+  extends CoreRpcTarget
   implements KnowledgeSignalsApi
 {
   readonly #env: Env;

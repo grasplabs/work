@@ -29,6 +29,8 @@ import {
 } from "@grasp-os/shared/statistics";
 import type { StatisticUse } from "@grasp-os/shared/statistics";
 import { TokenBuckets } from "@grasp-os/shared/token-bucket";
+import { passedBound } from "@grasp-os/shared/value-bounds";
+import type { ValueBounds } from "@grasp-os/shared/value-bounds";
 import { DurableObject, exports } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -186,8 +188,30 @@ const restrictedKey = "restricted";
  */
 export type AppAnswer = Rpc.Serializable<unknown>;
 
-/** Whether a value is plain data, as structured clone carries it. */
-export const isPlainData = (value: unknown): boolean => {
+/**
+ * How deep and how big plain data may be by default: as deep as Cap'n
+ * Web reads a message by default, the deepest any reader of ours takes
+ * (a browser's connection, a screen's frame), and as big as the longest
+ * message workerd's RPC or Cap'n Web carries. A bound on the walk and the
+ * clone after it, not on what an App may answer, which its readers bound.
+ */
+export const plainDataBounds: ValueBounds = {
+  depth: 256,
+  size: 32 * 1024 * 1024,
+};
+
+/**
+ * Whether a value is plain data, as structured clone carries it, within
+ * `bounds`. They are checked first, without recursion, so the clone never
+ * walks a value deeper or bigger than they are.
+ */
+export const isPlainData = (
+  value: unknown,
+  bounds: ValueBounds = plainDataBounds
+): boolean => {
+  if (passedBound([value], bounds) !== undefined) {
+    return false;
+  }
   try {
     structuredClone(value);
     return true;

@@ -6,13 +6,13 @@ import type {
   ModelsApi,
 } from "@grasp-os/shared/models";
 import { requireAdmin } from "@grasp-os/shared/roles";
-import { RpcTarget } from "capnweb";
 import { z } from "zod";
 
 import { budgetMonth, budgetSpend } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import { microsPerDollar } from "./model-prices.ts";
 import { gatewaySettings } from "./models.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
@@ -31,7 +31,7 @@ const heldIdSchema = z.uuid();
 const howSchema = z.enum(["release", "charge"]);
 
 /** The gateway's settings over `/rpc`, for admins, Grasp staff included. */
-export class ModelsRpc extends RpcTarget implements ModelsApi {
+export class ModelsRpc extends CoreRpcTarget implements ModelsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

@@ -133,6 +133,10 @@ export const requestErrors = defineErrorFamily({
   "request.upgrade_required":
     "This endpoint only accepts WebSocket connections.",
   "request.rate_limited": "Too many requests. Try again in a minute.",
+  "request.too_deep": "A value in the request nests deeper than values may.",
+  "request.too_large": "A value in the request holds more than a request may.",
+  "request.unsupported_value":
+    "A value in the request is of a kind calls don't take.",
 });
 
 /** Why a call needs a person to sign in (again). */

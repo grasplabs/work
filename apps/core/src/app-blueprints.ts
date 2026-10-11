@@ -11,7 +11,6 @@ import type { BlueprintId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { canBuild, requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { RpcTarget } from "capnweb";
 import { and, asc, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -45,6 +44,7 @@ import {
 import { ensureCollection } from "./knowledge/collections.ts";
 import { appMemoryPath } from "./knowledge/memory-files.ts";
 import { declarableOf, declaredRequests, toPermission } from "./permissions.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { workflowCallsIn } from "./workflows/code.ts";
@@ -575,7 +575,10 @@ export const installBuiltinBlueprint = async (
 };
 
 /** A signed-in person's `apps.blueprints`. */
-export class AppBlueprintsRpc extends RpcTarget implements AppBlueprintsApi {
+export class AppBlueprintsRpc
+  extends CoreRpcTarget
+  implements AppBlueprintsApi
+{
   readonly #env: Env;
   readonly #check: SessionCheck;
 
