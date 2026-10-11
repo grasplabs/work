@@ -741,8 +741,11 @@ const reconcileGraceMs = 5 * 60_000;
  * caller asks again and is told afresh rather than wait out a long call.
  *
  * A shared scope (the deployment, a workflow) is held by other people's
- * calls too, whose timing a derived wait would give away: polling would
- * show the second it drops a step. Such a refusal suggests a fixed wait.
+ * calls too. A derived wait would give away when they were sent: polling
+ * would show the second it drops a step. Such a refusal suggests a fixed
+ * wait. That removes only the timing of when they were sent: being told
+ * the budget is busy at all still says other calls are under way, and its
+ * turning into an admission (or out of budget) says when they finished.
  */
 const busyRetry = { stepSeconds: 15, mostSeconds: 300, sharedSeconds: 60 };
 

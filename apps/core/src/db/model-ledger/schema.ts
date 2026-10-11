@@ -62,8 +62,8 @@ export const requests = sqliteTable(
     dispatchedAt: integer("dispatched_at").notNull(),
     /**
      * When the call is cut off at the latest: until then it may still
-     * settle for less than it holds. 0 on a row admitted before the
-     * column was added, which then holds its reservation as spent.
+     * settle for less than it holds; after it, its reservation counts as
+     * spent.
      */
     deadline: integer().notNull().default(0),
     /** When it is charged its whole reservation, unless settled before. */

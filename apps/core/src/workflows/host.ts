@@ -2,7 +2,8 @@ import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { toHex } from "@grasp-os/shared/encoding";
-import { isExpectedError } from "@grasp-os/shared/errors";
+import { errorPayloadSchema, isExpectedError } from "@grasp-os/shared/errors";
+import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -113,7 +114,7 @@ export interface RunStep {
   do: (
     name: string,
     config: WorkflowStepConfig,
-    fn: () => Promise<unknown>
+    fn: (context?: unknown) => Promise<unknown>
   ) => Promise<unknown>;
   sleep: (name: string, duration: number) => Promise<void>;
   waitForEvent: (
@@ -156,6 +157,8 @@ interface StepAttempt {
    * an App call it makes waits for the App no longer (`callApp`).
    */
   ends?: number;
+  /** Whether the step has no retry left after it, as far as core can tell. */
+  last: boolean;
 }
 
 /** Why a run waits before running a step again. */
@@ -443,21 +446,41 @@ const waitMsOf = (env: Env): number => {
  */
 const budgetBusyWaitMs = 15_000;
 
+/** Cloudflare Workflows' retries of a step when the SDK names none. */
+const defaultRetryLimit = 5;
+
+/** What core reads of the context the engine gives a step's attempt. */
+const attemptContextSchema = z.object({
+  attempt: z.int().positive(),
+  config: z
+    .object({
+      retries: z.object({ limit: z.int().min(0) }).optional(),
+    })
+    .optional(),
+});
+
 /**
- * `call`'s answer; when the model budget turned it away while other calls
- * under way hold it, the same refusal, once {@link budgetBusyWaitMs} went
- * by.
+ * Whether an attempt has no retry after it: its number as the engine's
+ * `context` says, else `tries`, the attempts this execution made (fewer,
+ * if an earlier execution made some: never the last too soon), against
+ * its retries as the engine says, else `configured`, else the default.
  */
-const waitingOutBusyBudget = async <T>(call: () => Promise<T>): Promise<T> => {
-  try {
-    return await call();
-  } catch (error) {
-    if (modelErrors.codeOf(error) === "model.budget_busy") {
-      await scheduler.wait(budgetBusyWaitMs);
-    }
-    throw error;
-  }
+const isLastAttempt = (
+  context: unknown,
+  tries: number,
+  configured: number | undefined
+): boolean => {
+  const told = attemptContextSchema.safeParse(context).data;
+  const retries =
+    told?.config?.retries?.limit ?? configured ?? defaultRetryLimit;
+  return (told?.attempt ?? tries) > retries;
 };
+
+/** The last refusal of a step's AI call for a budget held by calls under way. */
+interface BusyBudget {
+  at: number;
+  details: ErrorPayload["details"];
+}
 
 /** The engine's step limit for this deployment. */
 export const stepLimitOf = (env: Env): number => {
@@ -731,6 +754,12 @@ export class RunHost extends RpcTarget {
   /** Every attempt of a step this execution started, by its ID. */
   readonly #attempts = new Map<string, StepAttempt>();
   /**
+   * Each step's last AI call the model budget turned away while other
+   * calls under way hold it, by step name: a later attempt within
+   * {@link budgetBusyWaitMs} is answered from here.
+   */
+  readonly #busyBudgets = new Map<string, BusyBudget>();
+  /**
    * The refusal that caught the run's isolate tampering
    * (`#refuseTampering`): once set, every later call of this execution
    * fails with it at once.
@@ -928,8 +957,12 @@ export class RunHost extends RpcTarget {
       sideEffect = parsed.sideEffect === true;
       input = inputShape(parsed.input);
       await this.#requirePerson();
-      const attemptStep = async (): Promise<unknown> => {
+      // The attempts of this `do` this execution made, for an engine that
+      // doesn't say which attempt it runs.
+      let tries = 0;
+      const attemptStep = async (context?: unknown): Promise<unknown> => {
         attempted = true;
+        tries += 1;
         // Only the last attempt's error counts: an earlier one was retried.
         failed = undefined;
         const attempt: StepAttempt = {
@@ -937,6 +970,7 @@ export class RunHost extends RpcTarget {
           step,
           held: false,
           calledApp: false,
+          last: isLastAttempt(context, tries, parsed.retries?.limit),
           ...(parsed.timeout === undefined
             ? {}
             : { ends: Date.now() + parsed.timeout }),
@@ -1032,6 +1066,7 @@ export class RunHost extends RpcTarget {
         const prefix = `${waitStepPrefix}${await waitKeyOf(step)}:held:${round}`;
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         await this.#waitWhileHeld(step, prefix);
+        tries = 0;
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         value = await this.#step.do(
           `${prefix}:run`,
@@ -1066,6 +1101,44 @@ export class RunHost extends RpcTarget {
   }
 
   /**
+   * `call`'s answer, unless the model budget turned away an AI call of
+   * `attempt`'s step while other calls under way hold it: then the same
+   * refusal, once {@link budgetBusyWaitMs} went by since, so a step whose
+   * attempts are retried tightly, or time out quickly, asks the ledger,
+   * and audits a refusal, at most that often. An attempt within that
+   * while of the last refusal is answered with it here, without asking
+   * the gateway. The last attempt doesn't wait: nothing comes after it.
+   */
+  async #waitingOutBusyBudget<T>(
+    attempt: StepAttempt,
+    call: () => Promise<T>
+  ): Promise<T> {
+    const known = this.#busyBudgets.get(attempt.step);
+    const since = known === undefined ? Infinity : Date.now() - known.at;
+    if (known !== undefined && since < budgetBusyWaitMs) {
+      if (!attempt.last) {
+        await scheduler.wait(budgetBusyWaitMs - since);
+      }
+      throw modelErrors.create("model.budget_busy", known.details);
+    }
+    try {
+      return await call();
+    } catch (error) {
+      if (modelErrors.codeOf(error) === "model.budget_busy") {
+        const details =
+          typeof error === "object" && error !== null && "details" in error
+            ? errorPayloadSchema.shape.details.safeParse(error.details).data
+            : undefined;
+        this.#busyBudgets.set(attempt.step, { at: Date.now(), details });
+        if (!attempt.last) {
+          await scheduler.wait(budgetBusyWaitMs);
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Asks the model gateway for an AI step, from inside the step only: the
    * model must be one the deployment allows and its rules let this call
    * use (model-rules.ts), and its answer must match the step's schema (a JSON Schema from the SDK, checked here as Zod, and
@@ -1089,7 +1162,8 @@ export class RunHost extends RpcTarget {
       } catch {
         throw modelErrors.create("model.invalid_call");
       }
-      const answer = await waitingOutBusyBudget(
+      const answer = await this.#waitingOutBusyBudget(
+        this.#running,
         async () =>
           await models(this.#env).call({
             model,
