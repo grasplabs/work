@@ -167,6 +167,49 @@ export const applyPartial = (
 };
 
 /**
+ * What the code step running now has logged so far, as the chat shows it
+ * before the step's result: redacted, and cut where it passed the run's
+ * output budget. `callId` is the code step (`ChatCode.callId`).
+ */
+export interface ChatOutput {
+  callId: string;
+  text: string;
+}
+
+/**
+ * What the running step's output gained since the watcher's last update:
+ * the length of what the watcher has that stays (`from`; 0 starts it
+ * afresh, as for another step) and what follows it.
+ */
+export interface ChatOutputUpdate {
+  callId: string;
+  from: number;
+  text: string;
+}
+
+/**
+ * The running step's output, as the watcher had it (`shown`), with an
+ * update's change applied (none when the update leaves it out); `null`
+ * while no step runs.
+ */
+export const applyOutput = (
+  shown: ChatOutput | null,
+  update: ChatOutputUpdate | null | undefined
+): ChatOutput | null => {
+  if (update === undefined) {
+    return shown;
+  }
+  if (update === null) {
+    return null;
+  }
+  const kept = shown?.callId === update.callId ? shown.text : "";
+  return {
+    callId: update.callId,
+    text: extended(kept, update.from, update.text),
+  };
+};
+
+/**
  * What changed in a chat since the last update: the messages stored since,
  * and the chat as it is now. The first update of a `watch` catches up: the
  * messages after the one it named, what the agent is writing then, and
@@ -179,6 +222,12 @@ export interface ChatUpdate {
    * between responses.
    */
   partial: ChatPartialUpdate | null;
+  /**
+   * What the code step running now logged since (`applyOutput`); `null`
+   * while none runs, and left out when it didn't change. Its result
+   * replaces it once stored.
+   */
+  output?: ChatOutputUpdate | null;
   /** Whether the agent is working on a question. */
   running: boolean;
   /** The chat's provenance: in the first update, and whenever it changes. */

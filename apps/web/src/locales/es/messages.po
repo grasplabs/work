@@ -2838,6 +2838,10 @@ msgstr "Otros motores ahora pueden llamar a {name}, que {does}"
 msgid "Otherwise:"
 msgstr "Si no:"
 
+#: src/chat/thread.tsx
+msgid "Output"
+msgstr "Salida"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Overview"
 msgstr "Resumen"

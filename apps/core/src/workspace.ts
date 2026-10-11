@@ -14,6 +14,7 @@ import type {
 import type {
   ChatDraft,
   ChatMessage,
+  ChatOutput,
   ChatProvenance,
   ChatSummary,
 } from "@grasp-os/shared/chat";
@@ -67,7 +68,15 @@ import { revokeChatPermissions } from "./chat-connections.ts";
 import { chatMessageOf, partialOf } from "./chat-messages.ts";
 import { ChatWatch } from "./chat-watch.ts";
 import type { ChatListener, ChatState } from "./chat-watch.ts";
-import { codeLimits, codeRuntime, codeTimeoutMs } from "./code-mode.ts";
+import {
+  codeLimits,
+  codeRuntime,
+  codeTimeoutMs,
+  cutMarker,
+  cutToBytes,
+  redact,
+  utf8Bytes,
+} from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/workspace/migrations/migrations.js";
@@ -314,6 +323,61 @@ const heldOutcomes: Record<HeldOutcome, string> = {
     "The person confirmed it, but carrying it out failed, so it may not have been done. It no longer waits for them; don't ask for it again unless they say so.",
 };
 
+/**
+ * What a chat's code step has logged, as core keeps it for its watchers:
+ * every line received (counted, and bounded, by core itself), how many
+ * of them are shown, and the text shown, redacted over all of it and cut
+ * at the output budget. A line is shown only once a read of revocations
+ * that began after it arrived found none, so nothing logged after a
+ * revocation is ever shown. Kept until the step's result is stored.
+ */
+interface RunOutput {
+  runId: string;
+  callId: string;
+  agentId: string;
+  lines: string[];
+  rawBytes: number;
+  shown: number;
+  text: string;
+  /** When the last read of revocations began; 0 before the first. */
+  checkedAt: number;
+  checking: boolean;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  /** The run ended: no more lines, what is shown stays until its result. */
+  ended: boolean;
+  /**
+   * How many lines there were once core cut what the run sent (a line cut
+   * to the bytes left, or lines past the most it takes); `undefined` while
+   * nothing was cut. What is shown up to there ends with the cut marker.
+   */
+  cutAt: number | undefined;
+}
+
+/** Most raw bytes of lines core takes from one run, whatever it sends. */
+const maxRawOutputBytes = 2 * codeLimits.outputBytes;
+
+/** The least time between two reads of revocations for one run's output. */
+const outputCheckMs = 1000;
+
+/**
+ * Lines as a watcher sees them: redacted as a whole, and cut at the budget
+ * or where core cut what the run sent (`cut`), with the marker saying so.
+ */
+const shownText = (lines: readonly string[], cut: boolean): string => {
+  const text = redact(lines.join("\n"));
+  const room = codeLimits.outputBytes - codeLimits.diagnosticBytes;
+  if (!cut && utf8Bytes(text) <= room) {
+    return text;
+  }
+  return `${cutToBytes(text, room - utf8Bytes(cutMarker))}${cutMarker}`;
+};
+
+/** The running step's output as watchers see it, without its bookkeeping. */
+const outputOf = (
+  output: { callId: string; text: string } | undefined
+): ChatOutput | null =>
+  output === undefined ? null : { callId: output.callId, text: output.text };
+
 /** A person's or team's workspace: chats and the Code Mode agent on Pi. */
 export class Workspace extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
@@ -334,6 +398,14 @@ export class Workspace extends DurableObject<Env> {
    * {@link endedRunsKept}: a run forgotten answers as ended, unlogged.
    */
   readonly #codeRuns = new Map<string, CodeRunLease>();
+
+  /**
+   * What the code step running now in each chat has logged, as its
+   * watchers see it before its result: for one run (`runId`), its UTF-8
+   * size, and whether it was cut at the run's output budget. In memory
+   * only, and gone once the run closes.
+   */
+  readonly #outputs = new Map<ChatId, RunOutput>();
 
   /**
    * The response each chat's agent is writing now, as it streams in: what
@@ -472,6 +544,12 @@ export class Workspace extends DurableObject<Env> {
       .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt })
       .get();
     const shown = chatMessageOf(id, message, createdAt);
+    // A step's result shows all it logged: its output goes in the same update.
+    if (message.role === "toolResult") {
+      const output = this.#outputs.get(chatId);
+      clearTimeout(output?.timer);
+      this.#outputs.delete(chatId);
+    }
     this.#changed(chatId, shown === undefined ? [] : [shown]);
   }
 
@@ -813,6 +891,9 @@ export class Workspace extends DurableObject<Env> {
           open: (opening) => this.openCodeRun(chat.id, opening),
           close: async (runId, status) =>
             await this.#endCodeRun(scope, runId, status),
+          output: (runId, callId, line) => {
+            this.codeRunOutput(chat.id, runId, callId, line);
+          },
         },
         loader: this.env.LOADER,
         codeTimeoutMs: codeTimeoutMs(this.env),
@@ -839,6 +920,10 @@ export class Workspace extends DurableObject<Env> {
       this.ctx.storage.kv.delete(`${turnKeyPrefix}${chat.id}`);
       this.#turns.delete(chat.id);
       this.#partials.delete(chat.id);
+      // A turn that stopped short of a step's result shows no output on.
+      const output = this.#outputs.get(chat.id);
+      clearTimeout(output?.timer);
+      this.#outputs.delete(chat.id);
       this.#changed(chat.id);
     }
   }
@@ -1014,6 +1099,14 @@ export class Workspace extends DurableObject<Env> {
     if (lease === undefined || !("closed" in lease)) {
       this.#closeLease(key, "ended");
     }
+    // No more of its output is taken or shown; what is shown stays until
+    // its result is stored (`#keep`), which shows all of it.
+    const output = this.#outputs.get(chatId);
+    if (output?.runId === runId) {
+      output.ended = true;
+      clearTimeout(output.timer);
+      output.timer = undefined;
+    }
     this.#db
       .update(chatCodeRuns)
       .set({ status: ended, endedAt: new Date() })
@@ -1048,6 +1141,7 @@ export class Workspace extends DurableObject<Env> {
       return ended;
     }
     let revoked: boolean;
+    let unreadable = false;
     try {
       revoked = await revokedSince(this.env, scope, admission.openedAt);
     } catch (error) {
@@ -1057,10 +1151,12 @@ export class Workspace extends DurableObject<Env> {
         ...errorFields(error),
       });
       revoked = true;
+      unreadable = true;
     }
     if (!revoked) {
       return ended;
     }
+    this.#dropOutput(scope.chatId, runId);
     this.#db
       .update(chatCodeRuns)
       .set({ status: "revoked" })
@@ -1077,9 +1173,164 @@ export class Workspace extends DurableObject<Env> {
       this.env,
       scope,
       { method: "executeCode" },
-      { outcome: "refused", reason: "agent.run_revoked" }
+      {
+        outcome: "refused",
+        reason: unreadable
+          ? "agent.revocation_read_failed"
+          : "agent.run_revoked",
+      }
     );
     return "revoked";
+  }
+
+  /**
+   * Takes a line a code run of the chat logged, for its watchers as the
+   * code step `callId`'s output: counted and bounded here, whatever the
+   * isolate claims, and shown only once a read of revocations begun after
+   * it arrived finds none (`#checkOutput`, at most once a second a run).
+   * Dropped once the run has closed, so a line that arrives late reopens
+   * nothing and reaches no other step or turn.
+   */
+  codeRunOutput(
+    chatId: ChatId,
+    runId: string,
+    callId: string,
+    line: string
+  ): void {
+    if (this.admitFromCodeRun(chatId, runId).call !== "open") {
+      return;
+    }
+    const before = this.#outputs.get(chatId);
+    const output: RunOutput =
+      before?.runId === runId
+        ? before
+        : {
+            runId,
+            callId,
+            agentId: this.#chat(chatId).agentId,
+            lines: [],
+            rawBytes: 0,
+            shown: 0,
+            text: "",
+            checkedAt: 0,
+            checking: false,
+            timer: undefined,
+            ended: false,
+            cutAt: undefined,
+          };
+    if (output.cutAt !== undefined) {
+      return;
+    }
+    if (output.lines.length >= codeLimits.logLines) {
+      output.cutAt = output.lines.length;
+      this.#outputs.set(chatId, output);
+      this.#scheduleOutputCheck(chatId, output);
+      return;
+    }
+    // A line past the bytes left keeps what fits, never half a character,
+    // and nothing after it is taken.
+    const left = maxRawOutputBytes - output.rawBytes;
+    const bytes = utf8Bytes(line);
+    const kept = bytes <= left ? line : cutToBytes(line, left);
+    output.lines.push(kept);
+    output.rawBytes += bytes <= left ? bytes : utf8Bytes(kept);
+    if (bytes > left) {
+      output.cutAt = output.lines.length;
+    }
+    this.#outputs.set(chatId, output);
+    this.#scheduleOutputCheck(chatId, output);
+  }
+
+  /** Reads revocations for `output` soon: at most once a second a run. */
+  #scheduleOutputCheck(chatId: ChatId, output: RunOutput): void {
+    if (output.checking || output.timer !== undefined || output.ended) {
+      return;
+    }
+    const wait = Math.max(0, output.checkedAt + outputCheckMs - Date.now());
+    output.timer = setTimeout(() => {
+      output.timer = undefined;
+      void this.#checkOutput(chatId, output);
+    }, wait);
+  }
+
+  /**
+   * Reads revocations since the run opened, then shows the lines that had
+   * arrived before the read began. One found (or a read that fails) closes
+   * the run's lease as revoked and shows nothing more of it.
+   */
+  async #checkOutput(chatId: ChatId, output: RunOutput): Promise<void> {
+    const admission = this.admitFromCodeRun(chatId, output.runId);
+    if (this.#outputs.get(chatId) !== output || admission.call !== "open") {
+      return;
+    }
+    output.checking = true;
+    output.checkedAt = Date.now();
+    const arrived = output.lines.length;
+    let revoked: boolean;
+    let unreadable = false;
+    try {
+      revoked = await revokedSince(
+        this.env,
+        { agentId: output.agentId, chatId },
+        admission.openedAt
+      );
+    } catch (error) {
+      log.error("agent.revocation_read_failed", {
+        chatId,
+        runId: output.runId,
+        ...errorFields(error),
+      });
+      revoked = true;
+      unreadable = true;
+    } finally {
+      output.checking = false;
+    }
+    if (this.#outputs.get(chatId) !== output || output.ended) {
+      return;
+    }
+    if (revoked) {
+      this.#dropOutput(chatId, output.runId);
+      const chat = this.#chat(chatId);
+      if (this.revokeCodeRun(chatId, output.runId)) {
+        await auditAgentCall(
+          this.env,
+          {
+            workspaceId: workspaceIdSchema.parse(this.ctx.id.name),
+            agentId: chat.agentId,
+            chatId,
+            personId: chat.personId,
+          },
+          { method: "output" },
+          {
+            outcome: "refused",
+            reason: unreadable
+              ? "agent.revocation_read_failed"
+              : "agent.run_revoked",
+          }
+        );
+      }
+      return;
+    }
+    output.shown = arrived;
+    output.text = shownText(
+      output.lines.slice(0, arrived),
+      output.cutAt !== undefined && arrived >= output.cutAt
+    );
+    this.#changed(chatId);
+    if (output.lines.length > output.shown) {
+      this.#scheduleOutputCheck(chatId, output);
+    }
+  }
+
+  /** Drops the run's output, shown or not, and tells the chat's watchers. */
+  #dropOutput(chatId: ChatId, runId: string): void {
+    const output = this.#outputs.get(chatId);
+    if (output?.runId !== runId) {
+      return;
+    }
+    clearTimeout(output.timer);
+    this.#outputs.delete(chatId);
+    this.#changed(chatId);
   }
 
   /**
@@ -1113,6 +1364,8 @@ export class Workspace extends DurableObject<Env> {
     this.#closeLease(key, "revoked");
     // The call that found the revocation records it: later calls aren't.
     this.#codeRuns.set(key, { closed: "revoked", reported: true });
+    // What it logged goes unshown from here on.
+    this.#dropOutput(chatId, runId);
     return true;
   }
 
@@ -1989,6 +2242,7 @@ export class Workspace extends DurableObject<Env> {
     const stopped = this.#stopped.get(chatId);
     return {
       partial: partial === undefined ? null : partialOf(partial),
+      output: outputOf(this.#outputs.get(chatId)),
       running: this.#turns.has(chatId),
       provenanceVersion: this.#provenanceVersions.get(chatId) ?? 0,
       stopped: stopped ?? null,
