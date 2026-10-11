@@ -101,6 +101,13 @@ import type { Draft } from "./workspace.ts";
 // make (code-mode.ts), bound the rest, dry runs included, which run in an
 // isolate with an empty env and leave nothing behind.
 //
+// A check or a proposal that takes longer than a code run may live goes to
+// a durable job instead (`submit`, build-jobs.ts): a workflow of core's
+// own, bound to the draft's revision and to the authority of the run that
+// submitted it, which the agent follows with `job` from a later run. How
+// it ended reaches the turn that submitted it while that turn runs, and
+// no other (workspace.ts).
+//
 // The person's rights bound every call, read again each time: creating an
 // App needs a role that builds (and, from a marked blueprint, a role in
 // its App), and changing one a builder's role in it.
