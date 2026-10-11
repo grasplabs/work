@@ -52,6 +52,7 @@ import {
   chatAuthority,
   chatContext,
   revokedSince,
+  runRefusal,
   workspaceAgentIdSchema,
 } from "./agent-scope.ts";
 import type {
@@ -64,6 +65,13 @@ import type { TurnContext, TurnResult } from "./agent.ts";
 import type { AppAnswer } from "./app.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
+import { BuildJobRecords } from "./build-job-records.ts";
+import type {
+  BuildJobAdmission,
+  BuildJobEnd,
+  BuildJobOpening,
+  BuildJobRow,
+} from "./build-job-records.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import { chatMessageOf, partialOf } from "./chat-messages.ts";
 import { ChatWatch } from "./chat-watch.ts";
@@ -99,8 +107,40 @@ import { PreviewReports, serverProblem } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { Previews } from "./preview.ts";
 import type { WorkContext } from "./restricted.ts";
+import { runEngine } from "./workflows/engine.ts";
 
 export type Chat = typeof chats.$inferSelect;
+
+/**
+ * A chat's turn while it runs: what cancels it, its ID (random, and only
+ * this turn's), and what the chat's build jobs it submitted said of how
+ * they ended (`endBuildJob`), waiting for its agent to read before its
+ * next model request.
+ */
+interface LiveTurn {
+  cancel: AbortController;
+  id: string;
+  events: Message[];
+}
+
+/** A build job, with the chat's agent and person it acts for. */
+export type BuildJob = BuildJobRow & { agentId: string; personId: string };
+
+/** What the agent of a chat is told as a build job it submitted ends. */
+const jobEnded = (job: BuildJobRow, end: BuildJobEnd): string => {
+  if (end.status === "cancelled") {
+    return "was cancelled";
+  }
+  if (end.status === "revoked") {
+    return "ended: a permission of yours was revoked since it was submitted";
+  }
+  if (end.status === "failed") {
+    return "failed";
+  }
+  return job.kind === "check"
+    ? "finished checking the draft"
+    : "finished: the draft was proposed, or its check says why not";
+};
 
 /**
  * A chat's draft of an App (agent-builds.ts): the version it started
@@ -388,7 +428,7 @@ export class Workspace extends DurableObject<Env> {
    * is also marked in storage while it runs (`turnKeyPrefix`), so the wake
    * after a restart tells the chat its turn was cut short.
    */
-  readonly #turns = new Map<ChatId, AbortController>();
+  readonly #turns = new Map<ChatId, LiveTurn>();
 
   /**
    * Code runs' leases, as `<chat>/<run>` (`CodeRunLease`): their stubs
@@ -457,6 +497,9 @@ export class Workspace extends DurableObject<Env> {
 
   /** Who follows each chat (`watch`), by chat and watch ID. */
   readonly #watchers = new Map<ChatId, Map<string, ChatWatch>>();
+
+  /** The chats' build jobs (build-jobs.ts). */
+  readonly #jobs = new BuildJobRecords(this.#db);
 
   /** The chats' previews of their drafts (preview.ts). */
   readonly #previews = new Previews(this.ctx, this.env);
@@ -832,7 +875,8 @@ export class Workspace extends DurableObject<Env> {
     // Taken before the first await, so a second question waits its turn
     // and the chat isn't deleted under it (`deleteChat`).
     const cancel = new AbortController();
-    this.#turns.set(chat.id, cancel);
+    const live: LiveTurn = { cancel, id: crypto.randomUUID(), events: [] };
+    this.#turns.set(chat.id, live);
     // Marked in storage as long as it is in `#turns`, however it ends.
     this.ctx.storage.kv.put(
       `${turnKeyPrefix}${chat.id}`,
@@ -898,6 +942,7 @@ export class Workspace extends DurableObject<Env> {
         loader: this.env.LOADER,
         codeTimeoutMs: codeTimeoutMs(this.env),
         signal: cancel.signal,
+        events: () => live.events.splice(0),
         keep: (message) => {
           if (message.role === "assistant") {
             this.#partials.delete(chat.id);
@@ -1425,9 +1470,139 @@ export class Workspace extends DurableObject<Env> {
    * request or code run in flight ends, and the turn answers `cancelled`.
    */
   cancel(chatId: unknown, personId: string): boolean {
-    const turn = this.#turns.get(this.#ownChat(chatId, personId).id);
-    turn?.abort();
+    const { id } = this.#ownChat(chatId, personId);
+    const turn = this.#turns.get(id);
+    turn?.cancel.abort();
+    if (turn !== undefined) {
+      // The build jobs it submitted are the turn's work: they end with it.
+      this.#terminateJobs(this.#jobs.cancelRunning(id, turn.id));
+    }
     return turn !== undefined;
+  }
+
+  /**
+   * Opens a build job of the chat for its open code run `runId`, in the
+   * same step as the check that the run is open (build-jobs.ts): bound to
+   * the run's turn, the draft of App `appId` as it is now (its revision),
+   * and the authority the run acts on (granted when it opened). Its ID is
+   * random. Null once the chat has as many jobs running as it may.
+   */
+  openBuildJob(
+    chatId: ChatId,
+    runId: string,
+    job: Pick<BuildJobOpening, "appId" | "kind" | "message">
+  ): { id: string; revision: number } | null {
+    const lease = this.admitFromCodeRun(chatId, runId);
+    const turn = this.#turns.get(chatId);
+    if (lease.call !== "open" || turn === undefined) {
+      throw runRefusal(lease.call === "revoked" ? "revoked" : "ended");
+    }
+    const id = crypto.randomUUID();
+    const { revision } = this.draft(chatId, job.appId);
+    const opened = this.#jobs.open({
+      ...job,
+      id,
+      chatId,
+      turnId: turn.id,
+      runId,
+      revision,
+      grantedAt: lease.openedAt,
+    });
+    return opened ? { id, revision } : null;
+  }
+
+  /**
+   * The chat's build job `id`, with the agent and person it acts for, as
+   * the chat has them now; none for another chat's, or a deleted chat's.
+   */
+  buildJob(chatId: unknown, id: string): BuildJob | undefined {
+    const chat = chatIdSchema.safeParse(chatId);
+    const row = chat.success ? this.#jobs.byId(chat.data, id) : undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    const { agentId, personId } = this.#chat(row.chatId);
+    return { ...row, agentId, personId };
+  }
+
+  /**
+   * Whether the chat's build job `id` may take a step or have a write
+   * admitted now, with when its authority was granted (agent-scope.ts
+   * reads revocations since). A job the object lacks is cancelled.
+   */
+  admitFromBuildJob(chatId: unknown, id: string): BuildJobAdmission {
+    const chat = chatIdSchema.safeParse(chatId);
+    return chat.success
+      ? this.#jobs.admission(chat.data, id)
+      : { call: "cancelled" };
+  }
+
+  /**
+   * Ends the chat's running build job `id` as `end` says, once: `false`
+   * when it had ended already. Its turn's agent is told how it ended, if
+   * that turn still runs, before its next model request; no other turn
+   * ever is, and nothing of its result goes with it: the agent reads that
+   * with `env.build.job`.
+   */
+  endBuildJob(chatId: unknown, id: string, end: BuildJobEnd): boolean {
+    const chat = chatIdSchema.safeParse(chatId);
+    const job = chat.success ? this.#jobs.byId(chat.data, id) : undefined;
+    if (job === undefined || !this.#jobs.end(job.chatId, id, end)) {
+      return false;
+    }
+    const turn = this.#turns.get(job.chatId);
+    if (turn?.id === job.turnId) {
+      turn.events.push({
+        role: "system",
+        content: `Build job ${id} (${job.kind} of App ${job.appId}, submitted by code run ${job.runId}) ${jobEnded(job, end)}. Read how it ended with \`env.build.job("${id}")\`.`,
+        timestamp: Date.now(),
+      });
+    }
+    return true;
+  }
+
+  /**
+   * Records the tree the chat's running build job `id` is about to commit
+   * over `parent` (build-jobs.ts): `false` once the job has ended.
+   */
+  intendBuildCommit(
+    chatId: unknown,
+    id: string,
+    parent: number | null,
+    tree: string
+  ): boolean {
+    return this.#jobs.intend(chatIdSchema.parse(chatId), id, parent, tree);
+  }
+
+  /** Records the version the chat's build job `id` committed: its receipt. */
+  recordBuildReceipt(chatId: unknown, id: string, version: number): void {
+    this.#jobs.receipt(chatIdSchema.parse(chatId), id, version);
+  }
+
+  /**
+   * Terminates the engine's instances of build jobs the object just
+   * ended, with nobody waiting: each refuses every later step anyway
+   * (build-jobs.ts), so this only stops their work sooner.
+   */
+  #terminateJobs(ids: readonly string[]): void {
+    if (ids.length === 0) {
+      return;
+    }
+    const engine = runEngine(this.env);
+    this.ctx.waitUntil(
+      Promise.all(
+        ids.map(async (id) => {
+          try {
+            await engine.terminate(id);
+          } catch (error) {
+            log.warn("agent.job_terminate_failed", {
+              jobId: id,
+              ...errorFields(error),
+            });
+          }
+        })
+      )
+    );
   }
 
   /**
@@ -1600,7 +1775,10 @@ export class Workspace extends DurableObject<Env> {
         .from(chatDrafts)
         .where(eq(chatDrafts.chatId, id))
         .all();
+      // Its build jobs end with it, and their rows go below.
+      this.#terminateJobs(this.#jobs.cancelRunning(id));
       this.ctx.storage.transactionSync(() => {
+        this.#jobs.deleteChat(id);
         this.#db.delete(chatMessages).where(eq(chatMessages.chatId, id)).run();
         this.#db.delete(chatSources).where(eq(chatSources.chatId, id)).run();
         this.#db.delete(chatCodeRuns).where(eq(chatCodeRuns.chatId, id)).run();
