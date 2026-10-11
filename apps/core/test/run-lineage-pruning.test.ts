@@ -6,7 +6,11 @@ import {
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import {
+  evictDurableObject,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -185,6 +189,46 @@ describe("run lineage pruning", { timeout: 90_000 }, () => {
       old: { spend: 0, alerts: 0 },
       recent: { spend: 1, alerts: 1 },
       ghost: { spend: 1, alerts: 1 },
+    });
+  });
+
+  it("sweep an idle ledger holding an ended lineage once it wakes, with no admission to set its alarm", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await lineageApp(builder);
+    const root = await builder.api.workflows.start(app, "idle");
+    await finished(root.id);
+    await endedAt(longAgo(), root.id);
+    // A ledger of its own that holds only the ended lineage's rows, with
+    // no alarm set: its last alarm ended, and nothing was admitted since.
+    const ledger = env.MODEL_LEDGER.getByName(crypto.randomUUID());
+    await runInDurableObject(ledger, async (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO spend (scope, key, period, spent_micros, requests) VALUES ('run', ?, 'lineage', 519, 1)",
+        root.id
+      );
+      state.storage.sql.exec(
+        "INSERT INTO alerts (scope, key, period, kind, threshold_micros) VALUES ('run', ?, 'lineage', 'alert', 100)",
+        root.id
+      );
+      await state.storage.deleteAlarm();
+    });
+    const armedBefore = await runInDurableObject(
+      ledger,
+      async (_instance, state) => await state.storage.getAlarm()
+    );
+    // Evicted, as an idle object is: the next request wakes it anew.
+    await evictDurableObject(ledger);
+
+    const alarmed = await runDurableObjectAlarm(ledger);
+    const kept = await runInDurableObject(ledger, (_instance, state) => [
+      state.storage.sql.exec("SELECT 1 FROM spend").toArray().length,
+      state.storage.sql.exec("SELECT 1 FROM alerts").toArray().length,
+    ]);
+
+    expect({ armedBefore, alarmed, kept }).toStrictEqual({
+      armedBefore: null,
+      alarmed: true,
+      kept: [0, 0],
     });
   });
 

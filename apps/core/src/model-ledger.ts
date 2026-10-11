@@ -439,6 +439,12 @@ export class ModelLedger extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     migrateOnWake(ctx, migrations);
+    // On waking, the alarm is set for whatever waits on it: requests to
+    // reconcile, receipts or ended lineages to sweep. A ledger whose last
+    // alarm ended, and that no admission woke since, still prunes.
+    void ctx.blockConcurrencyWhile(async () => {
+      await this.#alarmForNext();
+    });
   }
 
   /**
