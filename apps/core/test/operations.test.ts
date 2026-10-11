@@ -252,6 +252,47 @@ const guardedOrFallback = mutation({
   },
 });
 
+/** Reads the table `reads` times. */
+const readTimes = query({
+  args: { reads: v.number().integer().min(0).max(1000) },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    for (let index = 0; index < args.reads; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one read after the other
+      await ctx.db.query("notes").first();
+    }
+    return args.reads;
+  },
+});
+
+/**
+ * Stages an insert its schema refuses without waiting for it, then
+ * stages one it accepts.
+ */
+const floatingBadWrite = mutation({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => {
+    ctx.db.insert("notes", { title: "  " }).catch(() => null);
+    await ctx.db.query("notes").first();
+    await ctx.db.insert("notes", { title: "kept" });
+    return "done";
+  },
+});
+
+/** Reads each of `ids` asserting it is at revision 1. */
+const assertMany = mutation({
+  args: { ids: v.array(v.id("notes")).max(200) },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    for (const id of args.ids) {
+      // oxlint-disable-next-line no-await-in-loop -- one read after the other
+      await ctx.db.get("notes", id, { expectedRevision: 1 });
+    }
+    return args.ids.length;
+  },
+});
+
 const secret = internalQuery({
   args: {},
   returns: v.string(),
@@ -278,6 +319,9 @@ const notesApp = app({
       editTwice,
       takeFirst,
       guardedOrFallback,
+      readTimes,
+      floatingBadWrite,
+      assertMany,
     },
   },
   internalOperations: { secret },
@@ -1085,6 +1129,122 @@ describe("a mutation's own staged state", () => {
       code: "data.conflict",
       runs: 1,
       stored: 1,
+    });
+  });
+});
+
+describe("audit follow-ups", () => {
+  it("gives every run of a call its own reads, so reruns under contention still answer", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    let runs = 0;
+    // Another caller commits during each of the first two runs.
+    const run: Runner = async (path, args, channel) => {
+      if (path === "notes.readTimes") {
+        runs += 1;
+      }
+      const answer = await runFunction(notesApp, path, args, channel);
+      if (path === "notes.readTimes" && runs < 3) {
+        await call(fixture, owner, "mutation", "notes.create", {
+          title: `c${runs}`,
+        });
+      }
+      return answer;
+    };
+    expect({
+      answer: valueOf(
+        await call(
+          fixture,
+          owner,
+          "query",
+          "notes.readTimes",
+          { reads: 100 },
+          { run }
+        )
+      ),
+      runs,
+    }).toStrictEqual({ answer: 100, runs: 3 });
+  });
+
+  it("gives every attempt of a mutation its own staged-bytes budget", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    let runs = 0;
+    const run: Runner = async (path, args, channel) => {
+      if (path === "notes.stress") {
+        runs += 1;
+      }
+      const answer = await runFunction(notesApp, path, args, channel);
+      if (path === "notes.stress" && runs === 1) {
+        await call(fixture, owner, "mutation", "notes.create", {
+          title: "meanwhile",
+        });
+      }
+      return answer;
+    };
+    expect({
+      answer: codeOf(
+        await call(
+          fixture,
+          owner,
+          "mutation",
+          "notes.stress",
+          { inserts: 6, size: 100_000, reads: 20 },
+          { run }
+        )
+      ),
+      runs,
+    }).toStrictEqual({ answer: "ok", runs: 2 });
+  });
+
+  it("fails a mutation whose staged write was refused, awaited or not", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const result = await call(
+      fixture,
+      owner,
+      "mutation",
+      "notes.floatingBadWrite",
+      {}
+    );
+    const page = valueOf(
+      await call(fixture, owner, "query", "notes.list", { pagination: {} })
+    );
+    expect({ code: codeOf(result), stored: idsOf(page).length }).toStrictEqual({
+      code: "data.invalid",
+      stored: 0,
+    });
+  });
+
+  it("refuses the read that asserts one revision more than a commit holds", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const ids = await Promise.all(
+      Array.from({ length: 101 }, async (_, index) =>
+        valueOf(
+          await call(fixture, owner, "mutation", "notes.create", {
+            title: `n${index}`,
+          })
+        )
+      )
+    );
+    expect({
+      within: codeOf(
+        await call(fixture, owner, "mutation", "notes.assertMany", {
+          ids: ids.slice(0, 100),
+        })
+      ),
+      past: failureOf(
+        await call(fixture, owner, "mutation", "notes.assertMany", { ids })
+      ),
+    }).toStrictEqual({
+      within: "ok",
+      past: {
+        code: "data.guard_limit",
+        message: "A mutation asserts the revisions of at most 100 records.",
+        category: "contract",
+        retryable: false,
+      },
     });
   });
 });

@@ -1,6 +1,10 @@
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-reads";
-import { queryErrors } from "@grasp-os/shared/stores";
+import {
+  commitMaxGuards,
+  dataErrors,
+  queryErrors,
+} from "@grasp-os/shared/stores";
 import type { StagedWrites } from "@grasp-os/shared/stores";
 
 import type { OpenStore } from "./data-stores.ts";
@@ -42,8 +46,8 @@ export interface ReadGuard {
 
 /**
  * The generations a failed read's error carries (`details.generations`,
- * StoreHost's `#withGenerations`), taken off it, so App code never sees
- * them; none for an error raised before anything was read.
+ * StoreHost's `#readIn`), taken off it, so App code never sees them; none
+ * for an error raised before the read looked at a record.
  */
 const takeGenerations = (error: unknown): Record<string, number> => {
   if (typeof error !== "object" || error === null) {
@@ -129,6 +133,11 @@ export class StoreReader {
         ({ table, id }) => table === request.table && id === request.id
       )
     ) {
+      // One more than a commit can check would fail only at the commit,
+      // after the whole mutation ran: refused here, at the read.
+      if (this.#guards.length >= commitMaxGuards) {
+        throw dataErrors.create("data.guard_limit");
+      }
       this.#guards.push({
         table: request.table,
         id: request.id,

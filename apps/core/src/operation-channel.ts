@@ -46,11 +46,16 @@ export interface ChannelCapabilities {
   readonly resource?: Capability;
   /** Brands an expected error the channel raised as the host's. */
   readonly trust: (error: Error) => void;
-  /** The refusal for each capability it hasn't. */
+  /**
+   * The refusal for each capability it hasn't (`operation.not_found` for
+   * one without its own).
+   */
   readonly refusals: Readonly<
-    Record<
-      "read" | "write" | "call" | "resource",
-      Parameters<typeof operationErrors.create>[0]
+    Partial<
+      Record<
+        "read" | "write" | "call" | "resource",
+        Parameters<typeof operationErrors.create>[0]
+      >
     >
   >;
 }
@@ -147,7 +152,7 @@ class Channel extends ChannelTarget implements OperationChannel {
   }
 
   async #use(
-    name: keyof ChannelCapabilities["refusals"],
+    name: "read" | "write" | "call" | "resource",
     args: unknown[]
   ): Promise<unknown> {
     const capability = this.#capabilities[name];
@@ -156,7 +161,9 @@ class Channel extends ChannelTarget implements OperationChannel {
         throw operationErrors.create("operation.ended");
       }
       if (capability === undefined) {
-        throw operationErrors.create(this.#capabilities.refusals[name]);
+        throw operationErrors.create(
+          this.#capabilities.refusals[name] ?? "operation.not_found"
+        );
       }
       return await capability(...plainArgs(args));
     } catch (error) {

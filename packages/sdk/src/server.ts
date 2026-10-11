@@ -158,6 +158,22 @@ export interface MutationCtx<
  * What an action's handler has: the functions and resources it `uses`.
  * No database: what it reads and writes goes through the App's queries
  * and mutations, each committed on its own.
+ *
+ * An action is not atomic across its calls. A query it runs and a
+ * mutation it runs after are two invocations: nothing fences the
+ * mutation on what the query read, so a record can change between them,
+ * and a mutation that committed stays committed if the action fails
+ * later. Read and change together in one mutation when the change depends
+ * on the read (a mutation's `expectedRevision` and read set fence it).
+ *
+ * Called again under the same idempotency key with the same input, an
+ * action gets the earlier outcomes of the mutations and resource requests
+ * it makes, matched by their order among those (queries don't count).
+ * That order follows the data: if, on the second call, the data has the
+ * action run the same mutation at a place with other arguments, it gets
+ * `submission.key_conflict`; a different mutation at that place runs
+ * anew. Keep what an action changes, and in what order, a function of its
+ * input.
  */
 export interface ActionCtx<Uses extends readonly Use[] = readonly []> {
   readonly runQuery: RunQuery<Uses>;

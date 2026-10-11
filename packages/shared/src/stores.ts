@@ -407,6 +407,7 @@ export const dataErrors = defineErrorFamily({
   "data.unknown_index": "That table has no such index.",
   "data.access_denied": "You can't read this table.",
   "data.write_denied": "You can't change records of this table.",
+  "data.guard_limit": `A mutation asserts the revisions of at most ${commitMaxGuards} records.`,
   "data.reads_changed":
     "The records this change read changed before it committed. Try again.",
   "data.invalid_query": "That query isn't valid for this table.",
