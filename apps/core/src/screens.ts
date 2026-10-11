@@ -1,4 +1,5 @@
 import {
+  appCodeFiles,
   appModuleName,
   buildFiles,
   compilerVersion,
@@ -11,6 +12,7 @@ import {
   workflowFiles,
 } from "@grasp-os/compiler";
 import type {
+  AppCodeBuild,
   Diagnostic,
   ScreenBuild,
   ServerBuild,
@@ -99,7 +101,7 @@ interface FailedBuild {
  */
 const cachedBuild = async <Build>(
   env: Env,
-  kind: "screen" | "server" | "workflow",
+  kind: "screen" | "server" | "workflow" | "app",
   appFiles: AppFiles,
   select: (files: AppFiles) => AppFiles,
   build: (
@@ -155,6 +157,25 @@ export const buildServer = async (
     appFiles,
     serverFiles,
     async (compiler, files) => await compiler.buildServer(files)
+  );
+
+/**
+ * Builds an App's server code of spec 8's layout (its schema, values,
+ * registration and operations, with the modules the host generated for it
+ * under `.grasp/`) into ES modules, in the compiler's isolate, each file
+ * held to what its kind may import. Cached in R2 like the others: the
+ * generated modules are among the files the key hashes.
+ */
+export const buildAppCode = async (
+  env: Env,
+  appFiles: AppFiles
+): Promise<AppCodeBuild> =>
+  await cachedBuild(
+    env,
+    "app",
+    appFiles,
+    appCodeFiles,
+    async (compiler, files) => await compiler.buildAppCode(files)
   );
 
 /**

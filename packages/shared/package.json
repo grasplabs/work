@@ -8,6 +8,7 @@
   "exports": {
     "./agent": "./src/agent.ts",
     "./app-limits": "./src/app-limits.ts",
+    "./app-releases": "./src/app-releases.ts",
     "./apps": "./src/apps.ts",
     "./audit": "./src/audit.ts",
     "./audit-log": "./src/audit-log.ts",

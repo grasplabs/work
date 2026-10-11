@@ -1,0 +1,545 @@
+import { schemaHash } from "@grasp-os/sdk/host";
+import type { AppId, StoreId } from "@grasp-os/shared/ids";
+import type { Role } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { env } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { describe, expect, it } from "vite-plus/test";
+
+import { loadRelease, sealRelease } from "../src/app-releases.ts";
+import type { Release } from "../src/app-releases.ts";
+import { commitFiles, createApp, findVersion } from "../src/apps.ts";
+import type { Acting } from "../src/auth/identity.ts";
+import { createStore } from "../src/data-stores.ts";
+import {
+  sdkReleaseManifests,
+  sdkResourceBindings,
+} from "../src/db/core/schema.ts";
+import { buildScreens } from "../src/screens.ts";
+import { allEvents } from "./audit-events.ts";
+
+// Sealing an App's release (spec 8, 16) through the real compiler, Loader
+// isolates, R2 and D1: what a seal pins, that what it pins can't change
+// under it, and the ways App code and storage could try to make it seal
+// or run something else. Running a sealed release is
+// app-functions.test.ts.
+
+/** Notes, laid out as spec 8 has an App: its schema, operations and registration. */
+const notesFiles = (label = "Notes"): Record<string, string> => ({
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export const noteFields = {
+  title: v.string().trim().min(1).max(200),
+  body: v.string().max(100_000).default(""),
+};
+
+export default defineSchema({
+  notes: defineTable(noteFields).index("by_updated", ["_updatedAt"]),
+});
+`,
+  "operations/notes.ts": `import { v } from "@grasp-os/sdk";
+import { internal } from "#grasp/server-references";
+import { action, doc, internalQuery, mutation, query } from "#grasp/server";
+import { noteFields } from "../schema.ts";
+
+export const get = query({
+  args: { id: v.id("notes") },
+  returns: doc("notes").nullable(),
+  handler: async (ctx, args) => await ctx.db.get("notes", args.id),
+});
+
+export const create = mutation({
+  args: { title: noteFields.title, body: noteFields.body },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});
+
+export const count = internalQuery({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const notes = await ctx.db.query("notes").take(100);
+    return notes.length;
+  },
+});
+
+export const tally = action({
+  args: {},
+  returns: v.number(),
+  uses: [internal.notes.count],
+  handler: async (ctx) => await ctx.runQuery(internal.notes.count, {}),
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { count, create, get, tally } from "./operations/notes.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: ${JSON.stringify(label)},
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { notes: { get, create, tally } },
+  internalOperations: { notes: { count } },
+  screens: [],
+  uses: [],
+});
+`,
+});
+
+/** A person of the organization in `role`, as their session has them. */
+const person = async (role: Role): Promise<Acting & Identity> => {
+  const userId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO organizations (id, name, slug, created_at) VALUES ('organization', 'Acme', 'acme', ?)"
+    ).bind(Date.now()),
+    env.DB.prepare(
+      "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)"
+    ).bind(userId, "Person", `${userId}@acme.test`, Date.now(), Date.now()),
+    env.DB.prepare(
+      "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, ?, ?)"
+    ).bind(crypto.randomUUID(), userId, role, Date.now()),
+  ]);
+  return {
+    userId,
+    email: `${userId}@acme.test`,
+    name: "Person",
+    role,
+    teams: [],
+    staff: false,
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  };
+};
+
+interface Fixture {
+  readonly owner: Acting & Identity;
+  readonly app: AppId;
+  readonly store: StoreId;
+}
+
+/** A builder's App with `files` as its first version, and a store for it. */
+const appWith = async (files: Record<string, string>): Promise<Fixture> => {
+  const owner = await person("builder");
+  const { id } = await createApp(env, owner, { name: "Notes" });
+  await commitFiles(env, owner, id, files, "First version");
+  return { owner, app: id, store: await createStore(env, owner) };
+};
+
+/** Seals the fixture's `version`, with its store. */
+const seal = async (
+  { owner, app, store }: Fixture,
+  version = 1
+): Promise<Release> =>
+  await sealRelease(env, { app, version, store, by: owner });
+
+/** The error code `work` fails with. */
+const failure = async (work: () => Promise<unknown>): Promise<string> => {
+  try {
+    await work();
+  } catch (error) {
+    const code: unknown =
+      typeof error === "object" && error !== null
+        ? Reflect.get(error, "code")
+        : undefined;
+    return typeof code === "string" ? code : String(error);
+  }
+  return "ok";
+};
+
+/** Where an artifact's bytes are kept. */
+const artifactKey = (sha256: string): string => `release-artifacts/${sha256}`;
+
+/** The artifact of `release` at `path`. */
+const artifactAt = (release: Release, path: string) => {
+  const entry = release.manifest.artifacts.find(
+    (artifact) => artifact.path === path
+  );
+  if (entry === undefined) {
+    throw new Error(`No artifact at ${path}`);
+  }
+  return entry;
+};
+
+describe("sealing a release", { timeout: 120_000 }, () => {
+  it("pins the source, schema, contracts, runtime, store and every artifact by hash", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    const { tree } = await findVersion(env, fixture.app, 1);
+    const schema = await schemaHash(release.app.schema);
+    expect(release.manifest).toMatchObject({
+      formatVersion: 1,
+      resourceId: fixture.app,
+      resourceVersion: 1,
+      sourceTreeHash: tree,
+      schemaHash: schema,
+      sdkProtocolVersion: 1,
+      target: "app",
+      bindings: [],
+      artifactTrust: "unreviewed",
+      dataStoreBindings: [
+        { alias: "default", storeId: fixture.store, schemaHash: schema },
+      ],
+    });
+    expect(release.manifest.artifacts.map(({ path }) => path)).toStrictEqual(
+      expect.arrayContaining([
+        ".grasp/contracts.json",
+        ".grasp/references.ts",
+        ".grasp/server-references.ts",
+        ".grasp/server.ts",
+        ".grasp/verification.json",
+        "modules/app~app.js",
+        "modules/app~operations~notes.js",
+        "modules/app~schema.js",
+        "modules/app~.grasp~server.js",
+      ])
+    );
+    expect(Object.keys(release.fingerprints).toSorted()).toStrictEqual([
+      "notes.count",
+      "notes.create",
+      "notes.get",
+      "notes.tally",
+    ]);
+  });
+
+  it("generates references a browser may hold for this release, its public functions only", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    const references = await env.FILES.get(
+      artifactKey(artifactAt(release, ".grasp/references.ts").sha256)
+    );
+    const text = (await references?.text()) ?? "";
+    expect(text).toContain(`"resourceId": "${fixture.app}"`);
+    expect(text).toContain('"contractId": "notes.create"');
+    expect(text).not.toContain("notes.count");
+  });
+
+  it("records the store it bound apart from the manifest, and audits the seal", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    const bindings = await drizzle(env.DB)
+      .select()
+      .from(sdkResourceBindings)
+      .where(eq(sdkResourceBindings.resourceId, fixture.app));
+    expect(bindings).toStrictEqual([
+      {
+        resourceId: fixture.app,
+        resourceVersion: 1,
+        alias: "default",
+        kind: "store",
+        targetId: fixture.store,
+        schemaHash: release.manifest.schemaHash,
+        manifestHash: release.manifestHash,
+      },
+    ]);
+    const events = await allEvents();
+    const sealed = events.filter(
+      (event) =>
+        event.action === "app.release.sealed" &&
+        event.target?.id === fixture.app
+    );
+    expect(sealed.map((event) => event.detail)).toStrictEqual([
+      expect.objectContaining({
+        version: 1,
+        manifestHash: release.manifestHash,
+        store: fixture.store,
+      }),
+    ]);
+  });
+
+  it("reads every artifact back against its hash, and answers the same release again", async () => {
+    const fixture = await appWith(notesFiles());
+    const sealed = await seal(fixture);
+    const loaded = await loadRelease(env, fixture.app, 1);
+    expect(loaded.manifestHash).toBe(sealed.manifestHash);
+    expect(loaded.modules).toStrictEqual(sealed.modules);
+    expect(loaded.app).toStrictEqual(sealed.app);
+    // Sealed again, even asking for another store: the release as sealed.
+    const other = await createStore(env, fixture.owner);
+    const again = await sealRelease(env, {
+      app: fixture.app,
+      version: 1,
+      store: other,
+      by: fixture.owner,
+    });
+    expect([again.manifestHash, again.store?.storeId]).toStrictEqual([
+      sealed.manifestHash,
+      fixture.store,
+    ]);
+  });
+
+  it("is never changed by a later edit of the source: that is another version", async () => {
+    const fixture = await appWith(notesFiles());
+    const first = await seal(fixture);
+    await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      notesFiles("Notes, renamed"),
+      "Rename"
+    );
+    const second = await seal(fixture, 2);
+    const firstAgain = await loadRelease(env, fixture.app, 1);
+    expect([firstAgain.manifestHash, firstAgain.app.name]).toStrictEqual([
+      first.manifestHash,
+      "Notes",
+    ]);
+    expect(second.app.name).toBe("Notes, renamed");
+    expect([
+      second.manifestHash === first.manifestHash,
+      second.manifest.sourceTreeHash === first.manifest.sourceTreeHash,
+    ]).toStrictEqual([false, false]);
+    // The store survives the edit: it is the App's, not the version's.
+    expect(second.store?.storeId).toBe(first.store?.storeId);
+  });
+});
+
+describe("a sealed release that changed", { timeout: 120_000 }, () => {
+  it("is refused when one of its artifacts' bytes no longer match their hash", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    // The same number of bytes, one of them changed: only the hash tells.
+    const entry = artifactAt(release, "modules/app~operations~notes.js");
+    const stored = await env.FILES.get(artifactKey(entry.sha256));
+    const code = (await stored?.text()) ?? "";
+    const forged = code.replace("notes", "motes");
+    expect([forged.length, forged === code]).toStrictEqual([
+      code.length,
+      false,
+    ]);
+    await env.FILES.put(artifactKey(entry.sha256), forged);
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.artifact_corrupt");
+  });
+
+  it("is refused when an artifact is gone", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    await env.FILES.delete(
+      artifactKey(artifactAt(release, ".grasp/contracts.json").sha256)
+    );
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.artifact_corrupt");
+  });
+
+  it("is refused when its manifest no longer matches its hash, or it vouches for itself", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    const forged = JSON.stringify({
+      ...release.manifest,
+      artifactTrust: "approved",
+    });
+    await drizzle(env.DB)
+      .update(sdkReleaseManifests)
+      .set({ manifest: forged })
+      .where(
+        and(
+          eq(sdkReleaseManifests.appId, fixture.app),
+          eq(sdkReleaseManifests.version, 1)
+        )
+      );
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.manifest_corrupt");
+  });
+
+  it("is refused when its manifest and hash were both rewritten, as its binding names the hash sealed", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    const forged = JSON.stringify({ ...release.manifest, bindings: [] });
+    const { sha256Hex } = await import("@grasp-os/shared/encoding");
+    await drizzle(env.DB)
+      .update(sdkReleaseManifests)
+      .set({ manifest: forged, manifestHash: await sha256Hex(forged) })
+      .where(eq(sdkReleaseManifests.appId, fixture.app));
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.manifest_corrupt");
+  });
+
+  it("is refused when the host's binding names another store than the manifest", async () => {
+    const fixture = await appWith(notesFiles());
+    await seal(fixture);
+    const other = await createStore(env, fixture.owner);
+    await drizzle(env.DB)
+      .update(sdkResourceBindings)
+      .set({ targetId: other })
+      .where(eq(sdkResourceBindings.resourceId, fixture.app));
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.manifest_corrupt");
+  });
+
+  it("is refused to an invocation pinned to another manifest", async () => {
+    const fixture = await appWith(notesFiles());
+    await seal(fixture);
+    await expect(
+      failure(
+        async () => await loadRelease(env, fixture.app, 1, "0".repeat(64))
+      )
+    ).resolves.toBe("version.manifest_corrupt");
+  });
+
+  it("is never there for a version not sealed", async () => {
+    const fixture = await appWith(notesFiles());
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.not_sealed");
+  });
+});
+
+describe("App code that a seal refuses", { timeout: 120_000 }, () => {
+  /** Notes with `changes` to its files, sealed. */
+  const sealedWith = async (
+    changes: Record<string, string>
+  ): Promise<string> => {
+    const fixture = await appWith({ ...notesFiles(), ...changes });
+    return await failure(async () => await seal(fixture));
+  };
+
+  it("can't reach the network while it is inspected", async () => {
+    await expect(
+      sealedWith({
+        "app.ts": `${notesFiles()["app.ts"]}\nawait fetch("https://example.com");\n`,
+      })
+    ).resolves.toBe("version.inspection_failed");
+  });
+
+  it("must register an App", async () => {
+    await expect(
+      sealedWith({ "app.ts": "export default { name: 'Notes' };\n" })
+    ).resolves.toBe("version.inspection_failed");
+  });
+
+  it("can't hand the host a manifest it didn't declare", async () => {
+    // The App's code makes the SDK in its isolate answer a query that
+    // writes: no declaration makes that, so the host refuses it.
+    const forging = `${notesFiles()["app.ts"]}
+const stringify = JSON.stringify;
+JSON.stringify = (value, ...rest) => {
+  const text = stringify(value, ...rest);
+  return typeof value === "object" && value !== null && "operations" in value
+    ? text.replace('"insert":false', '"insert":true')
+    : text;
+};
+`;
+    await expect(sealedWith({ "app.ts": forging })).resolves.toBe(
+      "version.invalid_manifest"
+    );
+  });
+
+  it("can't register differently each time it is inspected", async () => {
+    const shifting = notesFiles()["app.ts"]?.replace(
+      'name: "Notes"',
+      'name: "Notes " + Math.random().toString(36).slice(2, 10)'
+    );
+    await expect(sealedWith({ "app.ts": shifting ?? "" })).resolves.toBe(
+      "version.unstable_manifest"
+    );
+  });
+
+  it.each([
+    [
+      "a schema that imports an operation",
+      {
+        "schema.ts": `import "./operations/notes.ts";\n${notesFiles()["schema.ts"]}`,
+      },
+    ],
+    [
+      "server code that imports the Workers runtime",
+      {
+        "operations/extra.ts":
+          'import { env } from "cloudflare:workers";\nexport const leak = env;\n',
+      },
+    ],
+    [
+      "server code that imports a platform-only SDK module",
+      {
+        "operations/extra.ts":
+          'import { inspectApp } from "@grasp-os/sdk/host";\nexport const peek = inspectApp;\n',
+      },
+    ],
+    [
+      "server code that imports a module by a computed name",
+      {
+        "operations/extra.ts":
+          'const name = "cloudflare:" + "workers";\nexport const load = () => import(name);\n',
+      },
+    ],
+  ])("doesn't build with %s", async (_case, changes) => {
+    await expect(sealedWith(changes)).resolves.toBe("version.build_failed");
+  });
+
+  it("needs a store the host binds when it declares tables", async () => {
+    const fixture = await appWith(notesFiles());
+    await expect(
+      failure(
+        async () =>
+          await sealRelease(env, {
+            app: fixture.app,
+            version: 1,
+            by: fixture.owner,
+          })
+      )
+    ).resolves.toBe("version.store_unbound");
+  });
+
+  it("is an App of spec 8's layout, not a server class", async () => {
+    const fixture = await appWith({
+      "app/server.ts": "export class App {}\n",
+    });
+    await expect(failure(async () => await seal(fixture))).resolves.toBe(
+      "version.unsealable"
+    );
+  });
+
+  it("can't put generated modules in its source", async () => {
+    const owner = await person("builder");
+    const { id } = await createApp(env, owner, { name: "Notes" });
+    await expect(
+      failure(
+        async () =>
+          await commitFiles(
+            env,
+            owner,
+            id,
+            {
+              ...notesFiles(),
+              ".grasp/references.ts": "export const api = {};\n",
+            },
+            "Forged references"
+          )
+      )
+    ).resolves.toBe("app.invalid");
+  });
+});
+
+describe("screens", { timeout: 120_000 }, () => {
+  it.each([
+    ["the server constructors", 'import { query } from "#grasp/server";'],
+    [
+      "the internal references",
+      'import { internal } from "#grasp/server-references";',
+    ],
+    ["the schema", 'import schema from "../schema.ts";'],
+    ["the registration", 'import notes from "../app";'],
+    ["an operation", 'import { create } from "../operations/notes.ts";'],
+    ["the host's SDK", 'import { inspectApp } from "@grasp-os/sdk/host";'],
+  ])(
+    "never import %s: the build fails before it starts",
+    async (_case, line) => {
+      const build = await buildScreens(env, {
+        ...notesFiles(),
+        "screens/notes.tsx": `${line}\nexport default function Notes() {\n  return null;\n}\n`,
+      });
+      expect(build.ok).toBeFalsy();
+      expect(build.diagnostics.map(({ message }) => message)).toStrictEqual([
+        expect.stringContaining(
+          "is the App's server code, which screens never import"
+        ),
+      ]);
+    }
+  );
+});

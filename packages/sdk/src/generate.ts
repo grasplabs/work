@@ -322,8 +322,12 @@ const typeImports = (text: string, names: readonly string[]): string => {
     : `import type { ${used.toSorted().join(", ")} } from "@grasp-os/sdk";\n`;
 };
 
-/** `#grasp/server`: the constructors, specialized to `schema.ts` by type. */
-const serverModuleText = `${banner}import type { Id as SdkId } from "@grasp-os/sdk";
+/**
+ * `#grasp/server`: the constructors, specialized to `schema.ts` by type.
+ * The same for every App, so inspection can load it before anything is
+ * generated from the App's manifest.
+ */
+export const serverModuleSource = `${banner}import type { Id as SdkId } from "@grasp-os/sdk";
 import type { Doc as SdkDoc } from "@grasp-os/sdk/database";
 import { serverModule } from "@grasp-os/sdk/server";
 import type {
@@ -519,7 +523,7 @@ export const generateModules = async (
     fingerprints,
   });
   return {
-    [generatedPaths.server]: serverModuleText,
+    [generatedPaths.server]: serverModuleSource,
     [generatedPaths.serverReferences]: serverReferencesText(
       manifest,
       identity,
