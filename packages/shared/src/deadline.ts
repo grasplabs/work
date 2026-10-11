@@ -9,6 +9,8 @@ export interface Deadline {
   stopped: () => Stopped | undefined;
   /** Ends the deadline: call it when the work ends, however it ends. */
   clear: () => void;
+  /** When the time is up, in ms since the epoch. */
+  endsAt: number;
 }
 
 /**
@@ -17,6 +19,7 @@ export interface Deadline {
  * (`AbortSignal.timeout` can't be cleared).
  */
 export const deadline = (ms: number, caller?: AbortSignal): Deadline => {
+  const endsAt = Date.now() + ms;
   const timer = new AbortController();
   const handle = setTimeout(() => {
     timer.abort();
@@ -35,6 +38,7 @@ export const deadline = (ms: number, caller?: AbortSignal): Deadline => {
     clear: () => {
       clearTimeout(handle);
     },
+    endsAt,
   };
 };
 
