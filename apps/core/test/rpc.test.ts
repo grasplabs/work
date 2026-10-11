@@ -9,11 +9,16 @@ import { routerSecretHeader } from "@grasp-os/shared/router";
 import type { CoreApi } from "@grasp-os/shared/rpc";
 import { newWebSocketRpcSession } from "capnweb";
 import { env, exports } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
+import { isolateRpcHeld, signedOutRpcAccounting } from "../src/rpc-target.ts";
 import { toClientError } from "../src/rpc.ts";
+import { mockIdp } from "./idp.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
 import { clientOrigin } from "./sign-in-config.ts";
+import { signedInWithRole } from "./sign-in.ts";
+
+const idp = mockIdp();
 
 const openRpc = async (headers: HeadersInit) =>
   await exports.default.fetch("https://core/rpc", { headers });
@@ -53,6 +58,8 @@ const rawRpc = async (headers: HeadersInit) => {
     }
   });
   socket.accept();
+  // Closed when the test ends, so what it held leaves the isolate's total.
+  closeWhenTestEnds(socket);
   let pushed = 0;
   const send = (message: unknown): void => {
     try {
@@ -123,9 +130,11 @@ describe("the memory a session spends expanding references", () => {
   });
 
   it("passes a large but legal value", async () => {
-    const connection = await rawRpc(signedOut);
-    // A megabyte of flat data, far under one message's budget: pushed, then
-    // a call that still answers proves the session stayed open.
+    const { session } = await signedInWithRole(idp, "user");
+    const connection = await rawRpc({ ...signedOut, cookie: session });
+    // A megabyte of flat data from a signed-in page, far under one message's
+    // budget: pushed, then a call that still answers proves the session
+    // stayed open.
     connection.push("a".repeat(1024 * 1024));
     const pong = await connection.pull(
       connection.push(["pipeline", 0, ["ping"], []])
@@ -205,19 +214,140 @@ describe("the memory a session spends expanding references", () => {
     connection.socket.close();
   });
 
-  it("keeps serving many streamed answers in one session", async () => {
+  it("ends a session that opens a stream or a pipe", async () => {
+    // A browser streams to core only into a stream core gave it, or to pass
+    // core one of its own; nothing core serves does either, and a pipe
+    // nobody reads keeps buffering. Both end the session.
+    const ends = await Promise.all(
+      [["stream", "x"], ["pipe"]].map(async (opening) => {
+        const connection = await rawRpc(signedOut);
+        connection.send(opening);
+        const { code } = await connection.closed;
+        return code;
+      })
+    );
+    expect(ends).toStrictEqual([3000, 3000]);
+  });
+
+  it("ends a session whose unreleased pushes hold too much, and others go on", async () => {
+    const { session } = await signedInWithRole(idp, "user");
+    const hoarder = await rawRpc({ ...signedOut, cookie: session });
+    // 13 MiB strings, never released: Cap'n Web keeps each until released,
+    // so a few would hold more than an isolate has. The third is refused.
+    const large = "a".repeat(13 * 1024 * 1024);
+    for (let i = 0; i < 4; i += 1) {
+      hoarder.send(["push", large]);
+    }
+    const end = await hoarder.closed;
+    expect(end.code).toBe(3000);
+    expect(end.reason).toContain("expand");
+
+    const other = await rawRpc(signedOut);
+    const pong = await other.pull(other.push(["pipeline", 0, ["ping"], []]));
+    expect(pong).toBe("pong");
+    other.socket.close();
+  });
+
+  it("holds a connection that isn't signed in to a little", async () => {
+    const hoarder = await rawRpc(signedOut);
+    // Nothing a signed-out connection may do needs more than a few bytes.
+    hoarder.send([
+      "push",
+      "a".repeat(signedOutRpcAccounting.maxSessionBytes * 2),
+    ]);
+    const end = await hoarder.closed;
+    expect(end.code).toBe(3000);
+  });
+
+  it("ends a connection that keeps values alive by referring to them and releasing the original", async () => {
     const connection = await rawRpc(signedOut);
-    // Cap'n Web answers each stream as it arrives and frees it then, and so
-    // does the accountant: more streams than may be pending at once, never
-    // released, still leave the session open. Each stream takes an export
-    // id, so the ping call is the id after the last stream.
-    const streams = 10_000;
-    for (let i = 0; i < streams; i += 1) {
-      connection.send(["stream", "x"]);
+    // Push a value, refer to it from a new export, release the original,
+    // again and again: each reference keeps its value alive, so it is
+    // charged what it keeps, and the connection's budget runs out.
+    const share = "a".repeat(signedOutRpcAccounting.maxSessionBytes / 3);
+    let id = 0;
+    for (let round = 0; round < 8; round += 1) {
+      connection.send(["push", `${share}${round}`]);
+      id += 1;
+      const original = id;
+      connection.send(["push", ["pipeline", original]]);
+      id += 1;
+      connection.send(["release", original, 1]);
+    }
+    const end = await connection.closed;
+    expect(end.code).toBe(3000);
+  });
+
+  it("ends the connection that takes the isolate past what all may hold, and no other", async () => {
+    // Each connection holds just under what one that isn't signed in may:
+    // within its own budget, but together past the isolate's.
+    const share = "a".repeat(signedOutRpcAccounting.maxSessionBytes - 4096);
+    const most = Math.ceil(isolateRpcHeld.limit / share.length) + 2;
+    const heldBefore = isolateRpcHeld.held;
+    const holding: Awaited<ReturnType<typeof rawRpc>>[] = [];
+    let crossed: Awaited<ReturnType<typeof rawRpc>> | undefined;
+    for (let count = 0; count < most && crossed === undefined; count += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one connection at a time, so the one that crosses is known
+      const connection = await rawRpc(signedOut);
+      connection.push(share);
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const settled = await Promise.race([
+        connection.pull(connection.push(["pipeline", 0, ["ping"], []])),
+        connection.closed.then(() => "ended"),
+      ]);
+      if (settled === "ended") {
+        crossed = connection;
+      } else {
+        holding.push(connection);
+      }
+    }
+    expect(crossed).toBeDefined();
+    expect(holding.length).toBeGreaterThan(1);
+
+    // The connections before it, and a fresh one, still answer.
+    const answers = await Promise.all(
+      [holding[0], holding.at(-1)].map(async (connection) =>
+        connection === undefined
+          ? "missing"
+          : await connection.pull(
+              connection.push(["pipeline", 0, ["ping"], []])
+            )
+      )
+    );
+    expect(answers).toStrictEqual(["pong", "pong"]);
+
+    // Releases let go of the isolate's total: a new connection may hold its
+    // share where the one that crossed could not.
+    holding[0]?.send(["release", 1, 1]);
+    holding[1]?.send(["release", 1, 1]);
+    const next = await rawRpc(signedOut);
+    next.push(share);
+    await expect(
+      next.pull(next.push(["pipeline", 0, ["ping"], []]))
+    ).resolves.toBe("pong");
+
+    // Closed connections let go of all they held: the isolate's total is
+    // back where it started.
+    for (const connection of [...holding, next]) {
+      connection.socket.close();
+    }
+    await vi.waitFor(() => {
+      expect(isolateRpcHeld.held).toBeLessThanOrEqual(heldBefore);
+    });
+  });
+
+  it("lets a session hold one large value at a time for as long as it likes", async () => {
+    const { session } = await signedInWithRole(idp, "user");
+    const connection = await rawRpc({ ...signedOut, cookie: session });
+    // The size of a 10 MB upload, pushed and released in turn, five times:
+    // more than the session may hold at once, never all at once.
+    const upload = ["bytes", "A".repeat(Math.ceil((10 * 1024 * 1024) / 3) * 4)];
+    for (let id = 1; id <= 5; id += 1) {
+      connection.send(["push", upload]);
+      connection.send(["release", id, 1]);
     }
     connection.send(["push", ["pipeline", 0, ["ping"], []]]);
-    const pong = await connection.pull(streams + 1);
-    expect(pong).toBe("pong");
+    await expect(connection.pull(6)).resolves.toBe("pong");
     connection.socket.close();
   });
 });

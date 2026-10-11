@@ -22,11 +22,11 @@ import { RpcSession, RpcStub } from "capnweb";
 // go) and the page's theme. Everything the frame sends is untrusted.
 //
 // The frame's traffic is bounded before it reaches core: each message in
-// size and depth (`screenLimits.rpc`, by Cap'n Web, which ends the session
-// over one that is too much), what each call of the bridge's gets to the
-// same depth and size however many messages built it (a value one message
-// refers to from another's: `FrameRpcTarget`), its requests and reports
-// by rate. A value too deep for core's connection would otherwise end the
+// size and nodes (`screenLimits.rpc`, by the accountant on the port, which
+// ends the session over one that is too much) and in depth (by Cap'n Web),
+// what each call of the bridge's gets to the same depth and size however
+// many messages built it (a value one message refers to from another's:
+// `FrameRpcTarget`), its requests and reports by rate. A value too deep for core's connection would otherwise end the
 // person's whole connection to core, not only this screen's call. That
 // spares the person's connection a screen that floods; it is not what
 // holds a screen to its limits. Core counts the same per person and App
@@ -235,24 +235,32 @@ export const openBridge = (
 ): (() => void) => {
   const cleanups: (() => void)[] = [];
   // Cap'n Web copies in full every value one message refers to from an
-  // earlier one, before any of the bridge's code runs, so a screen could
-  // crash its tab with a chain of tiny messages the way an unbounded
-  // connection could crash core. The accountant wraps the port, parses each
-  // message once, and ends the session once those copies would outgrow one
-  // message's budget or the session's (the shared node bounds, with the
-  // port's own message size); `onBroken` then tells the page, as for any
-  // other way the session ends.
+  // earlier one, and keeps every value pushed until it is released, before
+  // any of the bridge's code runs, so a screen could crash its tab the way
+  // an unbounded connection could crash core. The accountant wraps the
+  // port: it refuses a message longer than the port's or of too many nodes
+  // before parsing it, parses it once and hands the value to Cap'n Web
+  // (which then checks only depth and digits), and ends the session once
+  // what the messages copy or hold would outgrow one message's budget or
+  // the session's (`screenLimits.rpcHeldBytes`); `onBroken` then tells the
+  // page, as for any other way the session ends.
   const session = new RpcSession(
     accountedTransport(
       portTransport(port),
       {
         ...rpcCopyNodeBounds,
         maxMessageBytes: screenLimits.rpc.maxMessageSize,
+        maxSessionBytes: screenLimits.rpcHeldBytes,
       },
       () => requestErrors.create("request.too_expensive")
     ),
     frameBridge(target, cleanups),
-    { limits: screenLimits.rpc }
+    {
+      limits: {
+        maxDepth: screenLimits.rpc.maxDepth,
+        maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
+      },
+    }
   );
   const frame = session.getRemoteMain();
   let open = true;

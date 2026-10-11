@@ -58,9 +58,11 @@ export const screenLimits = {
    */
   openMs: 20_000,
   /**
-   * Cap'n Web's limits on what a frame sends over its port. A message's
-   * size is its text's, in UTF-16 code units. A browser's connection to
-   * core takes the depth and the digits too (core's rpc.ts).
+   * The limits on what a frame sends over its port. A message's size is
+   * its text's, in UTF-16 code units, held by the accountant on the port
+   * (the page's screen-bridge.ts); its depth and digits by Cap'n Web. A
+   * browser's connection to core takes the depth and the digits too (core's
+   * rpc.ts).
    *
    * The depth bounds how far Cap'n Web recurses into each message from
    * an untrusted side, so it is no deeper than a value may nest plus the
@@ -100,6 +102,14 @@ export const screenLimits = {
    * come, so more than this is a side sending faster than it is heard.
    */
   portQueue: { messages: 256, characters: 4 * 262_144 },
+  /**
+   * What a frame's unreleased pushes and unanswered calls may hold at once,
+   * in bytes of heap as the page's accountant estimates them
+   * (@grasp-os/shared/rpc-accounting): room for a call with the largest
+   * input a screen may send (`inputBytes`, at most about 4 MB once parsed
+   * into tiny values) and as much again, and no more.
+   */
+  rpcHeldBytes: 8 * 1024 * 1024,
 } as const;
 
 // A screen starts in two stages, each bound to this load of the frame and
