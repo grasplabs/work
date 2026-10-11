@@ -156,7 +156,8 @@ const inspected = async (
   const isolate = env.LOADER.get(null, () => ({
     ...sandbox,
     mainModule: inspectModule,
-    modules: { ...sdk.modules, ...modules, [inspectModule]: inspectMain },
+    // The platform's modules last: no App module takes one's name.
+    modules: { ...modules, ...sdk.modules, [inspectModule]: inspectMain },
     env: {},
   })).getEntrypoint<InspectEntrypoint>("Inspect");
   let text: unknown;
