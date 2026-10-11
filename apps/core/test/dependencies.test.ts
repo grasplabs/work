@@ -1470,7 +1470,7 @@ describe("dependency approval", () => {
     const intent = intentFor(app, { [dates]: "^1.0.0" });
     const chat = await chatOf(
       builder.userId,
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const tried = async (call) => { try { return await call(); } catch (error) { return error.message; } };
         const { request } = await env.build.resolveDependencies(${JSON.stringify(app)}, ${JSON.stringify(intent)});
         const decision = { approved: true, reviewed: { graphHash: request.graphHash, policyGeneration: request.policyGeneration } };

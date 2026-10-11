@@ -62,7 +62,7 @@ import { revokeChatPermissions } from "./chat-connections.ts";
 import { chatMessageOf, partialOf } from "./chat-messages.ts";
 import { ChatWatch } from "./chat-watch.ts";
 import type { ChatListener, ChatState } from "./chat-watch.ts";
-import { codeLimits } from "./code-mode.ts";
+import { codeLimits, codeTimeoutMs } from "./code-mode.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/workspace/migrations/migrations.js";
 import {
@@ -775,6 +775,7 @@ export class Workspace extends DurableObject<Env> {
           },
         },
         loader: this.env.LOADER,
+        codeTimeoutMs: codeTimeoutMs(this.env),
         signal: cancel.signal,
         keep: (message) => {
           if (message.role === "assistant") {
