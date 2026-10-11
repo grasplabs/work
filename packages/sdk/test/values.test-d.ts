@@ -191,8 +191,9 @@ expectTypeOf([badQuantity, badState, badTag]).not.toBeAny();
 // keeps its types at the bottom, in and out, and checks in well under a
 // second: inference is linear in depth. Keep a fixture like this written
 // across lines. The formatter takes time exponential in depth to break
-// nested calls written on one line (past about 14 levels it runs for
-// minutes), which once passed for slow type inference.
+// nested calls written on one line (about four times as long per level:
+// some 5 s at 15 levels, minutes from about 17), which once passed for
+// slow type inference.
 const deepLeaf = v.string().default("");
 const deepest = v.object({
   a: v.object({
