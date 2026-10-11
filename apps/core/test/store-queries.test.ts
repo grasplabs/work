@@ -1,5 +1,5 @@
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-import type { Id } from "@grasp-os/sdk";
+import type { Id, ValueShape } from "@grasp-os/sdk";
 import { databaseReader } from "@grasp-os/sdk/database";
 import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
 import type { AccessMode } from "@grasp-os/sdk/host";
@@ -885,5 +885,87 @@ describe("projection of unions", () => {
     await expect(
       db.query("notes").aggregate({ operation: "sum", field: "rank" })
     ).resolves.toBe(2);
+  });
+});
+
+describe("projection of unions of every kind", () => {
+  /** A store of notes whose `shape` is `shape`, holding `stored` shapes. */
+  const shapesRead = async (
+    shape: ValueShape[string],
+    ...stored: StoreFields[string][]
+  ): Promise<unknown> => {
+    const store = await openStore(env, await createStore(env, builder));
+    const pinned = await store.defineTables(
+      memberNotes({ title: v.string(), shape })
+    );
+    const fixture: Fixture = {
+      store,
+      schemaHash: pinned.schemaHash,
+      text: "",
+      tableId: pinned.tables.notes ?? "",
+    };
+    for (const [position, value] of stored.entries()) {
+      // One record each, by owners of their own.
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await insertMany(
+        fixture,
+        1,
+        { title: String(position), shape: value },
+        `owner${position}`
+      );
+    }
+    const answer = await refusal(
+      store.read(scopeOf(pinned.schemaHash), queryRequest({}))
+    );
+    return Array.isArray(answer)
+      ? answer
+          .map((note: unknown) => [
+            fieldOf(note, "title"),
+            fieldOf(note, "shape"),
+          ])
+          .toSorted(([left], [right]) =>
+            String(left).localeCompare(String(right))
+          )
+          .map(([, value]) => value)
+      : answer;
+  };
+
+  it("keeps money, files and schedules whole, and drops what their kinds don't hold", async () => {
+    expect({
+      money: await shapesRead(
+        v.union(v.money(), v.object({ label: v.string() })),
+        { minorUnits: 125, currency: "EUR" },
+        { label: "free" }
+      ),
+      file: await shapesRead(
+        v.union(v.file(), v.schedule()),
+        { id: "f1", hidden: "secret" },
+        { cron: "0 9 * * 1", timeZone: "Europe/Amsterdam" }
+      ),
+    }).toStrictEqual({
+      money: [{ minorUnits: 125, currency: "EUR" }, { label: "free" }],
+      file: [{ id: "f1" }, { cron: "0 9 * * 1", timeZone: "Europe/Amsterdam" }],
+    });
+  });
+
+  it("projects through nested unions to the member the value fits", async () => {
+    await expect(
+      shapesRead(
+        v.union(
+          v.union(v.object({ a: v.string() }), v.object({ b: v.string() })),
+          v.string()
+        ),
+        { b: "x" },
+        "plain"
+      )
+    ).resolves.toStrictEqual([{ b: "x" }, "plain"]);
+  });
+
+  it("refuses a value no member can be shown as, leaking nothing", async () => {
+    await expect(
+      shapesRead(v.union(v.object({ a: v.string() }), v.number()), {
+        secret: "undeclared",
+      })
+    ).resolves.toBe("data.incompatible_record");
   });
 });

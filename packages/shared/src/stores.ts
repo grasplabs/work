@@ -343,6 +343,8 @@ export const dataErrors = defineErrorFamily({
   "data.scan_limit": `A query reads at most ${queryMaxScannedEntries} entries and ${queryMaxScannedBytes} bytes. Narrow it with an index range, or page through it.`,
   "data.result_limit": `This query matches more than ${queryMaxResults} records. Page through them instead.`,
   "data.not_unique": "More than one record matches.",
+  "data.incompatible_record":
+    "A stored record doesn't fit the schema this read is pinned to.",
   "data.aggregate_overflow":
     "That aggregate is past the largest number there is.",
   "data.index_required":

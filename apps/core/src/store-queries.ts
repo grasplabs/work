@@ -275,84 +275,131 @@ const validates = (descriptor: ValueDescriptor, value: unknown): boolean => {
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Whether `value` is of the JSON shape `descriptor` describes, by kind. */
-const shapeFits = (value: unknown, descriptor: ValueDescriptor): boolean => {
-  if (descriptor.kind === "object" || descriptor.kind === "record") {
-    return isPlainObject(value);
+/** The keys each object-valued semantic kind holds (spec 32.1). */
+const semanticKeys: Readonly<
+  Partial<Record<ValueDescriptor["kind"], readonly string[]>>
+> = {
+  file: ["id"],
+  money: ["minorUnits", "currency"],
+  schedule: ["cron", "timeZone"],
+};
+
+/** A stored value no member of its pinned type can be shown as. */
+const unprojectable = (): Error =>
+  dataErrors.create("data.incompatible_record");
+
+/** How a value is projected to a descriptor (`projected`). */
+type Projection = (value: unknown, descriptor: ValueDescriptor) => unknown;
+
+/**
+ * An object's value as `fields` declare it: their keys only, each
+ * projected (a key declared without a descriptor, as a semantic kind's
+ * are, kept as stored), with defaults where a defaulted key is missing.
+ */
+const projectedObject = (
+  value: unknown,
+  fields: Readonly<Record<string, ValueDescriptor | undefined>>,
+  project: Projection
+): unknown => {
+  if (Array.isArray(value)) {
+    throw unprojectable();
   }
-  if (descriptor.kind === "array") {
-    return Array.isArray(value);
+  if (!isPlainObject(value)) {
+    return value;
   }
-  return !isPlainObject(value) && !Array.isArray(value);
+  const shown: Record<string, unknown> = {};
+  for (const [field, declared] of Object.entries(fields)) {
+    if (Object.hasOwn(value, field)) {
+      shown[field] =
+        declared === undefined ? value[field] : project(value[field], declared);
+    } else if (
+      declared?.presence === "default" &&
+      declared.defaultValue !== undefined
+    ) {
+      shown[field] = declared.defaultValue;
+    }
+  }
+  return shown;
+};
+
+/**
+ * A union's value as one of `members` has it: the member the stored value
+ * itself is valid under, as the validator picks it (the first that
+ * validates, whatever its kind, nested unions included), so a smaller
+ * member never drops fields of the one it was written as; failing that
+ * (it holds keys a later schema added), the first member whose projection
+ * is valid; failing that, `data.incompatible_record`, never the value as
+ * stored.
+ */
+const projectedUnion = (
+  value: unknown,
+  members: readonly ValueDescriptor[],
+  project: Projection
+): unknown => {
+  const fitting = members.find((member) => validates(member, value));
+  if (fitting !== undefined) {
+    return project(value, fitting);
+  }
+  for (const member of members) {
+    let projection: unknown;
+    try {
+      projection = project(value, member);
+    } catch {
+      continue;
+    }
+    if (validates(member, projection)) {
+      return projection;
+    }
+  }
+  throw unprojectable();
 };
 
 /**
  * `value` as `descriptor` (a pinned schema's) has it, at every depth:
  * objects keep only the keys they declare, with their defaults where a
- * defaulted key is missing; records, arrays and unions project what they
- * hold. Keys a later schema stored are left out, however deep (spec
- * 32.7); scalars are what they are.
+ * defaulted key is missing, and so do the object-valued semantic kinds;
+ * records, arrays and unions project what they hold. Keys a later schema
+ * stored are left out, however deep (spec 32.7). A value that holds an
+ * object or a list where its type holds neither, or that no member of a
+ * union can be shown as, fails (`data.incompatible_record`) rather than
+ * show what the pinned schema doesn't declare.
  */
 const projected = (value: unknown, descriptor: ValueDescriptor): unknown => {
   if (value === null) {
     return null;
   }
-  if (descriptor.kind === "object") {
-    if (!isPlainObject(value)) {
-      return value;
-    }
-    const kept: Record<string, unknown> = {};
-    for (const [field, declared] of Object.entries(descriptor.fields)) {
-      if (Object.hasOwn(value, field)) {
-        kept[field] = projected(value[field], declared);
-      } else if (
-        declared.presence === "default" &&
-        declared.defaultValue !== undefined
-      ) {
-        kept[field] = declared.defaultValue;
-      }
-    }
-    return kept;
+  const kept = semanticKeys[descriptor.kind];
+  if (descriptor.kind === "object" || kept !== undefined) {
+    return projectedObject(
+      value,
+      descriptor.kind === "object"
+        ? descriptor.fields
+        : Object.fromEntries((kept ?? []).map((key) => [key, undefined])),
+      projected
+    );
   }
   if (descriptor.kind === "record") {
-    return isPlainObject(value)
-      ? Object.fromEntries(
-          Object.entries(value).map(([key, item]) => [
-            key,
-            projected(item, descriptor.value),
-          ])
-        )
-      : value;
+    if (!isPlainObject(value)) {
+      throw unprojectable();
+    }
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        projected(item, descriptor.value),
+      ])
+    );
   }
   if (descriptor.kind === "array") {
-    return Array.isArray(value)
-      ? value.map((item: unknown) => projected(item, descriptor.item))
-      : value;
+    if (!Array.isArray(value)) {
+      throw unprojectable();
+    }
+    return value.map((item: unknown) => projected(item, descriptor.item));
   }
   if (descriptor.kind === "union") {
-    // The member the stored value itself fits, as the validator picks it
-    // (the first that validates), so a smaller member never drops fields
-    // of the one it was written as; failing that (it holds keys a later
-    // schema added), the first member whose projection validates, then
-    // the first of its shape.
-    const candidates = descriptor.members.filter((member) =>
-      shapeFits(value, member)
-    );
-    if (candidates.length <= 1) {
-      const [only] = candidates;
-      return only === undefined ? value : projected(value, only);
-    }
-    const fitting = candidates.find((member) => validates(member, value));
-    if (fitting !== undefined) {
-      return projected(value, fitting);
-    }
-    for (const member of candidates) {
-      const projection = projected(value, member);
-      if (validates(member, projection)) {
-        return projection;
-      }
-    }
-    return projected(value, candidates[0] ?? descriptor);
+    return projectedUnion(value, descriptor.members, projected);
+  }
+  if (isPlainObject(value) || Array.isArray(value)) {
+    throw unprojectable();
   }
   return value;
 };
