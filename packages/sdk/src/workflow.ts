@@ -244,9 +244,10 @@ interface StepOptions {
  * attempts (as in Cloudflare Workflows): `limit: 2` is three attempts in
  * all. Only failures trying again may fix are retried: a connection's
  * server that didn't take the call, a rate limit, a model or App that
- * failed or ran out of time. Any other error (a refusal, a tool's own
- * error, one the workflow throws) fails the step at once, and stops the
- * run unless the workflow catches it. Missing, the engine's defaults apply
+ * failed or ran out of time, a model budget held by other calls still
+ * under way. Any other error (a refusal, a tool's own error, one the
+ * workflow throws) fails the step at once, and stops the run unless the
+ * workflow catches it. Missing, the engine's defaults apply
  * (Cloudflare Workflows: 5 retries, 10 seconds apart, backing off
  * exponentially).
  */
@@ -392,7 +393,9 @@ export interface StepRunner {
    * an answer that doesn't counts as a failure and is retried. The
    * deployment's rules may refuse the call, say because it must stay in the
    * EU, its App has read sensitive data, or this month's model budget is
-   * used up; the step then fails with the reason, and isn't retried.
+   * used up; the step then fails with the reason, and isn't retried. A
+   * budget whose rest is held by other calls still under way is retried,
+   * as the step's retries allow.
    */
   llm: <Output extends z.ZodType>(
     name: string,

@@ -4,7 +4,17 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { DurableObject } from "cloudflare:workers";
-import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  lte,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
@@ -66,6 +76,10 @@ import type { PinnedPrice } from "./model-prices.ts";
 //   transaction as the spend that reached it.
 // - Spend crosses clients: each deployment's core has its own namespace
 //   of this object, so no other client's requests reach this ledger.
+// - A refusal tells a caller about other people's requests: a scope held
+//   only by requests under way answers when the soonest comes due, and
+//   nothing else of them (whose, which model, how much); the gateway
+//   turns that into a coarse wait (models.ts).
 
 /** The object's name: one ledger for the deployment. */
 const ledgerName = "deployment";
@@ -155,10 +169,15 @@ const admissionSchema = z.strictObject({
 /** A provider request to admit. */
 export type Admission = z.input<typeof admissionSchema>;
 
-/** Whether it was admitted, or which scope has no room. */
+/**
+ * Whether it was admitted, or which scope has no room. `heldUntil` tells
+ * a scope whose room is held only by requests still under way, which may
+ * settle for less than they reserved, from one whose spend leaves none:
+ * when the soonest of them comes due, in ms since the epoch.
+ */
 export type Admitted =
   | { ok: true }
-  | { ok: false; scope: LedgerScopeName }
+  | { ok: false; scope: LedgerScopeName; heldUntil?: number }
   /**
    * Its ID was admitted before, for another request or one no longer
    * open: refused, reserving nothing.
@@ -340,15 +359,20 @@ export class ModelLedger extends DurableObject<Env> {
           admission.actor
         );
       }
-      const full = rows.find(
+      const full = rows.filter(
         ({ scope, row }) =>
           scope.limitMicros !== null &&
           row.spentMicros + row.reservedMicros + admission.reservedMicros >
             scope.limitMicros
       );
-      if (full !== undefined) {
+      if (full.length > 0) {
         return {
-          admitted: { ok: false, scope: full.scope.scope } as const,
+          admitted: this.#refusal(
+            full,
+            admission.period,
+            admission.reservedMicros,
+            now
+          ),
           alerted: alertedNow,
         };
       }
@@ -778,6 +802,65 @@ export class ModelLedger extends DurableObject<Env> {
     if (times.length > 0) {
       await this.#alarmBy(Math.min(...times));
     }
+  }
+
+  /**
+   * Why a request of `bound` is refused by the scopes in `full`, each
+   * without room for it. Room comes back only from requests still under
+   * way (`dispatched`, not yet due): they settle at what they used, often
+   * far less than they hold. Every other reservation is as good as spent:
+   * a request whose usage was lost, or that is due, is charged in full,
+   * and a quarantined one waits for a person. A scope that has no room
+   * even once all those under way release theirs is out of budget; when
+   * every full scope would have room, the refusal says when the soonest
+   * request under way holding each comes due, the latest of those. Only a
+   * time: nothing of whose requests they are, or what they hold. Inside a
+   * transaction.
+   */
+  #refusal(
+    full: readonly {
+      scope: LedgerScope;
+      row: { spentMicros: number; reservedMicros: number };
+    }[],
+    period: string,
+    bound: number,
+    now: number
+  ): Admitted & { ok: false } {
+    let heldUntil = 0;
+    for (const { scope, row } of full) {
+      const underWay = this.#db
+        .select({
+          releasable: sql<number>`coalesce(sum(${requests.reservedMicros}), 0)`,
+          soonest: sql<number | null>`min(${requests.reconcileAt})`,
+        })
+        .from(requests)
+        .innerJoin(requestScopes, eq(requestScopes.requestId, requests.id))
+        .where(
+          and(
+            eq(requests.state, "dispatched"),
+            eq(requests.period, period),
+            gt(requests.reconcileAt, now),
+            eq(requestScopes.scope, scope.scope),
+            eq(requestScopes.key, scope.key)
+          )
+        )
+        .get();
+      const releasable = underWay?.releasable ?? 0;
+      const held = row.reservedMicros - releasable;
+      if (
+        underWay?.soonest === null ||
+        underWay?.soonest === undefined ||
+        row.spentMicros + held + bound > (scope.limitMicros ?? 0)
+      ) {
+        return { ok: false, scope: scope.scope };
+      }
+      heldUntil = Math.max(heldUntil, underWay.soonest);
+    }
+    const [first] = full;
+    if (first === undefined) {
+      throw new Error("A refusal needs a scope without room");
+    }
+    return { ok: false, scope: first.scope.scope, heldUntil };
   }
 
   /** The spend row of `scope` in `period`, or none spent yet. */

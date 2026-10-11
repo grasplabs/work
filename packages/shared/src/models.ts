@@ -11,6 +11,8 @@ export const modelErrors = defineErrorFamily({
     "This call carries sensitive data, and that model may not take it. Choose one this deployment allows for sensitive data.",
   "model.over_budget":
     "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
+  "model.budget_busy":
+    "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
   "model.unpriced":
     "What this model call would cost can't be bounded at known prices, so it wasn't sent. Choose another model, or send less.",
   "model.ledger_unavailable":
