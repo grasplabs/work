@@ -79,6 +79,19 @@ export const fieldExpression = (field: string): string => {
   return `(CASE json_type(value_json, '$.${field}') WHEN 'null' THEN ${nullSentinel} ELSE json_extract(value_json, '$.${field}') END)`;
 };
 
+/**
+ * The numeric value of declared field `field`, for an aggregate: its JSON
+ * number, and NULL for anything else (null, a field left out, a boolean,
+ * which SQLite would read as 0 or 1, or text). Throws for a name that
+ * isn't a declared field's.
+ */
+export const numberExpression = (field: string): string => {
+  if (Object.hasOwn(managedColumns, field) || !declaredField.test(field)) {
+    throw new Error("Only a declared field is aggregated");
+  }
+  return `(CASE WHEN json_type(value_json, '$.${field}') IN ('integer', 'real') THEN json_extract(value_json, '$.${field}') END)`;
+};
+
 /** A host-minted table ID: a UUID, as `crypto.randomUUID` makes them. */
 const tableIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;

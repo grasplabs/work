@@ -21,6 +21,7 @@ import { dataErrors, storedFieldsSchema } from "@grasp-os/shared/stores";
 import {
   fieldExpression,
   filterSql,
+  numberExpression,
   isManagedField,
   rangeSql,
   tableIdLiteral,
@@ -254,6 +255,23 @@ export interface ReadRow extends Record<string, SqlStorageValue> {
   updated_at: number;
 }
 
+/** Each union member's validator, made once per descriptor. */
+const validators = new WeakMap<
+  ValueDescriptor,
+  ReturnType<typeof schemaFromDescriptor>
+>();
+
+/** Whether `value` is valid under `descriptor`, as the SDK checks it. */
+const validates = (descriptor: ValueDescriptor, value: unknown): boolean => {
+  let schema = validators.get(descriptor);
+  if (schema === undefined) {
+    schema = schemaFromDescriptor(JSON.stringify(descriptor));
+    validators.set(descriptor, schema);
+  }
+  const checked = schema["~standard"].validate(value);
+  return !(checked instanceof Promise) && checked.issues === undefined;
+};
+
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -312,8 +330,11 @@ const projected = (value: unknown, descriptor: ValueDescriptor): unknown => {
       : value;
   }
   if (descriptor.kind === "union") {
-    // The first member of the value's shape whose projection validates;
-    // the first of its shape otherwise.
+    // The member the stored value itself fits, as the validator picks it
+    // (the first that validates), so a smaller member never drops fields
+    // of the one it was written as; failing that (it holds keys a later
+    // schema added), the first member whose projection validates, then
+    // the first of its shape.
     const candidates = descriptor.members.filter((member) =>
       shapeFits(value, member)
     );
@@ -321,12 +342,13 @@ const projected = (value: unknown, descriptor: ValueDescriptor): unknown => {
       const [only] = candidates;
       return only === undefined ? value : projected(value, only);
     }
+    const fitting = candidates.find((member) => validates(member, value));
+    if (fitting !== undefined) {
+      return projected(value, fitting);
+    }
     for (const member of candidates) {
       const projection = projected(value, member);
-      const checked = schemaFromDescriptor(JSON.stringify(member))[
-        "~standard"
-      ].validate(projection);
-      if (!(checked instanceof Promise) && checked.issues === undefined) {
+      if (validates(member, projection)) {
         return projection;
       }
     }
@@ -476,7 +498,7 @@ export const planQuery = (
     ...(filter === null ? [] : [`${filter.sql} AS matched`]),
     ...(aggregate === undefined
       ? []
-      : [`${fieldExpression(aggregate)} AS agg`]),
+      : [`${numberExpression(aggregate)} AS agg`]),
   ];
   const where = [
     `table_id = ${tableIdLiteral(table.tableId)}`,

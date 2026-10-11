@@ -823,3 +823,67 @@ describe("projection, at every depth", () => {
     });
   });
 });
+
+describe("projection of unions", () => {
+  it("projects a union to the member the stored value fits, never a smaller one", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const pinned = await store.defineTables(
+      memberNotes({
+        title: v.string(),
+        shape: v.union(
+          v.object({ a: v.string(), b: v.string().optional() }),
+          v.object({ a: v.string(), c: v.string() })
+        ),
+      })
+    );
+    const fixture: Fixture = {
+      store,
+      schemaHash: pinned.schemaHash,
+      text: "",
+      tableId: pinned.tables.notes ?? "",
+    };
+    await insertMany(fixture, 1, {
+      title: "fits second",
+      shape: { a: "x", c: "y" },
+    });
+    await insertMany(
+      fixture,
+      1,
+      { title: "fits first", shape: { a: "x", b: "z" } },
+      "grace"
+    );
+    // A later schema's key beside the second member's: none validates as
+    // stored, so the first whose projection validates.
+    await insertMany(
+      fixture,
+      1,
+      { title: "later key", shape: { a: "x", c: "y", d: "later" } },
+      "lin"
+    );
+    const answer = await store.read(
+      scopeOf(pinned.schemaHash),
+      queryRequest({})
+    );
+    const shapes = Object.fromEntries(
+      (Array.isArray(answer) ? answer : []).map((note) => [
+        String(fieldOf(note, "title")),
+        fieldOf(note, "shape"),
+      ])
+    );
+    expect(shapes).toStrictEqual({
+      "fits second": { a: "x", c: "y" },
+      "fits first": { a: "x", b: "z" },
+      "later key": { a: "x" },
+    });
+  });
+
+  it("aggregate numbers only, never a boolean stored where a number belongs", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertMany(fixture, 1, { title: "a", rank: 2 });
+    await insertMany(fixture, 1, { title: "b", rank: true }, "grace");
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    await expect(
+      db.query("notes").aggregate({ operation: "sum", field: "rank" })
+    ).resolves.toBe(2);
+  });
+});

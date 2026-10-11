@@ -179,6 +179,8 @@ const indexRequired = <Answer>(read: () => Answer): Answer => {
       dataErrors.codeOf(error) === undefined &&
       /no such index/u.test(error.message)
     ) {
+      // A store whose indexes don't match its schemas needs looking at.
+      log.error("store.index_missing", errorFields(error));
       throw dataErrors.create("data.index_required");
     }
     throw error;
