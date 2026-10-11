@@ -352,7 +352,8 @@ const publicOperation = (
  * `args` as the function's `args` normalize them, read as JSON and bounded:
  * measured as they are read, so input past the limit costs no more than
  * the limit to refuse. The bytes a call carries over the wire, before any
- * of this, are bounded where calls enter core (GRA-245).
+ * of this, are bounded where calls enter core, as text, before they are
+ * parsed (`callAppFunction`, app-functions.ts).
  */
 const admittedArgs = (
   compiled: Compiled,
