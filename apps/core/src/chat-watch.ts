@@ -54,11 +54,17 @@ export const partialUpdate = (
   };
 };
 
-/** What `now` adds to the running step's output the watcher has (`shown`). */
+/**
+ * What `now` adds to the running step's output the watcher has (`shown`):
+ * `undefined` when nothing changed.
+ */
 export const outputUpdate = (
   shown: ChatOutput | null,
   now: ChatOutput | null
-): ChatOutputUpdate | null => {
+): ChatOutputUpdate | null | undefined => {
+  if (shown?.callId === now?.callId && shown?.text === now?.text) {
+    return undefined;
+  }
   if (now === null) {
     return null;
   }
@@ -67,6 +73,15 @@ export const outputUpdate = (
     now.text
   );
   return { callId: now.callId, from, text: added };
+};
+
+/** The update's `output` field: there only when the output changed. */
+const outputChange = (
+  shown: ChatOutput | null,
+  now: ChatOutput | null
+): Pick<ChatUpdate, "output"> => {
+  const change = outputUpdate(shown, now);
+  return change === undefined ? {} : { output: change };
 };
 
 /**
@@ -128,7 +143,7 @@ export class ChatWatch {
     const update: ChatUpdate = {
       messages: this.#unsent.splice(0),
       partial: partialUpdate(this.#shown, partial),
-      output: outputUpdate(this.#shownOutput, output),
+      ...outputChange(this.#shownOutput, output),
       running,
       stopped,
       held,

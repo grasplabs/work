@@ -189,12 +189,16 @@ export interface ChatOutputUpdate {
 
 /**
  * The running step's output, as the watcher had it (`shown`), with an
- * update's change applied; `null` while no step runs.
+ * update's change applied (none when the update leaves it out); `null`
+ * while no step runs.
  */
 export const applyOutput = (
   shown: ChatOutput | null,
-  update: ChatOutputUpdate | null
+  update: ChatOutputUpdate | null | undefined
 ): ChatOutput | null => {
+  if (update === undefined) {
+    return shown;
+  }
   if (update === null) {
     return null;
   }
@@ -220,9 +224,10 @@ export interface ChatUpdate {
   partial: ChatPartialUpdate | null;
   /**
    * What the code step running now logged since (`applyOutput`); `null`
-   * while none runs. Its result replaces it once the step ends.
+   * while none runs, and left out when it didn't change. Its result
+   * replaces it once stored.
    */
-  output: ChatOutputUpdate | null;
+  output?: ChatOutputUpdate | null;
   /** Whether the agent is working on a question. */
   running: boolean;
   /** The chat's provenance: in the first update, and whenever it changes. */

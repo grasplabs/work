@@ -2034,8 +2034,54 @@ describe("chat agent code run leases", () => {
   });
 });
 
+/**
+ * Follows a chat's running step output as the page does: every update's
+ * output so far, whether it carried a step's result, and the latest.
+ */
+const watchOutput = async (
+  stub: WorkspaceStub,
+  chatId: string,
+  personId: string
+) => {
+  let output: ChatOutput | null = null;
+  const seen: { output: ChatOutput | null; result: boolean }[] = [];
+  await stub.watch(chatId, personId, null, async (update: ChatUpdate) => {
+    output = applyOutput(output, update.output);
+    seen.push({
+      output,
+      result: update.messages.some(({ role }) => role === "result"),
+    });
+    await Promise.resolve();
+  });
+  return { seen, latest: () => seen.at(-1)?.output ?? null };
+};
+
+/**
+ * A chat whose agent an admin granted something, running `code` once,
+ * and `revoke`, which revokes it.
+ */
+const grantedChat = async (code: string) => {
+  const admin = await signedInApi(idp, "admin");
+  const { collectionId } = await collectionWithNote(admin.api, {
+    name: `Handbook ${crypto.randomUUID()}`,
+    access: "everyone",
+  });
+  const chat = await newChat(codeStep(code), says("Done."));
+  const permission = await requestGranted(
+    idp,
+    admin,
+    readCollection(chat.agent, collectionId, "HANDBOOK")
+  );
+  return {
+    ...chat,
+    revoke: async () => {
+      await admin.api.permissions.revoke(permission);
+    },
+  };
+};
+
 describe("chat agent code output", () => {
-  it("streams what the code logs to the chat before its step ends, redacted, and drops it once the step ends", async () => {
+  it("streams what the code logs to the chat before its step ends, redacted, and drops it once the step's result is stored", async () => {
     const { stub, chat, personId, ask } = await newChat(
       codeStep(
         "export default async () => { console.log('first'); console.log('key Bearer abcdefghijklmnopqrstuvwxyz0123'); await scheduler.wait(1_500); console.log('after the wait'); return 'done'; };"
@@ -2066,10 +2112,6 @@ describe("chat agent code output", () => {
       callId,
       text: "first\nkey [redacted]",
     });
-    expect(before).toContainEqual({
-      callId,
-      text: "first\nkey [redacted]\nafter the wait",
-    });
     // What the model reads is redacted the same way.
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
       {
@@ -2091,10 +2133,101 @@ describe("chat agent code output", () => {
     expect(seen.slice(shown).some((step) => step.output !== null)).toBeFalsy();
   });
 
+  it("streams nothing a run logs after a revocation, even with no call to notice it", async () => {
+    const { stub, chat, personId, ask, revoke } = await grantedChat(
+      "export default async () => { console.log('before'); await scheduler.wait(2_500); console.log('after the revoke'); await scheduler.wait(2_500); return 'done'; };"
+    );
+    const { seen, latest } = await watchOutput(stub, chat.id, personId);
+
+    const reply = ask("Log it.");
+    await vi.waitFor(
+      () => {
+        expect(latest()?.text).toBe("before");
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    await revoke();
+    await reply;
+
+    expect(
+      seen.some(
+        ({ output }) => output?.text.includes("after the revoke") === true
+      )
+    ).toBeFalsy();
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "revoked",
+    ]);
+    expect(seen.at(-1)?.output ?? null).toBeNull();
+  });
+
+  it("drops what a run showed once a call of its finds a revocation", async () => {
+    const { stub, chat, personId, ask, revoke } = await grantedChat(
+      "export default async (self, env) => { console.log('shown'); await scheduler.wait(2_500); try { await env.chat.info(); } catch {} await scheduler.wait(1_000); return 'done'; };"
+    );
+    const { seen, latest } = await watchOutput(stub, chat.id, personId);
+
+    const reply = ask("Log, then look.");
+    await vi.waitFor(
+      () => {
+        expect(latest()?.text).toBe("shown");
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    await revoke();
+    await reply;
+
+    // Gone before the step's result came: with the refused call, not after.
+    const shownAt = seen.findIndex(({ output }) => output?.text === "shown");
+    const resultAt = seen.findIndex(({ result }) => result);
+    expect(
+      seen.slice(shownAt, resultAt).some(({ output }) => output === null)
+    ).toBeTruthy();
+  });
+
+  it("redacts a private key the code logs line by line, in the chat and for the model", async () => {
+    const { stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { for (const line of ['-----BEGIN PRIVATE KEY-----', 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC', 'BKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj', '-----END PRIVATE KEY-----', 'done']) { console.log(line); await scheduler.wait(1_100); } };"
+      ),
+      says("Done.")
+    );
+    const { seen } = await watchOutput(stub, chat.id, personId);
+
+    await ask("Log it.");
+
+    const streamed = seen.flatMap(({ output }) =>
+      output === null ? [] : [output.text]
+    );
+    expect(streamed.length).toBeGreaterThan(0);
+    expect(streamed.some((text) => /MIIE|BKcw/u.test(text))).toBeFalsy();
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      { isError: false, text: "Logs:\n[redacted]\ndone" },
+    ]);
+  });
+
+  it("takes no more lines of a run than one may log, whatever is sent", async () => {
+    const { stub, chat, personId } = await newChat();
+    const chatId = chatIdSchema.parse(chat.id);
+    const run = await stub.openCodeRun(chatId, testRunOpening);
+    const { latest } = await watchOutput(stub, chat.id, personId);
+
+    for (let line = 0; line < codeLimits.logLines + 500; line += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, as a run sends them
+      await stub.codeRunOutput(chatId, run, "call_test", `line ${line}`);
+    }
+
+    await vi.waitFor(
+      () => {
+        expect(latest()?.text.split("\n")).toHaveLength(codeLimits.logLines);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+  });
+
   it("shares one output budget between logs and result, and keeps room for how the run ended", async () => {
     const { stub, chat, personId, ask } = await newChat(
       codeStep(
-        "export default async () => { for (let i = 0; i < 5_000; i++) console.log('é'.repeat(200)); throw new Error('the end'); };"
+        "export default async () => { for (let i = 0; i < 5_000; i++) console.log('é'.repeat(200)); await scheduler.wait(1_500); throw new Error('the end'); };"
       ),
       says("Done.")
     );
@@ -2128,12 +2261,37 @@ describe("chat agent code output", () => {
       redacted: redact(
         "Authorization: Bearer abcdefghijklmnop1234 key sk-abcdefghijklmnop1234 jwt eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2Q aws AKIAABCDEFGHIJKLMNOP plain words"
       ),
+      // Put together here, so the repository holds no token-shaped text.
+      more: [
+        ["sk_", "live_abcdefghij1234"].join(""),
+        ["rk_", "test_abcdefghij1234"].join(""),
+        ["ghp", "_abcdefghijklmnopqrstuvwxyz0123"].join(""),
+        ["github", "_pat_abcdefghijklmnopqrstuv_0123"].join(""),
+        ["xo", "xb-1234567890-abcdefghij"].join(""),
+        ["AI", "zaSyA1234567890abcdefghijklmnopqrstuv"].join(""),
+        "api_key=abc123",
+        'password: "hunter2"',
+        "token=xyz",
+        "the secret is safe",
+      ].map(redact),
     }).toStrictEqual({
       cut: "éé",
       short: "abc",
       emoji: "😀",
       redacted:
         "Authorization: [redacted] key [redacted] jwt [redacted] aws [redacted] plain words",
+      more: [
+        "[redacted]",
+        "[redacted]",
+        "[redacted]",
+        "[redacted]",
+        "[redacted]",
+        "[redacted]",
+        "api_key=[redacted]",
+        'password: "[redacted]"',
+        "token=[redacted]",
+        "the secret is safe",
+      ],
     });
   });
 });

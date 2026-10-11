@@ -569,25 +569,45 @@ export const cutToBytes = (text: string, bytes: number): string => {
 export const cutMarker = `\n… (cut: over ${codeLimits.outputBytes} bytes of output)`;
 
 /**
- * Credentials as text that could only leak through output: bearer and
- * basic authorization values, provider API keys, JSON Web Tokens, private
- * keys, and AWS access keys. A run holds no secret of its own; these are
- * caught in case an outside system's data carries one. Applied to every
- * line before it streams to the chat, and to what the model reads.
+ * Credentials as text that could only leak through output, each with what
+ * it becomes. Covered: bearer and basic authorization values; Stripe keys
+ * (`sk_`, `pk_`, `rk_` live and test); `sk-`, `pk-` and `rk-` style
+ * provider keys; GitHub tokens (`ghp_`, `gho_`, `ghs_`, `ghu_`, `ghr_`,
+ * `github_pat_`); Slack tokens (`xoxa-`, `xoxb-`, `xoxp-`, `xoxr-`);
+ * Google API keys (`AIza`); JSON Web Tokens; PEM private keys, an
+ * unfinished block to the end of the text; AWS access key IDs; and the
+ * value of an `api_key`, `apikey`, `token`, `secret`, `password` or
+ * `authorization` written as `name=value` or `name: value`. Anything else
+ * shaped like a secret is not caught: this is a net for what an outside
+ * system's data may carry, not a guarantee (a run holds no secret of its
+ * own). Applied to what streams to the chat and to what the model reads,
+ * over the whole text, so a credential split across lines is caught.
  */
-const credentials = [
-  /\b(?:bearer|basic)\s+[\w\-.~+/]{16,}=*/giu,
-  /\b(?:sk|pk|rk)-[\w-]{16,}/gu,
-  /\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/gu,
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/gu,
-  /\bAKIA[0-9A-Z]{16}\b/gu,
+const credentials: readonly (readonly [RegExp, string])[] = [
+  [
+    /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/gu,
+    "[redacted]",
+  ],
+  [/\b(?:bearer|basic)\s+[\w\-.~+/]{16,}=*/giu, "[redacted]"],
+  [/\b(?:sk|pk|rk)_(?:live|test)_[0-9A-Za-z]{10,}/gu, "[redacted]"],
+  [/\b(?:sk|pk|rk)-[\w-]{16,}/gu, "[redacted]"],
+  [/\b(?:ghp|gho|ghs|ghu|ghr)_[0-9A-Za-z]{20,}/gu, "[redacted]"],
+  [/\bgithub_pat_[0-9A-Za-z_]{20,}/gu, "[redacted]"],
+  [/\bxox[abpr]-[0-9A-Za-z-]{10,}/gu, "[redacted]"],
+  [/\bAIza[0-9A-Za-z_-]{35}/gu, "[redacted]"],
+  [/\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/gu, "[redacted]"],
+  [/\bAKIA[0-9A-Z]{16}\b/gu, "[redacted]"],
+  [
+    /\b(?<name>api[_-]?key|apikey|token|secret|password|authorization)(?<between>["']?\s*[:=]\s*["']?)(?!\[redacted\])[^\s"'&,;]+/giu,
+    "$<name>$<between>[redacted]",
+  ],
 ];
 
-/** `text` with every credential in it replaced by `[redacted]`. */
+/** `text` with every credential in it ({@link credentials}) redacted. */
 export const redact = (text: string): string => {
   let redacted = text;
-  for (const pattern of credentials) {
-    redacted = redacted.replace(pattern, "[redacted]");
+  for (const [pattern, replacement] of credentials) {
+    redacted = redacted.replace(pattern, replacement);
   }
   return redacted;
 };

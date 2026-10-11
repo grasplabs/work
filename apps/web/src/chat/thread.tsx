@@ -124,7 +124,7 @@ const CodeStep = ({
           </pre>
         </section>
         {result !== undefined || output === undefined ? null : (
-          <section aria-live="polite" className="flex flex-col gap-2">
+          <section className="flex flex-col gap-2">
             <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
               <Trans>Output</Trans>
             </h4>

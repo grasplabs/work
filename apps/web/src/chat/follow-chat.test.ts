@@ -18,7 +18,6 @@ const question = (id: number, text: string): ChatMessage => ({
 const update = (changes: Partial<ChatUpdate> = {}): ChatUpdate => ({
   messages: [],
   partial: null,
-  output: null,
   running: false,
   stopped: null,
   held: 0,
@@ -83,16 +82,20 @@ describe("a chat as the page shows it", () => {
       grown,
       update({ output: { callId: "b", from: 0, text: "three" } })
     );
-    const done = applyUpdate(other, update({ output: null }));
+    const kept = applyUpdate(other, update({ output: undefined }));
+    const done = applyUpdate(kept, update({ output: null }));
 
     expect([
       first.output,
       grown.output,
       other.output,
+      kept.output,
       done.output,
     ]).toStrictEqual([
       { callId: "a", text: "one" },
       { callId: "a", text: "one\ntwo" },
+      { callId: "b", text: "three" },
+      // An update that leaves it out leaves it as it was.
       { callId: "b", text: "three" },
       null,
     ]);
