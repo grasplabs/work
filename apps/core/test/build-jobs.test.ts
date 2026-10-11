@@ -14,6 +14,7 @@ import {
   codeResults,
   codeStep,
   model,
+  openTestRun,
   pausedReply,
   pointAtGateway,
   says,
@@ -183,6 +184,34 @@ const slowTestResults = (ms: number): typeof env.FILES => {
     },
   });
   return files;
+};
+
+/** A commit storing a version's files: no code run commits. */
+const storedTrees = (method: string, key: unknown): boolean =>
+  method === "put" && typeof key === "string" && key.includes("/trees/");
+
+/**
+ * Writes the chat's draft of `app` from a run of its own, as the chat's
+ * code would in another step: a new revision of the draft.
+ */
+const writtenMeanwhile = async (
+  stub: WorkspaceStub,
+  chatId: string,
+  app: string
+): Promise<void> => {
+  const id = chatIdSchema.parse(chatId);
+  const draft = await stub.draft(id, app);
+  const run = await openTestRun(stub, id);
+  const saved = await stub.saveDraft(
+    id,
+    app,
+    draft.base,
+    { ...draft.changes, "screens/note.tsx": desk },
+    [],
+    draft.revision,
+    run
+  );
+  expect(saved).toBeTruthy();
 };
 
 /** A job's check, building the draft's screens: no code run builds them. */
@@ -837,6 +866,131 @@ describe("build jobs", { timeout: 180_000 }, () => {
       code: "permission.restricted",
       versions: [],
     });
+  });
+
+  it("commits nothing when its person stops building the App while its files are stored", async () => {
+    const other = await signedInApi(idp, "builder");
+    const { id: shared } = await other.api.apps.create({ name: "Shared" });
+    const { builder, chat } = await setUp([
+      codeStep(`export default async (self, env) => {
+        await env.build.write(${JSON.stringify(shared)}, ${JSON.stringify({ "screens/desk.tsx": desk })});
+        return await env.build.submit(${JSON.stringify(shared)}, { kind: "propose", message: "A desk" });
+      };`),
+      says("Submitted."),
+    ]);
+    await other.api.apps.members.add(shared, {
+      type: "person",
+      id: builder.userId,
+      role: "builder",
+    });
+    const storing = holdFiles(storedTrees);
+    let job: z.infer<typeof jobRowSchema>;
+    try {
+      await chat.ask("Propose the shared App");
+      job = await submittedJob(chat.stub, chat.chat.id);
+      await storing.reached();
+      await other.api.apps.members.add(shared, {
+        type: "person",
+        id: builder.userId,
+        role: "user",
+      });
+    } finally {
+      storing.restore();
+    }
+    const ended = await endedJob(chat.stub, chat.chat.id, job.id);
+    const versions = await other.api.apps.versions.list(shared);
+    expect({
+      status: ended.status,
+      version: ended.version,
+      code: errorCode(ended.error),
+      versions,
+    }).toStrictEqual({
+      status: "failed",
+      version: null,
+      code: "role.forbidden",
+      versions: [],
+    });
+  });
+
+  it("commits nothing when its chat turns restricted while its files are stored", async () => {
+    const { builder, chat } = await setUp([
+      codeStep(submitProposal),
+      says("Submitted."),
+    ]);
+    const storing = holdFiles(storedTrees);
+    let job: z.infer<typeof jobRowSchema>;
+    try {
+      await chat.ask("Build an invoice desk for invoices@");
+      job = await submittedJob(chat.stub, chat.chat.id);
+      await storing.reached();
+      await chat.stub.restrictChat(chat.chat.id);
+    } finally {
+      storing.restore();
+    }
+    const ended = await endedJob(chat.stub, chat.chat.id, job.id);
+    const { versions } = await createdApp(builder);
+    expect({
+      status: ended.status,
+      code: errorCode(ended.error),
+      versions,
+    }).toStrictEqual({
+      status: "failed",
+      code: "permission.restricted",
+      versions: [],
+    });
+  });
+
+  it("fails a check whose draft was written while it checked, with a conflict", async () => {
+    const { builder, chat } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": desk })});
+        return await env.build.submit(app.id, { kind: "check" });
+      };`),
+      says("Submitted."),
+    ]);
+    const checking = holdFiles(screenBuilds);
+    let job: z.infer<typeof jobRowSchema>;
+    try {
+      await chat.ask("Check an invoice desk");
+      job = await submittedJob(chat.stub, chat.chat.id);
+      await checking.reached();
+      const { app } = await createdApp(builder);
+      await writtenMeanwhile(chat.stub, chat.chat.id, app.id);
+    } finally {
+      checking.restore();
+    }
+    const ended = await endedJob(chat.stub, chat.chat.id, job.id);
+    expect({
+      status: ended.status,
+      result: ended.result,
+      code: errorCode(ended.error),
+    }).toStrictEqual({ status: "failed", result: null, code: "app.conflict" });
+  });
+
+  it("commits nothing when its draft is written while its files are stored", async () => {
+    const { builder, chat } = await setUp([
+      codeStep(submitProposal),
+      says("Submitted."),
+    ]);
+    const storing = holdFiles(storedTrees);
+    let job: z.infer<typeof jobRowSchema>;
+    try {
+      await chat.ask("Build an invoice desk for invoices@");
+      job = await submittedJob(chat.stub, chat.chat.id);
+      await storing.reached();
+      const { app } = await createdApp(builder);
+      await writtenMeanwhile(chat.stub, chat.chat.id, app.id);
+    } finally {
+      storing.restore();
+    }
+    const ended = await endedJob(chat.stub, chat.chat.id, job.id);
+    const { versions } = await createdApp(builder);
+    expect({
+      status: ended.status,
+      code: errorCode(ended.error),
+      versions,
+    }).toStrictEqual({ status: "failed", code: "app.conflict", versions: [] });
   });
 
   it("reads as none to another chat's code", async () => {

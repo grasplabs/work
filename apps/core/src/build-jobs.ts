@@ -86,7 +86,12 @@ import type { BuildJob, Draft } from "./workspace.ts";
 // - Another chat's job, or a guessed ID: a job's ID is random, and every
 //   read and admission is the chat's own; another's reads as none.
 // - A draft written after the job was submitted: the job is bound to the
-//   draft's revision then, and fails with `app.conflict` once it changed.
+//   draft's revision then, and fails with `app.conflict` once it changed,
+//   read again after a check and right before a commit, so a write made
+//   while either ran is never covered by a result for older files.
+// - Rights lost while it commits: the person's build rights for the App
+//   and restricted mode are checked again right before the commit lands,
+//   not only revocations of the agent's permissions.
 // - The repair loop: each job takes one of its draft's checks this turn,
 //   as an in-call check does, and settles it as it ends (workspace.ts), so
 //   jobs can't get the agent past the checks failed in a row it may make.
@@ -301,6 +306,8 @@ const checkStep = async (env: Env, step: JobStep): Promise<Checked> => {
       draft,
       Object.fromEntries(files)
     );
+    // A check of files the draft no longer has says nothing of it.
+    await submittedDraft(env, step);
     return {
       // The checks failed in a row are settled as the job ends, and set
       // in its result then (workspace.ts).
@@ -320,6 +327,7 @@ const checkStep = async (env: Env, step: JobStep): Promise<Checked> => {
     Object.fromEntries(over.files)
   );
   const { tree } = await versionTree(over.files);
+  await submittedDraft(env, step);
   return {
     check: { ...check, failedInARow: 0, maxFailedChecks },
     over: { parent: over.parent, tree },
@@ -359,7 +367,8 @@ const reconcileReceipt = async (
 /**
  * Commits the job's draft as the App's next version, pending review, as
  * `env.build.propose` does once its check passed: admitted right before
- * it commits, and once only. A version it recorded it was about to commit
+ * it commits (authorized again, the draft still at its revision, and the
+ * job still open), and once only. A version it recorded it was about to commit
  * and did is its receipt: a commit run again takes it, rather than making
  * another. The tests its check ran are kept with the version, and the
  * draft's revision is dropped.
@@ -400,7 +409,12 @@ const commitStep = async (
       app,
       over,
       job.message,
+      // Right before it commits, after storing its files: the person
+      // still builds the App, the chat isn't restricted, the draft is
+      // still the one checked, and the job may still act.
       async () => {
+        await authorize(env, scope, job);
+        await submittedDraft(env, step);
         await admitJob(env, scope, job.id);
       }
     );
