@@ -264,6 +264,50 @@ const reviewScreens = async (
 };
 
 /**
+ * Brings an engine seeded before it had its apps, or with older ones, to
+ * the seed's screens, as its next version made current. Only the seed's
+ * own change is made current: a later version that holds exactly the
+ * current one plus the seed's screens (a seed stopped before making it
+ * current) is reused; one with anyone else's changes is left alone, and
+ * so is the engine, as committing over it would release them.
+ */
+const upgradeScreens = async (
+  owner: Session,
+  adminSession: Session,
+  app: { id: string; name: string; currentVersion: number | null },
+  screens: Readonly<Record<string, string>>
+): Promise<void> => {
+  const current = app.currentVersion ?? undefined;
+  const files = await owner.api.apps.files.read(app.id, current);
+  const changed = Object.fromEntries(
+    Object.entries(screens).filter(([path, code]) => files[path] !== code)
+  );
+  if (Object.keys(changed).length === 0) {
+    return;
+  }
+  const [latest] = await owner.api.apps.versions.list(app.id);
+  if (latest !== undefined && latest.version !== current) {
+    const later = await owner.api.apps.files.read(app.id, latest.version);
+    const upgraded = { ...files, ...screens };
+    const paths = new Set([...Object.keys(later), ...Object.keys(upgraded)]);
+    if ([...paths].some((path) => later[path] !== upgraded[path])) {
+      console.warn(
+        `${app.name} has a version that isn't current, with changes of its own: its apps are left as they are.`
+      );
+      return;
+    }
+    await adminSession.api.apps.versions.setCurrent(app.id, latest.version);
+    return;
+  }
+  const { version } = await owner.api.apps.files.commit(
+    app.id,
+    changed,
+    "Add the engine's apps"
+  );
+  await adminSession.api.apps.versions.setCurrent(app.id, version);
+};
+
+/**
  * An engine: created by its owner with its workflows and apps, its version
  * made current by an admin, its apps approved where the seed says so,
  * shared with its teams, its deciders set, and, while it has none, its
@@ -305,27 +349,8 @@ const seedEngine = async (
     );
     // An admin makes it current, which approves its code.
     await adminSession.api.apps.versions.setCurrent(app.id, version);
-  } else {
-    // An engine seeded before it had its apps, or with older ones, gets
-    // them as its next version: over its latest version, which a seed
-    // stopped before making it current may have committed already.
-    const [latest] = await owner.api.apps.versions.list(app.id);
-    const version = latest?.version ?? app.currentVersion;
-    const files = await owner.api.apps.files.read(app.id, version);
-    const changed = Object.fromEntries(
-      Object.entries(screens).filter(([path, code]) => files[path] !== code)
-    );
-    let current = version;
-    if (Object.keys(changed).length > 0) {
-      ({ version: current } = await owner.api.apps.files.commit(
-        app.id,
-        changed,
-        "Add the engine's apps"
-      ));
-    }
-    if (current !== app.currentVersion) {
-      await adminSession.api.apps.versions.setCurrent(app.id, current);
-    }
+  } else if (Object.keys(screens).length > 0) {
+    await upgradeScreens(owner, adminSession, app, screens);
   }
   if (Object.keys(screens).length > 0) {
     await reviewScreens(adminSession, app.id, approvedScreens.has(seed.name));
