@@ -297,6 +297,7 @@ const seedEngine = async (
   }
   const runs = await seedRuns({
     app: app.id,
+    engine: seed.name,
     workflows: seed.workflows,
     sessions,
     db: core,

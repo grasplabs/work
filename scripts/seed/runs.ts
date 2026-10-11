@@ -276,16 +276,19 @@ const backdate = (
 };
 
 /**
- * Starts every workflow's runs on `app`, answers the decisions the plans
- * answer, and moves them all back in time. Returns how many it started.
+ * Starts every workflow's runs on `app`, the engine `engine`, answers the
+ * decisions the plans answer, and moves them all back in time. Returns
+ * how many it started.
  */
 export const seedRuns = async ({
   app,
+  engine,
   workflows,
   sessions,
   db,
 }: {
   app: string;
+  engine: string;
   workflows: readonly WorkflowSeed[];
   sessions: ReadonlyMap<PersonKey, Session>;
   db: DatabaseSync;
@@ -299,7 +302,8 @@ export const seedRuns = async ({
   };
   const now = Date.now();
   const planned = workflows.flatMap((workflow) => {
-    const draw = drawFor(`${app}:${workflow.id}`);
+    // By name, not ID: the same runs on every new stack.
+    const draw = drawFor(`${engine}:${workflow.id}`);
     const plans = workflow.runs(draw);
     const times = startTimes(workflow, plans, draw, now);
     return plans.map((plan, index) => ({
