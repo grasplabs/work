@@ -75,11 +75,21 @@ export const outputUpdate = (
   return { callId: now.callId, from, text: added };
 };
 
-/** The update's `output` field: there only when the output changed. */
+/**
+ * The update's `output` field: the whole output (`null` too) in a watch's
+ * first update, which the page may apply over what an earlier watch left
+ * it (after a reconnect, say); after that, there only when it changed.
+ */
 const outputChange = (
-  shown: ChatOutput | null,
+  shown: ChatOutput | null | undefined,
   now: ChatOutput | null
 ): Pick<ChatUpdate, "output"> => {
+  if (shown === undefined) {
+    return {
+      output:
+        now === null ? null : { callId: now.callId, from: 0, text: now.text },
+    };
+  }
   const change = outputUpdate(shown, now);
   return change === undefined ? {} : { output: change };
 };
@@ -103,8 +113,8 @@ export class ChatWatch {
   readonly #unsent: ChatMessage[] = [];
   /** The response being written, as this watcher has it. */
   #shown: ChatPartial | null = null;
-  /** The running step's output, as this watcher has it. */
-  #shownOutput: ChatOutput | null = null;
+  /** The running step's output, as this watcher has it; `undefined` before its first update. */
+  #shownOutput: ChatOutput | null | undefined = undefined;
   /** The provenance version this watcher has; none at first. */
   #provenanceSent: number | undefined;
   /** Something changed since the last update went out. */

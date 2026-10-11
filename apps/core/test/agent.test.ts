@@ -2272,6 +2272,49 @@ describe("chat agent code output", () => {
     ]);
   });
 
+  it("redacts whole credential values in what streams and in what is kept", async () => {
+    const { stub, chat, personId, ask } = await newChat(
+      codeStep(
+        `export default async () => { console.log("authorization: Basic dXNlcjpwYXNz"); console.log('password: "correct horse battery staple"'); await scheduler.wait(1_500); return 'done'; };`
+      ),
+      says("Done.")
+    );
+    const { seen } = await watchOutput(stub, chat.id, personId);
+
+    await ask("Log it.");
+
+    const streamed = seen.flatMap(({ output }) =>
+      output === null ? [] : [output.text]
+    );
+    expect(streamed).toContain(
+      'authorization: [redacted]\npassword: "[redacted]"'
+    );
+    expect(
+      streamed.some((text) => /dXNlcjpwYXNz|horse|battery/u.test(text))
+    ).toBeFalsy();
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      {
+        isError: false,
+        text: 'Logs:\nauthorization: [redacted]\npassword: "[redacted]"\n\nReturned:\ndone',
+      },
+    ]);
+  });
+
+  it("tells a new watch what output there is in its first update, none included", async () => {
+    const { stub, chat, personId } = await newChat();
+    const first = Promise.withResolvers<ChatUpdate>();
+    await stub.watch(chat.id, personId, null, async (update: ChatUpdate) => {
+      first.resolve(update);
+      await Promise.resolve();
+    });
+
+    // Explicitly none, so a page that had output from an earlier watch
+    // (before a reconnect) drops it, rather than keep it as unchanged.
+    const update = await first.promise;
+    expect(Object.hasOwn(update, "output")).toBeTruthy();
+    expect(update.output).toBeNull();
+  });
+
   it("takes no more lines of a run than one may log, whatever is sent", async () => {
     const { stub, chat, personId } = await newChat();
     const chatId = chatIdSchema.parse(chat.id);
@@ -2283,13 +2326,61 @@ describe("chat agent code output", () => {
       await stub.codeRunOutput(chatId, run, "call_test", `line ${line}`);
     }
 
+    // Every line it may log, then the marker that more was cut.
     await vi.waitFor(
       () => {
-        expect(latest()?.text.split("\n")).toHaveLength(codeLimits.logLines);
+        const text = latest()?.text ?? "";
+        expect(text.endsWith(cutMarker)).toBeTruthy();
+        expect(text.slice(0, -cutMarker.length).split("\n")).toHaveLength(
+          codeLimits.logLines
+        );
       },
       { timeout: 10_000, interval: 100 }
     );
   });
+
+  it.each([
+    ["a character of three bytes", "漢".repeat(65_536)],
+    ["a character of four bytes", "😀".repeat(40_000)],
+  ])(
+    "shows what fits of a line too large for its bytes, %s, never half a character, and says it was cut",
+    async (_, line) => {
+      const { stub, chat, personId } = await newChat();
+      const chatId = chatIdSchema.parse(chat.id);
+      const run = await stub.openCodeRun(chatId, testRunOpening);
+      const { latest } = await watchOutput(stub, chat.id, personId);
+
+      await stub.codeRunOutput(chatId, run, "call_test", line);
+      await stub.codeRunOutput(chatId, run, "call_test", "after the cut");
+
+      await vi.waitFor(
+        () => {
+          expect(latest()?.text.endsWith(cutMarker)).toBeTruthy();
+        },
+        { timeout: 10_000, interval: 100 }
+      );
+      const text = latest()?.text ?? "";
+      const shown = text.slice(0, -cutMarker.length);
+      expect({
+        prefix: line.startsWith(shown),
+        some: shown.length > 1000,
+        loneSurrogate:
+          /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(
+            shown
+          ),
+        within:
+          utf8Bytes(text) <=
+          codeLimits.outputBytes - codeLimits.diagnosticBytes,
+        after: text.includes("after the cut"),
+      }).toStrictEqual({
+        prefix: true,
+        some: true,
+        loneSurrogate: false,
+        within: true,
+        after: false,
+      });
+    }
+  );
 
   it("shares one output budget between logs and result, and keeps room for how the run ended", async () => {
     const { stub, chat, personId, ask } = await newChat(
@@ -2320,6 +2411,26 @@ describe("chat agent code output", () => {
     }).toStrictEqual({ within: true, cut: true, ending: true, streamed: true });
   });
 
+  it("redacts a whole credential value: a short Basic one, and a quoted one with spaces", () => {
+    expect(
+      [
+        "authorization: Basic dXNlcjpwYXNz",
+        "Authorization: Basic YQ==",
+        'password: "correct horse battery staple"',
+        "secret='two words' and more",
+        '{"password":"a b c","user":"ann"}',
+        'token: "never closed',
+      ].map(redact)
+    ).toStrictEqual([
+      "authorization: [redacted]",
+      "Authorization: [redacted]",
+      'password: "[redacted]"',
+      "secret='[redacted]' and more",
+      '{"password":"[redacted]","user":"ann"}',
+      'token: "[redacted]',
+    ]);
+  });
+
   it("redacts adversarial floods of every credential shape in linear time", () => {
     const units = [
       "eyJ-",
@@ -2334,6 +2445,9 @@ describe("chat agent code output", () => {
       "AIza-",
       "AKIA",
       "token:",
+      'password: "',
+      "secret='\\",
+      "authorization: Basic ",
       "-----BEGIN PRIVATE KEY-----",
     ];
     const slowest = Math.max(

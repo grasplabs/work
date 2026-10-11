@@ -345,6 +345,12 @@ interface RunOutput {
   timer: ReturnType<typeof setTimeout> | undefined;
   /** The run ended: no more lines, what is shown stays until its result. */
   ended: boolean;
+  /**
+   * How many lines there were once core cut what the run sent (a line cut
+   * to the bytes left, or lines past the most it takes); `undefined` while
+   * nothing was cut. What is shown up to there ends with the cut marker.
+   */
+  cutAt: number | undefined;
 }
 
 /** Most raw bytes of lines core takes from one run, whatever it sends. */
@@ -353,13 +359,17 @@ const maxRawOutputBytes = 2 * codeLimits.outputBytes;
 /** The least time between two reads of revocations for one run's output. */
 const outputCheckMs = 1000;
 
-/** Lines as a watcher sees them: redacted as a whole, cut at the budget. */
-const shownText = (lines: readonly string[]): string => {
+/**
+ * Lines as a watcher sees them: redacted as a whole, and cut at the budget
+ * or where core cut what the run sent (`cut`), with the marker saying so.
+ */
+const shownText = (lines: readonly string[], cut: boolean): string => {
   const text = redact(lines.join("\n"));
   const room = codeLimits.outputBytes - codeLimits.diagnosticBytes;
-  return utf8Bytes(text) <= room
-    ? text
-    : `${cutToBytes(text, room - utf8Bytes(cutMarker))}${cutMarker}`;
+  if (!cut && utf8Bytes(text) <= room) {
+    return text;
+  }
+  return `${cutToBytes(text, room - utf8Bytes(cutMarker))}${cutMarker}`;
 };
 
 /** The running step's output as watchers see it, without its bookkeeping. */
@@ -1206,16 +1216,27 @@ export class Workspace extends DurableObject<Env> {
             checking: false,
             timer: undefined,
             ended: false,
+            cutAt: undefined,
           };
-    const bytes = utf8Bytes(line);
-    if (
-      output.lines.length >= codeLimits.logLines ||
-      output.rawBytes + bytes > maxRawOutputBytes
-    ) {
+    if (output.cutAt !== undefined) {
       return;
     }
-    output.lines.push(line);
-    output.rawBytes += bytes;
+    if (output.lines.length >= codeLimits.logLines) {
+      output.cutAt = output.lines.length;
+      this.#outputs.set(chatId, output);
+      this.#scheduleOutputCheck(chatId, output);
+      return;
+    }
+    // A line past the bytes left keeps what fits, never half a character,
+    // and nothing after it is taken.
+    const left = maxRawOutputBytes - output.rawBytes;
+    const bytes = utf8Bytes(line);
+    const kept = bytes <= left ? line : cutToBytes(line, left);
+    output.lines.push(kept);
+    output.rawBytes += bytes <= left ? bytes : utf8Bytes(kept);
+    if (bytes > left) {
+      output.cutAt = output.lines.length;
+    }
     this.#outputs.set(chatId, output);
     this.#scheduleOutputCheck(chatId, output);
   }
@@ -1291,7 +1312,10 @@ export class Workspace extends DurableObject<Env> {
       return;
     }
     output.shown = arrived;
-    output.text = shownText(output.lines.slice(0, arrived));
+    output.text = shownText(
+      output.lines.slice(0, arrived),
+      output.cutAt !== undefined && arrived >= output.cutAt
+    );
     this.#changed(chatId);
     if (output.lines.length > output.shown) {
       this.#scheduleOutputCheck(chatId, output);

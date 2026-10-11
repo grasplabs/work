@@ -576,14 +576,37 @@ export const cutMarker = `\n… (cut: over ${codeLimits.outputBytes} bytes of ou
  * `github_pat_`); Slack tokens (`xoxa-`, `xoxb-`, `xoxp-`, `xoxr-`);
  * Google API keys (`AIza`); JSON Web Tokens; PEM private keys, an
  * unfinished block to the end of the text; AWS access key IDs; and the
- * value of an `api_key`, `apikey`, `token`, `secret`, `password` or
- * `authorization` written as `name=value` or `name: value`. Anything else
+ * whole value of an `api_key`, `apikey`, `token`, `secret`, `password` or
+ * `authorization` written as `name=value` or `name: value`: quoted, to
+ * its closing quote (or the end of the line), spaces included; unquoted,
+ * to the next space or separator, with a `Bearer` or `Basic` scheme of
+ * any length taken with it. Anything else
  * shaped like a secret is not caught: this is a net for what an outside
  * system's data may carry, not a guarantee (a run holds no secret of its
  * own). Applied to what streams to the chat and to what the model reads,
  * over the whole text, so a credential split across lines is caught.
  */
-const credentials: readonly (readonly [RegExp, string])[] = [
+/**
+ * An assignment's value as {@link credentials} redacts it: the name and
+ * separator kept, the value replaced, and its quotes kept where it had
+ * them.
+ */
+const redactedAssignment = (...args: unknown[]): string => {
+  const groups: unknown = args.at(-1);
+  const part = (name: string): string => {
+    const value: unknown =
+      typeof groups === "object" && groups !== null
+        ? Reflect.get(groups, name)
+        : undefined;
+    return typeof value === "string" ? value : "";
+  };
+  return `${part("name")}${part("between")}${part("quote")}[redacted]${part("close")}`;
+};
+
+const credentials: readonly (readonly [
+  RegExp,
+  string | ((...args: unknown[]) => string),
+])[] = [
   [
     /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/gu,
     "[redacted]",
@@ -599,9 +622,12 @@ const credentials: readonly (readonly [RegExp, string])[] = [
   // flood like "eyJ-eyJ-…", which made the match quadratic.
   [/(?<![\w-])eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/gu, "[redacted]"],
   [/\bAKIA[0-9A-Z]{16}\b/gu, "[redacted]"],
+  // Each character of a quoted value is taken by one alternative only
+  // (an escape, or anything but the quote, a backslash or a newline): it
+  // stays linear.
   [
-    /\b(?<name>api[_-]?key|apikey|token|secret|password|authorization)(?<between>["']?\s*[:=]\s*["']?)(?!\[redacted\])[^\s"'&,;]+/giu,
-    "$<name>$<between>[redacted]",
+    /\b(?<name>api[_-]?key|apikey|token|secret|password|authorization)(?<between>["']?\s*[:=]\s*)(?:(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)/giu,
+    redactedAssignment,
   ],
 ];
 
@@ -609,7 +635,10 @@ const credentials: readonly (readonly [RegExp, string])[] = [
 export const redact = (text: string): string => {
   let redacted = text;
   for (const [pattern, replacement] of credentials) {
-    redacted = redacted.replace(pattern, replacement);
+    redacted =
+      typeof replacement === "string"
+        ? redacted.replace(pattern, replacement)
+        : redacted.replace(pattern, replacement);
   }
   return redacted;
 };
