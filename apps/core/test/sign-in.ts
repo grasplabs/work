@@ -16,6 +16,7 @@ import worker from "../src/index.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
 import type { Claims, Idp } from "./idp.ts";
+import { closeWhenTestEnds } from "./open-sockets.ts";
 import {
   acmeTenant,
   clientOrigin,
@@ -184,8 +185,9 @@ export const openRpc = async (
     closed.resolve(event.code);
   });
   socket.accept();
+  closeWhenTestEnds(socket);
   const core = newWebSocketRpcSession<CoreApi>(socket);
-  return { core, closed: closed.promise };
+  return { core, socket, closed: closed.promise };
 };
 
 /** How core settled a call made over a raw connection, as it sent it. */
@@ -216,6 +218,7 @@ export const openRawRpc = async (cookie: string) => {
     }
   });
   socket.accept();
+  closeWhenTestEnds(socket);
   let pushed = 0;
   return {
     push: (expression: unknown): number => {

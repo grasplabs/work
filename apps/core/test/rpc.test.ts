@@ -12,6 +12,7 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { toClientError } from "../src/rpc.ts";
+import { closeWhenTestEnds } from "./open-sockets.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 
 const openRpc = async (headers: HeadersInit) =>
@@ -31,6 +32,7 @@ describe("Cap'n Web RPC", () => {
       throw new Error("Expected a WebSocket");
     }
     socket.accept();
+    closeWhenTestEnds(socket);
 
     const core = newWebSocketRpcSession<CoreApi>(socket);
     try {
