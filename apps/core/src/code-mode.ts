@@ -350,11 +350,21 @@ const ended = (status: CodeRunStatus, error: string): CodeRun => ({
   error,
 });
 
+/**
+ * The longest outcome string the harness can send for output within its
+ * limits: every character of the logs and the result or error escaped as
+ * JSON at its worst (six characters, as for \u0001 or a lone surrogate),
+ * each log line's quotes and comma, and the field names and punctuation.
+ * Past it, the string isn't the harness's; the decoded limits are checked
+ * again once it is parsed (`outcomeSchema`).
+ */
+const maxOutcomeChars = 6 * 2 * room + 3 * codeLimits.logLines + 256;
+
 /** What the isolate sent, or `undefined` for anything it may not send. */
 const parsed = (
   outcome: unknown
 ): z.infer<typeof outcomeSchema> | undefined => {
-  if (typeof outcome !== "string" || outcome.length > 8 * room) {
+  if (typeof outcome !== "string" || outcome.length > maxOutcomeChars) {
     return undefined;
   }
   let json: unknown;

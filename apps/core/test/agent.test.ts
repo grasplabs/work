@@ -694,6 +694,18 @@ describe("chat agent sandbox", () => {
     expect(result?.text).toMatch(/cut: longer than 32768 characters\)$/u);
   });
 
+  it("keeps a run whose output is all characters JSON must escape, within its limits", async () => {
+    // Each \u0001 is six characters as JSON: the most a character grows.
+    const result = await runEnded(
+      "export default async () => { console.log('\\x01'.repeat(65_535)); return '\\x01'.repeat(65_536); };"
+    );
+
+    expect(result.status).toBe("completed");
+    expect(
+      (result.text ?? "").startsWith(`Logs:\n${"\u0001".repeat(100)}`)
+    ).toBeTruthy();
+  });
+
   it("shows a value too large to read as such, without building it all", async () => {
     const result = await runStep(
       "export default async () => Array.from({ length: 1_000_000 }, (_, i) => ({ i }));"
