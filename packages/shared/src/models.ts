@@ -11,6 +11,12 @@ export const modelErrors = defineErrorFamily({
     "This call carries sensitive data, and that model may not take it. Choose one this deployment allows for sensitive data.",
   "model.over_budget":
     "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
+  "model.budget_busy":
+    "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
+  "model.unpriced":
+    "What this model call would cost can't be bounded at known prices, so it wasn't sent. Choose another model, or send less.",
+  "model.ledger_unavailable":
+    "Model spend can't be accounted for right now, so no model call was made. Try again later.",
   "model.failed": "The model call failed. Try again later.",
   "model.invalid_output":
     "The model's answer didn't match the expected shape, also when asked again.",
@@ -99,10 +105,68 @@ export interface ModelSettings {
   rules: { state: "invalid" } | ({ state: "on" } & ModelRulesSettings);
   /** The UTC month budgets count in now, such as `2026-09`. */
   month: string;
+  /** Reservations held for review (`HeldRequest`), oldest first. */
+  held: HeldRequest[];
 }
+
+/**
+ * A model request's reservation the model ledger couldn't read to settle:
+ * it stays held against its budgets until an admin releases it or charges
+ * it in full.
+ */
+export interface HeldRequest {
+  id: string;
+  /** `<provider>/<model>`. */
+  model: string;
+  /** The UTC month it counts in. */
+  period: string;
+  /** What it holds, in US dollars: the most it could have cost. */
+  amount: number;
+  /** When it was sent, as an ISO timestamp. */
+  sentAt: string;
+  /**
+   * A budget record it counts against is damaged, so it can only be
+   * released: a charge would count against a wrong total.
+   */
+  releaseOnly: boolean;
+}
+
+/** What an admin decides about a held reservation. */
+export type HeldHow = "release" | "charge";
+
+/**
+ * What an admin's decision on a held reservation came to. `decided`: done
+ * now, `amount` charged in US dollars. `already_decided`: an earlier
+ * decision, someone else's maybe, stands, and this one changed nothing.
+ * `release_only`: a charge refused, as the budget records it counts
+ * against are damaged; it is still held, and can be released. `not_held`:
+ * there is no such held reservation.
+ */
+export type HeldDecision =
+  | { state: "decided"; how: HeldHow; amount: number }
+  | {
+      state: "already_decided";
+      how: HeldHow;
+      amount: number;
+      /** When it was decided, as an ISO timestamp. */
+      decidedAt: string;
+    }
+  | { state: "release_only" }
+  | { state: "not_held" };
+
+/** Most held requests listed at once. */
+export const heldListed = 100;
 
 /** The model gateway's settings, over `/rpc`, for admins only. */
 export interface ModelsApi {
   /** The settings, and this month's spend against each budget. */
   settings: () => Promise<ModelSettings>;
+  /** The reservations held for review, oldest first. */
+  held: () => Promise<HeldRequest[]>;
+  /**
+   * Settles a held reservation: `release` charges nothing, `charge` all it
+   * holds. Audited. One already decided is left as it is, and answered
+   * with that decision.
+   */
+  resolveHeld: (id: string, how: HeldHow) => Promise<HeldDecision>;
 }

@@ -352,6 +352,14 @@ export const permissions = sqliteTable(
       table.subjectId,
       table.status
     ),
+    // Revocations of a subject's permissions since a moment: what ends a
+    // chat's code runs (`revokedSince` in agent-scope.ts).
+    index("permissions_revoked_idx").on(
+      table.subjectType,
+      table.subjectId,
+      table.status,
+      table.revokedAt
+    ),
     // The Apps granted to call an App's exports, found from that App
     // (app-provenance.ts): by object, not subject.
     index("permissions_object_idx").on(table.objectType, table.objectId),
@@ -1056,63 +1064,6 @@ export const workflowParamValues = sqliteTable(
 );
 
 /**
- * What model calls cost, in millionths of a US dollar, per budget and
- * month (model-rules.ts): `scope` is the budget's (`deployment`, `workflow`
- * or `user`), `key` what it counts within it (the deployment, a workflow
- * or a person, as JSON), and `period` the UTC month, such as `2026-09`.
- * Only ever added to, in one statement, so concurrent calls never lose
- * each other's cost. `model_spend_top_idx` reads a budget's month most
- * first, ties by `key` descending, without sorting (`budgetSpend`).
- */
-export const modelSpend = sqliteTable(
-  "model_spend",
-  {
-    scope: text({ enum: ["deployment", "workflow", "user"] }).notNull(),
-    key: text().notNull(),
-    period: text().notNull(),
-    spentMicros: integer("spent_micros").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.scope, table.key, table.period] }),
-    index("model_spend_top_idx").on(
-      table.scope,
-      table.period,
-      table.spentMicros,
-      table.key
-    ),
-  ]
-);
-
-/**
- * The budget alerts admins got, one per budget, month, kind (`alert` at
- * the alert threshold, `exhausted` at the limit) and threshold value in
- * millionths of a dollar (model-budgets.ts): an alert is stored only with
- * a new row here, so each value alerts once a month, however often the
- * config changes it.
- */
-export const modelBudgetAlerts = sqliteTable(
-  "model_budget_alerts",
-  {
-    scope: text({ enum: ["deployment", "workflow", "user"] }).notNull(),
-    key: text().notNull(),
-    period: text().notNull(),
-    kind: text({ enum: ["alert", "exhausted"] }).notNull(),
-    thresholdMicros: integer("threshold_micros").notNull(),
-  },
-  (table) => [
-    primaryKey({
-      columns: [
-        table.scope,
-        table.key,
-        table.period,
-        table.kind,
-        table.thresholdMicros,
-      ],
-    }),
-  ]
-);
-
-/**
  * The catalog entries an admin stopped offering (connections.ts): one row
  * each, by its source (`native` or `composio`) and its ID there. Nobody
  * starts connecting a hidden entry, admins included, until an admin offers
@@ -1375,4 +1326,60 @@ export const guestMessages = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [primaryKey({ columns: [table.chatId, table.seq] })]
+);
+
+/**
+ * The deployment's business stores (src/data-stores.ts): an inventory,
+ * never a copy of their records. Each store's records, receipts and
+ * outbox live in its own Durable Object (src/data-store.ts), named by
+ * this ID, which the host mints and which no App, workflow or run ID
+ * becomes. `physical_namespace_role` says which namespace of objects
+ * holds it. The active schema and operation hashes are filled in once a
+ * store activates a schema; until then they are null. A deleted store
+ * keeps its row, with `deleted_at` set, and is never served again.
+ */
+export const businessStores = sqliteTable("business_stores", {
+  id: text().primaryKey(),
+  /**
+   * The store's creator, the user who created it, and so its owner. Who
+   * owns each record is the record's own `_ownerId`, never this.
+   */
+  ownerId: text("owner_id").notNull(),
+  activeSchemaVersion: integer("active_schema_version"),
+  activeSchemaHash: text("active_schema_hash"),
+  activeOperationManifestHash: text("active_operation_manifest_hash"),
+  /** Moves on with every change of who may use the store. */
+  policyGeneration: integer("policy_generation").notNull().default(1),
+  physicalNamespaceRole: text("physical_namespace_role", {
+    enum: ["data_store"],
+  }).notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  deletedAt: timestamp("deleted_at"),
+});
+
+/**
+ * Who manages each business store besides the organization's admins and
+ * its creator (src/data-stores.ts): a person (`member_type` `person`,
+ * `member_id` their user ID) or a team, in role `manage`. Unsharing
+ * deletes the row; who did which is in the audit log.
+ */
+export const businessStoreMembers = sqliteTable(
+  "business_store_members",
+  {
+    storeId: text("store_id")
+      .notNull()
+      .references(() => businessStores.id),
+    memberType: text("member_type", { enum: ["person", "team"] }).notNull(),
+    memberId: text("member_id").notNull(),
+    role: text({ enum: ["manage"] }).notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storeId, table.memberType, table.memberId] }),
+    index("business_store_members_member_idx").on(
+      table.memberType,
+      table.memberId
+    ),
+  ]
 );

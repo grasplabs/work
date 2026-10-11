@@ -37,6 +37,13 @@ export type GatewayReply =
        * chat completions): an answer that breaks off.
        */
       cut?: number;
+      /**
+       * Ends whole, but with no usage chunk (chat completions): a provider
+       * that never sent its count.
+       */
+      noUsage?: boolean;
+      /** Prompt tokens written to a one-hour cache (Anthropic). */
+      cacheWrite1h?: number;
     }
   | {
       status: number;
@@ -176,7 +183,18 @@ const anthropicEvents = (answer: Answer): (StreamEvent | StreamPause)[] => {
           content: [],
           stop_reason: null,
           stop_sequence: null,
-          usage: { input_tokens: inputTokens, output_tokens: 0 },
+          usage: {
+            input_tokens: inputTokens,
+            output_tokens: 0,
+            ...(answer.cacheWrite1h === undefined
+              ? {}
+              : {
+                  cache_creation_input_tokens: answer.cacheWrite1h,
+                  cache_creation: {
+                    ephemeral_1h_input_tokens: answer.cacheWrite1h,
+                  },
+                }),
+          },
         },
       },
     },
@@ -240,7 +258,7 @@ const chunk = (fields: object) => ({
 const chatCompletionEvents = (
   answer: Answer
 ): (StreamEvent | StreamPause)[] => {
-  const { text, inputTokens, outputTokens, pause } = answer;
+  const { text, inputTokens, outputTokens, pause, noUsage } = answer;
   const content = (part: string): StreamEvent =>
     chunk({
       choices: [
@@ -291,14 +309,18 @@ const chatCompletionEvents = (
         },
       ],
     }),
-    chunk({
-      choices: [],
-      usage: {
-        prompt_tokens: inputTokens,
-        completion_tokens: outputTokens,
-        total_tokens: inputTokens + outputTokens,
-      },
-    }),
+    ...(noUsage === true
+      ? []
+      : [
+          chunk({
+            choices: [],
+            usage: {
+              prompt_tokens: inputTokens,
+              completion_tokens: outputTokens,
+              total_tokens: inputTokens + outputTokens,
+            },
+          }),
+        ]),
     { data: "[DONE]" },
   ];
 };

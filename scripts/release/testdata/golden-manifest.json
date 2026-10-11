@@ -125,6 +125,16 @@
           "type": "durable_object_namespace"
         },
         {
+          "class_name": "ModelLedger",
+          "name": "MODEL_LEDGER",
+          "type": "durable_object_namespace"
+        },
+        {
+          "class_name": "DataStore",
+          "name": "DATA_STORES",
+          "type": "durable_object_namespace"
+        },
+        {
           "class_name": "WorkflowDispatcher",
           "name": "WORKFLOWS",
           "type": "workflow",
@@ -231,6 +241,18 @@
             "Onboarding"
           ],
           "tag": "v3"
+        },
+        {
+          "new_sqlite_classes": [
+            "ModelLedger"
+          ],
+          "tag": "v4"
+        },
+        {
+          "new_sqlite_classes": [
+            "DataStore"
+          ],
+          "tag": "v5"
         }
       ],
       "keepVars": true,

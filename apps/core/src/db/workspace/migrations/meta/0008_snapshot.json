@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d06d6702-a2a8-4c53-ad0d-538efbf188de",
+  "id": "6ff8b1a6-ebe3-4f73-a2c7-318833ab78d1",
   "prevId": "842142da-ee11-4b56-bd29-cd2164d918bc",
   "tables": {
     "audit_outbox": {
@@ -94,6 +94,140 @@
       },
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "chat_code_runs": {
+      "name": "chat_code_runs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "chat_id": {
+          "name": "chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tool_call_id": {
+          "name": "tool_call_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_hash": {
+          "name": "source_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_chars": {
+          "name": "source_chars",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent": {
+          "name": "agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "compatibility_date": {
+          "name": "compatibility_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtime": {
+          "name": "runtime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cpu_limit": {
+          "name": "cpu_limit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "chat_code_runs_chat": {
+          "name": "chat_code_runs_chat",
+          "columns": [
+            "chat_id",
+            "started_at"
+          ],
+          "isUnique": false
+        },
+        "chat_code_runs_running": {
+          "name": "chat_code_runs_running",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false,
+          "where": "status = 'running'"
+        }
+      },
+      "foreignKeys": {
+        "chat_code_runs_chat_id_chats_id_fk": {
+          "name": "chat_code_runs_chat_id_chats_id_fk",
+          "tableFrom": "chat_code_runs",
+          "tableTo": "chats",
+          "columnsFrom": [
+            "chat_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "chat_code_runs_status": {
+          "name": "chat_code_runs_status",
+          "value": "\"chat_code_runs\".\"status\" IN ('running', 'completed', 'threw', 'refused', 'load_failed', 'cpu_exceeded', 'crashed', 'wall_expired', 'cancelled', 'revoked', 'interrupted')"
+        },
+        "chat_code_runs_tool_call_id": {
+          "name": "chat_code_runs_tool_call_id",
+          "value": "length(\"chat_code_runs\".\"tool_call_id\") BETWEEN 1 AND 200"
+        }
+      }
     },
     "chat_draft_files": {
       "name": "chat_draft_files",
@@ -396,83 +530,6 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "dashboard_widgets": {
-      "name": "dashboard_widgets",
-      "columns": {
-        "person_id": {
-          "name": "person_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "widget_id": {
-          "name": "widget_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "dashboard_widgets_person_id_dashboards_person_id_fk": {
-          "name": "dashboard_widgets_person_id_dashboards_person_id_fk",
-          "tableFrom": "dashboard_widgets",
-          "tableTo": "dashboards",
-          "columnsFrom": [
-            "person_id"
-          ],
-          "columnsTo": [
-            "person_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "dashboard_widgets_person_id_position_pk": {
-          "columns": [
-            "person_id",
-            "position"
-          ],
-          "name": "dashboard_widgets_person_id_position_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "dashboards": {
-      "name": "dashboards",
-      "columns": {
-        "person_id": {
-          "name": "person_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

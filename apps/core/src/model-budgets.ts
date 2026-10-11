@@ -1,6 +1,5 @@
-import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import type { budgetsSchema } from "@grasp-os/shared/deployment-config";
-import { errorFields, log } from "@grasp-os/shared/log";
 import { modelSpendListed } from "@grasp-os/shared/models";
 import type {
   ModelBudget,
@@ -8,72 +7,35 @@ import type {
   ModelSpender,
 } from "@grasp-os/shared/models";
 import type { Authority } from "@grasp-os/shared/permissions";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
-import type { OutboxEnv } from "./audit-outbox.ts";
-import {
-  apps,
-  modelBudgetAlerts,
-  modelSpend,
-  users,
-} from "./db/core/schema.ts";
+import { apps, users } from "./db/core/schema.ts";
+import { modelLedger } from "./model-ledger.ts";
+import type { LedgerScope, LedgerScopeName } from "./model-ledger.ts";
+import { microsPerDollar } from "./model-prices.ts";
 
 // Model budgets, one of the client's rules for model calls (model-rules.ts):
 // what the deployment's calls may cost in a UTC month, all together, per
 // workflow and per person, in US dollars at the providers' list prices.
-// A call's cost is what its provider reported it used (tokens in and out)
-// at the prices in the model catalog (models.ts), the same cost its audit
-// event records; for a request that failed or was cancelled mid-answer,
-// which the provider didn't count in full, an estimate, which the event
-// says (`usedBy`, models.ts).
 //
-// Before each request a call sends (a retry too), in the month it is
-// sent in, it is refused once any of its budgets is used up: the call
-// stops at 100%. After each request, its cost is added to each of its
-// budgets with one statement per budget, so concurrent calls never lose
-// each other's cost. Admins are alerted when a budget's spend reaches its
-// alert threshold or its limit, once per month and threshold value: the
-// alert is a row in `model_budget_alerts`, keyed by that value and
-// inserted only if the spend has reached it and the row isn't there yet,
-// and its event is stored only if the insert added the row, in the same
-// batch. It runs with every addition, and before each request for a
-// budget whose spend has reached a value with no alert yet. So whichever
-// call reaches a value, however many run at once, and in whatever order
-// the config changes a threshold, each value alerts once a month.
+// The model ledger (model-ledger.ts) enforces them: before each provider
+// request is sent, a retry too, it reserves the most the request can cost
+// against each of its scopes at once, and refuses it, sending nothing,
+// when any scope's spend and reservations leave no room for it. Once the
+// request ends, its reservation turns into what its usage cost; a request
+// whose usage can't be known is charged its whole reservation. Admins are
+// alerted once per month and threshold value when a budget's spend reaches
+// its alert threshold or its limit, with an audit event (`model.budget.alert`
+// and `model.budget.exhausted`) and a log line.
 //
-// A budget is only checked before a call, whose cost isn't known until it
-// is answered: calls already under way when the budget runs out still
-// finish, and are counted, so a month's spend can pass its limit by what
-// those calls cost.
-//
-// The alert is an audit event (`model.budget.alert` and
-// `model.budget.exhausted`) that admins find in the audit log, and a log
-// line: there is no other path to admins yet.
-
-/** Millionths of a US dollar, which the spend is counted in. */
-const microsPerDollar = 1_000_000;
+// A request's run is a scope too, counted with no budget yet, so a run's
+// spend is known across its retries and steps.
 
 type Budgets = z.output<typeof budgetsSchema>;
-
-/** Whose spend a budget counts. */
-type BudgetScope = ModelBudgetScope;
-
-/** One budget a call counts against, this month. */
-export interface Budgeted {
-  scope: BudgetScope;
-  /** What it counts within its scope: the deployment, a workflow, a person. */
-  key: string;
-  /** The UTC month the call was made in, such as `2026-09`. */
-  period: string;
-  limitMicros: number;
-  alertMicros: number;
-  /** What its alerts name, as audit detail: the workflow or the person. */
-  names: Record<string, string>;
-}
+type Budget = NonNullable<NonNullable<Budgets>["deployment"]>;
 
 /** What budgets count a call by. */
 export interface BudgetInput {
@@ -113,268 +75,83 @@ export const budgetMonth = (
     ? env.MODEL_BUDGET_MONTH
     : now.toISOString().slice(0, "yyyy-mm".length);
 
-/** The budgets the deployment sets that a call counts against in `period`. */
-export const budgetsFor = (
+/** A scope a call counts against, and the budget the deployment sets for it. */
+interface Scoped {
+  scope: LedgerScopeName;
+  key: string;
+  budget: Budget | undefined;
+  names: Record<string, string>;
+}
+
+/** The workflow and run scopes of a workflow's call. */
+const workflowScopes = (budgets: Budgets, trigger: AuditActor): Scoped[] =>
+  trigger.type === "workflow"
+    ? [
+        {
+          scope: "workflow",
+          key: JSON.stringify([trigger.appId, trigger.workflowId]),
+          budget: budgets?.workflow,
+          names: { app: trigger.appId, workflow: trigger.workflowId },
+        },
+        {
+          scope: "run",
+          key: trigger.runId,
+          budget: undefined,
+          names: { run: trigger.runId },
+        },
+      ]
+    : [];
+
+/**
+ * The scopes a call's requests count against, each with its budget where
+ * the deployment sets one: the deployment, always; the workflow and the
+ * run, for a workflow's call; and the person it is made by or for. A
+ * scope without a budget is counted, and limits nothing.
+ */
+export const scopesFor = (
   budgets: Budgets,
-  input: BudgetInput,
-  period: string
-): Budgeted[] => {
-  if (budgets === undefined) {
-    return [];
-  }
-  const { trigger } = input;
+  input: BudgetInput
+): LedgerScope[] => {
   const person = personOf(input);
-  const scopes: {
-    scope: BudgetScope;
-    key: string;
-    names: Record<string, string>;
-  }[] = [
-    { scope: "deployment", key: "deployment", names: {} },
-    ...(trigger.type === "workflow"
-      ? [
-          {
-            scope: "workflow" as const,
-            key: JSON.stringify([trigger.appId, trigger.workflowId]),
-            names: { app: trigger.appId, workflow: trigger.workflowId },
-          },
-        ]
-      : []),
+  const scopes: Scoped[] = [
+    {
+      scope: "deployment",
+      key: "deployment",
+      budget: budgets?.deployment,
+      names: {},
+    },
+    ...workflowScopes(budgets, input.trigger),
     ...(person === undefined
       ? []
-      : [{ scope: "user" as const, key: person, names: { user: person } }]),
+      : [
+          {
+            scope: "user" as const,
+            key: person,
+            budget: budgets?.user,
+            names: { user: person },
+          },
+        ]),
   ];
-  return scopes.flatMap(({ scope, key, names }) => {
-    const budget = budgets[scope];
+  return scopes.map(({ scope, key, budget, names }) => {
     if (budget === undefined) {
-      return [];
+      return { scope, key, limitMicros: null, alertMicros: null, names };
     }
     const limitMicros = Math.round(budget.limit * microsPerDollar);
-    return [
-      {
-        scope,
-        key,
-        period,
-        limitMicros,
-        alertMicros: Math.ceil((limitMicros * budget.alertAt) / 100),
-        names,
-      },
-    ];
+    return {
+      scope,
+      key,
+      limitMicros,
+      alertMicros: Math.ceil((limitMicros * budget.alertAt) / 100),
+      names,
+    };
   });
 };
 
-/** The row that counts `budget`'s spend this month. */
-const rowOf = (budget: Budgeted) =>
-  and(
-    eq(modelSpend.scope, budget.scope),
-    eq(modelSpend.key, budget.key),
-    eq(modelSpend.period, budget.period)
-  );
+/** Whether any of `scopes` has a budget, which a request must fit. */
+export const hasBudget = (scopes: readonly LedgerScope[]): boolean =>
+  scopes.some(({ limitMicros }) => limitMicros !== null);
 
-/** The alerts `budget` got this month. */
-const alertsOf = (budget: Budgeted) =>
-  and(
-    eq(modelBudgetAlerts.scope, budget.scope),
-    eq(modelBudgetAlerts.key, budget.key),
-    eq(modelBudgetAlerts.period, budget.period)
-  );
-
-/** The two thresholds a budget alerts at. */
-const thresholds = [
-  { kind: "alert", of: (budget: Budgeted) => budget.alertMicros },
-  { kind: "exhausted", of: (budget: Budgeted) => budget.limitMicros },
-] as const;
-type Threshold = (typeof thresholds)[number];
-
-/** One alert a budget may be due. */
-interface Due {
-  budget: Budgeted;
-  threshold: Threshold;
-}
-
-/** What admins are alerted to when a budget's spend reaches a threshold. */
-const alertEntry = (trigger: AuditActor, { budget, threshold }: Due) =>
-  ({
-    actor: trigger,
-    action: `model.budget.${threshold.kind}`,
-    detail: {
-      scope: budget.scope,
-      period: budget.period,
-      limit: budget.limitMicros / microsPerDollar,
-      threshold: threshold.of(budget) / microsPerDollar,
-      ...budget.names,
-    },
-  }) satisfies AuditEntry;
-
-/**
- * Alerts admins that a budget's spend has reached a threshold, once per
- * month and threshold value: records the alert in `model_budget_alerts`
- * if the spend has reached the value, and stores its event only if that
- * added the row. The row's key is the value, so a threshold lowered below
- * what was already spent alerts once, and changing it back and forth
- * never alerts twice for one value.
- */
-const alertStatements = (
-  db: DrizzleD1Database,
-  trigger: AuditActor,
-  due: Due
-) => {
-  const { budget, threshold } = due;
-  const value = threshold.of(budget);
-  const spent = db
-    .select({ spent: modelSpend.spentMicros })
-    .from(modelSpend)
-    .where(rowOf(budget));
-  return [
-    db
-      .insert(modelBudgetAlerts)
-      .select(
-        sql`SELECT ${budget.scope}, ${budget.key}, ${budget.period}, ${threshold.kind}, ${value} WHERE (${spent}) >= ${value}`
-      )
-      .onConflictDoNothing()
-      .returning({
-        kind: modelBudgetAlerts.kind,
-        scope: modelBudgetAlerts.scope,
-        period: modelBudgetAlerts.period,
-      }),
-    outboxedIfChanged(db, alertEntry(trigger, due)),
-  ] as const;
-};
-
-/** An alert `alertStatements` recorded, as its insert returns it. */
-const recordedSchema = z.array(
-  z.object({ kind: z.string(), scope: z.string(), period: z.string() })
-);
-
-/** Logs each alert a batch's `alertStatements` recorded. */
-const logAlerts = (results: readonly unknown[]): void => {
-  for (const result of results) {
-    for (const { kind, scope, period } of recordedSchema.safeParse(result)
-      .data ?? []) {
-      log.warn(`model.budget_${kind}`, { scope, period });
-    }
-  }
-};
-
-/** Every alert `budgeted` may be due. */
-const everyAlert = (budgeted: readonly Budgeted[]): Due[] =>
-  budgeted.flatMap((budget) =>
-    thresholds.map((threshold) => ({ budget, threshold }))
-  );
-
-/**
- * Checks `budgeted` before a request is sent: returns the first that is
- * used up, if any. Alerts admins first to every threshold a budget has
- * reached without an alert at that value this month: a threshold or limit
- * lowered below this month's spend, which no addition reached, and every
- * budget used up, not just the one that refuses. Nothing is written while
- * none is due; the write, when one is, is the same conditional insert an
- * addition runs, so two calls alert once between them. An alert that
- * can't be stored is logged, and the next call tries again.
- */
-export const checkBudgets = async (
-  env: OutboxEnv & Pick<Env, "DB">,
-  trigger: AuditActor,
-  budgeted: readonly Budgeted[]
-): Promise<Budgeted | undefined> => {
-  if (budgeted.length === 0) {
-    return undefined;
-  }
-  const db = drizzle(env.DB);
-  const [spends, alerts] = await Promise.all([
-    db
-      .select()
-      .from(modelSpend)
-      .where(or(...budgeted.map(rowOf))),
-    db
-      .select()
-      .from(modelBudgetAlerts)
-      .where(or(...budgeted.map(alertsOf))),
-  ]);
-  const spentOn = (budget: Budgeted): number =>
-    spends.find((row) => row.scope === budget.scope && row.key === budget.key)
-      ?.spentMicros ?? 0;
-  const due = everyAlert(budgeted).filter(
-    ({ budget, threshold }) =>
-      spentOn(budget) >= threshold.of(budget) &&
-      !alerts.some(
-        (row) =>
-          row.scope === budget.scope &&
-          row.key === budget.key &&
-          row.kind === threshold.kind &&
-          row.thresholdMicros === threshold.of(budget)
-      )
-  );
-  const [head, ...rest] = due.flatMap((one) =>
-    alertStatements(db, trigger, one)
-  );
-  if (head !== undefined) {
-    try {
-      logAlerts(await auditedBatch(env, db, [head, ...rest]));
-    } catch (error) {
-      log.error("model.budget_alert_failed", errorFields(error));
-    }
-  }
-  return budgeted.find((budget) => spentOn(budget) >= budget.limitMicros);
-};
-
-/**
- * Adds a request's `cost` (US dollars) to each budget it counts against,
- * and alerts admins to each threshold it reached, in one batch. Never
- * throws: it runs after the request was answered and paid for, and a
- * caller that lost the answer would ask (and pay) again. A spend that
- * can't be stored is logged, and the budget counts it short.
- */
-export const chargeBudgets = async (
-  env: OutboxEnv & Pick<Env, "DB">,
-  trigger: AuditActor,
-  budgeted: readonly Budgeted[],
-  cost: number
-): Promise<void> => {
-  if (budgeted.length === 0 || !(cost > 0)) {
-    return;
-  }
-  // At least one, so many tiny calls never add up to nothing.
-  const added = Math.max(1, Math.round(cost * microsPerDollar));
-  const db = drizzle(env.DB);
-  const additions = budgeted.map((budget) =>
-    db
-      .insert(modelSpend)
-      .values({
-        scope: budget.scope,
-        key: budget.key,
-        period: budget.period,
-        spentMicros: added,
-      })
-      .onConflictDoUpdate({
-        target: [modelSpend.scope, modelSpend.key, modelSpend.period],
-        set: {
-          spentMicros: sql`${modelSpend.spentMicros} + excluded.spent_micros`,
-        },
-      })
-  );
-  const statements = [
-    ...additions,
-    ...everyAlert(budgeted).flatMap((due) => alertStatements(db, trigger, due)),
-  ];
-  const [head, ...rest] = statements;
-  if (head === undefined) {
-    return;
-  }
-  let results: readonly unknown[] = [];
-  try {
-    results = await auditedBatch(env, db, [head, ...rest]);
-  } catch (error) {
-    log.error("model.spend_lost", {
-      ...errorFields(error),
-      micros: added,
-      budgets: budgeted.map(({ scope }) => scope).join(" "),
-    });
-    return;
-  }
-  logAlerts(results);
-};
-
-/** A workflow budget's key, as `budgetsFor` writes it: its App and workflow. */
+/** A workflow budget's key, as `scopesFor` writes it: its App and workflow. */
 const workflowKeySchema = z.tuple([z.string(), z.string()]);
 
 /** The App and workflow a workflow budget's `key` counts; none for a bad key. */
@@ -394,7 +171,7 @@ interface Names {
 
 /** What a spend row counted, by its scope and key; none for a bad key. */
 const spenderOf = (
-  scope: BudgetScope,
+  scope: ModelBudgetScope,
   key: string,
   names: Names
 ): ModelSpender | undefined => {
@@ -420,7 +197,7 @@ const spenderOf = (
 /** The names of the Apps and people `rows` count spend for. */
 const namesOf = async (
   db: DrizzleD1Database,
-  rows: readonly { scope: BudgetScope; key: string }[]
+  rows: readonly { scope: ModelBudgetScope; key: string }[]
 ): Promise<Names> => {
   const appIds = [
     ...new Set(
@@ -454,51 +231,51 @@ const namesOf = async (
 };
 
 /**
- * Each budget `budgets` sets, with its spend in `period`, most first (at
- * most `modelSpendListed`, and whether more spent), and the names of the
- * Apps and people it counts for where core still has them: for admins to
- * read (models-rpc.ts). Spend is counted only for the scopes a budget is
- * set for, so there is none to show for the others.
+ * Each budget `budgets` sets, with what was charged against it in
+ * `period` (reservations still held are not spend yet), most first (at most `modelSpendListed`, and
+ * whether more spent), and the names of the Apps and people it counts for
+ * where core still has them: for admins to read (models-rpc.ts).
  */
 export const budgetSpend = async (
-  env: Pick<Env, "DB">,
+  env: Pick<Env, "DB" | "MODEL_LEDGER" | "DURABLE_OBJECT_JURISDICTION">,
   budgets: Budgets,
   period: string
 ): Promise<ModelBudget[]> => {
-  const db = drizzle(env.DB);
   const set = (["deployment", "workflow", "user"] as const).flatMap((scope) => {
     const budget = budgets?.[scope];
     return budget === undefined ? [] : [{ scope, budget }];
   });
-  // One more than are listed, to tell whether any are left out. Ties go
-  // by key, descending, so `model_spend_top_idx` gives the order as is.
-  const read = await Promise.all(
-    set.map(async ({ scope, budget }) => {
-      const rows = await db
-        .select({ key: modelSpend.key, micros: modelSpend.spentMicros })
-        .from(modelSpend)
-        .where(and(eq(modelSpend.scope, scope), eq(modelSpend.period, period)))
-        .orderBy(desc(modelSpend.spentMicros), desc(modelSpend.key))
-        .limit(modelSpendListed + 1);
-      return {
-        scope,
-        budget,
-        rows: rows.slice(0, modelSpendListed),
-        more: rows.length > modelSpendListed,
-      };
-    })
+  if (set.length === 0) {
+    return [];
+  }
+  // One more than are listed, to tell whether any are left out.
+  const spent = await modelLedger(env).spendOf(
+    period,
+    set.map(({ scope }) => scope),
+    modelSpendListed + 1
   );
+  const read = set.map(({ scope, budget }) => {
+    const rows = spent[scope] ?? [];
+    return {
+      scope,
+      budget,
+      rows: rows.slice(0, modelSpendListed),
+      more: rows.length > modelSpendListed,
+    };
+  });
   const names = await namesOf(
-    db,
+    drizzle(env.DB),
     read.flatMap(({ scope, rows }) => rows.map(({ key }) => ({ scope, key })))
   );
   return read.map(({ scope, budget, rows, more }) => ({
     scope,
     limit: budget.limit,
     alertAt: budget.alertAt,
-    spent: rows.flatMap(({ key, micros }) => {
+    spent: rows.flatMap(({ key, spentMicros }) => {
       const of = spenderOf(scope, key, names);
-      return of === undefined ? [] : [{ of, amount: micros / microsPerDollar }];
+      return of === undefined
+        ? []
+        : [{ of, amount: spentMicros / microsPerDollar }];
     }),
     more,
   }));

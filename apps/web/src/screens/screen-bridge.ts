@@ -1,6 +1,8 @@
 import type { ScreenBridge, Theme } from "@grasp-os/sdk/screen-runtime";
+import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { portTransport } from "@grasp-os/shared/screen-port";
 import {
+  rpcArgumentDepth,
   screenErrors,
   screenLimits,
   screenProblemSchema,
@@ -8,7 +10,7 @@ import {
 import type { ScreenProblem } from "@grasp-os/shared/screens";
 import { takeToken } from "@grasp-os/shared/token-bucket";
 import type { TokenBucket } from "@grasp-os/shared/token-bucket";
-import { RpcSession, RpcStub, RpcTarget } from "capnweb";
+import { RpcSession, RpcStub } from "capnweb";
 
 // What a screen's frame reaches through its port, and nothing else: its
 // target (its own App's server and workflow runs, and where its problems
@@ -16,7 +18,11 @@ import { RpcSession, RpcStub, RpcTarget } from "capnweb";
 //
 // The frame's traffic is bounded before it reaches core: each message in
 // size and depth (`screenLimits.rpc`, by Cap'n Web, which ends the session
-// over one that is too much), its requests and reports by rate. That
+// over one that is too much), what each call of the bridge's gets to the
+// same depth and size however many messages built it (a value one message
+// refers to from another's: `FrameRpcTarget`), its requests and reports
+// by rate. A value too deep for core's connection would otherwise end the
+// person's whole connection to core, not only this screen's call. That
 // spares the person's connection a screen that floods; it is not what
 // holds a screen to its limits. Core counts the same per person and App
 // (core's screens-rpc.ts), also for a browser that skips this page.
@@ -72,7 +78,17 @@ const text = (value: unknown): string => {
   return value;
 };
 
-class Bridge extends RpcTarget implements ScreenBridge {
+/**
+ * What the bridge extends: each call's arguments arrive within what one
+ * message of the frame's may hold (`request.too_deep`,
+ * `request.too_large`), before any of the bridge's code sees them.
+ */
+const FrameRpcTarget = boundedRpcTarget({
+  depth: rpcArgumentDepth,
+  size: screenLimits.rpc.maxMessageSize,
+});
+
+class Bridge extends FrameRpcTarget implements ScreenBridge {
   readonly #target: FrameTarget;
   readonly #cleanups: (() => void)[];
   #requests: TokenBucket | undefined;

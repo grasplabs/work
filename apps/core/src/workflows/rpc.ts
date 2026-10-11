@@ -9,8 +9,8 @@ import type {
   WorkflowsApi,
   WorkflowSummary,
 } from "@grasp-os/shared/workflows";
-import { RpcTarget } from "capnweb";
 
+import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { runActivity } from "./activity.ts";
@@ -29,7 +29,7 @@ import { cancelRun, listRuns, runStatus, startWorkflow } from "./runs.ts";
  * returned to the run functions, which check the person's role and
  * validate what the client sent.
  */
-export class WorkflowsRpc extends RpcTarget implements WorkflowsApi {
+export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
   readonly #params: WorkflowParamsRpc;

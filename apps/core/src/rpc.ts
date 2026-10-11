@@ -7,16 +7,17 @@ import {
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { CoreApi, Identity, SignInOption } from "@grasp-os/shared/rpc";
 import { screenLimits } from "@grasp-os/shared/screens";
-import { newWebSocketRpcSession, RpcTarget } from "capnweb";
+import { newWebSocketRpcSession } from "capnweb";
 
 import { oidcProviders, signInConfig } from "./auth/config.ts";
 import { identify } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
+import { browserMessageSize, CoreRpcTarget } from "./rpc-target.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import { SessionRpc } from "./session-rpc.ts";
 
 /** What the frontend reaches over `/rpc`, signed in or not. */
-class CoreRpc extends RpcTarget implements CoreApi {
+class CoreRpc extends CoreRpcTarget implements CoreApi {
   readonly #options: SignInOption[];
   readonly #session: SessionRpc | undefined;
 
@@ -104,8 +105,22 @@ const sessionApi = (
   { env, headers, connectedAs }: ConnectionSession,
   server: WebSocket
 ): SessionRpc => {
+  /**
+   * Whether the connection is open and belongs to the request running
+   * now. A timer runs in the request that set it, but a clock something
+   * else drives (a faked one, moved on inside another Durable Object's
+   * request) can run it in another's, where workerd refuses even a look
+   * at the socket: that request leaves the connection alone.
+   */
+  const openHere = (): boolean => {
+    try {
+      return server.readyState === WebSocket.OPEN;
+    } catch {
+      return false;
+    }
+  };
   const close = (): void => {
-    if (server.readyState === WebSocket.OPEN) {
+    if (openHere()) {
       server.close(sessionEndedCloseCode, "Session ended");
     }
   };
@@ -115,13 +130,15 @@ const sessionApi = (
    * Has the timer read again as the latest reading runs out, whether or
    * not a call asks first: so an ended session closes the connection
    * within one window, used or idle, and a busy connection still reads
-   * once a window.
+   * once a window. The timer goes with the connection.
    */
   const recheckWhenDue = (run: () => Promise<void>): void => {
     clearTimeout(recheck);
     if (!ended) {
       recheck = setTimeout(() => {
-        void run();
+        if (!ended && openHere()) {
+          void run();
+        }
       }, sessionRecheckMs);
     }
   };
@@ -150,10 +167,12 @@ const sessionApi = (
   // The upgrade has just read the session: the next reading is due a
   // window on.
   recheckWhenDue(checkQuietly);
-  server.addEventListener("close", () => {
+  const end = (): void => {
     ended = true;
     clearTimeout(recheck);
-  });
+  };
+  server.addEventListener("close", end);
+  server.addEventListener("error", end);
   return new SessionRpc(env, check);
 };
 
@@ -206,13 +225,17 @@ export const rpcResponse = async (
   newWebSocketRpcSession(server, new CoreRpc(signInOptions(env), session), {
     // What a browser sends is untrusted, a screen's calls among it: no
     // deeper and no longer numbers than a screen's port takes
-    // (`screenLimits.rpc`). A message's size keeps Cap'n Web's default
-    // here: the product's own calls share this connection, and a
-    // document or an App's files are longer than a screen's message. A
-    // screen's call is held to its bytes where it lands (screens-rpc.ts).
+    // (`screenLimits.rpc`). A message may be longer than a screen's:
+    // the product's own calls share this connection, and a document or
+    // an App's files are longer than a screen's message. A screen's call
+    // is held to its bytes where it lands (screens-rpc.ts).
+    // These bound each message. A value built from what earlier messages
+    // sent, by referring to them, is held to the same depth and size by
+    // every target it is passed to (rpc-target.ts).
     limits: {
       maxDepth: screenLimits.rpc.maxDepth,
       maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
+      maxMessageSize: browserMessageSize,
     },
     onSendError: (error) => {
       // Every call of the tab goes over this one connection, so each

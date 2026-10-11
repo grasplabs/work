@@ -1,0 +1,1 @@
+CREATE INDEX `permissions_revoked_idx` ON `permissions` (`subject_type`,`subject_id`,`status`,`revoked_at`);

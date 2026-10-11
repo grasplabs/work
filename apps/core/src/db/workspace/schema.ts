@@ -4,7 +4,9 @@
  */
 import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
 import type { ChatId } from "@grasp-os/shared/ids";
+import { sql } from "drizzle-orm";
 import {
+  check,
   foreignKey,
   index,
   integer,
@@ -12,6 +14,8 @@ import {
   sqliteTable,
   text,
 } from "drizzle-orm/sqlite-core";
+
+import { codeRunStatuses } from "../../code-run-statuses.ts";
 
 export const chats = sqliteTable(
   "chats",
@@ -155,6 +159,62 @@ export const chatAttachments = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [primaryKey({ columns: [table.chatId, table.runId] })]
+);
+
+/**
+ * Every code run of a chat's agent, as evidence of what ran and how it
+ * ended: its run ID (the lease its stubs answer to, random and never
+ * reused), the tool call it ran for, the SHA-256 and length of its module
+ * (never the module itself: the transcript has the call), the agent and
+ * runtime it ran on, whether that runtime enforces the CPU limit, and its
+ * status: `running` until it ends, then how it ended (`CodeRunStatus` in
+ * code-mode.ts), or `interrupted` when a restart ended it first. Nothing
+ * here is ever run again: a restart ends a run's lease, and the agent's
+ * next step is a new run with a new ID. Deleted with the chat.
+ */
+/** Most characters of a tool call's ID a run's record keeps. */
+export const maxToolCallIdChars = 200;
+
+export const chatCodeRuns = sqliteTable(
+  "chat_code_runs",
+  {
+    id: text().primaryKey(),
+    chatId: text("chat_id")
+      .$type<ChatId>()
+      .notNull()
+      .references(() => chats.id),
+    toolCallId: text("tool_call_id").notNull(),
+    sourceHash: text("source_hash").notNull(),
+    sourceChars: integer("source_chars").notNull(),
+    agent: text().notNull(),
+    compatibilityDate: text("compatibility_date").notNull(),
+    runtime: text({ enum: ["cloudflare", "workerd"] }).notNull(),
+    cpuLimit: text("cpu_limit", {
+      enum: ["enforced", "cpu_limit_unsupported"],
+    }).notNull(),
+    status: text({ enum: ["running", ...codeRunStatuses] }).notNull(),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("chat_code_runs_chat").on(table.chatId, table.startedAt),
+    // The runs a wake marks interrupted: few, found without a scan.
+    index("chat_code_runs_running")
+      .on(table.status)
+      .where(sql`status = 'running'`),
+    check(
+      "chat_code_runs_status",
+      sql`${table.status} IN (${sql.raw(
+        ["running", ...codeRunStatuses]
+          .map((status) => `'${status}'`)
+          .join(", ")
+      )})`
+    ),
+    check(
+      "chat_code_runs_tool_call_id",
+      sql`length(${table.toolCallId}) BETWEEN 1 AND ${sql.raw(String(maxToolCallIdChars))}`
+    ),
+  ]
 );
 
 /**

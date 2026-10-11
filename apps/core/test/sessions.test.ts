@@ -1,5 +1,6 @@
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import type { RpcStub } from "capnweb";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -136,6 +137,65 @@ describe("sessions end", () => {
       }
     }
   );
+
+  it("close an open connection from its own request, even when another object's request runs its recheck", async () => {
+    const reads = { sessions: 0 };
+    const counted = { ...env, DB: countingSessionReads(env.DB, reads) };
+    const person = entraPerson(acmeTenant);
+    const laptop = await signedIn(idp, "microsoft", person);
+    const phone = await signedIn(idp, "microsoft", person);
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    let connection: Awaited<ReturnType<typeof openRpc>>;
+    let readElsewhere: number;
+    try {
+      connection = await openRpc(phone, { coreEnv: counted });
+      await callAuth("/revoke-other-sessions", laptop, {});
+      // The clock moves on inside another Durable Object's request, where
+      // the connection's recheck timer then runs: workerd refuses any I/O
+      // there on a socket another request opened.
+      const before = reads.sessions;
+      await runInDurableObject(
+        env.MODEL_LEDGER.getByName(crypto.randomUUID()),
+        async () => {
+          await vi.advanceTimersByTimeAsync(sessionRecheckMs);
+        }
+      );
+      readElsewhere = reads.sessions - before;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(readElsewhere).toBe(0);
+    // Its next call, in the connection's own request, is refused and
+    // closes it.
+    using session = connection.core.authenticate();
+    await expect(outcome(session.whoami())).resolves.toBe(
+      "auth.unauthenticated"
+    );
+    await expect(connection.closed).resolves.toBe(sessionEndedCloseCode);
+  });
+
+  it("are no longer read for a connection once it has closed, whatever happens to them later", async () => {
+    const reads = { sessions: 0 };
+    const counted = { ...env, DB: countingSessionReads(env.DB, reads) };
+    const person = entraPerson(acmeTenant);
+    const laptop = await signedIn(idp, "microsoft", person);
+    const phone = await signedIn(idp, "microsoft", person);
+    vi.useFakeTimers({
+      toFake: ["Date", "setTimeout", "clearTimeout"],
+      shouldAdvanceTime: true,
+    });
+    try {
+      const { socket, closed } = await openRpc(phone, { coreEnv: counted });
+      socket.close();
+      await closed;
+      const afterClose = reads.sessions;
+      await callAuth("/revoke-other-sessions", laptop, {});
+      await vi.advanceTimersByTimeAsync(3 * sessionRecheckMs);
+      expect(reads.sessions).toBe(afterClose);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("are read once every few seconds on an open connection, however many calls it carries", async () => {
     const reads = { sessions: 0 };

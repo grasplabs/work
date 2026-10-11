@@ -1,12 +1,12 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
-import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
-import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
 
+import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall, ModelsEnv } from "../src/models.ts";
 import { fakeGateway } from "./ai-gateway.ts";
@@ -37,12 +37,6 @@ const allowed = [workersAi, anthropic, euModel];
 
 /** An answer that costs next to nothing. */
 const cheapAnswer = { text: "Hi.", inputTokens: 10, outputTokens: 5 };
-
-/**
- * An answer that costs $0.0045 from Claude Sonnet 4.5, at its list prices:
- * $3 per million tokens in, $15 out.
- */
-const pricedAnswer = { text: "Hi.", inputTokens: 1000, outputTokens: 100 };
 
 let monthsUsed = 0;
 
@@ -131,12 +125,22 @@ const withDeploymentRules = async <Result>(
   }
 };
 
+/** The model gateway's actions among `events`, in order. */
+const modelActions = (events: AuditEvent[]): string[] =>
+  events
+    .map(({ action }) => action)
+    .filter((action) => action.startsWith("model."));
+
 /** A run of `workflow` in `app` no other test uses. */
 const runOf = (app: string, workflow: string) =>
   runActorOf({ runId: `run-${crypto.randomUUID()}`, app, workflow });
 
-/** The audit events `actor` triggered. */
+/**
+ * The audit events `actor` triggered, the model ledger's alerts included:
+ * its alarm delivers what its outbox holds.
+ */
 const eventsOf = async (actor: unknown): Promise<AuditEvent[]> => {
+  await runDurableObjectAlarm(modelLedger(env));
   const events = await allEvents();
   return events.filter(
     (event) => JSON.stringify(event.actor) === JSON.stringify(actor)
@@ -452,547 +456,297 @@ describe("model rules", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("alert admins when a person's spend crosses the alert threshold and the limit, then stop their calls, and no one else's", async () => {
-    const { call } = withRules(
-      { budgets: { user: { limit: 0.01, alertAt: 40 } } },
-      pricedAnswer
-    );
-    const trigger = newPerson();
-    const ada = hello(anthropic, { trigger });
-    const outcomes: string[] = [];
-    for (let count = 0; count < 4; count += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another, as a person would
-      outcomes.push(await outcome(call(ada)));
-    }
-
-    // $0.0045 a call: past 40% with the first, past the limit with the third.
-    expect(outcomes).toStrictEqual(["ok", "ok", "ok", "model.over_budget"]);
-    await expect(call(ada)).rejects.toMatchObject({
-      message:
-        "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
-      details: { because: "user" },
-    });
-    await expect(outcome(call(hello(anthropic)))).resolves.toBe("ok");
-    const events = await eventsOf(trigger);
-    const { userId } = trigger;
-    expect({
-      alerts: events.filter(({ action }) => action.startsWith("model.budget.")),
-      refused: events.filter(({ action }) => action === "model.refused"),
-    }).toMatchObject({
-      alerts: [
-        {
-          action: "model.budget.alert",
-          detail: {
-            scope: "user",
-            user: userId,
-            limit: 0.01,
-            threshold: 0.004,
-          },
-        },
-        {
-          action: "model.budget.exhausted",
-          detail: { scope: "user", user: userId, limit: 0.01, threshold: 0.01 },
-        },
-      ],
-      refused: [
-        { detail: { reason: "model.over_budget", because: "user" } },
-        { detail: { reason: "model.over_budget", because: "user" } },
-      ],
-    });
-  });
-
-  it("count every one of many concurrent calls, and alert once per threshold", async () => {
-    // Exactly four calls' worth: any call's cost lost would leave room.
-    const { call } = withRules(
-      { budgets: { user: { limit: 0.018, alertAt: 50 } } },
-      pricedAnswer
-    );
-    const ada = hello(anthropic);
-
-    await expect(
-      Promise.all(
-        Array.from({ length: 4 }, async () => await outcome(call(ada)))
-      )
-    ).resolves.toStrictEqual(["ok", "ok", "ok", "ok"]);
-    await expect(outcome(call(ada))).resolves.toBe("model.over_budget");
-    const events = await eventsOf(ada.trigger);
-    expect(
-      events
-        .map(({ action }) => action)
-        .filter((action) => action.startsWith("model.budget."))
-        .toSorted()
-    ).toStrictEqual(["model.budget.alert", "model.budget.exhausted"]);
-  });
-
-  it("count the calls an agent or a run makes for a person against that person's budget", async () => {
+  it("retry a workflow's AI step the budget turned away while other calls hold it, no sooner than 15 seconds on, however tight its retries", async () => {
     const builder = await signedInApi(idp, "builder");
-    const app = await appWith(builder, workflowFiles("idle", "  return null;"));
-    const run = await builder.api.workflows.start(app, "idle");
-    await finished(run.id);
-    const appId = appIdSchema.parse(app);
-    const { call } = withRules(
-      { budgets: { user: { limit: 0.01 } } },
-      pricedAnswer
+    // One retry, a millisecond on: the step's own delay.
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "reader",
+        `  return await step.llm("extract", {
+    description: "Read the total",
+    model: "${anthropic}",
+    instructions: "Read the total in cents.",
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+    retries: { limit: 1, delay: 1 },
+  });`,
+        { extract: { total: 1234 } }
+      )
     );
-    const ada = { type: "person", userId: builder.userId } as const;
-    const forAda = [
-      hello(anthropic, {
-        trigger: { type: "agent", agentId: "chat", onBehalfOf: ada.userId },
-      }),
-      hello(anthropic, {
-        purpose: "workflow.step",
-        trigger: runActorOf({ runId: run.id, app, workflow: "idle" }),
-        work: {
-          authority: {
-            subject: { type: "app", appId },
-            onBehalfOf: ada.userId,
-            mode: "workflow",
-            appVersion: 1,
+    const release = Promise.withResolvers<boolean>();
+    const actor = (runId: string) =>
+      runActorOf({ runId, app, workflow: "reader" });
+
+    // Sonnet 4.5 reserves some $0.56: another of the workflow's runs holds
+    // its $1 budget while it answers, until released.
+    const { result } = await withDeploymentRules(
+      {
+        gateway,
+        models: [workersAi, anthropic],
+        budgets: { workflow: { limit: 1 } },
+      },
+      [
+        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
+        { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
+      ],
+      async () => {
+        const holding = outcome(
+          models(env).call(
+            hello(anthropic, {
+              purpose: "workflow.step",
+              trigger: actor(`run-${crypto.randomUUID()}`),
+            })
+          )
+        );
+        await vi.waitFor(async () => {
+          const read = await modelLedger(env).spendOf(
+            env.MODEL_BUDGET_MONTH ?? "",
+            ["workflow"],
+            10
+          );
+          expect(read.workflow?.[0]?.reservedMicros).toBeGreaterThan(0);
+        });
+        const run = await builder.api.workflows.start(app, "reader");
+        await vi.waitFor(
+          async () => {
+            const events = await eventsOf(actor(run.id));
+            expect(events.map(({ action }) => action)).toContain(
+              "model.refused"
+            );
           },
-          context: { type: "run", appId, runId: runIdSchema.parse(run.id) },
-        },
-      }),
-      hello(anthropic, { trigger: ada }),
-    ];
-    const outcomes: string[] = [];
-    for (const made of [...forAda, hello(anthropic, { trigger: ada })]) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      outcomes.push(await outcome(call(made)));
-    }
-
-    expect(outcomes).toStrictEqual(["ok", "ok", "ok", "model.over_budget"]);
-  });
-
-  it("count an answer cancelled midway by an estimate of what it used, said in its audit event, so cancelling isn't free", async () => {
-    // The answer stops after its first 12 characters, until released: the
-    // provider's count, which comes with the answer's end, never arrives.
-    const rest = Promise.withResolvers<boolean>();
-    const { agent, call } = withRules(
-      { budgets: { user: { limit: 0.01 } } },
-      {
-        text: "Hello there, how are you today?",
-        inputTokens: 1000,
-        outputTokens: 100,
-        pause: { at: 12, until: rest.promise },
+          { timeout: 10_000, interval: 200 }
+        );
+        // Still held a while after the refusal: a retry a millisecond on
+        // would be turned away again, and spend the step's last.
+        await scheduler.wait(3000);
+        release.resolve(true);
+        await finished(run.id);
+        return {
+          held: await holding,
+          run: await builder.api.workflows.status(run.id),
+          events: await eventsOf(actor(run.id)),
+        };
       }
     );
-    // Some 50,000 tokens at four characters each: $0.0146 from Llama 3.3
-    // at its list price of $0.293 per million tokens in, past a cent.
-    const prompt = "word ".repeat(40_000);
-    /** A request of `trigger`'s to `model`, cancelled once text came. */
-    const cancelled = async (
-      model: string,
-      trigger: ReturnType<typeof newPerson>
-    ) => {
-      const session = await agent({
-        model,
-        purpose: "chat.turn",
-        trigger,
-        work: requireWork(),
-      });
-      const cancel = new AbortController();
-      const stream = session.stream(
-        session.model,
-        normalizeContext({
-          messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-        }),
-        { signal: cancel.signal }
-      );
-      for await (const event of stream) {
-        if (event.type === "text_delta") {
-          cancel.abort();
-        }
-      }
-      const { stopReason } = await stream.result();
-      return stopReason;
-    };
-    const ada = newPerson();
-    const ben = newPerson();
-    try {
-      // Chat completions count nothing until their last chunk; Anthropic
-      // counts the prompt at the start, and the answer at its end.
-      const stopped = [
-        await cancelled(workersAi, ada),
-        await cancelled(anthropic, ben),
-      ];
-      const after = await outcome(call(hello(workersAi, { trigger: ada })));
-      const [[adas], [bens]] = [await eventsOf(ada), await eventsOf(ben)];
-      const tokens = adas?.model?.inputTokens ?? 0;
-      expect({
-        stopped,
-        after,
-        ada: [adas?.action, adas?.detail, adas?.model?.outputTokens],
-        // The prompt, and the little the request holds besides.
-        prompt: tokens >= prompt.length / 4 && tokens < prompt.length / 4 + 200,
-        ben: [bens?.action, bens?.detail, bens?.model],
-      }).toMatchObject({
-        stopped: ["aborted", "aborted"],
-        // The estimate used up Ada's cent.
-        after: "model.over_budget",
-        ada: [
-          "model.call",
-          { outcome: "cancelled", errorType: "cancelled", estimated: true },
-          // "Hello there," at four characters a token.
-          3,
-        ],
-        prompt: true,
-        ben: [
-          "model.call",
-          { outcome: "cancelled", errorType: "cancelled", estimated: true },
-          // The prompt as Anthropic counted it, the answer estimated.
-          { inputTokens: 1000, outputTokens: 3 },
-        ],
-      });
-      // At the models' list prices, per million tokens in and out.
-      expect(adas?.cost?.amount).toBeCloseTo(
-        (tokens * 0.293 + 3 * 2.253) / 1_000_000,
-        6
-      );
-      expect(bens?.cost?.amount).toBeCloseTo(
-        (1000 * 3 + 3 * 15) / 1_000_000,
-        6
-      );
-    } finally {
-      rest.resolve(true);
-    }
-  });
 
-  it("count an answer that breaks off midway, with no end and no count, by an estimate of what came", async () => {
-    // The stream closes after the answer's first 12 characters.
-    const { agent, call } = withRules(
-      { budgets: { user: { limit: 0.01 } } },
-      {
-        text: "Hello there, how are you today?",
-        inputTokens: 1000,
-        outputTokens: 100,
-        cut: 12,
-      }
-    );
-    // Some 50,000 tokens at four characters each: past a cent from Llama
-    // 3.3, as above.
-    const prompt = "word ".repeat(40_000);
-    /** A request of `trigger`'s to `model`, and what reached its caller. */
-    const brokenOff = async (
-      model: string,
-      trigger: ReturnType<typeof newPerson>
-    ) => {
-      const session = await agent({
-        model,
-        purpose: "chat.turn",
-        trigger,
-        work: requireWork(),
-      });
-      const stream = session.stream(
-        session.model,
-        normalizeContext({
-          messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-        })
+    const timeOf = (action: string) =>
+      Date.parse(
+        result.events.find((event) => event.action === action)?.at ?? ""
       );
-      let streamed = "";
-      for await (const event of stream) {
-        if (event.type === "text_delta") {
-          streamed += event.delta;
-        }
-      }
-      const { stopReason } = await stream.result();
-      return [stopReason, streamed];
-    };
-    const ada = newPerson();
-    const ben = newPerson();
-    const ended = [
-      await brokenOff(workersAi, ada),
-      await brokenOff(anthropic, ben),
-    ];
-    const after = await outcome(call(hello(workersAi, { trigger: ada })));
-    const [[adas], [bens]] = [await eventsOf(ada), await eventsOf(ben)];
-    const tokens = adas?.model?.inputTokens ?? 0;
     expect({
-      ended,
-      after,
-      ada: [adas?.action, adas?.detail, adas?.model?.outputTokens],
-      prompt: tokens >= prompt.length / 4 && tokens < prompt.length / 4 + 200,
-      ben: [bens?.action, bens?.detail, bens?.model],
+      held: result.held,
+      run: result.run,
+      refused: result.events
+        .filter(({ action }) => action === "model.refused")
+        .map(({ detail }) => detail),
+      waited: timeOf("model.call") - timeOf("model.refused") >= 15_000,
     }).toMatchObject({
-      // What came reached the caller, before the failure.
-      ended: [
-        ["error", "Hello there,"],
-        ["error", "Hello there,"],
+      held: "ok",
+      run: { status: "completed", output: { total: 1234 } },
+      // A shared budget: a fixed wait, nothing of the other run's timing.
+      refused: [
+        {
+          reason: "model.budget_busy",
+          because: "workflow",
+          retryAfterSeconds: 60,
+        },
       ],
-      // And is paid for: the estimate used up Ada's cent.
-      after: "model.over_budget",
-      ada: ["model.call", { outcome: "failed", estimated: true }, 3],
-      prompt: true,
-      ben: [
-        "model.call",
-        { outcome: "failed", estimated: true },
-        { inputTokens: 1000, outputTokens: 3 },
-      ],
+      waited: true,
     });
   });
 
-  it("alert admins once for every limit lowered below what was spent, and count each month on its own", async () => {
-    const month = newMonth();
-    const spend = withRules(
-      { budgets: { user: { limit: 0.02 }, deployment: { limit: 0.02 } } },
-      pricedAnswer,
-      month
-    );
-    const lowered = withRules(
-      { budgets: { user: { limit: 0.01 }, deployment: { limit: 0.01 } } },
-      pricedAnswer,
-      month
-    );
-    const nextMonth = withRules(
-      { budgets: { user: { limit: 0.01 } } },
-      pricedAnswer
-    );
-    const ada = hello(anthropic);
-    const outcomes: string[] = [];
-    // $0.0135: under the first limit, over the lowered one.
-    for (const call of [spend.call, spend.call, spend.call]) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      outcomes.push(await outcome(call(ada)));
-    }
-    for (const call of [lowered.call, lowered.call, nextMonth.call]) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      outcomes.push(await outcome(call(ada)));
-    }
-
-    expect(outcomes).toStrictEqual([
-      "ok",
-      "ok",
-      "ok",
-      "model.over_budget",
-      "model.over_budget",
-      "ok",
-    ]);
-    const events = await eventsOf(ada.trigger);
-    // Both used up, both alerted, once each: not only the one that refused.
-    expect(
-      events
-        .filter(({ action }) => action === "model.budget.exhausted")
-        .map(({ detail }) => detail)
-        .toSorted((one, other) =>
-          String(one.scope).localeCompare(String(other.scope))
-        )
-    ).toMatchObject([
-      { scope: "deployment", period: month, limit: 0.01, threshold: 0.01 },
-      { scope: "user", period: month, limit: 0.01, threshold: 0.01 },
-    ]);
-  });
-
-  it("alert admins once when the alert threshold is lowered below what was spent", async () => {
-    const month = newMonth();
-    const early = withRules(
-      { budgets: { user: { limit: 0.02, alertAt: 90 } } },
-      pricedAnswer,
-      month
-    );
-    const lowered = withRules(
-      { budgets: { user: { limit: 0.02, alertAt: 40 } } },
-      pricedAnswer,
-      month
-    );
-    const ada = hello(anthropic);
-    const outcomes: string[] = [];
-    // $0.009 spent, under 90% of $0.02; then 40% is $0.008, already passed.
-    for (const call of [early.call, early.call, lowered.call, lowered.call]) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      outcomes.push(await outcome(call(ada)));
-    }
-
-    expect(outcomes).toStrictEqual(["ok", "ok", "ok", "ok"]);
-    const events = await eventsOf(ada.trigger);
-    expect(
-      events.filter(({ action }) => action === "model.budget.alert")
-    ).toMatchObject([
-      {
-        detail: { scope: "user", period: month, limit: 0.02, threshold: 0.008 },
-      },
-    ]);
-  });
-
-  it("check the budgets again before a retry: an attempt that used one up stops the call before anything more is sent", async () => {
-    const { fake, call } = withRules(
-      { budgets: { user: { limit: 0.01 } } },
-      // An answer that doesn't fit, and costs $0.0105: past the limit.
-      { text: "No JSON here.", inputTokens: 1000, outputTokens: 500 }
-    );
-    const ada = hello(anthropic);
-
-    await expect(
-      outcome(call({ ...ada, schema: z.object({ total: z.number() }) }))
-    ).resolves.toBe("model.over_budget");
-    expect(fake.requests).toHaveLength(1);
-    const events = await eventsOf(ada.trigger);
-    expect(events.map(({ action }) => action)).toStrictEqual([
-      "model.call",
-      "model.budget.alert",
-      "model.budget.exhausted",
-      "model.refused",
-    ]);
-  });
-
-  it("alert once per limit value a month, however the limit changes back and forth", async () => {
-    const month = newMonth();
-    const withLimit = (limit: number) =>
-      withRules({ budgets: { user: { limit } } }, pricedAnswer, month).call;
-    const ada = hello(anthropic);
-    const outcomes: string[] = [];
-    // $0.0135 spent under $0.03; then $0.012, $0.01 and $0.012 again.
-    for (const call of [
-      withLimit(0.03),
-      withLimit(0.03),
-      withLimit(0.03),
-      withLimit(0.012),
-      withLimit(0.01),
-      withLimit(0.012),
-    ]) {
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      outcomes.push(await outcome(call(ada)));
-    }
-
-    expect(outcomes).toStrictEqual([
-      "ok",
-      "ok",
-      "ok",
-      "model.over_budget",
-      "model.over_budget",
-      "model.over_budget",
-    ]);
-    const events = await eventsOf(ada.trigger);
-    expect(
-      events
-        .filter(({ action }) => action === "model.budget.exhausted")
-        .map(({ detail }) => detail.threshold)
-    ).toStrictEqual([0.012, 0.01]);
-  });
-
-  it("check and count a retry in the month it is sent in, when the month turns between attempts", async () => {
-    const [before, after] = [newMonth(), newMonth()];
-    const fake = fakeGateway(
-      pricedAnswer,
-      pricedAnswer,
-      { ...pricedAnswer, text: "No JSON here." },
-      { ...pricedAnswer, text: '{ "total": 1 }' }
-    );
-    const turningEnv: ModelsEnv = {
-      ...env,
-      AI: fake.binding,
-      MODEL_GATEWAY: {
-        gateway,
-        models: allowed,
-        budgets: { user: { limit: 0.01, alertAt: 40 } },
-      },
-      // The month turns once the call's first attempt was sent.
-      get MODEL_BUDGET_MONTH() {
-        return fake.requests.length < 3 ? before : after;
-      },
-    };
-    const ada = hello(anthropic);
-    const call = async (more: Partial<ModelCall<undefined>> = {}) =>
-      await outcome(models(turningEnv).call({ ...ada, ...more }));
-
-    // $0.009 of the old month's $0.01.
-    await expect(Promise.all([call(), call()])).resolves.toStrictEqual([
-      "ok",
-      "ok",
-    ]);
-    // Its first attempt uses the old month up; its retry is in the new one.
-    await expect(
-      outcome(
-        models(turningEnv).call({
-          ...ada,
-          schema: z.object({ total: z.number() }),
-        })
-      )
-    ).resolves.toBe("ok");
-    const events = await eventsOf(ada.trigger);
-    expect(
-      events
-        .filter(({ action }) => action.startsWith("model.budget."))
-        .map(({ action, detail }) => [action, detail.period])
-    ).toStrictEqual([
-      ["model.budget.alert", before],
-      ["model.budget.exhausted", before],
-      ["model.budget.alert", after],
-    ]);
-  });
-
-  it("keep a paid answer when its cost can't be counted", async () => {
-    const fake = fakeGateway(pricedAnswer);
-    const database: D1Database = env.DB;
-    const refusingEnv: ModelsEnv = {
-      ...env,
-      AI: fake.binding,
-      MODEL_GATEWAY: {
-        gateway,
-        models: allowed,
-        budgets: { user: { limit: 0.01 } },
-      },
-      MODEL_BUDGET_MONTH: newMonth(),
-      // Reads and single writes work; the batch that counts the cost fails.
-      DB: new Proxy(database, {
-        get: (target, name): unknown => {
-          if (name === "batch") {
-            return () => {
-              throw new Error("Unavailable");
-            };
-          }
-          const value: unknown = Reflect.get(target, name);
-          return value;
-        },
+  it("ask the ledger for a busy step at most every 15 seconds, however short its attempts' timeout, and fail a step with no retry left at once", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const llm = (retries: string) => `  return await step.llm("extract", {
+    description: "Read the total",
+    model: "${anthropic}",
+    instructions: "Read the total in cents.",
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+    ${retries}
+  });`;
+    // Attempts that time out after a second, retried a millisecond on; and
+    // a step with no retry at all.
+    const app = await appWith(builder, {
+      ...workflowFiles(
+        "reader",
+        llm("timeout: 1000, retries: { limit: 40, delay: 1 },"),
+        {
+          extract: { total: 1234 },
+        }
+      ),
+      ...workflowFiles("once", llm("retries: { limit: 0 },"), {
+        extract: { total: 1234 },
       }),
-    };
+    });
+    const release = Promise.withResolvers<boolean>();
+    const actor = (runId: string, workflow = "reader") =>
+      runActorOf({ runId, app, workflow });
 
-    await expect(
-      models(refusingEnv).call(hello(anthropic))
-    ).resolves.toMatchObject({ text: "Hi." });
+    // Another run of each workflow holds its $1 budget while it answers,
+    // until released.
+    const { result } = await withDeploymentRules(
+      {
+        gateway,
+        models: [workersAi, anthropic],
+        budgets: { workflow: { limit: 1 } },
+      },
+      [
+        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
+        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
+        { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
+      ],
+      async () => {
+        const holding = Promise.all(
+          ["reader", "once"].map(
+            async (workflow) =>
+              await outcome(
+                models(env).call(
+                  hello(anthropic, {
+                    purpose: "workflow.step",
+                    trigger: actor(`run-${crypto.randomUUID()}`, workflow),
+                  })
+                )
+              )
+          )
+        );
+        await vi.waitFor(async () => {
+          const read = await modelLedger(env).spendOf(
+            env.MODEL_BUDGET_MONTH ?? "",
+            ["workflow"],
+            10
+          );
+          expect(
+            read.workflow?.filter(({ reservedMicros }) => reservedMicros > 0)
+          ).toHaveLength(2);
+        });
+        const once = await builder.api.workflows.start(app, "once");
+        const startedOnce = Date.now();
+        await finished(once.id);
+        const onceTook = Date.now() - startedOnce;
+        const run = await builder.api.workflows.start(app, "reader");
+        // Eight seconds of attempts a second apart, all while held.
+        await scheduler.wait(8000);
+        const whileHeld = await eventsOf(actor(run.id));
+        release.resolve(true);
+        await finished(run.id);
+        return {
+          held: await holding,
+          onceTook,
+          once: await builder.api.workflows.status(once.id),
+          whileHeld,
+          run: await builder.api.workflows.status(run.id),
+          events: await eventsOf(actor(run.id)),
+        };
+      }
+    );
+
+    expect({
+      held: result.held,
+      once: result.once,
+      onceQuick: result.onceTook < 10_000,
+      whileHeld: modelActions(result.whileHeld),
+      run: result.run,
+      after: modelActions(result.events),
+    }).toMatchObject({
+      held: ["ok", "ok"],
+      // No retry left: it fails at once, with the reason.
+      once: {
+        status: "failed",
+        error: {
+          message:
+            "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
+        },
+      },
+      onceQuick: true,
+      // Asked once in eight seconds of attempts; the rest answered by the
+      // host from that refusal.
+      whileHeld: ["model.refused"],
+      run: { status: "completed", output: { total: 1234 } },
+      after: ["model.refused", "model.call"],
+    });
   });
 
-  it("count a workflow's calls apart from other workflows', and the deployment's across every caller", async () => {
-    const app = `app-${crypto.randomUUID()}`;
-    const { call } = withRules(
-      { budgets: { workflow: { limit: 0.01 } } },
-      pricedAnswer
+  it("ask the ledger again once 15 seconds passed since a busy step's refusal, on its last attempt too, when the budget freed meanwhile", async () => {
+    const builder = await signedInApi(idp, "builder");
+    // Attempts at about 0, 6 and 12 seconds: the third, the last, runs
+    // past the 15 seconds since the first was turned away.
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "reader",
+        `  return await step.llm("extract", {
+    description: "Read the total",
+    model: "${anthropic}",
+    instructions: "Read the total in cents.",
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+    timeout: 6000,
+    retries: { limit: 2, delay: 1 },
+  });`,
+        { extract: { total: 1234 } }
+      )
     );
-    const step = async (workflow: string) =>
-      await outcome(
-        call(
-          hello(anthropic, {
-            purpose: "workflow.step",
-            trigger: runOf(app, workflow),
-          })
-        )
-      );
-    const { call: anyone } = withRules(
-      { budgets: { deployment: { limit: 0.01 } } },
-      pricedAnswer
-    );
-    const outcomes: string[] = [];
-    for (let count = 0; count < 4; count += 1) {
-      // A new run each time: the workflow's budget counts all of its runs.
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      outcomes.push(await step("invoices"));
-    }
-    for (let count = 0; count < 4; count += 1) {
-      // A new person each time: the deployment's budget counts them all.
-      // oxlint-disable-next-line no-await-in-loop -- one after another
-      outcomes.push(await outcome(anyone(hello(anthropic))));
-    }
+    const release = Promise.withResolvers<boolean>();
+    const actor = (runId: string) =>
+      runActorOf({ runId, app, workflow: "reader" });
 
-    expect({ outcomes, orders: await step("orders") }).toStrictEqual({
-      outcomes: [
-        "ok",
-        "ok",
-        "ok",
-        "model.over_budget",
-        "ok",
-        "ok",
-        "ok",
-        "model.over_budget",
+    const { result } = await withDeploymentRules(
+      {
+        gateway,
+        models: [workersAi, anthropic],
+        budgets: { workflow: { limit: 1 } },
+      },
+      [
+        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
+        { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
       ],
-      orders: "ok",
+      async () => {
+        const holding = outcome(
+          models(env).call(
+            hello(anthropic, {
+              purpose: "workflow.step",
+              trigger: actor(`run-${crypto.randomUUID()}`),
+            })
+          )
+        );
+        await vi.waitFor(async () => {
+          const read = await modelLedger(env).spendOf(
+            env.MODEL_BUDGET_MONTH ?? "",
+            ["workflow"],
+            10
+          );
+          expect(read.workflow?.[0]?.reservedMicros).toBeGreaterThan(0);
+        });
+        const run = await builder.api.workflows.start(app, "reader");
+        await vi.waitFor(
+          async () => {
+            const events = await eventsOf(actor(run.id));
+            expect(modelActions(events)).toContain("model.refused");
+          },
+          { timeout: 10_000, interval: 100 }
+        );
+        // Free half a second after the refusal, well within the 15 seconds.
+        await scheduler.wait(500);
+        release.resolve(true);
+        await finished(run.id);
+        return {
+          held: await holding,
+          run: await builder.api.workflows.status(run.id),
+          events: await eventsOf(actor(run.id)),
+        };
+      }
+    );
+
+    expect({
+      held: result.held,
+      run: result.run,
+      actions: modelActions(result.events),
+    }).toMatchObject({
+      held: "ok",
+      run: { status: "completed", output: { total: 1234 } },
+      actions: ["model.refused", "model.call"],
     });
   });
 

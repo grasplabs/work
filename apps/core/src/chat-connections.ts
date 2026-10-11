@@ -302,7 +302,9 @@ const whyNotStored = async (
 export const askInChat = async (
   env: Env,
   scope: AgentScope,
-  input: unknown
+  input: unknown,
+  /** Admits the write, called right before it is committed: throws to refuse it. */
+  admit?: () => Promise<void>
 ): Promise<AskedConnection> => {
   const { reason, ...ask } = permissionErrors.parse(
     "permission.invalid",
@@ -384,6 +386,8 @@ export const askInChat = async (
       AND NOT EXISTS (SELECT 1 FROM ${permissions} WHERE subject_type = 'agent' AND subject_id = ${row.subjectId} AND binding = ${binding} AND chat_id IS NULL AND status <> 'revoked')`
   );
   try {
+    // Admitted last, with nothing slow left before the write.
+    await admit?.();
     await auditedBatch(env, db, [
       insert,
       outboxedIfChanged(

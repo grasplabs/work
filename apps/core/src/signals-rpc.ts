@@ -14,7 +14,6 @@ import type {
   SignalFilter,
   SignalsApi,
 } from "@grasp-os/shared/signals";
-import { RpcTarget } from "capnweb";
 import { and, asc, desc, eq, ne, notLike } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -24,6 +23,7 @@ import {
   improvementSignalComputations as computations,
   improvementSignals,
 } from "./db/core/schema.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { latestComputation, peopleSubject } from "./signals.ts";
@@ -187,7 +187,7 @@ export const listSignals = async (
  * hands the identity that check returned to `listSignals`,
  * which checks their role.
  */
-export class SignalsRpc extends RpcTarget implements SignalsApi {
+export class SignalsRpc extends CoreRpcTarget implements SignalsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

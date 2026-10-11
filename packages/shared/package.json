@@ -28,6 +28,7 @@
     "./interview-links": "./src/interview-links.ts",
     "./kickoff": "./src/kickoff.ts",
     "./http": "./src/http.ts",
+    "./identifier": "./src/identifier.ts",
     "./ids": "./src/ids.ts",
     "./json": "./src/json.ts",
     "./knowledge": "./src/knowledge.ts",
@@ -49,6 +50,7 @@
     "./roles": "./src/roles.ts",
     "./router": "./src/router.ts",
     "./rpc": "./src/rpc.ts",
+    "./rpc-target": "./src/rpc-target.ts",
     "./runtime": "./src/runtime.ts",
     "./screen-limits": "./src/screen-limits.ts",
     "./screen-port": "./src/screen-port.ts",
@@ -57,12 +59,19 @@
     "./sign-in": "./src/sign-in.ts",
     "./signals": "./src/signals.ts",
     "./statistics": "./src/statistics.ts",
+    "./store-limits": "./src/store-limits.ts",
+    "./store-queries": "./src/store-queries.ts",
+    "./store-reads": "./src/store-reads.ts",
+    "./stores": "./src/stores.ts",
     "./submissions": "./src/submissions.ts",
     "./token-bucket": "./src/token-bucket.ts",
     "./uploads": "./src/uploads.ts",
+    "./value-bounds": "./src/value-bounds.ts",
+    "./value-depth": "./src/value-depth.ts",
     "./workflows": "./src/workflows.ts"
   },
   "dependencies": {
+    "capnweb": "catalog:",
     "croner": "catalog:",
     "zod": "catalog:"
   }

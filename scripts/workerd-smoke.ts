@@ -67,6 +67,7 @@ const core :Workerd.Worker = (
   bindings = [
     (name = "ROUTER_SECRET", text = "${ROUTER_SECRET}"),
     (name = "DURABLE_OBJECT_JURISDICTION", text = "none"),
+    (name = "RUNTIME_PROFILE", text = "workerd"),
     # No LOADER (experimental in workerd) and no WORKFLOWS (no engine):
     # apps and screens need workerd's --experimental, and workflows don't
     # run on-prem (apps/core/src/workflows/engine.ts).
@@ -77,6 +78,8 @@ const core :Workerd.Worker = (
     (className = "AuditLog", uniqueKey = "audit-log", enableSql = true),
     (className = "Builtins", uniqueKey = "builtins", enableSql = true),
     (className = "Onboarding", uniqueKey = "onboarding", enableSql = true),
+    (className = "ModelLedger", uniqueKey = "model-ledger", enableSql = true),
+    (className = "DataStore", uniqueKey = "data-store", enableSql = true),
   ],
   # In-memory storage aborts workerd when a Durable Object alarm fires, so
   # the smoke run must not write audit events or run the 15-minute cron

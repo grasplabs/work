@@ -3,8 +3,8 @@ import type {
   DecisionsApi,
   DecisionView,
 } from "@grasp-os/shared/decisions";
-import { RpcTarget } from "capnweb";
 
+import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { answerDecision, decisionFor } from "./decisions.ts";
@@ -15,7 +15,7 @@ import { answerDecision, decisionFor } from "./decisions.ts";
  * identity that check returned, with its role and teams read now, to the
  * decision functions, which check that person may answer.
  */
-export class DecisionsRpc extends RpcTarget implements DecisionsApi {
+export class DecisionsRpc extends CoreRpcTarget implements DecisionsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

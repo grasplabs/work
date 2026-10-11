@@ -1,5 +1,6 @@
 import type { Message } from "@earendil-works/pi-ai";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
+import type { ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
@@ -144,3 +145,53 @@ export const codeResults = async (stub: WorkspaceStub, chatId: string) => {
       : []
   );
 };
+
+/** How each code step of the chat ended, as the host recorded it. */
+export const codeStatuses = async (stub: WorkspaceStub, chatId: string) => {
+  const messages = await transcript(stub, chatId);
+  return messages.flatMap((message) => {
+    if (message.role !== "toolResult") {
+      return [];
+    }
+    const details: unknown = message.details;
+    return [
+      typeof details === "object" && details !== null && "status" in details
+        ? details.status
+        : undefined,
+    ];
+  });
+};
+
+/**
+ * Sets `vars` in the object's env, as `pointAtGateway` points its gateway:
+ * a shorter code run limit (`CODE_RUN_TIMEOUT_MS`), say.
+ */
+export const setObjectEnv = async (
+  stub: WorkspaceStub,
+  vars: Record<string, string>
+) => {
+  await runInDurableObject(stub, (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv !== "object" || objectEnv === null) {
+      throw new TypeError("The Workspace object has no env");
+    }
+    Object.assign(objectEnv, vars);
+  });
+};
+
+/** What a test's own code run records of its module. */
+export const testRunOpening = {
+  toolCallId: "call_test",
+  sourceHash: "0".repeat(64),
+  sourceChars: 0,
+};
+
+/**
+ * Opens a code run of the chat outside any turn, for a test that writes
+ * a draft as the chat's code would: the run every draft write is
+ * admitted against.
+ */
+export const openTestRun = async (
+  stub: WorkspaceStub,
+  chatId: ChatId
+): Promise<string> => await stub.openCodeRun(chatId, testRunOpening);

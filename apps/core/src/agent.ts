@@ -11,11 +11,14 @@ import { toToolDeclaration } from "@earendil-works/pi-ai/utils/transcript";
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { CatalogSkill } from "@grasp-os/shared/knowledge";
 import type { Memory } from "@grasp-os/shared/memory";
+import { z } from "zod";
 
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
-import { describeRun, runCode } from "./code-mode.ts";
+import { describeRun, runCode, sourceHash } from "./code-mode.ts";
 import type { CodeRun } from "./code-mode.ts";
+import type { CodeRunStatus } from "./code-run-statuses.ts";
 import type { AgentModel } from "./models.ts";
+import type { CodeRunOpening } from "./workspace.ts";
 
 // The agent loop: Pi (pi-agent-core) in Code Mode. The model answers, or
 // calls one tool, `executeCode`, with code against the chat's typed APIs;
@@ -40,10 +43,10 @@ export const maxRunsPerTurn = 30;
 
 const instructions = `You are the Grasp assistant, in a chat with one person. You answer their questions, and you look things up or act for them by writing code. You act on their behalf and can do only what they may do, as far as you were given access in this workspace: when something is refused, say so, and don't try another way around it.
 
-To use an API, call the \`executeCode\` tool with a JavaScript module whose default export is an async function of \`env\`:
+To use an API, call the \`executeCode\` tool with a complete JavaScript module whose default export is an async function of \`(self, env, ctx)\`. \`env\` holds the APIs; \`self\` is null and \`ctx\` gives you nothing you need. Helper functions in the module are fine:
 
 \`\`\`js
-export default async (env) => {
+export default async (self, env, ctx) => {
   const info = await env.chat.info();
   return info.now;
 };
@@ -179,43 +182,133 @@ const systemUpdates = (
     : [{ role: "system", content: "", sections: changed, timestamp }];
 };
 
-const codeParameters = Type.Object({
-  code: Type.String({
-    description:
-      "A complete JavaScript module whose default export is an async function of `env`: `export default async (env) => { ... }`.",
-  }),
-});
+const codeParameters = Type.Object(
+  {
+    code: Type.String({
+      description:
+        "A complete JavaScript module whose default export is an async function of `(self, env, ctx)`: `export default async (self, env, ctx) => { ... }`.",
+    }),
+  },
+  { additionalProperties: false }
+);
 
 /**
- * The code runs of a chat that are running now. A stub answers only while
- * the run it was made for is open, so code that is still running after its
- * run was cancelled or timed out can't act any more.
+ * The tool's input, checked before Pi's own validation: only `code`, a
+ * string. Refused with a short message rather than Pi's, which repeats the
+ * whole input back to the model. Its length is checked by the host as the
+ * run starts (`runCode`), so an oversized module is a run that was refused.
+ */
+const codeInputSchema = z.strictObject({ code: z.string() });
+
+const codeInput = (args: unknown): { code: string } => {
+  const input = codeInputSchema.safeParse(args);
+  if (!input.success) {
+    throw new Error(
+      "executeCode takes one field, `code`: the module as a string. Nothing else is accepted."
+    );
+  }
+  return input.data;
+};
+
+/**
+ * The code runs of a chat: each opened with its record, before its code
+ * loads, and closed as it ends. A stub answers, and a write is admitted,
+ * only while the run it was made for is open, so code still running after
+ * its run was cancelled, timed out or lost a permission can't act any
+ * more. `close` says how the run ended: as it says, or `revoked` when a
+ * revocation closed it first.
  */
 export interface CodeRuns {
-  open: () => string;
-  close: (runId: string) => void;
+  open: (opening: CodeRunOpening) => string;
+  close: (runId: string, status: CodeRunStatus) => Promise<CodeRunStatus>;
+  /**
+   * A line the run's code logged, for the chat to show as it runs: taken
+   * only while the run is open, for the code step it runs for.
+   */
+  output: (runId: string, toolCallId: string, line: string) => void;
 }
 
-/** Runs code with stubs that answer only while the run is open. */
+/**
+ * Runs code with stubs that answer only while the run is open: opened with
+ * its record before the code loads, closed however it ends. A run a
+ * revocation closed ends as `revoked`: what its code returned isn't
+ * handed on, as it may rest on what was revoked.
+ */
 const runOpen = async (
   {
     apis,
     scope,
     runs,
     loader,
-  }: Pick<Turn, "apis" | "scope" | "runs" | "loader">,
+    codeTimeoutMs,
+  }: Pick<Turn, "apis" | "scope" | "runs" | "loader" | "codeTimeoutMs">,
+  toolCallId: string,
   code: string,
-  signal: AbortSignal | undefined
-): Promise<CodeRun> => {
-  const runId = runs.open();
+  signal: AbortSignal | undefined,
+  onOutput: (runId: string, line: string) => void
+): Promise<{ runId: string; run: CodeRun }> => {
+  const runId = runs.open({
+    toolCallId,
+    sourceHash: await sourceHash(code),
+    sourceChars: code.length,
+  });
   const env = Object.fromEntries(
     apis.map((api) => [api.name, api.stub({ ...scope, runId })])
   );
+  // `runCode` never throws; should anything else, the run still closes.
+  let ran: CodeRunStatus = "crashed";
+  let ended: CodeRunStatus;
+  let run: CodeRun;
   try {
-    return await runCode(loader, code, env, signal);
+    run = await runCode(loader, code, env, {
+      signal,
+      timeoutMs: codeTimeoutMs,
+      onOutput: (line) => {
+        onOutput(runId, line);
+      },
+    });
+    ran = run.status;
   } finally {
-    runs.close(runId);
+    ended = await runs.close(runId, ran);
   }
+  // A run a revocation closed, as it ran or as it ended, hands on nothing
+  // of what it did: not what it returned, nor what it logged, which could
+  // carry what return can't.
+  return {
+    runId,
+    run:
+      ended === "revoked"
+        ? {
+            status: ended,
+            logs: [],
+            error: agentErrors.create("agent.run_revoked").message,
+          }
+        : run,
+  };
+};
+
+/**
+ * How a code step's result says it went: as it runs (its output streams
+ * through pi's tool updates) and how it ended, with the run it was.
+ */
+interface CodeStepDetails {
+  status: CodeRunStatus | "running";
+  runId: string;
+}
+
+/** The run and logged line a code step's tool update carries, if one does. */
+const codeStepUpdateSchema = z.object({
+  content: z.tuple([z.object({ type: z.literal("text"), text: z.string() })]),
+  details: z.object({ status: z.literal("running"), runId: z.string() }),
+});
+
+const codeStepLine = (
+  update: unknown
+): { runId: string; text: string } | undefined => {
+  const parsed = codeStepUpdateSchema.safeParse(update);
+  return parsed.success
+    ? { runId: parsed.data.details.runId, text: parsed.data.content[0].text }
+    : undefined;
 };
 
 /** The one tool: runs code against the chat's APIs in a locked isolate. */
@@ -224,26 +317,40 @@ const executeCode = ({
   scope,
   runs,
   loader,
-}: Pick<Turn, "apis" | "scope" | "runs" | "loader">): AgentTool<
-  typeof codeParameters
-> => ({
+  codeTimeoutMs,
+}: Pick<
+  Turn,
+  "apis" | "scope" | "runs" | "loader" | "codeTimeoutMs"
+>): AgentTool<typeof codeParameters, CodeStepDetails> => ({
   name: "executeCode",
   label: "Run code",
   description:
     "Runs a JavaScript module in a sandbox with the chat's APIs as `env`, and returns what its default export returns, what it logs, or what it throws.",
   parameters: codeParameters,
+  prepareArguments: codeInput,
   executionMode: "sequential",
-  execute: async (_toolCallId, { code }, signal) => {
-    const run = await runOpen({ apis, scope, runs, loader }, code, signal);
-    if (!run.ok) {
-      // pi hands a thrown error's message to the model as a failed result.
-      throw new Error(describeRun(run));
-    }
-    // Only the text the model reads is kept: it is bounded, and the run's
-    // own output (which the transcript stores) needn't be.
+  execute: async (toolCallId, { code }, signal, onUpdate) => {
+    const { runId, run } = await runOpen(
+      { apis, scope, runs, loader, codeTimeoutMs },
+      toolCallId,
+      code,
+      signal,
+      // Each line as the code logs it, as one of pi's tool updates: pi
+      // drops an update once the step has settled.
+      (from, line) => {
+        onUpdate?.({
+          content: [{ type: "text", text: line }],
+          details: { status: "running", runId: from },
+        });
+      }
+    );
+    // Only the text the model reads is kept, with how the run ended: it is
+    // bounded, and the run's own output (which the transcript stores)
+    // needn't be. A run that didn't complete is a failed result.
     return {
       content: [{ type: "text", text: describeRun(run) }],
-      details: undefined,
+      details: { status: run.status, runId },
+      isError: run.status !== "completed",
     };
   },
 });
@@ -271,6 +378,8 @@ export interface Turn {
   scope: Omit<AgentScope, "runId">;
   runs: CodeRuns;
   loader: WorkerLoader;
+  /** Each code run's wall-clock limit (`codeTimeoutMs`). */
+  codeTimeoutMs: number;
   /** Cancels the turn: the request or code run in flight stops. */
   signal: AbortSignal;
   /** Keeps a finished message: called in order, as each one finishes. */
@@ -546,6 +655,7 @@ export const runTurn = async ({
   scope,
   runs,
   loader,
+  codeTimeoutMs,
   signal: cancelled,
   keep,
   write,
@@ -559,7 +669,7 @@ export const runTurn = async ({
     { role: "user", content: question, timestamp: Date.now() },
   ];
   const progress: Progress = { steps: 0, runs: 0 };
-  const tools = [executeCode({ apis, scope, runs, loader })];
+  const tools = [executeCode({ apis, scope, runs, loader, codeTimeoutMs })];
   const room = { chars: requestChars(model.inputTokens), tools };
   // A question that doesn't fit next to the rest of what the request
   // carries is refused here, before anything is kept or sent: the provider
@@ -606,6 +716,13 @@ export const runTurn = async ({
     (event) => {
       if (event.type === "message_end" && isMessage(event.message)) {
         keep(event.message);
+      }
+      if (event.type === "tool_execution_update") {
+        const update: unknown = event.partialResult;
+        const line = codeStepLine(update);
+        if (line !== undefined) {
+          runs.output(line.runId, event.toolCallId, line.text);
+        }
       }
       if (
         event.type === "message_update" &&

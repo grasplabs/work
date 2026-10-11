@@ -76,8 +76,8 @@ catalog:
   # as better-auth.
   "@better-auth/core": 1.7.5
   "@better-auth/sso": 1.7.5
-  "@earendil-works/pi-agent-core": 0.87.1
-  "@earendil-works/pi-ai": 0.87.1
+  "@earendil-works/pi-agent-core": 1.1.0
+  "@earendil-works/pi-ai": 1.1.0
   "@modelcontextprotocol/sdk": 1.30.0
   better-auth: 1.7.5
   # The console's Cloudflare Access check.

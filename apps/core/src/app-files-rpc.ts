@@ -4,14 +4,14 @@ import type {
   CommittedVersion,
   FileChanges,
 } from "@grasp-os/shared/apps";
-import { RpcTarget } from "capnweb";
 
 import { commitFiles, readFiles } from "./apps.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
 /** A signed-in person's `apps.files`. */
-export class AppFilesRpc extends RpcTarget implements AppFilesApi {
+export class AppFilesRpc extends CoreRpcTarget implements AppFilesApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

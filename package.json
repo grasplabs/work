@@ -9,6 +9,7 @@
     "dev": "node scripts/dev.ts",
     "e2e": "playwright test",
     "smoke:workerd": "node scripts/workerd-smoke.ts",
+    "smoke:code-mode": "node scripts/workerd-code-mode.ts",
     "check:docs": "node scripts/check-docs.ts",
     "check:migrations": "node scripts/check-migrations.ts",
     "check:wrangler-configs": "node scripts/check-wrangler-configs.ts",

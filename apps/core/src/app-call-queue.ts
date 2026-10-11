@@ -1,8 +1,44 @@
-/** A call waiting its turn: let in, or given up on once its deadline passes. */
-interface Waiter {
+/** A call waiting its turn: let in, or given up on. */
+interface Waiter<Tag> {
+  /** What the call waiting says of itself (`CallQueue.waitingTags`). */
+  tag: Tag | undefined;
   letIn: () => void;
+  /** Aborts once the waiter leaves the queue, let in or given up. */
+  left: AbortController;
+  /** Gives up as its deadline passed, with the call's `busy()`. */
   giveUp: () => void;
+  /** Gives up with `refusal`, as its `Wait.check` found. */
+  refuse: (refusal: Error) => void;
 }
+
+/**
+ * What a call says as it waits: `tag`, which `CallQueue.waitingTags`
+ * shows while it waits, and `check`, asked once it waits, whose error, if
+ * any, refuses the call at once, unless it was let in meanwhile. `left`
+ * aborts once the call no longer waits: the check has nothing left to do.
+ */
+export interface Wait<Tag> {
+  tag: Tag;
+  check: (left: AbortSignal) => Promise<Error | undefined>;
+}
+
+/** Refuses `waiter` with what `check` finds, unless let in by then. */
+const refuseIfFound = async <Tag>(
+  waiter: Waiter<Tag>,
+  check: (left: AbortSignal) => Promise<Error | undefined>
+): Promise<void> => {
+  let refusal: Error | undefined;
+  try {
+    refusal = await check(waiter.left.signal);
+  } catch {
+    // A check that fails finds nothing: the call waits as any other.
+    return;
+  }
+  // A waiter let in meanwhile no longer gives up (`CallQueue.turn`).
+  if (refusal !== undefined) {
+    waiter.refuse(refusal);
+  }
+};
 
 /**
  * Lets one call into an App run at a time, and the next ones wait their
@@ -16,18 +52,22 @@ interface Waiter {
  * still use a later call's token: never more than that App's own code
  * may. Only an isolate per call closes that.
  *
- * A waiter gives up once its deadline passes, and is never let in after;
- * past `limit` waiting, a call is refused at once. Both are the caller's
- * to retry (`busy`). Each turn ends by its `release`, which hands the App
- * to the next waiter, or frees it: called more than once, only the first
- * counts.
+ * A waiter gives up once its deadline passes, or once its `Wait.check`
+ * finds a reason to, and is never let in after; past `limit` waiting, a
+ * call is refused at once. All are the caller's to retry. Each turn ends
+ * by its `release`, which hands the App to the next waiter, or frees it:
+ * called more than once, only the first counts.
  */
-export class CallQueue {
-  /** Whether a call holds the App now. */
-  #held = false;
+export class CallQueue<Tag = never> {
+  /**
+   * The ID of the turn holding the App now, or none while it is free:
+   * handed straight from one turn to the next as it ends, so no other ever
+   * looks current in between.
+   */
+  #holder: string | undefined;
 
   /** Who waits, oldest first. */
-  readonly #waiting = new Set<Waiter>();
+  readonly #waiting = new Set<Waiter<Tag>>();
 
   readonly #limit: number;
 
@@ -35,14 +75,33 @@ export class CallQueue {
     this.#limit = limit;
   }
 
+  /** The ID of the turn holding the App now (`turn`), if any. */
+  holder(): string | undefined {
+    return this.#holder;
+  }
+
+  /** What the calls waiting now say of themselves (`Wait.tag`), oldest first. */
+  waitingTags(): Tag[] {
+    return [...this.#waiting].flatMap(({ tag }) =>
+      tag === undefined ? [] : [tag]
+    );
+  }
+
   /**
-   * Waits for the App, then answers the `release` that ends the turn.
+   * Waits for the App, then answers the `release` that ends the turn, `id`
+   * the turn's (`holder`).
    * Rejects with `busy()` once `signal` aborts first, or at once when the
-   * queue is full; either way, the caller never held the App.
+   * queue is full, or with what `wait.check` finds once the call waits;
+   * either way, the caller never held the App.
    */
-  async turn(signal: AbortSignal, busy: () => Error): Promise<() => void> {
-    if (!this.#held) {
-      this.#held = true;
+  async turn(
+    signal: AbortSignal,
+    busy: () => Error,
+    id: string,
+    wait?: Wait<Tag>
+  ): Promise<() => void> {
+    if (this.#holder === undefined) {
+      this.#holder = id;
       return this.#releaser();
     }
     if (signal.aborted || this.#waiting.size >= this.#limit) {
@@ -50,23 +109,38 @@ export class CallQueue {
     }
     const waited = Promise.withResolvers<boolean>();
     // Made before anything can call for it, so giving up only rejects.
-    const refusal = busy();
-    // Both run in one turn of the event loop, and each takes the waiter
-    // out of the queue first: a waiter that gave up is never let in, and
-    // one let in no longer gives up.
-    const waiter: Waiter = {
+    const timedOut = busy();
+    // Each runs in one turn of the event loop, and takes the waiter out
+    // of the queue first: a waiter that gave up is never let in, and one
+    // let in no longer gives up.
+    const waiter: Waiter<Tag> = {
+      tag: wait?.tag,
+      left: new AbortController(),
       letIn: () => {
+        this.#holder = id;
         this.#waiting.delete(waiter);
+        waiter.left.abort();
         signal.removeEventListener("abort", waiter.giveUp);
         waited.resolve(true);
       },
       giveUp: () => {
+        waiter.refuse(timedOut);
+      },
+      refuse: (refusal) => {
         this.#waiting.delete(waiter);
+        waiter.left.abort();
+        signal.removeEventListener("abort", waiter.giveUp);
         waited.reject(refusal);
       },
     };
     this.#waiting.add(waiter);
     signal.addEventListener("abort", waiter.giveUp, { once: true });
+    // Asked only once the call waits, where `waitingTags` shows it: of
+    // two calls that each check for the other, the later finds the
+    // earlier.
+    if (wait !== undefined) {
+      void refuseIfFound(waiter, wait.check);
+    }
     await waited.promise;
     return this.#releaser();
   }
@@ -81,7 +155,7 @@ export class CallQueue {
       released = true;
       const [next] = this.#waiting;
       if (next === undefined) {
-        this.#held = false;
+        this.#holder = undefined;
         return;
       }
       // Still held: the App passes straight to the next waiter, so no call
