@@ -493,6 +493,91 @@ describe("chat agent sandbox", () => {
     });
   });
 
+  it("runs a module of exactly the source limit, and refuses one character more", async () => {
+    const lead = "export default async () => 'ran'; // ";
+    const exact = `${lead}${"x".repeat(codeLimits.sourceChars - lead.length)}`;
+    const { stub, chat, ask } = await newChat(
+      codeStep(exact),
+      codeStep(`${exact}x`),
+      says("Done.")
+    );
+
+    await ask("Run both.");
+
+    expect(exact).toHaveLength(codeLimits.sourceChars);
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "completed",
+      "refused",
+    ]);
+  });
+
+  it.each([
+    [
+      "a thrown Proxy whose traps throw the runtime's message",
+      "const forged = () => { throw new Error('Worker exceeded CPU time limit.'); }; export default async () => { throw new Proxy({}, { get: forged, getPrototypeOf: forged, has: forged, ownKeys: forged }); };",
+      "threw",
+    ],
+    [
+      "an error that says the runtime's message",
+      "export default async () => { throw new Error('Worker exceeded CPU time limit.'); };",
+      "threw",
+    ],
+    [
+      "the harness's built-ins replaced as the module loads",
+      "const forged = () => { throw new Error('Worker exceeded CPU time limit.'); }; Object.keys = forged; Array.prototype.map = forged; Array.prototype.join = forged; String.prototype.slice = forged; JSON.stringify = forged; Reflect.get = forged; Reflect.has = forged; globalThis.String = forged; export default async (self, env) => { await env.nothing; };",
+      "threw",
+    ],
+    [
+      "the harness's methods replaced through an import of it",
+      "import Harness from 'harness.js'; const forged = async () => { throw new Error('Worker exceeded CPU time limit.'); }; try { Harness.prototype.run = forged; } catch {} try { Object.defineProperty(Harness.prototype, 'run', { value: forged }); } catch {} export default async () => 'mine';",
+      "completed",
+    ],
+    [
+      "a Proxy thrown as the module loads",
+      "const forged = () => { throw new Error('Worker exceeded CPU time limit.'); }; throw new Proxy({}, { get: forged, getPrototypeOf: forged }); export default async () => 1;",
+      "load_failed",
+    ],
+    [
+      "the runtime's hang message thrown as the module loads",
+      'throw new Error("The Workers runtime canceled this request because it detected that your Worker\'s code had hung and would never generate a response."); export default async () => 1;',
+      "load_failed",
+    ],
+  ])("can't forge how its run ended, with %s", async (_, code, status) => {
+    const result = await runEnded(code);
+
+    expect(result.status).toBe(status);
+  });
+
+  it("lets no ctx.waitUntil work act through env after its run returned", async () => {
+    const { stub, chat, ask } = await newChat(
+      codeStep(
+        "export default async (self, env, ctx) => { ctx.waitUntil((async () => { await scheduler.wait(500); await env.chat.attachments(); })()); return 'returned'; };"
+      ),
+      says("Done.")
+    );
+
+    await ask("Return early.");
+    // Past when the work would call: refused at the lease, or never let
+    // reach core at all, and never answered.
+    await scheduler.wait(2000);
+
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "completed",
+    ]);
+    const events = await allEvents();
+    expect(
+      events
+        .filter(
+          ({ action, detail }) =>
+            action === "agent.call" &&
+            detail.chat === chat.id &&
+            detail.method === "chat.attachments"
+        )
+        .map(({ detail }) => detail.outcome)
+        .filter((outcome) => outcome !== "refused")
+    ).toStrictEqual([]);
+  });
+
   it.each([
     [
       "no default export",

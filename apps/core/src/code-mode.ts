@@ -49,12 +49,16 @@ export const codeLimits = {
 
 /**
  * How a run ended, as the host saw it, never as the code says: it
- * returned (`completed`), threw (`threw`), was refused before it loaded
- * (`refused`: its source is over the limit), its module didn't load or
- * export a function (`load_failed`), the runtime stopped it for CPU time
- * (`cpu_exceeded`) or anything else (`crashed`: memory, say), it ran past
- * its wall-clock time (`wall_expired`), or the turn was cancelled
- * (`cancelled`).
+ * returned (`completed`), threw (`threw`, or sent back what the harness
+ * never returns), was refused before it loaded (`refused`: its source is
+ * over the limit), its module didn't load or export a function
+ * (`load_failed`, including anything the runtime ended while it loaded,
+ * short of its CPU time), the runtime stopped it for CPU time
+ * (`cpu_exceeded`) or anything else once it ran (`crashed`: memory, say),
+ * it ran past its wall-clock time (`wall_expired`, a wait that can never
+ * settle too), or the turn was cancelled (`cancelled`). Only the host
+ * sets one: the harness returns every outcome of the code, so the code
+ * can't make a call reject, nor pick the message a status is read from.
  */
 export type CodeRunStatus =
   | "completed"
@@ -102,48 +106,80 @@ const exportNeeded =
 const harness = `
 import { WorkerEntrypoint } from "cloudflare:workers";
 
+// Everything the harness uses of the language, taken before the code
+// loads: the code can replace any global or prototype after, never these.
 const room = ${room};
 const lines = ${codeLimits.logLines};
 const exportNeeded = ${JSON.stringify(exportNeeded)};
-const slice = Function.prototype.call.bind(String.prototype.slice);
+const call = Function.prototype.call;
+const bind = (method) => call.bind(method);
+const slice = bind(String.prototype.slice);
+const push = bind(Array.prototype.push);
+const map = bind(Array.prototype.map);
+const join = bind(Array.prototype.join);
+const keys = Object.keys;
+const freeze = Object.freeze;
+const has = Reflect.has;
+const get = Reflect.get;
 const stringify = JSON.stringify;
 const toText = String;
-const freeze = Object.freeze;
-const push = Function.prototype.call.bind(Array.prototype.push);
-const tooLarge = new Error("too large");
+const ProxyOf = Proxy;
+const ErrorOf = Error;
+const tooLarge = {};
+const undescribable = "(an error that can't be described)";
 
 Object.defineProperty(globalThis, "caches", { value: undefined });
 
-// A value as text: serializing stops as soon as it would pass room,
-// instead of building all of a huge value first.
+// A value as text, never throwing, whatever the value does: serializing
+// stops as soon as it would pass room, instead of building all of a huge
+// value first.
 const render = (value) => {
   if (typeof value === "string") {
     return value;
   }
   let size = 0;
   try {
-    return (
-      stringify(value, (key, item) => {
-        size += key.length + (typeof item === "string" ? item.length : 8);
-        if (size > room) {
-          throw tooLarge;
-        }
-        return item;
-      }) ?? toText(value)
-    );
+    const json = stringify(value, (key, item) => {
+      size += key.length + (typeof item === "string" ? item.length : 8);
+      if (size > room) {
+        throw tooLarge;
+      }
+      return item;
+    });
+    return json === undefined ? toText(value) : json;
   } catch (error) {
-    return error === tooLarge
-      ? "(a value too large to show, over " + room + " characters)"
-      : toText(value);
+    if (error === tooLarge) {
+      return "(a value too large to show, over " + room + " characters)";
+    }
+    try {
+      return toText(value);
+    } catch {
+      return "(a value that can't be shown)";
+    }
   }
 };
 
-// Never longer than room, whatever the value makes of itself (a
-// \`toString\` of its own, say).
-const show = (value) => slice(toText(render(value)), 0, room);
+// Never longer than room, and never throwing, whatever the value makes
+// of itself (a \`toString\` of its own, say).
+const show = (value) => {
+  try {
+    return slice(toText(render(value)), 0, room);
+  } catch {
+    return "(a value that can't be shown)";
+  }
+};
 
-const describe = (error) =>
-  error instanceof Error ? show(error.stack ?? toText(error)) : show(error);
+// What the code threw, as text: its stack when it has one, never
+// throwing (a thrown Proxy's traps may throw anything).
+const describe = (error) => {
+  try {
+    const stack =
+      typeof error === "object" && error !== null ? get(error, "stack") : undefined;
+    return show(typeof stack === "string" ? stack : error);
+  } catch {
+    return undescribable;
+  }
+};
 
 // What the code logs, as it loads and as it runs: one run per isolate.
 const logs = [];
@@ -151,8 +187,9 @@ let left = room;
 const write = (...parts) => {
   if (left > 0 && logs.length < lines) {
     let line = "";
-    for (const part of parts) {
-      line = line === "" ? show(part) : line + " " + show(part);
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = show(parts[index]);
+      line = line === "" ? part : line + " " + part;
     }
     line = slice(line, 0, left);
     left -= line.length + 1;
@@ -166,50 +203,65 @@ for (const level of ["log", "info", "warn", "error", "debug"]) {
 // The code's default export, once \`verify\` found it a function.
 let code;
 
-export default class extends WorkerEntrypoint {
+// Every outcome is returned, never thrown: a call that rejects was ended
+// by the runtime, so the code can't choose how its run ends.
+class Harness extends WorkerEntrypoint {
   async verify() {
     try {
       const { default: found } = await import("code.js");
       if (typeof found !== "function") {
-        return { then: undefined, ok: false, logs, error: exportNeeded };
+        return { then: undefined, ok: false, loaded: false, logs, error: exportNeeded };
       }
       code = found;
-      return { then: undefined, ok: true, logs };
+      return { then: undefined, ok: true, loaded: true, logs };
     } catch (error) {
-      return { then: undefined, ok: false, logs, error: describe(error) };
+      return { then: undefined, ok: false, loaded: false, logs, error: describe(error) };
     }
   }
 
   async run() {
     if (code === undefined) {
-      return { then: undefined, ok: false, logs, error: exportNeeded };
+      return { then: undefined, ok: false, loaded: false, logs, error: exportNeeded };
     }
-    const given = Object.keys(this.env);
-    const env = new Proxy(this.env, {
-      get(target, name) {
-        if (typeof name === "string" && name !== "then" && !(name in target)) {
-          throw new Error(
-            "This chat has no API named env." + name + ". It has: " +
-              (given.length === 0 ? "none" : given.map((api) => "env." + api).join(", ")) + "."
-          );
-        }
-        return target[name];
-      },
-    });
-    // The run's own context: waiting on more work extends nothing of
-    // core's (the run's stubs answer only while the host keeps it open).
-    const own = this.ctx;
-    const ctx = freeze({ waitUntil: (promise) => own.waitUntil(promise) });
     try {
+      const given = keys(this.env);
+      const env = new ProxyOf(this.env, {
+        get(target, name) {
+          if (typeof name === "string" && name !== "then" && !has(target, name)) {
+            throw new ErrorOf(
+              "This chat has no API named env." + name + ". It has: " +
+                (given.length === 0 ? "none" : join(map(given, (api) => "env." + api), ", ")) + "."
+            );
+          }
+          return get(target, name);
+        },
+      });
+      // The run's own context: waiting on more work extends nothing of
+      // core's (the run's stubs answer only while the host keeps it open).
+      const own = this.ctx;
+      const ctx = freeze({ waitUntil: (promise) => own.waitUntil(promise) });
       const value = await code(null, env, ctx);
       // An own \`then\`, so an \`Object.prototype.then\` the code set can't
       // make the result a thenable that resolves to something else.
-      return { then: undefined, ok: true, logs, result: value === undefined ? undefined : show(value) };
+      return {
+        then: undefined,
+        ok: true,
+        loaded: true,
+        logs,
+        result: value === undefined ? undefined : show(value),
+      };
     } catch (error) {
-      return { then: undefined, ok: false, logs, error: describe(error) };
+      return { then: undefined, ok: false, loaded: true, logs, error: describe(error) };
     }
   }
 }
+
+// Frozen before the code loads: it can't replace \`verify\` or \`run\`, even
+// by importing this module.
+freeze(Harness.prototype);
+freeze(Harness);
+
+export default Harness;
 `;
 
 const logsSchema = z.array(z.string().max(room)).max(codeLimits.logLines);
@@ -236,6 +288,8 @@ const withinRoom = ({
 const outcomeSchema = z
   .object({
     ok: z.boolean(),
+    /** Whether the code's function was there to call (`verify` found it). */
+    loaded: z.boolean(),
     logs: logsSchema,
     result: z.string().max(room).optional(),
     error: z.string().max(room).optional(),
@@ -259,15 +313,21 @@ interface Harness extends WorkerEntrypoint {
   run: () => Promise<z.infer<typeof outcomeSchema>>;
 }
 
-/** A message the runtime ends a run with when it used up its CPU time. */
-const cpuExceeded = /exceeded CPU time/iu;
+/**
+ * The message the runtime ends a run with when it used up its CPU time.
+ * Matched only on a call that rejected, which the harness never makes
+ * happen (it returns every outcome), and whole: the code can't make a
+ * call reject, nor choose the message.
+ */
+const cpuExceeded = /^Worker exceeded CPU time limit\.?$/u;
 
 /**
  * A message the runtime ends a run with when its code waits on nothing
  * that can ever settle (no timer, no call, no I/O): it would wait past its
  * wall-clock time, so it ends as if it had.
  */
-const hung = /code had hung/iu;
+const hung =
+  "The Workers runtime canceled this request because it detected that your Worker's code had hung";
 
 const ended = (status: CodeRunStatus, error: string): CodeRun => ({
   status,
@@ -289,8 +349,8 @@ const notAResult = "The run returned more than it may, or not a result.";
  * Runs `code`, an ES module whose default export is an async function of
  * `(self, env, ctx)`, in a fresh locked isolate with `env` as its only way
  * out. Never throws: every way a run can end is a {@link CodeRunStatus}.
- * The wall-clock limit starts before the code loads, and covers loading
- * it, its module's own code and the call.
+ * The wall-clock limit is set before the isolate is asked to load the
+ * code, and covers loading it, its module's own code and the call.
  */
 export const runCode = async (
   loader: WorkerLoader,
@@ -321,6 +381,9 @@ export const runCode = async (
     const verified = parsed(
       await Promise.race([entry.verify(), whenAborted(limit.signal)])
     );
+    // An outcome that isn't one the harness returns came from the code,
+    // which may change anything in its isolate: it didn't load (verify)
+    // or threw (run), never a status the host sets.
     if (verified === undefined) {
       return ended("load_failed", notAResult);
     }
@@ -338,8 +401,13 @@ export const runCode = async (
     if (ran === undefined) {
       return ended("threw", notAResult);
     }
-    const { ok, ...output } = ran;
-    return { status: ok ? "completed" : "threw", ...output };
+    const { ok, loaded, ...output } = ran;
+    if (ok) {
+      return { status: "completed", ...output };
+    }
+    // Its function wasn't there to call (the isolate started over since
+    // `verify`): it never ran.
+    return { status: loaded ? "threw" : "load_failed", ...output };
   } catch (error) {
     if (limit.stopped() === "cancelled") {
       return ended("cancelled", "The run was cancelled.");
@@ -350,15 +418,17 @@ export const runCode = async (
         `The run took longer than ${timeoutMs / 1000} seconds, so it was stopped.`
       );
     }
-    // The code didn't load (a syntax error, say), or the runtime stopped
-    // it (CPU time, memory). Its message is about the code, never core.
+    // A rejection is the runtime's, never the code's (the harness returns
+    // every outcome): the module didn't compile (a syntax error, say) as
+    // it loaded, or the runtime stopped it (CPU time, memory, a hang).
+    // Its message is about the code, never core.
     const message = (
       error instanceof Error ? error.message : String(error)
     ).slice(0, room);
     if (cpuExceeded.test(message)) {
       return ended("cpu_exceeded", message);
     }
-    if (hung.test(message)) {
+    if (message.startsWith(hung)) {
       return ended(
         "wall_expired",
         "The run waits for something that can never come, so it was stopped."
