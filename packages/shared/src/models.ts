@@ -124,6 +124,11 @@ export interface HeldRequest {
   amount: number;
   /** When it was sent, as an ISO timestamp. */
   sentAt: string;
+  /**
+   * A budget record it counts against is damaged, so it can only be
+   * released: a charge would count against a wrong total.
+   */
+  releaseOnly: boolean;
 }
 
 /** What an admin decides about a held reservation. */

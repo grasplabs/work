@@ -29,6 +29,7 @@ import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { ErrorText } from "../error-text.tsx";
+import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { dollars, monthEnd, percent, shareOf } from "../settings/money.ts";
@@ -180,7 +181,7 @@ const UnchangedNotice = ({ unchanged }: { unchanged: Unchanged }) => {
   const { model, decision } = unchanged;
   let what = t`It is no longer held.`;
   if (decision.state === "already_decided") {
-    const when = new Date(decision.decidedAt).toLocaleString();
+    const when = formatDateTime(decision.decidedAt);
     const amount = dollars(decision.amount);
     what =
       decision.how === "charge"
@@ -216,8 +217,10 @@ const HeldRow = ({
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const [deciding, setDeciding] = useState<HeldHow>();
-  const [releaseOnly, setReleaseOnly] = useState(false);
+  // Damaged when listed, or found so when a charge was refused since.
+  const [refused, setRefused] = useState(false);
   const { id, model, sentAt } = held;
+  const releaseOnly = held.releaseOnly || refused;
   const amount = dollars(held.amount);
   const decide = async (how: HeldHow): Promise<void> => {
     setDeciding(undefined);
@@ -234,7 +237,7 @@ const HeldRow = ({
       return answered;
     });
     if (decision?.state === "release_only") {
-      setReleaseOnly(true);
+      setRefused(true);
     } else if (
       decision?.state === "already_decided" ||
       decision?.state === "not_held"
@@ -248,7 +251,7 @@ const HeldRow = ({
         <span className="truncate">
           {model}{" "}
           <span className="text-muted-foreground">
-            {new Date(sentAt).toLocaleString()}
+            {formatDateTime(sentAt)}
           </span>
         </span>
         <span className="text-right tabular-nums">{amount}</span>

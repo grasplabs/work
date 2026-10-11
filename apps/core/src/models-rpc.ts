@@ -109,12 +109,15 @@ export class ModelsRpc extends RpcTarget implements ModelsApi {
 
   async #held(): Promise<HeldRequest[]> {
     const rows = await modelLedger(this.#env).quarantined(heldListed);
-    return rows.map(({ id, model, period, reservedMicros, dispatchedAt }) => ({
-      id,
-      model,
-      period,
-      amount: reservedMicros / microsPerDollar,
-      sentAt: new Date(dispatchedAt).toISOString(),
-    }));
+    return rows.map(
+      ({ id, model, period, reservedMicros, dispatchedAt, releaseOnly }) => ({
+        id,
+        model,
+        period,
+        amount: reservedMicros / microsPerDollar,
+        sentAt: new Date(dispatchedAt).toISOString(),
+        releaseOnly,
+      })
+    );
   }
 }
