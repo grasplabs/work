@@ -70,6 +70,21 @@ const plainArgs = (args: readonly unknown[]): unknown[] =>
     return copy;
   });
 
+/**
+ * A fresh copy of expected error `error`: its code, message and details
+ * (as a JSON copy), without a stack to send.
+ */
+const copyOf = (error: CodedError): CodedError => {
+  const copy: CodedError = Object.assign(
+    new Error(error.message),
+    error.details === undefined
+      ? { code: error.code }
+      : { code: error.code, details: structuredClone(error.details) }
+  );
+  copy.stack = undefined;
+  return copy;
+};
+
 /** What a channel and the host that made it share. */
 interface ChannelState {
   ended: boolean;
@@ -126,9 +141,7 @@ class Channel extends RpcTarget implements OperationChannel {
       return await capability(...plainArgs(args));
     } catch (error) {
       if (isExpectedError(error)) {
-        this.#capabilities.trust(error);
-        this.#state.raised.set(error.code, error);
-        throw error;
+        throw this.#raise(error);
       }
       const { requestId, path } = this.#capabilities;
       log.error("operation.channel_failed", {
@@ -137,15 +150,23 @@ class Channel extends RpcTarget implements OperationChannel {
         capability: name,
         ...errorFields(error),
       });
-      const opaque = internalErrors.create("internal.unexpected", {
-        requestId,
-      });
-      // Cap'n Web and Workers RPC send a stack; this one has none to send.
-      opaque.stack = undefined;
-      this.#capabilities.trust(opaque);
-      this.#state.raised.set(opaque.code, opaque);
-      throw opaque;
+      throw this.#raise(
+        internalErrors.create("internal.unexpected", { requestId })
+      );
     }
+  }
+
+  /**
+   * Raises expected error `error` to App code: the host keeps a copy of
+   * its own (`raised`, branded with `trust`), and App code gets another,
+   * so whatever App code does to the error it caught (its message, code or
+   * details, now or after a later await) changes nothing the host answers.
+   */
+  #raise(error: CodedError): Error {
+    const kept = copyOf(error);
+    this.#capabilities.trust(kept);
+    this.#state.raised.set(kept.code, kept);
+    return copyOf(error);
   }
 }
 

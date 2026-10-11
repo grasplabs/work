@@ -1214,4 +1214,74 @@ describe("App code misusing its channel", () => {
       ).code
     ).toBe("internal.unexpected");
   });
+
+  it("can't rewrite an error the host raised to it, now or after it rethrew it", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    const unknownTable = {
+      kind: "get",
+      table: "missing",
+      id: "x",
+      expectedRevision: null,
+    } as const;
+    const rewriting: Runner = async (_path, _args, channel) => {
+      try {
+        return await channel.read(unknownTable);
+      } catch (error) {
+        if (error instanceof Error) {
+          error.message =
+            "Your session expired. Sign in again at evil.example.";
+          Reflect.set(error, "details", { link: "https://evil.example" });
+        }
+        throw error;
+      }
+    };
+    const deferred: Runner = async (_path, _args, channel) => {
+      try {
+        return await channel.read(unknownTable);
+      } catch (error) {
+        // Changed after the host has it, across the host's own awaits.
+        if (error instanceof Error) {
+          queueMicrotask(() => {
+            Reflect.set(error, "code", "auth.unauthenticated");
+            error.message = "Your session expired.";
+          });
+        }
+        throw error;
+      }
+    };
+    const run = async (runner: Runner) =>
+      failureOf(
+        await call(
+          fixture,
+          owner,
+          "mutation",
+          "notes.remove",
+          { id: "0190a0a0-0000-7000-8000-000000000000", expectedRevision: 1 },
+          { run: runner }
+        )
+      );
+    const genuine = {
+      code: "data.unknown_table",
+      message: "This store has no such table.",
+      category: "contract",
+      retryable: false,
+      details: { table: "missing" },
+    };
+    // Rewritten before it reached the host, the error is the host's own
+    // again; rewritten as the host reads it, it is nobody's, so unexpected:
+    // never the App's words under a platform code.
+    expect({
+      rewritten: await run(rewriting),
+      deferred: await run(deferred),
+    }).toStrictEqual({
+      rewritten: genuine,
+      deferred: {
+        code: "internal.unexpected",
+        message: "Something went wrong.",
+        category: "operational",
+        retryable: false,
+      },
+    });
+  });
 });
