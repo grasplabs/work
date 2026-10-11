@@ -27,14 +27,22 @@ export interface D1DatabaseConfig {
 const statementBreakpoint = "--> statement-breakpoint";
 const commentLine = /^\s*--.*$/gmu;
 
+/** A migration file's leading number, which Wrangler orders them by. */
+const leadingDigits = /^\d+/u;
+const migrationNumber = (file: string): number =>
+  Number(leadingDigits.exec(file)?.[0] ?? 0);
+
 /**
- * A database's migrations as Wrangler applies them: its `.sql` files in
- * name order, each split at Drizzle's statement breakpoints.
+ * A database's migrations as Wrangler applies them: its `.sql` files by
+ * their leading number, then by name, each split at Drizzle's statement
+ * breakpoints.
  */
 export const d1Migrations = (migrationsDir: string): D1Migration[] =>
   readdirSync(migrationsDir)
     .filter((file) => file.endsWith(".sql"))
-    .toSorted()
+    .toSorted(
+      (a, b) => migrationNumber(a) - migrationNumber(b) || a.localeCompare(b)
+    )
     .map((file) => ({
       name: file,
       queries: readFileSync(path.join(migrationsDir, file), "utf-8")

@@ -260,6 +260,90 @@ describe("the on-prem D1 service", () => {
     });
   });
 
+  it("applies migrations in Wrangler's order, by leading number, then name", async () => {
+    const served = await serve(
+      [
+        {
+          binding: "DB",
+          migrationsDir: migrationsDir({
+            "10_second.sql": "INSERT INTO steps (name) VALUES ('10');",
+            "2_first.sql":
+              "CREATE TABLE steps (name text NOT NULL);\n--> statement-breakpoint\nINSERT INTO steps (name) VALUES ('2');",
+          }),
+        },
+      ],
+      storageDir()
+    );
+    await expect(
+      served.run([{ db: "DB", sql: "SELECT name FROM steps ORDER BY rowid" }])
+    ).resolves.toStrictEqual([
+      { ok: { results: [{ name: "2" }, { name: "10" }], changes: 0 } },
+    ]);
+  });
+
+  it("rolls back a migration whole when one of its statements fails", async () => {
+    const storage = storageDir();
+    const dir = migrationsDir({
+      "0000_tags.sql":
+        "CREATE TABLE `tags` (`name` text NOT NULL);\n--> statement-breakpoint\nINSERT INTO `missing` VALUES (1);",
+    });
+    const broken = await serve(
+      [{ binding: "DB", migrationsDir: dir }],
+      storage
+    );
+    const failed = await broken.run([{ db: "DB", sql: "SELECT 1 AS one" }]);
+    await broken.stop();
+
+    // Fixed, it applies from the start: had the failed run kept its first
+    // statement, creating the table again would fail.
+    writeFileSync(
+      path.join(dir, "0000_tags.sql"),
+      "CREATE TABLE `tags` (`name` text NOT NULL);"
+    );
+    const fixed = await serve([{ binding: "DB", migrationsDir: dir }], storage);
+    const applied = await fixed.run([
+      { db: "DB", sql: "SELECT name FROM d1_migrations" },
+      { db: "DB", sql: "SELECT count(*) AS n FROM tags" },
+    ]);
+    expect({ failed, applied }).toStrictEqual({
+      failed: [{ error: "D1_ERROR: no such table: missing: SQLITE_ERROR" }],
+      applied: [
+        { ok: { results: [{ name: "0000_tags.sql" }], changes: 0 } },
+        { ok: { results: [{ n: 0 }], changes: 0 } },
+      ],
+    });
+  });
+
+  it("searches full text with FTS5, as core's knowledge search does", async () => {
+    const served = await serve(
+      [
+        {
+          binding: "DB",
+          migrationsDir: migrationsDir({
+            "0000_search.sql":
+              "CREATE VIRTUAL TABLE `search` USING fts5(text, tokenize = 'trigram remove_diacritics 1');",
+          }),
+        },
+      ],
+      storageDir()
+    );
+    const results = await served.run([
+      {
+        db: "DB",
+        sql: "INSERT INTO search (rowid, text) VALUES (1, ?), (2, ?)",
+        params: ["zwangerschapsverlof", "vakantie"],
+      },
+      {
+        db: "DB",
+        sql: "SELECT rowid AS id FROM search WHERE search MATCH ?",
+        params: ["verlof"],
+      },
+    ]);
+    expect(results[1]).toStrictEqual({
+      ok: { results: [{ id: 1 }], changes: 0 },
+    });
+  });
+
   it("answers statements as D1 does: rows, what changed, blobs as bytes", async () => {
     const served = await serve(
       [{ binding: "DB", migrationsDir: migrationsDir(notes) }],
