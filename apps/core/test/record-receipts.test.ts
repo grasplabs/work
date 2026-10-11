@@ -1,4 +1,3 @@
-import { whenAborted } from "@grasp-os/shared/deadline";
 import {
   appIdSchema,
   collectionIdSchema,
@@ -32,6 +31,7 @@ import type {
 } from "../src/outbox-delivery.ts";
 import { restrict } from "../src/restricted.ts";
 import { release, requestGranted, serverBuilt } from "./apps.ts";
+import { gatedConsumer } from "./gated-consumer.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -341,45 +341,6 @@ const consumersFor = (
   const consumer: OutboxConsumer = async (entry) =>
     isOf(entry, marker) ? await of(entry) : "delivered";
   return { "workflow.notify": consumer, "workflow.start": consumer };
-};
-
-/** How long a test waits on a hand-over it expects (`gatedConsumers`). */
-const enteredWithinMs = 5000;
-
-/**
- * Consumers whose hand-overs of `marker`'s entries answer only once their
- * time is up: `entered(n)` waits, in real time and at most
- * `enteredWithinMs`, until the `n`th of them began, so a test moves a
- * faked clock only once the hand-over it means is going. `release` lets
- * any still waiting go.
- */
-const gatedConsumers = (marker: string) => {
-  const handed: string[] = [];
-  const began: PromiseWithResolvers<null>[] = [];
-  const gate = Promise.withResolvers<null>();
-  const beganAt = (n: number): PromiseWithResolvers<null> => {
-    began[n] ??= Promise.withResolvers<null>();
-    return began[n];
-  };
-  return {
-    handed,
-    consumers: consumersFor(marker, async (entry) => {
-      beganAt(handed.length).resolve(null);
-      handed.push(entry.id);
-      await outcome(Promise.race([whenAborted(entry.signal), gate.promise]));
-      return "delivered";
-    }),
-    entered: async (n: number): Promise<void> => {
-      const late = async (): Promise<never> => {
-        await scheduler.wait(enteredWithinMs);
-        throw new Error(`Hand-over ${n} never began.`);
-      };
-      await Promise.race([beganAt(n).promise, late()]);
-    },
-    release: () => {
-      gate.resolve(null);
-    },
-  };
 };
 
 const savedSchema = z.object({
@@ -1460,13 +1421,17 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     // Each hand-over answers only once its time is up: each fails, and is
     // put back for later.
-    const first = gatedConsumers(marker);
-    const second = gatedConsumers(marker);
+    const first = gatedConsumer();
+    const second = gatedConsumer();
     const timeoutMs = 1000;
     try {
-      const firstDrain = drainSubmissionOutbox(env, first.consumers, {
-        timeoutMs,
-      });
+      const firstDrain = drainSubmissionOutbox(
+        env,
+        consumersFor(marker, first.consumer),
+        {
+          timeoutMs,
+        }
+      );
       // The first drain hands three entries over, one limit each.
       for (let n = 0; n < 3; n += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one after the other
@@ -1481,9 +1446,13 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       await vi.advanceTimersByTimeAsync(timeoutMs - 1);
       // Another drain starts meanwhile, and is handing over the first
       // entry it finds due when the first drain's hand-over runs out.
-      const secondDrain = drainSubmissionOutbox(env, second.consumers, {
-        timeoutMs,
-      });
+      const secondDrain = drainSubmissionOutbox(
+        env,
+        consumersFor(marker, second.consumer),
+        {
+          timeoutMs,
+        }
+      );
       await second.entered(0);
       await vi.advanceTimersByTimeAsync(1);
       // The first drain goes on past the entry the other one holds.
