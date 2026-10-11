@@ -326,6 +326,18 @@ const fieldOf = (answer: unknown, field: string): unknown =>
     ? Object.getOwnPropertyDescriptor(answer, field)?.value
     : undefined;
 
+/**
+ * `part` spelled another way that decodes to the same bytes: its last
+ * character's unused low bits set (a 43-character tag leaves two).
+ */
+const respelled = (part: string): string => {
+  const alphabet =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const last = alphabet.indexOf(part.at(-1) ?? "A");
+  const other = last % 2 === 0 ? last + 1 : last - 1;
+  return `${part.slice(0, -1)}${alphabet[other] ?? "A"}`;
+};
+
 /** `part` with its last character changed. */
 const flip = (part: string): string =>
   `${part.slice(0, -1)}${part.endsWith("A") ? "B" : "A"}`;
@@ -443,6 +455,22 @@ describe("cursors", () => {
           `${version}.${sealed}.${flip(tag)}.${stable}`
         )
       ),
+      editedStable: await outcome(
+        pageAfter(
+          fixture,
+          scope,
+          {},
+          `${version}.${sealed}.${tag}.${flip(stable)}`
+        )
+      ),
+      stableSpelling: await outcome(
+        pageAfter(
+          fixture,
+          scope,
+          {},
+          `${version}.${sealed}.${tag}.${respelled(stable)}`
+        )
+      ),
       editedTags: await outcome(
         pageAfter(
           fixture,
@@ -531,6 +559,10 @@ describe("cursors", () => {
       // Its stable tag still verifies: its holder learns nothing new.
       editedTag: "data.cursor_expired",
       editedTags: "data.invalid_cursor",
+      // Both tags must verify: an edited or respelled stable tag alone is
+      // refused too.
+      editedStable: "data.invalid_cursor",
+      stableSpelling: "data.invalid_cursor",
       otherSpelling: "data.invalid_cursor",
       // Another format version can't be told apart from a forgery: no tag
       // of this store covers it.

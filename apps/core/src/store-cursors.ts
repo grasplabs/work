@@ -29,9 +29,9 @@ import type { Anchor } from "./store-queries.ts";
 // Threat model, and how each is closed:
 //
 // - A caller forges or edits a cursor to read from a place of its
-//   choosing: both tags are checked, in constant time, before anything in
-//   the cursor is acted on, its version included; the anchor is decrypted
-//   only after. Anything that doesn't verify is `data.invalid_cursor`, and
+//   choosing: both tags are checked, in constant time and always both,
+//   before anything in the cursor is acted on, its version included; the
+//   anchor is decrypted only after, and only when both verified. Anything that doesn't verify is `data.invalid_cursor`, and
 //   a store never accepts another store's cursor (its keys differ).
 // - A caller reuses a cursor for another query or caller: the tag covers
 //   the digest of everything the cursor is bound to (`CursorBinding`),
@@ -266,18 +266,17 @@ export const openCursor = async (
     throw dataErrors.create("data.invalid_cursor");
   }
   const { version = "", sealed = "", tag = "", stable = "" } = groups;
+  // Both tags, always: a cursor is this store's only when both verify.
   const full = await verifies(
     keys,
     tag,
     await messageOf(version, binding, sealed, true)
   );
-  const same =
-    full ||
-    (await verifies(
-      keys,
-      stable,
-      await messageOf(version, binding, sealed, false)
-    ));
+  const same = await verifies(
+    keys,
+    stable,
+    await messageOf(version, binding, sealed, false)
+  );
   if (!same) {
     throw dataErrors.create("data.invalid_cursor");
   }
