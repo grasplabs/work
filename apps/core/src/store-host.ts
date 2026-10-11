@@ -340,9 +340,10 @@ export class StoreHost {
    * past `storeMaxTables`. Then it installs a physical index for each of
    * the schema's declared indexes it doesn't hold yet (store-indexes.ts;
    * `data.too_many_indexes` past `storeMaxIndexes`) and records the
-   * manifest under its hash, both in one transaction, so a read pinned to
-   * the schema finds its indexes whenever it finds the schema. Doing it
-   * again changes nothing. Tables and indexes are never renamed or
+   * manifest under its hash, all in one transaction with the new tables,
+   * so a refusal leaves nothing behind and a read pinned to the schema
+   * finds its indexes whenever it finds the schema. Doing it again
+   * changes nothing. Tables and indexes are never renamed or
    * removed here, and nothing is activated: which schema a store holds
    * its records to comes with schema activation.
    */
@@ -353,68 +354,107 @@ export class StoreHost {
     const read = readSchema(manifest);
     const schemaHash = await hashOf(read.manifest);
     const names = Object.keys(read.manifest.tables);
-    const ids = this.ctx.storage.transactionSync(() => {
-      this.#bind(storeId);
-      const now = Date.now();
-      for (const name of names) {
-        const existing = this.#db
-          .select({ name: tables.name })
-          .from(tables)
-          .where(eq(tables.nameKey, name.toLowerCase()))
-          .get();
-        if (existing !== undefined) {
-          if (existing.name !== name) {
-            throw dataErrors.create("data.table_conflict", {
-              table: name,
-              existing: existing.name,
-            });
-          }
-          continue;
-        }
-        this.#db
-          .insert(tables)
-          .values({
-            tableId: crypto.randomUUID(),
-            name,
-            nameKey: name.toLowerCase(),
-            createdAt: now,
-          })
-          .run();
-      }
-      const all = this.#db
-        .select({ name: tables.name, tableId: tables.tableId })
-        .from(tables)
-        .all();
-      if (all.length > storeMaxTables) {
-        throw dataErrors.create("data.too_many_tables");
-      }
-      const schemaTables = new Set(names);
-      return {
-        tables: Object.fromEntries(
-          all
-            .filter(({ name }) => schemaTables.has(name))
-            .map(({ name, tableId }) => [name, tableId])
-        ),
-        storeTables: Object.fromEntries(
-          all.map(({ name, tableId }) => [name, tableId])
-        ),
-      };
-    });
-    // Hashing is asynchronous, so the indexes are planned between the two
-    // transactions: tables without indexes yet are harmless, and the
-    // schema is only recorded with its indexes.
-    const plan = await planIndexes(read.manifest, ids.storeTables);
     const text = manifestText(read.manifest);
-    this.ctx.storage.transactionSync(() => {
-      this.#bind(storeId);
-      installIndexes(this.ctx.storage.sql, plan);
+    // Indexes are named by hashes of definitions that name table IDs, and
+    // hashing is asynchronous: so the IDs of new tables are minted and the
+    // indexes planned first, from the tables as they are, then the tables,
+    // indexes and schema land in one transaction, or nothing does. Should
+    // another call change the tables in between, it plans again.
+    for (let attempt = 1; ; attempt += 1) {
+      const before = this.#tableRows();
+      const known = new Map(before.map(({ name, tableId }) => [name, tableId]));
+      const planned = Object.fromEntries(
+        names.map((name) => [name, known.get(name) ?? crypto.randomUUID()])
+      );
+      // Planned table by table; nothing is written yet.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const plan = await planIndexes(read.manifest, planned);
+      const defined = this.ctx.storage.transactionSync(() =>
+        this.#defineIn(storeId, before, planned, plan, schemaHash, text)
+      );
+      if (defined !== null) {
+        return { schemaHash, ...defined };
+      }
+      if (attempt >= 3) {
+        throw new Error("The store's tables kept changing while defined");
+      }
+    }
+  }
+
+  /**
+   * `defineTables`' one transaction: the schema's new tables with the IDs
+   * its indexes were planned for, the indexes and the schema; null, with
+   * nothing written, if the tables changed since `before` was read.
+   */
+  #defineIn(
+    storeId: StoreId,
+    before: readonly { name: string; tableId: string }[],
+    planned: Readonly<Record<string, string>>,
+    plan: Awaited<ReturnType<typeof planIndexes>>,
+    schemaHash: string,
+    text: string
+  ): Omit<DefinedTables, "schemaHash"> | null {
+    const names = Object.keys(planned);
+    this.#bind(storeId);
+    if (canonicalJson(this.#tableRows()) !== canonicalJson(before)) {
+      return null;
+    }
+    const now = Date.now();
+    for (const name of names) {
+      const existing = this.#db
+        .select({ name: tables.name })
+        .from(tables)
+        .where(eq(tables.nameKey, name.toLowerCase()))
+        .get();
+      if (existing !== undefined) {
+        if (existing.name !== name) {
+          throw dataErrors.create("data.table_conflict", {
+            table: name,
+            existing: existing.name,
+          });
+        }
+        continue;
+      }
       this.#db
-        .insert(schemas)
-        .values({ schemaHash, manifest: text, createdAt: Date.now() })
-        .onConflictDoNothing()
+        .insert(tables)
+        .values({
+          tableId: planned[name] ?? crypto.randomUUID(),
+          name,
+          nameKey: name.toLowerCase(),
+          createdAt: now,
+        })
         .run();
-    });
-    return { schemaHash, ...ids };
+    }
+    const all = this.#tableRows();
+    if (all.length > storeMaxTables) {
+      throw dataErrors.create("data.too_many_tables");
+    }
+    installIndexes(this.ctx.storage.sql, plan);
+    this.#db
+      .insert(schemas)
+      .values({ schemaHash, manifest: text, createdAt: now })
+      .onConflictDoNothing()
+      .run();
+    const schemaTables = new Set(names);
+    return {
+      tables: Object.fromEntries(
+        all
+          .filter(({ name }) => schemaTables.has(name))
+          .map(({ name, tableId }) => [name, tableId])
+      ),
+      storeTables: Object.fromEntries(
+        all.map(({ name, tableId }) => [name, tableId])
+      ),
+    };
+  }
+
+  /** The store's tables, by name and ID, in a stable order. */
+  #tableRows(): { name: string; tableId: string }[] {
+    return this.#db
+      .select({ name: tables.name, tableId: tables.tableId })
+      .from(tables)
+      .orderBy(asc(tables.tableId))
+      .all();
   }
 
   /** The record `id` of `table`, or null if the store has none. */

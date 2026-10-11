@@ -112,6 +112,17 @@ const indexesOf = async (store: OpenStore): Promise<IndexRow[]> =>
         .toArray()
   );
 
+/** The tables the store holds, by name. */
+const tablesOf = async (store: OpenStore): Promise<string[]> =>
+  await runInDurableObject(
+    env.DATA_STORES.getByName(store.id),
+    (_instance, state) =>
+      state.storage.sql
+        .exec<{ name: string }>("SELECT name FROM sdk_tables ORDER BY name")
+        .toArray()
+        .map(({ name }) => name)
+  );
+
 /** The schemas the store recorded, by hash. */
 const schemasOf = async (store: OpenStore): Promise<string[]> =>
   await runInDurableObject(
@@ -243,8 +254,12 @@ describe("declared indexes", () => {
     await expect(store.defineTables(tooMany)).rejects.toMatchObject({
       code: "data.too_many_indexes",
     });
-    await expect(indexesOf(store)).resolves.toStrictEqual([]);
-    await expect(schemasOf(store)).resolves.toStrictEqual([]);
+    // Nothing of the refused schema stays: no index, no schema, no table.
+    expect({
+      indexes: await indexesOf(store),
+      schemas: await schemasOf(store),
+      tables: await tablesOf(store),
+    }).toStrictEqual({ indexes: [], schemas: [], tables: [] });
   });
 
   it(`count the indexes kept for older schemas against the ${storeMaxIndexes}`, async () => {
