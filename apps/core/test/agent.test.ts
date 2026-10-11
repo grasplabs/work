@@ -1533,6 +1533,24 @@ const withRevocationReads = async (
   }
 };
 
+/** `statement`, answering two seconds late, as its bound copies do. */
+const lateStatement = (statement: D1PreparedStatement): D1PreparedStatement =>
+  new Proxy(statement, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      if (property === "bind") {
+        return (...args: unknown[]) => lateStatement(target.bind(...args));
+      }
+      return async (...args: unknown[]): Promise<unknown> => {
+        await scheduler.wait(2000);
+        return await Reflect.apply(value, target, args);
+      };
+    },
+  });
+
 /** The chat's code run records, oldest first, as the object keeps them. */
 const runRecords = async (stub: WorkspaceStub, chatId: string) =>
   await runInDurableObject(stub, (_instance, state) =>
@@ -1886,6 +1904,61 @@ describe("chat agent code run leases", () => {
     await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
       "wall_expired",
     ]);
+  });
+
+  it("saves no USER.md for a run that ran out of time while the save was prepared", async () => {
+    const { stub, chat, agent, ask } = await newChat(
+      codeStep(
+        "export default async (self, env) => await env.memory.saveUser({ text: 'Prefers short answers.', ifVersion: 0 });"
+      ),
+      says("It ran out of time.")
+    );
+    // Knowledge answers two seconds late; the run has a second. The save
+    // is let in as it starts, then prepared past the run's end.
+    const { KNOWLEDGE: knowledge } = env;
+    const slow = new Proxy(knowledge, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "prepare") {
+          return (query: string) => lateStatement(target.prepare(query));
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1000" });
+    env.KNOWLEDGE = slow;
+    try {
+      await ask("Remember it.");
+    } finally {
+      env.KNOWLEDGE = knowledge;
+      await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "" });
+    }
+
+    await vi.waitFor(
+      async () => {
+        await expect(
+          refusalsIn(chat.id, "agent.run_ended")
+        ).resolves.toStrictEqual([
+          {
+            method: "memory.saveUser",
+            outcome: "refused",
+            reason: "agent.run_ended",
+          },
+        ]);
+      },
+      { timeout: 30_000, interval: 200 }
+    );
+    const events = await allEvents();
+    expect(
+      events.filter(
+        ({ action, actor }) =>
+          action === "knowledge.document.saved" &&
+          actor.type === "agent" &&
+          actor.agentId === agent.agentId
+      )
+    ).toStrictEqual([]);
   });
 
   it("ends a run a restart cuts short: its lease closes, its record says interrupted, and nothing runs again", async () => {

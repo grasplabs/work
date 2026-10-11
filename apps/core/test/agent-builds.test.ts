@@ -159,21 +159,26 @@ const setUp = async (
 };
 
 /**
- * Runs `during` with the object's code runs limited to a second, and every
- * read of core's files two seconds slow: a call let in at once outlives
- * its run while it waits on them. Set back however it ends.
+ * Runs `during` with the object's code runs limited to a second, and the
+ * calls to core's files `slowed` picks (every read, unless told otherwise)
+ * two seconds slow: a call let in at once outlives its run while it waits
+ * on them. Set back however it ends.
  */
 const slowFilesDuring = async (
   stub: WorkspaceStub,
-  during: () => Promise<void>
+  during: () => Promise<void>,
+  slowed: (method: string, key: unknown) => boolean = (method) =>
+    method === "get"
 ): Promise<void> => {
   const { FILES: files } = env;
   const slow = new Proxy(files, {
     get: (target, property) => {
       const value: unknown = Reflect.get(target, property);
-      if (property === "get" && typeof value === "function") {
+      if (typeof property === "string" && typeof value === "function") {
         return async (...args: unknown[]): Promise<unknown> => {
-          await scheduler.wait(2000);
+          if (slowed(property, args[0])) {
+            await scheduler.wait(2000);
+          }
           return await Reflect.apply(value, target, args);
         };
       }
@@ -771,6 +776,47 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await slowFilesDuring(chat.stub, async () => {
       await chat.ask("Propose it.");
     });
+
+    await vi.waitFor(
+      async () => {
+        await expect(endedRefusals(chat.chat.id)).resolves.toStrictEqual([
+          "build.propose",
+        ]);
+      },
+      { timeout: 30_000, interval: 200 }
+    );
+    const listed = await builder.api.apps.list();
+    expect(listed.find(({ id }) => id === existing)?.pendingVersion).toBeNull();
+  });
+
+  it("commits no proposal whose run ran out of time while it stored the version's files, after its last check", async () => {
+    const { chat, builder, existing, grant } = await setUp([]);
+    await pointAtGateway(
+      chat.stub,
+      fakeGateway(
+        codeStep(`export default async (self, env) => {
+          await env.build.write(${JSON.stringify(existing)}, { "AGENTS.md": "# Ledger, once more\\n" });
+        };`),
+        says("Written."),
+        codeStep(`export default async (self, env) => {
+          await env.build.propose(${JSON.stringify(existing)}, "Once more");
+        };`),
+        says("It ran out of time.")
+      )
+    );
+    await grant();
+    await chat.ask("Write it.");
+
+    // Only storing the version's tree is slow: the check and the
+    // admission before it pass, and the run ends while the tree is stored.
+    await slowFilesDuring(
+      chat.stub,
+      async () => {
+        await chat.ask("Propose it.");
+      },
+      (method, key) =>
+        method === "put" && typeof key === "string" && key.includes("/trees/")
+    );
 
     await vi.waitFor(
       async () => {

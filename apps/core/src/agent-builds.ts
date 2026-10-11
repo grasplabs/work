@@ -438,6 +438,17 @@ export interface Proposal {
 /** Building Apps, as a chat's code does it. */
 export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   /**
+   * Admits a write of this run's, handed to what writes it so it runs
+   * right before the write commits, after any slow preparation (fetching
+   * packages, building, storing files): a run that ended or lost a
+   * permission meanwhile writes nothing. The check each method makes
+   * before it starts is the cheap early refusal.
+   */
+  readonly #admit = async (): Promise<void> => {
+    await admitEffect(this.env, this.ctx.props);
+  };
+
+  /**
    * Runs one build call as the chat's person, with the agent as the audit
    * log's actor for what it changes: once the agent may build Apps, and
    * only from a chat that hasn't read restricted data.
@@ -488,7 +499,9 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     return await this.#build(
       "build.create",
       async (by) =>
-        await this.#creating(async () => await createApp(this.env, by, input)),
+        await this.#creating(
+          async () => await createApp(this.env, by, input, this.#admit)
+        ),
       (created) => ({ app: created.id })
     );
   }
@@ -521,7 +534,14 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.createFromBlueprint",
       async (by) =>
         await this.#creating(
-          async () => await createFromBlueprint(this.env, by, blueprint, input)
+          async () =>
+            await createFromBlueprint(
+              this.env,
+              by,
+              blueprint,
+              input,
+              this.#admit
+            )
         ),
       (created) => ({
         app: created.app.id,
@@ -760,7 +780,14 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         }
         // The commit is admitted only while the run is still open.
         await admitEffect(this.env, this.ctx.props);
-        const proposed = await proposeDraft(this.env, by, id, over, message);
+        const proposed = await proposeDraft(
+          this.env,
+          by,
+          id,
+          over,
+          message,
+          this.#admit
+        );
         // Committed and up for review: from here on it is proposed, however
         // the rest goes, and says so, so the agent doesn't try again (and
         // meet nothing to commit). What follows is logged when it fails.
@@ -812,7 +839,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           typeof request === "object" && request !== null
             ? { ...request, subject }
             : request,
-          async (named, role) => await appFor(this.env, by, named, role)
+          async (named, role) => await appFor(this.env, by, named, role),
+          this.#admit
         );
       },
       (requested) => ({
@@ -842,7 +870,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           by,
           typeof intent === "object" && intent !== null
             ? { ...intent, app: id }
-            : intent
+            : intent,
+          this.#admit
         );
       },
       (resolved) => ({

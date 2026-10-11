@@ -25,7 +25,13 @@ import {
   decideDependency,
   proposeForTests,
 } from "../src/dependencies/requests.ts";
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  says,
+  setObjectEnv,
+} from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { actingFor, envOf } from "./contexts.ts";
@@ -1449,6 +1455,79 @@ describe("dependency approval", () => {
     expect(Object.keys(await envOf(authority)).toSorted()).toStrictEqual(
       before
     );
+  });
+
+  it("stores no request or lock for a chat's agent whose run ran out of time while the graph was fetched", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const { id: existing } = await builder.api.apps.create({ name: "Ledger" });
+    await release(builder, existing, { "AGENTS.md": "# Ledger\n" });
+    const { id: app } = await builder.api.apps.create({
+      name: `App ${unique()}`,
+    });
+    const dates = named("dates");
+    await publish(plain(dates, "1.0.0"));
+    const intent = intentFor(app, { [dates]: "^1.0.0" });
+    const chat = await chatOf(
+      builder.userId,
+      codeStep(`export default async (self, env) => {
+        await env.build.resolveDependencies(${JSON.stringify(app)}, ${JSON.stringify(intent)});
+      };`),
+      says("It ran out of time.")
+    );
+    await requestGranted(idp, admin, {
+      subject: chat.agent,
+      object: { type: "collection", collectionId: "apps" },
+      actions: ["read", "write"],
+      binding: "APP_LIBRARY",
+    });
+    // The registry answers two seconds late; the run has a second.
+    const { CONNECT: connect } = env;
+    const slow = new Proxy(connect, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "npmMetadata" && typeof value === "function") {
+          return async (...args: unknown[]): Promise<unknown> => {
+            await scheduler.wait(2000);
+            return await Reflect.apply(value, target, args);
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    await setObjectEnv(chat.stub, { CODE_RUN_TIMEOUT_MS: "1000" });
+    env.CONNECT = slow;
+    try {
+      await chat.ask("Add a date library");
+    } finally {
+      env.CONNECT = connect;
+      await setObjectEnv(chat.stub, { CODE_RUN_TIMEOUT_MS: "" });
+    }
+
+    // The resolve goes on past the run's end; what it would store is
+    // refused as it commits: no request, no lock.
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events
+            .filter(
+              ({ action, detail }) =>
+                action === "agent.call" &&
+                detail.chat === chat.chat.id &&
+                detail.reason === "agent.run_ended"
+            )
+            .map(({ detail }) => detail.method)
+        ).toStrictEqual(["build.resolveDependencies"]);
+      },
+      { timeout: 30_000, interval: 200 }
+    );
+    await expect(builder.api.dependencies.status(app)).resolves.toMatchObject({
+      pending: null,
+      approved: null,
+    });
   });
 
   it("lets a chat's agent resolve, and never propose a graph of its own, approve, grant or ask for the permission", async () => {

@@ -32,7 +32,11 @@ export class MemoryApi extends WorkerEntrypoint<Env, AgentScope> {
         chatAuthority(scope),
         chatContext(scope),
         { type: "own" },
-        input
+        input,
+        // Again right before the save commits, after it was prepared.
+        async () => {
+          await admitEffect(this.env, scope, "memory.saveUser");
+        }
       );
       return { version: saved.currentVersion };
     } catch (error) {

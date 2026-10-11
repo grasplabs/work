@@ -234,7 +234,9 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
         },
         async () => {
           await admitEffect(this.env, scope);
-          return await askInChat(this.env, scope, ask);
+          return await askInChat(this.env, scope, ask, async () => {
+            await admitEffect(this.env, scope);
+          });
         }
       );
     } catch (error) {

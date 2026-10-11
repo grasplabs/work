@@ -275,7 +275,9 @@ export const createFromBlueprint = async (
   env: Env,
   by: Acting,
   id: unknown,
-  input: unknown
+  input: unknown,
+  /** Admits the write, called right before it is committed: throws to refuse it. */
+  admit?: () => Promise<void>
 ): Promise<CreatedFromBlueprint> => {
   requireBuilder(by);
   requireNotStaff(by);
@@ -399,6 +401,8 @@ export const createFromBlueprint = async (
     ...requests.entries.map((entry) => outboxed(db, entry)),
   ] as const;
   try {
+    // Admitted last, with nothing slow left before the write.
+    await admit?.();
     await auditedBatch(env, db, statements);
   } catch (error) {
     if (!(await blueprintRow(env, blueprintIdSchema.parse(blueprint.id)))) {
