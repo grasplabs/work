@@ -355,3 +355,12 @@ export const dataErrors = defineErrorFamily({
   "data.store_in_use":
     "This store can't be deleted while a mutation's receipt still refers to it. Try again once its receipts have expired.",
 });
+
+/**
+ * Why a query operation's reads couldn't be answered as one state of the
+ * store: retryable, as spec 6.3 says (`details.retryable`).
+ */
+export const queryErrors = defineErrorFamily({
+  "query.concurrent_change":
+    "The records changed while they were read. Try again.",
+});

@@ -16,6 +16,7 @@ import type {
 } from "@grasp-os/shared/stores";
 import { and, asc, eq, exists, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
@@ -31,7 +32,7 @@ import {
 import type { MemberRef } from "./sharing.ts";
 import { recordStoreDeleted } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
-import type { QueryAnswer } from "./store-queries.ts";
+import type { ReadResult } from "./store-host.ts";
 
 // The deployment's business stores, as core finds them: its inventory in
 // core D1 (`business_stores`) says which stores exist, and each store's
@@ -96,8 +97,28 @@ export interface OpenStore {
    * One read for `scope`, which the caller resolved for the invocation
    * (`StoreHost.read`): never a scope App code supplied.
    */
-  read: (scope: ReadScope, request: ReadRequest) => Promise<QueryAnswer>;
+  read: (scope: ReadScope, request: ReadRequest) => Promise<ReadResult>;
+  /** The current generation of each of `tables` (`StoreHost.generations`). */
+  generations: (tables: string[]) => Promise<Record<string, number>>;
 }
+
+/**
+ * A read's result as the store's object answered it, as JSON text over
+ * RPC (data-store.ts): its value as the store shaped it, and the
+ * generations, which must be counts.
+ */
+const readResultSchema = z.strictObject({
+  value: z.unknown(),
+  generations: z.record(z.string(), z.number().int().min(0)),
+});
+
+const readResultOf = (answered: string): ReadResult => {
+  const { value, generations } = readResultSchema.parse(JSON.parse(answered));
+  // SAFETY: the store's host shaped the value (`StoreHost.read`), a
+  // `QueryAnswer` of JSON documents, which JSON carries unchanged.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return { value: value as ReadResult["value"], generations };
+};
 
 /** The audit entry of a change to `store` by `by`: identifiers only. */
 const storeEntry = (
@@ -396,6 +417,8 @@ export const openStore = async (
     get: async (table, recordId) => await stub.get(storeId, table, recordId),
     claim: async (claim) => await stub.claim({ ...claim, storeId }),
     commit: async (commit) => await stub.commit({ ...commit, storeId }),
-    read: async (scope, request) => await stub.read(storeId, scope, request),
+    read: async (scope, request) =>
+      readResultOf(await stub.read(storeId, scope, request)),
+    generations: async (names) => await stub.generations(storeId, names),
   };
 };

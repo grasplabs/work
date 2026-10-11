@@ -23,6 +23,16 @@ import { StoreHost } from "../src/store-host.ts";
 // through every terminal; what a descriptor can't name; what no query can
 // scan past; and SQLite's own plan for the statements the store runs.
 
+/** What a read answered, without the generations it depended on. */
+const valueOf = async (
+  store: OpenStore,
+  scope: ReadScope,
+  request: ReadRequest
+): Promise<unknown> => {
+  const { value } = await store.read(scope, request);
+  return value;
+};
+
 const builder: Acting = {
   userId: "ada",
   role: "builder",
@@ -130,7 +140,7 @@ const insert = async (
 const dbOf = (fixture: Fixture, scope: ReadScope) =>
   databaseReader(
     notesSchema("owner").schema,
-    async (request) => await fixture.store.read(scope, request)
+    async (request) => await valueOf(fixture.store, scope, request)
   );
 
 /** A record ID, as App code holds one. */
@@ -377,7 +387,7 @@ describe("what a descriptor names", () => {
     const fixture = await storeWith("appMembers");
     const scope = scopeOf(fixture.schemaHash);
     const read = async (request: ReadRequest) =>
-      await refusal(fixture.store.read(scope, request));
+      await refusal(valueOf(fixture.store, scope, request));
     // A table the store holds for another schema isn't this schema's.
     await fixture.store.defineTables(
       manifestText(
@@ -389,7 +399,7 @@ describe("what a descriptor names", () => {
     );
     expect({
       unknownSchema: await refusal(
-        fixture.store.read(scopeOf("f".repeat(64)), queryRequest({}))
+        valueOf(fixture.store, scopeOf("f".repeat(64)), queryRequest({}))
       ),
       unknownTable: await read(queryRequest({ table: "missing" })),
       otherSchemasTable: await read(queryRequest({ table: "secrets" })),
@@ -434,7 +444,8 @@ describe("what a descriptor names", () => {
         .filter({ title: "it's' OR 1=1 --" })
         .count(),
       fieldInjection: await refusal(
-        fixture.store.read(
+        valueOf(
+          fixture.store,
           scope,
           queryRequest({
             filter: { field: "title') OR 1=1 --", op: "eq", value: 1 },
@@ -442,7 +453,8 @@ describe("what a descriptor names", () => {
         )
       ),
       rawSql: await refusal(
-        fixture.store.read(
+        valueOf(
+          fixture.store,
           scope,
           untypedRead({ kind: "query", query: { sql: "SELECT 1" } })
         )
@@ -592,7 +604,11 @@ describe("pinned schemas", () => {
     await insert(fixture, "ada", { title: "old" });
     await insert(fixture, "ada", { title: "new", body: "text" });
     const read = async (schemaHash: string) => {
-      const answer = await store.read(scopeOf(schemaHash), queryRequest({}));
+      const answer = await valueOf(
+        store,
+        scopeOf(schemaHash),
+        queryRequest({})
+      );
       if (!Array.isArray(answer)) {
         throw new TypeError("A collect answers a list");
       }
@@ -681,7 +697,7 @@ describe("more owners, more tables", () => {
     expect({
       asNote: await db.get("notes", idOf(person)),
       asPerson: fieldOf(
-        await fixture.store.read(scopeOf(fixture.schemaHash), {
+        await valueOf(fixture.store, scopeOf(fixture.schemaHash), {
           kind: "get",
           table: "people",
           id: person ?? "",
@@ -722,7 +738,8 @@ describe("scan and aggregate edges", () => {
         db.query("notes").aggregate({ operation: "sum", field: "rank" })
       ),
       text: await refusal(
-        fixture.store.read(
+        valueOf(
+          fixture.store,
           scope,
           queryRequest({
             terminal: { kind: "aggregate", operation: "sum", field: "title" },
@@ -743,7 +760,7 @@ describe("what a read changes", () => {
   it("creates nothing in a store no schema was handed", async () => {
     const store = await openStore(env, await createStore(env, builder));
     const refused = await refusal(
-      store.read(scopeOf("a".repeat(64)), queryRequest({}))
+      valueOf(store, scopeOf("a".repeat(64)), queryRequest({}))
     );
     const rows = await runInDurableObject(
       env.DATA_STORES.getByName(store.id),
@@ -774,7 +791,8 @@ describe("what a read changes", () => {
     );
     await expect(
       refusal(
-        fixture.store.read(
+        valueOf(
+          fixture.store,
           scopeOf(fixture.schemaHash),
           queryRequest({ index: "by_title" })
         )
@@ -807,11 +825,12 @@ describe("projection, at every depth", () => {
       parts: [{ label: "x", hidden: true }],
       tags: { red: { color: "red", internal: 1 } },
     });
-    const answer = await store.read(
+    const answer = await valueOf(
+      store,
       scopeOf(pinned.schemaHash),
       queryRequest({})
     );
-    const note = Array.isArray(answer) ? answer[0] : undefined;
+    const note: unknown = Array.isArray(answer) ? answer[0] : undefined;
     expect({
       meta: fieldOf(note, "meta"),
       parts: fieldOf(note, "parts"),
@@ -860,7 +879,8 @@ describe("projection of unions", () => {
       { title: "later key", shape: { a: "x", c: "y", d: "later" } },
       "lin"
     );
-    const answer = await store.read(
+    const answer = await valueOf(
+      store,
       scopeOf(pinned.schemaHash),
       queryRequest({})
     );
@@ -915,7 +935,7 @@ describe("projection of unions of every kind", () => {
       );
     }
     const answer = await refusal(
-      store.read(scopeOf(pinned.schemaHash), queryRequest({}))
+      valueOf(store, scopeOf(pinned.schemaHash), queryRequest({}))
     );
     return Array.isArray(answer)
       ? answer

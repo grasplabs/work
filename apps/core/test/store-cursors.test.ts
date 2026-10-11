@@ -29,6 +29,16 @@ import type { AnchorValue } from "../src/store-queries.ts";
 // what they read; and cursors that no one can forge, edit, carry to
 // another query, caller or store, or keep past their version.
 
+/** What a read answered, without the generations it depended on. */
+const valueOf = async (
+  store: OpenStore,
+  scope: ReadScope,
+  request: ReadRequest
+): Promise<unknown> => {
+  const { value } = await store.read(scope, request);
+  return value;
+};
+
 const builder: Acting = {
   userId: "ada",
   role: "builder",
@@ -89,7 +99,7 @@ const scopeOf = (
 const dbOf = (fixture: Fixture, scope: ReadScope) =>
   databaseReader(
     schema,
-    async (request) => await fixture.store.read(scope, request)
+    async (request) => await valueOf(fixture.store, scope, request)
   );
 
 /**
@@ -139,7 +149,8 @@ const pageAfter = async (
   changes: Record<string, unknown>,
   cursor: string
 ): Promise<unknown> =>
-  await store.read(
+  await valueOf(
+    store,
     readScope,
     untypedRead({
       kind: "query",
