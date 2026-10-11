@@ -1,7 +1,7 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { hoursOf } from "../blueprints/board-page/files/app/figures.ts";
@@ -376,7 +376,39 @@ describe("a snapshot's hours", () => {
   });
 });
 
+/** The IDs of the Playbook's documents now. */
+const playbookDocuments = async (): Promise<Set<string>> => {
+  const { results } = await env.KNOWLEDGE.prepare(
+    "SELECT id FROM documents WHERE collection_id = ?"
+  )
+    .bind(playbook)
+    .all<{ id: string }>();
+  return new Set(results.map(({ id }) => id));
+};
+
 describe("the board page", { timeout: 60_000 }, () => {
+  // The Playbook is the workspace's, shared by this file's tests: each
+  // test's workflows, teams and snapshots are removed after it, versions,
+  // sections, links and search rows with them (they cascade), so no
+  // snapshot reads another test's workflows. Left in, they added a read
+  // for each designed one to every later snapshot, and took the last
+  // test's snapshot past its call's deadline on a loaded runner.
+  let earlier = new Set<string>();
+  beforeEach(async () => {
+    earlier = await playbookDocuments();
+  });
+  afterEach(async () => {
+    const added = [...(await playbookDocuments())].filter(
+      (id) => !earlier.has(id)
+    );
+    for (const id of added) {
+      // oxlint-disable-next-line no-await-in-loop -- one statement per document
+      await env.KNOWLEDGE.prepare("DELETE FROM documents WHERE id = ?")
+        .bind(id)
+        .run();
+    }
+  });
+
   it("asks for the Playbook, takes a snapshot there, and saves its narrative and decision keeping what it froze", async () => {
     const { admin, app, map, asked } = await setUp();
     expect(
@@ -904,9 +936,8 @@ describe("the board page", { timeout: 60_000 }, () => {
 
   it("stops at a drawn version it is refused, starting no read once it has the refusal, and answers it once the reads it had started are done", async () => {
     const { admin, app, map } = await setUp();
-    // First in the Playbook's path order, ahead of every other test's
-    // workflows: four times as many designed workflows as a snapshot reads
-    // at once (six).
+    // First in the Playbook's path order, ahead of its snapshots: four
+    // times as many designed workflows as a snapshot reads at once (six).
     const folder = `0-refused-${unique()}`;
     const designed: z.infer<typeof savedSchema>[] = [];
     for (let index = 0; index < 24; index += 1) {
@@ -937,57 +968,45 @@ describe("the board page", { timeout: 60_000 }, () => {
     // The first one's drawn version is gone from the store: its read is
     // refused, while the reads started with it are still on their way.
     const [refused] = designed;
-    const moved = 1_000_000;
-    const renumber = async (from: number, to: number) => {
-      await env.KNOWLEDGE.prepare(
-        "UPDATE versions SET number = ? WHERE document_id = ? AND number = ?"
-      )
-        .bind(to, refused?.id, from)
-        .run();
-    };
-    await renumber(1, moved);
-    try {
-      let taken: unknown;
-      const events = await auditedDuring(async () => {
-        taken = await call(app, admin.userId, "take", { maturity: 1 });
-      });
-      // Every read of one version is audited as it starts, refused or not.
-      const readsOf = new Map<string, number>();
-      for (const { action, target } of events) {
-        if (action === "knowledge.read" && target?.type === "document") {
-          readsOf.set(target.id, (readsOf.get(target.id) ?? 0) + 1);
-        }
+    await env.KNOWLEDGE.prepare(
+      "UPDATE versions SET number = ? WHERE document_id = ? AND number = 1"
+    )
+      .bind(1_000_000, refused?.id)
+      .run();
+    let taken: unknown;
+    const events = await auditedDuring(async () => {
+      taken = await call(app, admin.userId, "take", { maturity: 1 });
+    });
+    // Every read of one version is audited as it starts, refused or not.
+    const readsOf = new Map<string, number>();
+    for (const { action, target } of events) {
+      if (action === "knowledge.read" && target?.type === "document") {
+        readsOf.set(target.id, (readsOf.get(target.id) ?? 0) + 1);
       }
-      const read = designed.map(({ id }) => readsOf.get(id) ?? 0);
-      const reads = [...readsOf.values()].reduce(
-        (sum, count) => sum + count,
-        0
-      );
-      expect({
-        taken,
-        // The refused read and the five started with it, at once: the
-        // call answers only once they are done, so each is read through
-        // while the call still runs. (A read that finished before the
-        // refusal came back frees its place for the next, so how many more
-        // start before then is down to timing.)
-        startedTogether: read.slice(0, 6),
-        // Once the refusal is in, no read starts: the last of the
-        // workflows are never read, nor any version twice.
-        lastRead: read.at(-1),
-        readTwice: read.some((count) => count > 1),
-        // Nothing but these workflows' drawn versions.
-        others: reads - read.reduce((sum, count) => sum + count, 0),
-      }).toStrictEqual({
-        taken: { error: "knowledge.not_found" },
-        startedTogether: [1, 1, 1, 1, 1, 1],
-        lastRead: 0,
-        readTwice: false,
-        others: 0,
-      });
-    } finally {
-      // The Playbook is shared by this file's tests.
-      await renumber(moved, 1);
     }
+    const read = designed.map(({ id }) => readsOf.get(id) ?? 0);
+    const reads = [...readsOf.values()].reduce((sum, count) => sum + count, 0);
+    expect({
+      taken,
+      // The refused read and the five started with it, at once: the
+      // call answers only once they are done, so each is read through
+      // while the call still runs. (A read that finished before the
+      // refusal came back frees its place for the next, so how many more
+      // start before then is down to timing.)
+      startedTogether: read.slice(0, 6),
+      // Once the refusal is in, no read starts: the last of the
+      // workflows are never read, nor any version twice.
+      lastRead: read.at(-1),
+      readTwice: read.some((count) => count > 1),
+      // Nothing but these workflows' drawn versions.
+      others: reads - read.reduce((sum, count) => sum + count, 0),
+    }).toStrictEqual({
+      taken: { error: "knowledge.not_found" },
+      startedTogether: [1, 1, 1, 1, 1, 1],
+      lastRead: 0,
+      readTwice: false,
+      others: 0,
+    });
   });
 
   it("leaves out a workflow that no longer reads as one, and a drawn version a designed one never had", async () => {
