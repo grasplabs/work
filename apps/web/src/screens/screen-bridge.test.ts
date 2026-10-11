@@ -426,9 +426,11 @@ describe("the page's bridge to a screen", () => {
 
   it("refuses a value held so many times over it is more than a message may hold", async () => {
     const frame = rawFramed();
-    // Each push holds the one before twice: 2^20 copies of 1,000 signs.
+    // Each push holds the one before twice: 2^10 copies of 1,000 signs, far
+    // past the bridge's message size. Cap'n Web copies every reference before
+    // the check runs (GRA-424), so more copies only make the test slow.
     let pushed = frame.push("x".repeat(1000));
-    for (let level = 0; level < 20; level += 1) {
+    for (let level = 0; level < 10; level += 1) {
       pushed = frame.push([
         [
           ["pipeline", pushed],
