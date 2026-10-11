@@ -4,6 +4,37 @@
  * `RUNTIME_PROFILE=workerd`: Code Mode's run record then claims no CPU limit
  * (apps/core/src/code-mode.ts), which plain workerd doesn't enforce.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+import { z } from "zod";
+
+import { parseJsonc } from "./wrangler-config-rules.ts";
+
+const coreWranglerConfig = path.join(
+  import.meta.dirname,
+  "../apps/core/wrangler.jsonc"
+);
+
+/**
+ * Every Durable Object namespace core binds, read from its wrangler.jsonc so
+ * none is left out: a class defined but not bound fails every route that
+ * reaches it.
+ */
+const coreDurableObjects = (): { name: string; className: string }[] =>
+  z
+    .object({
+      durable_objects: z.object({
+        bindings: z.array(
+          z.object({ name: z.string(), class_name: z.string() })
+        ),
+      }),
+    })
+    .parse(parseJsonc(readFileSync(coreWranglerConfig, "utf-8")))
+    .durable_objects.bindings.map(({ name, class_name: className }) => ({
+      name,
+      className,
+    }));
 
 /** What the config is made from. */
 export interface SmokeConfigInputs {
@@ -20,7 +51,17 @@ export const smokeConfig = ({
   port,
   routerSecret,
   modules,
-}: SmokeConfigInputs): string => `using Workerd = import "/workerd/workerd.capnp";
+}: SmokeConfigInputs): string => {
+  const durableObjects = coreDurableObjects();
+  const durableObjectBindings = durableObjects.map(
+    ({ name, className }) =>
+      `(name = "${name}", durableObjectNamespace = (className = "${className}"))`
+  );
+  const durableObjectNamespaces = durableObjects.map(
+    ({ className }) =>
+      `(className = "${className}", uniqueKey = "${className}", enableSql = true)`
+  );
+  return `using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
   services = [(name = "core", worker = .core)],
@@ -35,18 +76,13 @@ const core :Workerd.Worker = (
     (name = "ROUTER_SECRET", text = "${routerSecret}"),
     (name = "DURABLE_OBJECT_JURISDICTION", text = "none"),
     (name = "RUNTIME_PROFILE", text = "workerd"),
+    ${durableObjectBindings.join(",\n    ")},
     # No LOADER (experimental in workerd) and no WORKFLOWS (no engine):
     # apps and screens need workerd's --experimental, and workflows don't
     # run on-prem (apps/core/src/workflows/engine.ts).
   ],
   durableObjectNamespaces = [
-    (className = "Workspace", uniqueKey = "workspace", enableSql = true),
-    (className = "App", uniqueKey = "app", enableSql = true),
-    (className = "AuditLog", uniqueKey = "audit-log", enableSql = true),
-    (className = "Builtins", uniqueKey = "builtins", enableSql = true),
-    (className = "Onboarding", uniqueKey = "onboarding", enableSql = true),
-    (className = "ModelLedger", uniqueKey = "model-ledger", enableSql = true),
-    (className = "DataStore", uniqueKey = "data-store", enableSql = true),
+    ${durableObjectNamespaces.join(",\n    ")},
   ],
   # In-memory storage aborts workerd when a Durable Object alarm fires, so
   # the smoke run must not write audit events or run the 15-minute cron
@@ -57,3 +93,4 @@ const core :Workerd.Worker = (
   durableObjectStorage = (inMemory = void),
 );
 `;
+};
