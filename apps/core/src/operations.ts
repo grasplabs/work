@@ -1311,7 +1311,7 @@ const trackedCalls = (
       while (running.size > 0) {
         const left = deadline - Date.now();
         if (left <= 0) {
-          throw operationErrors.create("operation.unfinished_call");
+          throw hostError(operationErrors.create("operation.unfinished_call"));
         }
         // oxlint-disable-next-line no-await-in-loop -- until none is left
         await Promise.race([Promise.allSettled(running), scheduler.wait(left)]);
@@ -1403,6 +1403,11 @@ const runHandler = async (
       );
     }
     if (unfinished !== undefined) {
+      // A call it left running may have failed on reads a commit made
+      // stale, as its handler may: then it is a run to repeat too.
+      if (stale !== undefined && (await stale())) {
+        throw staleRun;
+      }
       throw failureOf(
         unfinished,
         open,

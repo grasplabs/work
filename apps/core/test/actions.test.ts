@@ -389,6 +389,42 @@ const startLater = action({
   },
 });
 
+/** Starts a mutation, handles its failure, and returns without waiting. */
+const fireAndForgetCaught = action({
+  args: { title: v.string() },
+  returns: v.null(),
+  uses: [create],
+  handler: (ctx, args) => {
+    ctx.runMutation(create, { title: args.title }).catch(() => null);
+    return null;
+  },
+});
+
+/** Counts the notes twice, failing when the two counts differ. */
+const consistentPair = internalQuery({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const counted = await ctx.db.query("notes").count();
+    const listed = await ctx.db.query("notes").collect();
+    if (counted !== listed.length) {
+      throw new AppError("note.torn", "The notes changed between two reads.");
+    }
+    return counted;
+  },
+});
+
+/** Starts a consistency check and returns without waiting for it. */
+const checkLater = mutation({
+  args: {},
+  returns: v.string(),
+  uses: [consistentPair],
+  handler: (ctx) => {
+    ctx.runQuery(consistentPair, {}).catch(() => null);
+    return "done";
+  },
+});
+
 const streaming = action({
   args: {},
   returns: v.null(),
@@ -401,7 +437,15 @@ const notesApp = app({
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
   operations: {
-    notes: { get, create, reject, createAndCount, blindCount, remove },
+    notes: {
+      get,
+      create,
+      reject,
+      createAndCount,
+      blindCount,
+      remove,
+      checkLater,
+    },
     actions: {
       compose,
       createThenFail,
@@ -422,10 +466,11 @@ const notesApp = app({
       raced,
       racedFailure,
       startLater,
+      fireAndForgetCaught,
     },
     chain: { level0, level1, level2, level3, level4 },
   },
-  internalOperations: { count, readMany },
+  internalOperations: { count, readMany, consistentPair },
   operationAccess: {
     "notes.blindCount": { tables: { notes: { insert: true } } },
   },
@@ -471,6 +516,8 @@ const notes = async (): Promise<Fixture> => {
 
 interface CallOptions {
   readonly run?: Runner;
+  /** How long the call may take, in milliseconds: a minute unless set. */
+  readonly within?: number;
   readonly idempotencyKey?: string;
   readonly resources?: ResourceBindings;
 }
@@ -480,7 +527,12 @@ const call = async (
   kind: string,
   path: string,
   args: unknown,
-  { run = defaultRun, idempotencyKey, resources }: CallOptions = {}
+  {
+    run = defaultRun,
+    idempotencyKey,
+    resources,
+    within = 60_000,
+  }: CallOptions = {}
 ): Promise<OperationResult> =>
   await callOperation(
     { manifest, run },
@@ -489,7 +541,7 @@ const call = async (
       consumer: { resourceId: appId, resourceVersion: 1 },
       store,
       requestId: crypto.randomUUID(),
-      deadline: Date.now() + 60_000,
+      deadline: Date.now() + within,
       runId: null,
       authorize: async () => await operationRoles(env, owner, appId),
       ...(resources === undefined ? {} : { resources }),
@@ -1308,5 +1360,72 @@ describe("an action's nested calls", () => {
     await scheduler.wait(300);
     // Only the probe: the late mutation was refused.
     await expect(noteCount(fixture)).resolves.toBe(1);
+  });
+
+  it("answer a call left running past the deadline as unfinished", async () => {
+    const fixture = await notes();
+    const slow: Runner = async (path, args, channel) => {
+      if (path === "notes.create") {
+        await scheduler.wait(600);
+      }
+      return await defaultRun(path, args, channel);
+    };
+    expect(
+      failureOf(
+        await call(
+          fixture,
+          "action",
+          "actions.fireAndForgetCaught",
+          { title: "slow" },
+          { run: slow, within: 300 }
+        )
+      )
+    ).toStrictEqual({
+      code: "operation.unfinished_call",
+      message:
+        "The operation left a call it started running past its deadline.",
+      category: "contract",
+      retryable: false,
+    });
+  });
+
+  it("run a mutation again when a query it left running failed on reads a commit made stale", async () => {
+    const fixture = await notes();
+    let runs = 0;
+    // Another caller commits between the left-running query's two reads,
+    // the first time only.
+    const run: Runner = async (path, args, channel) => {
+      if (path === "notes.checkLater") {
+        runs += 1;
+      }
+      if (path !== "consistentPair" || runs > 1) {
+        return await defaultRun(path, args, channel);
+      }
+      let reads = 0;
+      const tearing: OperationChannel = {
+        read: async (request) => {
+          const answer = await channel.read(request);
+          reads += 1;
+          if (reads === 1) {
+            await call(fixture, "mutation", "notes.create", {
+              title: "meanwhile",
+            });
+          }
+          return answer;
+        },
+        write: async (request) => await channel.write(request),
+        call: async (kind, called, callArgs) =>
+          await channel.call(kind, called, callArgs),
+        resource: async (alias, method, callArgs) =>
+          await channel.resource(alias, method, callArgs),
+      };
+      return await defaultRun(path, args, tearing);
+    };
+    expect({
+      answer: valueOf(
+        await call(fixture, "mutation", "notes.checkLater", {}, { run })
+      ),
+      runs,
+    }).toStrictEqual({ answer: "done", runs: 2 });
   });
 });
