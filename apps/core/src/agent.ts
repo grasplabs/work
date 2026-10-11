@@ -11,10 +11,11 @@ import { toToolDeclaration } from "@earendil-works/pi-ai/utils/transcript";
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { CatalogSkill } from "@grasp-os/shared/knowledge";
 import type { Memory } from "@grasp-os/shared/memory";
+import { z } from "zod";
 
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { describeRun, runCode } from "./code-mode.ts";
-import type { CodeRun } from "./code-mode.ts";
+import type { CodeRun, CodeRunStatus } from "./code-mode.ts";
 import type { AgentModel } from "./models.ts";
 
 // The agent loop: Pi (pi-agent-core) in Code Mode. The model answers, or
@@ -40,10 +41,10 @@ export const maxRunsPerTurn = 30;
 
 const instructions = `You are the Grasp assistant, in a chat with one person. You answer their questions, and you look things up or act for them by writing code. You act on their behalf and can do only what they may do, as far as you were given access in this workspace: when something is refused, say so, and don't try another way around it.
 
-To use an API, call the \`executeCode\` tool with a JavaScript module whose default export is an async function of \`env\`:
+To use an API, call the \`executeCode\` tool with a complete JavaScript module whose default export is an async function of \`(self, env, ctx)\`. \`env\` holds the APIs; \`self\` is null and \`ctx\` gives you nothing you need. Helper functions in the module are fine:
 
 \`\`\`js
-export default async (env) => {
+export default async (self, env, ctx) => {
   const info = await env.chat.info();
   return info.now;
 };
@@ -179,12 +180,33 @@ const systemUpdates = (
     : [{ role: "system", content: "", sections: changed, timestamp }];
 };
 
-const codeParameters = Type.Object({
-  code: Type.String({
-    description:
-      "A complete JavaScript module whose default export is an async function of `env`: `export default async (env) => { ... }`.",
-  }),
-});
+const codeParameters = Type.Object(
+  {
+    code: Type.String({
+      description:
+        "A complete JavaScript module whose default export is an async function of `(self, env, ctx)`: `export default async (self, env, ctx) => { ... }`.",
+    }),
+  },
+  { additionalProperties: false }
+);
+
+/**
+ * The tool's input, checked before Pi's own validation: only `code`, a
+ * string. Refused with a short message rather than Pi's, which repeats the
+ * whole input back to the model. Its length is checked by the host as the
+ * run starts (`runCode`), so an oversized module is a run that was refused.
+ */
+const codeInputSchema = z.strictObject({ code: z.string() });
+
+const codeInput = (args: unknown): { code: string } => {
+  const input = codeInputSchema.safeParse(args);
+  if (!input.success) {
+    throw new Error(
+      "executeCode takes one field, `code`: the module as a string. Nothing else is accepted."
+    );
+  }
+  return input.data;
+};
 
 /**
  * The code runs of a chat that are running now. A stub answers only while
@@ -203,7 +225,8 @@ const runOpen = async (
     scope,
     runs,
     loader,
-  }: Pick<Turn, "apis" | "scope" | "runs" | "loader">,
+    codeTimeoutMs,
+  }: Pick<Turn, "apis" | "scope" | "runs" | "loader" | "codeTimeoutMs">,
   code: string,
   signal: AbortSignal | undefined
 ): Promise<CodeRun> => {
@@ -212,7 +235,7 @@ const runOpen = async (
     apis.map((api) => [api.name, api.stub({ ...scope, runId })])
   );
   try {
-    return await runCode(loader, code, env, signal);
+    return await runCode(loader, code, env, signal, codeTimeoutMs);
   } finally {
     runs.close(runId);
   }
@@ -224,26 +247,31 @@ const executeCode = ({
   scope,
   runs,
   loader,
-}: Pick<Turn, "apis" | "scope" | "runs" | "loader">): AgentTool<
-  typeof codeParameters
-> => ({
+  codeTimeoutMs,
+}: Pick<
+  Turn,
+  "apis" | "scope" | "runs" | "loader" | "codeTimeoutMs"
+>): AgentTool<typeof codeParameters, { status: CodeRunStatus }> => ({
   name: "executeCode",
   label: "Run code",
   description:
     "Runs a JavaScript module in a sandbox with the chat's APIs as `env`, and returns what its default export returns, what it logs, or what it throws.",
   parameters: codeParameters,
+  prepareArguments: codeInput,
   executionMode: "sequential",
   execute: async (_toolCallId, { code }, signal) => {
-    const run = await runOpen({ apis, scope, runs, loader }, code, signal);
-    if (!run.ok) {
-      // pi hands a thrown error's message to the model as a failed result.
-      throw new Error(describeRun(run));
-    }
-    // Only the text the model reads is kept: it is bounded, and the run's
-    // own output (which the transcript stores) needn't be.
+    const run = await runOpen(
+      { apis, scope, runs, loader, codeTimeoutMs },
+      code,
+      signal
+    );
+    // Only the text the model reads is kept, with how the run ended: it is
+    // bounded, and the run's own output (which the transcript stores)
+    // needn't be. A run that didn't complete is a failed result.
     return {
       content: [{ type: "text", text: describeRun(run) }],
-      details: undefined,
+      details: { status: run.status },
+      isError: run.status !== "completed",
     };
   },
 });
@@ -271,6 +299,8 @@ export interface Turn {
   scope: Omit<AgentScope, "runId">;
   runs: CodeRuns;
   loader: WorkerLoader;
+  /** Each code run's wall-clock limit (`codeTimeoutMs`). */
+  codeTimeoutMs: number;
   /** Cancels the turn: the request or code run in flight stops. */
   signal: AbortSignal;
   /** Keeps a finished message: called in order, as each one finishes. */
@@ -546,6 +576,7 @@ export const runTurn = async ({
   scope,
   runs,
   loader,
+  codeTimeoutMs,
   signal: cancelled,
   keep,
   write,
@@ -559,7 +590,7 @@ export const runTurn = async ({
     { role: "user", content: question, timestamp: Date.now() },
   ];
   const progress: Progress = { steps: 0, runs: 0 };
-  const tools = [executeCode({ apis, scope, runs, loader })];
+  const tools = [executeCode({ apis, scope, runs, loader, codeTimeoutMs })];
   const room = { chars: requestChars(model.inputTokens), tools };
   // A question that doesn't fit next to the rest of what the request
   // carries is refused here, before anything is kept or sent: the provider

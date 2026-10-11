@@ -144,3 +144,36 @@ export const codeResults = async (stub: WorkspaceStub, chatId: string) => {
       : []
   );
 };
+
+/** How each code step of the chat ended, as the host recorded it. */
+export const codeStatuses = async (stub: WorkspaceStub, chatId: string) => {
+  const messages = await transcript(stub, chatId);
+  return messages.flatMap((message) => {
+    if (message.role !== "toolResult") {
+      return [];
+    }
+    const details: unknown = message.details;
+    return [
+      typeof details === "object" && details !== null && "status" in details
+        ? details.status
+        : undefined,
+    ];
+  });
+};
+
+/**
+ * Sets `vars` in the object's env, as `pointAtGateway` points its gateway:
+ * a shorter code run limit (`CODE_RUN_TIMEOUT_MS`), say.
+ */
+export const setObjectEnv = async (
+  stub: WorkspaceStub,
+  vars: Record<string, string>
+) => {
+  await runInDurableObject(stub, (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv !== "object" || objectEnv === null) {
+      throw new TypeError("The Workspace object has no env");
+    }
+    Object.assign(objectEnv, vars);
+  });
+};

@@ -20,12 +20,14 @@ import { workspace } from "../src/durable-objects.ts";
 import {
   chatOf,
   codeResults,
+  codeStatuses,
   codeStep,
   gatewayConfig,
   model,
   pausedReply,
   pointAtGateway,
   says,
+  setObjectEnv,
   transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
@@ -121,6 +123,15 @@ const runStep = async (code: string) => {
   return result;
 };
 
+/** Runs `code` as the chat's only code step: what it gave, and how it ended. */
+const runEnded = async (code: string) => {
+  const { stub, chat, ask } = await newChat(codeStep(code), says("Done."));
+  await ask("Run it.");
+  const [result] = await codeResults(stub, chat.id);
+  const [status] = await codeStatuses(stub, chat.id);
+  return { ...result, status };
+};
+
 /** The agent's model.call events for `userId`, once `count` have arrived. */
 const modelCallsBy = async (
   userId: string,
@@ -188,7 +199,7 @@ describe("chat agent", () => {
   it("answers a question with a code step against the chat's API", async () => {
     const { stub, chat, personId, gateway, ask } = await newChat(
       codeStep(
-        "export default async (env) => (await env.chat.info()).personId;"
+        "export default async (self, env) => (await env.chat.info()).personId;"
       ),
       says("You are the person this chat belongs to.")
     );
@@ -401,7 +412,7 @@ describe("chat agent sandbox", () => {
 
   it("gets only its APIs in env, and can't import core's env or entrypoints", async () => {
     const result = await runStep(
-      "import { env as imported, exports } from 'cloudflare:workers'; export default async (env) => ({ given: Object.keys(env), imported: Object.keys(imported ?? {}), exports: Object.keys(exports ?? {}) });"
+      "import { env as imported, exports } from 'cloudflare:workers'; export default async (self, env) => ({ given: Object.keys(env), imported: Object.keys(imported ?? {}), exports: Object.keys(exports ?? {}) });"
     );
 
     expect(result).toStrictEqual({
@@ -412,7 +423,7 @@ describe("chat agent sandbox", () => {
 
   it("names the API it doesn't have, and the ones it does", async () => {
     const result = await runStep(
-      "export default async (env) => await env.mailbox.send('hi');"
+      "export default async (self, env) => await env.mailbox.send('hi');"
     );
 
     expect(result?.isError).toBeTruthy();
@@ -421,12 +432,138 @@ describe("chat agent sandbox", () => {
     );
   });
 
-  it("stops code that waits for something that never comes", async () => {
-    const result = await runStep(
+  it("ends code that waits on what can never settle as past its wall-clock time", async () => {
+    const result = await runEnded(
       "export default async () => { await new Promise(() => {}); return 'never'; };"
     );
 
-    expect(result?.isError).toBeTruthy();
+    expect(result).toStrictEqual({
+      isError: true,
+      text: "Error (wall_expired):\nThe run waits for something that can never come, so it was stopped.",
+      status: "wall_expired",
+    });
+  });
+
+  it("ends code still waiting at its wall-clock limit", async () => {
+    const { stub, chat, ask } = await newChat(
+      codeStep(
+        "export default async () => { await scheduler.wait(60_000); return 'late'; };"
+      ),
+      says("Done.")
+    );
+    await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1000" });
+
+    const started = Date.now();
+    await ask("Wait.");
+
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      {
+        isError: true,
+        text: "Error (wall_expired):\nThe run took longer than 1 seconds, so it was stopped.",
+      },
+    ]);
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "wall_expired",
+    ]);
+    // At its limit, long before its wait would end.
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it("runs a complete module: helpers, null self, its own ctx and parallel calls", async () => {
+    const result = await runEnded(
+      "const keys = (value) => Object.keys(value ?? {}); export default async (self, env, ctx) => { const [first, second] = await Promise.all([env.chat.info(), env.chat.info()]); return { self, ctx: keys(ctx), same: first.chatId === second.chatId }; };"
+    );
+
+    expect(result).toStrictEqual({
+      isError: false,
+      text: `Returned:\n${JSON.stringify({ self: null, ctx: ["waitUntil"], same: true })}`,
+      status: "completed",
+    });
+  });
+
+  it("refuses a module over the source limit before it loads", async () => {
+    // A module that would log as it loads: refused, it never does.
+    const code = `console.log("loaded"); export default async () => 1; // ${"x".repeat(codeLimits.sourceChars)}`;
+    const result = await runEnded(code);
+
+    expect(result).toStrictEqual({
+      isError: true,
+      text: `Error (refused):\nThe module is ${code.length} characters long; a run takes at most ${codeLimits.sourceChars}.`,
+      status: "refused",
+    });
+  });
+
+  it.each([
+    [
+      "no default export",
+      "export const run = async () => 1;",
+      /default export must be an async function/u,
+    ],
+    [
+      "a default export that isn't a function",
+      "export default 42;",
+      /default export must be an async function/u,
+    ],
+    [
+      "a module that throws as it loads",
+      "console.log('before'); throw new Error('broken module'); export default async () => 1;",
+      /^Logs:\nbefore\n\nError \(load_failed\):\nError: broken module/u,
+    ],
+    [
+      "a syntax error",
+      "export default async () => {",
+      /^Error \(load_failed\):\n.*Syntax/isu,
+    ],
+  ])(
+    "reports %s as a module that didn't load, without running it",
+    async (_, code, text) => {
+      const result = await runEnded(code);
+
+      expect(result.status).toBe("load_failed");
+      expect(result.isError).toBeTruthy();
+      expect(result.text).toMatch(text);
+    }
+  );
+
+  it("reports what the function throws as thrown, after what the module logged as it loaded", async () => {
+    const result = await runEnded(
+      "console.log('loaded'); export default async () => { throw new Error('nope'); };"
+    );
+
+    expect(result.status).toBe("threw");
+    expect(result.text).toMatch(
+      /^Logs:\nloaded\n\nError \(threw\):\nError: nope/u
+    );
+  });
+
+  it("refuses input with fields besides code, without running it or repeating it back", async () => {
+    const { stub, chat, ask } = await newChat(
+      {
+        text: "",
+        toolCalls: [
+          {
+            id: `call_${crypto.randomUUID()}`,
+            name: "executeCode",
+            arguments: {
+              code: "export default async () => 'ran';",
+              timeoutMs: 1,
+            },
+          },
+        ],
+        inputTokens: 200,
+        outputTokens: 40,
+      },
+      says("Done.")
+    );
+
+    await ask("Run it.");
+
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      {
+        isError: true,
+        text: "executeCode takes one field, `code`: the module as a string. Nothing else is accepted.",
+      },
+    ]);
   });
 
   it("keeps what the code logs and returns to what the model can read", async () => {
@@ -456,7 +593,7 @@ describe("chat agent sandbox", () => {
     // runner: the cancel ends the run, not the wait.
     const { stub, chat, personId, ask } = await newChat(
       codeStep(
-        "export default async (env) => { await scheduler.wait(5_000); await env.chat.info(); await env.chat.info(); };"
+        "export default async (self, env) => { await scheduler.wait(5_000); await env.chat.info(); await env.chat.info(); };"
       )
     );
 
@@ -531,7 +668,7 @@ describe("chat agent sandbox", () => {
   it("stops a run's API calls at the most one run may make, and audits that once", async () => {
     const { stub, chat, ask } = await newChat(
       codeStep(
-        "export default async (env) => { let answered = 0; let refused = 0; let message; for (let i = 0; i < 150; i++) { try { await env.chat.info(); answered += 1; } catch (error) { refused += 1; message = String(error.message); } } return { answered, refused, message }; };"
+        "export default async (self, env) => { let answered = 0; let refused = 0; let message; for (let i = 0; i < 150; i++) { try { await env.chat.info(); answered += 1; } catch (error) { refused += 1; message = String(error.message); } } return { answered, refused, message }; };"
       ),
       says("Done.")
     );
@@ -602,13 +739,6 @@ describe("chat agent sandbox", () => {
       expect(row?.longest).toBeLessThan(40_000);
     }
   );
-
-  it("reports code that doesn't load", async () => {
-    const result = await runStep("export default async () => {");
-
-    expect(result?.isError).toBeTruthy();
-    expect(result?.text).toMatch(/Syntax/iu);
-  });
 });
 
 describe("chat agent turns", () => {
@@ -632,7 +762,7 @@ describe("chat agent turns", () => {
 
     await expect(reply).resolves.toMatchObject({ outcome: "cancelled" });
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
-      { isError: true, text: "Error:\nThe run was cancelled." },
+      { isError: true, text: "Error (cancelled):\nThe run was cancelled." },
     ]);
     // No request after the cancelled step.
     expect(gateway.requests).toHaveLength(1);
@@ -1113,7 +1243,9 @@ describe("chat agent after a restart", () => {
 
   it("continues the conversation with everything before it", async () => {
     const { stub, chat, ask } = await newChat(
-      codeStep("export default async (env) => (await env.chat.info()).chatId;"),
+      codeStep(
+        "export default async (self, env) => (await env.chat.info()).chatId;"
+      ),
       says("This chat's ID is known.")
     );
     await ask("Which chat is this?");
