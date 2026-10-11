@@ -71,9 +71,9 @@ defineSchema({ notes: defineTable({ author: v.id("people") }) });
 // @ts-expect-error -- not even nested in an array
 defineSchema({ notes: defineTable({ watchers: v.array(v.id("people")) }) });
 
-// A record ID deeper than the eight levels this check once stopped at is
-// still checked. (It looks as deep as a value may nest; how deep the
-// value types themselves stay practical to infer is `v`'s own bound.)
+// A record ID as deep as a value may nest (`valueLimits.depth`: 32 levels)
+// is still checked.
+const missingId = v.id("missing");
 const nested = v.object({
   a: v.object({
     a: v.object({
@@ -82,7 +82,53 @@ const nested = v.object({
           a: v.object({
             a: v.object({
               a: v.object({
-                a: v.object({ a: v.object({ a: v.id("missing") }) }),
+                a: v.object({
+                  a: v.object({
+                    a: v.object({
+                      a: v.object({
+                        a: v.object({
+                          a: v.object({
+                            a: v.object({
+                              a: v.object({
+                                a: v.object({
+                                  a: v.object({
+                                    a: v.object({
+                                      a: v.object({
+                                        a: v.object({
+                                          a: v.object({
+                                            a: v.object({
+                                              a: v.object({
+                                                a: v.object({
+                                                  a: v.object({
+                                                    a: v.object({
+                                                      a: v.object({
+                                                        a: v.object({
+                                                          a: v.object({
+                                                            a: v.object({
+                                                              a: missingId,
+                                                            }),
+                                                          }),
+                                                        }),
+                                                      }),
+                                                    }),
+                                                  }),
+                                                }),
+                                              }),
+                                            }),
+                                          }),
+                                        }),
+                                      }),
+                                    }),
+                                  }),
+                                }),
+                              }),
+                            }),
+                          }),
+                        }),
+                      }),
+                    }),
+                  }),
+                }),
               }),
             }),
           }),
@@ -93,6 +139,7 @@ const nested = v.object({
 });
 // @ts-expect-error -- this schema has no `missing` table, however deep
 defineSchema({ notes: defineTable({ nested }) });
+const noteId = v.id("notes");
 const nestedKnown = v.object({
   a: v.object({
     a: v.object({
@@ -101,7 +148,53 @@ const nestedKnown = v.object({
           a: v.object({
             a: v.object({
               a: v.object({
-                a: v.object({ a: v.object({ a: v.id("notes") }) }),
+                a: v.object({
+                  a: v.object({
+                    a: v.object({
+                      a: v.object({
+                        a: v.object({
+                          a: v.object({
+                            a: v.object({
+                              a: v.object({
+                                a: v.object({
+                                  a: v.object({
+                                    a: v.object({
+                                      a: v.object({
+                                        a: v.object({
+                                          a: v.object({
+                                            a: v.object({
+                                              a: v.object({
+                                                a: v.object({
+                                                  a: v.object({
+                                                    a: v.object({
+                                                      a: v.object({
+                                                        a: v.object({
+                                                          a: v.object({
+                                                            a: v.object({
+                                                              a: noteId,
+                                                            }),
+                                                          }),
+                                                        }),
+                                                      }),
+                                                    }),
+                                                  }),
+                                                }),
+                                              }),
+                                            }),
+                                          }),
+                                        }),
+                                      }),
+                                    }),
+                                  }),
+                                }),
+                              }),
+                            }),
+                          }),
+                        }),
+                      }),
+                    }),
+                  }),
+                }),
               }),
             }),
           }),

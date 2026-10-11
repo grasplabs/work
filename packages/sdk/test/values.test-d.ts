@@ -187,6 +187,89 @@ const badState: OrderValue["state"] = { kind: "closed" };
 const badTag: OrderValue["customer"]["tags"][number] = "old";
 expectTypeOf([badQuantity, badState, badTag]).not.toBeAny();
 
+// A value nested as deep as values may (`valueLimits.depth`: 32 levels)
+// keeps its types at the bottom, in and out, and checks in well under a
+// second: inference is linear in depth. Keep a fixture like this written
+// across lines. The formatter takes time exponential in depth to break
+// nested calls written on one line (about four times as long per level:
+// some 5 s at 15 levels, minutes from about 17), which once passed for
+// slow type inference.
+const deepLeaf = v.string().default("");
+const deepest = v.object({
+  a: v.object({
+    a: v.object({
+      a: v.object({
+        a: v.object({
+          a: v.object({
+            a: v.object({
+              a: v.object({
+                a: v.object({
+                  a: v.object({
+                    a: v.object({
+                      a: v.object({
+                        a: v.object({
+                          a: v.object({
+                            a: v.object({
+                              a: v.object({
+                                a: v.object({
+                                  a: v.object({
+                                    a: v.object({
+                                      a: v.object({
+                                        a: v.object({
+                                          a: v.object({
+                                            a: v.object({
+                                              a: v.object({
+                                                a: v.object({
+                                                  a: v.object({
+                                                    a: v.object({
+                                                      a: v.object({
+                                                        a: v.object({
+                                                          a: v.object({
+                                                            a: v.object({
+                                                              a: deepLeaf,
+                                                            }),
+                                                          }),
+                                                        }),
+                                                      }),
+                                                    }),
+                                                  }),
+                                                }),
+                                              }),
+                                            }),
+                                          }),
+                                        }),
+                                      }),
+                                    }),
+                                  }),
+                                }),
+                              }),
+                            }),
+                          }),
+                        }),
+                      }),
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  }),
+});
+// The innermost object, 30 levels down.
+type In = InferInput<typeof deepest>;
+type In10 = In["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"];
+type In20 = In10["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"];
+type In30 = In20["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"];
+type Out = Infer<typeof deepest>;
+type Out10 = Out["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"];
+type Out20 = Out10["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"];
+type Out30 = Out20["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"]["a"];
+expectTypeOf<In30>().toEqualTypeOf<{ a?: string }>();
+expectTypeOf<Out30>().toEqualTypeOf<{ a: string }>();
+
 // Modifiers at the top level, and that a modifier keeps the schema's kind.
 const maybeText = v.string().min(1).optional();
 expectTypeOf<InferInput<typeof maybeText>>().toEqualTypeOf<
