@@ -1978,7 +1978,7 @@ describe("screens", { timeout: 60_000 }, () => {
     });
   });
 
-  it("refuses a value a key every object has carries in, a prototype among them", async () => {
+  it("refuses a value a key every object has carries in, a prototype and an error's own among them", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
     const raw = await openRawRpc(builder.session);
@@ -2011,6 +2011,31 @@ describe("screens", { timeout: 60_000 }, () => {
       toJSONDeep: await echoed("toJSON", deep),
       // As text: equality compares a `constructor` key as the class.
       constructorShallow: JSON.stringify(await echoed("constructor", shallow)),
+      // Cap'n Web gives it `errors` as a property `Object.keys` skips.
+      aggregateDeep: rawOutcome(
+        await raw.pull(
+          raw.push([
+            "pipeline",
+            session,
+            ["screens", "call"],
+            [
+              app,
+              "echo",
+              [
+                [
+                  [
+                    "error",
+                    "AggregateError",
+                    "m",
+                    null,
+                    { errors: ["pipeline", deep] },
+                  ],
+                ],
+              ],
+            ],
+          ])
+        )
+      ),
     };
     raw.close();
 
@@ -2022,6 +2047,7 @@ describe("screens", { timeout: 60_000 }, () => {
       constructorShallow: JSON.stringify({
         answered: { constructor: { approved: true } },
       }),
+      aggregateDeep: "request.too_deep",
     });
   });
 

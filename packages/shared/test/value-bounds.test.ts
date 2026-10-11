@@ -49,9 +49,29 @@ describe("the bounds of a value", () => {
     expect(passedBound([nested(1_000_000)], roomy)).toBe("depth");
   });
 
-  it("looks into what an error carries", () => {
-    const error = Object.assign(new Error("deep"), { details: nested(40) });
-    expect(passedBound([error], roomy)).toBe("depth");
+  it("looks into what an error carries, listed or not", () => {
+    const aggregate = new AggregateError([], "m");
+    // As Cap'n Web sets it: an own property `Object.keys` doesn't list.
+    aggregate.errors = [nested(40)];
+    expect({
+      details: passedBound(
+        [Object.assign(new Error("deep"), { details: nested(40) })],
+        roomy
+      ),
+      errors: passedBound([aggregate], roomy),
+      cause: passedBound([new Error("m", { cause: nested(40) })], roomy),
+    }).toStrictEqual({ details: "depth", errors: "depth", cause: "depth" });
+  });
+
+  it("refuses a stream, a request or a response, which would carry what it streams unchecked", () => {
+    expect(
+      [
+        new ReadableStream(),
+        new WritableStream(),
+        new Request("https://example.com"),
+        new Response("x"),
+      ].map((value) => passedBound([value], roomy))
+    ).toStrictEqual(["kind", "kind", "kind", "kind"]);
   });
 
   it("lets an error through as deep as a leaf may be, counting its name and message at its own level", () => {

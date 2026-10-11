@@ -141,7 +141,15 @@ export default defineConfig({
               ],
             },
           ],
-          "grasp/no-capnweb-namespace": "error",
+          "grasp/no-unbounded-rpc-target": "error",
+        },
+      },
+      {
+        // No package passes RpcTarget on for core or the frontend to
+        // extend unbounded; the bounded base extends it in place.
+        files: ["packages/**"],
+        rules: {
+          "grasp/no-unbounded-rpc-target": ["error", { reexportsOnly: true }],
         },
       },
       {
@@ -168,7 +176,7 @@ export default defineConfig({
         files: ["apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx"],
         rules: {
           "no-restricted-imports": "off",
-          "grasp/no-capnweb-namespace": "off",
+          "grasp/no-unbounded-rpc-target": "off",
         },
       },
       {

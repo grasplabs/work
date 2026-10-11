@@ -26,7 +26,10 @@ export type PassedBound = "depth" | "size" | "kind";
 
 /**
  * The global constructors whose instances are leaves: what Cap'n Web and
- * structured clone carry that holds no value to walk. Looked up by name,
+ * structured clone carry that holds no value to walk. Not a stream, nor a
+ * request or a response, which carry one: what it streams would arrive
+ * unchecked, chunk by chunk, so none is taken. A method that is to read
+ * one must take it apart from this, and bound each chunk itself. Looked up by name,
  * as not every runtime has every one.
  */
 const leafConstructors = [
@@ -48,10 +51,6 @@ const leafConstructors = [
   "BigInt64Array",
   "BigUint64Array",
   "Blob",
-  "ReadableStream",
-  "WritableStream",
-  "Request",
-  "Response",
   "Headers",
   "URL",
 ] as const;
@@ -106,12 +105,33 @@ const ownEntries = (value: object): Held => {
 };
 
 /**
+ * What an error holds: every own data property, enumerable or not (Cap'n
+ * Web gives an `AggregateError` its `errors`, and an error its `cause`,
+ * as properties `Object.keys` doesn't list), each a level deeper, but its
+ * message, which counts toward its size at its own level with its name,
+ * and its stack, which isn't counted: the runtime makes one up for an
+ * error the sender sent none for.
+ */
+const errorHeld = (error: Error): Held => {
+  let size = error.name.length + error.message.length;
+  const held: unknown[] = [];
+  for (const key of Object.getOwnPropertyNames(error)) {
+    if (key !== "message" && key !== "stack") {
+      size += key.length;
+      const property = Reflect.getOwnPropertyDescriptor(error, key);
+      if (property !== undefined && "value" in property) {
+        held.push(property.value);
+      }
+    }
+  }
+  return { size, held };
+};
+
+/**
  * What an object holds, as Cap'n Web and structured clone carry it: an
  * array's elements, a map's keys and values, a set's members, a plain
- * object's or an error's own enumerable keys and values. An error's name
- * and message count toward its size, at its own level; its stack isn't
- * counted, as the runtime makes one up for an error the sender sent
- * none for. A leaf holds nothing; an object of an unknown kind is
+ * object's own enumerable keys and values, an error's as `errorHeld`
+ * says. A leaf holds nothing; an object of an unknown kind is
  * `undefined`.
  */
 const heldBy = (value: object): Held | undefined => {
@@ -141,11 +161,7 @@ const heldBy = (value: object): Held | undefined => {
       : undefined;
   }
   if (value instanceof Error) {
-    if (!errorPrototypes.has(prototype)) {
-      return undefined;
-    }
-    const { size, held } = ownEntries(value);
-    return { size: size + value.name.length + value.message.length, held };
+    return errorPrototypes.has(prototype) ? errorHeld(value) : undefined;
   }
   if (prototype === Object.prototype || prototype === null) {
     return ownEntries(value);

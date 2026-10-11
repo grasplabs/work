@@ -365,7 +365,7 @@ describe("the page's bridge to a screen", () => {
     });
   });
 
-  it("refuses a value a key every object has carries in, a prototype among them", async () => {
+  it("refuses a value a key every object has carries in, a prototype and an error's own among them", async () => {
     const frame = rawFramed();
     let deep = frame.push(wireNested(30));
     for (let level = 0; level < 100; level += 1) {
@@ -387,6 +387,28 @@ describe("the page's bridge to a screen", () => {
       protoShallow: await called("__proto__", shallow),
       constructorDeep: await called("constructor", deep),
       toJSONDeep: await called("toJSON", deep),
+      // Cap'n Web gives it `errors` as a property `Object.keys` skips.
+      aggregateDeep: await frame.pull(
+        frame.push([
+          "pipeline",
+          0,
+          ["call"],
+          [
+            "notes",
+            [
+              [
+                [
+                  "error",
+                  "AggregateError",
+                  "m",
+                  null,
+                  { errors: ["pipeline", deep] },
+                ],
+              ],
+            ],
+          ],
+        ])
+      ),
     };
     frame.close();
 
@@ -396,6 +418,7 @@ describe("the page's bridge to a screen", () => {
         protoShallow: "request.unsupported_value",
         constructorDeep: "request.too_deep",
         toJSONDeep: "request.too_deep",
+        aggregateDeep: "request.too_deep",
       },
       reached: [],
     });
