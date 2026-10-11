@@ -6,9 +6,10 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/values.ts",
+    ".": "./src/index.ts",
     "./host": "./src/host.ts",
     "./database": "./src/database.ts",
+    "./server": "./src/server.ts",
     "./workflow": "./src/workflow.ts",
     "./engine": "./src/engine.ts",
     "./params": "./src/params.ts",
