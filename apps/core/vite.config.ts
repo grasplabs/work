@@ -146,6 +146,8 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
             },
             // workerd doesn't implement Durable Object jurisdictions.
             DURABLE_OBJECT_JURISDICTION: "none",
+            // Plain workerd: no CPU limit on Code Mode's isolates.
+            RUNTIME_PROFILE: "workerd",
             // So the test of a call that never ends doesn't wait a minute.
             APP_CALL_TIMEOUT_MS: "10000",
             // The engine's step limit, lowered below (`workflows`) so a test

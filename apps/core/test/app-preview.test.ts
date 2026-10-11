@@ -8,6 +8,7 @@ import { callApp } from "../src/app.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { readStatistics } from "../src/statistics.ts";
+import { openTestRun } from "./agent-chat.ts";
 import {
   pastAccessRecheck,
   release,
@@ -221,7 +222,8 @@ const chatWithDraft = async (
       1,
       written,
       [],
-      revision
+      revision,
+      await openTestRun(chatsOf(person), chatId)
     );
     if (!saved) {
       throw new Error("The draft wasn't written");

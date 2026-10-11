@@ -57,6 +57,13 @@
       "when": 1790793391689,
       "tag": "0007_chat_owner_required",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791687051646,
+      "tag": "0008_chat_code_runs",
+      "breakpoints": true
     }
   ]
 }

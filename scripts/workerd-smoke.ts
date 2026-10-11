@@ -67,6 +67,7 @@ const core :Workerd.Worker = (
   bindings = [
     (name = "ROUTER_SECRET", text = "${ROUTER_SECRET}"),
     (name = "DURABLE_OBJECT_JURISDICTION", text = "none"),
+    (name = "RUNTIME_PROFILE", text = "workerd"),
     # No LOADER (experimental in workerd) and no WORKFLOWS (no engine):
     # apps and screens need workerd's --experimental, and workflows don't
     # run on-prem (apps/core/src/workflows/engine.ts).

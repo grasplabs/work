@@ -442,7 +442,9 @@ export const versionFiles = async (
 export const createApp = async (
   env: Env,
   by: Acting,
-  input: unknown
+  input: unknown,
+  /** Admits the write, called right before it is committed: throws to refuse it. */
+  admit?: () => Promise<void>
 ): Promise<App> => {
   requireBuilder(by);
   const { name, description, blueprint } = appErrors.parse(
@@ -462,6 +464,8 @@ export const createApp = async (
   };
   const app = toApp(row);
   const db = drizzle(env.DB);
+  // Admitted last, with nothing slow left before the write.
+  await admit?.();
   await auditedBatch(env, db, [
     db.insert(apps).values(row),
     outboxed(
@@ -814,7 +818,9 @@ export const proposeDraft = async (
   by: Acting,
   app: unknown,
   { parent, files }: DraftOverLatest,
-  message: unknown
+  message: unknown,
+  /** Admits the write, called right before it is committed: throws to refuse it. */
+  admit?: () => Promise<void>
 ): Promise<AppVersion> => {
   const { id: appId } = await appFor(env, by, app, "builder");
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
@@ -848,6 +854,8 @@ export const proposeDraft = async (
   };
   const db = drizzle(env.DB);
   try {
+    // Admitted last, with nothing slow left before the write.
+    await admit?.();
     await auditedBatch(env, db, [
       db.insert(appVersions).values(row),
       outboxed(

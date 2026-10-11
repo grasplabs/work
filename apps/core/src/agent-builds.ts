@@ -25,7 +25,7 @@ import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
 import { asPerson } from "./agent-person.ts";
-import { chatAuthority, chatContext } from "./agent-scope.ts";
+import { admitEffect, chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { createFromBlueprint, listBlueprints } from "./app-blueprints.ts";
 import { isPlainData } from "./app.ts";
@@ -438,6 +438,17 @@ export interface Proposal {
 /** Building Apps, as a chat's code does it. */
 export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   /**
+   * Admits a write of this run's, handed to what writes it so it runs
+   * right before the write commits, after any slow preparation (fetching
+   * packages, building, storing files): a run that ended or lost a
+   * permission meanwhile writes nothing. The check each method makes
+   * before it starts is the cheap early refusal.
+   */
+  readonly #admit = async (): Promise<void> => {
+    await admitEffect(this.env, this.ctx.props);
+  };
+
+  /**
    * Runs one build call as the chat's person, with the agent as the audit
    * log's actor for what it changes: once the agent may build Apps, and
    * only from a chat that hasn't read restricted data.
@@ -488,7 +499,9 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     return await this.#build(
       "build.create",
       async (by) =>
-        await this.#creating(async () => await createApp(this.env, by, input)),
+        await this.#creating(
+          async () => await createApp(this.env, by, input, this.#admit)
+        ),
       (created) => ({ app: created.id })
     );
   }
@@ -521,7 +534,14 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.createFromBlueprint",
       async (by) =>
         await this.#creating(
-          async () => await createFromBlueprint(this.env, by, blueprint, input)
+          async () =>
+            await createFromBlueprint(
+              this.env,
+              by,
+              blueprint,
+              input,
+              this.#admit
+            )
         ),
       (created) => ({
         app: created.app.id,
@@ -536,10 +556,13 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    * nothing.
    */
   async #creating<T>(create: () => Promise<T>): Promise<T> {
-    const { workspaceId, chatId } = this.ctx.props;
+    const { workspaceId, chatId, runId } = this.ctx.props;
+    // Admitted as it takes the create, which a D1 write follows.
+    await admitEffect(this.env, this.ctx.props);
     const taken = await workspace(this.env, workspaceId).takeCreate(
       chatId,
-      maxCreatesPerTurn
+      maxCreatesPerTurn,
+      runId
     );
     if (!taken) {
       throw appErrors.create("app.creates_exhausted");
@@ -637,6 +660,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         const unchanged = written.flatMap(([path, content]) =>
           (content ?? undefined) === base.get(path) ? [path] : []
         );
+        await admitEffect(this.env, this.ctx.props);
         const saved = await workspace(
           this.env,
           this.ctx.props.workspaceId
@@ -646,7 +670,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           draft.base,
           Object.fromEntries(kept),
           unchanged,
-          draft.revision
+          draft.revision,
+          this.ctx.props.runId
         );
         if (!saved) {
           throw appErrors.create("app.conflict");
@@ -673,8 +698,11 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.discard",
       async (by) => {
         const id = await this.#buildable(by, app);
-        const { workspaceId, chatId } = this.ctx.props;
-        await workspace(this.env, workspaceId).dropDraft(chatId, id);
+        const { workspaceId, chatId, runId } = this.ctx.props;
+        await admitEffect(this.env, this.ctx.props);
+        await workspace(this.env, workspaceId).dropDraft(chatId, id, {
+          runId,
+        });
       },
       () => ({ app: typeof app === "string" ? app : null })
     );
@@ -750,7 +778,16 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
             reviewUnavailable: false,
           };
         }
-        const proposed = await proposeDraft(this.env, by, id, over, message);
+        // The commit is admitted only while the run is still open.
+        await admitEffect(this.env, this.ctx.props);
+        const proposed = await proposeDraft(
+          this.env,
+          by,
+          id,
+          over,
+          message,
+          this.#admit
+        );
         // Committed and up for review: from here on it is proposed, however
         // the rest goes, and says so, so the agent doesn't try again (and
         // meet nothing to commit). What follows is logged when it fails.
@@ -764,7 +801,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         }
         // Only the revision committed: a write since stays a draft.
         await workspace(this.env, workspaceId)
-          .dropDraft(chatId, id, draft.revision)
+          .dropDraft(chatId, id, { revision: draft.revision })
           .catch(afterProposal("drop_draft", id, version));
         const review = await reviewVersion(this.env, by, id, version).catch(
           afterProposal("review", id, version)
@@ -795,13 +832,15 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       async (by) => {
         const id = await this.#buildable(by, app);
         const subject = { type: "app", appId: id };
+        await admitEffect(this.env, this.ctx.props);
         return await requestPermission(
           this.env,
           by,
           typeof request === "object" && request !== null
             ? { ...request, subject }
             : request,
-          async (named, role) => await appFor(this.env, by, named, role)
+          async (named, role) => await appFor(this.env, by, named, role),
+          this.#admit
         );
       },
       (requested) => ({
@@ -825,12 +864,14 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.resolveDependencies",
       async (by) => {
         const id = await this.#buildable(by, app);
+        await admitEffect(this.env, this.ctx.props);
         return await resolveDependencies(
           this.env,
           by,
           typeof intent === "object" && intent !== null
             ? { ...intent, app: id }
-            : intent
+            : intent,
+          this.#admit
         );
       },
       (resolved) => ({
