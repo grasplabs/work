@@ -76,6 +76,20 @@ export interface DrainOptions {
 /** How long one hand-over may take, unless a drain says otherwise. */
 export const defaultTimeoutMs = 30_000;
 
+/**
+ * Refuses a hand-over limit that is not a positive number of milliseconds:
+ * a lease lasts twice the limit, and only a positive one makes a lease
+ * taken after another ran out end strictly later, which fences the drain
+ * that lost it off from settling the entry.
+ */
+export const assertTimeout = (timeoutMs: number): void => {
+  if (!(timeoutMs > 0)) {
+    throw new RangeError(
+      `A hand-over's limit must be above 0 ms, not ${timeoutMs}.`
+    );
+  }
+};
+
 /** How long a drain goes on handing over, unless it says otherwise. */
 export const defaultBudgetMs = 20_000;
 

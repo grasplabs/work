@@ -46,11 +46,17 @@ export const gatedConsumer = (): GatedConsumer => {
       return "delivered";
     },
     entered: async (n) => {
+      // Cancels the bound once the hand-over began, so no wait outlives it.
+      const bound = new AbortController();
       const late = async (): Promise<never> => {
-        await scheduler.wait(enteredWithinMs);
+        await scheduler.wait(enteredWithinMs, { signal: bound.signal });
         throw new Error(`Hand-over ${n} never began.`);
       };
-      await Promise.race([beganAt(n).promise, late()]);
+      try {
+        await Promise.race([beganAt(n).promise, late()]);
+      } finally {
+        bound.abort();
+      }
     },
     release: () => {
       gate.resolve(null);

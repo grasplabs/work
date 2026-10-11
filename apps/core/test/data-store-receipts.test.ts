@@ -605,12 +605,15 @@ describe("outbox", () => {
     const first = gatedConsumer();
     const second = gatedConsumer();
     const timeoutMs = 1000;
+    // Every drain started, to wait out however the test ends.
+    const drains: Promise<void>[] = [];
     try {
       await inHost(store, async (host) => {
         const firstDrain = host.drainOutbox(
           { "workflow.start": first.consumer },
           { timeoutMs }
         );
+        drains.push(firstDrain);
         // The first drain hands three entries over, one limit each: each
         // fails, and is put back for later.
         for (let n = 0; n < 3; n += 1) {
@@ -621,7 +624,7 @@ describe("outbox", () => {
         }
         // Its fourth hand-over is going, all but done: that entry's lease,
         // taken when its turn came, holds yet; one taken as the drain
-        // started (two limits long) would have run out a limit ago.
+        // started (two limits long) would have run out about two limits ago.
         await first.entered(3);
         await vi.advanceTimersByTimeAsync(timeoutMs - 1);
         // Another drain starts meanwhile, and is handing over the first
@@ -630,6 +633,7 @@ describe("outbox", () => {
           { "workflow.start": second.consumer },
           { timeoutMs }
         );
+        drains.push(secondDrain);
         await second.entered(0);
         await vi.advanceTimersByTimeAsync(1);
         // The first drain goes on past the entry the other one holds.
@@ -644,6 +648,7 @@ describe("outbox", () => {
     } finally {
       first.release();
       second.release();
+      await Promise.allSettled(drains);
       vi.useRealTimers();
     }
     // Each drain hands over only entries no other drain holds: never one
@@ -651,6 +656,40 @@ describe("outbox", () => {
     expect({ first: first.handed, second: second.handed }).toStrictEqual({
       first: [...ids.slice(0, 4), ids[5]],
       second: [ids[4]],
+    });
+  });
+
+  it("refuses a drain whose hand-over limit is not above 0 ms, handing nothing over", async () => {
+    const store = await newStore();
+    const held = heldBy(await store.claim(await claimOf("k1", {})));
+    await commitWith(
+      store,
+      insertOf(held, "Launch", {
+        intents: [{ kind: "workflow.start", data: {} }],
+      }),
+      { "workflow.start": taker([]) }
+    );
+    const taken: OutboxEntry[] = [];
+    const refused = await inHost(store, async (host) => {
+      try {
+        await host.drainOutbox(
+          { "workflow.start": taker(taken) },
+          { timeoutMs: 0 }
+        );
+        return "drained";
+      } catch (error) {
+        return error instanceof RangeError ? error.message : String(error);
+      }
+    });
+    const [entry] = await rowsOf(store, "sdk_change_outbox");
+    expect({
+      refused,
+      taken: taken.length,
+      settled: entry?.settled_at,
+    }).toStrictEqual({
+      refused: "A hand-over's limit must be above 0 ms, not 0.",
+      taken: 0,
+      settled: null,
     });
   });
 

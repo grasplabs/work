@@ -1424,14 +1424,15 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
     const first = gatedConsumer();
     const second = gatedConsumer();
     const timeoutMs = 1000;
+    // Every drain started, to wait out however the test ends.
+    const drains: Promise<void>[] = [];
     try {
       const firstDrain = drainSubmissionOutbox(
         env,
         consumersFor(marker, first.consumer),
-        {
-          timeoutMs,
-        }
+        { timeoutMs }
       );
+      drains.push(firstDrain);
       // The first drain hands three entries over, one limit each.
       for (let n = 0; n < 3; n += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one after the other
@@ -1441,7 +1442,7 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       }
       // Its fourth hand-over is going, all but done: that entry's lease,
       // taken when its turn came, holds yet; one taken as the drain
-      // started (two limits long) would have run out a limit ago.
+      // started (two limits long) would have run out about two limits ago.
       await first.entered(3);
       await vi.advanceTimersByTimeAsync(timeoutMs - 1);
       // Another drain starts meanwhile, and is handing over the first
@@ -1449,10 +1450,9 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       const secondDrain = drainSubmissionOutbox(
         env,
         consumersFor(marker, second.consumer),
-        {
-          timeoutMs,
-        }
+        { timeoutMs }
       );
+      drains.push(secondDrain);
       await second.entered(0);
       await vi.advanceTimersByTimeAsync(1);
       // The first drain goes on past the entry the other one holds.
@@ -1466,6 +1466,7 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
     } finally {
       first.release();
       second.release();
+      await Promise.allSettled(drains);
       vi.useRealTimers();
     }
     const entries = await entriesOf(marker);
@@ -1475,6 +1476,43 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
     expect({ first: first.handed, second: second.handed }).toStrictEqual({
       first: [...ids.slice(0, 4), ids[5]],
       second: [ids[4]],
+    });
+  });
+
+  it("refuse a drain whose hand-over limit is not above 0 ms, handing nothing over", async () => {
+    const setup = await setUp();
+    const marker = unique();
+    let calls = 0;
+    const consumers = consumersFor(marker, async () => {
+      calls += 1;
+      return await Promise.resolve("delivered");
+    });
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key: unique(),
+      intents: [{ kind: "workflow.notify", data: { marker } }],
+      consumers,
+    });
+    const zero = await outcome(
+      drainSubmissionOutbox(env, consumers, { timeoutMs: 0 })
+    );
+    const negative = await outcome(
+      drainSubmissionOutbox(env, consumers, { timeoutMs: -1 })
+    );
+    const entries = await entriesOf(marker);
+    const refusedCalls = calls;
+    // A drain with a limit takes it then, leaving nothing due behind for
+    // the other tests on this database.
+    await drainSubmissionOutbox(env, consumers);
+    expect({
+      zero,
+      negative,
+      calls: refusedCalls,
+      settled: entries.map(({ settled }) => settled),
+    }).toStrictEqual({
+      zero: "RangeError: A hand-over's limit must be above 0 ms, not 0.",
+      negative: "RangeError: A hand-over's limit must be above 0 ms, not -1.",
+      calls: 0,
+      settled: [false],
     });
   });
 

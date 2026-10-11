@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { submissionOutbox } from "../db/knowledge/schema.ts";
 import {
+  assertTimeout,
   backoffMs,
   consumerFor,
   defaultBudgetMs,
@@ -235,6 +236,7 @@ export const drainSubmissionOutbox = async (
     maxAttempts = defaultMaxAttempts,
   }: DrainOptions = {}
 ): Promise<void> => {
+  assertTimeout(timeoutMs);
   const started = Date.now();
   const drain: Drain = {
     consumers,

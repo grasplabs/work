@@ -70,6 +70,7 @@ import {
 } from "./db/data-store/schema.ts";
 import { liveRuns } from "./live-runs.ts";
 import {
+  assertTimeout,
   backoffMs,
   consumerFor,
   defaultBudgetMs,
@@ -142,8 +143,11 @@ import type { PinnedSchema, QueryAnswer } from "./store-queries.ts";
 //   outbox still owes an entry, or whose run is live, is never expired.
 // - An outbox entry is lost or handed over twice: it commits with its
 //   records, stays until settled, is leased before each hand-over and
-//   settled only by the lease holder, and keeps one ID however often it
-//   is handed over. A kind nothing takes can't be staged; one whose
+//   settled only by the lease holder, and keeps one ID however often it is
+//   handed over: a drain that dies mid-way, or stalls past its lease (a
+//   starved isolate, a slow write), leaves the lease to run out, and the
+//   entry is handed over again under that ID, while the drain that lost the
+//   lease settles nothing. A kind nothing takes can't be staged; one whose
 //   consumer is gone fails its attempts like any hand-over, so a rollback
 //   doesn't drop it, and is settled as `outbox.no_consumer` once they run
 //   out, so it doesn't keep its receipt forever. Every commit gives its
@@ -925,6 +929,7 @@ export class StoreHost {
       maxAttempts = defaultMaxAttempts,
     }: DrainOptions = {}
   ): Promise<void> {
+    assertTimeout(timeoutMs);
     const started = Date.now();
     const clock = () => now.getTime() + (Date.now() - started);
     const handed = new Set<string>();
