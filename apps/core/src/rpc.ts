@@ -13,11 +13,7 @@ import { RpcSession, WebSocketTransport } from "capnweb";
 import { oidcProviders, signInConfig } from "./auth/config.ts";
 import { identify } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
-import {
-  browserMessageSize,
-  coreRpcAccounting,
-  CoreRpcTarget,
-} from "./rpc-target.ts";
+import { coreRpcAccounting, CoreRpcTarget } from "./rpc-target.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import { SessionRpc } from "./session-rpc.ts";
 
@@ -241,15 +237,15 @@ export const rpcResponse = async (
   server.accept();
 
   // What a browser sends is untrusted, a screen's calls among it, and it is
-  // reachable signed out: bound it before Cap'n Web expands it. Cap'n Web
-  // bounds each message's depth, numbers and size (`maxDepth`,
-  // `maxBigIntDigits`, `maxMessageSize`), but copies in full every value a
-  // message refers to from an earlier one, before any target runs; the
-  // accountant wraps the transport and ends the connection once those
-  // copies would outgrow one message's budget or the connection's
-  // (`coreRpcAccounting`). What a value held by a target gets is bounded
-  // again where it lands (rpc-target.ts), and a screen's call to its bytes
-  // (screens-rpc.ts).
+  // reachable signed out: bound it before Cap'n Web expands it. The
+  // accountant wraps the transport: it refuses a message longer than
+  // `browserMessageSize` or of too many nodes before parsing it, parses it
+  // once and hands the value to Cap'n Web (which then checks no size of its
+  // own, only depth and digits), and ends the connection once what the
+  // messages copy or hold would outgrow one message's budget or the
+  // connection's (`coreRpcAccounting`). What a value held by a target gets
+  // is bounded again where it lands (rpc-target.ts), and a screen's call to
+  // its bytes (screens-rpc.ts).
   const transport = accountedTransport(
     new WebSocketTransport(server),
     coreRpcAccounting,
@@ -264,7 +260,6 @@ export const rpcResponse = async (
       limits: {
         maxDepth: screenLimits.rpc.maxDepth,
         maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
-        maxMessageSize: browserMessageSize,
       },
       onSendError: (error) => {
         // Every call of the tab goes over this one connection, so each

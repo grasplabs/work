@@ -205,19 +205,50 @@ describe("the memory a session spends expanding references", () => {
     connection.socket.close();
   });
 
-  it("keeps serving many streamed answers in one session", async () => {
+  it("ends a session that opens a stream or a pipe", async () => {
+    // A browser streams to core only into a stream core gave it, or to pass
+    // core one of its own; nothing core serves does either, and a pipe
+    // nobody reads keeps buffering. Both end the session.
+    const ends = await Promise.all(
+      [["stream", "x"], ["pipe"]].map(async (opening) => {
+        const connection = await rawRpc(signedOut);
+        connection.send(opening);
+        const { code } = await connection.closed;
+        return code;
+      })
+    );
+    expect(ends).toStrictEqual([3000, 3000]);
+  });
+
+  it("ends a session whose unreleased pushes hold too much, and others go on", async () => {
+    const hoarder = await rawRpc(signedOut);
+    // 13 MiB strings, never released: Cap'n Web keeps each until released,
+    // so a few would hold more than an isolate has. The third is refused.
+    const large = "a".repeat(13 * 1024 * 1024);
+    for (let i = 0; i < 4; i += 1) {
+      hoarder.send(["push", large]);
+    }
+    const end = await hoarder.closed;
+    expect(end.code).toBe(3000);
+    expect(end.reason).toContain("expand");
+
+    const other = await rawRpc(signedOut);
+    const pong = await other.pull(other.push(["pipeline", 0, ["ping"], []]));
+    expect(pong).toBe("pong");
+    other.socket.close();
+  });
+
+  it("lets a session hold one large value at a time for as long as it likes", async () => {
     const connection = await rawRpc(signedOut);
-    // Cap'n Web answers each stream as it arrives and frees it then, and so
-    // does the accountant: more streams than may be pending at once, never
-    // released, still leave the session open. Each stream takes an export
-    // id, so the ping call is the id after the last stream.
-    const streams = 10_000;
-    for (let i = 0; i < streams; i += 1) {
-      connection.send(["stream", "x"]);
+    // The size of a 10 MB upload, pushed and released in turn, five times:
+    // more than the session may hold at once, never all at once.
+    const upload = ["bytes", "A".repeat(Math.ceil((10 * 1024 * 1024) / 3) * 4)];
+    for (let id = 1; id <= 5; id += 1) {
+      connection.send(["push", upload]);
+      connection.send(["release", id, 1]);
     }
     connection.send(["push", ["pipeline", 0, ["ping"], []]]);
-    const pong = await connection.pull(streams + 1);
-    expect(pong).toBe("pong");
+    await expect(connection.pull(6)).resolves.toBe("pong");
     connection.socket.close();
   });
 });

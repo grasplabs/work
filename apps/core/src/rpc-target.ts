@@ -17,13 +17,20 @@ import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 export const browserMessageSize = 14 * 1024 * 1024;
 
 /**
- * What a browser's connection to core may spend expanding references: the
- * shared node bounds, with core's message size (rpc.ts). Parsed once at the
- * transport and handed to Cap'n Web, so one message is parsed a single time.
+ * What a browser's connection to core may spend: the shared node bounds,
+ * with core's message size and what its live exports may hold (rpc.ts).
+ *
+ * `maxSessionBytes` is what the browser's unreleased pushes and unanswered
+ * calls may hold at once, as the accountant estimates their heap: room for
+ * two or three 10 MB uploads in flight (each about 10.5 MB held, its bytes
+ * decoded), and no more. With one message of the largest kind still being
+ * parsed on top (its text plus what it parses into, about 50 MB at worst),
+ * one connection stays near 90 MB of a 128 MB isolate at the very most.
  */
 export const coreRpcAccounting: RpcAccountingLimits = {
   ...rpcCopyNodeBounds,
   maxMessageBytes: browserMessageSize,
+  maxSessionBytes: 32 * 1024 * 1024,
 };
 
 /**

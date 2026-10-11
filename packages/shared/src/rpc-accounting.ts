@@ -35,6 +35,13 @@
 export interface RpcAccountingLimits {
   /** The longest message, in UTF-16 code units of its JSON text. */
   readonly maxMessageBytes: number;
+  /**
+   * What the peer's live exports may hold inline together, in bytes of
+   * heap, as `inlineBytes` estimates them: Cap'n Web keeps every pushed
+   * value until the peer releases it, so without this a peer could hold
+   * many full-size messages at once.
+   */
+  readonly maxSessionBytes: number;
   /** How many nodes one message may hold, inline and copied together. */
   readonly maxMessageNodes: number;
   /** How many nodes one message's references may copy. */
@@ -104,7 +111,39 @@ interface WalkState {
    * export would then copy too.
    */
   holdsPeerPromise: boolean;
+  /**
+   * What the value holds in the heap once parsed, in bytes, never less
+   * than V8 spends: `nodeHeapBytes` a node, a string's characters at one or
+   * two bytes each (two once any is past Latin-1), a byte string at its
+   * decoded length, and `nodeHeapBytes` for each node a reference copies.
+   */
+  inlineBytes: number;
 }
+
+/**
+ * The most V8 spends on one parsed node, measured on the shapes JSON makes:
+ * 64 bytes for an empty object, 40 for an empty array, 32 for a short
+ * string, 8 for a number. Charged for every node, so a value of many tiny
+ * nodes is priced at what it really holds.
+ */
+const nodeHeapBytes = 64;
+
+/** The latest code unit a one-byte (Latin-1) string can hold. */
+const LATIN1_MAX = 0xff;
+
+/** The bytes V8 holds for `text`: one a character, or two past Latin-1. */
+const stringHeapBytes = (text: string): number => {
+  for (let index = 0; index < text.length; index += 1) {
+    if ((text.codePointAt(index) ?? 0) > LATIN1_MAX) {
+      return text.length * 2;
+    }
+  }
+  return text.length;
+};
+
+/** The bytes a base64 byte string decodes to. */
+const decodedBytes = (base64: string): number =>
+  Math.ceil((base64.length * 3) / 4);
 
 /** What the walk needs to know of the exports a value refers to. */
 interface Exports {
@@ -140,6 +179,7 @@ const walk = (
     banned: false,
     holdsPeerStub: false,
     holdsPeerPromise: false,
+    inlineBytes: 0,
   };
   // What a call answered by the peer counts as: the whole budget, so a copy
   // of its answer (a nested call is put in place, copied) is refused.
@@ -182,8 +222,11 @@ const walk = (
         state.holdsPeerPromise = true;
       }
     } else if (tag === "bytes") {
-      // One byte string: one node, nothing copied.
+      // One byte string: one node, held as its decoded bytes.
       state.nodeCount += 1;
+      if (typeof value[1] === "string") {
+        state.inlineBytes += decodedBytes(value[1]);
+      }
     } else {
       // A date, an error, a URL and such: one node, measured by its members.
       state.nodeCount += 1;
@@ -205,9 +248,15 @@ const walk = (
       }
     } else if (value !== null && typeof value === "object") {
       state.nodeCount += 1;
+      for (const key of Object.keys(value)) {
+        state.inlineBytes += stringHeapBytes(key);
+      }
       frames.push({ items: Object.values(value), index: 0 });
     } else {
       state.nodeCount += 1;
+      if (typeof value === "string") {
+        state.inlineBytes += stringHeapBytes(value);
+      }
     }
   };
 
@@ -226,6 +275,8 @@ const walk = (
     visit(frame.items[frame.index]);
     frame.index += 1;
   }
+  // Every node, copied ones among them, costs a node's worth of heap.
+  state.inlineBytes += state.nodeCount * nodeHeapBytes;
   return state;
 };
 
@@ -236,6 +287,8 @@ export type AccountingRefusal =
   | "copy"
   | "session"
   | "exports"
+  | "bytes"
+  | "stream"
   | "remap"
   | "release"
   | "unknown-export"
@@ -263,6 +316,7 @@ export const messageAccountant = (
     maxMessageCopyNodes,
     maxSessionCopyNodes,
     maxLiveExports,
+    maxSessionBytes,
     answerNodes,
   } = limits;
   // An export's node count: what a later reference to it copies.
@@ -274,15 +328,25 @@ export const messageAccountant = (
   const refcount = new Map<number, number>();
   let liveCopyNodes = 0;
   let liveCount = 0;
+  // What the live exports hold inline, in bytes, and each one's share, so a
+  // release (or an answer replacing a call's arguments) lets go of it.
+  let liveBytes = 0;
+  const bytesOf = new Map<number, number>();
   // The next export ID, as Cap'n Web assigns them: the main export is 0, so
-  // the peer's first push, stream or pipe is 1.
+  // the peer's first push is 1.
   let nextExport = 1;
+
+  // Our own exports the peer may refer back to (id <= 0), as we sent them:
+  // a stub (`["export", id]`), whose copy is a reference to the same object
+  // and copies no data, or a promise (`["promise", id]`), whose value is our
+  // answer once it settles. The main export is a stub.
+  const ourStubs = new Set<number>([0]);
 
   // A reference to an export the accountant tracks copies its recorded
   // nodes; to an unknown positive export, the session's whole budget, so an
   // id that was freed (or never made) fails closed rather than costing
-  // nothing while Cap'n Web still copies it; to the main export or one of
-  // ours (id <= 0), a stub's worth, since those are capabilities, not data.
+  // nothing while Cap'n Web still copies it; to one of our stubs, nothing;
+  // to any other of ours (a promise we sent), `answerNodes`.
   const nodesOf = (id: unknown): number => {
     if (typeof id !== "number") {
       return 0;
@@ -291,7 +355,10 @@ export const messageAccountant = (
     if (known !== undefined) {
       return known;
     }
-    return id > 0 ? maxSessionCopyNodes + 1 : answerNodes;
+    if (id > 0) {
+      return maxSessionCopyNodes + 1;
+    }
+    return ourStubs.has(id) ? 0 : answerNodes;
   };
 
   // The peer's exports a call through goes to the peer: a value holding a
@@ -318,37 +385,18 @@ export const messageAccountant = (
     return undefined;
   };
 
-  // Stream exports, which Cap'n Web auto-releases right after it sends their
-  // answer (`autoRelease` in 0.12.0): they take an ID and can be referred to
-  // like any other while pending, but they don't count against the live
-  // budget. Their entries are dropped when the answer is sent
-  // (`recordSent`), as Cap'n Web frees them, so a peer that streams without
-  // ever releasing can't grow these maps; and no more than
-  // `maxLiveExports` may be pending at once. (A pipe is not auto-released:
-  // Cap'n Web frees it only on the peer's release, so it counts as live.)
-  const pendingStreams = new Set<number>();
+  /** Sets what export `id` holds inline, adjusting the session's total. */
+  const holdBytes = (id: number, bytes: number): void => {
+    liveBytes += bytes - (bytesOf.get(id) ?? 0);
+    bytesOf.set(id, bytes);
+  };
 
-  const addExport = (
-    recordedNodes: number,
-    copyCost: number,
-    { counted = true, peer = false }: { counted?: boolean; peer?: boolean } = {}
-  ): AccountingRefusal | undefined => {
-    const id = nextExport;
-    nextExport += 1;
-    recorded.set(id, Math.min(recordedNodes, maxSessionCopyNodes + 1));
-    held.set(id, copyCost);
-    refcount.set(id, 1);
-    if (peer) {
-      peerHeld.add(id);
-    }
-    if (!counted) {
-      pendingStreams.add(id);
-      return pendingStreams.size > maxLiveExports ? "exports" : undefined;
-    }
-    liveCopyNodes += copyCost;
-    liveCount += 1;
+  const overSession = (): AccountingRefusal | undefined => {
     if (liveCopyNodes > maxSessionCopyNodes) {
       return "session";
+    }
+    if (liveBytes > maxSessionBytes) {
+      return "bytes";
     }
     if (liveCount > maxLiveExports) {
       return "exports";
@@ -356,8 +404,27 @@ export const messageAccountant = (
     return undefined;
   };
 
-  // A push or a stream makes an export, priced by what a later copy of it
-  // would allocate:
+  const addExport = (
+    recordedNodes: number,
+    state: WalkState,
+    peer: boolean
+  ): AccountingRefusal | undefined => {
+    const id = nextExport;
+    nextExport += 1;
+    recorded.set(id, Math.min(recordedNodes, maxSessionCopyNodes + 1));
+    held.set(id, state.copyCost);
+    refcount.set(id, 1);
+    if (peer) {
+      peerHeld.add(id);
+    }
+    liveCopyNodes += state.copyCost;
+    liveCount += 1;
+    holdBytes(id, state.inlineBytes);
+    return overSession();
+  };
+
+  // A push makes an export, priced by what a later copy of it would
+  // allocate:
   // - a call through one of the peer's stubs is answered by the peer, with
   //   a value of any size: the whole budget;
   // - any other call is answered by us: `answerNodes` until our answer is
@@ -368,13 +435,12 @@ export const messageAccountant = (
   // A page passing its own callback as an argument is none of these: the
   // call's answer is ours, and the subscription it gets back is pulled,
   // called and released as usual. What this message copies now is its
-  // references' nodes, checked against one message's budget.
+  // references' nodes, checked against one message's budget; what it holds
+  // inline (a call's arguments, or the value) counts against the session's
+  // bytes until it is released or, for a call, answered.
   const peerAnswer = maxSessionCopyNodes + 1;
 
-  const accountPush = (
-    expression: unknown,
-    counted: boolean
-  ): AccountingRefusal | undefined => {
+  const accountPush = (expression: unknown): AccountingRefusal | undefined => {
     const isCall =
       Array.isArray(expression) &&
       isSpecialArray(expression) &&
@@ -387,15 +453,16 @@ export const messageAccountant = (
     }
     if (isCall) {
       const throughPeer = isPeerHeld(expression[1]);
-      return addExport(throughPeer ? peerAnswer : answerNodes, state.copyCost, {
-        counted,
-        peer: throughPeer || state.holdsPeerStub,
-      });
+      return addExport(
+        throughPeer ? peerAnswer : answerNodes,
+        state,
+        throughPeer || state.holdsPeerStub
+      );
     }
     return addExport(
       state.holdsPeerPromise ? peerAnswer : state.nodeCount,
-      state.copyCost,
-      { counted, peer: state.holdsPeerStub }
+      state,
+      state.holdsPeerStub
     );
   };
 
@@ -426,12 +493,10 @@ export const messageAccountant = (
       refcount.set(id, left);
       return undefined;
     }
-    if (pendingStreams.has(id)) {
-      pendingStreams.delete(id);
-    } else {
-      liveCopyNodes -= held.get(id) ?? 0;
-      liveCount -= 1;
-    }
+    liveCopyNodes -= held.get(id) ?? 0;
+    liveCount -= 1;
+    holdBytes(id, 0);
+    bytesOf.delete(id);
     recorded.delete(id);
     held.delete(id);
     refcount.delete(id);
@@ -450,22 +515,26 @@ export const messageAccountant = (
   };
 
   const account = (message: unknown): AccountingRefusal | undefined => {
+    // An answer we sent may have grown what the live exports hold
+    // (`recordSent`); the session ends at the peer's next message.
+    const already = overSession();
+    if (already !== undefined) {
+      return already;
+    }
     if (!Array.isArray(message)) {
       return "bad-message";
     }
     const parts: unknown[] = message;
     const [kind, arg1, arg2] = parts;
     if (kind === "push") {
-      return parts.length < 2 ? "bad-message" : accountPush(arg1, true);
+      return parts.length < 2 ? "bad-message" : accountPush(arg1);
     }
-    if (kind === "stream") {
-      // A stream's value is deep-copied like a push's, but Cap'n Web
-      // auto-releases the export once it answers, so it doesn't count.
-      return parts.length < 2 ? "bad-message" : accountPush(arg1, false);
-    }
-    if (kind === "pipe") {
-      // A writable the peer pipes into: freed only on the peer's release.
-      return addExport(answerNodes, 0);
+    if (kind === "stream" || kind === "pipe") {
+      // A peer streams to us only to write into a stream we gave it or to
+      // pass us one of its own. Nothing we serve does either (a stream we
+      // return is written by us: we send these, the peer only answers), and
+      // a pipe nobody reads keeps buffering what is written into it.
+      return "stream";
     }
     if (kind === "resolve" || kind === "reject" || kind === "abort") {
       // These carry a value the peer sends, copied too, but make no export.
@@ -480,15 +549,41 @@ export const messageAccountant = (
     return "bad-message";
   };
 
-  // What we answer the peer: a resolve or reject settles an export, so the
-  // peer's later references to it copy its real value, not the `answerNodes`
-  // it was priced at. Recording its node count here closes the gap where a
-  // large answer, referred to again, would be copied for far less than it
-  // costs. We produce these values, so measuring them is bounded by what we
-  // already serialized. Only a still-live export is recorded: one already
-  // released (or auto-released after a stream answers) must stay unknown, so
-  // a later reference to it fails closed rather than being priced.
+  // Our own stubs and promises in a message we send, so a reference the
+  // peer makes back to one is priced for what it is (`nodesOf`).
+  const noteOurExports = (message: unknown): void => {
+    const stack: unknown[] = [message];
+    while (stack.length > 0) {
+      const value = stack.pop();
+      if (Array.isArray(value)) {
+        const items: unknown[] = value;
+        const [tag, id] = items;
+        if (tag === "export" && typeof id === "number" && id < 0) {
+          ourStubs.add(id);
+        } else if (tag === "promise" && typeof id === "number") {
+          ourStubs.delete(id);
+        }
+        for (const item of items) {
+          stack.push(item);
+        }
+      } else if (value !== null && typeof value === "object") {
+        for (const item of Object.values(value)) {
+          stack.push(item);
+        }
+      }
+    }
+  };
+
+  // What we answer the peer: a resolve or reject settles an export. The
+  // peer's later references to it copy its real value, not the
+  // `answerNodes` it was priced at, so its node count is recorded; and the
+  // export now holds our answer, not the call's arguments, so that is what
+  // it holds against the session's bytes. We produce these values, so
+  // measuring them is bounded by what we already serialized. Only a
+  // still-live export is recorded: one already released must stay unknown,
+  // so a later reference to it fails closed rather than being priced.
   const recordSent = (message: unknown): void => {
+    noteOurExports(message);
     if (!Array.isArray(message)) {
       return;
     }
@@ -501,18 +596,9 @@ export const messageAccountant = (
     ) {
       return;
     }
-    if (pendingStreams.has(id)) {
-      // Cap'n Web auto-releases a stream export as soon as its answer is
-      // sent, so it is gone now: drop it, and a later reference fails closed.
-      pendingStreams.delete(id);
-      recorded.delete(id);
-      held.delete(id);
-      refcount.delete(id);
-      peerHeld.delete(id);
-      return;
-    }
-    const { nodeCount } = walkValue(value);
-    recorded.set(id, Math.min(nodeCount, maxSessionCopyNodes + 1));
+    const answer = walkValue(value);
+    recorded.set(id, Math.min(answer.nodeCount, maxSessionCopyNodes + 1));
+    holdBytes(id, answer.inlineBytes);
   };
 
   return { account, recordSent };

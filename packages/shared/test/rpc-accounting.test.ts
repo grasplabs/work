@@ -11,6 +11,7 @@ import type { RpcAccountingLimits } from "../src/rpc-accounting.ts";
 
 const limits: RpcAccountingLimits = {
   maxMessageBytes: 1024 * 1024,
+  maxSessionBytes: 600_000,
   maxMessageNodes: 1000,
   maxMessageCopyNodes: 64,
   maxSessionCopyNodes: 256,
@@ -215,45 +216,117 @@ describe("a peer that supplies or is sent a large answer", () => {
   });
 });
 
-describe("streams, which Cap'n Web auto-releases once answered", () => {
-  it("serves far more answered streams than the caps allow at once, with no releases", () => {
-    const { account, recordSent } = fresh();
-    // Each stream is answered before the next, as Cap'n Web answers them,
-    // and the peer never releases one: Cap'n Web frees each as it answers,
-    // and so does the accountant, so none of the limits is reached.
+describe("what the peer's live exports hold", () => {
+  it("ends the session when unreleased pushes hold more than its bytes", () => {
+    const { account } = fresh();
+    // Each push holds a string a quarter of the session's bytes: the fifth
+    // is past them, however few exports that is.
+    const quarter = "a".repeat(limits.maxSessionBytes / 4);
+    const outcomes = [1, 2, 3, 4, 5].map(() => account(["push", quarter]));
+    expect(outcomes).toStrictEqual([
+      undefined,
+      undefined,
+      undefined,
+      "bytes",
+      "bytes",
+    ]);
+  });
+
+  it("frees what a push holds when it is released", () => {
+    const { account } = fresh();
+    const third = "a".repeat(limits.maxSessionBytes / 3);
     const outcomes: (string | undefined)[] = [];
-    for (let id = 1; id <= limits.maxLiveExports * 50; id += 1) {
-      outcomes.push(account(["stream", "chunk"]));
-      recordSent(["resolve", id, "ok"]);
+    // Many more pushes than fit at once, each released before the next.
+    for (let id = 1; id <= 20; id += 1) {
+      outcomes.push(account(["push", third]), account(["release", id, 1]));
     }
     expect(outcomes.every((outcome) => outcome === undefined)).toBeTruthy();
   });
 
-  it("forgets a stream once it is answered", () => {
+  it("charges a call's arguments until it is answered, then the answer", () => {
     const { account, recordSent } = fresh();
-    expect(account(["stream", "chunk"])).toBeUndefined();
-    recordSent(["resolve", 1, "ok"]);
-    // Cap'n Web has freed export 1: a reference to it fails closed.
-    expect(account(["push", [[["pipeline", 1]]]])).toBe("copy");
+    const half = "a".repeat(limits.maxSessionBytes / 2);
+    expect(
+      account(["push", ["pipeline", 0, ["save"], [half]]])
+    ).toBeUndefined();
+    // Answered small: the arguments are let go, so another large call fits.
+    recordSent(["resolve", 1, "saved"]);
+    expect(
+      account(["push", ["pipeline", 0, ["save"], [half]]])
+    ).toBeUndefined();
+    // Answered with a large value that the peer never releases: the session
+    // ends at its next message.
+    recordSent(["resolve", 2, "b".repeat(limits.maxSessionBytes)]);
+    expect(account(["pull", 2])).toBe("bytes");
   });
 
-  it("ends the session when too many streams are left unanswered", () => {
-    const { account } = fresh();
-    const outcomes: (string | undefined)[] = [];
-    for (let i = 0; i <= limits.maxLiveExports; i += 1) {
-      outcomes.push(account(["stream", "chunk"]));
-    }
-    expect(outcomes.slice(0, -1).every((o) => o === undefined)).toBeTruthy();
-    expect(outcomes.at(-1)).toBe("exports");
+  it("charges a string past Latin-1 two bytes a character", () => {
+    const narrow = fresh();
+    const wide = fresh();
+    const length = Math.floor(limits.maxSessionBytes / 1.5);
+    expect(narrow.account(["push", "a".repeat(length)])).toBeUndefined();
+    expect(wide.account(["push", "\u0100".repeat(length)])).toBe("bytes");
   });
+});
 
-  it("counts a pipe as live until the peer releases it", () => {
-    const { account } = fresh();
-    const outcomes: (string | undefined)[] = [];
-    for (let i = 0; i <= limits.maxLiveExports; i += 1) {
-      outcomes.push(account(["pipe"]));
-    }
-    expect(outcomes.at(-1)).toBe("exports");
+describe("streams and pipes the peer may not open", () => {
+  it("ends the session on a stream or a pipe", () => {
+    expect(fresh().account(["stream", "chunk"])).toBe("stream");
+    expect(fresh().account(["pipe"])).toBe("stream");
+  });
+});
+
+describe("our own stubs passed back", () => {
+  it("costs nothing to refer back to stubs we sent, but a promise we sent costs an answer", () => {
+    const { account, recordSent } = fresh();
+    // We hand the peer five stubs (sessions, subscriptions) and a promise.
+    recordSent([
+      "resolve",
+      7,
+      [
+        [
+          ["export", -1],
+          ["export", -2],
+          ["export", -3],
+          ["export", -4],
+          ["export", -5],
+          ["promise", -6],
+        ],
+      ],
+    ]);
+    // Five stubs back in one call copy no data, so they cost nothing.
+    expect(
+      account([
+        "push",
+        [
+          "pipeline",
+          0,
+          ["use"],
+          [
+            ["pipeline", -1],
+            ["pipeline", -2],
+            ["pipeline", -3],
+            ["pipeline", -4],
+            ["pipeline", -5],
+          ],
+        ],
+      ])
+    ).toBeUndefined();
+    // The promise we sent settles to our answer: priced as one.
+    expect(
+      account([
+        "push",
+        [
+          [
+            ["pipeline", -6],
+            ["pipeline", -6],
+            ["pipeline", -6],
+            ["pipeline", -6],
+            ["pipeline", -6],
+          ],
+        ],
+      ])
+    ).toBe("copy");
   });
 });
 

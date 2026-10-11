@@ -7,8 +7,9 @@ import type { ValueBounds } from "./value-bounds.ts";
 // What an untrusted side's call hands a target's method, bounded once,
 // before the method sees it.
 //
-// Cap'n Web bounds each message it reads (its `maxDepth` and
-// `maxMessageSize`), not the values a call ends up with. A message may
+// Each message is bounded as it is read (its depth by Cap'n Web, its size
+// and nodes by the accountant on the transport, rpc-accounting.ts), not
+// the values a call ends up with. A message may
 // refer to what earlier ones sent: a value it pushed (`["push", v]`), or
 // what a call answered, referred to as `["pipeline", n]` from a later
 // call's arguments, which Cap'n Web puts in place after it has checked
@@ -113,7 +114,7 @@ const wrapMethods = (
  * `bounds` when the method runs, deep and big, however it was sent. Give
  * it the session's own limits on a message: `depth` one less than its
  * `maxDepth` (a direct argument's levels, the call's list of arguments
- * apart), `size` its `maxMessageSize`.
+ * apart), `size` the longest message its transport takes.
  *
  * A method a target calls on itself is held to the same bounds.
  */
