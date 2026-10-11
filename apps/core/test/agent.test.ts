@@ -464,10 +464,14 @@ describe("chat agent sandbox", () => {
       ),
       says("Done.")
     );
+    // Objects share their env: set back however the test ends.
     await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1000" });
-
     const started = Date.now();
-    await ask("Wait.");
+    try {
+      await ask("Wait.");
+    } finally {
+      await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "" });
+    }
 
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
       {
