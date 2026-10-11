@@ -169,10 +169,45 @@ export const closed = query({
     throw new AppError("notes.closed", "Notes are closed.", { reason: "maintenance" });
   },
 });
+
+/** Reads a note at a revision it hasn't, and handles the conflict itself. */
+export const checkRevision = query({
+  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  returns: v.string(),
+  handler: async (ctx, args) => {
+    try {
+      await ctx.db.get("notes", args.id, { expectedRevision: args.expectedRevision });
+      return "current";
+    } catch (error) {
+      if (error instanceof Error && Reflect.get(error, "code") === "data.conflict") {
+        return "changed";
+      }
+      throw error;
+    }
+  },
+});
+
+/** Runs a query that fails as a domain failure, and recovers from it. */
+export const recover = action({
+  args: {},
+  returns: v.string(),
+  uses: [closed],
+  handler: async (ctx) => {
+    try {
+      await ctx.runQuery(closed, {});
+      return "open";
+    } catch (error) {
+      if (error instanceof AppError) {
+        return \`recovered from \${error.code}\`;
+      }
+      throw error;
+    }
+  },
+});
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
 import {
-  bump, closed, count, create, flood, get, list, reach, remember, remove, tally, update,
+  bump, checkRevision, closed, count, create, flood, get, list, reach, recover, remember, remove, tally, update,
 } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
@@ -181,7 +216,7 @@ export default app({
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
   operations: {
-    notes: { list, get, create, update, remove, tally, bump, remember, reach, flood, closed },
+    notes: { list, get, create, update, remove, tally, bump, remember, reach, flood, closed, checkRevision, recover },
   },
   internalOperations: { notes: { count } },
   screens: [],
@@ -356,6 +391,26 @@ describe("an App's functions", { timeout: 120_000 }, () => {
         details: { reason: "maintenance" },
       },
     });
+  });
+
+  it("hand App code the host's failures whole, to branch on and recover from", async () => {
+    const notes = await sealedNotes();
+    const id = valueOf(
+      await call(notes, notes.owner, "notes.create", { title: "Launch" })
+    );
+    // A store refusal, caught in the isolate by its code.
+    expect(
+      valueOf(
+        await call(notes, notes.owner, "notes.checkRevision", {
+          id,
+          expectedRevision: 7,
+        })
+      )
+    ).toBe("changed");
+    // A nested domain failure, caught as the SDK's own AppError.
+    expect(valueOf(await call(notes, notes.owner, "notes.recover", {}))).toBe(
+      "recovered from notes.closed"
+    );
   });
 
   it("run an action's nested calls of internal functions, each in its own isolate", async () => {
@@ -578,6 +633,18 @@ describe("a request", { timeout: 120_000 }, () => {
     ],
   ])("is refused when it %s", async (_case, request) => {
     const notes = await sealedNotes();
+    expect(
+      codeOf(await callAppFunction(env, notes.owner, notes.app, request))
+    ).toBe("contract.invalid_request");
+  });
+
+  it("is refused when it names a frame generation, which nothing reads", async () => {
+    const notes = await sealedNotes();
+    const request = JSON.stringify({
+      reference: referenceTo(notes.release, "notes.bump"),
+      input: {},
+      frameGeneration: "1",
+    });
     expect(
       codeOf(await callAppFunction(env, notes.owner, notes.app, request))
     ).toBe("contract.invalid_request");

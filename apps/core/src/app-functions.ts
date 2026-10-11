@@ -431,7 +431,6 @@ const functionRequestSchema = z.strictObject({
   }),
   input: z.unknown(),
   idempotencyKey: z.string().optional(),
-  frameGeneration: z.string().max(128).optional(),
 });
 
 /** What a call answers (spec 32.6). */
