@@ -15,7 +15,7 @@ import { z } from "zod";
 
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { describeRun, runCode, sourceHash } from "./code-mode.ts";
-import type { CodeRun } from "./code-mode.ts";
+import type { CodeRun, HeldHandles } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
 import type { AgentModel } from "./models.ts";
 import type { CodeRunOpening } from "./workspace.ts";
@@ -226,6 +226,8 @@ export interface CodeRuns {
    * only while the run is open, for the code step it runs for.
    */
   output: (runId: string, toolCallId: string, line: string) => void;
+  /** Where each run's entrypoint and stubs are held while it runs. */
+  handles: HeldHandles;
 }
 
 /**
@@ -253,7 +255,10 @@ const runOpen = async (
     sourceChars: code.length,
   });
   const env = Object.fromEntries(
-    apis.map((api) => [api.name, api.stub({ ...scope, runId })])
+    apis.map((api) => [
+      api.name,
+      runs.handles.hold(api.stub({ ...scope, runId })),
+    ])
   );
   // `runCode` never throws; should anything else, the run still closes.
   let ran: CodeRunStatus = "crashed";
@@ -263,6 +268,7 @@ const runOpen = async (
     run = await runCode(loader, code, env, {
       signal,
       timeoutMs: codeTimeoutMs,
+      handles: runs.handles,
       onOutput: (line) => {
         onOutput(runId, line);
       },
@@ -270,6 +276,10 @@ const runOpen = async (
     ran = run.status;
   } finally {
     ended = await runs.close(runId, ran);
+    // The run's stubs go with it.
+    for (const stub of Object.values(env)) {
+      runs.handles.release(stub);
+    }
   }
   // A run a revocation closed, as it ran or as it ended, hands on nothing
   // of what it did: not what it returned, nor what it logged, which could

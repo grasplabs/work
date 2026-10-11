@@ -2511,3 +2511,49 @@ describe("chat agent code output", () => {
     });
   });
 });
+
+/** Orders text alphabetically. */
+const byText = (a: string, b: string): number => a.localeCompare(b, "en");
+
+describe("chat agent code run retention", () => {
+  it("leaves nothing held after many runs, whether they complete, throw or fail to load", async () => {
+    const kinds = [
+      "export default async () => { console.log('ran'); return 1; };",
+      "export default async () => { throw new Error('nope'); };",
+      "export default async () => {",
+    ];
+    const turns = 4;
+    const replies = Array.from({ length: turns }, (_, turn) => [
+      codeStep(kinds[0] ?? "", 5),
+      codeStep(kinds[1 + (turn % 2)] ?? "", 5),
+      says("Done."),
+    ]).flat();
+    const { stub, chat, ask } = await newChat(...replies);
+
+    for (let turn = 0; turn < turns; turn += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one turn at a time per chat
+      await ask("Run them.");
+    }
+
+    // Measured in the object: what its runs hold now, not what their
+    // cleanup is meant to do.
+    await expect(
+      runInDurableObject(stub, (instance) => instance.codeRunRetention())
+    ).resolves.toStrictEqual({
+      handles: 0,
+      open: 0,
+      closed: turns * 10,
+      outputs: 0,
+    });
+    const records = await runRecords(stub, chat.id);
+    expect(
+      records.map(({ status }) => String(status)).toSorted(byText)
+    ).toStrictEqual(
+      [
+        ...Array.from({ length: 20 }, () => "completed"),
+        ...Array.from({ length: 10 }, () => "load_failed"),
+        ...Array.from({ length: 10 }, () => "threw"),
+      ].toSorted(byText)
+    );
+  });
+});
