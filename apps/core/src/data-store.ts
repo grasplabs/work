@@ -1,5 +1,7 @@
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { StoreId } from "@grasp-os/shared/ids";
+import type { ReadScope } from "@grasp-os/shared/store-queries";
+import type { ReadRequest } from "@grasp-os/shared/store-reads";
 import type {
   ClaimInput,
   Claimed,
@@ -15,6 +17,7 @@ import { migrateOnWake } from "./db/migrate.ts";
 import { outboxConsumers } from "./outbox-delivery.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { StoreHost } from "./store-host.ts";
+import type { QueryAnswer } from "./store-queries.ts";
 
 // A business store: one Durable Object per store, named by the store's ID
 // (data-stores.ts), with a SQLite database of its own. What it does, and
@@ -52,6 +55,15 @@ export class DataStore extends DurableObject<Env> {
   /** `StoreHost.get`. */
   get(storeId: StoreId, table: string, id: string): StoredRecord | null {
     return this.#host.get(storeId, table, id);
+  }
+
+  /** `StoreHost.read`. */
+  async read(
+    storeId: StoreId,
+    scope: ReadScope,
+    request: ReadRequest
+  ): Promise<QueryAnswer> {
+    return await this.#host.read(storeId, scope, request);
   }
 
   /** `StoreHost.claim`. */

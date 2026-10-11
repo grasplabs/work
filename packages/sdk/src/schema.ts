@@ -356,6 +356,14 @@ export const indexBase = (
   return scalarBases[descriptor.kind];
 };
 
+/** Whether a field of this descriptor may hold an explicit null. */
+export const allowsNull = (descriptor: ValueDescriptor): boolean => {
+  if (descriptor.nullable || isNullOnly(descriptor)) {
+    return true;
+  }
+  return descriptor.kind === "union" && descriptor.members.some(allowsNull);
+};
+
 /** The fields of a new index, checked against its table. */
 const checkedIndexFields = (
   state: TableState,

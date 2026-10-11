@@ -11,11 +11,13 @@ import { schemaOf } from "./value-schema.ts";
 // What a host knows of schemas that App code needn't: the managed fields,
 // the limits, and the error a declaration throws.
 export {
+  allowsNull,
+  indexBase,
   managedFields,
   SchemaDefinitionError,
   schemaLimits,
 } from "./schema.ts";
-export type { SchemaDefinitionCode } from "./schema.ts";
+export type { IndexBase, SchemaDefinitionCode } from "./schema.ts";
 
 // A schema as a store's host reads, hashes and compares it.
 export { diffSchemaManifests, schemaReferences } from "./schema-diff.ts";

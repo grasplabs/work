@@ -25,7 +25,7 @@ import type {
   ReadRequest,
 } from "@grasp-os/shared/store-reads";
 
-import { indexBase, tablesOf } from "./schema.ts";
+import { allowsNull, indexBase, tablesOf } from "./schema.ts";
 import type {
   AnyTable,
   IndexBase,
@@ -33,7 +33,6 @@ import type {
   SchemaDefinition,
   TableState,
 } from "./schema.ts";
-import type { ValueDescriptor } from "./value-descriptor.ts";
 import type { Id, ObjectOutput } from "./values.ts";
 
 // `ctx.db` for reading: a record by ID, and queries over a table, typed by
@@ -429,17 +428,6 @@ const baseOf = (table: TableState, field: string): IndexBase | undefined => {
     ? table.fields[field]
     : undefined;
   return descriptor === undefined ? undefined : indexBase(descriptor);
-};
-
-/** Whether a declared field may hold an explicit null. */
-const allowsNull = (descriptor: ValueDescriptor): boolean => {
-  if (descriptor.nullable || descriptor.kind === "null") {
-    return true;
-  }
-  if (descriptor.kind === "literal") {
-    return descriptor.value === null;
-  }
-  return descriptor.kind === "union" && descriptor.members.some(allowsNull);
 };
 
 /** Whether `field` of `table` may hold an explicit null. */
