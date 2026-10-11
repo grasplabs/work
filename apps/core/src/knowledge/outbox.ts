@@ -34,9 +34,11 @@ import type {
 // - An entry is handed over twice: a drain leases each entry before
 //   handing it over (its `next_attempt_at` moved past the lease), so an
 //   overlapping drain skips it, and settles it only while it still holds
-//   that lease. A drain that dies mid-way leaves the lease to run out, and
-//   the entry is handed over again, under the same ID: a consumer keeps
-//   the IDs it took, and takes it once.
+//   that lease. A drain that dies mid-way, or stalls past its lease (a
+//   starved isolate, a slow write), leaves the lease to run out, and the
+//   entry is handed over again, under the same ID: a consumer keeps the
+//   IDs it took, and takes it once. The drain that lost the lease settles
+//   nothing.
 // - A consumer hangs or keeps failing: each hand-over has a time limit,
 //   past which it counts as failed; failures back off to hourly, and past
 //   `defaultMaxAttempts` (about a day) the entry is settled as

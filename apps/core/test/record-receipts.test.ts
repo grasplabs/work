@@ -10,7 +10,7 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { SubmissionIntent } from "@grasp-os/shared/submissions";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callApp } from "../src/app.ts";
@@ -341,6 +341,45 @@ const consumersFor = (
   const consumer: OutboxConsumer = async (entry) =>
     isOf(entry, marker) ? await of(entry) : "delivered";
   return { "workflow.notify": consumer, "workflow.start": consumer };
+};
+
+/** How long a test waits on a hand-over it expects (`gatedConsumers`). */
+const enteredWithinMs = 5000;
+
+/**
+ * Consumers whose hand-overs of `marker`'s entries answer only once their
+ * time is up: `entered(n)` waits, in real time and at most
+ * `enteredWithinMs`, until the `n`th of them began, so a test moves a
+ * faked clock only once the hand-over it means is going. `release` lets
+ * any still waiting go.
+ */
+const gatedConsumers = (marker: string) => {
+  const handed: string[] = [];
+  const began: PromiseWithResolvers<null>[] = [];
+  const gate = Promise.withResolvers<null>();
+  const beganAt = (n: number): PromiseWithResolvers<null> => {
+    began[n] ??= Promise.withResolvers<null>();
+    return began[n];
+  };
+  return {
+    handed,
+    consumers: consumersFor(marker, async (entry) => {
+      beganAt(handed.length).resolve(null);
+      handed.push(entry.id);
+      await outcome(Promise.race([whenAborted(entry.signal), gate.promise]));
+      return "delivered";
+    }),
+    entered: async (n: number): Promise<void> => {
+      const late = async (): Promise<never> => {
+        await scheduler.wait(enteredWithinMs);
+        throw new Error(`Hand-over ${n} never began.`);
+      };
+      await Promise.race([beganAt(n).promise, late()]);
+    },
+    release: () => {
+      gate.resolve(null);
+    },
+  };
 };
 
 const savedSchema = z.object({
@@ -1406,19 +1445,6 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
   it("lease each entry when its turn comes, so a drain started meanwhile hands none over again", async () => {
     const setup = await setUp();
     const marker = unique();
-    const handed: string[] = [];
-    // How long a hand-over may take. A lease lasts twice that, so a lease
-    // outlives its hand-over by this much: room enough for the writes
-    // around it on a loaded machine, so no lease here runs out while its
-    // hand-over is still going.
-    const timeoutMs = 300;
-    // Slower than a hand-over may take: each one fails, and is put back.
-    const consumers = consumersFor(marker, async (entry) => {
-      handed.push(entry.id);
-      // Answers only once its hand-over gave up on it.
-      await outcome(whenAborted(entry.signal));
-      return "delivered";
-    });
     const count = 6;
     await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
       key: unique(),
@@ -1426,17 +1452,61 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
         kind: "workflow.notify" as const,
         data: { marker, n },
       })),
-      consumers,
+      consumers: consumersFor(marker),
     });
-    const first = drainSubmissionOutbox(env, consumers, { timeoutMs });
-    // Once a lease taken as the first drain started would have run out,
-    // and long before that drain has handed all of them over.
-    await scheduler.wait(timeoutMs * 3);
-    await drainSubmissionOutbox(env, consumers, { timeoutMs });
-    await first;
+    // The drains' clock and their hand-overs' time limits are the test's
+    // to move, so no lease runs out unless the test moves the clock past
+    // it: a busy machine changes nothing here.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    // Each hand-over answers only once its time is up: each fails, and is
+    // put back for later.
+    const first = gatedConsumers(marker);
+    const second = gatedConsumers(marker);
+    const timeoutMs = 1000;
+    try {
+      const firstDrain = drainSubmissionOutbox(env, first.consumers, {
+        timeoutMs,
+      });
+      // The first drain hands three entries over, one limit each.
+      for (let n = 0; n < 3; n += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one after the other
+        await first.entered(n);
+        // oxlint-disable-next-line no-await-in-loop -- one after the other
+        await vi.advanceTimersByTimeAsync(timeoutMs);
+      }
+      // Its fourth hand-over is going, all but done: that entry's lease,
+      // taken when its turn came, holds yet; one taken as the drain
+      // started (two limits long) would have run out a limit ago.
+      await first.entered(3);
+      await vi.advanceTimersByTimeAsync(timeoutMs - 1);
+      // Another drain starts meanwhile, and is handing over the first
+      // entry it finds due when the first drain's hand-over runs out.
+      const secondDrain = drainSubmissionOutbox(env, second.consumers, {
+        timeoutMs,
+      });
+      await second.entered(0);
+      await vi.advanceTimersByTimeAsync(1);
+      // The first drain goes on past the entry the other one holds.
+      await first.entered(4);
+      await vi.advanceTimersByTimeAsync(timeoutMs);
+      // Every hand-over here has run out by now. Let go of any that hasn't
+      // (an entry handed over twice), so the drains end either way.
+      first.release();
+      second.release();
+      await Promise.all([firstDrain, secondDrain]);
+    } finally {
+      first.release();
+      second.release();
+      vi.useRealTimers();
+    }
     const entries = await entriesOf(marker);
     const ids = entries.map(({ id }) => id);
-    expect(handed.toSorted()).toStrictEqual(ids.toSorted());
+    // Each drain hands over only entries no other drain holds: never one
+    // twice, however they overlap.
+    expect({ first: first.handed, second: second.handed }).toStrictEqual({
+      first: [...ids.slice(0, 4), ids[5]],
+      second: [ids[4]],
+    });
   });
 
   it("hand over one entry with no budget left, and stop", async () => {

@@ -28,8 +28,9 @@ export interface OutboxEntry {
  * handed over again later.
  *
  * A consumer must stop once `signal` aborts, and must take each entry ID
- * once: a hand-over that timed out (or whose drain died) is handed over
- * again, under the same ID, possibly while the first call still runs.
+ * once: a hand-over that timed out (or whose drain died, or stalled past
+ * its lease) is handed over again, under the same ID, possibly while the
+ * first call still runs.
  */
 export type OutboxConsumer = (
   entry: OutboxEntry
