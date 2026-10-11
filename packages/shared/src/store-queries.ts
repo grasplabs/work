@@ -200,3 +200,23 @@ export const readRequestSchema = z.discriminatedUnion("kind", [
   getRequestSchema.extend({ kind: z.literal("get") }),
   z.strictObject({ kind: z.literal("query"), query: queryRequestSchema }),
 ]) satisfies z.ZodType<ReadRequest>;
+
+/**
+ * Whom a read is for, as core resolves it for the invocation and hands
+ * the store: never anything App code supplies. The schema the caller is
+ * pinned to (its tables, indexes and access modes are the store's own
+ * record of it), the person, whether they are a member or a builder of
+ * the App the read comes through (what `appMembers` and `appBuilders`
+ * tables require), and that App and version, which a cursor is bound to.
+ */
+export const readScopeSchema = z.strictObject({
+  schemaHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  principal: identifierSchema,
+  appMember: z.boolean(),
+  appBuilder: z.boolean(),
+  consumer: z.strictObject({
+    resourceId: identifierSchema,
+    resourceVersion: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  }),
+});
+export type ReadScope = z.infer<typeof readScopeSchema>;

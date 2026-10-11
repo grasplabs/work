@@ -4,6 +4,9 @@ import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema, storeIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
 import {
+  queryMaxResults,
+  queryMaxScannedBytes,
+  queryMaxScannedEntries,
   storeMaxIndexes,
   storeMaxTables,
   storeNameMaxLength,
@@ -333,7 +336,13 @@ export const dataErrors = defineErrorFamily({
   "data.store_unavailable": "This store doesn't exist or was deleted.",
   "data.receipt_invalid":
     "This commit doesn't hold a receipt its caller claimed.",
+  "data.unknown_schema": "This store wasn't handed that schema.",
+  "data.unknown_index": "That table has no such index.",
+  "data.access_denied": "You can't read this table.",
   "data.invalid_query": "That query isn't valid for this table.",
+  "data.scan_limit": `A query reads at most ${queryMaxScannedEntries} entries and ${queryMaxScannedBytes} bytes. Narrow it with an index range, or page through it.`,
+  "data.result_limit": `This query matches more than ${queryMaxResults} records. Page through them instead.`,
+  "data.not_unique": "More than one record matches.",
   "data.store_in_use":
     "This store can't be deleted while a mutation's receipt still refers to it. Try again once its receipts have expired.",
 });

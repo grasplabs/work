@@ -73,5 +73,16 @@ export const filterMaxNodes = 64;
  */
 export const queryMaxBoundValues = 64;
 
+/**
+ * The most index entries one terminal examines: a filter that must skip
+ * more to answer, or a count or aggregate over more, fails
+ * (`data.scan_limit`) rather than answering part. Longer work is a
+ * workflow's, in pages.
+ */
+export const queryMaxScannedEntries = 10_000;
+
+/** The most bytes of documents (UTF-8 JSON) one terminal reads. */
+export const queryMaxScannedBytes = 16 * 1024 * 1024;
+
 /** The longest a pagination cursor may be, in characters (spec 9.2: 4 KiB). */
 export const cursorMaxLength = 4096;
