@@ -1,3 +1,8 @@
+import {
+  cursorMaxLength,
+  queryDefaultPageSize,
+  queryMaxResults,
+} from "@grasp-os/shared/store-limits";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import { descriptorVersion } from "./value-descriptor.ts";
@@ -322,3 +327,35 @@ export const v = Object.freeze({
   ): SimpleSchema<InferInput<Members[number]>, Infer<Members[number]>> =>
     schema({ ...required, kind: "union", members: members.map(descriptorOf) }),
 });
+
+// The page contract of spec 9.2, as schemas an operation declares for its
+// arguments and return: `{ pageSize, cursor }` in, `{ items, nextCursor,
+// hasMore }` out. A page's two shapes are two strict objects, so a page
+// with a cursor always says there is more, and the last page never carries
+// a cursor, empty or not.
+
+/** A page request: `pageSize` 1 to 100 (50 unless set), and a cursor or null. */
+export const paginationOptionsValidator = v.object({
+  pageSize: v
+    .number()
+    .integer()
+    .min(1)
+    .max(queryMaxResults)
+    .default(queryDefaultPageSize),
+  cursor: v.string().min(1).max(cursorMaxLength).nullable().default(null),
+});
+
+/** One page of `item`s: the last one without a cursor, any other with one. */
+export const paginationResultValidator = <Item extends AnySchema>(item: Item) =>
+  v.union(
+    v.object({
+      items: v.array(item).max(queryMaxResults),
+      nextCursor: v.null(),
+      hasMore: v.literal(false),
+    }),
+    v.object({
+      items: v.array(item).min(1).max(queryMaxResults),
+      nextCursor: v.string().min(1).max(cursorMaxLength),
+      hasMore: v.literal(true),
+    })
+  );
