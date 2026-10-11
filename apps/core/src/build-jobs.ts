@@ -29,7 +29,7 @@ import {
   draftFiles,
   draftOverLatest,
   proposeDraft,
-  proposedFromChat,
+  proposedByJob,
   versionTree,
 } from "./apps.ts";
 import type { Acting } from "./auth/identity.ts";
@@ -344,11 +344,11 @@ const reconcileReceipt = async (
   if (job.intendedTree === null) {
     return undefined;
   }
-  const version = await proposedFromChat(
+  const version = await proposedByJob(
     env,
     job.appId,
     { parent: job.intendedParent, tree: job.intendedTree },
-    job.chatId
+    { chatId: job.chatId, jobId: job.id }
   );
   if (version !== undefined) {
     await chats.recordBuildReceipt(job.chatId, job.id, version);
@@ -391,9 +391,12 @@ const commitStep = async (
     ) {
       throw jobRefusal("cancelled");
     }
+    // Proposed as this job's: what its receipt is found by.
+    const byJob =
+      by.via === undefined ? by : { ...by, via: { ...by.via, jobId: job.id } };
     const proposed = await proposeDraft(
       env,
-      by,
+      byJob,
       app,
       over,
       job.message,

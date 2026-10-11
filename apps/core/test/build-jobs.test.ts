@@ -326,6 +326,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       versions: versions.map(({ version, proposedBy }) => ({
         version,
         chat: proposedBy?.chatId,
+        job: proposedBy?.jobId,
       })),
     }).toMatchObject({
       answer: {
@@ -341,7 +342,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       last: "assistant",
       sent: true,
       app: { pending: 1, current: null },
-      versions: [{ version: 1, chat: chat.chat.id }],
+      versions: [{ version: 1, chat: chat.chat.id, job: job.id }],
     });
   });
 

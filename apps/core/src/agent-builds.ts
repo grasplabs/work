@@ -39,7 +39,7 @@ import {
   draftOverLatest,
   latestVersion,
   proposeDraft,
-  proposedFromChat,
+  proposedByJob,
 } from "./apps.ts";
 import type { Acting, Member } from "./auth/identity.ts";
 import { jobView } from "./build-job-records.ts";
@@ -484,7 +484,17 @@ const failDeadJobs = async (
   const running = await chats.runningBuildJobs(chatId);
   await Promise.all(
     running.map(async ({ id, createdAt }) => {
-      const instance = await engine.status(id);
+      // A read that fails says nothing of the job: it isn't dead for it.
+      let instance: Awaited<ReturnType<typeof engine.status>>;
+      try {
+        instance = await engine.status(id);
+      } catch (error) {
+        log.warn("agent.job_status_failed", {
+          jobId: id,
+          ...errorFields(error),
+        });
+        return;
+      }
       const dead =
         instance === undefined
           ? Date.now() - createdAt.getTime() > orphanedJobMs
@@ -1102,11 +1112,11 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         await this.#buildable(by, found.appId);
         await failDeadJobs(this.env, workspaceId, chatId);
         if (found.version === null && found.intendedTree !== null) {
-          const version = await proposedFromChat(
+          const version = await proposedByJob(
             this.env,
             found.appId,
             { parent: found.intendedParent, tree: found.intendedTree },
-            chatId
+            { chatId, jobId: found.id }
           );
           if (version !== undefined) {
             await chats.recordBuildReceipt(chatId, found.id, version);

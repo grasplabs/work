@@ -218,15 +218,16 @@ export const latestVersion = async (
 };
 
 /**
- * The version of `app` over `parent` whose files are `tree` and that the
- * agent of chat `chatId` proposed, if there is one: what a build job
- * recorded it was about to commit, found committed (build-jobs.ts).
+ * The version of `app` over `parent` whose files are `tree` and that build
+ * job `job` of chat `chatId` proposed, if there is one: what the job
+ * recorded it was about to commit, found committed (build-jobs.ts). Never
+ * another commit of the same files, from the same chat or not.
  */
-export const proposedFromChat = async (
+export const proposedByJob = async (
   env: Env,
   app: string,
   { parent, tree }: { parent: number | null; tree: string },
-  chatId: string
+  { chatId, jobId }: { chatId: string; jobId: string }
 ): Promise<number | undefined> => {
   const version = (parent ?? 0) + 1;
   const row = await drizzle(env.DB)
@@ -234,7 +235,9 @@ export const proposedFromChat = async (
     .from(appVersions)
     .where(and(eq(appVersions.appId, app), eq(appVersions.version, version)))
     .get();
-  return row?.tree === tree && row.proposedBy?.chatId === chatId
+  return row?.tree === tree &&
+    row.proposedBy?.chatId === chatId &&
+    row.proposedBy.jobId === jobId
     ? version
     : undefined;
 };
