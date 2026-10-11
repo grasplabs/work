@@ -1,5 +1,6 @@
 import {
   auditActorSchema,
+  auditDetailMaxKeys,
   auditIdentifierMaxLength,
   createAuditEvent,
 } from "@grasp-os/shared/audit";
@@ -130,11 +131,19 @@ const reconcileRetryMs = 60 * 60 * 1000;
 const maxReconcileFailures = 3;
 
 /**
- * Most damaged scopes one decision's audit event lists, up to five detail
- * members each: within the event's limit (`auditDetailMaxKeys`) beside its other
- * members, however many scopes stored data names. `damaged` counts all.
+ * The members a decision's audit event has besides its damaged scopes:
+ * `request`, `model`, `period`, `charged` and `damaged`.
  */
-const auditedDamagedScopes = 6;
+const decisionMembers = 5;
+
+/**
+ * The detail members a decision's audit event may spend on its damaged
+ * scopes, four or five each (`damaged.N.requests` only for a lineage
+ * recreated used up): whole scopes are listed while they fit, so the event
+ * stays within its limit however many scopes stored data names, and
+ * `damaged` counts all.
+ */
+const damagedMembers = auditDetailMaxKeys - decisionMembers;
 
 /** How often the alarm looks again for receipts to sweep, while any are kept. */
 const sweepEveryMs = 24 * 60 * 60 * 1000;
@@ -747,6 +756,7 @@ export class ModelLedger extends DurableObject<Env> {
       // Each damaged scope, flat as audit detail is: `damaged.0.scope`, …
       const rebuilt: Record<string, string | number | null> = {};
       let rebuiltScopes = 0;
+      let listing = true;
       for (const { kept, holds, damaged: isDamaged } of counted) {
         if (!isDamaged) {
           this.#settleHeldScope(kept, row, charged, actor);
@@ -755,17 +765,23 @@ export class ModelLedger extends DurableObject<Env> {
         const after = this.#rebuildScope(kept, row, holds);
         const at = `damaged.${rebuiltScopes}`;
         rebuiltScopes += 1;
-        if (rebuiltScopes > auditedDamagedScopes) {
-          continue;
-        }
-        rebuilt[`${at}.scope`] = kept.scope;
-        rebuilt[`${at}.key`] = kept.key.slice(0, auditIdentifierMaxLength);
-        rebuilt[`${at}.held`] =
-          holds === undefined ? null : holds / microsPerDollar;
-        rebuilt[`${at}.rebuilt`] =
-          after.micros === null ? null : after.micros / microsPerDollar;
-        if (after.requests !== undefined) {
-          rebuilt[`${at}.requests`] = after.requests;
+        const members: Record<string, string | number | null> = {
+          [`${at}.scope`]: kept.scope,
+          [`${at}.key`]: kept.key.slice(0, auditIdentifierMaxLength),
+          [`${at}.held`]: holds === undefined ? null : holds / microsPerDollar,
+          [`${at}.rebuilt`]:
+            after.micros === null ? null : after.micros / microsPerDollar,
+          ...(after.requests === undefined
+            ? {}
+            : { [`${at}.requests`]: after.requests }),
+        };
+        // Listed in order while whole scopes fit: none after the first
+        // left out.
+        listing &&=
+          Object.keys(rebuilt).length + Object.keys(members).length <=
+          damagedMembers;
+        if (listing) {
+          Object.assign(rebuilt, members);
         }
       }
       this.#outbox({
@@ -1206,8 +1222,16 @@ export class ModelLedger extends DurableObject<Env> {
     charged: number,
     by: "usage" | "refused" | "unsent" | "reconciled"
   ): number | "quarantined" {
-    const scopes = scopesOf(row);
-    if (scopes === undefined) {
+    // What it reserved against, as its admission recorded it apart from
+    // its JSON: the one record a person's decision on it walks too, so a
+    // scope settles here exactly when it would there. Stored data that
+    // can't be read, its JSON or no scope at all, is held for a person.
+    const kept = this.#db
+      .select()
+      .from(requestScopes)
+      .where(eq(requestScopes.requestId, row.id))
+      .all();
+    if (scopesOf(row) === undefined || kept.length === 0) {
       this.#quarantine(row);
       return "quarantined";
     }
@@ -1231,26 +1255,8 @@ export class ModelLedger extends DurableObject<Env> {
       return 0;
     }
     const actor = actorOf(row);
-    // The period each scope reserved against, as its admission recorded it.
-    const periods = new Map(
-      this.#db
-        .select({
-          scope: requestScopes.scope,
-          key: requestScopes.key,
-          period: requestScopes.period,
-        })
-        .from(requestScopes)
-        .where(eq(requestScopes.requestId, row.id))
-        .all()
-        .map(({ scope, key, period }) => [`${scope}\n${key}`, period])
-    );
     let alerted = 0;
-    for (const scope of scopes) {
-      const recorded = periods.get(`${scope.scope}\n${scope.key}`);
-      if (recorded === undefined) {
-        throw new Error("A request's scope has no record of what it reserved");
-      }
-      const period = reservedPeriod({ period: recorded }, row);
+    for (const scope of kept) {
       const after = this.#db
         .update(spend)
         .set({
@@ -1265,7 +1271,7 @@ export class ModelLedger extends DurableObject<Env> {
           and(
             eq(spend.scope, scope.scope),
             eq(spend.key, scope.key),
-            eq(spend.period, period)
+            eq(spend.period, reservedPeriod(scope, row))
           )
         )
         .returning({ spentMicros: spend.spentMicros })
@@ -1273,7 +1279,18 @@ export class ModelLedger extends DurableObject<Env> {
       if (after === undefined) {
         throw new Error("A request's scope has no spend to settle against");
       }
-      alerted += this.#alert(scope, row.period, after.spentMicros, actor);
+      alerted += this.#alert(
+        {
+          scope: scope.scope,
+          key: scope.key,
+          limitMicros: scope.limitMicros,
+          alertMicros: scope.alertMicros,
+          names: namesSchema.safeParse(jsonOf(scope.names)).data ?? {},
+        },
+        row.period,
+        after.spentMicros,
+        actor
+      );
     }
     return alerted;
   }

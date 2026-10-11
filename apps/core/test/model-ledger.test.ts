@@ -128,6 +128,23 @@ const corrupt = async (
   });
 };
 
+/**
+ * Points request `id`'s recorded scopes at a person with no spend, as a
+ * release that stored them otherwise might have: every charge of it
+ * throws.
+ */
+const strayed = async (
+  ledger: ReturnType<typeof newLedger>,
+  id: string
+): Promise<void> => {
+  await runInDurableObject(ledger, (_instance, state) => {
+    state.storage.sql.exec(
+      "UPDATE request_scopes SET key = 'nobody' WHERE request_id = ?",
+      id
+    );
+  });
+};
+
 /** The ledger's requests, most reserved first. */
 const rowsOf = async (ledger: ReturnType<typeof newLedger>) =>
   await runInDurableObject(ledger, (_instance, state) =>
@@ -437,12 +454,7 @@ describe("the model ledger", () => {
     // aren't JSON, a scope with no spend to settle against, and an actor
     // that isn't one.
     await corrupt(ledger, "scopes", "not JSON", broken.id, settling.id);
-    await corrupt(
-      ledger,
-      "scopes",
-      JSON.stringify([budget(1000, "nobody")]),
-      stray.id
-    );
+    await strayed(ledger, stray.id);
     await corrupt(ledger, "actor", "not JSON", nameless.id);
     await expect(
       ledger.settle(settling.id, { by: "refused" })
@@ -1158,6 +1170,106 @@ describe("the model ledger", () => {
     }).toStrictEqual({ released: "decided", after: [], damaged: 8, listed: 6 });
   });
 
+  it("keeps a decision's audit event within its limit when damaged lineages come back used up, listing the whole scopes that fit", async () => {
+    const ledger = newLedger();
+    const held = admission(10, [budget(1000, `oz-${crypto.randomUUID()}`)]);
+    await ledger.admit(held);
+    // Stored data naming more lineages than any admission may, none with
+    // spend: each recreated used up, its count audited too.
+    await runInDurableObject(ledger, (_instance, state) => {
+      for (let extra = 0; extra < 7; extra += 1) {
+        state.storage.sql.exec(
+          "INSERT INTO request_scopes (request_id, scope, key, period, limit_requests) VALUES (?, 'run', ?, 'lineage', 100)",
+          held.id,
+          `root-${extra}`
+        );
+      }
+      state.storage.sql.exec("DELETE FROM spend WHERE period = '2400-01'");
+    });
+    await corrupt(ledger, "scopes", "not JSON", held.id);
+    await ledger.settle(held.id, { by: "refused" });
+    const admin = {
+      type: "person",
+      userId: `admin-${crypto.randomUUID()}`,
+    } as const;
+
+    const released = await ledger.resolveQuarantined(held.id, "release", admin);
+    await runDurableObjectAlarm(ledger);
+    const events = await allEvents();
+    const event = events.find(
+      ({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin)
+    );
+    const names = Object.keys(event?.detail ?? {});
+    const listed = names
+      .filter((name) => name.endsWith(".scope"))
+      .map((name) => event?.detail[name]);
+    const counts = names
+      .filter((name) => name.endsWith(".requests"))
+      .map((name) => event?.detail[name]);
+    expect({
+      released: released.state,
+      damaged: event?.detail.damaged,
+      listed,
+      counts,
+      members: names.length,
+    }).toStrictEqual({
+      released: "decided",
+      damaged: 8,
+      // The scopes that fit whole, five members each: none cut short.
+      listed: ["run", "run", "run", "run", "run"],
+      counts: [100, 100, 100, 100, 100],
+      members: 30,
+    });
+  });
+
+  it("settles every scope a request reserved against, as its admission recorded them, even one its JSON leaves out, and holds one with no record", async () => {
+    const ledger = newLedger();
+    const key = `una-${crypto.randomUUID()}`;
+    const workflow = {
+      scope: "workflow",
+      key: `flow-${crypto.randomUUID()}`,
+      limitMicros: null,
+      alertMicros: null,
+      names: {},
+    } as const;
+    const left = admission(30, [budget(1000, key), workflow]);
+    const unrecorded = admission(10, [budget(1000, key)]);
+    await ledger.admit(left);
+    await ledger.admit(unrecorded);
+    // Its JSON lost the workflow, the record of the other is gone.
+    await corrupt(
+      ledger,
+      "scopes",
+      JSON.stringify([budget(1000, key)]),
+      left.id
+    );
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "DELETE FROM request_scopes WHERE request_id = ?",
+        unrecorded.id
+      );
+    });
+    const used = { input: 2, output: 2, cacheRead: 0, cacheWrite: 0 };
+
+    const settled = [
+      await ledger.settle(left.id, { by: "usage", tokens: used }),
+      await ledger.settle(unrecorded.id, { by: "usage", tokens: used }),
+    ];
+    const read = await ledger.spendOf("2400-01", ["user", "workflow"], 10);
+
+    expect({ settled, user: read.user, workflow: read.workflow }).toStrictEqual(
+      {
+        settled: [
+          { state: "settled", chargedMicros: 4 },
+          { state: "quarantined" },
+        ],
+        // The unrecorded request still holds its 10.
+        user: [{ key, spentMicros: 4, reservedMicros: 10 }],
+        workflow: [{ key: workflow.key, spentMicros: 4, reservedMicros: 0 }],
+      }
+    );
+  });
+
   it("alerts admins when a decided charge takes a budget past its threshold", async () => {
     const ledger = newLedger();
     const key = `gus-${crypto.randomUUID()}`;
@@ -1189,14 +1301,9 @@ describe("the model ledger", () => {
       reconcileAt: Date.now() + 1000,
     });
     await ledger.admit(failing);
-    // Its scopes read as JSON, but name a scope with no spend to settle
+    // Its scopes can be read, but name a scope with no spend to settle
     // against: every charge throws.
-    await corrupt(
-      ledger,
-      "scopes",
-      JSON.stringify([budget(1000, "nobody")]),
-      failing.id
-    );
+    await strayed(ledger, failing.id);
     const states: string[] = [];
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       // As if its next try came due.
