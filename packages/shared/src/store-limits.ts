@@ -21,6 +21,18 @@ export const indexMaxFields = 16;
 /** The most tables a store may define. */
 export const storeMaxTables = 64;
 
+/**
+ * The most physical indexes a store holds for its declared indexes,
+ * retained ones (for consumers pinned to older schemas) included. Every
+ * write to a store's records evaluates every partial index's condition
+ * and opens each index, whichever table it belongs to, so a write's cost
+ * follows the store's total. Measured on SQLite 3.51 with 32 indexes on
+ * the table written and N on others, an insert took 25 µs at N = 32,
+ * 90 µs at 224, then 356 µs at 352 and 784 µs at 480: 256 keeps a write
+ * before that cliff. Default-order reads use two fixed indexes instead.
+ */
+export const storeMaxIndexes = 256;
+
 // The bounds of one read of a store (`ctx.db`): what a query's descriptor
 // may hold, and what one terminal returns. Checked by the SDK as a query is
 // built and again by the store's host, which trusts no descriptor. The
