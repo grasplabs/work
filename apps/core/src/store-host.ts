@@ -8,7 +8,7 @@ import {
 import type { ReadManifest } from "@grasp-os/sdk/host";
 import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
-import { sha256Hex } from "@grasp-os/shared/encoding";
+import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -78,16 +78,19 @@ import {
   handOver,
 } from "./outbox-delivery.ts";
 import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
+import { cursorKeyOf, openCursor, sealCursor } from "./store-cursors.ts";
+import type { CursorBinding } from "./store-cursors.ts";
 import { inventoriedDeleted, recordStoreDeleted } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { installIndexes, planIndexes } from "./store-indexes.ts";
 import {
   planQuery,
   readableTable,
+  readPage,
   readRecord,
   runQuery,
 } from "./store-queries.ts";
-import type { PinnedSchema, QueryAnswer } from "./store-queries.ts";
+import type { PageAnswer, PinnedSchema, QueryAnswer } from "./store-queries.ts";
 
 // The host of a business store (data-store.ts is its Durable Object): one
 // object per store, named by the store's ID (data-stores.ts), with a SQLite database of its own that holds all
@@ -357,6 +360,8 @@ export class StoreHost {
   readonly ctx: DurableObjectState;
   readonly env: Env;
   readonly #db: DrizzleSqliteDODatabase;
+  /** The store's cursor key, once imported (`#cursorKey`). */
+  #key: CryptoKey | undefined;
   /** Each schema read so far, by hash (`#pinned`). */
   readonly #schemas = new Map<string, PinnedSchema>();
 
@@ -534,6 +539,9 @@ export class StoreHost {
       request
     );
     const pinned = await this.#pinned(storeId, reader.schemaHash);
+    if (read.kind === "query" && read.query.terminal.kind === "paginate") {
+      return await this.#page(storeId, reader, pinned, read.query);
+    }
     return this.ctx.storage.transactionSync((): QueryAnswer => {
       this.#bind(storeId, false);
       return indexRequired(() =>
@@ -542,6 +550,79 @@ export class StoreHost {
           : runQuery(this.ctx.storage.sql, pinned, reader, read.query)
       );
     });
+  }
+
+  /**
+   * One page of `query` for `reader` (store-cursors.ts has its threat
+   * model): its cursor opened first, against what this request and scope
+   * bind it to, under this store's key; the page read in one transaction;
+   * and the next page's cursor sealed for the same binding, when more
+   * follow.
+   */
+  async #page(
+    storeId: StoreId,
+    reader: ReadScope,
+    pinned: PinnedSchema,
+    query: QueryRequest
+  ): Promise<PageAnswer> {
+    const { terminal } = query;
+    if (terminal.kind !== "paginate") {
+      throw new Error("Not a page");
+    }
+    const key = await this.#cursorKey(storeId);
+    const binding: CursorBinding = {
+      storeId,
+      schemaHash: reader.schemaHash,
+      consumer: reader.consumer,
+      principal: reader.principal,
+      appMember: reader.appMember,
+      appBuilder: reader.appBuilder,
+      table: query.table,
+      index: query.index,
+      range: query.range,
+      filter: query.filter,
+      order: query.order,
+    };
+    const anchor =
+      terminal.cursor === null
+        ? null
+        : await openCursor(key, binding, terminal.cursor);
+    const read = this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      return indexRequired(() =>
+        readPage(this.ctx.storage.sql, pinned, reader, query, anchor)
+      );
+    });
+    if (read.hasMore && read.last !== undefined) {
+      return {
+        items: read.items,
+        nextCursor: await sealCursor(key, binding, read.last),
+        hasMore: true,
+      };
+    }
+    return { items: read.items, nextCursor: null, hasMore: false };
+  }
+
+  /**
+   * The key this store signs its cursors with, made on first use and kept
+   * in its own SQLite; imported once per object.
+   */
+  async #cursorKey(storeId: StoreId): Promise<CryptoKey> {
+    if (this.#key !== undefined) {
+      return this.#key;
+    }
+    const hex = this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      const row = this.#db.select({ key: store.cursorKey }).from(store).get();
+      if (row?.key !== null && row?.key !== undefined) {
+        return row.key;
+      }
+      const made = toHex(crypto.getRandomValues(new Uint8Array(32)));
+      this.#db.update(store).set({ cursorKey: made }).run();
+      return made;
+    });
+    this.#key = await cursorKeyOf(hex);
+    return this.#key;
   }
 
   /**

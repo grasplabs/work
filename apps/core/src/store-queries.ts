@@ -23,6 +23,7 @@ import {
   filterSql,
   numberExpression,
   isManagedField,
+  nullSentinel,
   rangeSql,
   tableIdLiteral,
 } from "./store-expressions.ts";
@@ -181,8 +182,11 @@ export interface Access {
   readonly index: string;
   /** The range's terms, after the table and owner predicates. */
   readonly where: Fragment;
-  /** The columns it is ordered by, past those its range holds equal. */
-  readonly order: readonly string[];
+  /**
+   * The fields it is ordered by, past those its range holds equal, the
+   * record ID (`_id`) last.
+   */
+  readonly orderFields: readonly string[];
 }
 
 /**
@@ -204,7 +208,7 @@ const accessOf = (
     return {
       index: defaultIndexName(table.ownerScoped),
       where: { sql: "", params: [] },
-      order: ["created_at", "record_id"],
+      orderFields: ["_createdAt", "_id"],
     };
   }
   const index = pinned.indexes.get(table.name)?.get(query.index);
@@ -237,12 +241,7 @@ const accessOf = (
       sql: terms.map(({ sql }) => sql).join(" AND "),
       params: terms.flatMap(({ params }) => params),
     },
-    order: [
-      ...index.fields
-        .slice(equal.length)
-        .map((field) => fieldExpression(field)),
-      "record_id",
-    ],
+    orderFields: [...index.fields.slice(equal.length), "_id"],
   };
 };
 
@@ -440,7 +439,7 @@ const documentOf = (
 });
 
 /** What the scan has seen, against its bounds. */
-interface Scan {
+export interface Scan {
   entries: number;
   bytes: number;
 }
@@ -494,8 +493,21 @@ export const readRecord = (
   return documentOf(table, row, row.value_json);
 };
 
+/**
+ * One page, as `paginate` answers it: the last without a cursor, any
+ * other with one (spec 9.2's page envelope).
+ */
+export type PageAnswer =
+  | { items: ReadDocument[]; nextCursor: null; hasMore: false }
+  | { items: ReadDocument[]; nextCursor: string; hasMore: true };
+
 /** What a terminal answers. */
-export type QueryAnswer = ReadDocument[] | ReadDocument | number | null;
+export type QueryAnswer =
+  | ReadDocument[]
+  | ReadDocument
+  | PageAnswer
+  | number
+  | null;
 
 /** A query's one statement, ready to run: SQL, parameters and its table. */
 interface Plan {
@@ -506,12 +518,27 @@ interface Plan {
   readonly filtered: boolean;
 }
 
+/**
+ * Where a page starts after its cursor's anchor: terms that are top-level
+ * conjuncts of the WHERE clause (an index range SQLite seeks to), and how
+ * many of the leading order fields they hold equal, which the ORDER BY
+ * leaves out, as SQLite only reads an expression index in order when it
+ * does.
+ */
+export interface Seek {
+  readonly terms: readonly Fragment[];
+  readonly fixed: number;
+}
+
 /** What a plan selects, besides a record's managed fields. */
 export interface PlanOptions {
   /** Whether the terminal needs documents. */
   readonly documents: boolean;
   /** The declared field an aggregate reads, as `agg`. */
   readonly aggregate?: string;
+  /** Whether to select the order fields' values, as `o0`, `o1`, …. */
+  readonly anchors?: boolean;
+  readonly seek?: Seek;
 }
 
 /**
@@ -527,7 +554,7 @@ export const planQuery = (
   scope: ReadScope,
   table: ReadTable,
   query: QueryRequest,
-  { documents, aggregate }: PlanOptions
+  { documents, aggregate, anchors = false, seek }: PlanOptions
 ): Plan => {
   const access = accessOf(pinned, table, query);
   const filter =
@@ -546,13 +573,23 @@ export const planQuery = (
     ...(aggregate === undefined
       ? []
       : [`${numberExpression(aggregate)} AS agg`]),
+    ...(anchors
+      ? access.orderFields.map(
+          (field, position) => `${fieldExpression(field)} AS o${position}`
+        )
+      : []),
   ];
+  const seekTerms = seek?.terms ?? [];
   const where = [
     `table_id = ${tableIdLiteral(table.tableId)}`,
     ...(table.ownerScoped ? ["owner_id = ?"] : []),
-    ...(access.where.sql === "" ? [] : [access.where.sql]),
+    ...[access.where, ...seekTerms]
+      .map(({ sql }) => sql)
+      .filter((term) => term !== ""),
   ];
-  const order = access.order.map((column) => `${column} ${direction}`);
+  const order = access.orderFields
+    .slice(seek?.fixed ?? 0)
+    .map((field) => `${fieldExpression(field)} ${direction}`);
   return {
     table,
     statement: `SELECT ${columns.join(", ")} FROM sdk_records INDEXED BY ${access.index} WHERE ${where.join(" AND ")} ORDER BY ${order.join(", ")} LIMIT ${queryMaxScannedEntries + 1}`,
@@ -560,6 +597,7 @@ export const planQuery = (
       ...(filter?.params ?? []),
       ...(table.ownerScoped ? [scope.principal] : []),
       ...access.where.params,
+      ...seekTerms.flatMap(({ params }) => params),
     ],
     filtered: filter !== null,
   };
@@ -578,9 +616,11 @@ export interface Match {
  */
 export const matchesOf = (
   sql: SqlStorage,
-  plan: Plan
+  plan: Plan,
+  shared?: Scan
 ): IterableIterator<Match, undefined> => {
-  const scan: Scan = { entries: 0, bytes: 0 };
+  // A scan of its own unless the caller's spans several statements.
+  const scan: Scan = shared ?? { entries: 0, bytes: 0 };
   const cursor = sql.exec<
     ReadRow & { value_json?: string; bytes?: number; matched?: number }
   >(plan.statement, ...plan.params);
@@ -663,9 +703,250 @@ const countOf = (matches: Iterable<Match>): number => {
 };
 
 /**
+ * An order field's value at a page's anchor: left out (`[]`), an explicit
+ * null (`[null]`) or a value, as the field's expression gives it.
+ */
+export type AnchorValue = [] | [null] | [string | number];
+
+/**
+ * Where a page ends, for the next to start after: the last record's ID
+ * and, when they fit in a cursor, its order fields' values. Without them,
+ * the next page looks the record up again.
+ */
+export interface Anchor {
+  readonly id: string;
+  readonly values?: readonly AnchorValue[];
+}
+
+/** One page: its records, whether more follow, and its last record's anchor. */
+export interface PageRead {
+  readonly items: ReadDocument[];
+  readonly hasMore: boolean;
+  readonly last: Required<Anchor> | undefined;
+}
+
+/** An order field's value as SQLite read it, as an anchor holds it. */
+const anchorValueOf = (value: SqlStorageValue | undefined): AnchorValue => {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  if (value === Number.NEGATIVE_INFINITY) {
+    return [null];
+  }
+  if (typeof value === "number" || typeof value === "string") {
+    return [value];
+  }
+  throw new Error("An order field read as bytes");
+};
+
+/** `expression` equal to an anchor's value, as SQLite reads the index. */
+const sameAs = (expression: string, value: AnchorValue): Fragment => {
+  if (value.length === 0) {
+    return { sql: `${expression} IS NULL`, params: [] };
+  }
+  const [held] = value;
+  return held === null
+    ? { sql: `${expression} = ${nullSentinel}`, params: [] }
+    : { sql: `${expression} = ?`, params: [held] };
+};
+
+/**
+ * What comes strictly after an anchor's value of one order field, in the
+ * index's order, as terms SQLite seeks by, each with how many more
+ * fields it holds equal. SQLite sorts NULL (a field left out) first, then
+ * the null sentinel, then values, so ascending, after a field left out
+ * comes anything not NULL; descending, after a value come lesser values
+ * (the sentinel among them), then NULL, in two steps.
+ */
+const afterOf = (
+  expression: string,
+  value: AnchorValue,
+  direction: "asc" | "desc"
+): { term: Fragment; fixes: number }[] => {
+  const leftOut = {
+    term: { sql: `${expression} IS NULL`, params: [] },
+    fixes: 1,
+  };
+  if (value.length === 0) {
+    // Ascending, anything held comes after; descending, nothing does.
+    return direction === "asc"
+      ? [{ term: { sql: `${expression} IS NOT NULL`, params: [] }, fixes: 0 }]
+      : [];
+  }
+  const [held] = value;
+  if (held === null) {
+    return direction === "asc"
+      ? [
+          {
+            term: { sql: `${expression} > ${nullSentinel}`, params: [] },
+            fixes: 0,
+          },
+        ]
+      : [leftOut];
+  }
+  return direction === "asc"
+    ? [{ term: { sql: `${expression} > ?`, params: [held] }, fixes: 0 }]
+    : [
+        { term: { sql: `${expression} < ?`, params: [held] }, fixes: 0 },
+        leftOut,
+      ];
+};
+
+/**
+ * The seeks that read, in order, every entry after `anchor`: first those
+ * equal to it in every order field with a later record ID, then, field by
+ * field from the last, those equal in the fields before it and after it
+ * in this one. Each seek is one index range, so a page costs what it
+ * reads, however deep it is.
+ */
+const seeksAfter = (
+  orderFields: readonly string[],
+  values: readonly AnchorValue[],
+  id: string,
+  direction: "asc" | "desc"
+): Seek[] => {
+  const fields = orderFields.slice(0, -1);
+  if (values.length !== fields.length) {
+    throw dataErrors.create("data.cursor_expired");
+  }
+  const equal = (count: number): Fragment[] =>
+    fields
+      .slice(0, count)
+      .map((field, position) =>
+        sameAs(fieldExpression(field), values[position] ?? [])
+      );
+  const seeks: Seek[] = [
+    {
+      terms: [
+        ...equal(fields.length),
+        {
+          sql: `record_id ${direction === "asc" ? ">" : "<"} ?`,
+          params: [id],
+        },
+      ],
+      fixed: fields.length,
+    },
+  ];
+  for (let position = fields.length - 1; position >= 0; position -= 1) {
+    const field = fields[position] ?? "_id";
+    for (const { term, fixes } of afterOf(
+      fieldExpression(field),
+      values[position] ?? [],
+      direction
+    )) {
+      seeks.push({
+        terms: [...equal(position), term],
+        fixed: position + fixes,
+      });
+    }
+  }
+  return seeks;
+};
+
+/**
+ * The order fields' values of record `id` as the caller may see it, for a
+ * cursor that carried only the ID; `data.cursor_expired` when the record
+ * is gone.
+ */
+const anchorValuesOf = (
+  sql: SqlStorage,
+  table: ReadTable,
+  scope: ReadScope,
+  orderFields: readonly string[],
+  id: string
+): AnchorValue[] => {
+  const fields = orderFields.slice(0, -1);
+  const columns = fields.map(
+    (field, position) => `${fieldExpression(field)} AS o${position}`
+  );
+  const [row] = sql
+    .exec(
+      `SELECT ${["record_id", ...columns].join(", ")} FROM sdk_records WHERE table_id = ? AND record_id = ?${table.ownerScoped ? " AND owner_id = ?" : ""}`,
+      table.tableId,
+      id,
+      ...(table.ownerScoped ? [scope.principal] : [])
+    )
+    .toArray();
+  if (row === undefined) {
+    throw dataErrors.create("data.cursor_expired");
+  }
+  return fields.map((_field, position) => anchorValueOf(row[`o${position}`]));
+};
+
+/**
+ * One page of `query` (a `paginate` terminal) for `scope` from `pinned`,
+ * after `anchor` or from the start: at most `pageSize` records in order,
+ * one more read to know whether more follow, and the last record's anchor
+ * for the next page's cursor. Keyset paging: a record changed between
+ * pages may move past or into a later page, as spec 9.2 allows; the
+ * bounds of every other terminal apply across all of a page's seeks.
+ */
+export const readPage = (
+  sql: SqlStorage,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  query: QueryRequest,
+  anchor: Anchor | null
+): PageRead => {
+  const { terminal } = query;
+  if (terminal.kind !== "paginate") {
+    throw new Error("Not a page");
+  }
+  const table = readableTable(pinned, scope, query.table);
+  const { orderFields } = accessOf(pinned, table, query);
+  const seeks: (Seek | undefined)[] =
+    anchor === null
+      ? [undefined]
+      : seeksAfter(
+          orderFields,
+          anchor.values ??
+            anchorValuesOf(sql, table, scope, orderFields, anchor.id),
+          anchor.id,
+          query.order
+        );
+  const scan: Scan = { entries: 0, bytes: 0 };
+  const found: Match[] = [];
+  for (const seek of seeks) {
+    if (found.length > terminal.pageSize) {
+      break;
+    }
+    const plan = planQuery(pinned, scope, table, query, {
+      documents: true,
+      anchors: true,
+      seek,
+    });
+    for (const match of matchesOf(sql, plan, scan)) {
+      found.push(match);
+      if (found.length > terminal.pageSize) {
+        break;
+      }
+    }
+  }
+  const page = found.slice(0, terminal.pageSize);
+  const lastMatch = page.at(-1);
+  return {
+    items: page.map(({ row, valueJson }) =>
+      documentOf(table, row, valueJson ?? "{}")
+    ),
+    hasMore: found.length > terminal.pageSize,
+    last:
+      lastMatch === undefined
+        ? undefined
+        : {
+            id: lastMatch.row.record_id,
+            values: orderFields
+              .slice(0, -1)
+              .map((_field, position) =>
+                anchorValueOf(lastMatch.row[`o${position}`])
+              ),
+          },
+  };
+};
+
+/**
  * Answers `query` for `scope` from `pinned`: one statement through the
  * index the query names, under the caller's access, bounded as the threat
- * model above says. `paginate` comes with cursors.
+ * model above says. A page is read with `readPage`.
  */
 export const runQuery = (
   sql: SqlStorage,
@@ -737,7 +1018,8 @@ export const runQuery = (
       );
     }
     case "paginate": {
-      throw invalid("`paginate` isn't available yet");
+      // Pages carry cursors, which the host signs (`StoreHost.read`).
+      throw new Error("A page is read with `readPage`");
     }
     default: {
       return terminal satisfies never;
