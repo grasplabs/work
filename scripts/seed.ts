@@ -238,20 +238,23 @@ const seedCollection = async (
 };
 
 /**
- * Approves, as an admin, every screen of the App's current version that
- * builds and isn't approved yet, so its people see their data in it.
+ * Checks, as an admin, that every screen of the App's current version
+ * builds, and approves those not approved yet when `approve`, so its
+ * people see their data in them. A screen left unapproved still has to
+ * build: one that doesn't fails the seed, not the first person to open it.
  */
-const approveScreens = async (
+const reviewScreens = async (
   adminSession: Session,
-  app: string
+  app: string,
+  approve: boolean
 ): Promise<void> => {
   const review = await adminSession.api.screenTrust.review(app);
-  if (review.screens.every(({ trust }) => trust === "approved")) {
-    return;
-  }
   const artifacts = builtArtifacts(review.screens);
   if (artifacts.length < review.screens.length) {
     throw new Error(`Not every screen of ${review.name} builds`);
+  }
+  if (!approve || review.screens.every(({ trust }) => trust === "approved")) {
+    return;
   }
   await adminSession.api.screenTrust.approve(app, {
     version: review.version,
@@ -303,24 +306,29 @@ const seedEngine = async (
     // An admin makes it current, which approves its code.
     await adminSession.api.apps.versions.setCurrent(app.id, version);
   } else {
-    // An engine seeded before it had apps gets them as its next version.
-    const { screens: has } = await owner.api.apps.contents(app.id);
-    const missing = Object.fromEntries(
-      Object.entries(screens).filter(
-        ([path]) => !has.includes(path.slice("screens/".length, -".tsx".length))
-      )
+    // An engine seeded before it had its apps, or with older ones, gets
+    // them as its next version: over its latest version, which a seed
+    // stopped before making it current may have committed already.
+    const [latest] = await owner.api.apps.versions.list(app.id);
+    const version = latest?.version ?? app.currentVersion;
+    const files = await owner.api.apps.files.read(app.id, version);
+    const changed = Object.fromEntries(
+      Object.entries(screens).filter(([path, code]) => files[path] !== code)
     );
-    if (Object.keys(missing).length > 0) {
-      const { version } = await owner.api.apps.files.commit(
+    let current = version;
+    if (Object.keys(changed).length > 0) {
+      ({ version: current } = await owner.api.apps.files.commit(
         app.id,
-        missing,
+        changed,
         "Add the engine's apps"
-      );
-      await adminSession.api.apps.versions.setCurrent(app.id, version);
+      ));
+    }
+    if (current !== app.currentVersion) {
+      await adminSession.api.apps.versions.setCurrent(app.id, current);
     }
   }
-  if (approvedScreens.has(seed.name) && Object.keys(screens).length > 0) {
-    await approveScreens(adminSession, app.id);
+  if (Object.keys(screens).length > 0) {
+    await reviewScreens(adminSession, app.id, approvedScreens.has(seed.name));
   }
   const shared = await owner.api.apps.members.list(app.id);
   for (const { team, role } of seed.teams) {
