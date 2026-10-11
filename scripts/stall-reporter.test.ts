@@ -5,7 +5,7 @@ import { setTimeout as wait } from "node:timers/promises";
 
 import { describe, expect, it } from "vite-plus/test";
 
-import StallReporter, { reportDelayMs } from "./stall-reporter.ts";
+import StallReporter, { budgetMs, reportDelayMs } from "./stall-reporter.ts";
 import type { ReportedCase, ReportedModule } from "./stall-reporter.ts";
 
 /** A report due 60 ms after the run starts, written to `written`. */
@@ -25,16 +25,57 @@ const reporting = (progressFile?: string) => {
 /** Long enough for a report due 60 ms after the run starts to be out. */
 const pastTheReport = 200;
 
-const file = (name: string): ReportedModule => ({
-  project: { name: "core" },
-  relativeModuleId: `test/${name}.test.ts`,
-});
+/** The tests of each file, as `test` makes them. */
+const testsOf = new WeakMap<ReportedModule, ReportedCase[]>();
 
-const test = (module: ReportedModule, fullName: string): ReportedCase => ({
-  module,
-  fullName,
-  result: () => ({ state: "passed" }),
-});
+const file = (name: string): ReportedModule => {
+  const tests: ReportedCase[] = [];
+  const testModule: ReportedModule = {
+    project: { name: "core" },
+    relativeModuleId: `test/${name}.test.ts`,
+    children: { allTests: () => tests },
+  };
+  testsOf.set(testModule, tests);
+  return testModule;
+};
+
+const test = (
+  module: ReportedModule,
+  fullName: string,
+  options?: ReportedCase["options"]
+): ReportedCase => {
+  const testCase: ReportedCase = {
+    module,
+    fullName,
+    options: options ?? { timeout: 60_000 },
+    result: () => ({ state: "passed" }),
+  };
+  testsOf.get(module)?.push(testCase);
+  return testCase;
+};
+
+/**
+ * A reporter that ends the run once a test runs 50 ms past its timeout,
+ * looking every 10 ms: `ended` counts how often it did.
+ */
+const ending = () => {
+  const written: string[] = [];
+  const state = { ended: 0 };
+  const reporter = new StallReporter({
+    overdueGraceSeconds: 0.05,
+    overdueCheckMs: 10,
+    write: (text) => {
+      written.push(text);
+    },
+    end: () => {
+      state.ended += 1;
+    },
+  });
+  return { reporter, written, state };
+};
+
+/** Well past a 20 ms test's timeout and the 50 ms grace. */
+const pastTheGrace = 300;
 
 describe("when the stall report is due", () => {
   it("counts from the process's start, not from when the tests start", () => {
@@ -136,5 +177,113 @@ describe("the progress file", () => {
           `passed core test/package-builds.test.ts > ${fullName}`
       )
     );
+  });
+});
+
+describe("how long a test may run", () => {
+  it("is its timeout for every attempt its retries and repeats allow, and the grace", () => {
+    const builds = file("package-builds");
+    expect([
+      budgetMs(test(builds, "once", { timeout: 60_000 }), 120_000),
+      budgetMs(test(builds, "retried", { timeout: 1000, retry: 2 }), 500),
+      budgetMs(
+        test(builds, "retried by count", {
+          timeout: 1000,
+          retry: { count: 1 },
+          repeats: 1,
+        }),
+        0
+      ),
+      budgetMs(test(builds, "untimed", {}), 500),
+    ]).toStrictEqual([180_000, 3500, 4000, undefined]);
+  });
+});
+
+describe("a test past its timeout", () => {
+  it("ends the run once, naming it, when Vitest never reports it", async () => {
+    const { reporter, written, state } = ending();
+    const builds = file("package-builds");
+    const spinning = test(builds, "spins forever", { timeout: 20 });
+    reporter.onTestRunStart();
+    reporter.onTestModuleStart(builds);
+    reporter.onTestCaseReady(spinning);
+    await wait(pastTheGrace);
+
+    const report = written.join("");
+    expect({
+      ended: state.ended,
+      heading: report.includes(
+        "no longer times it out: core test/package-builds.test.ts > spins forever has run for"
+      ),
+      named: report.includes(
+        "  test core test/package-builds.test.ts > spins forever"
+      ),
+    }).toStrictEqual({ ended: 1, heading: true, named: true });
+  });
+
+  it("ends the run when its file goes quiet, even before Vitest says it started", async () => {
+    const { reporter, written, state } = ending();
+    const builds = file("package-builds");
+    const done = test(builds, "builds", { timeout: 20 });
+    test(builds, "spins forever", { timeout: 20 });
+    reporter.onTestRunStart();
+    reporter.onTestModuleCollected(builds);
+    reporter.onTestCaseReady(done);
+    reporter.onTestCaseResult(done);
+    await wait(pastTheGrace);
+
+    expect({
+      ended: state.ended,
+      heading: written
+        .join("")
+        .includes(
+          "no longer times it out: core test/package-builds.test.ts has reported nothing for"
+        ),
+    }).toStrictEqual({ ended: 1, heading: true });
+  });
+
+  it("leaves a run alone whose tests Vitest reports, timed out or not", async () => {
+    const { reporter, written, state } = ending();
+    const builds = file("package-builds");
+    const timedOut = test(builds, "times out", { timeout: 20 });
+    const untimed = test(builds, "has no timeout", {});
+    reporter.onTestRunStart();
+    reporter.onTestModuleStart(builds);
+    reporter.onTestCaseReady(timedOut);
+    reporter.onTestCaseReady(untimed);
+    await wait(40);
+    reporter.onTestCaseResult(timedOut);
+    await wait(pastTheGrace);
+    reporter.onTestCaseResult(untimed);
+    reporter.onTestModuleEnd(builds);
+    await reporter.onTestRunEnd();
+
+    expect({ ended: state.ended, written }).toStrictEqual({
+      ended: 0,
+      written: [],
+    });
+  });
+
+  it("never ends a run without a grace set", async () => {
+    const written: string[] = [];
+    const state = { ended: 0 };
+    const reporter = new StallReporter({
+      overdueCheckMs: 10,
+      write: (text) => {
+        written.push(text);
+      },
+      end: () => {
+        state.ended += 1;
+      },
+    });
+    const builds = file("package-builds");
+    reporter.onTestRunStart();
+    reporter.onTestCaseReady(test(builds, "spins forever", { timeout: 20 }));
+    await wait(pastTheGrace);
+
+    expect({ ended: state.ended, written }).toStrictEqual({
+      ended: 0,
+      written: [],
+    });
   });
 });
