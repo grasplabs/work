@@ -1,8 +1,9 @@
 /**
  * `vp run seed`: fills the local stack `vp run dev` runs with a demo
  * company (scripts/seed/company.ts), so every page has something to show:
- * people in teams and roles, engines with released workflows and 30 days
- * of their runs, Knowledge, and chats. Run it while `vp run dev` runs.
+ * people in teams and roles, engines with released workflows, 30 days of
+ * their runs and apps over them (scripts/seed/screens.ts), Knowledge, and
+ * chats. Run it while `vp run dev` runs.
  *
  * Everything goes through core's API as the person who would do it, signed
  * in through the local fake IdP; only what no API does is written into the
@@ -20,6 +21,7 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { z } from "zod";
 
 import { chats, writeTranscript } from "./seed/chats.ts";
@@ -38,6 +40,7 @@ import {
 } from "./seed/local.ts";
 import type { Session } from "./seed/local.ts";
 import { seedRuns } from "./seed/runs.ts";
+import { approvedScreens, engineScreens } from "./seed/screens.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -235,7 +238,78 @@ const seedCollection = async (
 };
 
 /**
- * An engine: created by its owner, its version made current by an admin,
+ * Checks, as an admin, that every screen of the App's current version
+ * builds, and approves those not approved yet when `approve`, so its
+ * people see their data in them. A screen left unapproved still has to
+ * build: one that doesn't fails the seed, not the first person to open it.
+ */
+const reviewScreens = async (
+  adminSession: Session,
+  app: string,
+  approve: boolean
+): Promise<void> => {
+  const review = await adminSession.api.screenTrust.review(app);
+  const artifacts = builtArtifacts(review.screens);
+  if (artifacts.length < review.screens.length) {
+    throw new Error(`Not every screen of ${review.name} builds`);
+  }
+  if (!approve || review.screens.every(({ trust }) => trust === "approved")) {
+    return;
+  }
+  await adminSession.api.screenTrust.approve(app, {
+    version: review.version,
+    generation: review.generation,
+    artifacts,
+  });
+};
+
+/**
+ * Brings an engine seeded before it had its apps, or with older ones, to
+ * the seed's screens, as its next version made current. Only the seed's
+ * own change is made current: a later version that holds exactly the
+ * current one plus the seed's screens (a seed stopped before making it
+ * current) is reused; one with anyone else's changes is left alone, and
+ * so is the engine, as committing over it would release them.
+ */
+const upgradeScreens = async (
+  owner: Session,
+  adminSession: Session,
+  app: { id: string; name: string; currentVersion: number | null },
+  screens: Readonly<Record<string, string>>
+): Promise<void> => {
+  const current = app.currentVersion ?? undefined;
+  const files = await owner.api.apps.files.read(app.id, current);
+  const changed = Object.fromEntries(
+    Object.entries(screens).filter(([path, code]) => files[path] !== code)
+  );
+  if (Object.keys(changed).length === 0) {
+    return;
+  }
+  const [latest] = await owner.api.apps.versions.list(app.id);
+  if (latest !== undefined && latest.version !== current) {
+    const later = await owner.api.apps.files.read(app.id, latest.version);
+    const upgraded = { ...files, ...screens };
+    const paths = new Set([...Object.keys(later), ...Object.keys(upgraded)]);
+    if ([...paths].some((path) => later[path] !== upgraded[path])) {
+      console.warn(
+        `${app.name} has a version that isn't current, with changes of its own: its apps are left as they are.`
+      );
+      return;
+    }
+    await adminSession.api.apps.versions.setCurrent(app.id, latest.version);
+    return;
+  }
+  const { version } = await owner.api.apps.files.commit(
+    app.id,
+    changed,
+    "Add the engine's apps"
+  );
+  await adminSession.api.apps.versions.setCurrent(app.id, version);
+};
+
+/**
+ * An engine: created by its owner with its workflows and apps, its version
+ * made current by an admin, its apps approved where the seed says so,
  * shared with its teams, its deciders set, and, while it has none, its
  * runs. Returns its ID, and how many runs it got.
  */
@@ -253,8 +327,17 @@ const seedEngine = async (
       name: seed.name,
       description: seed.description,
     }));
+  const screens = Object.fromEntries(
+    Object.entries(engineScreens[seed.name] ?? {}).map(([name, code]) => [
+      `screens/${name}.tsx`,
+      code,
+    ])
+  );
   if (app.currentVersion === null) {
-    const files: Record<string, string> = { "AGENTS.md": seed.agents };
+    const files: Record<string, string> = {
+      "AGENTS.md": seed.agents,
+      ...screens,
+    };
     for (const { id, code, tests } of seed.workflows) {
       files[`workflows/${id}.ts`] = code;
       files[`workflows/${id}.workflow-tests.ts`] = tests;
@@ -262,10 +345,15 @@ const seedEngine = async (
     const { version } = await owner.api.apps.files.commit(
       app.id,
       files,
-      "Release the engine's workflows"
+      "Release the engine's workflows and apps"
     );
     // An admin makes it current, which approves its code.
     await adminSession.api.apps.versions.setCurrent(app.id, version);
+  } else if (Object.keys(screens).length > 0) {
+    await upgradeScreens(owner, adminSession, app, screens);
+  }
+  if (Object.keys(screens).length > 0) {
+    await reviewScreens(adminSession, app.id, approvedScreens.has(seed.name));
   }
   const shared = await owner.api.apps.members.list(app.id);
   for (const { team, role } of seed.teams) {
