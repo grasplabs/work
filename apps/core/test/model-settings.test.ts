@@ -344,7 +344,7 @@ describe("model settings", { timeout: 60_000 }, () => {
     expect(user?.spent[0]?.amount).toBe(0.9);
   });
 
-  it("show admins the reservations held for review, and let them release or charge each, audited, and nobody else", async () => {
+  it("show admins the reservations held for review, and let them release or charge each, audited, telling them when one was already decided, and nobody else", async () => {
     const coreEnv = envWith({
       gateway: "grasp-os-test",
       models: [workersAi],
@@ -404,16 +404,34 @@ describe("model settings", { timeout: 60_000 }, () => {
         builderCore.authenticate().models.resolveHeld(releasing, "release")
       )
     ).resolves.toBe("role.forbidden");
-    await admin.models.resolveHeld(releasing, "release");
-    await admin.models.resolveHeld(charging, "charge");
+    const before = Date.now();
+    const decided = [
+      await admin.models.resolveHeld(releasing, "release"),
+      await admin.models.resolveHeld(charging, "charge"),
+    ];
+    // Someone else's decision came first: this one changes nothing.
+    const again = await admin.models.resolveHeld(charging, "release");
     await runDurableObjectAlarm(ledger);
     const events = await allEvents();
     const spentNow = await ledger.spendOf(period, ["user"], 1000);
 
     expect({
       shown: ours(shown.held)
-        .map(({ id, amount, model }) => [id, amount, model])
+        .map(({ id, amount, model, releaseOnly }) => [
+          id,
+          amount,
+          model,
+          releaseOnly,
+        ])
         .toSorted(byJson),
+      decided,
+      again: {
+        ...again,
+        decidedAt:
+          "decidedAt" in again &&
+          Date.parse(again.decidedAt) >= before &&
+          Date.parse(again.decidedAt) <= Date.now(),
+      },
       after: ours(await admin.models.held()),
       spent: spentNow.user?.find((row) => row.key === key),
       audited: events
@@ -427,15 +445,85 @@ describe("model settings", { timeout: 60_000 }, () => {
         .toSorted(byJson),
     }).toStrictEqual({
       shown: [
-        [releasing, 0.01, workersAi],
-        [charging, 0.02, workersAi],
+        [releasing, 0.01, workersAi, false],
+        [charging, 0.02, workersAi, false],
       ].toSorted(byJson),
+      decided: [
+        { state: "decided", how: "release", amount: 0 },
+        { state: "decided", how: "charge", amount: 0.02 },
+      ],
+      again: {
+        state: "already_decided",
+        how: "charge",
+        amount: 0.02,
+        decidedAt: true,
+      },
       after: [],
       spent: { key, spentMicros: 20_000, reservedMicros: 0 },
       audited: [
         ["model.spend.charged", charging],
         ["model.spend.released", releasing],
       ].toSorted(byJson),
+    });
+  });
+
+  it("show admins which held reservations can only be released, as their budget record is damaged, and refuse to charge one", async () => {
+    const coreEnv = envWith({
+      gateway: "grasp-os-test",
+      models: [workersAi],
+      budgets: { user: { limit: 1 } },
+    });
+    const period = coreEnv.MODEL_BUDGET_MONTH;
+    if (period === undefined) {
+      throw new Error("Each test counts in a month of its own");
+    }
+    const key = `damaged-${crypto.randomUUID()}`;
+    const ledger = modelLedger(env);
+    const id = crypto.randomUUID();
+    await ledger.admit({
+      id,
+      period,
+      scopes: [{ ...counted("user", key), limitMicros: 1_000_000 }],
+      model: workersAi,
+      price: {
+        version: "test",
+        input: 1_000_000,
+        output: 1_000_000,
+        cacheRead: 0,
+        cacheWrite: 0,
+      },
+      reservedMicros: 10_000,
+      actor: { type: "person", userId: key },
+      deadline: Date.now() + 60_000,
+      reconcileAt: Date.now() + 60_000,
+    });
+    // Set aside, and its person's spend gone with it.
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE requests SET scopes = 'not JSON' WHERE id = ?",
+        id
+      );
+      state.storage.sql.exec("DELETE FROM spend WHERE key = ?", key);
+    });
+    await ledger.settle(id, { by: "refused" });
+    const { session } = await signedInWithRole(idp, "admin");
+    const { core } = await openRpc(session, { coreEnv });
+    const admin = core.authenticate();
+
+    const listed = await admin.models.held();
+    const charged = await admin.models.resolveHeld(id, "charge");
+    const released = await admin.models.resolveHeld(id, "release");
+
+    expect({
+      listed: listed
+        .filter((held) => held.id === id)
+        .map(({ releaseOnly }) => releaseOnly),
+      charged,
+      released,
+    }).toStrictEqual({
+      listed: [true],
+      charged: { state: "release_only" },
+      released: { state: "decided", how: "release", amount: 0 },
     });
   });
 
