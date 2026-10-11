@@ -530,10 +530,13 @@ const newVersion = (): string =>
 const base64Encode = (text: string): string =>
   btoa(String.fromCodePoint(...new TextEncoder().encode(text)));
 
-/** A list cursor's key: what `base64Encode` made of it, or a 400. */
+/**
+ * A list cursor's key: what `base64Encode` made of it, or a 400. A byte
+ * order mark it starts with is part of the key, so it's kept.
+ */
 const cursorKey = (cursor: string): string => {
   try {
-    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
       base64Bytes(cursor)
     );
   } catch {
@@ -620,36 +623,17 @@ interface ListGroup {
   lastKey: string;
 }
 
-/**
- * A list page's entries from `rows` in key order: up to `limit` of them,
- * and whether there are more. Keys sharing a delimited prefix are next to
- * each other, so each group ends where the next begins, and only the rows
- * of this page and the first of the next are read.
- */
-const groupsOf = (
-  rows: Iterable<ObjectRow>,
+/** The delimited prefix `key` falls under, past the list's `prefix`. */
+const delimitedPrefixOf = (
+  key: string,
   prefix: string,
-  delimiter: string | undefined,
-  limit: number
-): { groups: ListGroup[]; truncated: boolean } => {
-  const groups: ListGroup[] = [];
-  for (const row of rows) {
-    const at =
-      delimiter === undefined ? -1 : row.key.indexOf(delimiter, prefix.length);
-    const delimited =
-      delimiter === undefined || at === -1
-        ? undefined
-        : row.key.slice(0, at + delimiter.length);
-    const current = groups.at(-1);
-    if (delimited !== undefined && current?.prefix === delimited) {
-      current.lastKey = row.key;
-    } else if (groups.length === limit) {
-      return { groups, truncated: true };
-    } else {
-      groups.push({ prefix: delimited, row, lastKey: row.key });
-    }
+  delimiter: string | undefined
+): string | undefined => {
+  if (delimiter === undefined) {
+    return undefined;
   }
-  return { groups, truncated: false };
+  const at = key.indexOf(delimiter, prefix.length);
+  return at === -1 ? undefined : key.slice(0, at + delimiter.length);
 };
 
 /** One bucket: a SQLite Durable Object that answers R2's client. */
@@ -979,6 +963,62 @@ export class R2Store extends DurableObject<R2Env> {
     }
   }
 
+  /**
+   * A list page's entries in key order: up to `limit` of them, and whether
+   * there are more. The prefix's keys are one range of the primary key,
+   * read in order. A delimited prefix is one entry, so the read seeks past
+   * all of its keys: a page reads about one row per entry, however many
+   * objects each prefix holds.
+   */
+  #groups(
+    prefix: string,
+    startAfter: string | undefined,
+    delimiter: string | undefined,
+    limit: number
+  ): { groups: ListGroup[]; truncated: boolean } {
+    const { sql } = this.ctx.storage;
+    const groups: ListGroup[] = [];
+    let after = startAfter;
+    for (;;) {
+      const { sql: where, bindings } = keyRange(prefix, after);
+      let seekTo: string | undefined;
+      for (const row of sql.exec<ObjectRow>(
+        `SELECT * FROM objects WHERE ${where} ORDER BY key`,
+        ...bindings
+      )) {
+        if (groups.length === limit) {
+          return { groups, truncated: true };
+        }
+        const delimited = delimitedPrefixOf(row.key, prefix, delimiter);
+        if (delimited === undefined) {
+          groups.push({ row, lastKey: row.key });
+        } else {
+          seekTo = this.#lastKeyUnder(delimited);
+          groups.push({ prefix: delimited, row, lastKey: seekTo });
+          break;
+        }
+      }
+      if (seekTo === undefined) {
+        return { groups, truncated: false };
+      }
+      after = seekTo;
+    }
+  }
+
+  /** The last key starting with `prefix`: one seek of the primary key. */
+  #lastKeyUnder(prefix: string): string {
+    const end = prefixEnd(prefix);
+    const [row] = this.ctx.storage.sql
+      .exec<{ last: string }>(
+        end === undefined
+          ? "SELECT max(key) AS last FROM objects WHERE key >= ?"
+          : "SELECT max(key) AS last FROM objects WHERE key >= ? AND key < ?",
+        ...(end === undefined ? [prefix] : [prefix, end])
+      )
+      .toArray();
+    return row?.last ?? prefix;
+  }
+
   #list(request: R2Request) {
     const prefix = request.prefix ?? "";
     let limit = request.limit ?? maxListKeys;
@@ -997,14 +1037,12 @@ export class R2Store extends DurableObject<R2Env> {
       request.delimiter === undefined || request.delimiter === ""
         ? undefined
         : request.delimiter;
-    // The prefix's keys are one range of the primary key, read in order:
-    // a page reads its own rows and the first of the next, no more.
-    const { sql: where, bindings } = keyRange(prefix, startAfter);
-    const rows = this.ctx.storage.sql.exec<ObjectRow>(
-      `SELECT * FROM objects WHERE ${where} ORDER BY key`,
-      ...bindings
+    const { groups, truncated } = this.#groups(
+      prefix,
+      startAfter,
+      delimiter,
+      limit
     );
-    const { groups, truncated } = groupsOf(rows, prefix, delimiter, limit);
     const withHttp = include.includes(0);
     const withCustom = include.includes(1);
     const objects = groups

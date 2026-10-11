@@ -141,6 +141,21 @@ const run = async (env, step) => {
       await writer.write(new Uint8Array(step.sent).fill(1));
       return await put;
     }
+    case "pageAll": {
+      // Lists page by page to the end: each page's keys and prefixes.
+      const pages = [];
+      let cursor;
+      do {
+        const listed = await bucket.list({ ...step.options, ...(cursor === undefined ? {} : { cursor }) });
+        pages.push([...listed.objects.map(({ key }) => key), ...listed.delimitedPrefixes]);
+        cursor = listed.truncated ? listed.cursor : undefined;
+      } while (cursor !== undefined && pages.length < 100);
+      return pages;
+    }
+    case "putMany": {
+      for (const key of step.keys) await bucket.put(key, key);
+      return step.keys.length;
+    }
     case "expected":
       return { size: step.size, sha256: await sha256(generated(step.size)) };
   }
@@ -172,7 +187,9 @@ type Step = Record<string, unknown> & {
     | "expected"
     | "getWhileReplaced"
     | "racePuts"
-    | "putStalled";
+    | "putStalled"
+    | "pageAll"
+    | "putMany";
   bucket?: "FILES" | "OTHER";
 };
 
@@ -567,6 +584,59 @@ describe("the on-prem R2 service", () => {
       delete: true,
       kept: { key: "k" },
     });
+  });
+
+  it("pages through keys starting with a byte order mark, to the end", async () => {
+    const { run } = await serve();
+    const keys = ["\u{FEFF}a", "\u{FEFF}b"];
+    const pages = values(
+      await run([
+        ...keys.map(putItself),
+        { op: "pageAll", bucket: "FILES", options: { limit: 1 } },
+      ])
+    ).at(-1);
+    expect(pages).toStrictEqual([["\u{FEFF}a"], ["\u{FEFF}b"]]);
+  });
+
+  it("pages through delimited prefixes with many objects under each", async () => {
+    const { run } = await serve();
+    const days = ["2026-10-01", "2026-10-02", "2026-10-03"];
+    const keys = [
+      ...days.flatMap((day) =>
+        Array.from(
+          { length: 50 },
+          (_, i) => `kept/${day}/app/${String(i).padStart(3, "0")}`
+        )
+      ),
+      "kept/loose",
+    ];
+    const results = values(
+      await run([
+        { op: "putMany", bucket: "FILES", keys },
+        {
+          op: "pageAll",
+          bucket: "FILES",
+          options: { prefix: "kept/", delimiter: "/", limit: 1 },
+        },
+        {
+          op: "pageAll",
+          bucket: "FILES",
+          options: { prefix: "kept/", delimiter: "/", limit: 2 },
+        },
+      ])
+    );
+    expect(results.slice(1)).toStrictEqual([
+      [
+        ["kept/2026-10-01/"],
+        ["kept/2026-10-02/"],
+        ["kept/2026-10-03/"],
+        ["kept/loose"],
+      ],
+      [
+        ["kept/2026-10-01/", "kept/2026-10-02/"],
+        ["kept/loose", "kept/2026-10-03/"],
+      ],
+    ]);
   });
 
   it("deletes one key or many", async () => {
