@@ -1,4 +1,9 @@
-import { allowsNull, indexBase } from "@grasp-os/sdk/host";
+import type { ValueDescriptor } from "@grasp-os/sdk";
+import {
+  allowsNull,
+  indexBase,
+  schemaFromDescriptor,
+} from "@grasp-os/sdk/host";
 import type {
   IndexBase,
   ManifestTable,
@@ -72,6 +77,20 @@ import type { PhysicalIndex } from "./store-indexes.ts";
 // - A caller reads a schema the store doesn't hold, or claims a role: the
 //   schema hash and roles are core's (`ReadScope`), and an unknown hash is
 //   refused (`data.unknown_schema`).
+//
+// What this module trusts, and who answers for it:
+//
+// - `ReadScope` (principal, roles, schema hash, consumer) is taken as
+//   given: only core holds the store's binding, and core must build the
+//   scope for each invocation from its own records, never from what App
+//   code sends. That is a hard requirement on the operation boundary
+//   (GRA-244).
+// - An older schema's access is the access a read under its hash gets: a
+//   table tightened from `appMembers` to `owner` in a newer schema is
+//   still read by members under the older hash. So the hash must be the
+//   consumer's own pinned manifest's (GRA-244), and a hash a newer
+//   access mode superseded must be retired once no consumer is pinned to
+//   it (GRA-246); this store keeps every hash it was handed until then.
 
 /** A store's record of one schema: what reads pinned to it are checked by. */
 export interface PinnedSchema {
@@ -235,36 +254,121 @@ export interface ReadRow extends Record<string, SqlStorageValue> {
   updated_at: number;
 }
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Whether `value` is of the JSON shape `descriptor` describes, by kind. */
+const shapeFits = (value: unknown, descriptor: ValueDescriptor): boolean => {
+  if (descriptor.kind === "object" || descriptor.kind === "record") {
+    return isPlainObject(value);
+  }
+  if (descriptor.kind === "array") {
+    return Array.isArray(value);
+  }
+  return !isPlainObject(value) && !Array.isArray(value);
+};
+
+/**
+ * `value` as `descriptor` (a pinned schema's) has it, at every depth:
+ * objects keep only the keys they declare, with their defaults where a
+ * defaulted key is missing; records, arrays and unions project what they
+ * hold. Keys a later schema stored are left out, however deep (spec
+ * 32.7); scalars are what they are.
+ */
+const projected = (value: unknown, descriptor: ValueDescriptor): unknown => {
+  if (value === null) {
+    return null;
+  }
+  if (descriptor.kind === "object") {
+    if (!isPlainObject(value)) {
+      return value;
+    }
+    const kept: Record<string, unknown> = {};
+    for (const [field, declared] of Object.entries(descriptor.fields)) {
+      if (Object.hasOwn(value, field)) {
+        kept[field] = projected(value[field], declared);
+      } else if (
+        declared.presence === "default" &&
+        declared.defaultValue !== undefined
+      ) {
+        kept[field] = declared.defaultValue;
+      }
+    }
+    return kept;
+  }
+  if (descriptor.kind === "record") {
+    return isPlainObject(value)
+      ? Object.fromEntries(
+          Object.entries(value).map(([key, item]) => [
+            key,
+            projected(item, descriptor.value),
+          ])
+        )
+      : value;
+  }
+  if (descriptor.kind === "array") {
+    return Array.isArray(value)
+      ? value.map((item: unknown) => projected(item, descriptor.item))
+      : value;
+  }
+  if (descriptor.kind === "union") {
+    // The first member of the value's shape whose projection validates;
+    // the first of its shape otherwise.
+    const candidates = descriptor.members.filter((member) =>
+      shapeFits(value, member)
+    );
+    if (candidates.length <= 1) {
+      const [only] = candidates;
+      return only === undefined ? value : projected(value, only);
+    }
+    for (const member of candidates) {
+      const projection = projected(value, member);
+      const checked = schemaFromDescriptor(JSON.stringify(member))[
+        "~standard"
+      ].validate(projection);
+      if (!(checked instanceof Promise) && checked.issues === undefined) {
+        return projection;
+      }
+    }
+    return projected(value, candidates[0] ?? descriptor);
+  }
+  return value;
+};
+
+/** `stored` fields as the declared `fields` have them (`projected`). */
+const projectedFields = (
+  stored: Readonly<Record<string, unknown>>,
+  fields: Readonly<Record<string, ValueDescriptor>>
+): Record<string, unknown> => {
+  const projection = projected(stored, {
+    descriptorVersion: 1,
+    presence: "required",
+    nullable: false,
+    kind: "object",
+    fields,
+  });
+  return isPlainObject(projection) ? projection : {};
+};
+
 /**
  * A stored record as the pinned table has it: its managed fields, then
- * each field the table declares, with its default where the record lacks
- * a defaulted field; fields the table doesn't declare are left out.
+ * its declared fields, projected at every depth (`projected`).
  */
 const documentOf = (
   table: ReadTable,
   row: ReadRow,
   valueJson: string
-): ReadDocument => {
-  const stored = storedFieldsSchema.parse(JSON.parse(valueJson));
-  const document: ReadDocument = {
-    _id: row.record_id,
-    _ownerId: row.owner_id,
-    _rev: row.revision,
-    _createdAt: row.created_at,
-    _updatedAt: row.updated_at,
-  };
-  for (const [field, descriptor] of Object.entries(table.declared.fields)) {
-    if (Object.hasOwn(stored, field)) {
-      document[field] = stored[field];
-    } else if (
-      descriptor.presence === "default" &&
-      descriptor.defaultValue !== undefined
-    ) {
-      document[field] = descriptor.defaultValue;
-    }
-  }
-  return document;
-};
+): ReadDocument => ({
+  _id: row.record_id,
+  _ownerId: row.owner_id,
+  _rev: row.revision,
+  _createdAt: row.created_at,
+  _updatedAt: row.updated_at,
+  ...projectedFields(
+    storedFieldsSchema.parse(JSON.parse(valueJson)),
+    table.declared.fields
+  ),
+});
 
 /** What the scan has seen, against its bounds. */
 interface Scan {
@@ -333,43 +437,51 @@ interface Plan {
   readonly filtered: boolean;
 }
 
+/** What a plan selects, besides a record's managed fields. */
+export interface PlanOptions {
+  /** Whether the terminal needs documents. */
+  readonly documents: boolean;
+  /** The declared field an aggregate reads, as `agg`. */
+  readonly aggregate?: string;
+}
+
 /**
  * The one statement `query` runs on `table` for `scope`: through the
  * index it names (`INDEXED BY`), the table, the owner when the table is
- * read by owner only, the index range and `extra` (a cursor's seek) in
- * its WHERE, the filter as a computed column, ordered along the index and
- * limited to one entry past the scan bound. Documents are selected only
- * when `documents` says the terminal needs them.
+ * read by owner only and the index range in its WHERE, the filter as a
+ * computed column, ordered along the index and limited to one entry past
+ * the scan bound. Documents reach JavaScript only when the terminal needs
+ * them; their size is counted whenever SQLite reads them.
  */
 export const planQuery = (
   pinned: PinnedSchema,
   scope: ReadScope,
   table: ReadTable,
   query: QueryRequest,
-  documents: boolean,
-  extra?: (access: Access, direction: "ASC" | "DESC") => Fragment
+  { documents, aggregate }: PlanOptions
 ): Plan => {
   const access = accessOf(pinned, table, query);
   const filter =
     query.filter === null ? null : filterSql(typesOf(table), query.filter);
   const direction = query.order === "desc" ? "DESC" : "ASC";
-  const seek = extra?.(access, direction);
-  const reads = documents || filter !== null;
+  const reads = documents || filter !== null || aggregate !== undefined;
   const columns = [
     "record_id",
     "owner_id",
     "revision",
     "created_at",
     "updated_at",
-    ...(reads
-      ? ["value_json", "length(CAST(value_json AS BLOB)) AS bytes"]
-      : []),
+    ...(documents ? ["value_json"] : []),
+    ...(reads ? ["length(CAST(value_json AS BLOB)) AS bytes"] : []),
     ...(filter === null ? [] : [`${filter.sql} AS matched`]),
+    ...(aggregate === undefined
+      ? []
+      : [`${fieldExpression(aggregate)} AS agg`]),
   ];
   const where = [
     `table_id = ${tableIdLiteral(table.tableId)}`,
     ...(table.ownerScoped ? ["owner_id = ?"] : []),
-    ...[access.where.sql, seek?.sql ?? ""].filter((term) => term !== ""),
+    ...(access.where.sql === "" ? [] : [access.where.sql]),
   ];
   const order = access.order.map((column) => `${column} ${direction}`);
   return {
@@ -379,7 +491,6 @@ export const planQuery = (
       ...(filter?.params ?? []),
       ...(table.ownerScoped ? [scope.principal] : []),
       ...access.where.params,
-      ...(seek?.params ?? []),
     ],
     filtered: filter !== null,
   };
@@ -442,39 +553,35 @@ export const documentsOf = (
   return documents;
 };
 
-/** The numeric value of declared field `field` in a document, or undefined. */
-const numberIn = (
-  field: string,
-  valueJson: string | undefined
-): number | undefined => {
-  if (valueJson === undefined) {
-    return undefined;
-  }
-  const value: unknown = storedFieldsSchema.parse(JSON.parse(valueJson))[field];
-  return typeof value === "number" ? value : undefined;
-};
-
-/** The sum, least or greatest value of `field` over every match. */
+/**
+ * The sum, least or greatest value of the aggregated field over every
+ * match, as SQLite read it (`agg`): values that are numbers only, never
+ * null (the sentinel) or a field left out. A result that isn't finite
+ * (a sum past the largest number) is refused, never answered.
+ */
 const aggregateOf = (
   operation: "sum" | "min" | "max",
-  field: string,
   matches: Iterable<Match>
 ): number | null => {
   let sum = 0;
   let least: number | null = null;
   let greatest: number | null = null;
-  for (const { valueJson } of matches) {
-    const value = numberIn(field, valueJson);
-    if (value !== undefined) {
+  for (const { row } of matches) {
+    const value = row.agg;
+    if (typeof value === "number" && Number.isFinite(value)) {
       sum += value;
       least = least === null ? value : Math.min(least, value);
       greatest = greatest === null ? value : Math.max(greatest, value);
     }
   }
-  if (operation === "sum") {
-    return sum;
+  let result: number | null = sum;
+  if (operation !== "sum") {
+    result = operation === "min" ? least : greatest;
   }
-  return operation === "min" ? least : greatest;
+  if (result !== null && !Number.isFinite(result)) {
+    throw dataErrors.create("data.aggregate_overflow");
+  }
+  return result;
 };
 
 /** How many matches there are. */
@@ -502,7 +609,8 @@ export const runQuery = (
   const counting =
     terminal.kind === "count" ||
     (terminal.kind === "aggregate" && terminal.operation === "count");
-  const plan = (): Plan => planQuery(pinned, scope, table, query, !counting);
+  const plan = (): Plan =>
+    planQuery(pinned, scope, table, query, { documents: !counting });
   switch (terminal.kind) {
     case "take": {
       // Planned even for none, so a query that isn't valid is refused.
@@ -550,8 +658,13 @@ export const runQuery = (
       }
       return aggregateOf(
         terminal.operation,
-        terminal.field,
-        matchesOf(sql, plan())
+        matchesOf(
+          sql,
+          planQuery(pinned, scope, table, query, {
+            documents: false,
+            aggregate: terminal.field,
+          })
+        )
       );
     }
     case "paginate": {

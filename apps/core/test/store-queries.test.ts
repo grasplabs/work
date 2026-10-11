@@ -1,11 +1,7 @@
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 import type { Id } from "@grasp-os/sdk";
 import { databaseReader } from "@grasp-os/sdk/database";
-import {
-  manifestText,
-  readSchemaManifest,
-  schemaManifest,
-} from "@grasp-os/sdk/host";
+import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
 import type { AccessMode } from "@grasp-os/sdk/host";
 import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
@@ -18,8 +14,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import { planIndexes } from "../src/store-indexes.ts";
-import { planQuery, readableTable } from "../src/store-queries.ts";
+import { StoreHost } from "../src/store-host.ts";
 
 // Reads of a business store through core's way in and the store's Durable
 // Object: what `ctx.db` (sdk/src/database.ts) asks, as the store answers
@@ -174,6 +169,12 @@ const untypedRead = (request: unknown): ReadRequest =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- deliberately ill-typed input
   request as ReadRequest;
 
+/** Field `field` of a record a read answered, or undefined. */
+const fieldOf = (answer: unknown, field: string): unknown =>
+  typeof answer === "object" && answer !== null && !Array.isArray(answer)
+    ? Object.getOwnPropertyDescriptor(answer, field)?.value
+    : undefined;
+
 /** The titles of notes, in the order read. */
 const titlesOf = (notes: readonly { title: string }[]): string[] =>
   notes.map(({ title }) => title);
@@ -182,7 +183,8 @@ const titlesOf = (notes: readonly { title: string }[]): string[] =>
 const insertMany = async (
   { store, tableId }: Fixture,
   count: number,
-  document: StoreFields
+  document: StoreFields,
+  owner = "ada"
 ): Promise<void> => {
   await runInDurableObject(
     env.DATA_STORES.getByName(store.id),
@@ -190,9 +192,10 @@ const insertMany = async (
       const text = JSON.stringify(document);
       for (let index = 0; index < count; index += 1) {
         state.storage.sql.exec(
-          "INSERT INTO sdk_records (table_id, record_id, owner_id, revision, created_at, updated_at, value_json, schema_hash) VALUES (?, ?, 'ada', 1, ?, ?, ?, ?)",
+          "INSERT INTO sdk_records (table_id, record_id, owner_id, revision, created_at, updated_at, value_json, schema_hash) VALUES (?, ?, ?, 1, ?, ?, ?, ?)",
           tableId,
-          `bulk-${String(index).padStart(6, "0")}`,
+          `bulk-${owner}-${String(index).padStart(6, "0")}`,
+          owner,
           index,
           index,
           text,
@@ -204,44 +207,19 @@ const insertMany = async (
 };
 
 /**
- * SQLite's plan for the statement the store runs for `query`, planned
- * exactly as the store plans it, from the store's own records.
+ * SQLite's plan for the statement the store runs for `query`, planned by
+ * the store's own host, from its own records.
  */
 const planOf = async (
-  { store, text }: Fixture,
+  { store }: Fixture,
   scope: ReadScope,
   query: QueryRequest
-): Promise<string> => {
-  const { manifest } = readSchemaManifest(text);
-  return await runInDurableObject(
+): Promise<string> =>
+  await runInDurableObject(
     env.DATA_STORES.getByName(store.id),
-    async (_instance, state) => {
-      const tableIds = Object.fromEntries(
-        state.storage.sql
-          .exec<{ name: string; id: string }>(
-            "SELECT name, table_id AS id FROM sdk_tables"
-          )
-          .toArray()
-          .map(({ name, id }) => [name, id])
-      );
-      const pinned = {
-        manifest,
-        tableIds,
-        indexes: await planIndexes(manifest, tableIds),
-      };
-      const table = readableTable(pinned, scope, query.table);
-      const plan = planQuery(pinned, scope, table, query, true);
-      return state.storage.sql
-        .exec<{ detail: string }>(
-          `EXPLAIN QUERY PLAN ${plan.statement}`,
-          ...plan.params
-        )
-        .toArray()
-        .map(({ detail }) => detail)
-        .join("\n");
-    }
+    async (_instance, state) =>
+      await new StoreHost(state, env).explain(store.id, scope, query)
   );
-};
 
 describe("owner-only tables", () => {
   it("answer every terminal from the caller's own records only", async () => {
@@ -635,6 +613,213 @@ describe("pinned schemas", () => {
         { title: "new", body: "text" },
         { title: "old", body: "" },
       ],
+    });
+  });
+});
+
+describe("more owners, more tables", () => {
+  it("never count another owner's records against the caller's bounds", async () => {
+    const fixture = await storeWith("owner");
+    await insertMany(
+      fixture,
+      queryMaxScannedEntries + 5,
+      { title: "theirs" },
+      "grace"
+    );
+    await insert(
+      fixture,
+      "ada",
+      { title: "a", rank: 1 },
+      { title: "b", rank: 2 }
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const found = await db.query("notes").collect();
+    expect({
+      collect: titlesOf(found).toSorted(),
+      count: await db.query("notes").count(),
+      filtered: await db.query("notes").filter({ title: "theirs" }).first(),
+      ranged: await db
+        .query("notes")
+        .withIndex("by_title", (range) => range.eq("title", "theirs"))
+        .count(),
+    }).toStrictEqual({
+      collect: ["a", "b"],
+      count: 2,
+      filtered: null,
+      ranged: 0,
+    });
+  });
+
+  it("find no record by an ID of another table", async () => {
+    const fixture = await storeWith("appMembers");
+    const claimed = await fixture.store.claim({
+      scope: {
+        principal: "ada",
+        resource: "notes-app",
+        binding: null,
+        contractId: "people.create",
+        contractVersion: 1,
+        operationKind: "mutation",
+      },
+      key: [crypto.randomUUID()],
+      inputHash: "c".repeat(64),
+      runId: null,
+      deadline: Date.now() + 60_000,
+    });
+    if (!("held" in claimed)) {
+      throw new Error("A new key found an outcome");
+    }
+    const {
+      inserted: [person],
+    } = await fixture.store.commit({
+      principal: { userId: "ada" },
+      schemaHash: fixture.schemaHash,
+      receipt: claimed.held,
+      writes: [{ op: "insert", table: "people", fields: { name: "Ada" } }],
+    });
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    expect({
+      asNote: await db.get("notes", idOf(person)),
+      asPerson: fieldOf(
+        await fixture.store.read(scopeOf(fixture.schemaHash), {
+          kind: "get",
+          table: "people",
+          id: person ?? "",
+          expectedRevision: null,
+        }),
+        "name"
+      ),
+    }).toStrictEqual({ asNote: null, asPerson: "Ada" });
+  });
+});
+
+describe("scan and aggregate edges", () => {
+  it(`answer at exactly ${queryMaxScannedEntries} entries`, async () => {
+    const fixture = await storeWith("appMembers");
+    await insertMany(fixture, queryMaxScannedEntries, { title: "same" });
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    await expect(db.query("notes").count()).resolves.toBe(
+      queryMaxScannedEntries
+    );
+  });
+
+  it("answer null for the least or greatest of nothing, and refuse what isn't finite or numeric", async () => {
+    const fixture = await storeWith("appMembers");
+    await insert(
+      fixture,
+      "ada",
+      { title: "a", rank: 1e308 },
+      { title: "b", rank: 1e308 }
+    );
+    const scope = scopeOf(fixture.schemaHash);
+    const db = dbOf(fixture, scope);
+    const none = db.query("notes").filter({ title: "missing" });
+    expect({
+      min: await none.aggregate({ operation: "min", field: "rank" }),
+      max: await none.aggregate({ operation: "max", field: "rank" }),
+      sumOfNone: await none.aggregate({ operation: "sum", field: "rank" }),
+      overflow: await refusal(
+        db.query("notes").aggregate({ operation: "sum", field: "rank" })
+      ),
+      text: await refusal(
+        fixture.store.read(
+          scope,
+          queryRequest({
+            terminal: { kind: "aggregate", operation: "sum", field: "title" },
+          })
+        )
+      ),
+    }).toStrictEqual({
+      min: null,
+      max: null,
+      sumOfNone: 0,
+      overflow: "data.aggregate_overflow",
+      text: "data.invalid_query",
+    });
+  });
+});
+
+describe("what a read changes", () => {
+  it("creates nothing in a store no schema was handed", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const refused = await refusal(
+      store.read(scopeOf("a".repeat(64)), queryRequest({}))
+    );
+    const rows = await runInDurableObject(
+      env.DATA_STORES.getByName(store.id),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ count: number }>("SELECT count(*) AS count FROM sdk_store")
+          .one().count
+    );
+    expect({ refused, rows }).toStrictEqual({
+      refused: "data.unknown_schema",
+      rows: 0,
+    });
+  });
+
+  it("asks for an index the store doesn't hold, never scanning instead", async () => {
+    const fixture = await storeWith("appMembers");
+    await runInDurableObject(
+      env.DATA_STORES.getByName(fixture.store.id),
+      (_instance, state) => {
+        for (const { name } of state.storage.sql
+          .exec<{ name: string }>(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'sdk\\_ix\\_%' ESCAPE '\\'"
+          )
+          .toArray()) {
+          state.storage.sql.exec(`DROP INDEX ${name}`);
+        }
+      }
+    );
+    await expect(
+      refusal(
+        fixture.store.read(
+          scopeOf(fixture.schemaHash),
+          queryRequest({ index: "by_title" })
+        )
+      )
+    ).resolves.toBe("data.index_required");
+  });
+});
+
+describe("projection, at every depth", () => {
+  it("leaves out nested keys the pinned schema doesn't declare", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const pinned = await store.defineTables(
+      memberNotes({
+        title: v.string(),
+        meta: v.object({ source: v.string() }),
+        parts: v.array(v.object({ label: v.string() })),
+        tags: v.record(v.object({ color: v.string() })),
+      })
+    );
+    const fixture: Fixture = {
+      store,
+      schemaHash: pinned.schemaHash,
+      text: "",
+      tableId: pinned.tables.notes ?? "",
+    };
+    // What a later schema could have stored beside the pinned fields.
+    await insertMany(fixture, 1, {
+      title: "a",
+      meta: { source: "mail", secret: "s" },
+      parts: [{ label: "x", hidden: true }],
+      tags: { red: { color: "red", internal: 1 } },
+    });
+    const answer = await store.read(
+      scopeOf(pinned.schemaHash),
+      queryRequest({})
+    );
+    const note = Array.isArray(answer) ? answer[0] : undefined;
+    expect({
+      meta: fieldOf(note, "meta"),
+      parts: fieldOf(note, "parts"),
+      tags: fieldOf(note, "tags"),
+    }).toStrictEqual({
+      meta: { source: "mail" },
+      parts: [{ label: "x" }],
+      tags: { red: { color: "red" } },
     });
   });
 });
