@@ -160,6 +160,29 @@ describe("the bounds of a value", () => {
     expect(passedBound([doubled("x", 30)], roomy)).toBe("size");
   });
 
+  it("stops reading a wide value once past the size, not after reading all of it", () => {
+    const wide = new Map<number, number>();
+    for (let key = 0; key < 1_000_000; key += 1) {
+      wide.set(key, key);
+    }
+    // Counts the entries the walk reads, through the map's own iterator.
+    let read = 0;
+    const entries = wide.entries();
+    Object.defineProperty(wide, Symbol.iterator, {
+      value: () => ({
+        next: () => {
+          read += 1;
+          return entries.next();
+        },
+      }),
+    });
+    const passed = passedBound([wide], { depth: 32, size: 1000 });
+    expect({ passed, readAboutTheBound: read <= 1000 }).toStrictEqual({
+      passed: "size",
+      readAboutTheBound: true,
+    });
+  });
+
   it("refuses a value that holds itself", () => {
     const loop: unknown[] = [];
     loop.push(loop);

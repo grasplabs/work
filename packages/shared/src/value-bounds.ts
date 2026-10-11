@@ -82,59 +82,59 @@ const prototypesOf = (names: readonly string[]): Set<unknown> => {
 const leafPrototypes = prototypesOf(leafConstructors);
 const errorPrototypes = prototypesOf(errorConstructors);
 
-/** What an object holds that is walked, and what it counts by itself. */
-interface Held {
-  /** Its keys' lengths, and an error's name and message, toward the size. */
-  size: number;
-  /** The values it holds, each a level deeper. */
-  held: unknown[];
-}
+/**
+ * Takes one value an object holds, and what its key counts toward the
+ * size; answers whether to go on to the next.
+ */
+type Visit = (held: unknown, keySize: number) => boolean;
 
-/** An object's own enumerable keys and values; a getter holds nothing. */
-const ownEntries = (value: object): Held => {
-  let size = 0;
-  const held: unknown[] = [];
-  for (const key of Object.keys(value)) {
-    size += key.length;
-    const property = Reflect.getOwnPropertyDescriptor(value, key);
-    if (property !== undefined && "value" in property) {
-      held.push(property.value);
+/** Visits a property's value, if it has one: a getter holds nothing. */
+const visitProperty = (value: object, key: string, visit: Visit): boolean => {
+  const property = Reflect.getOwnPropertyDescriptor(value, key);
+  return property !== undefined && "value" in property
+    ? visit(property.value, key.length)
+    : true;
+};
+
+/** Visits an object's own enumerable keys and values, until told to stop. */
+const visitOwn = (value: object, visit: Visit): void => {
+  // `for...in`, not a list of all the keys made first; the prototype is
+  // `Object.prototype` or `null`, so it adds no key, and inherited ones
+  // are passed over anyway.
+  for (const key in value) {
+    if (Object.hasOwn(value, key) && !visitProperty(value, key, visit)) {
+      return;
     }
   }
-  return { size, held };
 };
 
 /**
- * What an error holds: every own data property, enumerable or not (Cap'n
- * Web gives an `AggregateError` its `errors`, and an error its `cause`,
- * as properties `Object.keys` doesn't list), each a level deeper, but its
- * message, which counts toward its size at its own level with its name,
- * and its stack, which isn't counted: the runtime makes one up for an
- * error the sender sent none for.
+ * Visits what an error holds: every own data property, enumerable or not
+ * (Cap'n Web gives an `AggregateError` its `errors`, and an error its
+ * `cause`, as properties `Object.keys` doesn't list), but its message,
+ * counted at its own level (`ownSize`), and its stack, which isn't
+ * counted: the runtime makes one up for an error the sender sent none for.
  */
-const errorHeld = (error: Error): Held => {
-  let size = error.name.length + error.message.length;
-  const held: unknown[] = [];
+const visitError = (error: Error, visit: Visit): void => {
   for (const key of Object.getOwnPropertyNames(error)) {
-    if (key !== "message" && key !== "stack") {
-      size += key.length;
-      const property = Reflect.getOwnPropertyDescriptor(error, key);
-      if (property !== undefined && "value" in property) {
-        held.push(property.value);
-      }
+    if (
+      key !== "message" &&
+      key !== "stack" &&
+      !visitProperty(error, key, visit)
+    ) {
+      return;
     }
   }
-  return { size, held };
 };
 
 /**
- * What an object holds, as Cap'n Web and structured clone carry it: an
- * array's elements, a map's keys and values, a set's members, a plain
- * object's own enumerable keys and values, an error's as `errorHeld`
- * says. A leaf holds nothing; an object of an unknown kind is
- * `undefined`.
+ * Visits what an object holds, as Cap'n Web and structured clone carry
+ * it, one value at a time, until `visit` says to stop: an array's
+ * elements, a map's keys and values, a set's members, a plain object's
+ * own enumerable keys and values, an error's as `visitError` says. A leaf
+ * holds nothing. Whether it is of a kind that is measured.
  */
-const heldBy = (value: object): Held | undefined => {
+const visitHeld = (value: object, visit: Visit): boolean => {
   // By its own prototype, exactly a built-in one, and nothing it says of
   // itself. A value's prototype can be set to another value (Cap'n Web
   // puts a referred value in place under the key it was sent as,
@@ -143,33 +143,56 @@ const heldBy = (value: object): Held | undefined => {
   // leaf.
   const prototype: unknown = Reflect.getPrototypeOf(value);
   if (Array.isArray(value)) {
-    return prototype === Array.prototype ? { size: 0, held: value } : undefined;
+    if (prototype !== Array.prototype) {
+      return false;
+    }
+    for (const held of value) {
+      if (!visit(held, 0)) {
+        break;
+      }
+    }
+    return true;
   }
   if (value instanceof Map) {
     if (prototype !== Map.prototype) {
-      return undefined;
+      return false;
     }
-    const held: unknown[] = [];
-    for (const [key, inner] of value) {
-      held.push(key, inner);
+    for (const [key, held] of value) {
+      if (!(visit(key, 0) && visit(held, 0))) {
+        break;
+      }
     }
-    return { size: 0, held };
+    return true;
   }
   if (value instanceof Set) {
-    return prototype === Set.prototype
-      ? { size: 0, held: [...value] }
-      : undefined;
+    if (prototype !== Set.prototype) {
+      return false;
+    }
+    for (const held of value) {
+      if (!visit(held, 0)) {
+        break;
+      }
+    }
+    return true;
   }
   if (value instanceof Error) {
-    return errorPrototypes.has(prototype) ? errorHeld(value) : undefined;
+    if (!errorPrototypes.has(prototype)) {
+      return false;
+    }
+    visitError(value, visit);
+    return true;
   }
   if (prototype === Object.prototype || prototype === null) {
-    return ownEntries(value);
+    visitOwn(value, visit);
+    return true;
   }
-  return leafPrototypes.has(prototype) ? { size: 0, held: [] } : undefined;
+  return leafPrototypes.has(prototype);
 };
 
-/** What a value counts toward a size by itself, apart from what it holds. */
+/**
+ * What a value counts toward a size by itself, apart from what it holds:
+ * a string its length, bytes theirs, an error its name and message.
+ */
 const ownSize = (value: unknown): number => {
   if (typeof value === "string") {
     return 1 + value.length;
@@ -177,56 +200,80 @@ const ownSize = (value: unknown): number => {
   if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
     return 1 + value.byteLength;
   }
+  if (
+    value instanceof Error &&
+    errorPrototypes.has(Reflect.getPrototypeOf(value))
+  ) {
+    return 1 + value.name.length + value.message.length;
+  }
   return 1;
+};
+
+/** Where a walk is: the values waiting, and the size counted so far. */
+interface Walk {
+  readonly pending: { value: unknown; level: number }[];
+  size: number;
+}
+
+/**
+ * Queues what `value`, at `level`, holds, one member at a time, and
+ * stops at the first that passes a bound: the bound it passed, `kind` for
+ * an object of no kind measured, or nothing.
+ */
+const queueHeld = (
+  walk: Walk,
+  value: object,
+  level: number,
+  bounds: ValueBounds
+): PassedBound | undefined => {
+  let passed: PassedBound | undefined;
+  const measured = visitHeld(value, (held, keySize) => {
+    if (level >= bounds.depth) {
+      passed = "depth";
+      return false;
+    }
+    walk.size += keySize;
+    walk.pending.push({ value: held, level: level + 1 });
+    // Each value waiting counts at least one toward the size.
+    if (walk.size + walk.pending.length > bounds.size) {
+      passed = "size";
+      return false;
+    }
+    return true;
+  });
+  return measured ? passed : "kind";
 };
 
 /**
  * The bound `values` pass together, if any: each is measured from level
  * 1, and their sizes add up. Walked with a stack of its own, one value at
- * a time; a value held twice counts twice, as it would travel. A value
- * that holds itself passes the depth.
+ * a time, and an object's members one at a time too: it stops at the
+ * first that passes a bound, so a value costs no more to measure than its
+ * bounds, however wide. A value held twice counts twice, as it would
+ * travel. A value that holds itself passes the depth.
  */
 export const passedBound = (
   values: readonly unknown[],
   bounds: ValueBounds
 ): PassedBound | undefined => {
-  const pending: { value: unknown; level: number }[] = values.map((value) => ({
-    value,
-    level: 1,
-  }));
-  let size = 0;
-  while (pending.length > 0) {
-    const next = pending.pop();
+  const walk: Walk = {
+    pending: values.map((value) => ({ value, level: 1 })),
+    size: 0,
+  };
+  while (walk.pending.length > 0) {
+    const next = walk.pending.pop();
     if (next === undefined) {
       break;
     }
     const { value, level } = next;
-    size += ownSize(value);
-    if (size > bounds.size) {
+    walk.size += ownSize(value);
+    if (walk.size > bounds.size) {
       return "size";
     }
-    if (typeof value !== "object" || value === null) {
-      continue;
-    }
-    const contents = heldBy(value);
-    if (contents === undefined) {
-      return "kind";
-    }
-    const { held } = contents;
-    size += contents.size;
-    if (size > bounds.size) {
-      return "size";
-    }
-    if (held.length > 0 && level >= bounds.depth) {
-      return "depth";
-    }
-    // One at a time, not spread: a long array would pass too many
-    // arguments at once. Each counts at least one toward the size, so no
-    // more are pushed than the size has room for.
-    for (const inner of held) {
-      pending.push({ value: inner, level: level + 1 });
-      if (pending.length > bounds.size - size) {
-        return "size";
+    if (typeof value === "object" && value !== null) {
+      const passed = queueHeld(walk, value, level, bounds);
+      if (passed !== undefined) {
+        return passed;
       }
     }
   }

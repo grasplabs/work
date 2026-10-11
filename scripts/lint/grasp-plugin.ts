@@ -122,7 +122,8 @@ const noUnboundedRpcTarget = {
     const report = (node: Node): void => {
       context.report({ node, messageId: "reached" });
     };
-    // What this file calls the RpcTarget it imported, to tell a re-export.
+    // What this file calls the RpcTarget it imported, or either module as
+    // a namespace, to tell a re-export.
     const locals = new Set<unknown>();
     const reexports = {
       ExportAllDeclaration: (node: Node): void => {
@@ -149,6 +150,8 @@ const noUnboundedRpcTarget = {
         }
         for (const specifier of node.specifiers ?? []) {
           if (specifier.type === "ImportNamespaceSpecifier") {
+            // Exported, the namespace passes its RpcTarget on too.
+            locals.add(nameOf(specifier.local));
             if (!reexportsOnly) {
               report(node);
             }
