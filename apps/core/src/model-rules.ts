@@ -170,6 +170,7 @@ export interface Refusal {
     | "model.eu_only"
     | "model.sensitive_data"
     | "model.over_budget"
+    | "model.run_limit"
     | "model.budget_busy"
     | "model.unpriced"
     | "model.ledger_unavailable"

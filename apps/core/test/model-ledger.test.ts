@@ -9,6 +9,53 @@ import { allEvents } from "./audit-events.ts";
 // the gateway (models.ts) relies on when a request is admitted, settled,
 // lost or repeated. Each test has a ledger of its own.
 
+/** A run lineage's scope, by its root run, counted with no budget. */
+const lineageOf = (root: string): LedgerScope => ({
+  scope: "run",
+  key: root,
+  limitMicros: null,
+  alertMicros: null,
+  limitRequests: 100,
+  names: { run: root },
+});
+
+/** `rows` in order of their keys. */
+const byKey = <Row extends { key: string }>(rows: Row[] | undefined) =>
+  rows?.toSorted((one, other) => one.key.localeCompare(other.key));
+
+/**
+ * Makes request `id` as a release before periods were recorded left it:
+ * no period on its scopes, and its run's reservation on the run's monthly
+ * row (2400-01) instead of its lineage's.
+ */
+const asBeforePeriods = async (
+  ledger: ReturnType<typeof newLedger>,
+  id: string,
+  root: string
+): Promise<void> => {
+  await runInDurableObject(ledger, (_instance, state) => {
+    state.storage.sql.exec(
+      "UPDATE request_scopes SET period = NULL WHERE request_id = ?",
+      id
+    );
+    state.storage.sql.exec(
+      "UPDATE spend SET period = '2400-01' WHERE scope = 'run' AND key = ?",
+      root
+    );
+  });
+};
+
+/** A run's spend rows, every period's, in order of period. */
+const runRowsOf = async (ledger: ReturnType<typeof newLedger>, root: string) =>
+  await runInDurableObject(ledger, (_instance, state) =>
+    state.storage.sql
+      .exec<{ period: string; spentMicros: number; reservedMicros: number }>(
+        "SELECT period, spent_micros AS spentMicros, reserved_micros AS reservedMicros FROM spend WHERE scope = 'run' AND key = ? ORDER BY period",
+        root
+      )
+      .toArray()
+  );
+
 /** Values in order, as their JSON sorts. */
 const byJson = (one: unknown, other: unknown): number =>
   JSON.stringify(one).localeCompare(JSON.stringify(other));
@@ -137,6 +184,51 @@ describe("the model ledger", () => {
     expect(read).toStrictEqual({
       deployment: [{ key: "deployment", spentMicros: 0, reservedMicros: 90 }],
       user: [{ key: "ada", spentMicros: 0, reservedMicros: 90 }],
+    });
+  });
+
+  it("counts a run lineage's requests and spend across months, and gives back the count of a request never sent", async () => {
+    const ledger = newLedger();
+    const lineage = {
+      scope: "run",
+      key: "root",
+      limitMicros: 100,
+      alertMicros: null,
+      limitRequests: 2,
+      names: { run: "root" },
+    } as const;
+    const first = admission(10, [lineage]);
+    const unsent = admission(10, [lineage], { period: "2400-02" });
+
+    const counted = [
+      await ledger.admit(first),
+      await ledger.admit(unsent),
+      // Two requests made: none left, in any month.
+      await ledger.admit(admission(10, [lineage], { period: "2400-03" })),
+    ];
+    await ledger.settle(unsent.id, { by: "unsent" });
+    const afterUnsent = await ledger.admit(
+      admission(10, [lineage], { period: "2400-04" })
+    );
+    await ledger.settle(first.id, {
+      by: "usage",
+      tokens: { input: 60, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+    // Months on, its spend holds: 60 of 100 micros spent, 10 held.
+    const roomless = await ledger.admit(
+      admission(50, [{ ...lineage, key: "root", limitRequests: 5 }], {
+        period: "2400-05",
+      })
+    );
+
+    expect({ counted, afterUnsent, roomless }).toStrictEqual({
+      counted: [
+        { ok: true },
+        { ok: true },
+        { ok: false, scope: "run", requests: true },
+      ],
+      afterUnsent: { ok: true },
+      roomless: { ok: false, scope: "run" },
     });
   });
 
@@ -728,6 +820,276 @@ describe("the model ledger", () => {
         workflow: [{ key: workflow.key, spentMicros: 4, reservedMicros: 0 }],
       },
       audited: [[2, 0.000025, 0.00001, null, 0.00001]],
+    });
+  });
+
+  it("rebuilds a damaged run lineage from its open requests in every month when a person releases a held one, and flags no healthy lineage", async () => {
+    const ledger = newLedger();
+    const key = `lea-${crypto.randomUUID()}`;
+    const damaged = lineageOf(`root-${crypto.randomUUID()}`);
+    const healthy = lineageOf(`root-${crypto.randomUUID()}`);
+    const first = admission(30, [budget(1000, key), damaged, healthy], {
+      reconcileAt: Date.now() + 1000,
+    });
+    // The damaged lineage's other request, a month later.
+    const second = admission(10, [damaged], { period: "2400-02" });
+    await ledger.admit(first);
+    await ledger.admit(second);
+    // The damaged lineage should hold 40 for the two; damaged, it holds 5.
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE spend SET reserved_micros = 5 WHERE scope = 'run' AND key = ?",
+        damaged.key
+      );
+    });
+    // Settling the first takes the lineage's spend below nothing: held
+    // after three failed tries.
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runInDurableObject(ledger, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE requests SET reconcile_at = ? WHERE id = ?",
+          Date.now() - 1,
+          first.id
+        );
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runDurableObjectAlarm(ledger);
+    }
+    const listed = await ledger.quarantined(10);
+    const admin = {
+      type: "person",
+      userId: `admin-${crypto.randomUUID()}`,
+    } as const;
+
+    const released = await ledger.resolveQuarantined(
+      first.id,
+      "release",
+      admin
+    );
+    const holding = await ledger.spendOf("2400-01", ["user", "run"], 10);
+    const settled = await ledger.settle(second.id, {
+      by: "usage",
+      tokens: { input: 2, output: 2, cacheRead: 0, cacheWrite: 0 },
+    });
+    await runDurableObjectAlarm(ledger);
+    const later = await ledger.spendOf("2400-03", ["run"], 10);
+    const events = await allEvents();
+    expect({
+      listed: listed.map(({ id, releaseOnly }) => [id, releaseOnly]),
+      released: released.state,
+      holding: { user: holding.user, run: byKey(holding.run) },
+      settled,
+      after: byKey(later.run),
+      audited: events
+        .filter(({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin))
+        .map(({ detail }) => [
+          detail.damaged,
+          detail["damaged.0.scope"],
+          detail["damaged.0.key"],
+          detail["damaged.0.held"],
+          detail["damaged.0.rebuilt"],
+        ]),
+    }).toStrictEqual({
+      listed: [[first.id, true]],
+      released: "decided",
+      // The damaged lineage holds what the second still reserves, though it
+      // counts in another month; the healthy one released the first as usual.
+      holding: {
+        user: [{ key, spentMicros: 0, reservedMicros: 0 }],
+        run: byKey([
+          { key: damaged.key, spentMicros: 0, reservedMicros: 10 },
+          { key: healthy.key, spentMicros: 0, reservedMicros: 0 },
+        ]),
+      },
+      settled: { state: "settled", chargedMicros: 4 },
+      // A lineage's spend, read in any month.
+      after: byKey([
+        { key: damaged.key, spentMicros: 4, reservedMicros: 0 },
+        { key: healthy.key, spentMicros: 0, reservedMicros: 0 },
+      ]),
+      // Only the damaged lineage.
+      audited: [[1, "run", damaged.key, 0.000005, 0.00001]],
+    });
+  });
+
+  it("settles a request admitted before periods were recorded against its monthly rows, its run's too, and never a newer lineage's", async () => {
+    const ledger = newLedger();
+    const key = `lea-${crypto.randomUUID()}`;
+    const run = lineageOf(`root-${crypto.randomUUID()}`);
+    const workflow = {
+      scope: "workflow",
+      key: `flow-${crypto.randomUUID()}`,
+      limitMicros: null,
+      alertMicros: null,
+      names: {},
+    } as const;
+    const team = {
+      scope: "deployment",
+      key: "deployment",
+      limitMicros: null,
+      alertMicros: null,
+      names: {},
+    } as const;
+    const old = admission(30, [team, workflow, budget(1000, key), run]);
+    await ledger.admit(old);
+    await asBeforePeriods(ledger, old.id, run.key);
+    // The same run's next request, on its lineage's row.
+    const next = admission(40, [run]);
+    await ledger.admit(next);
+    const used = { input: 2, output: 2, cacheRead: 0, cacheWrite: 0 };
+
+    const oldSettled = await ledger.settle(old.id, {
+      by: "usage",
+      tokens: used,
+    });
+    const monthly = await ledger.spendOf(
+      "2400-01",
+      ["deployment", "workflow", "user"],
+      10
+    );
+    const runRows = await runRowsOf(ledger, run.key);
+    const nextSettled = await ledger.settle(next.id, {
+      by: "usage",
+      tokens: used,
+    });
+    const after = await runRowsOf(ledger, run.key);
+
+    expect({
+      oldSettled,
+      monthly: {
+        deployment: monthly.deployment,
+        workflow: monthly.workflow,
+        user: monthly.user,
+      },
+      runRows,
+      nextSettled,
+      after,
+    }).toStrictEqual({
+      oldSettled: { state: "settled", chargedMicros: 4 },
+      // Its month's rows settled: nothing held, what it used spent.
+      monthly: {
+        deployment: [{ key: "deployment", spentMicros: 4, reservedMicros: 0 }],
+        workflow: [{ key: workflow.key, spentMicros: 4, reservedMicros: 0 }],
+        user: [{ key, spentMicros: 4, reservedMicros: 0 }],
+      },
+      // Its run's monthly row settled; the lineage's still holds the next.
+      runRows: [
+        { period: "2400-01", spentMicros: 4, reservedMicros: 0 },
+        { period: "lineage", spentMicros: 0, reservedMicros: 40 },
+      ],
+      nextSettled: { state: "settled", chargedMicros: 4 },
+      after: [
+        { period: "2400-01", spentMicros: 4, reservedMicros: 0 },
+        { period: "lineage", spentMicros: 4, reservedMicros: 0 },
+      ],
+    });
+  });
+
+  it("frees what a held request admitted before periods were recorded reserved in its month when a person releases it, rebuilding from the others of its time", async () => {
+    const ledger = newLedger();
+    const key = `lea-${crypto.randomUUID()}`;
+    const run = lineageOf(`root-${crypto.randomUUID()}`);
+    const old = admission(30, [budget(1000, key), run]);
+    // Another of its time, still under way on the person's month.
+    const other = admission(10, [budget(1000, key)]);
+    await ledger.admit(old);
+    await ledger.admit(other);
+    await asBeforePeriods(ledger, old.id, run.key);
+    await asBeforePeriods(ledger, other.id, run.key);
+    // The person's spend should hold 40 for the two; damaged, it holds 5.
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE spend SET reserved_micros = 5 WHERE scope = 'user' AND key = ?",
+        key
+      );
+    });
+    // Held: its scopes' JSON can't be read to settle it.
+    await corrupt(ledger, "scopes", "not json", old.id);
+    await ledger.settle(old.id, { by: "unknown" });
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE requests SET reconcile_at = ? WHERE id = ?",
+        Date.now() - 1,
+        old.id
+      );
+    });
+    await runDurableObjectAlarm(ledger);
+    const listed = await ledger.quarantined(10);
+    const admin = {
+      type: "person",
+      userId: `admin-${crypto.randomUUID()}`,
+    } as const;
+
+    const released = await ledger.resolveQuarantined(old.id, "release", admin);
+    const user = await spendOf(ledger, key);
+    const runRows = await runRowsOf(ledger, run.key);
+
+    expect({
+      listed: listed.map(({ id, releaseOnly }) => [id, releaseOnly]),
+      released: released.state,
+      user,
+      runRows,
+    }).toStrictEqual({
+      listed: [[old.id, true]],
+      released: "decided",
+      // Rebuilt to what the other still reserves in that month.
+      user: { key, spentMicros: 0, reservedMicros: 10 },
+      runRows: [{ period: "2400-01", spentMicros: 0, reservedMicros: 0 }],
+    });
+  });
+
+  it("recreates a lost run lineage's spend as used up when a person releases a request held for it, so the lineage makes no more requests", async () => {
+    const ledger = newLedger();
+    const run = lineageOf(`root-${crypto.randomUUID()}`);
+    const held = admission(30, [run], { reconcileAt: Date.now() + 1000 });
+    await ledger.admit(held);
+    // Its spend row, and the count with it, is gone.
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "DELETE FROM spend WHERE scope = 'run' AND key = ?",
+        run.key
+      );
+    });
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runInDurableObject(ledger, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE requests SET reconcile_at = ? WHERE id = ?",
+          Date.now() - 1,
+          held.id
+        );
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runDurableObjectAlarm(ledger);
+    }
+    const admin = {
+      type: "person",
+      userId: `admin-${crypto.randomUUID()}`,
+    } as const;
+
+    const released = await ledger.resolveQuarantined(held.id, "release", admin);
+    const again = await ledger.admit(admission(1, [run]));
+    await runDurableObjectAlarm(ledger);
+    const rebuilt = await ledger.spendOf("2400-01", ["run"], 10);
+    const events = await allEvents();
+    expect({
+      released: released.state,
+      again,
+      lineage: rebuilt.run,
+      audited: events
+        .filter(({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin))
+        .map(({ detail }) => [
+          detail.damaged,
+          detail["damaged.0.held"],
+          detail["damaged.0.rebuilt"],
+          detail["damaged.0.requests"],
+        ]),
+    }).toStrictEqual({
+      released: "decided",
+      again: { ok: false, scope: "run", requests: true },
+      lineage: [{ key: run.key, spentMicros: 0, reservedMicros: 0 }],
+      audited: [[1, null, 0, 100]],
     });
   });
 
