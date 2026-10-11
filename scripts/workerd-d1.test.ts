@@ -28,8 +28,9 @@ const STARTUP_RETRY_MS = 50;
 
 /**
  * Runs the steps it's sent on its D1 bindings and answers each one's result.
- * A step is `{db, sql, params}` (one statement, `all()`), or
- * `{db, batch: [{sql, params}]}` (one `batch()`).
+ * A step is `{db, sql, params}` (one statement, `all()`, or `first()`,
+ * `raw()` or `run()` when it says so), or `{db, batch: [{sql, params}]}`
+ * (one `batch()`).
  */
 const testWorker = `
 const statement = (db, { sql, params = [] }) => db.prepare(sql).bind(...params);
@@ -49,6 +50,9 @@ export default {
           results.push({ ok: done.map(({ results, meta }) => ({ results, ...changed(meta) })) });
         } else if (step.first) {
           results.push({ ok: await statement(db, step).first() });
+        } else if (step.run) {
+          const { success, meta } = await statement(db, step).run();
+          results.push({ ok: { success, changes: meta.changes, lastRowId: meta.last_row_id } });
         } else if (step.raw) {
           results.push({ ok: await statement(db, step).raw() });
         } else {
@@ -82,6 +86,7 @@ interface Step {
   params?: unknown[];
   first?: boolean;
   raw?: boolean;
+  run?: boolean;
   batch?: { sql: string; params?: unknown[] }[];
 }
 
@@ -116,19 +121,20 @@ const migrationsDir = (files: Record<string, string>): string => {
 const waitUntilServing = async (
   url: string,
   workerd: ChildProcess,
+  stderr: () => string,
   attempt = 0
 ): Promise<void> => {
   if (workerd.exitCode !== null) {
-    throw new Error(`workerd exited (${workerd.exitCode})`);
+    throw new Error(`workerd exited (${workerd.exitCode}): ${stderr()}`);
   }
   if (attempt >= STARTUP_ATTEMPTS) {
-    throw new Error("workerd did not start");
+    throw new Error(`workerd did not start: ${stderr()}`);
   }
   try {
     await fetch(url, { method: "POST", body: "[]" });
   } catch {
     await sleep(STARTUP_RETRY_MS);
-    await waitUntilServing(url, workerd, attempt + 1);
+    await waitUntilServing(url, workerd, stderr, attempt + 1);
   }
 };
 
@@ -162,11 +168,16 @@ const config :Workerd.Config = (
   const workerd = spawn(
     workerdBinary,
     ["serve", path.join(out, "config.capnp")],
-    { stdio: "ignore" }
+    { stdio: ["ignore", "ignore", "pipe"] }
   );
   running.push(workerd);
+  // What workerd says when it can't start: a startup failure names it.
+  let stderr = "";
+  workerd.stderr?.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
   const url = `http://127.0.0.1:${port}/`;
-  await waitUntilServing(url, workerd);
+  await waitUntilServing(url, workerd, () => stderr);
   return {
     run: async (steps) => {
       const response = await fetch(url, {
@@ -368,6 +379,18 @@ describe("the on-prem D1 service", () => {
       },
       { db: "DB", sql: "SELECT note_id, bytes FROM attachments", raw: true },
       { db: "DB", sql: "UPDATE notes SET text = text || '!'" },
+      {
+        db: "DB",
+        sql: "INSERT INTO notes (text) VALUES (?)",
+        params: ["c"],
+        run: true,
+      },
+      {
+        db: "DB",
+        sql: "DELETE FROM notes WHERE id <= ?",
+        params: [2],
+        run: true,
+      },
     ]);
     expect(results).toStrictEqual([
       { ok: { results: [], changes: 2, lastRowId: 2 } },
@@ -375,6 +398,8 @@ describe("the on-prem D1 service", () => {
       { ok: { id: 2, text: "b" } },
       { ok: [[1, [0, 1, 255]]] },
       { ok: { results: [], changes: 2, lastRowId: 1 } },
+      { ok: { success: true, changes: 1, lastRowId: 3 } },
+      { ok: { success: true, changes: 2, lastRowId: 3 } },
     ]);
   });
 
