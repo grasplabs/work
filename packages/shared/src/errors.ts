@@ -137,6 +137,8 @@ export const requestErrors = defineErrorFamily({
   "request.too_large": "A value in the request holds more than a request may.",
   "request.unsupported_value":
     "A value in the request is of a kind calls don't take.",
+  "request.too_expensive":
+    "A message would expand to more than this connection may hold.",
 });
 
 /** Why a call needs a person to sign in (again). */
