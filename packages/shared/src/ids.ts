@@ -1,12 +1,8 @@
 import { z } from "zod";
 
-/**
- * The longest an ID, or any other identifier, may be: room for provider IDs
- * (Microsoft Graph item IDs run past 100 characters), not for content.
- * Everything that names something has to fit in an audit event, which names
- * things and never carries their content.
- */
-export const identifierMaxLength = 256;
+import { identifierMaxLength } from "./identifier.ts";
+
+export { identifierMaxLength } from "./identifier.ts";
 
 /** An identifier: non-empty, and at most {@link identifierMaxLength}. */
 export const identifierSchema = z.string().min(1).max(identifierMaxLength);
