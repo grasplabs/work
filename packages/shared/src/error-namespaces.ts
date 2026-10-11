@@ -26,6 +26,7 @@ export const familyNamespaces = [
   "decision",
   "dependency",
   "document",
+  "effect",
   "error_report",
   "expression",
   "guest",
@@ -44,6 +45,7 @@ export const familyNamespaces = [
   "permission",
   "query",
   "request",
+  "resource",
   "role",
   "screen",
   "signal",
@@ -56,14 +58,12 @@ export const familyNamespaces = [
 /**
  * The namespaces of the codes the SDK gives its own refusals and those the
  * host reserves, which no family defines: a declaration refused
- * (`definition`, `schema`, `function`, `resource`) and the outcomes of an
- * external effect and of a safety check (`effect`, `safety`).
+ * (`definition`, `schema`, `function`) and the outcome of a safety check
+ * (`safety`). A resource refused at declaration has a family's namespace.
  */
 export const sdkNamespaces = [
   "definition",
-  "effect",
   "function",
-  "resource",
   "safety",
   "schema",
 ] as const;
