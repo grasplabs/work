@@ -1,5 +1,6 @@
 import type { ScreenBridge } from "@grasp-os/sdk/screen-runtime";
 import { portTransport } from "@grasp-os/shared/screen-port";
+import { valueDepth } from "@grasp-os/shared/value-depth";
 import { RpcSession, RpcTarget } from "capnweb";
 import type { RpcStub } from "capnweb";
 import {
@@ -90,10 +91,10 @@ const unchecked = (value: unknown): never =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   value as never;
 
-/** A value nested `depth` arrays deep. */
+/** A value `depth` levels deep: arrays around a leaf, which is a level too. */
 const nested = (depth: number): unknown => {
   let value: unknown = "bottom";
-  for (let level = 0; level < depth; level += 1) {
+  for (let level = 1; level < depth; level += 1) {
     value = [value];
   }
   return value;
@@ -218,21 +219,26 @@ describe("the page's bridge to a screen", () => {
     });
   });
 
-  it("ends the session over a value nested deeper than 32", async () => {
+  it("passes on a value as deep as values may be, and ends the session over one level more", async () => {
     const frame = framed();
-    const shallow = await outcome(frame.page.call("notes", [nested(20)]));
-    const deep = await outcome(frame.page.call("notes", [nested(40)]));
+    const deepest = await outcome(
+      frame.page.call("notes", [nested(valueDepth)])
+    );
+    const tooDeep = await outcome(
+      frame.page.call("notes", [nested(valueDepth + 1)])
+    );
     frame.close();
 
     expect({
-      shallow,
-      deep,
-      reached: frame.calls.length,
+      deepest,
+      tooDeep,
+      reached: frame.calls,
       broken: frame.broken.times,
     }).toStrictEqual({
-      shallow: "answered",
-      deep: "refused",
-      reached: 1,
+      deepest: "answered",
+      tooDeep: "refused",
+      // Whole, every level of it.
+      reached: [{ method: "notes", args: [nested(valueDepth)] }],
       broken: 1,
     });
   });

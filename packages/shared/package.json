@@ -64,6 +64,7 @@
     "./submissions": "./src/submissions.ts",
     "./token-bucket": "./src/token-bucket.ts",
     "./uploads": "./src/uploads.ts",
+    "./value-depth": "./src/value-depth.ts",
     "./workflows": "./src/workflows.ts"
   },
   "dependencies": {
