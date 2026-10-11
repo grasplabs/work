@@ -1131,6 +1131,7 @@ export class Workspace extends DurableObject<Env> {
       return ended;
     }
     let revoked: boolean;
+    let unreadable = false;
     try {
       revoked = await revokedSince(this.env, scope, admission.openedAt);
     } catch (error) {
@@ -1140,6 +1141,7 @@ export class Workspace extends DurableObject<Env> {
         ...errorFields(error),
       });
       revoked = true;
+      unreadable = true;
     }
     if (!revoked) {
       return ended;
@@ -1161,7 +1163,12 @@ export class Workspace extends DurableObject<Env> {
       this.env,
       scope,
       { method: "executeCode" },
-      { outcome: "refused", reason: "agent.run_revoked" }
+      {
+        outcome: "refused",
+        reason: unreadable
+          ? "agent.revocation_read_failed"
+          : "agent.run_revoked",
+      }
     );
     return "revoked";
   }
@@ -1239,6 +1246,7 @@ export class Workspace extends DurableObject<Env> {
     output.checkedAt = Date.now();
     const arrived = output.lines.length;
     let revoked: boolean;
+    let unreadable = false;
     try {
       revoked = await revokedSince(
         this.env,
@@ -1252,6 +1260,7 @@ export class Workspace extends DurableObject<Env> {
         ...errorFields(error),
       });
       revoked = true;
+      unreadable = true;
     } finally {
       output.checking = false;
     }
@@ -1271,7 +1280,12 @@ export class Workspace extends DurableObject<Env> {
             personId: chat.personId,
           },
           { method: "output" },
-          { outcome: "refused", reason: "agent.run_revoked" }
+          {
+            outcome: "refused",
+            reason: unreadable
+              ? "agent.revocation_read_failed"
+              : "agent.run_revoked",
+          }
         );
       }
       return;

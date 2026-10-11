@@ -595,7 +595,9 @@ const credentials: readonly (readonly [RegExp, string])[] = [
   [/\bgithub_pat_[0-9A-Za-z_]{20,}/gu, "[redacted]"],
   [/\bxox[abpr]-[0-9A-Za-z-]{10,}/gu, "[redacted]"],
   [/\bAIza[0-9A-Za-z_-]{35}/gu, "[redacted]"],
-  [/\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/gu, "[redacted]"],
+  // Not a word boundary: between "-" and "e" one holds at every step of a
+  // flood like "eyJ-eyJ-…", which made the match quadratic.
+  [/(?<![\w-])eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/gu, "[redacted]"],
   [/\bAKIA[0-9A-Z]{16}\b/gu, "[redacted]"],
   [
     /\b(?<name>api[_-]?key|apikey|token|secret|password|authorization)(?<between>["']?\s*[:=]\s*["']?)(?!\[redacted\])[^\s"'&,;]+/giu,

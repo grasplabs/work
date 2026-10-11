@@ -2205,6 +2205,73 @@ describe("chat agent code output", () => {
     ]);
   });
 
+  it("shows nothing of a run whose revocation read fails, and records why", async () => {
+    const { stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { console.log('read'); await scheduler.wait(1_500); return 'secret'; };"
+      ),
+      says("Done.")
+    );
+    const { seen } = await watchOutput(stub, chat.id, personId);
+
+    await withRevocationReads(
+      stub,
+      async () => {
+        await Promise.resolve();
+        throw new Error("D1 is down for a moment");
+      },
+      async () => {
+        await ask("Log it.");
+      }
+    );
+
+    expect(seen.some(({ output }) => output !== null)).toBeFalsy();
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "revoked",
+    ]);
+    await vi.waitFor(
+      async () => {
+        await expect(
+          refusalsIn(chat.id, "agent.revocation_read_failed")
+        ).resolves.toStrictEqual([
+          {
+            method: "output",
+            outcome: "refused",
+            reason: "agent.revocation_read_failed",
+          },
+        ]);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+  });
+
+  it("holds a line until a revocation read begun after it finds none, however slow", async () => {
+    const { stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { console.log('held'); await scheduler.wait(1_000); return 'done'; };"
+      ),
+      says("Done.")
+    );
+    const { seen } = await watchOutput(stub, chat.id, personId);
+
+    // Every read takes longer than the run: the line is never shown before
+    // the step's result, which shows it.
+    await withRevocationReads(
+      stub,
+      async () => {
+        await scheduler.wait(3000);
+      },
+      async () => {
+        await ask("Log it.");
+      }
+    );
+
+    expect(seen.some(({ output }) => output !== null)).toBeFalsy();
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      { isError: false, text: "Logs:\nheld\n\nReturned:\ndone" },
+    ]);
+  });
+
   it("takes no more lines of a run than one may log, whatever is sent", async () => {
     const { stub, chat, personId } = await newChat();
     const chatId = chatIdSchema.parse(chat.id);
@@ -2251,6 +2318,41 @@ describe("chat agent code output", () => {
         longest > 0 &&
         longest <= codeLimits.outputBytes - codeLimits.diagnosticBytes,
     }).toStrictEqual({ within: true, cut: true, ending: true, streamed: true });
+  });
+
+  it("redacts adversarial floods of every credential shape in linear time", () => {
+    const units = [
+      "eyJ-",
+      "eyJ--",
+      "eyJ.",
+      "bearer ",
+      ["sk_", "live_"].join(""),
+      "sk-",
+      "ghp_",
+      ["github", "_pat_"].join(""),
+      ["xo", "xb-"].join(""),
+      "AIza-",
+      "AKIA",
+      "token:",
+      "-----BEGIN PRIVATE KEY-----",
+    ];
+    const slowest = Math.max(
+      ...units.flatMap((unit) =>
+        ["", "x", "-", "."].map((tail) => {
+          const flood = `${unit}${tail}`.repeat(
+            Math.ceil(
+              (2 * codeLimits.outputBytes) / (unit.length + tail.length)
+            )
+          );
+          const started = performance.now();
+          redact(flood);
+          return performance.now() - started;
+        })
+      )
+    );
+
+    // About 128K characters each: a quadratic pattern takes seconds.
+    expect(slowest).toBeLessThan(250);
   });
 
   it("cuts text by UTF-8 bytes, never inside a character, and redacts credentials", () => {
