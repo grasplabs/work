@@ -125,6 +125,12 @@ const withDeploymentRules = async <Result>(
   }
 };
 
+/** The model gateway's actions among `events`, in order. */
+const modelActions = (events: AuditEvent[]): string[] =>
+  events
+    .map(({ action }) => action)
+    .filter((action) => action.startsWith("model."));
+
 /** A run of `workflow` in `app` no other test uses. */
 const runOf = (app: string, workflow: string) =>
   runActorOf({ runId: `run-${crypto.randomUUID()}`, app, workflow });
@@ -448,6 +454,300 @@ describe("model rules", { timeout: 60_000 }, () => {
         detail: { reason: "permission.context_invalid", because: null },
       },
     ]);
+  });
+
+  it("retry a workflow's AI step the budget turned away while other calls hold it, no sooner than 15 seconds on, however tight its retries", async () => {
+    const builder = await signedInApi(idp, "builder");
+    // One retry, a millisecond on: the step's own delay.
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "reader",
+        `  return await step.llm("extract", {
+    description: "Read the total",
+    model: "${anthropic}",
+    instructions: "Read the total in cents.",
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+    retries: { limit: 1, delay: 1 },
+  });`,
+        { extract: { total: 1234 } }
+      )
+    );
+    const release = Promise.withResolvers<boolean>();
+    const actor = (runId: string) =>
+      runActorOf({ runId, app, workflow: "reader" });
+
+    // Sonnet 4.5 reserves some $0.56: another of the workflow's runs holds
+    // its $1 budget while it answers, until released.
+    const { result } = await withDeploymentRules(
+      {
+        gateway,
+        models: [workersAi, anthropic],
+        budgets: { workflow: { limit: 1 } },
+      },
+      [
+        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
+        { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
+      ],
+      async () => {
+        const holding = outcome(
+          models(env).call(
+            hello(anthropic, {
+              purpose: "workflow.step",
+              trigger: actor(`run-${crypto.randomUUID()}`),
+            })
+          )
+        );
+        await vi.waitFor(async () => {
+          const read = await modelLedger(env).spendOf(
+            env.MODEL_BUDGET_MONTH ?? "",
+            ["workflow"],
+            10
+          );
+          expect(read.workflow?.[0]?.reservedMicros).toBeGreaterThan(0);
+        });
+        const run = await builder.api.workflows.start(app, "reader");
+        await vi.waitFor(
+          async () => {
+            const events = await eventsOf(actor(run.id));
+            expect(events.map(({ action }) => action)).toContain(
+              "model.refused"
+            );
+          },
+          { timeout: 10_000, interval: 200 }
+        );
+        // Still held a while after the refusal: a retry a millisecond on
+        // would be turned away again, and spend the step's last.
+        await scheduler.wait(3000);
+        release.resolve(true);
+        await finished(run.id);
+        return {
+          held: await holding,
+          run: await builder.api.workflows.status(run.id),
+          events: await eventsOf(actor(run.id)),
+        };
+      }
+    );
+
+    const timeOf = (action: string) =>
+      Date.parse(
+        result.events.find((event) => event.action === action)?.at ?? ""
+      );
+    expect({
+      held: result.held,
+      run: result.run,
+      refused: result.events
+        .filter(({ action }) => action === "model.refused")
+        .map(({ detail }) => detail),
+      waited: timeOf("model.call") - timeOf("model.refused") >= 15_000,
+    }).toMatchObject({
+      held: "ok",
+      run: { status: "completed", output: { total: 1234 } },
+      // A shared budget: a fixed wait, nothing of the other run's timing.
+      refused: [
+        {
+          reason: "model.budget_busy",
+          because: "workflow",
+          retryAfterSeconds: 60,
+        },
+      ],
+      waited: true,
+    });
+  });
+
+  it("ask the ledger for a busy step at most every 15 seconds, however short its attempts' timeout, and fail a step with no retry left at once", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const llm = (retries: string) => `  return await step.llm("extract", {
+    description: "Read the total",
+    model: "${anthropic}",
+    instructions: "Read the total in cents.",
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+    ${retries}
+  });`;
+    // Attempts that time out after a second, retried a millisecond on; and
+    // a step with no retry at all.
+    const app = await appWith(builder, {
+      ...workflowFiles(
+        "reader",
+        llm("timeout: 1000, retries: { limit: 40, delay: 1 },"),
+        {
+          extract: { total: 1234 },
+        }
+      ),
+      ...workflowFiles("once", llm("retries: { limit: 0 },"), {
+        extract: { total: 1234 },
+      }),
+    });
+    const release = Promise.withResolvers<boolean>();
+    const actor = (runId: string, workflow = "reader") =>
+      runActorOf({ runId, app, workflow });
+
+    // Another run of each workflow holds its $1 budget while it answers,
+    // until released.
+    const { result } = await withDeploymentRules(
+      {
+        gateway,
+        models: [workersAi, anthropic],
+        budgets: { workflow: { limit: 1 } },
+      },
+      [
+        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
+        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
+        { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
+      ],
+      async () => {
+        const holding = Promise.all(
+          ["reader", "once"].map(
+            async (workflow) =>
+              await outcome(
+                models(env).call(
+                  hello(anthropic, {
+                    purpose: "workflow.step",
+                    trigger: actor(`run-${crypto.randomUUID()}`, workflow),
+                  })
+                )
+              )
+          )
+        );
+        await vi.waitFor(async () => {
+          const read = await modelLedger(env).spendOf(
+            env.MODEL_BUDGET_MONTH ?? "",
+            ["workflow"],
+            10
+          );
+          expect(
+            read.workflow?.filter(({ reservedMicros }) => reservedMicros > 0)
+          ).toHaveLength(2);
+        });
+        const once = await builder.api.workflows.start(app, "once");
+        const startedOnce = Date.now();
+        await finished(once.id);
+        const onceTook = Date.now() - startedOnce;
+        const run = await builder.api.workflows.start(app, "reader");
+        // Eight seconds of attempts a second apart, all while held.
+        await scheduler.wait(8000);
+        const whileHeld = await eventsOf(actor(run.id));
+        release.resolve(true);
+        await finished(run.id);
+        return {
+          held: await holding,
+          onceTook,
+          once: await builder.api.workflows.status(once.id),
+          whileHeld,
+          run: await builder.api.workflows.status(run.id),
+          events: await eventsOf(actor(run.id)),
+        };
+      }
+    );
+
+    expect({
+      held: result.held,
+      once: result.once,
+      onceQuick: result.onceTook < 10_000,
+      whileHeld: modelActions(result.whileHeld),
+      run: result.run,
+      after: modelActions(result.events),
+    }).toMatchObject({
+      held: ["ok", "ok"],
+      // No retry left: it fails at once, with the reason.
+      once: {
+        status: "failed",
+        error: {
+          message:
+            "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
+        },
+      },
+      onceQuick: true,
+      // Asked once in eight seconds of attempts; the rest answered by the
+      // host from that refusal.
+      whileHeld: ["model.refused"],
+      run: { status: "completed", output: { total: 1234 } },
+      after: ["model.refused", "model.call"],
+    });
+  });
+
+  it("ask the ledger again once 15 seconds passed since a busy step's refusal, on its last attempt too, when the budget freed meanwhile", async () => {
+    const builder = await signedInApi(idp, "builder");
+    // Attempts at about 0, 6 and 12 seconds: the third, the last, runs
+    // past the 15 seconds since the first was turned away.
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "reader",
+        `  return await step.llm("extract", {
+    description: "Read the total",
+    model: "${anthropic}",
+    instructions: "Read the total in cents.",
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+    timeout: 6000,
+    retries: { limit: 2, delay: 1 },
+  });`,
+        { extract: { total: 1234 } }
+      )
+    );
+    const release = Promise.withResolvers<boolean>();
+    const actor = (runId: string) =>
+      runActorOf({ runId, app, workflow: "reader" });
+
+    const { result } = await withDeploymentRules(
+      {
+        gateway,
+        models: [workersAi, anthropic],
+        budgets: { workflow: { limit: 1 } },
+      },
+      [
+        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
+        { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
+      ],
+      async () => {
+        const holding = outcome(
+          models(env).call(
+            hello(anthropic, {
+              purpose: "workflow.step",
+              trigger: actor(`run-${crypto.randomUUID()}`),
+            })
+          )
+        );
+        await vi.waitFor(async () => {
+          const read = await modelLedger(env).spendOf(
+            env.MODEL_BUDGET_MONTH ?? "",
+            ["workflow"],
+            10
+          );
+          expect(read.workflow?.[0]?.reservedMicros).toBeGreaterThan(0);
+        });
+        const run = await builder.api.workflows.start(app, "reader");
+        await vi.waitFor(
+          async () => {
+            const events = await eventsOf(actor(run.id));
+            expect(modelActions(events)).toContain("model.refused");
+          },
+          { timeout: 10_000, interval: 100 }
+        );
+        // Free half a second after the refusal, well within the 15 seconds.
+        await scheduler.wait(500);
+        release.resolve(true);
+        await finished(run.id);
+        return {
+          held: await holding,
+          run: await builder.api.workflows.status(run.id),
+          events: await eventsOf(actor(run.id)),
+        };
+      }
+    );
+
+    expect({
+      held: result.held,
+      run: result.run,
+      actions: modelActions(result.events),
+    }).toMatchObject({
+      held: "ok",
+      run: { status: "completed", output: { total: 1234 } },
+      actions: ["model.refused", "model.call"],
+    });
   });
 
   it("stop a workflow's AI steps with a readable error once its budget is used up, and alert admins", async () => {

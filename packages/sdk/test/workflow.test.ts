@@ -400,6 +400,15 @@ describe("step.do", () => {
     const rateLimited = failingWith(() =>
       Object.assign(new Error("Busy"), { code: "connect.server_unavailable" })
     );
+    // As the model gateway answers while calls under way hold the budget:
+    // nothing sent, and room comes back once they finish.
+    const budgetHeld = failingWith(() =>
+      Object.assign(new Error("Held"), { code: "model.budget_busy" })
+    );
+    // As the model gateway answers once the budget is spent: it stays so.
+    const budgetSpent = failingWith(() =>
+      Object.assign(new Error("Spent"), { code: "model.over_budget" })
+    );
     // As a tool reports bad input: trying again changes nothing.
     const refused = failingWith(() =>
       Object.assign(new Error("Refused"), { code: "connect.action_failed" })
@@ -407,6 +416,10 @@ describe("step.do", () => {
     const thrown = failingWith(() => new Error("No such customer"));
 
     await expect(rateLimited.run(createFakeEngine().engine)).resolves.toBe(3);
+    await expect(budgetHeld.run(createFakeEngine().engine)).resolves.toBe(3);
+    await expect(budgetSpent.run(createFakeEngine().engine)).rejects.toThrow(
+      "Spent"
+    );
     await expect(refused.run(createFakeEngine().engine)).rejects.toThrow(
       "Refused"
     );
