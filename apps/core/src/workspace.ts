@@ -115,12 +115,17 @@ export type Chat = typeof chats.$inferSelect;
  * A chat's turn while it runs: what cancels it, its ID (random, and only
  * this turn's), and what the chat's build jobs it submitted said of how
  * they ended (`endBuildJob`), waiting for its agent to read before its
- * next model request.
+ * next model request. Those notices are the turn's alone: its model
+ * requests carry them from then on, and they are never stored with the
+ * chat (`notices` names them, for `keep` to pass over), so they leave the
+ * prompt with their turn. A later turn reads how a job ended with
+ * `env.build.job`, for as long as the chat keeps its record.
  */
 interface LiveTurn {
   cancel: AbortController;
   id: string;
   events: Message[];
+  notices: Set<string>;
 }
 
 /** A build job, with the chat's agent and person it acts for. */
@@ -914,7 +919,12 @@ export class Workspace extends DurableObject<Env> {
     // Taken before the first await, so a second question waits its turn
     // and the chat isn't deleted under it (`deleteChat`).
     const cancel = new AbortController();
-    const live: LiveTurn = { cancel, id: crypto.randomUUID(), events: [] };
+    const live: LiveTurn = {
+      cancel,
+      id: crypto.randomUUID(),
+      events: [],
+      notices: new Set(),
+    };
     this.#turns.set(chat.id, live);
     // Marked in storage as long as it is in `#turns`, however it ends.
     this.ctx.storage.kv.put(
@@ -983,6 +993,14 @@ export class Workspace extends DurableObject<Env> {
         signal: cancel.signal,
         events: () => live.events.splice(0),
         keep: (message) => {
+          // A job's notice is this turn's only (`LiveTurn`).
+          if (
+            message.role === "system" &&
+            typeof message.content === "string" &&
+            live.notices.has(message.content)
+          ) {
+            return;
+          }
           if (message.role === "assistant") {
             this.#partials.delete(chat.id);
           }
@@ -1588,7 +1606,8 @@ export class Workspace extends DurableObject<Env> {
    */
   admitFromBuildJob(chatId: unknown, id: string): BuildJobAdmission {
     const chat = chatIdSchema.safeParse(chatId);
-    return chat.success
+    // A chat being deleted admits nothing of its jobs (`deleteChat`).
+    return chat.success && !this.#deleting.has(chat.data)
       ? this.#jobs.admission(chat.data, id)
       : { call: "cancelled" };
   }
@@ -1596,9 +1615,10 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Ends the chat's running build job `id` as `end` says, once: `false`
    * when it had ended already. Its turn's agent is told how it ended, if
-   * that turn still runs, before its next model request; no other turn
-   * ever is, and nothing of its result goes with it: the agent reads that
-   * with `env.build.job`.
+   * that turn still runs, before its next model request, in a notice that
+   * is never stored with the chat (`LiveTurn`); no other turn ever is, and
+   * nothing of its result goes with it: the agent reads that with
+   * `env.build.job`.
    */
   endBuildJob(chatId: unknown, id: string, end: BuildJobEnd): boolean {
     const chat = chatIdSchema.safeParse(chatId);
@@ -1619,11 +1639,9 @@ export class Workspace extends DurableObject<Env> {
         : end;
     this.#jobs.end(job.chatId, id, settled);
     if (turn?.id === job.turnId) {
-      turn.events.push({
-        role: "system",
-        content: `Build job ${id} (${job.kind} of App ${job.appId}, submitted by code run ${job.runId}) ${jobEnded(job, end)}. Read how it ended with \`env.build.job("${id}")\`.`,
-        timestamp: Date.now(),
-      });
+      const content = `Build job ${id} (${job.kind} of App ${job.appId}, submitted by code run ${job.runId}) ${jobEnded(job, end)}. Read how it ended with \`env.build.job("${id}")\`.`;
+      turn.notices.add(content);
+      turn.events.push({ role: "system", content, timestamp: Date.now() });
     }
     return true;
   }
@@ -1821,6 +1839,9 @@ export class Workspace extends DurableObject<Env> {
       throw agentErrors.create("agent.busy");
     }
     this.#deleting.add(id);
+    // Its build jobs end before anything here awaits, so none commits while
+    // it is deleted; they stay ended should the delete then fail.
+    this.#terminateJobs(this.#jobs.cancelRunning(id));
     try {
       const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
       const declined = await this.env.CONNECT.declineChatActions({
@@ -1842,8 +1863,7 @@ export class Workspace extends DurableObject<Env> {
         .from(chatDrafts)
         .where(eq(chatDrafts.chatId, id))
         .all();
-      // Its build jobs end with it, and their rows go below.
-      this.#terminateJobs(this.#jobs.cancelRunning(id));
+      // Their rows go with it below.
       this.ctx.storage.transactionSync(() => {
         this.#jobs.deleteChat(id);
         this.#db.delete(chatMessages).where(eq(chatMessages.chatId, id)).run();
