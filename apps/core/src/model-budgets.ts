@@ -33,12 +33,12 @@ import { microsPerDollar } from "./model-prices.ts";
 // and `model.budget.exhausted`) and a log line.
 //
 // A request's run lineage is a scope too: the run, and every run started
-// under it, keyed by the lineage's root run (\`rootRunId\` on the run's
+// under it, keyed by the lineage's root run (`rootRunId` on the run's
 // audit actor, which the engine's record of the run gives it, never its
 // input). It is counted across all their steps, retries, restarts and
 // children, for the lineage's whole life (the ledger never resets it by
 // month), so none of them starts afresh. It has a budget only where the
-// deployment sets \`run\`; whatever it sets, a lineage makes at most
+// deployment sets `run`; whatever it sets, a lineage makes at most
 // {@link lineageModelRequests} provider requests.
 
 type Budgets = z.output<typeof budgetsSchema>;
@@ -196,7 +196,10 @@ const workflowOf = (key: string): [string, string] | undefined => {
 interface Names {
   apps: ReadonlyMap<string, string>;
   people: ReadonlyMap<string, string>;
-  runs: ReadonlyMap<string, { appId: string; workflowId: string }>;
+  runs: ReadonlyMap<
+    string,
+    { appId: string; workflowId: string; startedAt: Date }
+  >;
 }
 
 /** What a spend row counted, by its scope and key; none for a bad key. */
@@ -219,6 +222,7 @@ const spenderOf = (
       appId: run?.appId ?? null,
       appName: run === undefined ? null : (names.apps.get(run.appId) ?? null),
       workflowId: run?.workflowId ?? null,
+      startedAt: run?.startedAt.toISOString() ?? null,
     };
   }
   const workflow = workflowOf(key);
@@ -250,6 +254,7 @@ const namesOf = async (
             id: workflowRuns.id,
             appId: workflowRuns.appId,
             workflowId: workflowRuns.workflowId,
+            startedAt: workflowRuns.createdAt,
           })
           .from(workflowRuns)
           .where(inArray(workflowRuns.id, runIds));
@@ -283,7 +288,10 @@ const namesOf = async (
     apps: new Map(appRows.map(({ id, name }) => [id, name])),
     people: new Map(userRows.map(({ id, name }) => [id, name])),
     runs: new Map(
-      runRows.map(({ id, appId, workflowId }) => [id, { appId, workflowId }])
+      runRows.map(({ id, appId, workflowId, startedAt }) => [
+        id,
+        { appId, workflowId, startedAt },
+      ])
     ),
   };
 };

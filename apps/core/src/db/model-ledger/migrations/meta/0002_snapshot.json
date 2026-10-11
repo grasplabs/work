@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "573972cd-49fc-4ed1-886a-a3a0a6007cdd",
+  "id": "e01421fb-c11e-4fb4-a1b5-29c9b1d064f4",
   "prevId": "ddfc842f-e968-42d9-a6ea-12d31ff0dd83",
   "tables": {
     "alerts": {
@@ -136,6 +136,20 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'{}'"
+        },
+        "period": {
+          "name": "period",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "limit_requests": {
+          "name": "limit_requests",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {},

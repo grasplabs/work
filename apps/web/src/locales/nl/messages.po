@@ -3338,8 +3338,8 @@ msgid "Run {runId}"
 msgstr "Run {runId}"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "Run of {workflowId} in {engine}"
-msgstr "Run van {workflowId} in {engine}"
+msgid "Run {shortId} of {workflowId} in {engine}, started {started}"
+msgstr "Run {shortId} van {workflowId} in {engine}, gestart {started}"
 
 #: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx

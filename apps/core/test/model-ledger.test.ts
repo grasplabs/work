@@ -880,6 +880,125 @@ describe("the model ledger", () => {
     });
   });
 
+  it("settles a request only against the spend it reserved, so one with no recorded period leaves a newer lineage's spend alone and is held", async () => {
+    const ledger = newLedger();
+    const run = lineageOf(`root-${crypto.randomUUID()}`);
+    const old = admission(30, [run], { reconcileAt: Date.now() + 1000 });
+    await ledger.admit(old);
+    // As a release before periods were recorded left it: no period on its
+    // scope, and its reservation on a monthly row of the run.
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE request_scopes SET period = NULL WHERE request_id = ?",
+        old.id
+      );
+      state.storage.sql.exec(
+        "UPDATE spend SET period = '2400-01' WHERE scope = 'run' AND key = ?",
+        run.key
+      );
+    });
+    // The same run's next request, on its lineage's row.
+    const next = admission(40, [run]);
+    await ledger.admit(next);
+    const used = { input: 2, output: 2, cacheRead: 0, cacheWrite: 0 };
+
+    const oldSettled = await ledger
+      .settle(old.id, { by: "usage", tokens: used })
+      .then(
+        () => "settled",
+        () => "refused"
+      );
+    const lineageAfterOld = await ledger.spendOf("2400-01", ["run"], 10);
+    const nextSettled = await ledger.settle(next.id, {
+      by: "usage",
+      tokens: used,
+    });
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runInDurableObject(ledger, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE requests SET reconcile_at = ? WHERE id = ?",
+          Date.now() - 1,
+          old.id
+        );
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runDurableObjectAlarm(ledger);
+    }
+    const listed = await ledger.quarantined(10);
+    const later = await ledger.spendOf("2400-02", ["run"], 10);
+
+    expect({
+      oldSettled,
+      lineageAfterOld: lineageAfterOld.run,
+      nextSettled,
+      listed: listed.map(({ id, releaseOnly }) => [id, releaseOnly]),
+      lineage: later.run,
+    }).toStrictEqual({
+      oldSettled: "refused",
+      // The lineage's row holds the next request's whole reservation still.
+      lineageAfterOld: [{ key: run.key, spentMicros: 0, reservedMicros: 40 }],
+      nextSettled: { state: "settled", chargedMicros: 4 },
+      // Held for a person, release only: it has no spend it can settle on.
+      listed: [[old.id, true]],
+      lineage: [{ key: run.key, spentMicros: 4, reservedMicros: 0 }],
+    });
+  });
+
+  it("recreates a lost run lineage's spend as used up when a person releases a request held for it, so the lineage makes no more requests", async () => {
+    const ledger = newLedger();
+    const run = lineageOf(`root-${crypto.randomUUID()}`);
+    const held = admission(30, [run], { reconcileAt: Date.now() + 1000 });
+    await ledger.admit(held);
+    // Its spend row, and the count with it, is gone.
+    await runInDurableObject(ledger, (_instance, state) => {
+      state.storage.sql.exec(
+        "DELETE FROM spend WHERE scope = 'run' AND key = ?",
+        run.key
+      );
+    });
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runInDurableObject(ledger, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE requests SET reconcile_at = ? WHERE id = ?",
+          Date.now() - 1,
+          held.id
+        );
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one try after another
+      await runDurableObjectAlarm(ledger);
+    }
+    const admin = {
+      type: "person",
+      userId: `admin-${crypto.randomUUID()}`,
+    } as const;
+
+    const released = await ledger.resolveQuarantined(held.id, "release", admin);
+    const again = await ledger.admit(admission(1, [run]));
+    await runDurableObjectAlarm(ledger);
+    const rebuilt = await ledger.spendOf("2400-01", ["run"], 10);
+    const events = await allEvents();
+    expect({
+      released: released.state,
+      again,
+      lineage: rebuilt.run,
+      audited: events
+        .filter(({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin))
+        .map(({ detail }) => [
+          detail.damaged,
+          detail["damaged.0.held"],
+          detail["damaged.0.rebuilt"],
+          detail["damaged.0.requests"],
+        ]),
+    }).toStrictEqual({
+      released: "decided",
+      again: { ok: false, scope: "run", requests: true },
+      lineage: [{ key: run.key, spentMicros: 0, reservedMicros: 0 }],
+      audited: [[1, null, 0, 100]],
+    });
+  });
+
   it("refuses an admission with more scopes than the gateway counts, reserving nothing", async () => {
     const ledger = newLedger();
     const scopes: LedgerScope[] = [

@@ -92,6 +92,9 @@ const Month = ({ budget, month }: { budget: ModelBudget; month: string }) => {
   );
 };
 
+/** How much of a run's ID names it beside its workflow and start time. */
+const shortRunId = 8;
+
 /** Who spent part of a budget, by the name core has for them. */
 const spenderName = (of: ModelSpender, i18n: I18n): string => {
   if (of.type === "deployment") {
@@ -104,12 +107,17 @@ const spenderName = (of: ModelSpender, i18n: I18n): string => {
   }
   if (of.type === "run") {
     const { runId } = of;
-    if (of.workflowId === null) {
+    if (of.workflowId === null || of.startedAt === null) {
       return i18n._(msg`Run ${runId}`);
     }
+    // Runs of one workflow told apart by when each started, and its ID.
     const { workflowId } = of;
     const engine = of.appName ?? of.appId ?? "";
-    return i18n._(msg`Run of ${workflowId} in ${engine}`);
+    const started = formatDateTime(of.startedAt);
+    const shortId = runId.slice(0, shortRunId);
+    return i18n._(
+      msg`Run ${shortId} of ${workflowId} in ${engine}, started ${started}`
+    );
   }
   return of.name ?? of.userId;
 };

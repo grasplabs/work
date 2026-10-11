@@ -230,6 +230,7 @@ describe("model settings", { timeout: 60_000 }, () => {
                   appId: app,
                   appName: "Invoices",
                   workflowId: "idle",
+                  startedAt: run.createdAt,
                 },
                 amount: 0.0045,
               },

@@ -55,6 +55,8 @@ export type ModelSpender =
       /** Null once the App, or the run's record, is gone. */
       appName: string | null;
       workflowId: string | null;
+      /** When the root run started, ISO 8601; null once its record is gone. */
+      startedAt: string | null;
     };
 
 /** Most workflows or people one budget lists the spend of. */

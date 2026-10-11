@@ -269,7 +269,7 @@ export interface RunRequest {
   /**
    * The run that started it, for a run another run starts: core's own,
    * from the engine's record of that run, never from anything an App or a
-   * run's code passes in. The new run joins its lineage (\`root_run_id\`),
+   * run's code passes in. The new run joins its lineage (`root_run_id`),
    * whose model calls and spend are counted together.
    */
   parent?: RunId;

@@ -677,7 +677,7 @@ export const workflowRuns = sqliteTable(
     detailsRemovedAt: timestamp("details_removed_at"),
     /**
      * The run its lineage started from, for a run another run started
-     * (src/workflows/runs.ts, \`startRun\`'s \`parent\`): the parent's own
+     * (src/workflows/runs.ts, `startRun`'s `parent`): the parent's own
      * root, so every descendant names the same one. Null for a run that
      * is its own root. Written once, with the row, and never from what the
      * run is given: the model gateway counts the lineage's model calls and

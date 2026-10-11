@@ -104,6 +104,16 @@ export const requestScopes = sqliteTable(
     alertMicros: integer("alert_micros"),
     /** What its alerts name, as JSON. */
     names: text().notNull().default("{}"),
+    /**
+     * The spend period it reserved against: the request's month, or
+     * `lineage` for a run lineage (model-ledger.ts). The request settles,
+     * is rebuilt and is summed against exactly this, never one worked out
+     * again later. Null for a request admitted before it was recorded: it
+     * has no period to settle against, and is held for a person.
+     */
+    period: text(),
+    /** The most requests its scope may admit, when admitted; null for none. */
+    limitRequests: integer("limit_requests"),
   },
   (table) => [
     primaryKey({ columns: [table.requestId, table.scope, table.key] }),
@@ -113,7 +123,7 @@ export const requestScopes = sqliteTable(
 /**
  * What a scope reserved and spent in a month: the deployment, a workflow,
  * a person; or a run lineage, for its whole life, under the period
- * \`lineage\` (model-ledger.ts). A request reserves against all of its
+ * `lineage` (model-ledger.ts). A request reserves against all of its
  * scopes at once, and moves its reservation to the spend when it settles.
  */
 export const spend = sqliteTable(
