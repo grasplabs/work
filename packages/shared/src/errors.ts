@@ -152,6 +152,13 @@ export const internalErrors = defineErrorFamily({
   "internal.unexpected": "Something went wrong.",
 });
 
+/**
+ * The namespaces (first segments) of every expected code defined so far:
+ * those of every family whose module is loaded.
+ */
+export const expectedNamespaces = (): ReadonlySet<string> =>
+  new Set([...expectedCodes].map((code) => code.slice(0, code.indexOf("."))));
+
 /** Whether `code` is the code of an expected error, of any family. */
 export const isExpectedCode = (code: unknown): code is string =>
   typeof code === "string" && expectedCodes.has(code);
