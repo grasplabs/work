@@ -105,8 +105,22 @@ const sessionApi = (
   { env, headers, connectedAs }: ConnectionSession,
   server: WebSocket
 ): SessionRpc => {
+  /**
+   * Whether the connection is open and belongs to the request running
+   * now. A timer runs in the request that set it, but a clock something
+   * else drives (a faked one, moved on inside another Durable Object's
+   * request) can run it in another's, where workerd refuses even a look
+   * at the socket: that request leaves the connection alone.
+   */
+  const openHere = (): boolean => {
+    try {
+      return server.readyState === WebSocket.OPEN;
+    } catch {
+      return false;
+    }
+  };
   const close = (): void => {
-    if (server.readyState === WebSocket.OPEN) {
+    if (openHere()) {
       server.close(sessionEndedCloseCode, "Session ended");
     }
   };
@@ -116,13 +130,15 @@ const sessionApi = (
    * Has the timer read again as the latest reading runs out, whether or
    * not a call asks first: so an ended session closes the connection
    * within one window, used or idle, and a busy connection still reads
-   * once a window.
+   * once a window. The timer goes with the connection.
    */
   const recheckWhenDue = (run: () => Promise<void>): void => {
     clearTimeout(recheck);
     if (!ended) {
       recheck = setTimeout(() => {
-        void run();
+        if (!ended && openHere()) {
+          void run();
+        }
       }, sessionRecheckMs);
     }
   };
@@ -151,10 +167,12 @@ const sessionApi = (
   // The upgrade has just read the session: the next reading is due a
   // window on.
   recheckWhenDue(checkQuietly);
-  server.addEventListener("close", () => {
+  const end = (): void => {
     ended = true;
     clearTimeout(recheck);
-  });
+  };
+  server.addEventListener("close", end);
+  server.addEventListener("error", end);
   return new SessionRpc(env, check);
 };
 
