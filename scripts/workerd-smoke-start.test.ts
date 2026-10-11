@@ -102,15 +102,19 @@ const installed = (outcome: string): string =>
   logged("info", `{ event: 'builtins.installed', outcome: '${outcome}' }`);
 
 /** As workerd prints a blueprint core failed to install. */
-const blueprintFailed = (errorMessage: string): string =>
+const blueprintFailed = (
+  errorMessage: string,
+  thrownIn = "storeBlueprintTree"
+): string =>
   logged(
     "error",
-    `{\n  event: 'builtins.blueprint_failed',\n  blueprint: 'intake',\n  errorName: 'TypeError',\n  errorMessage: ${JSON.stringify(errorMessage)},\n  errorStack: 'TypeError: at storeBlueprintTree'\n}`
+    `{\n  event: 'builtins.blueprint_failed',\n  blueprint: 'intake',\n  errorName: 'TypeError',\n  errorMessage: ${JSON.stringify(errorMessage)},\n  errorStack: ${JSON.stringify(`TypeError: ${errorMessage}\\n`)} +\n    '    at ${thrownIn} (index.js:183943:20)\\n' +\n    '    at async installBlueprints (index.js:192662:7)'\n}`
   );
 
 const filesGap: KnownGap = {
   event: "builtins.blueprint_failed",
   errorMessage: "Cannot read properties of undefined (reading 'put')",
+  thrownIn: "storeBlueprintTree",
   why: "FILES has no on-prem service",
 };
 
@@ -191,6 +195,18 @@ describe("the workerd smoke run's install check", () => {
         [filesGap]
       )
     ).resolves.toStrictEqual([filesGap]);
+  });
+
+  it("doesn't excuse a known gap's error thrown somewhere else", async () => {
+    await expect(
+      builtinsInstalled(
+        [
+          blueprintFailed(filesGap.errorMessage, "installBuiltinBlueprint"),
+          installed("partial"),
+        ],
+        [filesGap]
+      )
+    ).rejects.toThrow("core logged a failure on workerd");
   });
 
   it("fails when workerd exits before the built-ins are installed", async () => {

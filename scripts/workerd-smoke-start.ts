@@ -84,11 +84,14 @@ export const coreStarted = async (
 
 /**
  * A failure the on-prem profile is known to have today, excused only for
- * its exact event and error, with why: the smoke names each one it sees.
+ * its exact event, error and the function that threw it, with why: the
+ * smoke names each one it sees.
  */
 export interface KnownGap {
   event: string;
   errorMessage: string;
+  /** The function the error was thrown in: its stack's top frame. */
+  thrownIn: string;
   why: string;
 }
 
@@ -126,6 +129,14 @@ export const logField = (message: string, name: string): string | undefined =>
   )?.[2];
 
 const rawError = /\berror\b/iu;
+// A frame's line, as workerd prints a logged stack: after a newline, or at
+// the start of a quoted piece of a long one.
+const topFrame =
+  /errorStack:[\s\S]*?(?:\\n|')\s+at (?:async )?(?<name>[^\s(]+)/u;
+
+/** The function a logged error was thrown in: its stack's top frame. */
+export const thrownIn = (message: string): string | undefined =>
+  topFrame.exec(message)?.groups?.name;
 
 /** What's wrong with a line, given the known gaps; nothing when it's fine. */
 const failureOf = (
@@ -141,8 +152,12 @@ const failureOf = (
     return {};
   }
   const errorMessage = logField(message, "errorMessage");
+  const frame = thrownIn(message);
   const gap = knownGaps.find(
-    (known) => known.event === event && known.errorMessage === errorMessage
+    (known) =>
+      known.event === event &&
+      known.errorMessage === errorMessage &&
+      known.thrownIn === frame
   );
   return gap === undefined ? { failure: message } : { gap };
 };

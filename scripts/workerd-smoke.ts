@@ -33,13 +33,15 @@ const INSTALL_TIMEOUT_MS = 120_000;
 
 /**
  * What the on-prem profile can't do yet, so the install can't complete:
- * each excuses exactly its own failure, and the run says so. Remove one
+ * each excuses exactly its own failure (its event, error and the function
+ * that threw it), and the run says so. Remove one
  * once its gap is closed; the install must then be complete.
  */
 const knownGaps: KnownGap[] = [
   {
     event: "builtins.blueprint_failed",
     errorMessage: "Cannot read properties of undefined (reading 'put')",
+    thrownIn: "storeBlueprintTree",
     why: "FILES (R2) has no on-prem service yet, so no built-in blueprint installs (GRA-446)",
   },
 ];
