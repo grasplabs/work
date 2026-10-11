@@ -759,18 +759,27 @@ const sameAs = (expression: string, value: AnchorValue): Fragment => {
  * (the sentinel among them), then NULL, in two steps.
  */
 const afterOf = (
-  expression: string,
+  field: string,
   value: AnchorValue,
   direction: "asc" | "desc"
 ): { term: Fragment; fixes: number }[] => {
-  const leftOut = {
-    term: { sql: `${expression} IS NULL`, params: [] },
-    fixes: 1,
-  };
+  const expression = fieldExpression(field);
+  // A managed field is a column that is never NULL: no step for a field
+  // left out.
+  const leftOut = isManagedField(field)
+    ? []
+    : [{ term: { sql: `${expression} IS NULL`, params: [] }, fixes: 1 }];
   if (value.length === 0) {
-    // Ascending, anything held comes after; descending, nothing does.
+    // Ascending, every held value comes after, and `>=` the sentinel is
+    // an index range over exactly those (never a walk over the field's
+    // left-out entries); descending, nothing does.
     return direction === "asc"
-      ? [{ term: { sql: `${expression} IS NOT NULL`, params: [] }, fixes: 0 }]
+      ? [
+          {
+            term: { sql: `${expression} >= ${nullSentinel}`, params: [] },
+            fixes: 0,
+          },
+        ]
       : [];
   }
   const [held] = value;
@@ -782,13 +791,13 @@ const afterOf = (
             fixes: 0,
           },
         ]
-      : [leftOut];
+      : leftOut;
   }
   return direction === "asc"
     ? [{ term: { sql: `${expression} > ?`, params: [held] }, fixes: 0 }]
     : [
         { term: { sql: `${expression} < ?`, params: [held] }, fixes: 0 },
-        leftOut,
+        ...leftOut,
       ];
 };
 
@@ -830,7 +839,7 @@ const seeksAfter = (
   for (let position = fields.length - 1; position >= 0; position -= 1) {
     const field = fields[position] ?? "_id";
     for (const { term, fixes } of afterOf(
-      fieldExpression(field),
+      field,
       values[position] ?? [],
       direction
     )) {
@@ -874,6 +883,38 @@ const anchorValuesOf = (
 };
 
 /**
+ * The statements a page of `query` runs after `anchor` (or from the start),
+ * in order: one per seek, each an index range of its own.
+ */
+export const pagePlans = (
+  sql: SqlStorage,
+  pinned: PinnedSchema,
+  scope: ReadScope,
+  query: QueryRequest,
+  anchor: Anchor | null
+): Plan[] => {
+  const table = readableTable(pinned, scope, query.table);
+  const { orderFields } = accessOf(pinned, table, query);
+  const seeks: (Seek | undefined)[] =
+    anchor === null
+      ? [undefined]
+      : seeksAfter(
+          orderFields,
+          anchor.values ??
+            anchorValuesOf(sql, table, scope, orderFields, anchor.id),
+          anchor.id,
+          query.order
+        );
+  return seeks.map((seek) =>
+    planQuery(pinned, scope, table, query, {
+      documents: true,
+      anchors: true,
+      seek,
+    })
+  );
+};
+
+/**
  * One page of `query` (a `paginate` terminal) for `scope` from `pinned`,
  * after `anchor` or from the start: at most `pageSize` records in order,
  * one more read to know whether more follow, and the last record's anchor
@@ -894,27 +935,12 @@ export const readPage = (
   }
   const table = readableTable(pinned, scope, query.table);
   const { orderFields } = accessOf(pinned, table, query);
-  const seeks: (Seek | undefined)[] =
-    anchor === null
-      ? [undefined]
-      : seeksAfter(
-          orderFields,
-          anchor.values ??
-            anchorValuesOf(sql, table, scope, orderFields, anchor.id),
-          anchor.id,
-          query.order
-        );
   const scan: Scan = { entries: 0, bytes: 0 };
   const found: Match[] = [];
-  for (const seek of seeks) {
+  for (const plan of pagePlans(sql, pinned, scope, query, anchor)) {
     if (found.length > terminal.pageSize) {
       break;
     }
-    const plan = planQuery(pinned, scope, table, query, {
-      documents: true,
-      anchors: true,
-      seek,
-    });
     for (const match of matchesOf(sql, plan, scan)) {
       found.push(match);
       if (found.length > terminal.pageSize) {

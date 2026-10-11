@@ -78,19 +78,25 @@ import {
   handOver,
 } from "./outbox-delivery.ts";
 import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
-import { cursorKeyOf, openCursor, sealCursor } from "./store-cursors.ts";
-import type { CursorBinding } from "./store-cursors.ts";
+import { cursorKeysOf, openCursor, sealCursor } from "./store-cursors.ts";
+import type { CursorBinding, CursorKeys } from "./store-cursors.ts";
 import { inventoriedDeleted, recordStoreDeleted } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { installIndexes, planIndexes } from "./store-indexes.ts";
 import {
+  pagePlans,
   planQuery,
   readableTable,
   readPage,
   readRecord,
   runQuery,
 } from "./store-queries.ts";
-import type { PageAnswer, PinnedSchema, QueryAnswer } from "./store-queries.ts";
+import type {
+  Anchor,
+  PageAnswer,
+  PinnedSchema,
+  QueryAnswer,
+} from "./store-queries.ts";
 
 // The host of a business store (data-store.ts is its Durable Object): one
 // object per store, named by the store's ID (data-stores.ts), with a SQLite database of its own that holds all
@@ -360,8 +366,8 @@ export class StoreHost {
   readonly ctx: DurableObjectState;
   readonly env: Env;
   readonly #db: DrizzleSqliteDODatabase;
-  /** The store's cursor key, once imported (`#cursorKey`). */
-  #key: CryptoKey | undefined;
+  /** The store's cursor keys, once derived (`#cursorKeys`). */
+  #keys: CursorKeys | undefined;
   /** Each schema read so far, by hash (`#pinned`). */
   readonly #schemas = new Map<string, PinnedSchema>();
 
@@ -569,7 +575,7 @@ export class StoreHost {
     if (terminal.kind !== "paginate") {
       throw new Error("Not a page");
     }
-    const key = await this.#cursorKey(storeId);
+    const keys = await this.#cursorKeys(storeId);
     const binding: CursorBinding = {
       storeId,
       schemaHash: reader.schemaHash,
@@ -586,7 +592,7 @@ export class StoreHost {
     const anchor =
       terminal.cursor === null
         ? null
-        : await openCursor(key, binding, terminal.cursor);
+        : await openCursor(keys, binding, terminal.cursor);
     const read = this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
       return indexRequired(() =>
@@ -596,7 +602,7 @@ export class StoreHost {
     if (read.hasMore && read.last !== undefined) {
       return {
         items: read.items,
-        nextCursor: await sealCursor(key, binding, read.last),
+        nextCursor: await sealCursor(keys, binding, read.last),
         hasMore: true,
       };
     }
@@ -604,12 +610,13 @@ export class StoreHost {
   }
 
   /**
-   * The key this store signs its cursors with, made on first use and kept
-   * in its own SQLite; imported once per object.
+   * The keys this store seals and tags its cursors with, derived from one
+   * random key kept in its own SQLite: minted by the store's first page,
+   * cleared when the store is purged, derived once per object.
    */
-  async #cursorKey(storeId: StoreId): Promise<CryptoKey> {
-    if (this.#key !== undefined) {
-      return this.#key;
+  async #cursorKeys(storeId: StoreId): Promise<CursorKeys> {
+    if (this.#keys !== undefined) {
+      return this.#keys;
     }
     const hex = this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
@@ -621,8 +628,8 @@ export class StoreHost {
       this.#db.update(store).set({ cursorKey: made }).run();
       return made;
     });
-    this.#key = await cursorKeyOf(hex);
-    return this.#key;
+    this.#keys = await cursorKeysOf(hex);
+    return this.#keys;
   }
 
   /**
@@ -649,6 +656,31 @@ export class StoreHost {
       .toArray()
       .map(({ detail }) => detail)
       .join("\n");
+  }
+  /**
+   * SQLite's plan for each statement a page of `request` reads after
+   * `anchor`, one per seek, planned as `read` plans them: for tests, in
+   * the object, never over RPC.
+   */
+  async explainPage(
+    storeId: StoreId,
+    scope: ReadScope,
+    request: QueryRequest,
+    anchor: Anchor
+  ): Promise<string[]> {
+    const reader = readScopeSchema.parse(scope);
+    const pinned = await this.#pinned(storeId, reader.schemaHash);
+    return pagePlans(this.ctx.storage.sql, pinned, reader, request, anchor).map(
+      (plan) =>
+        this.ctx.storage.sql
+          .exec<{ detail: string }>(
+            `EXPLAIN QUERY PLAN ${plan.statement}`,
+            ...plan.params
+          )
+          .toArray()
+          .map(({ detail }) => detail)
+          .join("\n")
+    );
   }
 
   /**
@@ -1437,6 +1469,9 @@ export class StoreHost {
       }
       this.#db.update(store).set({ inventoriedAt: Date.now() }).run();
     }
+    // The cursor key goes with what it sealed: nothing is left to page.
+    this.#db.update(store).set({ cursorKey: null }).run();
+    this.#keys = undefined;
     const started = Date.now();
     for (const table of purgedTables) {
       for (;;) {

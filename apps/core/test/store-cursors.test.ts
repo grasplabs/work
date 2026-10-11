@@ -18,6 +18,8 @@ import { describe, expect, it } from "vite-plus/test";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { StoreHost } from "../src/store-host.ts";
+import type { AnchorValue } from "../src/store-queries.ts";
 
 // Pages of a business store's records and their cursors (store-cursors.ts,
 // store-queries.ts `readPage`), through core's way into a store and its
@@ -39,9 +41,12 @@ const schema = defineSchema({
     title: v.string(),
     rank: v.number().nullable().optional(),
     done: v.boolean().default(false),
+    label: v.string().nullable().optional(),
   })
     .index("by_title", ["title"])
-    .index("by_done_rank", ["done", "rank"]),
+    .index("by_done_rank", ["done", "rank"])
+    .index("by_label", ["label"]),
+  people: defineTable({ name: v.string() }),
 });
 
 interface Fixture {
@@ -54,7 +59,12 @@ const storeWith = async (read: AccessMode): Promise<Fixture> => {
   const store = await openStore(env, await createStore(env, builder));
   const defined = await store.defineTables(
     manifestText(
-      schemaManifest(schema, { tables: { notes: { read, write: read } } })
+      schemaManifest(schema, {
+        tables: {
+          notes: { read, write: read },
+          people: { read, write: read },
+        },
+      })
     )
   );
   return {
@@ -310,54 +320,149 @@ describe("pages", () => {
   });
 });
 
+/** Field `field` of what a read answered, or undefined. */
+const fieldOf = (answer: unknown, field: string): unknown =>
+  typeof answer === "object" && answer !== null && !Array.isArray(answer)
+    ? Object.getOwnPropertyDescriptor(answer, field)?.value
+    : undefined;
+
+/** `part` with its last character changed. */
+const flip = (part: string): string =>
+  `${part.slice(0, -1)}${part.endsWith("A") ? "B" : "A"}`;
+
+/** A page request by `index` in `order`, as the store reads it. */
+const pageQuery = (index: string | null, order: "asc" | "desc") => ({
+  descriptorVersion: 1 as const,
+  table: "notes",
+  index,
+  range: [],
+  filter: null,
+  order,
+  terminal: { kind: "paginate" as const, pageSize: 2, cursor: null },
+});
+
+/** The record IDs of `notes`, sorted: for pages whose order ties. */
+const sortedIds = (notes: readonly { _id: string }[]): string[] =>
+  idsOf(notes).toSorted();
+
+/** The text of every part of `cursor`, decoded, as anyone holding it could. */
+const readable = (cursor: string): string =>
+  cursor
+    .split(".")
+    .map((part) => {
+      try {
+        return new TextDecoder().decode(fromBase64Url(part));
+      } catch {
+        return part;
+      }
+    })
+    .join(" ");
+
 describe("cursors", () => {
-  it("hold no more than the last record's ID and order values, within 4 KiB", async () => {
+  it("are opaque: neither record IDs nor values can be read from them", async () => {
     const fixture = await storeWith("appMembers");
     await insertNotes(fixture, ranked);
     const db = dbOf(fixture, scopeOf(fixture.schemaHash));
     const page = await db
       .query("notes")
-      .withIndex("by_done_rank", (range) => range.eq("done", false))
-      .paginate({ pageSize: 2, cursor: null });
-    const [, payload = ""] = (page.nextCursor ?? "").split(".");
-    const content: unknown = JSON.parse(
-      new TextDecoder().decode(fromBase64Url(payload))
-    );
+      .withIndex("by_title")
+      .paginate({ pageSize: 3, cursor: null });
+    const cursor = page.nextCursor ?? "";
+    const text = `${cursor} ${readable(cursor)}`;
     expect({
-      content,
-      fits: (page.nextCursor ?? "").length <= cursorMaxLength,
-    }).toStrictEqual({
-      content: { id: page.items.at(-1)?._id, values: [[]] },
-      fits: true,
-    });
+      fits: cursor.length <= cursorMaxLength,
+      leaks: page.items.some(
+        ({ _id, title }) => text.includes(_id) || text.includes(`"${title}"`)
+      ),
+      prefix: text.includes("n-ada"),
+    }).toStrictEqual({ fits: true, leaks: false, prefix: false });
   });
 
-  it("are refused when forged, edited, or carried to another query, caller or store", async () => {
+  it("are refused when forged, edited, or carried to another query or caller, and expire with their generation", async () => {
     const fixture = await storeWith("owner");
     const other = await storeWith("owner");
     await insertNotes(fixture, ranked);
     await insertNotes(fixture, ranked, "grace");
+    // Another schema of the same store: another generation of its tables.
+    const later = await fixture.store.defineTables(
+      manifestText(
+        schemaManifest(schema, {
+          tables: {
+            notes: { read: "owner", write: "appMembers" },
+            people: { read: "owner", write: "owner" },
+          },
+        })
+      )
+    );
     const scope = scopeOf(fixture.schemaHash);
     const first = await dbOf(fixture, scope)
       .query("notes")
       .withIndex("by_title")
       .paginate({ pageSize: 2, cursor: null });
     const cursor = first.nextCursor ?? "";
-    const [version, payload = "", mac = ""] = cursor.split(".");
-    const edited = `${version}.${payload.slice(0, -2)}AA.${mac}`;
+    const [version, sealed = "", tag = "", stable = ""] = cursor.split(".");
+    const same = await pageAfter(fixture, scope, {}, cursor);
     expect({
-      same: await outcome(
-        pageAfter(fixture, scope, {}, cursor).then(() => "read")
-      ),
+      same: (() => {
+        const items = fieldOf(same, "items");
+        return Array.isArray(items)
+          ? items.map((item: unknown) => fieldOf(item, "_id"))
+          : same;
+      })(),
       forged: await outcome(
-        pageAfter(fixture, scope, {}, `1.e30.${"A".repeat(43)}`)
+        pageAfter(
+          fixture,
+          scope,
+          {},
+          `1.e30.${"A".repeat(43)}.${"A".repeat(43)}`
+        )
       ),
-      edited: await outcome(pageAfter(fixture, scope, {}, edited)),
+      editedSeal: await outcome(
+        pageAfter(
+          fixture,
+          scope,
+          {},
+          `${version}.${flip(sealed)}.${tag}.${stable}`
+        )
+      ),
+      editedTag: await outcome(
+        pageAfter(
+          fixture,
+          scope,
+          {},
+          `${version}.${sealed}.${flip(tag)}.${stable}`
+        )
+      ),
+      editedTags: await outcome(
+        pageAfter(
+          fixture,
+          scope,
+          {},
+          `${version}.${sealed}.${flip(tag)}.${flip(stable)}`
+        )
+      ),
+      otherSpelling: await outcome(
+        pageAfter(fixture, scope, {}, `0${version}.${sealed}.${tag}.${stable}`)
+      ),
+      laterFormat: await outcome(
+        pageAfter(fixture, scope, {}, `2.${sealed}.${tag}.${stable}`)
+      ),
       otherOrder: await outcome(
         pageAfter(fixture, scope, { order: "desc" }, cursor)
       ),
       otherIndex: await outcome(
         pageAfter(fixture, scope, { index: "by_done_rank" }, cursor)
+      ),
+      otherRange: await outcome(
+        pageAfter(
+          fixture,
+          scope,
+          { range: [{ field: "title", op: "gt", value: "a" }] },
+          cursor
+        )
+      ),
+      otherTable: await outcome(
+        pageAfter(fixture, scope, { table: "people", index: null }, cursor)
       ),
       otherFilter: await outcome(
         pageAfter(
@@ -383,6 +488,19 @@ describe("cursors", () => {
           cursor
         )
       ),
+      otherApp: await outcome(
+        pageAfter(
+          fixture,
+          scopeOf(fixture.schemaHash, {
+            consumer: { resourceId: "other-app", resourceVersion: 1 },
+          }),
+          {},
+          cursor
+        )
+      ),
+      otherStore: await outcome(
+        pageAfter(other, scopeOf(other.schemaHash), {}, cursor)
+      ),
       otherVersion: await outcome(
         pageAfter(
           fixture,
@@ -393,24 +511,31 @@ describe("cursors", () => {
           cursor
         )
       ),
-      otherStore: await outcome(
-        pageAfter(other, scopeOf(other.schemaHash), {}, cursor)
-      ),
-      laterFormat: await outcome(
-        pageAfter(fixture, scope, {}, `2.${payload}.${mac}`)
+      otherSchema: await outcome(
+        pageAfter(fixture, scopeOf(later.schemaHash), {}, cursor)
       ),
     }).toStrictEqual({
-      same: "read",
+      same: ["n-ada-00002", "n-ada-00003"],
       forged: "data.invalid_cursor",
-      edited: "data.invalid_cursor",
+      editedSeal: "data.invalid_cursor",
+      // Its stable tag still verifies: its holder learns nothing new.
+      editedTag: "data.cursor_expired",
+      editedTags: "data.invalid_cursor",
+      otherSpelling: "data.invalid_cursor",
+      // Another format version can't be told apart from a forgery: no tag
+      // of this store covers it.
+      laterFormat: "data.invalid_cursor",
       otherOrder: "data.invalid_cursor",
       otherIndex: "data.invalid_cursor",
+      otherRange: "data.invalid_cursor",
+      otherTable: "data.invalid_cursor",
       otherFilter: "data.invalid_cursor",
       otherPerson: "data.invalid_cursor",
       otherRole: "data.invalid_cursor",
-      otherVersion: "data.invalid_cursor",
+      otherApp: "data.invalid_cursor",
       otherStore: "data.invalid_cursor",
-      laterFormat: "data.cursor_expired",
+      otherVersion: "data.cursor_expired",
+      otherSchema: "data.cursor_expired",
     });
   });
 
@@ -425,10 +550,6 @@ describe("cursors", () => {
     const byTitle = () => db.query("notes").withIndex("by_title");
     const first = await byTitle().paginate({ pageSize: 1, cursor: null });
     const cursor = first.nextCursor ?? "";
-    const [, payload = ""] = cursor.split(".");
-    const content: unknown = JSON.parse(
-      new TextDecoder().decode(fromBase64Url(payload))
-    );
     const second = await byTitle().paginate({ pageSize: 1, cursor });
     // The anchor record goes: a cursor of its ID alone no longer applies.
     await runInDurableObject(
@@ -442,14 +563,196 @@ describe("cursors", () => {
     );
     expect({
       fits: cursor.length <= cursorMaxLength,
-      content,
       second: idsOf(second.items),
       gone: await outcome(byTitle().paginate({ pageSize: 1, cursor })),
     }).toStrictEqual({
       fits: true,
-      content: { id: first.items[0]?._id },
       second: ["n-ada-00001"],
       gone: "data.cursor_expired",
     });
+  });
+});
+
+describe("pages of owner-only tables", () => {
+  it("add up to the caller's own records, another owner's interleaved, both ways", async () => {
+    const fixture = await storeWith("owner");
+    const notes = Array.from({ length: 9 }, (_, index) => ({
+      title: `t${index}`,
+      done: false,
+      rank: index % 3,
+    }));
+    // Interleaved: each of Ada's notes beside one of Grace's, in one index.
+    await insertNotes(fixture, notes, "ada");
+    await insertNotes(fixture, notes, "grace", 1000);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const along = (order: "asc" | "desc") =>
+      db.query("notes").withIndex("by_done_rank").order(order);
+    for (const order of ["asc", "desc"] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const { items } = await allPages(
+        async (cursor) => await along(order).paginate({ pageSize: 2, cursor })
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const whole = await along(order).collect();
+      expect({
+        ids: idsOf(items),
+        owners: [...new Set(items.map(({ _ownerId }) => _ownerId))],
+      }).toStrictEqual({ ids: idsOf(whole), owners: ["ada"] });
+    }
+  });
+
+  it("page descending through long, null and left-out values, the long ones by ID", async () => {
+    const fixture = await storeWith("owner");
+    const labelled: StoreFields[] = [
+      { title: "a", label: long("x") },
+      { title: "b", label: long("y") },
+      { title: "c", label: null },
+      { title: "d" },
+      { title: "e", label: long("z") },
+      { title: "f", label: null },
+      { title: "g" },
+    ];
+    await insertNotes(fixture, labelled, "ada");
+    await insertNotes(fixture, labelled, "grace", 1000);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byLabel = () => db.query("notes").withIndex("by_label").order("desc");
+    const { items, pages } = await allPages(
+      async (cursor) => await byLabel().paginate({ pageSize: 1, cursor })
+    );
+    expect({
+      ids: idsOf(items),
+      pages: pages.length,
+    }).toStrictEqual({
+      ids: idsOf(await byLabel().collect()),
+      pages: 7,
+    });
+  });
+});
+
+describe("seeks", () => {
+  it("each read an index range: never a scan, never a sort", async () => {
+    const fixture = await storeWith("appMembers");
+    const scope = scopeOf(fixture.schemaHash);
+    const cases: {
+      query: ReturnType<typeof pageQuery>;
+      values: AnchorValue[];
+    }[] = [
+      { query: pageQuery("by_done_rank", "asc"), values: [[0], []] },
+      { query: pageQuery("by_done_rank", "asc"), values: [[0], [null]] },
+      { query: pageQuery("by_done_rank", "asc"), values: [[1], [3]] },
+      { query: pageQuery("by_done_rank", "desc"), values: [[0], [3]] },
+      { query: pageQuery("by_done_rank", "desc"), values: [[0], [null]] },
+      { query: pageQuery("by_label", "asc"), values: [[]] },
+      { query: pageQuery(null, "desc"), values: [[5]] },
+    ];
+    const plans = await runInDurableObject(
+      env.DATA_STORES.getByName(fixture.store.id),
+      async (_instance, state) => {
+        const host = new StoreHost(state, env);
+        const found: string[] = [];
+        for (const { query: request, values } of cases) {
+          // oxlint-disable-next-line no-await-in-loop -- one case at a time
+          const seekPlans = await host.explainPage(
+            fixture.store.id,
+            scope,
+            request,
+            {
+              id: "n-ada-00001",
+              values,
+            }
+          );
+          found.push(...seekPlans);
+        }
+        return found;
+      }
+    );
+    expect(plans.length).toBeGreaterThan(cases.length);
+    for (const plan of plans) {
+      expect(plan).toMatch(/SEARCH sdk_records USING (?:COVERING )?INDEX/u);
+      expect(plan).not.toMatch(/TEMP B-TREE|\bSCAN sdk_records\b/u);
+    }
+  });
+
+  it("count against one scan bound across all of a page's seeks", async () => {
+    const fixture = await storeWith("appMembers");
+    const many = queryMaxScannedEntries / 2 + 500;
+    // Two hits first; after them, past the bound across two seeks.
+    await insertNotes(fixture, [
+      { title: "hit", done: false, rank: 5 },
+      { title: "hit", done: false, rank: 5 },
+    ]);
+    await insertNotes(
+      fixture,
+      Array.from({ length: many }, () => ({
+        title: "miss",
+        done: false,
+        rank: 5,
+      })),
+      "ada",
+      10
+    );
+    await insertNotes(
+      fixture,
+      Array.from({ length: many }, () => ({
+        title: "miss",
+        done: false,
+        rank: 7,
+      })),
+      "ada",
+      100_000
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const hits = () =>
+      db.query("notes").withIndex("by_done_rank").filter({ title: "hit" });
+    const first = await hits().paginate({ pageSize: 1, cursor: null });
+    expect({
+      first: idsOf(first.items),
+      next: await outcome(
+        hits().paginate({ pageSize: 1, cursor: first.nextCursor })
+      ),
+    }).toStrictEqual({ first: ["n-ada-00000"], next: "data.scan_limit" });
+  });
+
+  it("carry on from a full anchor whose record changed or went between pages", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(
+      fixture,
+      Array.from({ length: 6 }, (_, index) => ({
+        title: `t${index}`,
+        done: false,
+        rank: index,
+      }))
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byRank = () => db.query("notes").withIndex("by_done_rank");
+    const first = await byRank().paginate({ pageSize: 2, cursor: null });
+    const anchor = first.items.at(-1)?._id ?? "";
+    // The anchor record moves to the end, and the next record goes.
+    await runInDurableObject(
+      env.DATA_STORES.getByName(fixture.store.id),
+      (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE sdk_records SET value_json = ? WHERE record_id = ?",
+          JSON.stringify({ title: "moved", done: false, rank: 99 }),
+          anchor
+        );
+        state.storage.sql.exec(
+          "DELETE FROM sdk_records WHERE record_id = 'n-ada-00002'"
+        );
+      }
+    );
+    const rest = await allPages(
+      async (cursor) =>
+        await byRank().paginate({
+          pageSize: 2,
+          cursor: cursor ?? first.nextCursor,
+        })
+    );
+    expect(sortedIds(rest.items)).toStrictEqual([
+      "n-ada-00001",
+      "n-ada-00003",
+      "n-ada-00004",
+      "n-ada-00005",
+    ]);
   });
 });
