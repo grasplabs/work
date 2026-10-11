@@ -188,6 +188,17 @@ const slowTestResults = (ms: number): typeof env.FILES => {
   return files;
 };
 
+/** A Workspace object's own env, to change a binding of it in a test. */
+const envOf = (instance: object): Pick<Env, "CONNECT"> => {
+  const objectEnv: unknown = Reflect.get(instance, "env");
+  if (typeof objectEnv !== "object" || objectEnv === null) {
+    throw new TypeError("The Workspace object has no env");
+  }
+  // SAFETY: a Workspace object's env is core's Env, which has CONNECT.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return objectEnv as Pick<Env, "CONNECT">;
+};
+
 /** A commit storing a version's files: no code run commits. */
 const storedTrees = (method: string, key: unknown): boolean =>
   method === "put" && typeof key === "string" && key.includes("/trees/");
@@ -1003,31 +1014,37 @@ describe("build jobs", { timeout: 180_000 }, () => {
     const declining = { reached: false, released: false };
     let deleting: Promise<unknown> | undefined;
     let ended: Awaited<ReturnType<typeof endedJob>> | undefined;
+    let originalConnect: Env["CONNECT"] | undefined;
     try {
       await chat.ask("Build an invoice desk for invoices@");
       const job = await submittedJob(chat.stub, chat.chat.id);
       await storing.reached();
-      // Deleting the chat waits on connect, as it declines its writes.
+      // Deleting the chat waits on connect, as it declines its writes:
+      // the object's own binding, wrapped, every other method as it was.
       await runInDurableObject(chat.stub, (instance) => {
-        const objectEnv: unknown = Reflect.get(instance, "env");
-        const { CONNECT: connect } = z
-          .looseObject({ CONNECT: z.custom<Env["CONNECT"]>() })
-          .parse(objectEnv);
-        if (typeof objectEnv !== "object" || objectEnv === null) {
-          throw new TypeError("The Workspace object has no env");
-        }
-        Object.assign(objectEnv, {
-          CONNECT: {
-            declineChatActions: async (
-              ...args: Parameters<Env["CONNECT"]["declineChatActions"]>
-            ) => {
+        const objectEnv = envOf(instance);
+        const connect = objectEnv.CONNECT;
+        originalConnect = connect;
+        objectEnv.CONNECT = new Proxy(connect, {
+          get: (target, property) => {
+            const value: unknown = Reflect.get(target, property);
+            if (
+              property !== "declineChatActions" ||
+              typeof value !== "function"
+            ) {
+              return typeof value === "function"
+                ? (...args: unknown[]): unknown =>
+                    Reflect.apply(value, target, args)
+                : value;
+            }
+            return async (...args: unknown[]): Promise<unknown> => {
               declining.reached = true;
               while (!declining.released) {
                 // oxlint-disable-next-line no-await-in-loop -- until the test releases it
                 await scheduler.wait(20);
               }
-              return await connect.declineChatActions(...args);
-            },
+              return await Reflect.apply(value, target, args);
+            };
           },
         });
       });
@@ -1049,6 +1066,13 @@ describe("build jobs", { timeout: 180_000 }, () => {
       storing.restore();
       declining.released = true;
       await deleting;
+      // The object's env may be other tests' too: its binding goes back.
+      const restored = originalConnect;
+      if (restored !== undefined) {
+        await runInDurableObject(chat.stub, (instance) => {
+          envOf(instance).CONNECT = restored;
+        });
+      }
     }
     const { versions } = await createdApp(builder);
     expect({
