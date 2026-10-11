@@ -36,6 +36,7 @@ import {
 import { inJurisdiction } from "./durable-objects.ts";
 import { costMicros, microsPerDollar } from "./model-prices.ts";
 import type { PinnedPrice } from "./model-prices.ts";
+import { endedLineages, lineagesAsked } from "./run-lineage-ends.ts";
 
 // The model ledger: the one authority for what the deployment's model
 // requests may spend and have spent, a Durable Object per deployment,
@@ -81,6 +82,12 @@ import type { PinnedPrice } from "./model-prices.ts";
 // - A retry releases an unknown earlier cost: every provider request has
 //   its own ID and reservation; a retry is admitted, reserved and settled
 //   on its own, and nothing settles one request by another's outcome.
+// - A lineage's rows pruned while it can still spend, or told early that
+//   it ended: the alarm prunes a lineage's spend and alerts only once
+//   core's own records of its runs (`workflow_runs`, which only core
+//   writes) say every run of it ended a retention ago, and no open
+//   request reserves against it; nothing an App or a run passes says so
+//   (run-lineage-ends.ts).
 // - A request is settled twice, or an ID reused: a request settles once
 //   (`state`), later settlements answer the first; an admission repeated
 //   with the same input under its ID answers the first, and other input
@@ -1058,8 +1065,102 @@ export class ModelLedger extends DurableObject<Env> {
       log.warn("model.spend_reconciled", { requests: reconciled });
     }
     this.#sweep(now);
+    try {
+      await this.#pruneLineages(now);
+    } catch (error) {
+      // Tried again on the next sweep: nothing is lost by keeping them.
+      log.error("model.lineage_prune_failed", errorFields(error));
+    }
     await this.#drainAudit();
     await this.#alarmForNext();
+  }
+
+  /**
+   * Deletes the spend and alerts of run lineages that have ended, every
+   * run of each, at least {@link settledRetentionMs} ago, as core's own
+   * records of the runs say (`endedLineages`): nothing an App or a run
+   * passes, so no lineage is ended early. A lineage any open request
+   * (under way, lost or held for a person) still reserves against keeps
+   * its rows, checked again as they are deleted. A page of lineages at a
+   * time, in key order, so a page of live ones holds up none after it.
+   */
+  async #pruneLineages(now: number): Promise<void> {
+    let after = "";
+    for (;;) {
+      const page = this.#prunable(after);
+      if (page.length === 0) {
+        return;
+      }
+      after = page.at(-1) ?? after;
+      // oxlint-disable-next-line no-await-in-loop -- a page at a time
+      const ended = await endedLineages(
+        this.env,
+        page,
+        now - settledRetentionMs
+      );
+      if (ended.size > 0) {
+        this.ctx.storage.transactionSync(() => {
+          for (const key of this.#prunable("", [...ended])) {
+            this.#db
+              .delete(spend)
+              .where(
+                and(
+                  eq(spend.scope, "run"),
+                  eq(spend.key, key),
+                  eq(spend.period, lineagePeriod)
+                )
+              )
+              .run();
+            this.#db
+              .delete(alerts)
+              .where(
+                and(
+                  eq(alerts.scope, "run"),
+                  eq(alerts.key, key),
+                  eq(alerts.period, lineagePeriod)
+                )
+              )
+              .run();
+          }
+        });
+        log.info("model.lineages_pruned", { lineages: ended.size });
+      }
+      if (page.length < lineagesAsked) {
+        return;
+      }
+    }
+  }
+
+  /**
+   * Run lineages past `after` in key order, at most {@link lineagesAsked}
+   * (or those of `only`), whose spend holds nothing and that no open
+   * request reserves against: the ones that may be pruned once ended.
+   */
+  #prunable(after: string, only?: readonly string[]): string[] {
+    return this.#db
+      .select({ key: spend.key })
+      .from(spend)
+      .where(
+        and(
+          eq(spend.scope, "run"),
+          eq(spend.period, lineagePeriod),
+          gt(spend.key, after),
+          only === undefined ? undefined : inArray(spend.key, [...only]),
+          eq(spend.reservedMicros, 0),
+          sql`not exists (
+            select 1 from ${requestScopes}
+            join ${requests} on ${requests.id} = ${requestScopes.requestId}
+            where ${requestScopes.scope} = 'run'
+              and ${requestScopes.key} = ${spend.key}
+              and ${reservedPeriodSql} = ${lineagePeriod}
+              and ${requests.state} in ('dispatched', 'unknown', 'quarantined')
+          )`
+        )
+      )
+      .orderBy(asc(spend.key))
+      .limit(lineagesAsked)
+      .all()
+      .map(({ key }) => key);
   }
 
   /** Deletes settled receipts past their retention, a page at a time. */
@@ -1109,9 +1210,18 @@ export class ModelLedger extends DurableObject<Env> {
       .where(eq(requests.state, "settled"))
       .limit(1)
       .get();
+    // A lineage's spend is pruned on a sweep, receipts or not.
+    const lineage = this.#db
+      .select({ key: spend.key })
+      .from(spend)
+      .where(and(eq(spend.scope, "run"), eq(spend.period, lineagePeriod)))
+      .limit(1)
+      .get();
     const times = [
       next?.at,
-      kept === undefined ? undefined : Date.now() + sweepEveryMs,
+      kept === undefined && lineage === undefined
+        ? undefined
+        : Date.now() + sweepEveryMs,
     ].filter((time) => time !== undefined);
     if (times.length > 0) {
       await this.#alarmBy(Math.min(...times));
