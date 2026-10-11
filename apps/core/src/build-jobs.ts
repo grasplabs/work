@@ -1,6 +1,6 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
-import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -29,11 +29,12 @@ import {
   draftFiles,
   draftOverLatest,
   proposeDraft,
-  proposedByJob,
   versionTree,
 } from "./apps.ts";
 import type { Acting } from "./auth/identity.ts";
 import { memberOf } from "./auth/identity.ts";
+import { reconcileReceipt } from "./build-job-receipts.ts";
+import { brokenOff } from "./build-job-records.ts";
 import type { BuildJobEnd } from "./build-job-records.ts";
 import { workspace } from "./durable-objects.ts";
 import { grantedPermissions } from "./permissions.ts";
@@ -69,6 +70,10 @@ import type { BuildJob, Draft } from "./workspace.ts";
 //   it, granted when that run opened. Each step, and each write right
 //   before it commits, reads revocations since then (`admitJob`): one
 //   found ends the job as revoked, and nothing it does after is admitted.
+//   Any revoked permission of the agent ends it, not only those a build
+//   uses (decided for GRA-443): a revocation is an admin narrowing the
+//   agent's authority, which a job mustn't outlive on a guess at which
+//   grants its work rests on, and a job is cheap to submit again.
 //   A revoked job hands on no result. What it committed before keeps its
 //   receipt: it stays, proposed for review, and is never said to be undone.
 // - Cancellation: cancelling the turn that submitted it, or deleting the
@@ -103,7 +108,7 @@ import type { BuildJob, Draft } from "./workspace.ts";
 //   App's run.
 
 /** What the dispatcher hands a job (`env.build.submit`). */
-export const buildJobInputSchema = z.strictObject({
+const buildJobInputSchema = z.strictObject({
   workspaceId: workspaceIdSchema,
   chatId: chatIdSchema,
   jobId: z.uuid(),
@@ -143,10 +148,11 @@ const scopeOf = (
  * Admits a step or write of the job `jobId`, right before it: refused once
  * the job has ended (cancelled with its turn or chat, or revoked), and
  * when a permission of its agent was revoked since its authority was
- * granted, which ends it as revoked. The slow read of revocations comes
- * first, the job's own check last.
+ * granted, which ends it as revoked. The job's own check comes first, a
+ * cheap refusal, and again last, after the slow read of revocations, so
+ * nothing ended meanwhile is admitted.
  */
-export const admitJob = async (
+const admitJob = async (
   env: Env,
   scope: Omit<AgentScope, "runId">,
   jobId: string
@@ -258,7 +264,8 @@ const asJob = async <T>(
     const value = await auditedCall(
       env,
       { ...scope, runId: job.runId },
-      { method, detail: { job: job.id, app: job.appId } },
+      // The run that submitted it, recorded with each of its calls.
+      { method, detail: { job: job.id, app: job.appId, run: job.runId } },
       async () => {
         const { by, app } = await authorize(env, scope, job);
         return await run({ job, scope, app, by });
@@ -332,36 +339,6 @@ const checkStep = async (env: Env, step: JobStep): Promise<Checked> => {
     check: { ...check, failedInARow: 0, maxFailedChecks },
     over: { parent: over.parent, tree },
   };
-};
-
-/**
- * Records, as the job's receipt, the version it recorded it was about to
- * commit and did commit, if it did, before anything else of a commit run
- * again: whether or not the job may still act, as what it committed stays.
- * The version, if there is one.
- */
-const reconcileReceipt = async (
-  env: Env,
-  input: JobInput
-): Promise<number | undefined> => {
-  const chats = workspace(env, input.workspaceId);
-  const job = await chats.buildJob(input.chatId, input.jobId);
-  if (job?.version !== null) {
-    return job?.version;
-  }
-  if (job.intendedTree === null) {
-    return undefined;
-  }
-  const version = await proposedByJob(
-    env,
-    job.appId,
-    { parent: job.intendedParent, tree: job.intendedTree },
-    { chatId: job.chatId, jobId: job.id }
-  );
-  if (version !== undefined) {
-    await chats.recordBuildReceipt(job.chatId, job.id, version);
-  }
-  return version;
 };
 
 /**
@@ -448,15 +425,6 @@ const completed = (result: DraftCheck | Proposal): BuildJobEnd => ({
   result: JSON.stringify(result),
 });
 
-/** The job's end for a step that failed for good: internal, unexpected. */
-const unexpected = (): BuildJobEnd => {
-  const error = internalErrors.create("internal.unexpected");
-  return {
-    status: "failed",
-    error: JSON.stringify({ code: error.code, message: error.message }),
-  };
-};
-
 /**
  * Runs `run` as the engine's step `name` (`asJob`), journaled: run again
  * after a restart only when it never finished.
@@ -506,7 +474,8 @@ const jobSteps = async (
     });
   }
   const proposed = await jobStep(step, "commit", async () => {
-    await reconcileReceipt(env, input);
+    // Before it asks to be admitted: what it committed stays its receipt.
+    await reconcileReceipt(env, input.workspaceId, input.chatId, input.jobId);
     return await asJob(
       env,
       input,
@@ -529,18 +498,29 @@ export const runBuildJob = async (
   step: RunStep
 ): Promise<void> => {
   const input = buildJobInputSchema.parse(payload);
-  let end: BuildJobEnd;
+  // Null when a step failed for good, past its retries. Should the engine
+  // have stopped this execution instead, the next step throws as well,
+  // and the engine runs the job again from here.
+  let end: BuildJobEnd | null;
   try {
     end = await jobSteps(env, input, step);
   } catch {
-    // A step failed for good, past its retries. Should the engine have
-    // stopped this execution instead, the next step throws as well, and
-    // the engine runs the job again from here.
-    end = unexpected();
+    end = null;
   }
   await step.do("finish", stepConfig, async () => {
     const chats = workspace(env, input.workspaceId);
-    let ending = end;
+    // Broken off: as one that committed, if it did, never as one to submit
+    // again.
+    let ending =
+      end ??
+      brokenOff(
+        (await reconcileReceipt(
+          env,
+          input.workspaceId,
+          input.chatId,
+          input.jobId
+        )) ?? null
+      );
     if (ending.status === "completed") {
       const job = await chats.buildJob(input.chatId, input.jobId);
       try {

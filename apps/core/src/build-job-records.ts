@@ -14,7 +14,7 @@ import { chatBuildJobs } from "./db/workspace/schema.ts";
 // interleaved with another call.
 
 /** Most build jobs a chat may have running at once. */
-export const maxRunningJobs = 3;
+const maxRunningJobs = 3;
 
 /**
  * Most build job records a chat keeps, newest first: what its agent may
@@ -22,6 +22,22 @@ export const maxRunningJobs = 3;
  * proposal, so this bounds what jobs keep in the chat's object.
  */
 export const jobRecordsKept = 100;
+
+/**
+ * How a job that broke off ends, failed: as one that committed version
+ * `version` when it did, so the agent doesn't propose it again, or as one
+ * that didn't run to its end, to submit again.
+ */
+export const brokenOff = (version: number | null): BuildJobEnd => ({
+  status: "failed",
+  error: JSON.stringify({
+    code: "internal.unexpected",
+    message:
+      version === null
+        ? "The build job couldn't run to its end. Submit it again."
+        : `The build job ended unexpectedly after committing version ${version}, which is proposed for review. Don't propose it again.`,
+  }),
+});
 
 /** A build job's row. */
 export type BuildJobRow = typeof chatBuildJobs.$inferSelect;

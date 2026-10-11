@@ -39,10 +39,10 @@ import {
   draftOverLatest,
   latestVersion,
   proposeDraft,
-  proposedByJob,
 } from "./apps.ts";
 import type { Acting, Member } from "./auth/identity.ts";
-import { jobView } from "./build-job-records.ts";
+import { reconcileReceipt } from "./build-job-receipts.ts";
+import { brokenOff, jobView } from "./build-job-records.ts";
 import type { BuildJobView } from "./build-job-records.ts";
 import { workspace } from "./durable-objects.ts";
 import { appsCollectionId } from "./knowledge/app-entries.ts";
@@ -457,15 +457,6 @@ const orphanedJobMs = 60_000;
 /** Where the engine has an instance that has ended. */
 const endedInstances = new Set(["complete", "errored", "terminated"]);
 
-/** How a job that never ran, or whose instance went, ends. */
-const jobNotStarted = {
-  status: "failed",
-  error: JSON.stringify({
-    code: "internal.unexpected",
-    message: "The build job couldn't run. Submit it again.",
-  }),
-} as const;
-
 /**
  * Fails the chat's jobs whose record says they run while the engine has
  * ended their instance (terminated, errored or complete without their last
@@ -500,7 +491,9 @@ const failDeadJobs = async (
           ? Date.now() - createdAt.getTime() > orphanedJobMs
           : endedInstances.has(instance.status);
       if (dead) {
-        await chats.endBuildJob(chatId, id, jobNotStarted);
+        // As one that committed, if it did before it went.
+        const version = await reconcileReceipt(env, workspaceId, chatId, id);
+        await chats.endBuildJob(chatId, id, brokenOff(version ?? null));
       }
     })
   );
@@ -1077,7 +1070,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
             ...errorFields(error),
           });
           await chats
-            .endBuildJob(chatId, opened.id, jobNotStarted)
+            .endBuildJob(chatId, opened.id, brokenOff(null))
             .catch(logCountFailure);
           throw error;
         }
@@ -1111,17 +1104,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         }
         await this.#buildable(by, found.appId);
         await failDeadJobs(this.env, workspaceId, chatId);
-        if (found.version === null && found.intendedTree !== null) {
-          const version = await proposedByJob(
-            this.env,
-            found.appId,
-            { parent: found.intendedParent, tree: found.intendedTree },
-            { chatId, jobId: found.id }
-          );
-          if (version !== undefined) {
-            await chats.recordBuildReceipt(chatId, found.id, version);
-          }
-        }
+        await reconcileReceipt(this.env, workspaceId, chatId, found.id);
         const now = await chats.buildJob(chatId, found.id);
         return jobView(now ?? found);
       },
