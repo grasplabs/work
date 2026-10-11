@@ -67,6 +67,12 @@ export const tables = sqliteTable(
     /** The name in lower case, so `Notes` and `notes` can't both exist. */
     nameKey: text("name_key").notNull(),
     createdAt: integer("created_at").notNull(),
+    /**
+     * How many commits have changed the table's records: what a read of
+     * the table depends on, so a read set is known stale once a commit
+     * changed a table it read, whether or not its records matched.
+     */
+    generation: integer().notNull().default(0),
   },
   (table) => [
     uniqueIndex("sdk_tables_name_key").on(table.nameKey),

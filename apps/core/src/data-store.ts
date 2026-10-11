@@ -17,7 +17,6 @@ import { migrateOnWake } from "./db/migrate.ts";
 import { outboxConsumers } from "./outbox-delivery.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { StoreHost } from "./store-host.ts";
-import type { QueryAnswer } from "./store-queries.ts";
 
 // A business store: one Durable Object per store, named by the store's ID
 // (data-stores.ts), with a SQLite database of its own. What it does, and
@@ -57,13 +56,21 @@ export class DataStore extends DurableObject<Env> {
     return this.#host.get(storeId, table, id);
   }
 
-  /** `StoreHost.read`. */
+  /**
+   * `StoreHost.read`, as the JSON text of its `ReadResult`: RPC types
+   * can't carry documents, which are JSON anyway (`openStore` parses it).
+   */
   async read(
     storeId: StoreId,
     scope: ReadScope,
     request: ReadRequest
-  ): Promise<QueryAnswer> {
-    return await this.#host.read(storeId, scope, request);
+  ): Promise<string> {
+    return JSON.stringify(await this.#host.read(storeId, scope, request));
+  }
+
+  /** `StoreHost.generations`. */
+  generations(storeId: StoreId, names: string[]): Record<string, number> {
+    return this.#host.generations(storeId, names);
   }
 
   /** `StoreHost.claim`. */
