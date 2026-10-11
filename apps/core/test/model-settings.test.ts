@@ -291,6 +291,7 @@ describe("model settings", { timeout: 60_000 }, () => {
         },
         reservedMicros: micros,
         actor: { type: "person", userId: "someone" },
+        deadline: Date.now() + 60_000,
         reconcileAt: Date.now() + 60_000,
       });
       await ledger.settle(id, {
@@ -373,6 +374,7 @@ describe("model settings", { timeout: 60_000 }, () => {
         },
         reservedMicros: 10_000 * (index + 1),
         actor: { type: "person", userId: key },
+        deadline: Date.now() + 60_000,
         reconcileAt: Date.now() + 60_000,
       });
     }

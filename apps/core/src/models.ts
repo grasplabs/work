@@ -55,7 +55,12 @@ import { z } from "zod";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { budgetMonth, hasBudget, scopesFor } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
-import type { LedgerScope, Settled, Settlement } from "./model-ledger.ts";
+import type {
+  LedgerScope,
+  LedgerScopeName,
+  Settled,
+  Settlement,
+} from "./model-ledger.ts";
 import {
   boundMicros,
   costDollars,
@@ -724,6 +729,42 @@ const promptAllowanceTokens = 1024;
  */
 const reconcileGraceMs = 5 * 60_000;
 
+/**
+ * The wait a refusal for a budget held by calls under way suggests. An
+ * advisory hint: asking again sooner is only refused again.
+ *
+ * Where every full scope is the caller's own (their user scope, their
+ * run), the calls holding it are theirs: the wait runs until the soonest
+ * call under way in each scope reaches its deadline (the ledger's
+ * `heldUntil`), rounded up to a whole step, and no longer than the most.
+ * Optimistic, as that call may not free enough on its own; bounded, so a
+ * caller asks again and is told afresh rather than wait out a long call.
+ *
+ * A shared scope (the deployment, a workflow) is held by other people's
+ * calls too. A derived wait would give away when they were sent: polling
+ * would show the second it drops a step. Such a refusal suggests a fixed
+ * wait. That removes only the timing of when they were sent: being told
+ * the budget is busy at all still says other calls are under way, and its
+ * turning into an admission (or out of budget) says when they finished.
+ */
+const busyRetry = { stepSeconds: 15, mostSeconds: 300, sharedSeconds: 60 };
+
+/** The scopes a caller's own calls alone count against. */
+const ownScopes: ReadonlySet<LedgerScopeName> = new Set(["user", "run"]);
+
+/** The seconds to wait before asking again, for a budget held until `heldUntil`. */
+const retryAfterSeconds = (
+  heldBy: readonly LedgerScopeName[],
+  heldUntil: number
+): number => {
+  if (!heldBy.every((scope) => ownScopes.has(scope))) {
+    return busyRetry.sharedSeconds;
+  }
+  const waitMs = heldUntil - Date.now();
+  const steps = Math.max(1, Math.ceil(waitMs / 1000 / busyRetry.stepSeconds));
+  return Math.min(steps * busyRetry.stepSeconds, busyRetry.mostSeconds);
+};
+
 /** The prices of a model that has none, which no budget admits. */
 const unpriced: PinnedPrice = {
   version: "unpriced",
@@ -797,6 +838,7 @@ const admitRequest = async (
   const promptBound = bytes + promptAllowanceTokens;
   const pinned = price ?? unpriced;
   const id = crypto.randomUUID();
+  const callDeadline = Date.now() + (call.timeoutMs ?? defaultTimeoutMs);
   const reservedMicros = boundMicros(pinned, {
     inputTokens: promptBound,
     outputTokens,
@@ -810,8 +852,8 @@ const admitRequest = async (
       price: pinned,
       reservedMicros,
       actor: call.trigger,
-      reconcileAt:
-        Date.now() + (call.timeoutMs ?? defaultTimeoutMs) + reconcileGraceMs,
+      deadline: callDeadline,
+      reconcileAt: callDeadline + reconcileGraceMs,
     });
     if (admitted.ok) {
       return { id, reservedMicros };
@@ -823,6 +865,20 @@ const admitRequest = async (
       // Never expected: every ID is a new UUID.
       log.error("model.request_id_reused", { model: call.model });
       return { held: { code: "model.ledger_unavailable" } };
+    }
+    // A guest's user scope is the member who invited them: whether that
+    // member has calls under way is theirs to know, not the guest's.
+    if ("heldUntil" in admitted && call.trigger.type !== "guest") {
+      return {
+        held: {
+          code: "model.budget_busy",
+          because: admitted.scope,
+          retryAfterSeconds: retryAfterSeconds(
+            admitted.heldBy,
+            admitted.heldUntil
+          ),
+        },
+      };
     }
     return { held: { code: "model.over_budget", because: admitted.scope } };
   } catch (error) {
@@ -1403,7 +1459,7 @@ const record = async (
  */
 const refusedEntry = (
   call: Session,
-  { code, because }: Refusal
+  { code, because, retryAfterSeconds: retryAfter }: Refusal
 ): AuditEntry => {
   // Never a model name so long that the event would be refused.
   const model =
@@ -1417,6 +1473,7 @@ const refusedEntry = (
       purpose: call.purpose,
       reason: code,
       because: because ?? null,
+      ...(retryAfter === undefined ? {} : { retryAfterSeconds: retryAfter }),
       model,
       provenanceDropped: dropped,
       chat: chatOf(call),
@@ -1436,12 +1493,13 @@ const refuse = async (
   if (code === "permission.context_invalid") {
     throw permissionErrors.create(code);
   }
-  throw modelErrors.create(
-    code,
-    because === undefined
-      ? { model: call.model }
-      : { model: call.model, because }
-  );
+  const { retryAfterSeconds: retryAfter } = refusal;
+  throw modelErrors.create(code, {
+    model: call.model,
+    ...(because === undefined ? {} : { because }),
+    // A budget held by calls under way: worth asking again, after this.
+    ...(retryAfter === undefined ? {} : { retryAfterSeconds: retryAfter }),
+  });
 };
 
 /** Records a refusal, as `refuse` does, without throwing it. */
@@ -1666,13 +1724,16 @@ const relayEvents = async (
   for await (const event of events) {
     if (event.type === "error" && response.held !== undefined) {
       // Never sent: the ledger held it back. Audited as a refusal.
-      const { code } = response.held;
+      const { code, retryAfterSeconds: retryAfter } = response.held;
       await refuseQuietly(env, route.call, response.held);
       out.push({
         ...event,
         error: {
           ...event.error,
-          errorMessage: `The model call was refused (${code}).`,
+          errorMessage:
+            retryAfter === undefined
+              ? `The model call was refused (${code}).`
+              : `The model call was refused (${code}). Try again in ${retryAfter} seconds.`,
         },
       });
       return;
