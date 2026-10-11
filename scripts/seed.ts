@@ -1,8 +1,9 @@
 /**
  * `vp run seed`: fills the local stack `vp run dev` runs with a demo
  * company (scripts/seed/company.ts), so every page has something to show:
- * people in teams and roles, engines with released workflows and 30 days
- * of their runs, Knowledge, and chats. Run it while `vp run dev` runs.
+ * people in teams and roles, engines with released workflows, 30 days of
+ * their runs and apps over them (scripts/seed/screens.ts), Knowledge, and
+ * chats. Run it while `vp run dev` runs.
  *
  * Everything goes through core's API as the person who would do it, signed
  * in through the local fake IdP; only what no API does is written into the
@@ -20,6 +21,7 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import { z } from "zod";
 
 import { chats, writeTranscript } from "./seed/chats.ts";
@@ -38,6 +40,7 @@ import {
 } from "./seed/local.ts";
 import type { Session } from "./seed/local.ts";
 import { seedRuns } from "./seed/runs.ts";
+import { approvedScreens, engineScreens } from "./seed/screens.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -235,7 +238,31 @@ const seedCollection = async (
 };
 
 /**
- * An engine: created by its owner, its version made current by an admin,
+ * Approves, as an admin, every screen of the App's current version that
+ * builds and isn't approved yet, so its people see their data in it.
+ */
+const approveScreens = async (
+  adminSession: Session,
+  app: string
+): Promise<void> => {
+  const review = await adminSession.api.screenTrust.review(app);
+  if (review.screens.every(({ trust }) => trust === "approved")) {
+    return;
+  }
+  const artifacts = builtArtifacts(review.screens);
+  if (artifacts.length < review.screens.length) {
+    throw new Error(`Not every screen of ${review.name} builds`);
+  }
+  await adminSession.api.screenTrust.approve(app, {
+    version: review.version,
+    generation: review.generation,
+    artifacts,
+  });
+};
+
+/**
+ * An engine: created by its owner with its workflows and apps, its version
+ * made current by an admin, its apps approved where the seed says so,
  * shared with its teams, its deciders set, and, while it has none, its
  * runs. Returns its ID, and how many runs it got.
  */
@@ -253,8 +280,17 @@ const seedEngine = async (
       name: seed.name,
       description: seed.description,
     }));
+  const screens = Object.fromEntries(
+    Object.entries(engineScreens[seed.name] ?? {}).map(([name, code]) => [
+      `screens/${name}.tsx`,
+      code,
+    ])
+  );
   if (app.currentVersion === null) {
-    const files: Record<string, string> = { "AGENTS.md": seed.agents };
+    const files: Record<string, string> = {
+      "AGENTS.md": seed.agents,
+      ...screens,
+    };
     for (const { id, code, tests } of seed.workflows) {
       files[`workflows/${id}.ts`] = code;
       files[`workflows/${id}.workflow-tests.ts`] = tests;
@@ -262,10 +298,29 @@ const seedEngine = async (
     const { version } = await owner.api.apps.files.commit(
       app.id,
       files,
-      "Release the engine's workflows"
+      "Release the engine's workflows and apps"
     );
     // An admin makes it current, which approves its code.
     await adminSession.api.apps.versions.setCurrent(app.id, version);
+  } else {
+    // An engine seeded before it had apps gets them as its next version.
+    const { screens: has } = await owner.api.apps.contents(app.id);
+    const missing = Object.fromEntries(
+      Object.entries(screens).filter(
+        ([path]) => !has.includes(path.slice("screens/".length, -".tsx".length))
+      )
+    );
+    if (Object.keys(missing).length > 0) {
+      const { version } = await owner.api.apps.files.commit(
+        app.id,
+        missing,
+        "Add the engine's apps"
+      );
+      await adminSession.api.apps.versions.setCurrent(app.id, version);
+    }
+  }
+  if (approvedScreens.has(seed.name) && Object.keys(screens).length > 0) {
+    await approveScreens(adminSession, app.id);
   }
   const shared = await owner.api.apps.members.list(app.id);
   for (const { team, role } of seed.teams) {
