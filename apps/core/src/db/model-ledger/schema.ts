@@ -61,9 +61,9 @@ export const requests = sqliteTable(
     actor: text().notNull(),
     dispatchedAt: integer("dispatched_at").notNull(),
     /**
-     * When the call is cut off at the latest: until then it may still
-     * settle for less than it holds; after it, its reservation counts as
-     * spent.
+     * When the call is cut off at the latest. Past it, its reservation
+     * counts as spent when deciding whether the budget is busy, though it
+     * may still settle at what it used until it comes due.
      */
     deadline: integer().notNull().default(0),
     /** When it is charged its whole reservation, unless settled before. */

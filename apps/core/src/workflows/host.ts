@@ -476,6 +476,28 @@ const isLastAttempt = (
   return (told?.attempt ?? tries) > retries;
 };
 
+/** Waits `ms`, or until `attempt`'s timeout ends, if that comes first. */
+const waitWithin = async (attempt: StepAttempt, ms: number): Promise<void> => {
+  const timeLeft = attempt.ends === undefined ? ms : attempt.ends - Date.now();
+  await scheduler.wait(Math.max(0, Math.min(ms, timeLeft)));
+};
+
+/**
+ * The refusal `known` again, for an attempt answered without asking the
+ * gateway: its suggested wait less the time gone by since, at least a
+ * second.
+ */
+const busyAgain = (known: BusyBudget) => {
+  const wait = known.details?.retryAfterSeconds;
+  const gone = Math.floor((Date.now() - known.at) / 1000);
+  return modelErrors.create(
+    "model.budget_busy",
+    typeof wait === "number"
+      ? { ...known.details, retryAfterSeconds: Math.max(1, wait - gone) }
+      : known.details
+  );
+};
+
 /** The last refusal of a step's AI call for a budget held by calls under way. */
 interface BusyBudget {
   at: number;
@@ -759,6 +781,11 @@ export class RunHost extends RpcTarget {
    * {@link budgetBusyWaitMs} is answered from here.
    */
   readonly #busyBudgets = new Map<string, BusyBudget>();
+  /**
+   * Each step's AI call in flight, by step name: a later attempt of the
+   * step waits for it rather than ask the gateway beside it.
+   */
+  readonly #asking = new Map<string, Promise<unknown>>();
   /**
    * The refusal that caught the run's isolate tampering
    * (`#refuseTampering`): once set, every later call of this execution
@@ -1101,28 +1128,21 @@ export class RunHost extends RpcTarget {
   }
 
   /**
-   * `call`'s answer, unless the model budget turned away an AI call of
-   * `attempt`'s step while other calls under way hold it: then the same
-   * refusal, once {@link budgetBusyWaitMs} went by since, so a step whose
-   * attempts are retried tightly, or time out quickly, asks the ledger,
-   * and audits a refusal, at most that often. An attempt within that
-   * while of the last refusal is answered with it here, without asking
-   * the gateway. The last attempt doesn't wait: nothing comes after it.
+   * `call`'s answer, asked of the gateway once {@link #untilAsking} lets
+   * `attempt` ask. When the budget turns it away while other calls under
+   * way hold it, the refusal is kept, and the attempt waits out
+   * {@link budgetBusyWaitMs} (as long as its timeout lets it) before it
+   * fails, unless it is the last: nothing comes after it.
    */
   async #waitingOutBusyBudget<T>(
     attempt: StepAttempt,
     call: () => Promise<T>
   ): Promise<T> {
-    const known = this.#busyBudgets.get(attempt.step);
-    const since = known === undefined ? Infinity : Date.now() - known.at;
-    if (known !== undefined && since < budgetBusyWaitMs) {
-      if (!attempt.last) {
-        await scheduler.wait(budgetBusyWaitMs - since);
-      }
-      throw modelErrors.create("model.budget_busy", known.details);
-    }
+    await this.#untilAsking(attempt);
+    const asking = call();
+    this.#asking.set(attempt.step, asking);
     try {
-      return await call();
+      return await asking;
     } catch (error) {
       if (modelErrors.codeOf(error) === "model.budget_busy") {
         const details =
@@ -1131,10 +1151,59 @@ export class RunHost extends RpcTarget {
             : undefined;
         this.#busyBudgets.set(attempt.step, { at: Date.now(), details });
         if (!attempt.last) {
-          await scheduler.wait(budgetBusyWaitMs);
+          await waitWithin(attempt, budgetBusyWaitMs);
         }
       }
       throw error;
+    } finally {
+      if (this.#asking.get(attempt.step) === asking) {
+        this.#asking.delete(attempt.step);
+      }
+    }
+  }
+
+  /**
+   * Returns once `attempt` may ask the gateway for its step's AI call, so
+   * a step asks the ledger, and audits a refusal, at most once every
+   * {@link budgetBusyWaitMs}, however tightly its attempts are retried or
+   * time out. It waits for a call of the step still in flight, and while
+   * the step's last refusal for a busy budget is that recent, for that
+   * while to end. An attempt whose timeout ends first, or that a newer
+   * attempt took over meanwhile, is answered with that refusal instead,
+   * its wait shortened by the time gone by.
+   */
+  async #untilAsking(attempt: StepAttempt): Promise<void> {
+    for (;;) {
+      const asking = this.#asking.get(attempt.step);
+      const known = this.#busyBudgets.get(attempt.step);
+      const left =
+        known === undefined ? 0 : known.at + budgetBusyWaitMs - Date.now();
+      if (asking === undefined && left <= 0) {
+        return;
+      }
+      if (asking !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- then look again
+        await asking.then(
+          () => null,
+          () => null
+        );
+      } else if (known !== undefined) {
+        const timeLeft =
+          attempt.ends === undefined ? Infinity : attempt.ends - Date.now();
+        if (timeLeft < left) {
+          // oxlint-disable-next-line no-await-in-loop -- once, then answered
+          await scheduler.wait(Math.max(0, timeLeft));
+          throw busyAgain(known);
+        }
+        // oxlint-disable-next-line no-await-in-loop -- then look again
+        await scheduler.wait(left);
+      }
+      if (this.#running !== attempt) {
+        const latest = this.#busyBudgets.get(attempt.step);
+        throw latest === undefined
+          ? modelErrors.create("model.failed")
+          : busyAgain(latest);
+      }
     }
   }
 
