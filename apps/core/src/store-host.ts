@@ -1,5 +1,6 @@
 import { ValueDefinitionError } from "@grasp-os/sdk";
 import {
+  manifestText,
   readSchemaManifest,
   SchemaDefinitionError,
   schemaHash as hashOf,
@@ -57,6 +58,7 @@ import {
   outbox,
   receipts,
   records,
+  schemas,
   store,
   tables,
 } from "./db/data-store/schema.ts";
@@ -72,6 +74,7 @@ import {
 import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
 import { inventoriedDeleted, recordStoreDeleted } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
+import { installIndexes, planIndexes } from "./store-indexes.ts";
 
 // The host of a business store (data-store.ts is its Durable Object): one
 // object per store, named by the store's ID (data-stores.ts), with a SQLite database of its own that holds all
@@ -224,6 +227,7 @@ const purgeBudgetMs = 10_000;
  */
 const purgedTables = [
   "sdk_records",
+  "sdk_schemas",
   "sdk_change_outbox",
   "sdk_mutation_receipts",
   "sdk_tables",
@@ -333,9 +337,14 @@ export class StoreHost {
    * the caller. A schema that fails a check is refused
    * (`data.invalid_schema`, with the check's code). A table name that
    * differs from an existing one only in case is refused, and so is one
-   * past `storeMaxTables`. Tables are never renamed or removed here, and
-   * nothing is activated: which schema a store holds its records to comes
-   * with schema activation.
+   * past `storeMaxTables`. Then it installs a physical index for each of
+   * the schema's declared indexes it doesn't hold yet (store-indexes.ts;
+   * `data.too_many_indexes` past `storeMaxIndexes`) and records the
+   * manifest under its hash, both in one transaction, so a read pinned to
+   * the schema finds its indexes whenever it finds the schema. Doing it
+   * again changes nothing. Tables and indexes are never renamed or
+   * removed here, and nothing is activated: which schema a store holds
+   * its records to comes with schema activation.
    */
   async defineTables(
     storeId: StoreId,
@@ -390,6 +399,20 @@ export class StoreHost {
           all.map(({ name, tableId }) => [name, tableId])
         ),
       };
+    });
+    // Hashing is asynchronous, so the indexes are planned between the two
+    // transactions: tables without indexes yet are harmless, and the
+    // schema is only recorded with its indexes.
+    const plan = await planIndexes(read.manifest, ids.storeTables);
+    const text = manifestText(read.manifest);
+    this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId);
+      installIndexes(this.ctx.storage.sql, plan);
+      this.#db
+        .insert(schemas)
+        .values({ schemaHash, manifest: text, createdAt: Date.now() })
+        .onConflictDoNothing()
+        .run();
     });
     return { schemaHash, ...ids };
   }
@@ -1020,12 +1043,14 @@ export class StoreHost {
   async schedule(gapMs = alarmGapMs): Promise<void> {
     if (this.#deleted()) {
       // Only recording it in core and its purge are left, if anything.
-      const left = this.ctx.storage.sql
-        .exec(
-          `SELECT 1 FROM sdk_store WHERE inventoried_at IS NULL ${purgedTables.map((table) => `UNION ALL SELECT 1 FROM ${table}`).join(" ")} LIMIT 1`
+      // EXISTS terms rather than a UNION: SQLite here caps a compound
+      // SELECT at five terms.
+      const [left] = this.ctx.storage.sql
+        .exec<{ left: number }>(
+          `SELECT (EXISTS (SELECT 1 FROM sdk_store WHERE inventoried_at IS NULL) ${purgedTables.map((table) => `OR EXISTS (SELECT 1 FROM ${table})`).join(" ")}) AS left`
         )
         .toArray();
-      if (left.length > 0) {
+      if (left?.left === 1) {
         await this.ctx.storage.setAlarm(Date.now() + gapMs);
       }
       return;

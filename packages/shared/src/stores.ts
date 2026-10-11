@@ -4,6 +4,7 @@ import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema, storeIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
 import {
+  storeMaxIndexes,
   storeMaxTables,
   storeNameMaxLength,
   storeNamePattern,
@@ -326,6 +327,7 @@ export const dataErrors = defineErrorFamily({
   "data.table_conflict":
     "Two tables can't have names that differ only in case.",
   "data.too_many_tables": `A store holds at most ${storeMaxTables} tables.`,
+  "data.too_many_indexes": `A store holds at most ${storeMaxIndexes} indexes, those kept for older versions included.`,
   "data.conflict":
     "The record changed since it was read. Read it again, then retry.",
   "data.store_unavailable": "This store doesn't exist or was deleted.",
