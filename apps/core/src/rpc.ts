@@ -17,7 +17,7 @@ import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import { SessionRpc } from "./session-rpc.ts";
 
 /** What the frontend reaches over `/rpc`, signed in or not. */
-class CoreRpc extends CoreRpcTarget implements CoreApi {
+export class CoreRpc extends CoreRpcTarget implements CoreApi {
   readonly #options: SignInOption[];
   readonly #session: SessionRpc | undefined;
 
@@ -159,6 +159,24 @@ const sessionApi = (
 };
 
 /**
+ * What a browser's connection over `server` reaches: signed in as the
+ * session `headers` carry (only the upgrade request's cookie), if it holds
+ * one. Every target the browser can reach from here extends
+ * `CoreRpcTarget` (test/rpc-targets.test.ts walks them all).
+ */
+export const browserApi = async (
+  env: Env,
+  headers: Headers,
+  server: WebSocket
+): Promise<CoreRpc> => {
+  const connectedAs = await identify(env, headers);
+  const session = connectedAs
+    ? sessionApi({ env, headers, connectedAs }, server)
+    : undefined;
+  return new CoreRpc(signInOptions(env), session);
+};
+
+/**
  * Opens a Cap'n Web session over WebSocket. The session lives in this Worker
  * invocation for as long as the socket is open; hibernation applies once RPC
  * is routed to a Durable Object.
@@ -190,8 +208,6 @@ export const rpcResponse = async (
 
   const cookie = request.headers.get("Cookie");
   const headers = new Headers(cookie === null ? {} : { cookie });
-  const connectedAs = await identify(env, headers);
-
   const { 0: client, 1: server } = new WebSocketPair();
   // Cap'n Web also passes the reason a session ended through onSendError.
   // A closed socket is how sessions normally end, so that isn't logged.
@@ -201,10 +217,7 @@ export const rpcResponse = async (
   });
   server.accept();
 
-  const session = connectedAs
-    ? sessionApi({ env, headers, connectedAs }, server)
-    : undefined;
-  newWebSocketRpcSession(server, new CoreRpc(signInOptions(env), session), {
+  newWebSocketRpcSession(server, await browserApi(env, headers, server), {
     // What a browser sends is untrusted, a screen's calls among it: no
     // deeper and no longer numbers than a screen's port takes
     // (`screenLimits.rpc`). A message may be longer than a screen's:

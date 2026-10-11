@@ -12,7 +12,7 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { openBridge } from "./screen-bridge.ts";
+import { frameBridge, FrameRpcTarget, openBridge } from "./screen-bridge.ts";
 import type { FrameTarget } from "./screen-bridge.ts";
 
 // The page's bridge, from the frame's end of a real `MessagePort`: a
@@ -179,6 +179,14 @@ describe("the page's bridge to a screen", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("serves the frame only an object that holds each call to the frame's bounds", () => {
+    // What `openBridge` serves: a frame reaches nothing else through its
+    // port but what this answers and takes.
+    expect(frameBridge(coreStandIn().target, [])).toBeInstanceOf(
+      FrameRpcTarget
+    );
   });
 
   it("passes a call on to the screen's own target, named by a string", async () => {
