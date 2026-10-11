@@ -46,11 +46,17 @@ import type { PinnedPrice } from "./model-prices.ts";
 //
 // - Concurrent requests overspend a budget: an admission reserves the
 //   request's most possible cost (its bound) against every one of its
-//   scopes (the deployment, the workflow, the person, the run) in one
-//   synchronous transaction that first checks each scope's spend plus
-//   what is reserved plus the bound against its limit. Nothing else runs
-//   in between, so reservations never oversubscribe a limit, and a scope
-//   without room refuses the whole request: no partial reservation.
+//   scopes (the deployment, the workflow, the person, the run lineage) in
+//   one synchronous transaction that first checks each scope's spend plus
+//   what is reserved plus the bound against its limit, and its requests
+//   against its request limit. Nothing else runs in between, so
+//   reservations never oversubscribe a limit, and a scope without room
+//   refuses the whole request: no partial reservation.
+// - A run lineage escapes its limits: its scope is keyed by the lineage's
+//   root run, so a child run, a run beside it, a retry or a restart counts
+//   against the same spend and requests as the rest of the lineage, and
+//   its spend and alerts are kept under one period (\`lineagePeriod\`), so
+//   a new month doesn't start it afresh either.
 // - The ledger fails or can't be reached: the gateway sends nothing
 //   unless its admission answered yes. An admission whose answer was lost
 //   may have committed: the gateway releases it only if it knows the
@@ -127,6 +133,17 @@ const sweepEveryMs = 24 * 60 * 60 * 1000;
 
 const scopeNames = ["deployment", "workflow", "user", "run"] as const;
 
+/**
+ * The period a run lineage's spend, requests and alerts are kept under,
+ * whatever month its requests count in for the other scopes: a lineage
+ * is counted for its whole life.
+ */
+const lineagePeriod = "lineage";
+
+/** The period `scope`'s spend counts in, for a request of `period`. */
+const periodOf = (scope: LedgerScopeName, period: string): string =>
+  scope === "run" ? lineagePeriod : period;
+
 /** Whose spend a scope counts. */
 export type LedgerScopeName = (typeof scopeNames)[number];
 
@@ -139,12 +156,14 @@ const scopeSchema = z.strictObject({
   limitMicros: microsSchema.nullable(),
   /** Where admins are alerted; `null` without a budget. */
   alertMicros: microsSchema.nullable(),
+  /** The most requests it may admit; `null` for no limit. */
+  limitRequests: z.int().positive().nullable().default(null),
   /** What its alerts name, as audit detail: the workflow or the person. */
   names: z.record(z.string(), z.string()),
 });
 
 /** One scope a request counts against, with its budget when admitted. */
-export type LedgerScope = z.infer<typeof scopeSchema>;
+export type LedgerScope = z.input<typeof scopeSchema>;
 
 const ratesShape = {
   input: microsSchema,
@@ -222,6 +241,8 @@ export type Admitted =
       heldBy: LedgerScopeName[];
       heldUntil: number;
     }
+  /** It admitted as many requests as it may: refused, for good. */
+  | { ok: false; scope: LedgerScopeName; requests: true }
   /**
    * Its ID was admitted before, for another request or one no longer
    * open: refused, reserving nothing.
@@ -427,6 +448,22 @@ export class ModelLedger extends DurableObject<Env> {
         scope,
         row: this.#spendOf(scope, admission.period),
       }));
+      // No request comes back but one never sent: a scope out of requests
+      // is refused whatever its spend.
+      const counted = rows.find(
+        ({ scope, row }) =>
+          scope.limitRequests !== null && row.requests >= scope.limitRequests
+      );
+      if (counted !== undefined) {
+        return {
+          admitted: {
+            ok: false,
+            scope: counted.scope.scope,
+            requests: true,
+          } as const,
+          alerted: 0,
+        };
+      }
       let alertedNow = 0;
       for (const { scope, row } of rows) {
         alertedNow += this.#alert(
@@ -494,13 +531,15 @@ export class ModelLedger extends DurableObject<Env> {
           .values({
             scope,
             key,
-            period: admission.period,
+            period: periodOf(scope, admission.period),
             reservedMicros: admission.reservedMicros,
+            requests: 1,
           })
           .onConflictDoUpdate({
             target: [spend.scope, spend.key, spend.period],
             set: {
               reservedMicros: sql`${spend.reservedMicros} + excluded.reserved_micros`,
+              requests: sql`${spend.requests} + 1`,
             },
           })
           .run();
@@ -684,10 +723,11 @@ export class ModelLedger extends DurableObject<Env> {
       const rebuilt: Record<string, string | number | null> = {};
       let rebuiltScopes = 0;
       for (const { kept, holds, damaged: isDamaged } of counted) {
+        const period = periodOf(kept.scope, row.period);
         const where = and(
           eq(spend.scope, kept.scope),
           eq(spend.key, kept.key),
-          eq(spend.period, row.period)
+          eq(spend.period, period)
         );
         if (isDamaged) {
           const rebuiltMicros = this.#openReservations(kept, row.period);
@@ -703,7 +743,7 @@ export class ModelLedger extends DurableObject<Env> {
               .values({
                 scope: kept.scope,
                 key: kept.key,
-                period: row.period,
+                period,
                 reservedMicros: rebuiltMicros,
               })
               .run();
@@ -770,8 +810,9 @@ export class ModelLedger extends DurableObject<Env> {
 
   /**
    * The scopes `row` reserved against (`request_scopes`), each with what
-   * its spend holds this month, and whether that spend is damaged: missing,
-   * or holding less than `row` alone reserved.
+   * its spend holds this month (a run lineage's: in its whole life), and
+   * whether that spend is damaged: missing, or holding less than `row`
+   * alone reserved.
    */
   #heldScopes(row: { id: string; period: string; reservedMicros: number }): {
     kept: typeof requestScopes.$inferSelect;
@@ -791,7 +832,7 @@ export class ModelLedger extends DurableObject<Env> {
             and(
               eq(spend.scope, kept.scope),
               eq(spend.key, kept.key),
-              eq(spend.period, row.period)
+              eq(spend.period, periodOf(kept.scope, row.period))
             )
           )
           .get()?.reservedMicros;
@@ -805,8 +846,9 @@ export class ModelLedger extends DurableObject<Env> {
 
   /**
    * What the open requests (under way, lost or held) reserve against
-   * `kept`'s scope in `period`, by the ledger's own records: what its spend
-   * should hold. Inside a transaction.
+   * `kept`'s scope in `period` (a run lineage's: in any month), by the
+   * ledger's own records: what its spend should hold. Inside a
+   * transaction.
    */
   #openReservations(
     kept: { scope: LedgerScopeName; key: string },
@@ -822,7 +864,7 @@ export class ModelLedger extends DurableObject<Env> {
         .where(
           and(
             inArray(requests.state, ["dispatched", "unknown", "quarantined"]),
-            eq(requests.period, period),
+            kept.scope === "run" ? undefined : eq(requests.period, period),
             eq(requestScopes.scope, kept.scope),
             eq(requestScopes.key, kept.key)
           )
@@ -1020,7 +1062,8 @@ export class ModelLedger extends DurableObject<Env> {
         .where(
           and(
             eq(requests.state, "dispatched"),
-            eq(requests.period, period),
+            // A lineage's requests hold its room whatever month they count in.
+            scope.scope === "run" ? undefined : eq(requests.period, period),
             gt(requests.deadline, now),
             eq(requestScopes.scope, scope.scope),
             eq(requestScopes.key, scope.key)
@@ -1050,26 +1093,27 @@ export class ModelLedger extends DurableObject<Env> {
     };
   }
 
-  /** The spend row of `scope` in `period`, or none spent yet. */
+  /** The spend row of `scope` for a request of `period`, or none spent yet. */
   #spendOf(
     { scope, key }: LedgerScope,
     period: string
-  ): { spentMicros: number; reservedMicros: number } {
+  ): { spentMicros: number; reservedMicros: number; requests: number } {
     return (
       this.#db
         .select({
           spentMicros: spend.spentMicros,
           reservedMicros: spend.reservedMicros,
+          requests: spend.requests,
         })
         .from(spend)
         .where(
           and(
             eq(spend.scope, scope),
             eq(spend.key, key),
-            eq(spend.period, period)
+            eq(spend.period, periodOf(scope, period))
           )
         )
-        .get() ?? { spentMicros: 0, reservedMicros: 0 }
+        .get() ?? { spentMicros: 0, reservedMicros: 0, requests: 0 }
     );
   }
 
@@ -1116,12 +1160,16 @@ export class ModelLedger extends DurableObject<Env> {
         .set({
           reservedMicros: sql`${spend.reservedMicros} - ${row.reservedMicros}`,
           spentMicros: sql`${spend.spentMicros} + ${charged}`,
+          // A request never sent wasn't made: its count comes back.
+          ...(by === "unsent"
+            ? { requests: sql`max(${spend.requests} - 1, 0)` }
+            : {}),
         })
         .where(
           and(
             eq(spend.scope, scope.scope),
             eq(spend.key, scope.key),
-            eq(spend.period, row.period)
+            eq(spend.period, periodOf(scope.scope, row.period))
           )
         )
         .returning({ spentMicros: spend.spentMicros })
@@ -1147,6 +1195,7 @@ export class ModelLedger extends DurableObject<Env> {
     actor: AuditActor
   ): number {
     let stored = 0;
+    const counted = periodOf(scope.scope, period);
     for (const threshold of thresholds) {
       const value = threshold.of(scope);
       if (value === null || spentMicros < value) {
@@ -1157,7 +1206,7 @@ export class ModelLedger extends DurableObject<Env> {
         .values({
           scope: scope.scope,
           key: scope.key,
-          period,
+          period: counted,
           kind: threshold.kind,
           thresholdMicros: value,
         })
@@ -1172,7 +1221,7 @@ export class ModelLedger extends DurableObject<Env> {
         action: `model.budget.${threshold.kind}`,
         detail: {
           scope: scope.scope,
-          period,
+          period: counted,
           limit: (scope.limitMicros ?? 0) / microsPerDollar,
           threshold: value / microsPerDollar,
           ...scope.names,
@@ -1180,7 +1229,7 @@ export class ModelLedger extends DurableObject<Env> {
       });
       log.warn(`model.budget_${threshold.kind}`, {
         scope: scope.scope,
-        period,
+        period: counted,
       });
       stored += 1;
     }

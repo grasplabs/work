@@ -1,0 +1,1 @@
+ALTER TABLE `spend` ADD `requests` integer DEFAULT 0 NOT NULL;

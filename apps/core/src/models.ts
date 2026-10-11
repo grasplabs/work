@@ -861,6 +861,11 @@ const admitRequest = async (
     if ("unpriced" in admitted) {
       return { held: { code: "model.unpriced" } };
     }
+    // The run lineage's own limits: no wait helps a lineage out of
+    // requests, nor one whose spend leaves no room.
+    if ("requests" in admitted) {
+      return { held: { code: "model.run_limit", because: "requests" } };
+    }
     if ("reused" in admitted) {
       // Never expected: every ID is a new UUID.
       log.error("model.request_id_reused", { model: call.model });
@@ -880,7 +885,9 @@ const admitRequest = async (
         },
       };
     }
-    return { held: { code: "model.over_budget", because: admitted.scope } };
+    return admitted.scope === "run"
+      ? { held: { code: "model.run_limit", because: "spend" } }
+      : { held: { code: "model.over_budget", because: admitted.scope } };
   } catch (error) {
     log.error("model.ledger_failed", errorFields(error));
     // The admission may have committed with its answer lost: nothing was

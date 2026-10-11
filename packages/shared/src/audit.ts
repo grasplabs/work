@@ -60,6 +60,12 @@ export const auditActorSchema = z.discriminatedUnion("type", [
     appId: appIdSchema,
     workflowId: workflowIdSchema,
     runId: runIdSchema,
+    /**
+     * The run its lineage started from, for a run started by another run:
+     * read from the engine's record of the run, never from what the run
+     * was given. A run that is its own root has none.
+     */
+    rootRunId: runIdSchema.optional(),
   }),
   z.object({ type: z.literal("staff"), userId: identifierSchema }),
   /**
@@ -92,20 +98,28 @@ export const delegateActorOf = ({
     ? { type: "agent", agentId: subject.agentId, onBehalfOf }
     : { type: "app", appId: subject.appId, part: "server" };
 
-/** A workflow run, acting on its own, as the audit log names it. */
+/**
+ * A workflow run, acting on its own, as the audit log names it, with the
+ * root of its lineage when another run started it.
+ */
 export const runActorOf = ({
   runId,
   app,
   workflow,
+  rootRunId,
 }: {
   runId: string;
   app: string;
   workflow: string;
+  rootRunId?: string | null | undefined;
 }): AuditActor => ({
   type: "workflow",
   appId: appIdSchema.parse(app),
   workflowId: workflowIdSchema.parse(workflow),
   runId: runIdSchema.parse(runId),
+  ...(rootRunId === null || rootRunId === undefined || rootRunId === runId
+    ? {}
+    : { rootRunId: runIdSchema.parse(rootRunId) }),
 });
 
 /** The Workers that send audit events. */

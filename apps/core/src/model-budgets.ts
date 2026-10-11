@@ -31,8 +31,14 @@ import { microsPerDollar } from "./model-prices.ts";
 // its alert threshold or its limit, with an audit event (`model.budget.alert`
 // and `model.budget.exhausted`) and a log line.
 //
-// A request's run is a scope too, counted with no budget yet, so a run's
-// spend is known across its retries and steps.
+// A request's run lineage is a scope too: the run, and every run started
+// under it, keyed by the lineage's root run (\`rootRunId\` on the run's
+// audit actor, which the engine's record of the run gives it, never its
+// input). It is counted across all their steps, retries, restarts and
+// children, for the lineage's whole life (the ledger never resets it by
+// month), so none of them starts afresh. It has a budget only where the
+// deployment sets \`run\`; whatever it sets, a lineage makes at most
+// {@link lineageModelRequests} provider requests.
 
 type Budgets = z.output<typeof budgetsSchema>;
 type Budget = NonNullable<NonNullable<Budgets>["deployment"]>;
@@ -75,38 +81,51 @@ export const budgetMonth = (
     ? env.MODEL_BUDGET_MONTH
     : now.toISOString().slice(0, "yyyy-mm".length);
 
+/**
+ * The most provider requests one run lineage may make, retries included
+ * (platform default: 100 model requests per run lineage).
+ */
+export const lineageModelRequests = 100;
+
 /** A scope a call counts against, and the budget the deployment sets for it. */
 interface Scoped {
   scope: LedgerScopeName;
   key: string;
   budget: Budget | undefined;
   names: Record<string, string>;
+  /** The most requests it may make; none for no limit. */
+  requests?: number;
 }
 
-/** The workflow and run scopes of a workflow's call. */
-const workflowScopes = (budgets: Budgets, trigger: AuditActor): Scoped[] =>
-  trigger.type === "workflow"
-    ? [
-        {
-          scope: "workflow",
-          key: JSON.stringify([trigger.appId, trigger.workflowId]),
-          budget: budgets?.workflow,
-          names: { app: trigger.appId, workflow: trigger.workflowId },
-        },
-        {
-          scope: "run",
-          key: trigger.runId,
-          budget: undefined,
-          names: { run: trigger.runId },
-        },
-      ]
-    : [];
+/** The workflow and run lineage scopes of a workflow's call. */
+const workflowScopes = (budgets: Budgets, trigger: AuditActor): Scoped[] => {
+  if (trigger.type !== "workflow") {
+    return [];
+  }
+  const lineage = trigger.rootRunId ?? trigger.runId;
+  return [
+    {
+      scope: "workflow",
+      key: JSON.stringify([trigger.appId, trigger.workflowId]),
+      budget: budgets?.workflow,
+      names: { app: trigger.appId, workflow: trigger.workflowId },
+    },
+    {
+      scope: "run",
+      key: lineage,
+      budget: budgets?.run,
+      names: { run: lineage },
+      requests: lineageModelRequests,
+    },
+  ];
+};
 
 /**
  * The scopes a call's requests count against, each with its budget where
  * the deployment sets one: the deployment, always; the workflow and the
- * run, for a workflow's call; and the person it is made by or for. A
- * scope without a budget is counted, and limits nothing.
+ * run lineage, for a workflow's call; and the person it is made by or
+ * for. A scope without a budget is counted, and limits no spend; the run
+ * lineage's requests are limited whatever the budgets.
  */
 export const scopesFor = (
   budgets: Budgets,
@@ -132,9 +151,17 @@ export const scopesFor = (
           },
         ]),
   ];
-  return scopes.map(({ scope, key, budget, names }) => {
+  return scopes.map(({ scope, key, budget, names, requests }) => {
+    const limitRequests = requests ?? null;
     if (budget === undefined) {
-      return { scope, key, limitMicros: null, alertMicros: null, names };
+      return {
+        scope,
+        key,
+        limitMicros: null,
+        alertMicros: null,
+        limitRequests,
+        names,
+      };
     }
     const limitMicros = Math.round(budget.limit * microsPerDollar);
     return {
@@ -142,6 +169,7 @@ export const scopesFor = (
       key,
       limitMicros,
       alertMicros: Math.ceil((limitMicros * budget.alertAt) / 100),
+      limitRequests,
       names,
     };
   });

@@ -194,9 +194,15 @@ export const runEntry = (
 
 /** The run's own actor in the audit log. */
 export const runActor = (
-  row: Pick<RunRow, "id" | "appId" | "workflowId">
+  row: Pick<RunRow, "id" | "appId" | "workflowId"> &
+    Partial<Pick<RunRow, "rootRunId">>
 ): AuditActor =>
-  runActorOf({ runId: row.id, app: row.appId, workflow: row.workflowId });
+  runActorOf({
+    runId: row.id,
+    app: row.appId,
+    workflow: row.workflowId,
+    rootRunId: row.rootRunId,
+  });
 
 /**
  * The statements that record a run's failure, after the one that marks it
@@ -260,6 +266,13 @@ export interface RunRequest {
    * run only of that version, while it is current.
    */
   trigger?: { type: TriggerType; key: string; version: number };
+  /**
+   * The run that started it, for a run another run starts: core's own,
+   * from the engine's record of that run, never from anything an App or a
+   * run's code passes in. The new run joins its lineage (\`root_run_id\`),
+   * whose model calls and spend are counted together.
+   */
+  parent?: RunId;
 }
 
 /**
@@ -483,6 +496,19 @@ export const failOrphans = async (
 };
 
 /**
+ * The root of the lineage a run started by `parent` joins: the parent's
+ * own root, or the parent itself when it is a root. Read from the parent's
+ * row, so a lineage holds however deep its runs nest.
+ */
+const rootOf = async (env: Env, parent: RunId): Promise<string> => {
+  const row = await findRun(env, parent);
+  if (row === undefined) {
+    throw new Error(`No run ${parent} to start a run under`);
+  }
+  return row.rootRunId ?? row.id;
+};
+
+/**
  * Starts a run on the App's current version, which it keeps until it ends.
  * The row and its audit event are written before the run is created, so
  * the dispatcher always finds the row. The row says `starting` until the
@@ -501,12 +527,13 @@ export const failOrphans = async (
  */
 export const startRun = async (
   env: Env,
-  { app, workflow, input, startedBy, actor, via, trigger }: RunRequest
+  { app, workflow, input, startedBy, actor, via, trigger, parent }: RunRequest
 ): Promise<WorkflowRun> => {
   if (input !== undefined && JSON.stringify(input).length > maxInputLength) {
     throw invalid();
   }
   const db = drizzle(env.DB);
+  const rootRunId = parent === undefined ? null : await rootOf(env, parent);
   const { currentVersion: version } = await appRecord(env, app);
   if (version === null) {
     throw appErrors.create("app.not_running");
@@ -529,6 +556,7 @@ export const startRun = async (
     failure: null,
     triggerKey: trigger?.key ?? null,
     detailsRemovedAt: null,
+    rootRunId,
   } satisfies RunFields & typeof workflowRuns.$inferInsert;
   // Nothing is written, audit event included, for a key a run has.
   const [inserted] = await auditedBatch(env, db, [
@@ -545,6 +573,10 @@ export const startRun = async (
         // The key names what started it: a time, a hash, an ID; never
         // what a message or event says.
         ...(trigger ? { trigger: trigger.type, key: trigger.key } : {}),
+        // The lineage it joins, for a run another run started.
+        ...(parent === undefined || rootRunId === null
+          ? {}
+          : { parent, root: rootRunId }),
       })
     ),
   ]);

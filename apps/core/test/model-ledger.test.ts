@@ -140,6 +140,51 @@ describe("the model ledger", () => {
     });
   });
 
+  it("counts a run lineage's requests and spend across months, and gives back the count of a request never sent", async () => {
+    const ledger = newLedger();
+    const lineage = {
+      scope: "run",
+      key: "root",
+      limitMicros: 100,
+      alertMicros: null,
+      limitRequests: 2,
+      names: { run: "root" },
+    } as const;
+    const first = admission(10, [lineage]);
+    const unsent = admission(10, [lineage], { period: "2400-02" });
+
+    const counted = [
+      await ledger.admit(first),
+      await ledger.admit(unsent),
+      // Two requests made: none left, in any month.
+      await ledger.admit(admission(10, [lineage], { period: "2400-03" })),
+    ];
+    await ledger.settle(unsent.id, { by: "unsent" });
+    const afterUnsent = await ledger.admit(
+      admission(10, [lineage], { period: "2400-04" })
+    );
+    await ledger.settle(first.id, {
+      by: "usage",
+      tokens: { input: 60, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+    // Months on, its spend holds: 60 of 100 micros spent, 10 held.
+    const roomless = await ledger.admit(
+      admission(50, [{ ...lineage, key: "root", limitRequests: 5 }], {
+        period: "2400-05",
+      })
+    );
+
+    expect({ counted, afterUnsent, roomless }).toStrictEqual({
+      counted: [
+        { ok: true },
+        { ok: true },
+        { ok: false, scope: "run", requests: true },
+      ],
+      afterUnsent: { ok: true },
+      roomless: { ok: false, scope: "run" },
+    });
+  });
+
   it("charges what a request used at its pinned prices, once, however often it is settled", async () => {
     const ledger = newLedger();
     const request = admission(80, [budget(1000)], {
