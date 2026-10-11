@@ -4,7 +4,9 @@ import type { CodedError } from "@grasp-os/shared/errors";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
-import { RpcTarget } from "cloudflare:workers";
+import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
+import { rpcArgumentDepth } from "@grasp-os/shared/screens";
+import { commitMaxInputBytes } from "@grasp-os/shared/stores";
 
 // The one authority an App's code is handed for one invocation of one of
 // its server functions (operations.ts): a read, a staged write, a call of
@@ -96,7 +98,17 @@ interface ChannelState {
  * RPC nothing but them can be called (ending it and reading what it raised
  * are the host's, on `OpenChannel`).
  */
-class Channel extends RpcTarget implements OperationChannel {
+/**
+ * What a channel's methods take, bounded as each call arrives, before any
+ * of its own code runs: as deep as any value, and no larger than one
+ * commit, more than any request App code has reason to send.
+ */
+const ChannelTarget = boundedRpcTarget({
+  depth: rpcArgumentDepth,
+  size: commitMaxInputBytes,
+});
+
+class Channel extends ChannelTarget implements OperationChannel {
   readonly #capabilities: ChannelCapabilities;
   readonly #state: ChannelState;
 

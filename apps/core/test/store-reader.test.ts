@@ -482,7 +482,12 @@ describe("a read refused before reading", () => {
         }
         // Another caller keeps changing the table Ada may not read.
         await commit(fixture, [
-          { op: "insert", table: "drafts", fields: { title: `run ${runs}` } },
+          {
+            op: "insert",
+            table: "drafts",
+            id: newRecordId(),
+            fields: { title: `run ${runs}` },
+          },
         ]);
         return drafts;
       }
@@ -502,7 +507,12 @@ describe("a read refused before reading", () => {
           // Another caller changes the table after the refusal, before
           // the run's reads are checked.
           await commit(fixture, [
-            { op: "insert", table: "drafts", fields: { title: `run ${runs}` } },
+            {
+              op: "insert",
+              table: "drafts",
+              id: newRecordId(),
+              fields: { title: `run ${runs}` },
+            },
           ]);
         }
       })
