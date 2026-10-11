@@ -36,21 +36,32 @@ const budget = (limit: number, key = "ada"): LedgerScope => ({
   names: { user: key },
 });
 
+/** How long after its deadline the gateway has a request come due (models.ts). */
+const graceMs = 5 * 60_000;
+
+/**
+ * A request of `reservedMicros`, due in an hour unless `more` says when,
+ * its deadline the gateway's grace before that.
+ */
 const admission = (
   reservedMicros: number,
   scopes: LedgerScope[] = [budget(100)],
   more: Partial<Admission> = {}
-): Admission => ({
-  id: crypto.randomUUID(),
-  period: "2400-01",
-  scopes,
-  model: "workers-ai/test",
-  price,
-  reservedMicros,
-  actor,
-  reconcileAt: Date.now() + 60 * 60_000,
-  ...more,
-});
+): Admission => {
+  const reconcileAt = more.reconcileAt ?? Date.now() + 60 * 60_000;
+  return {
+    id: crypto.randomUUID(),
+    period: "2400-01",
+    scopes,
+    model: "workers-ai/test",
+    price,
+    reservedMicros,
+    actor,
+    deadline: reconcileAt - graceMs,
+    ...more,
+    reconcileAt,
+  };
+};
 
 /** Overwrites `column` of the requests `ids`, as another release might have stored them. */
 const corrupt = async (
@@ -97,17 +108,29 @@ describe("the model ledger", () => {
       names: {},
     } as const;
 
+    const reconcileAt = Date.now() + 60 * 60_000;
+
     const admitted = await Promise.all(
       Array.from(
         { length: 10 },
-        async () => await ledger.admit(admission(30, [team, budget(100)]))
+        async () =>
+          await ledger.admit(
+            admission(30, [team, budget(100)], { reconcileAt })
+          )
       )
     );
 
     // The person's $100 micros fit three; the deployment had room for all.
+    // The three hold it while under way: room is hoped back by their
+    // deadline.
     expect(admitted.filter(({ ok }) => ok)).toHaveLength(3);
     expect(admitted.filter(({ ok }) => !ok)).toStrictEqual(
-      Array.from({ length: 7 }, () => ({ ok: false, scope: "user" }))
+      Array.from({ length: 7 }, () => ({
+        ok: false,
+        scope: "user",
+        heldBy: ["user"],
+        heldUntil: reconcileAt - graceMs,
+      }))
     );
     // Refused whole: the deployment holds only what the admitted reserved.
     const read = await ledger.spendOf("2400-01", ["deployment", "user"], 10);
@@ -689,5 +712,95 @@ describe("the model ledger", () => {
       ["model.budget.alert", 0.000015],
       ["model.budget.exhausted", 0.00003],
     ]);
+  });
+
+  it("refuses as out of budget when any full scope has no room even once the requests under way finish, in whichever order the scopes come", async () => {
+    const ledger = newLedger();
+    const team: LedgerScope = {
+      scope: "deployment",
+      key: "deployment",
+      limitMicros: 100,
+      alertMicros: null,
+      names: {},
+    };
+    // Ben's request is under way, holding 60 of the deployment's 100; Ada
+    // spent 80 of her own 100.
+    await ledger.admit(admission(60, [team, budget(1000, "ben")]));
+    const spent = admission(80, [budget(100)]);
+    await ledger.admit(spent);
+    await ledger.settle(spent.id, {
+      by: "usage",
+      tokens: { input: 80, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+
+    // 50 more: the deployment would have room once Ben's is in; Ada never.
+    await expect(
+      Promise.all([
+        ledger.admit(admission(50, [team, budget(100)])),
+        ledger.admit(admission(50, [budget(100), team])),
+      ])
+    ).resolves.toStrictEqual([
+      { ok: false, scope: "user" },
+      { ok: false, scope: "user" },
+    ]);
+  });
+
+  it("counts as spent what a request holds past its deadline, in the grace before it comes due, and what a quarantined one holds", async () => {
+    const ledger = newLedger();
+    // Past its deadline, not yet due: cut off, so charged in full when due.
+    const late = admission(60, [budget(100, "cy")], {
+      deadline: Date.now() - 1000,
+      reconcileAt: Date.now() + graceMs,
+    });
+    // Its scopes can't be read once it settles: held for a person.
+    const held = admission(60, [budget(100, "di")]);
+    await ledger.admit(late);
+    await ledger.admit(held);
+    await corrupt(ledger, "scopes", "not json", held.id);
+    await expect(
+      ledger.settle(held.id, {
+        by: "usage",
+        tokens: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0 },
+      })
+    ).resolves.toStrictEqual({ state: "quarantined" });
+
+    await expect(
+      Promise.all([
+        ledger.admit(admission(50, [budget(100, "cy")])),
+        ledger.admit(admission(50, [budget(100, "di")])),
+      ])
+    ).resolves.toStrictEqual([
+      { ok: false, scope: "user" },
+      { ok: false, scope: "user" },
+    ]);
+  });
+
+  it("hopes room back across several full scopes by the latest of each scope's soonest deadline", async () => {
+    const ledger = newLedger();
+    const team: LedgerScope = {
+      scope: "deployment",
+      key: "deployment",
+      limitMicros: 100,
+      alertMicros: null,
+      names: {},
+    };
+    const now = Date.now();
+    const at = (minutes: number) => ({
+      reconcileAt: now + minutes * 60_000 + graceMs,
+    });
+    // The deployment's room is held by two of Ben's, the soonest in 10
+    // minutes; Ada's by one of hers in 20.
+    await ledger.admit(admission(40, [team, budget(1000, "ben")], at(10)));
+    await ledger.admit(admission(40, [team, budget(1000, "ben")], at(30)));
+    await ledger.admit(admission(60, [budget(100)], at(20)));
+
+    await expect(
+      ledger.admit(admission(50, [team, budget(100)]))
+    ).resolves.toStrictEqual({
+      ok: false,
+      scope: "deployment",
+      heldBy: ["deployment", "user"],
+      heldUntil: now + 20 * 60_000,
+    });
   });
 });

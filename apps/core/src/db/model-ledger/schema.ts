@@ -60,6 +60,12 @@ export const requests = sqliteTable(
     /** Who or what asked, as JSON, for the alerts it causes. */
     actor: text().notNull(),
     dispatchedAt: integer("dispatched_at").notNull(),
+    /**
+     * When the call is cut off at the latest: until then it may still
+     * settle for less than it holds. 0 on a row admitted before the
+     * column was added, which then holds its reservation as spent.
+     */
+    deadline: integer().notNull().default(0),
     /** When it is charged its whole reservation, unless settled before. */
     reconcileAt: integer("reconcile_at").notNull(),
     /** How often reconciling it failed; quarantined once it reaches three. */

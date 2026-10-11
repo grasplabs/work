@@ -433,6 +433,32 @@ const waitMsOf = (env: Env): number => {
     : defaultWaitMs;
 };
 
+/**
+ * The least an AI step waits after the model budget turned it away while
+ * other calls under way hold it (`model.budget_busy`), before its attempt
+ * fails and the engine retries it at the step's own delay: so a step with
+ * a tight retry config can't loop on the ledger. The refusal's
+ * `retryAfterSeconds` is advisory, and steps don't wait it out: their
+ * retries are theirs to set.
+ */
+const budgetBusyWaitMs = 15_000;
+
+/**
+ * `call`'s answer; when the model budget turned it away while other calls
+ * under way hold it, the same refusal, once {@link budgetBusyWaitMs} went
+ * by.
+ */
+const waitingOutBusyBudget = async <T>(call: () => Promise<T>): Promise<T> => {
+  try {
+    return await call();
+  } catch (error) {
+    if (modelErrors.codeOf(error) === "model.budget_busy") {
+      await scheduler.wait(budgetBusyWaitMs);
+    }
+    throw error;
+  }
+};
+
 /** The engine's step limit for this deployment. */
 export const stepLimitOf = (env: Env): number => {
   const set = Number(env.WORKFLOW_STEP_LIMIT);
@@ -1063,31 +1089,34 @@ export class RunHost extends RpcTarget {
       } catch {
         throw modelErrors.create("model.invalid_call");
       }
-      const answer = await models(this.#env).call({
-        model,
-        system: instructions,
-        input,
-        schema,
-        purpose: "workflow.step",
-        trigger: this.#actor,
-        // The step may have read any of them into its input.
-        connections: [
-          ...new Set(
-            Object.values(this.#run.connections).map(
-              ({ connection }) => connection.connectionId
-            )
-          ),
-        ],
-        // The run's restricted mode, which is its App's.
-        work: {
-          authority: this.#run.authority,
-          context: {
-            type: "run",
-            appId: this.#run.app,
-            runId: this.#run.runId,
-          },
-        },
-      });
+      const answer = await waitingOutBusyBudget(
+        async () =>
+          await models(this.#env).call({
+            model,
+            system: instructions,
+            input,
+            schema,
+            purpose: "workflow.step",
+            trigger: this.#actor,
+            // The step may have read any of them into its input.
+            connections: [
+              ...new Set(
+                Object.values(this.#run.connections).map(
+                  ({ connection }) => connection.connectionId
+                )
+              ),
+            ],
+            // The run's restricted mode, which is its App's.
+            work: {
+              authority: this.#run.authority,
+              context: {
+                type: "run",
+                appId: this.#run.app,
+                runId: this.#run.runId,
+              },
+            },
+          })
+      );
       return answer.output;
     });
   }

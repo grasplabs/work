@@ -55,7 +55,12 @@ import { z } from "zod";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { budgetMonth, hasBudget, scopesFor } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
-import type { LedgerScope, Settled, Settlement } from "./model-ledger.ts";
+import type {
+  LedgerScope,
+  LedgerScopeName,
+  Settled,
+  Settlement,
+} from "./model-ledger.ts";
 import {
   boundMicros,
   costDollars,
@@ -725,18 +730,34 @@ const promptAllowanceTokens = 1024;
 const reconcileGraceMs = 5 * 60_000;
 
 /**
- * The wait a refusal for a budget held by calls under way suggests: until
- * the soonest of them would have reached its deadline (the ledger's
- * `heldUntil`, less the grace the gateway added to it), rounded up to a
- * whole step, and no longer than the most. Rounded so it pins down no one
- * else's call; bounded so a caller that waits asks again, and is told
- * afresh, rather than waiting out a long call that may end sooner.
+ * The wait a refusal for a budget held by calls under way suggests. An
+ * advisory hint: asking again sooner is only refused again.
+ *
+ * Where every full scope is the caller's own (their user scope, their
+ * run), the calls holding it are theirs: the wait runs until the soonest
+ * call under way in each scope reaches its deadline (the ledger's
+ * `heldUntil`), rounded up to a whole step, and no longer than the most.
+ * Optimistic, as that call may not free enough on its own; bounded, so a
+ * caller asks again and is told afresh rather than wait out a long call.
+ *
+ * A shared scope (the deployment, a workflow) is held by other people's
+ * calls too, whose timing a derived wait would give away: polling would
+ * show the second it drops a step. Such a refusal suggests a fixed wait.
  */
-const busyRetry = { stepSeconds: 15, mostSeconds: 300 };
+const busyRetry = { stepSeconds: 15, mostSeconds: 300, sharedSeconds: 60 };
+
+/** The scopes a caller's own calls alone count against. */
+const ownScopes: ReadonlySet<LedgerScopeName> = new Set(["user", "run"]);
 
 /** The seconds to wait before asking again, for a budget held until `heldUntil`. */
-const retryAfterSeconds = (heldUntil: number): number => {
-  const waitMs = heldUntil - reconcileGraceMs - Date.now();
+const retryAfterSeconds = (
+  heldBy: readonly LedgerScopeName[],
+  heldUntil: number
+): number => {
+  if (!heldBy.every((scope) => ownScopes.has(scope))) {
+    return busyRetry.sharedSeconds;
+  }
+  const waitMs = heldUntil - Date.now();
   const steps = Math.max(1, Math.ceil(waitMs / 1000 / busyRetry.stepSeconds));
   return Math.min(steps * busyRetry.stepSeconds, busyRetry.mostSeconds);
 };
@@ -814,6 +835,7 @@ const admitRequest = async (
   const promptBound = bytes + promptAllowanceTokens;
   const pinned = price ?? unpriced;
   const id = crypto.randomUUID();
+  const callDeadline = Date.now() + (call.timeoutMs ?? defaultTimeoutMs);
   const reservedMicros = boundMicros(pinned, {
     inputTokens: promptBound,
     outputTokens,
@@ -827,8 +849,8 @@ const admitRequest = async (
       price: pinned,
       reservedMicros,
       actor: call.trigger,
-      reconcileAt:
-        Date.now() + (call.timeoutMs ?? defaultTimeoutMs) + reconcileGraceMs,
+      deadline: callDeadline,
+      reconcileAt: callDeadline + reconcileGraceMs,
     });
     if (admitted.ok) {
       return { id, reservedMicros };
@@ -841,12 +863,17 @@ const admitRequest = async (
       log.error("model.request_id_reused", { model: call.model });
       return { held: { code: "model.ledger_unavailable" } };
     }
-    if (admitted.heldUntil !== undefined) {
+    // A guest's user scope is the member who invited them: whether that
+    // member has calls under way is theirs to know, not the guest's.
+    if ("heldUntil" in admitted && call.trigger.type !== "guest") {
       return {
         held: {
           code: "model.budget_busy",
           because: admitted.scope,
-          retryAfterSeconds: retryAfterSeconds(admitted.heldUntil),
+          retryAfterSeconds: retryAfterSeconds(
+            admitted.heldBy,
+            admitted.heldUntil
+          ),
         },
       };
     }
@@ -1468,9 +1495,7 @@ const refuse = async (
     model: call.model,
     ...(because === undefined ? {} : { because }),
     // A budget held by calls under way: worth asking again, after this.
-    ...(retryAfter === undefined
-      ? {}
-      : { retryable: true, retryAfterSeconds: retryAfter }),
+    ...(retryAfter === undefined ? {} : { retryAfterSeconds: retryAfter }),
   });
 };
 

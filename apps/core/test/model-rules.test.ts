@@ -450,6 +450,106 @@ describe("model rules", { timeout: 60_000 }, () => {
     ]);
   });
 
+  it("retry a workflow's AI step the budget turned away while other calls hold it, no sooner than 15 seconds on, however tight its retries", async () => {
+    const builder = await signedInApi(idp, "builder");
+    // One retry, a millisecond on: the step's own delay.
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "reader",
+        `  return await step.llm("extract", {
+    description: "Read the total",
+    model: "${anthropic}",
+    instructions: "Read the total in cents.",
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+    retries: { limit: 1, delay: 1 },
+  });`,
+        { extract: { total: 1234 } }
+      )
+    );
+    const release = Promise.withResolvers<boolean>();
+    const actor = (runId: string) =>
+      runActorOf({ runId, app, workflow: "reader" });
+
+    // Sonnet 4.5 reserves some $0.56: another of the workflow's runs holds
+    // its $1 budget while it answers, until released.
+    const { result } = await withDeploymentRules(
+      {
+        gateway,
+        models: [workersAi, anthropic],
+        budgets: { workflow: { limit: 1 } },
+      },
+      [
+        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
+        { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
+      ],
+      async () => {
+        const holding = outcome(
+          models(env).call(
+            hello(anthropic, {
+              purpose: "workflow.step",
+              trigger: actor(`run-${crypto.randomUUID()}`),
+            })
+          )
+        );
+        await vi.waitFor(async () => {
+          const read = await modelLedger(env).spendOf(
+            env.MODEL_BUDGET_MONTH ?? "",
+            ["workflow"],
+            10
+          );
+          expect(read.workflow?.[0]?.reservedMicros).toBeGreaterThan(0);
+        });
+        const run = await builder.api.workflows.start(app, "reader");
+        await vi.waitFor(
+          async () => {
+            const events = await eventsOf(actor(run.id));
+            expect(events.map(({ action }) => action)).toContain(
+              "model.refused"
+            );
+          },
+          { timeout: 10_000, interval: 200 }
+        );
+        // Still held a while after the refusal: a retry a millisecond on
+        // would be turned away again, and spend the step's last.
+        await scheduler.wait(3000);
+        release.resolve(true);
+        await finished(run.id);
+        return {
+          held: await holding,
+          run: await builder.api.workflows.status(run.id),
+          events: await eventsOf(actor(run.id)),
+        };
+      }
+    );
+
+    const timeOf = (action: string) =>
+      Date.parse(
+        result.events.find((event) => event.action === action)?.at ?? ""
+      );
+    expect({
+      held: result.held,
+      run: result.run,
+      refused: result.events
+        .filter(({ action }) => action === "model.refused")
+        .map(({ detail }) => detail),
+      waited: timeOf("model.call") - timeOf("model.refused") >= 15_000,
+    }).toMatchObject({
+      held: "ok",
+      run: { status: "completed", output: { total: 1234 } },
+      // A shared budget: a fixed wait, nothing of the other run's timing.
+      refused: [
+        {
+          reason: "model.budget_busy",
+          because: "workflow",
+          retryAfterSeconds: 60,
+        },
+      ],
+      waited: true,
+    });
+  });
+
   it("stop a workflow's AI steps with a readable error once its budget is used up, and alert admins", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await appWith(

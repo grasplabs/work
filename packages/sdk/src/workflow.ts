@@ -395,7 +395,8 @@ export interface StepRunner {
    * EU, its App has read sensitive data, or this month's model budget is
    * used up; the step then fails with the reason, and isn't retried. A
    * budget whose rest is held by other calls still under way is retried,
-   * as the step's retries allow.
+   * as the step's retries allow, no sooner than 15 seconds on; the wait
+   * the refusal suggests is advisory.
    */
   llm: <Output extends z.ZodType>(
     name: string,

@@ -333,7 +333,7 @@ describe("model budgets", { timeout: 60_000 }, () => {
     );
     const busy = {
       code: "model.budget_busy",
-      details: { because: "user", retryable: true, retryAfterSeconds: 180 },
+      details: { because: "user", retryAfterSeconds: 180 },
     };
     const audited = {
       detail: {
@@ -455,7 +455,6 @@ describe("model budgets", { timeout: 60_000 }, () => {
           details: {
             model: workersAi,
             because: "user",
-            retryable: true,
             retryAfterSeconds: 180,
           },
         },
@@ -466,6 +465,91 @@ describe("model budgets", { timeout: 60_000 }, () => {
       ],
       answered: "ok",
       after: { llama: "ok", sonnet: "model.over_budget" },
+    });
+  });
+
+  it("suggest a wait from the calls under way only to the person they are all theirs, a fixed one where others' calls hold the budget, and none to a guest", async () => {
+    const release = Promise.withResolvers<boolean>();
+    const paused = {
+      ...pricedAnswer,
+      text: "Hello there.",
+      pause: { at: 3, until: release.promise },
+    };
+    // Sonnet 4.5 reserves some $0.56: $1 has no room for a second beside it.
+    const own = withRules({ budgets: { user: { limit: 1 } } }, [paused]);
+    const shared = withRules({ budgets: { deployment: { limit: 1 } } }, [
+      paused,
+    ]);
+    const ada = newPerson();
+    const sonnet = (
+      trigger: ModelCall<undefined>["trigger"],
+      more: Partial<ModelCall<undefined>> = {}
+    ) => hello({ trigger, model: anthropic, maxTokens: undefined, ...more });
+    const guest = {
+      type: "guest",
+      chatId: `chat-${crypto.randomUUID()}`,
+      appId: appIdSchema.parse(crypto.randomUUID()),
+      invitedBy: ada.userId,
+    } as const;
+    // Ada's call may take 15 minutes: the wait is capped at five.
+    const answering = [
+      outcome(own.call(sonnet(ada, { timeoutMs: 15 * 60_000 }))),
+      outcome(shared.call(sonnet(newPerson()))),
+    ];
+    const heldBoth = async () => {
+      const [mine, everyone] = await Promise.all([
+        ledgerOf(own.month, ada.userId),
+        modelLedger(env).spendOf(shared.month, ["deployment"], 1),
+      ]);
+      return (
+        mine.reservedMicros > 0 &&
+        (everyone.deployment?.[0]?.reservedMicros ?? 0) > 0
+      );
+    };
+    // oxlint-disable-next-line no-await-in-loop -- until both are under way
+    while (!(await heldBoth())) {
+      // oxlint-disable-next-line no-await-in-loop -- until both are under way
+      await scheduler.wait(10);
+    }
+    const told = {
+      ada: await toldBy(own.call(sonnet(ada))),
+      guest: await toldBy(own.call(sonnet(guest))),
+      ben: await toldBy(shared.call(sonnet(newPerson()))),
+    };
+    release.resolve(true);
+
+    expect({ told, answered: await Promise.all(answering) }).toStrictEqual({
+      told: {
+        ada: {
+          code: "model.budget_busy",
+          message:
+            "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
+          details: {
+            model: anthropic,
+            because: "user",
+            retryAfterSeconds: 300,
+          },
+        },
+        // The member's calls are theirs to know of.
+        guest: {
+          code: "model.over_budget",
+          message:
+            "This month's model budget is used up, so no more model calls can be made for this. Ask your admin to have Grasp raise the budget.",
+          details: { model: anthropic, because: "user" },
+        },
+        // Someone else's call holds it: a fixed wait, nothing of its timing.
+        ben: {
+          code: "model.budget_busy",
+          message:
+            "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
+          details: {
+            model: anthropic,
+            because: "deployment",
+            retryAfterSeconds: 60,
+          },
+        },
+      },
+      answered: ["ok", "ok"],
     });
   });
 
