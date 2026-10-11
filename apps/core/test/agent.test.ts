@@ -29,6 +29,7 @@ import {
   utf8Bytes,
 } from "../src/code-mode.ts";
 import { workspace } from "../src/durable-objects.ts";
+import { endedRunsKept } from "../src/workspace.ts";
 import {
   chatOf,
   codeResults,
@@ -2509,5 +2510,78 @@ describe("chat agent code output", () => {
         "the secret is safe",
       ],
     });
+  });
+});
+
+/** Orders text alphabetically. */
+const byText = (a: string, b: string): number => a.localeCompare(b, "en");
+
+describe("chat agent code run retention", () => {
+  it("keeps no more closed leases than it may, however many runs end", async () => {
+    const { stub, chat } = await newChat();
+    const chatId = chatIdSchema.parse(chat.id);
+    const runs = endedRunsKept + 50;
+
+    // Leases opened and closed as runs do, past the most it keeps.
+    const kept = await runInDurableObject(stub, (instance) => {
+      const ids: string[] = [];
+      for (let run = 0; run < runs; run += 1) {
+        const id = instance.openCodeRun(chatId, testRunOpening);
+        instance.closeCodeRun(chatId, id, "completed");
+        ids.push(id);
+      }
+      return {
+        retention: instance.codeRunRetention(),
+        // The oldest are forgotten, and answer as ended, unlogged.
+        oldest: instance.callFromCodeRun(chatId, ids[0] ?? ""),
+        newest: instance.callFromCodeRun(chatId, ids.at(-1) ?? ""),
+      };
+    });
+
+    expect(kept).toStrictEqual({
+      retention: { open: 0, closed: endedRunsKept, outputs: 0 },
+      oldest: { call: "ended", first: false },
+      newest: { call: "ended", first: true },
+    });
+  });
+
+  it("keeps no open lease or output after many runs, whether they complete, throw or fail to load", async () => {
+    const kinds = [
+      "export default async (self, env) => { console.log((await env.chat.info()).chatId); return 1; };",
+      "export default async (self, env) => { await env.chat.info(); throw new Error('nope'); };",
+      "export default async () => {",
+    ];
+    const turns = 4;
+    const replies = Array.from({ length: turns }, (_, turn) => [
+      codeStep(kinds[0] ?? "", 5),
+      codeStep(kinds[1 + (turn % 2)] ?? "", 5),
+      says("Done."),
+    ]).flat();
+    const { stub, chat, ask } = await newChat(...replies);
+
+    for (let turn = 0; turn < turns; turn += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one turn at a time per chat
+      await ask("Run them.");
+    }
+
+    // Read from the object's own state after the runs, not inferred from
+    // their cleanup. What the runtime holds for them can't be read.
+    await expect(
+      runInDurableObject(stub, (instance) => instance.codeRunRetention())
+    ).resolves.toStrictEqual({
+      open: 0,
+      closed: turns * 10,
+      outputs: 0,
+    });
+    const records = await runRecords(stub, chat.id);
+    expect(
+      records.map(({ status }) => String(status)).toSorted(byText)
+    ).toStrictEqual(
+      [
+        ...Array.from({ length: 20 }, () => "completed"),
+        ...Array.from({ length: 10 }, () => "load_failed"),
+        ...Array.from({ length: 10 }, () => "threw"),
+      ].toSorted(byText)
+    );
   });
 });

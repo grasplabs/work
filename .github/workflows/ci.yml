@@ -125,6 +125,8 @@ jobs:
             - args: ["--frozen-lockfile"]
       - run: vp run --filter @grasp-os/web build
       - run: vp run smoke:workerd
+      # Code Mode's executor, with a Worker Loader, on plain workerd.
+      - run: vp run smoke:code-mode
 
   # Builds a release bundle as main will publish it (core, connect, the
   # frontend's static files and D1 migrations, with its manifest) and checks
