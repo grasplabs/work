@@ -16,7 +16,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { createStore, deleteStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { StoreHost } from "../src/store-host.ts";
 import type { AnchorValue } from "../src/store-queries.ts";
@@ -754,5 +754,39 @@ describe("seeks", () => {
       "n-ada-00004",
       "n-ada-00005",
     ]);
+  });
+});
+
+describe("a deleted store's cursor key", () => {
+  it("goes with the store's purge, so nothing it sealed can be opened again", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(fixture, ranked);
+    const page = await dbOf(fixture, scopeOf(fixture.schemaHash))
+      .query("notes")
+      .paginate({ pageSize: 2, cursor: null });
+    const keyOf = async (): Promise<unknown> =>
+      await runInDurableObject(
+        env.DATA_STORES.getByName(fixture.store.id),
+        (_instance, state) =>
+          state.storage.sql
+            .exec<{ key: string | null }>(
+              "SELECT cursor_key AS key FROM sdk_store"
+            )
+            .one().key
+      );
+    const minted = await keyOf();
+    await deleteStore(env, builder, fixture.store.id);
+    // Its alarm, run here rather than waited for (its own may have run).
+    await runInDurableObject(
+      env.DATA_STORES.getByName(fixture.store.id),
+      async (_instance, state) => {
+        await new StoreHost(state, env).runAlarm({});
+      }
+    );
+    expect({
+      cursor: typeof page.nextCursor,
+      minted: typeof minted,
+      afterPurge: await keyOf(),
+    }).toStrictEqual({ cursor: "string", minted: "string", afterPurge: null });
   });
 });
