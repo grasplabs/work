@@ -10,6 +10,7 @@
     "./host": "./src/host.ts",
     "./database": "./src/database.ts",
     "./server": "./src/server.ts",
+    "./runner": "./src/runner.ts",
     "./workflow": "./src/workflow.ts",
     "./engine": "./src/engine.ts",
     "./params": "./src/params.ts",

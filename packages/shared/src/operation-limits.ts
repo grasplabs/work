@@ -23,6 +23,28 @@ export const operationInputMaxBytes = 128 * 1024;
 export const operationResultMaxBytes = 1024 * 1024;
 
 /**
+ * The most bytes of what one mutation returns, as UTF-8 JSON: less than an
+ * operation's result, since it is kept with its receipt in the commit that
+ * holds its writes, within one commit's bound. A whole record fits.
+ */
+export const mutationResultMaxBytes = 256 * 1024;
+
+/**
+ * The most times one function reads the store in one call: reads past it
+ * are refused (`operation.read_limit`). Longer work pages, or is a
+ * workflow's.
+ */
+export const invocationMaxReads = 256;
+
+/**
+ * The most bytes of staged writes one mutation's reads may send the store
+ * in all, as UTF-8 JSON: each read of a mutation that staged writes sends
+ * them, and the store applies them, so this bounds what one call can make
+ * the store do (`operation.read_limit` past it).
+ */
+export const stagedReadMaxBytes = 16 * 1024 * 1024;
+
+/**
  * The most bytes of an `AppError`'s details, as UTF-8 JSON (spec 32.6):
  * an error reaches a screen, which is held to what it may receive.
  */

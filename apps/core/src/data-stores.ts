@@ -5,13 +5,18 @@ import type { StoreId } from "@grasp-os/shared/ids";
 import { canBuild, isAdmin, requireBuilder } from "@grasp-os/shared/roles";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-reads";
-import { dataErrors, storeMemberSchema } from "@grasp-os/shared/stores";
+import {
+  committedSchema,
+  dataErrors,
+  storeMemberSchema,
+} from "@grasp-os/shared/stores";
 import type {
   ClaimInput,
   Claimed,
   Commit,
   Committed,
   DefinedTables,
+  StagedWrites,
   StoredRecord,
 } from "@grasp-os/shared/stores";
 import { and, asc, eq, exists, isNull, or, sql } from "drizzle-orm";
@@ -95,9 +100,15 @@ export interface OpenStore {
   commit: (commit: Omit<Commit, "storeId">) => Promise<Committed>;
   /**
    * One read for `scope`, which the caller resolved for the invocation
-   * (`StoreHost.read`): never a scope App code supplied.
+   * (`StoreHost.read`): never a scope App code supplied. With `staged`,
+   * a mutation's writes not yet committed, the read sees them as their
+   * commit would.
    */
-  read: (scope: ReadScope, request: ReadRequest) => Promise<ReadResult>;
+  read: (
+    scope: ReadScope,
+    request: ReadRequest,
+    staged?: StagedWrites
+  ) => Promise<ReadResult>;
   /** The current generation of each of `tables` (`StoreHost.generations`). */
   generations: (tables: string[]) => Promise<Record<string, number>>;
 }
@@ -111,6 +122,17 @@ const readResultSchema = z.strictObject({
   value: z.unknown(),
   generations: z.record(z.string(), z.number().int().min(0)),
 });
+
+/** A claim's answer, as JSON text over RPC (data-store.ts). */
+const claimedSchema = z.union([
+  z.strictObject({
+    held: z.strictObject({ receiptId: z.string(), fence: z.number().int() }),
+  }),
+  z.strictObject({ outcome: committedSchema }),
+]);
+
+const claimedOf = (answered: string): Claimed =>
+  claimedSchema.parse(JSON.parse(answered));
 
 const readResultOf = (answered: string): ReadResult => {
   const { value, generations } = readResultSchema.parse(JSON.parse(answered));
@@ -415,10 +437,13 @@ export const openStore = async (
     defineTables: async (manifest) =>
       await stub.defineTables(storeId, manifest),
     get: async (table, recordId) => await stub.get(storeId, table, recordId),
-    claim: async (claim) => await stub.claim({ ...claim, storeId }),
-    commit: async (commit) => await stub.commit({ ...commit, storeId }),
-    read: async (scope, request) =>
-      readResultOf(await stub.read(storeId, scope, request)),
+    claim: async (claim) => claimedOf(await stub.claim({ ...claim, storeId })),
+    commit: async (commit) =>
+      committedSchema.parse(
+        JSON.parse(await stub.commit({ ...commit, storeId }))
+      ),
+    read: async (scope, request, staged) =>
+      readResultOf(await stub.read(storeId, scope, request, staged)),
     generations: async (names) => await stub.generations(storeId, names),
   };
 };

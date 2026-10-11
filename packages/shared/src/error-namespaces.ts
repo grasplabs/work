@@ -21,6 +21,7 @@ export const familyNamespaces = [
   "capability",
   "connect",
   "connection",
+  "contract",
   "data",
   "decision",
   "dependency",
@@ -35,8 +36,10 @@ export const familyNamespaces = [
   "knowledge_signal",
   "member",
   "model",
+  "mutation",
   "notification",
   "onboarding",
+  "operation",
   "package",
   "permission",
   "query",
@@ -51,18 +54,15 @@ export const familyNamespaces = [
 ] as const;
 
 /**
- * The namespaces of the codes the SDK and the operation host give their
- * own refusals, which no family defines: a declaration refused (`definition`,
- * `schema`, `function`, `resource`) and how the host answers a call
- * (`operation`, `contract`, `mutation`, `effect`, `safety`).
+ * The namespaces of the codes the SDK gives its own refusals and those the
+ * host reserves, which no family defines: a declaration refused
+ * (`definition`, `schema`, `function`, `resource`) and the outcomes of an
+ * external effect and of a safety check (`effect`, `safety`).
  */
 export const sdkNamespaces = [
-  "contract",
   "definition",
   "effect",
   "function",
-  "mutation",
-  "operation",
   "resource",
   "safety",
   "schema",

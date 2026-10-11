@@ -20,7 +20,12 @@ import type {
 } from "../src/outbox-delivery.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { gatedConsumer } from "./gated-consumer.ts";
-import { tablesManifest } from "./store-schemas.ts";
+import {
+  manifestHash,
+  memberRoles,
+  newRecordId,
+  tablesManifest,
+} from "./store-schemas.ts";
 
 /** Who creates the stores these tests use: a builder of the organization. */
 const builder: Acting = {
@@ -36,7 +41,7 @@ const builder: Acting = {
 // once. Each test makes stores of its own.
 
 const dayMs = 24 * 60 * 60 * 1000;
-const schemaHash = "a".repeat(64);
+const schemaHash = await manifestHash(tablesManifest("notes"));
 
 const scope = {
   principal: "ada",
@@ -89,9 +94,13 @@ const insertOf = (
   more: Partial<Omit<Commit, "storeId">> = {}
 ): Omit<Commit, "storeId"> => ({
   principal: { userId: "ada" },
+  roles: memberRoles,
+  stagedAt: Date.now(),
   schemaHash,
   receipt,
-  writes: [{ op: "insert", table: "notes", fields: { title } }],
+  writes: [
+    { op: "insert", id: newRecordId(), table: "notes", fields: { title } },
+  ],
   ...more,
 });
 
@@ -265,6 +274,8 @@ describe("receipts", () => {
     await expect(
       store.commit({
         principal: { userId: "ada" },
+        roles: memberRoles,
+        stagedAt: Date.now(),
         schemaHash,
         receipt: edit,
         writes: [
@@ -292,6 +303,8 @@ describe("receipts", () => {
     const check = async (key: string) =>
       await store.commit({
         principal: { userId: "ada" },
+        roles: memberRoles,
+        stagedAt: Date.now(),
         schemaHash,
         receipt: heldBy(await store.claim(await claimOf(key, { id }))),
         guards: [{ table: "notes", id, expectedRevision: 1 }],
@@ -307,6 +320,8 @@ describe("receipts", () => {
     const bump = heldBy(await store.claim(await claimOf("bump", {})));
     await store.commit({
       principal: { userId: "ada" },
+      roles: memberRoles,
+      stagedAt: Date.now(),
       schemaHash,
       receipt: bump,
       writes: [
