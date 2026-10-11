@@ -902,16 +902,17 @@ describe("the board page", { timeout: 60_000 }, () => {
     }).toStrictEqual({ frozen: 50, readOnce: true });
   });
 
-  it("stops at a drawn version it is refused, reading none it hadn't started, and answers that refusal once those it had are done", async () => {
+  it("stops at a drawn version it is refused, starting no read once it has the refusal, and answers it once the reads it had started are done", async () => {
     const { admin, app, map } = await setUp();
     // First in the Playbook's path order, ahead of every other test's
-    // workflows: more designed workflows than a snapshot reads at once.
+    // workflows: four times as many designed workflows as a snapshot reads
+    // at once (six).
     const folder = `0-refused-${unique()}`;
     const designed: z.infer<typeof savedSchema>[] = [];
-    for (let index = 0; index < 9; index += 1) {
+    for (let index = 0; index < 24; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one call at a time
       const drawn = await saveWorkflow(map, admin, {
-        path: `${folder}/${index}.md`,
+        path: `${folder}/${String(index).padStart(2, "0")}.md`,
         ifVersion: 0,
         record: {
           type: "workflow",
@@ -957,16 +958,31 @@ describe("the board page", { timeout: 60_000 }, () => {
           readsOf.set(target.id, (readsOf.get(target.id) ?? 0) + 1);
         }
       }
+      const read = designed.map(({ id }) => readsOf.get(id) ?? 0);
+      const reads = [...readsOf.values()].reduce(
+        (sum, count) => sum + count,
+        0
+      );
       expect({
         taken,
-        // The refused read and the five started with it, six at once; no
-        // read after the refusal; nothing else read.
-        read: designed.map(({ id }) => readsOf.get(id) ?? 0),
-        reads: [...readsOf.values()].reduce((sum, count) => sum + count, 0),
+        // The refused read and the five started with it, at once: the
+        // call answers only once they are done, so each is read through
+        // while the call still runs. (A read that finished before the
+        // refusal came back frees its place for the next, so how many more
+        // start before then is down to timing.)
+        startedTogether: read.slice(0, 6),
+        // Once the refusal is in, no read starts: the last of the
+        // workflows are never read, nor any version twice.
+        lastRead: read.at(-1),
+        readTwice: read.some((count) => count > 1),
+        // Nothing but these workflows' drawn versions.
+        others: reads - read.reduce((sum, count) => sum + count, 0),
       }).toStrictEqual({
         taken: { error: "knowledge.not_found" },
-        read: [1, 1, 1, 1, 1, 1, 0, 0, 0],
-        reads: 6,
+        startedTogether: [1, 1, 1, 1, 1, 1],
+        lastRead: 0,
+        readTwice: false,
+        others: 0,
       });
     } finally {
       // The Playbook is shared by this file's tests.
