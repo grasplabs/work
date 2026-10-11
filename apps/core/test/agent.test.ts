@@ -123,6 +123,19 @@ const runStep = async (code: string) => {
   return result;
 };
 
+/** The runtime's own messages for a run out of CPU time, and a hung one. */
+const cpuMessage = "Worker exceeded CPU time limit.";
+const hangMessage =
+  "The Workers runtime canceled this request because it detected that your Worker's code had hung and would never generate a response.";
+
+/**
+ * Code that makes the next value set at index 0 of any array a getter
+ * throwing `message`: an array the harness filled through [[Set]], then
+ * sent, would reject with the code's own message.
+ */
+const arrayTrap = (message: string): string =>
+  `Object.defineProperty(Array.prototype, "0", { configurable: true, set(value) { Object.defineProperty(this, "0", { enumerable: true, configurable: true, get() { throw new Error(${JSON.stringify(message)}); } }); } });`;
+
 /** Runs `code` as the chat's only code step: what it gave, and how it ended. */
 const runEnded = async (code: string) => {
   const { stub, chat, ask } = await newChat(codeStep(code), says("Done."));
@@ -530,6 +543,26 @@ describe("chat agent sandbox", () => {
     [
       "the harness's methods replaced through an import of it",
       "import Harness from 'harness.js'; const forged = async () => { throw new Error('Worker exceeded CPU time limit.'); }; try { Harness.prototype.run = forged; } catch {} try { Object.defineProperty(Harness.prototype, 'run', { value: forged }); } catch {} export default async () => 'mine';",
+      "completed",
+    ],
+    [
+      "a setter on Array.prototype[0] set up as the module loads, throwing the CPU message",
+      `${arrayTrap(cpuMessage)} console.log('x'); export default async () => { console.log('y'); return 'mine'; };`,
+      "completed",
+    ],
+    [
+      "a setter on Array.prototype[0] set up as the module loads, throwing the hang message",
+      `${arrayTrap(hangMessage)} console.log('x'); export default async () => { console.log('y'); return 'mine'; };`,
+      "completed",
+    ],
+    [
+      "a setter on Array.prototype[0] set up in the function, throwing the CPU message",
+      `export default async () => { ${arrayTrap(cpuMessage)} console.log('x'); throw new Error('then this'); };`,
+      "threw",
+    ],
+    [
+      "a setter on Array.prototype[0] set up in the function, throwing the hang message",
+      `export default async () => { ${arrayTrap(hangMessage)} console.log('x'); return 'mine'; };`,
       "completed",
     ],
     [

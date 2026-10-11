@@ -114,7 +114,6 @@ const exportNeeded = ${JSON.stringify(exportNeeded)};
 const call = Function.prototype.call;
 const bind = (method) => call.bind(method);
 const slice = bind(String.prototype.slice);
-const push = bind(Array.prototype.push);
 const map = bind(Array.prototype.map);
 const join = bind(Array.prototype.join);
 const keys = Object.keys;
@@ -182,10 +181,14 @@ const describe = (error) => {
 };
 
 // What the code logs, as it loads and as it runs: one run per isolate.
-const logs = [];
+// Kept as the JSON of its lines, built from strings only: no array or
+// object of the harness's that a prototype the code changed could reach
+// (a setter on \`Array.prototype[0]\` fires on an array's [[Set]]).
+let logsJson = "";
+let logCount = 0;
 let left = room;
 const write = (...parts) => {
-  if (left > 0 && logs.length < lines) {
+  if (left > 0 && logCount < lines) {
     let line = "";
     for (let index = 0; index < parts.length; index += 1) {
       const part = show(parts[index]);
@@ -193,7 +196,27 @@ const write = (...parts) => {
     }
     line = slice(line, 0, left);
     left -= line.length + 1;
-    push(logs, line);
+    const quoted = stringify(line);
+    logsJson = logCount === 0 ? quoted : logsJson + "," + quoted;
+    logCount += 1;
+  }
+};
+
+// An outcome as the one string a call returns: its fields are all
+// primitives, put together as JSON by hand, so nothing the code changed
+// runs as it is built or as the runtime sends it. A string can't make
+// the call reject.
+const outcome = (ok, loaded, field, text) => {
+  try {
+    return (
+      '{"ok":' + (ok ? "true" : "false") +
+      ',"loaded":' + (loaded ? "true" : "false") +
+      ',"logs":[' + logsJson + "]" +
+      (typeof text === "string" ? "," + stringify(field) + ":" + stringify(text) : "") +
+      "}"
+    );
+  } catch {
+    return '{"ok":false,"loaded":' + (loaded ? "true" : "false") + ',"logs":[],"error":"(an outcome that could not be sent)"}';
   }
 };
 for (const level of ["log", "info", "warn", "error", "debug"]) {
@@ -210,18 +233,18 @@ class Harness extends WorkerEntrypoint {
     try {
       const { default: found } = await import("code.js");
       if (typeof found !== "function") {
-        return { then: undefined, ok: false, loaded: false, logs, error: exportNeeded };
+        return outcome(false, false, "error", exportNeeded);
       }
       code = found;
-      return { then: undefined, ok: true, loaded: true, logs };
+      return outcome(true, true);
     } catch (error) {
-      return { then: undefined, ok: false, loaded: false, logs, error: describe(error) };
+      return outcome(false, false, "error", describe(error));
     }
   }
 
   async run() {
     if (code === undefined) {
-      return { then: undefined, ok: false, loaded: false, logs, error: exportNeeded };
+      return outcome(false, false, "error", exportNeeded);
     }
     try {
       const given = keys(this.env);
@@ -241,17 +264,9 @@ class Harness extends WorkerEntrypoint {
       const own = this.ctx;
       const ctx = freeze({ waitUntil: (promise) => own.waitUntil(promise) });
       const value = await code(null, env, ctx);
-      // An own \`then\`, so an \`Object.prototype.then\` the code set can't
-      // make the result a thenable that resolves to something else.
-      return {
-        then: undefined,
-        ok: true,
-        loaded: true,
-        logs,
-        result: value === undefined ? undefined : show(value),
-      };
+      return outcome(true, true, "result", value === undefined ? undefined : show(value));
     } catch (error) {
-      return { then: undefined, ok: false, loaded: true, logs, error: describe(error) };
+      return outcome(false, true, "error", describe(error));
     }
   }
 }
@@ -309,8 +324,8 @@ export interface CodeRun {
  * checked, not trusted.
  */
 interface Harness extends WorkerEntrypoint {
-  verify: () => Promise<z.infer<typeof outcomeSchema>>;
-  run: () => Promise<z.infer<typeof outcomeSchema>>;
+  verify: () => Promise<string>;
+  run: () => Promise<string>;
 }
 
 /**
@@ -339,7 +354,16 @@ const ended = (status: CodeRunStatus, error: string): CodeRun => ({
 const parsed = (
   outcome: unknown
 ): z.infer<typeof outcomeSchema> | undefined => {
-  const checked = outcomeSchema.safeParse(outcome);
+  if (typeof outcome !== "string" || outcome.length > 8 * room) {
+    return undefined;
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(outcome);
+  } catch {
+    return undefined;
+  }
+  const checked = outcomeSchema.safeParse(json);
   return checked.success ? checked.data : undefined;
 };
 
