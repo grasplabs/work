@@ -13,6 +13,7 @@
  * no case here runs one. The CPU limit is proven on the deployed profile.
  */
 import { execFileSync, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -26,34 +27,8 @@ const ATTEMPTS = 100;
 /** Most lines a run may log (`codeLimits.logLines` in code-mode.ts). */
 const LOG_LINES = 1000;
 const RETRY_DELAY_MS = 100;
-const out = mkdtempSync(path.join(tmpdir(), "grasp-os-code-mode-"));
 const core = path.join(import.meta.dirname, "../apps/core");
 const worker = path.join(core, "test/workerd/code-mode-worker.ts");
-
-// Bundled as core's own deploy bundles (workerd-smoke.ts): Wrangler's dry
-// run, from a config of the Worker's own, so the bundle is what Wrangler
-// would ship and nothing but the frozen install is needed.
-const config = path.join(out, "wrangler.jsonc");
-writeFileSync(
-  config,
-  JSON.stringify({
-    name: "code-mode-smoke",
-    main: worker,
-    compatibility_date: "2026-09-15",
-  })
-);
-execFileSync(
-  "wrangler",
-  [
-    "deploy",
-    "--dry-run",
-    "--outdir",
-    path.join(out, "bundle"),
-    "--config",
-    config,
-  ],
-  { cwd: core, stdio: "inherit" }
-);
 
 const freePort = async (): Promise<number> => {
   const probe = createServer().listen(0, "127.0.0.1");
@@ -66,25 +41,6 @@ const freePort = async (): Promise<number> => {
   }
   return address.port;
 };
-const PORT = await freePort();
-
-writeFileSync(
-  path.join(out, "config.capnp"),
-  `using Workerd = import "/workerd/workerd.capnp";
-
-const config :Workerd.Config = (
-  services = [(name = "main", worker = .main)],
-  sockets = [(name = "http", address = "127.0.0.1:${PORT}", http = (), service = "main")],
-);
-
-const main :Workerd.Worker = (
-  modules = [(name = "worker.js", esModule = embed "bundle/code-mode-worker.js")],
-  compatibilityDate = "2026-09-15",
-  bindings = [(name = "LOADER", workerLoader = ())],
-);
-`
-);
-
 /** What each case must come to, and the runtime the run records. */
 const expected = {
   runtime: {
@@ -126,12 +82,6 @@ const answerSchema = z.object({
   ),
 });
 
-const server = spawn(
-  "workerd",
-  ["serve", "--experimental", path.join(out, "config.capnp")],
-  { stdio: "inherit" }
-);
-
 /** The longest the cases may take together, start to answer. */
 const ANSWER_TIMEOUT_MS = 120_000;
 
@@ -140,15 +90,19 @@ const ANSWER_TIMEOUT_MS = 120_000;
  * connection (workerd still starting) is tried again, until it answers or
  * {@link ANSWER_TIMEOUT_MS} passes; anything else fails the run at once.
  */
-const fetchResults = async (): Promise<z.infer<typeof answerSchema>> => {
+const fetchResults = async (
+  port: number,
+  stopped: () => string | undefined
+): Promise<z.infer<typeof answerSchema>> => {
   const until = Date.now() + ANSWER_TIMEOUT_MS;
   for (let attempt = 0; ; attempt += 1) {
-    if (server.exitCode !== null) {
-      throw new Error(`workerd exited with ${server.exitCode}`);
+    const why = stopped();
+    if (why !== undefined) {
+      throw new Error(`workerd ${why}`);
     }
     try {
       // oxlint-disable-next-line no-await-in-loop -- polled until workerd answers
-      const response = await fetch(`http://127.0.0.1:${PORT}/`, {
+      const response = await fetch(`http://127.0.0.1:${port}/`, {
         signal: AbortSignal.timeout(Math.max(1, until - Date.now())),
       });
       if (!response.ok) {
@@ -162,6 +116,11 @@ const fetchResults = async (): Promise<z.infer<typeof answerSchema>> => {
         error.cause instanceof Error &&
         "code" in error.cause &&
         error.cause.code === "ECONNREFUSED";
+      // workerd may have died with the request: say how, not the reset.
+      const died = stopped();
+      if (died !== undefined) {
+        throw new Error(`workerd ${died}`, { cause: error });
+      }
       if (!refused || attempt >= ATTEMPTS || Date.now() >= until) {
         throw error;
       }
@@ -171,8 +130,69 @@ const fetchResults = async (): Promise<z.infer<typeof answerSchema>> => {
   }
 };
 
+// Everything after the temporary folder is made runs inside the scope
+// that removes it, and stops workerd, however the run ends: a bundle that
+// fails leaves nothing behind.
+const out = mkdtempSync(path.join(tmpdir(), "grasp-os-code-mode-"));
+let server: ChildProcess | undefined;
+/** How workerd stopped, once it has: its exit code or its signal. */
+let stopped: string | undefined;
 try {
-  const { runtime, calls, results } = await fetchResults();
+  // Bundled as core's own deploy bundles (workerd-smoke.ts): Wrangler's dry
+  // run, from a config of the Worker's own, so the bundle is what Wrangler
+  // would ship and nothing but the frozen install is needed.
+  const config = path.join(out, "wrangler.jsonc");
+  writeFileSync(
+    config,
+    JSON.stringify({
+      name: "code-mode-smoke",
+      main: worker,
+      compatibility_date: "2026-09-15",
+    })
+  );
+  execFileSync(
+    "wrangler",
+    [
+      "deploy",
+      "--dry-run",
+      "--outdir",
+      path.join(out, "bundle"),
+      "--config",
+      config,
+    ],
+    { cwd: core, stdio: "inherit" }
+  );
+
+  const port = await freePort();
+  writeFileSync(
+    path.join(out, "config.capnp"),
+    `using Workerd = import "/workerd/workerd.capnp";
+
+  const config :Workerd.Config = (
+    services = [(name = "main", worker = .main)],
+    sockets = [(name = "http", address = "127.0.0.1:${port}", http = (), service = "main")],
+  );
+
+  const main :Workerd.Worker = (
+    modules = [(name = "worker.js", esModule = embed "bundle/code-mode-worker.js")],
+    compatibilityDate = "2026-09-15",
+    bindings = [(name = "LOADER", workerLoader = ())],
+  );
+  `
+  );
+
+  server = spawn(
+    "workerd",
+    ["serve", "--experimental", path.join(out, "config.capnp")],
+    { stdio: "inherit" }
+  );
+  // The exit code stays null when workerd dies from a signal: say which.
+  server.once("exit", (code, signal) => {
+    stopped =
+      signal === null ? `exited with ${code}` : `was killed by ${signal}`;
+  });
+
+  const { runtime, calls, results } = await fetchResults(port, () => stopped);
   const problems: string[] = [];
   for (const [name, status] of Object.entries(expected.statuses)) {
     if (results[name]?.status !== status) {
@@ -226,6 +246,6 @@ try {
     `Code Mode runs on plain workerd: ${Object.keys(expected.statuses).length} cases (${JSON.stringify(runtime)})`
   );
 } finally {
-  server.kill();
+  server?.kill();
   rmSync(out, { force: true, recursive: true });
 }

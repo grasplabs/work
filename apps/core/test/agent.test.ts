@@ -29,6 +29,7 @@ import {
   utf8Bytes,
 } from "../src/code-mode.ts";
 import { workspace } from "../src/durable-objects.ts";
+import { endedRunsKept } from "../src/workspace.ts";
 import {
   chatOf,
   codeResults,
@@ -2516,6 +2517,34 @@ describe("chat agent code output", () => {
 const byText = (a: string, b: string): number => a.localeCompare(b, "en");
 
 describe("chat agent code run retention", () => {
+  it("keeps no more closed leases than it may, however many runs end", async () => {
+    const { stub, chat } = await newChat();
+    const chatId = chatIdSchema.parse(chat.id);
+    const runs = endedRunsKept + 50;
+
+    // Leases opened and closed as runs do, past the most it keeps.
+    const kept = await runInDurableObject(stub, (instance) => {
+      const ids: string[] = [];
+      for (let run = 0; run < runs; run += 1) {
+        const id = instance.openCodeRun(chatId, testRunOpening);
+        instance.closeCodeRun(chatId, id, "completed");
+        ids.push(id);
+      }
+      return {
+        retention: instance.codeRunRetention(),
+        // The oldest are forgotten, and answer as ended, unlogged.
+        oldest: instance.callFromCodeRun(chatId, ids[0] ?? ""),
+        newest: instance.callFromCodeRun(chatId, ids.at(-1) ?? ""),
+      };
+    });
+
+    expect(kept).toStrictEqual({
+      retention: { open: 0, closed: endedRunsKept, outputs: 0 },
+      oldest: { call: "ended", first: false },
+      newest: { call: "ended", first: true },
+    });
+  });
+
   it("keeps no open lease or output after many runs, whether they complete, throw or fail to load", async () => {
     const kinds = [
       "export default async (self, env) => { console.log((await env.chat.info()).chatId); return 1; };",

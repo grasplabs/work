@@ -188,7 +188,7 @@ export const maxChatChars = 4_000_000;
  * Most ended code runs an object remembers, to refuse and log a call from
  * one: a few turns' worth (at most 30 runs each).
  */
-const endedRunsKept = 1000;
+export const endedRunsKept = 1000;
 
 /**
  * Most code run records a chat keeps, newest first: a long chat's run
