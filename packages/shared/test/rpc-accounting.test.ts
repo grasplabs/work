@@ -215,27 +215,45 @@ describe("a peer that supplies or is sent a large answer", () => {
   });
 });
 
-describe("exports Cap'n Web auto-releases", () => {
-  it("keeps many sequential streamed answers under the limits", () => {
-    const { account } = fresh();
-    // Far more streams than the live-export cap, each with some copy cost:
-    // they don't accumulate, because Cap'n Web auto-releases them.
-    for (let round = 0; round < limits.maxLiveExports * 4; round += 1) {
-      const seed = account(["push", "x"]);
-      expect(seed).toBeUndefined();
-      const streamed = account([
-        "stream",
-        [
-          [
-            ["pipeline", round * 2 + 1],
-            ["pipeline", round * 2 + 1],
-          ],
-        ],
-      ]);
-      expect(streamed).toBeUndefined();
-      // Release the seed push so only the (uncounted) stream would accumulate.
-      expect(account(["release", round * 2 + 1, 1])).toBeUndefined();
+describe("streams, which Cap'n Web auto-releases once answered", () => {
+  it("serves far more answered streams than the caps allow at once, with no releases", () => {
+    const { account, recordSent } = fresh();
+    // Each stream is answered before the next, as Cap'n Web answers them,
+    // and the peer never releases one: Cap'n Web frees each as it answers,
+    // and so does the accountant, so none of the limits is reached.
+    const outcomes: (string | undefined)[] = [];
+    for (let id = 1; id <= limits.maxLiveExports * 50; id += 1) {
+      outcomes.push(account(["stream", "chunk"]));
+      recordSent(["resolve", id, "ok"]);
     }
+    expect(outcomes.every((outcome) => outcome === undefined)).toBeTruthy();
+  });
+
+  it("forgets a stream once it is answered", () => {
+    const { account, recordSent } = fresh();
+    expect(account(["stream", "chunk"])).toBeUndefined();
+    recordSent(["resolve", 1, "ok"]);
+    // Cap'n Web has freed export 1: a reference to it fails closed.
+    expect(account(["push", [[["pipeline", 1]]]])).toBe("copy");
+  });
+
+  it("ends the session when too many streams are left unanswered", () => {
+    const { account } = fresh();
+    const outcomes: (string | undefined)[] = [];
+    for (let i = 0; i <= limits.maxLiveExports; i += 1) {
+      outcomes.push(account(["stream", "chunk"]));
+    }
+    expect(outcomes.slice(0, -1).every((o) => o === undefined)).toBeTruthy();
+    expect(outcomes.at(-1)).toBe("exports");
+  });
+
+  it("counts a pipe as live until the peer releases it", () => {
+    const { account } = fresh();
+    const outcomes: (string | undefined)[] = [];
+    for (let i = 0; i <= limits.maxLiveExports; i += 1) {
+      outcomes.push(account(["pipe"]));
+    }
+    expect(outcomes.at(-1)).toBe("exports");
   });
 });
 

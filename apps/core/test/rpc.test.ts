@@ -207,10 +207,11 @@ describe("the memory a session spends expanding references", () => {
 
   it("keeps serving many streamed answers in one session", async () => {
     const connection = await rawRpc(signedOut);
-    // Streams are auto-released by Cap'n Web, so many in a row don't fill the
-    // live-export budget: the session still answers after them. Each stream
-    // takes an export id, so the ping call is the id after the last stream.
-    const streams = 200;
+    // Cap'n Web answers each stream as it arrives and frees it then, and so
+    // does the accountant: more streams than may be pending at once, never
+    // released, still leave the session open. Each stream takes an export
+    // id, so the ping call is the id after the last stream.
+    const streams = 10_000;
     for (let i = 0; i < streams; i += 1) {
       connection.send(["stream", "x"]);
     }

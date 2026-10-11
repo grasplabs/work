@@ -318,11 +318,15 @@ export const messageAccountant = (
     return undefined;
   };
 
-  // Exports Cap'n Web auto-releases once their answer is sent (streams and
-  // pipes): they take an ID and can be referred to and released like any
-  // other, but they don't count against the live budget, since Cap'n Web
-  // frees them on its own and the accountant never sees that release.
-  const uncounted = new Set<number>();
+  // Stream exports, which Cap'n Web auto-releases right after it sends their
+  // answer (`autoRelease` in 0.12.0): they take an ID and can be referred to
+  // like any other while pending, but they don't count against the live
+  // budget. Their entries are dropped when the answer is sent
+  // (`recordSent`), as Cap'n Web frees them, so a peer that streams without
+  // ever releasing can't grow these maps; and no more than
+  // `maxLiveExports` may be pending at once. (A pipe is not auto-released:
+  // Cap'n Web frees it only on the peer's release, so it counts as live.)
+  const pendingStreams = new Set<number>();
 
   const addExport = (
     recordedNodes: number,
@@ -338,8 +342,8 @@ export const messageAccountant = (
       peerHeld.add(id);
     }
     if (!counted) {
-      uncounted.add(id);
-      return undefined;
+      pendingStreams.add(id);
+      return pendingStreams.size > maxLiveExports ? "exports" : undefined;
     }
     liveCopyNodes += copyCost;
     liveCount += 1;
@@ -422,8 +426,8 @@ export const messageAccountant = (
       refcount.set(id, left);
       return undefined;
     }
-    if (uncounted.has(id)) {
-      uncounted.delete(id);
+    if (pendingStreams.has(id)) {
+      pendingStreams.delete(id);
     } else {
       liveCopyNodes -= held.get(id) ?? 0;
       liveCount -= 1;
@@ -460,8 +464,8 @@ export const messageAccountant = (
       return parts.length < 2 ? "bad-message" : accountPush(arg1, false);
     }
     if (kind === "pipe") {
-      // A readable the peer writes to: auto-released like a stream.
-      return addExport(answerNodes, 0, { counted: false });
+      // A writable the peer pipes into: freed only on the peer's release.
+      return addExport(answerNodes, 0);
     }
     if (kind === "resolve" || kind === "reject" || kind === "abort") {
       // These carry a value the peer sends, copied too, but make no export.
@@ -491,13 +495,24 @@ export const messageAccountant = (
     const parts: unknown[] = message;
     const [kind, id, value] = parts;
     if (
-      (kind === "resolve" || kind === "reject") &&
-      typeof id === "number" &&
-      refcount.has(id)
+      (kind !== "resolve" && kind !== "reject") ||
+      typeof id !== "number" ||
+      !refcount.has(id)
     ) {
-      const { nodeCount } = walkValue(value);
-      recorded.set(id, Math.min(nodeCount, maxSessionCopyNodes + 1));
+      return;
     }
+    if (pendingStreams.has(id)) {
+      // Cap'n Web auto-releases a stream export as soon as its answer is
+      // sent, so it is gone now: drop it, and a later reference fails closed.
+      pendingStreams.delete(id);
+      recorded.delete(id);
+      held.delete(id);
+      refcount.delete(id);
+      peerHeld.delete(id);
+      return;
+    }
+    const { nodeCount } = walkValue(value);
+    recorded.set(id, Math.min(nodeCount, maxSessionCopyNodes + 1));
   };
 
   return { account, recordSent };
