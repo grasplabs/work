@@ -1,7 +1,9 @@
 /**
  * On-prem smoke run: bundles core and serves it on plain workerd (no
- * Wrangler, no Miniflare), then checks it answers. Keeps the code on-prem
- * ready: only platform APIs that also run on workerd.
+ * Wrangler, no Miniflare), checks it answers, and waits for its built-in
+ * content to install: it fails on any failure core or workerd logs before
+ * that. Keeps the code on-prem ready: only platform APIs that also run on
+ * workerd.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
@@ -15,15 +17,32 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createInterface } from "node:readline";
+import { PassThrough } from "node:stream";
 
 import { routerSecretHeader } from "../packages/shared/src/router.ts";
 import { d1DatabasesOf, writeD1Service } from "./workerd-d1.ts";
 import { coreWranglerConfig, smokeConfig } from "./workerd-smoke-config.ts";
-import { coreStarted } from "./workerd-smoke-start.ts";
+import { coreStarted, installedOnWorkerd } from "./workerd-smoke-start.ts";
+import type { KnownGap } from "./workerd-smoke-start.ts";
 
 const ROUTER_SECRET = "smoke-router-secret";
 const ATTEMPTS = 50;
 const RETRY_DELAY_MS = 100;
+const INSTALL_TIMEOUT_MS = 120_000;
+
+/**
+ * What the on-prem profile can't do yet, so the install can't complete:
+ * each excuses exactly its own failure, and the run says so. Remove one
+ * once its gap is closed; the install must then be complete.
+ */
+const knownGaps: KnownGap[] = [
+  {
+    event: "builtins.blueprint_failed",
+    errorMessage: "Cannot read properties of undefined (reading 'put')",
+    why: "FILES (R2) has no on-prem service yet, so no built-in blueprint installs (GRA-446)",
+  },
+];
 const core = path.join(import.meta.dirname, "../apps/core");
 const out = mkdtempSync(path.join(tmpdir(), "grasp-os-workerd-"));
 
@@ -73,8 +92,18 @@ writeFileSync(
 );
 
 const server = spawn("workerd", ["serve", path.join(out, "config.capnp")], {
-  stdio: "inherit",
+  stdio: ["ignore", "pipe", "pipe"],
 });
+
+// Everything workerd writes, line by line, both shown and checked.
+const output = new PassThrough();
+for (const stream of [server.stdout, server.stderr]) {
+  createInterface({ input: stream }).on("line", (line) => {
+    console.info(line);
+    output.write(`${line}\n`);
+  });
+}
+const lines = createInterface({ input: output })[Symbol.asyncIterator]();
 
 try {
   await coreStarted(server, {
@@ -84,7 +113,20 @@ try {
     attempts: ATTEMPTS,
     retryDelayMs: RETRY_DELAY_MS,
   });
-  console.info("core runs on workerd");
+  const excused = await installedOnWorkerd(
+    server,
+    { [Symbol.asyncIterator]: () => lines },
+    knownGaps,
+    INSTALL_TIMEOUT_MS
+  );
+  for (const { why } of excused) {
+    console.warn(`known on-prem gap: ${why}`);
+  }
+  console.info(
+    excused.length === 0
+      ? "core runs on workerd, and its built-in content installed"
+      : "core runs on workerd, and its built-in content installed but for the known gaps above"
+  );
 } finally {
   server.kill();
   rmSync(out, { force: true, recursive: true });
