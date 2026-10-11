@@ -115,6 +115,13 @@ const reconcileRetryMs = 60 * 60 * 1000;
 /** How many failed tries at reconciling a request set it aside for a person. */
 const maxReconcileFailures = 3;
 
+/**
+ * Most damaged scopes one decision's audit event lists, four detail members
+ * each: within the event's limit (`auditDetailMaxKeys`) beside its other
+ * members, however many scopes stored data names. `damaged` counts all.
+ */
+const auditedDamagedScopes = 6;
+
 /** How often the alarm looks again for receipts to sweep, while any are kept. */
 const sweepEveryMs = 24 * 60 * 60 * 1000;
 
@@ -164,10 +171,15 @@ const admissionSchema = z
     id: z.uuid(),
     /** The UTC month it counts in. */
     period: z.string().regex(periodPattern),
-    /** Each scope once. */
+    /**
+     * Each scope once, at most one of each kind the gateway counts (the
+     * deployment, the workflow, the person, the run): a bound that also
+     * keeps a decision's audit event within its detail limit.
+     */
     scopes: z
       .array(scopeSchema)
       .min(1)
+      .max(scopeNames.length)
       .refine(
         (all) =>
           new Set(all.map(({ scope, key }) => `${scope}\n${key}`)).size ===
@@ -698,6 +710,9 @@ export class ModelLedger extends DurableObject<Env> {
           }
           const at = `damaged.${rebuiltScopes}`;
           rebuiltScopes += 1;
+          if (rebuiltScopes > auditedDamagedScopes) {
+            continue;
+          }
           rebuilt[`${at}.scope`] = kept.scope;
           rebuilt[`${at}.key`] = kept.key.slice(0, auditIdentifierMaxLength);
           rebuilt[`${at}.held`] =

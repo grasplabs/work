@@ -731,6 +731,71 @@ describe("the model ledger", () => {
     });
   });
 
+  it("refuses an admission with more scopes than the gateway counts, reserving nothing", async () => {
+    const ledger = newLedger();
+    const scopes: LedgerScope[] = [
+      { ...budget(1000, "max"), scope: "deployment", key: "deployment" },
+      { ...budget(1000, "max"), scope: "workflow", key: "flow" },
+      budget(1000, "max"),
+      { ...budget(1000, "max"), scope: "run", key: "run" },
+    ];
+    const fits = admission(10, scopes);
+    const tooMany = admission(10, [...scopes, budget(1000, "nia")]);
+
+    const refused = await ledger.admit(tooMany).then(
+      () => "admitted",
+      () => "refused"
+    );
+    const admitted = await ledger.admit(fits);
+    expect({
+      refused,
+      admitted: admitted.ok,
+      nia: await spendOf(ledger, "nia"),
+    }).toStrictEqual({ refused: "refused", admitted: true, nia: undefined });
+  });
+
+  it("lists at most six damaged scopes in a decision's audit event, counting all, and still settles it", async () => {
+    const ledger = newLedger();
+    const held = admission(10, [budget(1000, `oz-${crypto.randomUUID()}`)]);
+    await ledger.admit(held);
+    // Stored data naming more scopes than any admission may, none with
+    // spend: every one damaged.
+    await runInDurableObject(ledger, (_instance, state) => {
+      for (let extra = 0; extra < 7; extra += 1) {
+        state.storage.sql.exec(
+          "INSERT INTO request_scopes (request_id, scope, key) VALUES (?, 'run', ?)",
+          held.id,
+          `run-${extra}`
+        );
+      }
+      state.storage.sql.exec("DELETE FROM spend WHERE period = '2400-01'");
+    });
+    await corrupt(ledger, "scopes", "not JSON", held.id);
+    await ledger.settle(held.id, { by: "refused" });
+    const admin = {
+      type: "person",
+      userId: `admin-${crypto.randomUUID()}`,
+    } as const;
+
+    const released = await ledger.resolveQuarantined(held.id, "release", admin);
+    await runDurableObjectAlarm(ledger);
+    const events = await allEvents();
+    const event = events.find(
+      ({ actor: by }) => JSON.stringify(by) === JSON.stringify(admin)
+    );
+    const listed = new Set(
+      Object.keys(event?.detail ?? {})
+        .filter((name) => name.startsWith("damaged."))
+        .map((name) => name.split(".")[1])
+    );
+    expect({
+      released: released.state,
+      after: await ledger.quarantined(10),
+      damaged: event?.detail.damaged,
+      listed: listed.size,
+    }).toStrictEqual({ released: "decided", after: [], damaged: 8, listed: 6 });
+  });
+
   it("alerts admins when a decided charge takes a budget past its threshold", async () => {
     const ledger = newLedger();
     const key = `gus-${crypto.randomUUID()}`;
