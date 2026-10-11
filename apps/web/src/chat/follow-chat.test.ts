@@ -18,6 +18,7 @@ const question = (id: number, text: string): ChatMessage => ({
 const update = (changes: Partial<ChatUpdate> = {}): ChatUpdate => ({
   messages: [],
   partial: null,
+  output: null,
   running: false,
   stopped: null,
   held: 0,
@@ -67,5 +68,33 @@ describe("a chat as the page shows it", () => {
       texts: ["One", "Two"],
       provenance: { sources: ["handbook"], restricted: false },
     });
+  });
+
+  it("shows a running step's output as it grows, starts afresh for another step, and drops it once none runs", () => {
+    const first = applyUpdate(
+      emptyView,
+      update({ output: { callId: "a", from: 0, text: "one" } })
+    );
+    const grown = applyUpdate(
+      first,
+      update({ output: { callId: "a", from: 3, text: "\ntwo" } })
+    );
+    const other = applyUpdate(
+      grown,
+      update({ output: { callId: "b", from: 0, text: "three" } })
+    );
+    const done = applyUpdate(other, update({ output: null }));
+
+    expect([
+      first.output,
+      grown.output,
+      other.output,
+      done.output,
+    ]).toStrictEqual([
+      { callId: "a", text: "one" },
+      { callId: "a", text: "one\ntwo" },
+      { callId: "b", text: "three" },
+      null,
+    ]);
   });
 });

@@ -14,6 +14,7 @@ import type {
 import type {
   ChatDraft,
   ChatMessage,
+  ChatOutput,
   ChatProvenance,
   ChatSummary,
 } from "@grasp-os/shared/chat";
@@ -67,7 +68,15 @@ import { revokeChatPermissions } from "./chat-connections.ts";
 import { chatMessageOf, partialOf } from "./chat-messages.ts";
 import { ChatWatch } from "./chat-watch.ts";
 import type { ChatListener, ChatState } from "./chat-watch.ts";
-import { codeLimits, codeRuntime, codeTimeoutMs } from "./code-mode.ts";
+import {
+  codeLimits,
+  codeRuntime,
+  codeTimeoutMs,
+  cutMarker,
+  cutToBytes,
+  redact,
+  utf8Bytes,
+} from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/workspace/migrations/migrations.js";
@@ -314,6 +323,12 @@ const heldOutcomes: Record<HeldOutcome, string> = {
     "The person confirmed it, but carrying it out failed, so it may not have been done. It no longer waits for them; don't ask for it again unless they say so.",
 };
 
+/** The running step's output as watchers see it, without its bookkeeping. */
+const outputOf = (
+  output: { callId: string; text: string } | undefined
+): ChatOutput | null =>
+  output === undefined ? null : { callId: output.callId, text: output.text };
+
 /** A person's or team's workspace: chats and the Code Mode agent on Pi. */
 export class Workspace extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
@@ -334,6 +349,17 @@ export class Workspace extends DurableObject<Env> {
    * {@link endedRunsKept}: a run forgotten answers as ended, unlogged.
    */
   readonly #codeRuns = new Map<string, CodeRunLease>();
+
+  /**
+   * What the code step running now in each chat has logged, as its
+   * watchers see it before its result: for one run (`runId`), its UTF-8
+   * size, and whether it was cut at the run's output budget. In memory
+   * only, and gone once the run closes.
+   */
+  readonly #outputs = new Map<
+    ChatId,
+    { runId: string; callId: string; text: string; bytes: number; cut: boolean }
+  >();
 
   /**
    * The response each chat's agent is writing now, as it streams in: what
@@ -813,6 +839,9 @@ export class Workspace extends DurableObject<Env> {
           open: (opening) => this.openCodeRun(chat.id, opening),
           close: async (runId, status) =>
             await this.#endCodeRun(scope, runId, status),
+          output: (runId, callId, line) => {
+            this.codeRunOutput(chat.id, runId, callId, line);
+          },
         },
         loader: this.env.LOADER,
         codeTimeoutMs: codeTimeoutMs(this.env),
@@ -1014,6 +1043,11 @@ export class Workspace extends DurableObject<Env> {
     if (lease === undefined || !("closed" in lease)) {
       this.#closeLease(key, "ended");
     }
+    // Its output goes: the step's result shows from here on.
+    if (this.#outputs.get(chatId)?.runId === runId) {
+      this.#outputs.delete(chatId);
+      this.#changed(chatId);
+    }
     this.#db
       .update(chatCodeRuns)
       .set({ status: ended, endedAt: new Date() })
@@ -1083,6 +1117,49 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Shows a line a code run of the chat logged to the chat's watchers, as
+   * the code step `callId`'s output so far: redacted, and only up to the
+   * run's output budget (less what stays for how it ends), then cut once.
+   * Dropped once the run has closed, so a line that arrives late reopens
+   * nothing and reaches no other step or turn.
+   */
+  codeRunOutput(
+    chatId: ChatId,
+    runId: string,
+    callId: string,
+    line: string
+  ): void {
+    if (this.admitFromCodeRun(chatId, runId).call !== "open") {
+      return;
+    }
+    const before = this.#outputs.get(chatId);
+    const output =
+      before?.runId === runId
+        ? before
+        : { runId, callId, text: "", bytes: 0, cut: false };
+    if (output.cut) {
+      return;
+    }
+    const piece = `${output.text === "" ? "" : "\n"}${redact(line)}`;
+    const room = codeLimits.outputBytes - codeLimits.diagnosticBytes;
+    const bytes = utf8Bytes(piece);
+    if (output.bytes + bytes > room) {
+      const kept = cutToBytes(
+        piece,
+        room - output.bytes - utf8Bytes(cutMarker)
+      );
+      output.text += `${kept}${cutMarker}`;
+      output.bytes = room;
+      output.cut = true;
+    } else {
+      output.text += piece;
+      output.bytes += bytes;
+    }
+    this.#outputs.set(chatId, output);
+    this.#changed(chatId);
+  }
+
+  /**
    * Closes a code run's lease, and forgets the oldest closed runs past the
    * cap. Moved to the end, so the map keeps closed runs oldest first.
    */
@@ -1113,6 +1190,11 @@ export class Workspace extends DurableObject<Env> {
     this.#closeLease(key, "revoked");
     // The call that found the revocation records it: later calls aren't.
     this.#codeRuns.set(key, { closed: "revoked", reported: true });
+    // What it logged and no watcher has had yet goes unshown.
+    if (this.#outputs.get(chatId)?.runId === runId) {
+      this.#outputs.delete(chatId);
+      this.#changed(chatId);
+    }
     return true;
   }
 
@@ -1989,6 +2071,7 @@ export class Workspace extends DurableObject<Env> {
     const stopped = this.#stopped.get(chatId);
     return {
       partial: partial === undefined ? null : partialOf(partial),
+      output: outputOf(this.#outputs.get(chatId)),
       running: this.#turns.has(chatId),
       provenanceVersion: this.#provenanceVersions.get(chatId) ?? 0,
       stopped: stopped ?? null,

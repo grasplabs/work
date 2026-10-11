@@ -1,4 +1,9 @@
-import type { ChatCode, ChatMessage, ChatPartial } from "@grasp-os/shared/chat";
+import type {
+  ChatCode,
+  ChatMessage,
+  ChatOutput,
+  ChatPartial,
+} from "@grasp-os/shared/chat";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
@@ -72,11 +77,14 @@ const stepStatusOf = (
 const CodeStep = ({
   code,
   result,
+  output,
   writing,
   running,
 }: {
   code: ChatCode;
   result: Result | undefined;
+  /** What it has logged so far, while it runs and has no result yet. */
+  output: string | undefined;
   /** Still being written by the model. */
   writing: boolean;
   /** Whether the agent is working on the chat now. */
@@ -115,6 +123,16 @@ const CodeStep = ({
             <code className="font-mono">{code.code}</code>
           </pre>
         </section>
+        {result !== undefined || output === undefined ? null : (
+          <section aria-live="polite" className="flex flex-col gap-2">
+            <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+              <Trans>Output</Trans>
+            </h4>
+            <pre className="bg-muted/50 overflow-x-auto rounded-md p-3 text-xs">
+              <code className="font-mono">{output}</code>
+            </pre>
+          </section>
+        )}
         {result === undefined ? null : (
           <section className="flex flex-col gap-2">
             <h4 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
@@ -244,6 +262,7 @@ const WorkedFor = ({ seconds }: { seconds: number }) => {
 const Reply = ({
   reply,
   results,
+  output,
   writing,
   running,
   top,
@@ -252,6 +271,8 @@ const Reply = ({
 }: {
   reply: ChatPartial & { end?: Answer["end"]; error?: string };
   results: ReadonlyMap<string, Result>;
+  /** What the running code step has logged so far. */
+  output: ChatOutput | null;
   writing: boolean;
   running: boolean;
   /** The line over it, over the first answer to a question. */
@@ -274,6 +295,7 @@ const Reply = ({
             <CodeStep
               code={code}
               key={code.callId}
+              output={output?.callId === code.callId ? output.text : undefined}
               result={results.get(code.callId)}
               running={running}
               writing={writing}
@@ -416,6 +438,7 @@ const progressOf = (
 export const ChatThread = ({
   loaded,
   messages,
+  output,
   partial,
   running,
   onRetry,
@@ -424,6 +447,8 @@ export const ChatThread = ({
   /** Whether core has sent the chat yet: until then, it is loading. */
   loaded: boolean;
   messages: readonly ChatMessage[];
+  /** What the running code step has logged so far; `null` while none runs. */
+  output: ChatOutput | null;
   partial: ChatPartial | null;
   /** Whether the agent is working on the chat now. */
   running: boolean;
@@ -493,6 +518,7 @@ export const ChatThread = ({
                         ? onRetry
                         : undefined
                     }
+                    output={output}
                     reply={message}
                     results={results}
                     running={running}
@@ -512,6 +538,7 @@ export const ChatThread = ({
           {shown === null ? null : (
             <li aria-busy="true">
               <Reply
+                output={output}
                 reply={shown}
                 results={results}
                 running={running}

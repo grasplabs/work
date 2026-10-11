@@ -2838,6 +2838,10 @@ msgstr "Andere engines mogen nu {name} aanroepen, dat {does}"
 msgid "Otherwise:"
 msgstr "Anders:"
 
+#: src/chat/thread.tsx
+msgid "Output"
+msgstr "Uitvoer"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Overview"
 msgstr "Overzicht"

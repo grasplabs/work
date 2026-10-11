@@ -44,8 +44,15 @@ export const codeLimits = {
   sourceChars: 200_000,
   subRequests: 100,
   timeoutMs: 30_000,
-  /** Most characters of logs and result that go back to the model. */
-  outputChars: 32 * 1024,
+  /**
+   * Most UTF-8 bytes of output a run may have, shared by what it logs (as
+   * it streams to the chat and as the model reads it), what it returns
+   * and its error: one budget, so a flood of one leaves no room unbounded
+   * for the others.
+   */
+  outputBytes: 64 * 1024,
+  /** Of {@link outputBytes}, kept for how the run ended, whatever it logged. */
+  diagnosticBytes: 1024,
   /** Most log lines a run may send back. */
   logLines: 1000,
 } as const;
@@ -86,9 +93,9 @@ export const sourceHash = async (code: string): Promise<string> => {
 
 /**
  * Most characters of each part of a run that core takes from the isolate:
- * more than the model reads, so it can be told what was cut.
+ * at least what fits in the output budget, so it can be told what was cut.
  */
-const room = 2 * codeLimits.outputChars;
+const room = codeLimits.outputBytes;
 
 /**
  * A run's wall-clock limit: {@link codeLimits}' `timeoutMs`, or less where
@@ -140,6 +147,8 @@ const ProxyOf = Proxy;
 const ErrorOf = Error;
 const tooLarge = {};
 const undescribable = "(an error that can't be described)";
+const then = bind(Promise.prototype.then);
+const resolve = Promise.resolve.bind(Promise);
 
 Object.defineProperty(globalThis, "caches", { value: undefined });
 
@@ -200,7 +209,19 @@ const describe = (error) => {
 // (a setter on \`Array.prototype[0]\` fires on an array's [[Set]]).
 let logsJson = "";
 let logCount = 0;
+// Each line also goes to the host as it is written (\`out\`, core's own
+// callback, which the code never sees), in order, one after another
+// (\`sent\`), and all of them before a call returns.
 let left = room;
+let out;
+let sent = resolve();
+const delivered = async () => {
+  try {
+    await sent;
+  } catch {
+    // A line the host didn't take is still in the outcome's logs.
+  }
+};
 const write = (...parts) => {
   if (left > 0 && logCount < lines) {
     let line = "";
@@ -213,6 +234,12 @@ const write = (...parts) => {
     const quoted = stringify(line);
     logsJson = logCount === 0 ? quoted : logsJson + "," + quoted;
     logCount += 1;
+    if (out !== undefined) {
+      const send = out;
+      const next = () => send(line);
+      // After the line before, however that went.
+      sent = then(sent, next, next);
+    }
   }
 };
 
@@ -241,22 +268,29 @@ for (const level of ["log", "info", "warn", "error", "debug"]) {
 let code;
 
 // Every outcome is returned, never thrown: a call that rejects was ended
-// by the runtime, so the code can't choose how its run ends.
+// by the runtime, so the code can't choose how its run ends. Each call
+// gets core's output callback anew: a stub works only in the call that
+// brought it.
 class Harness extends WorkerEntrypoint {
-  async verify() {
+  async verify(output) {
+    out = output;
     try {
       const { default: found } = await import("code.js");
       if (typeof found !== "function") {
+        await delivered();
         return outcome(false, false, "error", exportNeeded);
       }
       code = found;
+      await delivered();
       return outcome(true, true);
     } catch (error) {
+      await delivered();
       return outcome(false, false, "error", describe(error));
     }
   }
 
-  async run() {
+  async run(output) {
+    out = output;
     if (code === undefined) {
       return outcome(false, false, "error", exportNeeded);
     }
@@ -278,8 +312,11 @@ class Harness extends WorkerEntrypoint {
       const own = this.ctx;
       const ctx = freeze({ waitUntil: (promise) => own.waitUntil(promise) });
       const value = await code(null, env, ctx);
-      return outcome(true, true, "result", value === undefined ? undefined : show(value));
+      const result = value === undefined ? undefined : show(value);
+      await delivered();
+      return outcome(true, true, "result", result);
     } catch (error) {
+      await delivered();
       return outcome(false, true, "error", describe(error));
     }
   }
@@ -338,8 +375,8 @@ export interface CodeRun {
  * checked, not trusted.
  */
 interface Harness extends WorkerEntrypoint {
-  verify: () => Promise<string>;
-  run: () => Promise<string>;
+  verify: (output: (line: unknown) => void) => Promise<string>;
+  run: (output: (line: unknown) => void) => Promise<string>;
 }
 
 /**
@@ -393,6 +430,19 @@ const parsed = (
 
 const notAResult = "The run returned more than it may, or not a result.";
 
+/** How a run is limited and followed, besides its code and env. */
+export interface RunOptions {
+  /** Cancels the run. */
+  signal?: AbortSignal;
+  /** Its wall-clock limit ({@link codeTimeoutMs}). */
+  timeoutMs?: number;
+  /**
+   * Gets each line the code logs as it is written, until the run ends:
+   * a line after that is dropped, whenever the isolate sends it.
+   */
+  onOutput?: (line: string) => void;
+}
+
 /**
  * Runs `code`, an ES module whose default export is an async function of
  * `(self, env, ctx)`, in a fresh locked isolate with `env` as its only way
@@ -404,10 +454,17 @@ export const runCode = async (
   loader: WorkerLoader,
   code: string,
   env: Readonly<Record<string, Fetcher>>,
-  signal?: AbortSignal,
-  timeoutMs: number = codeLimits.timeoutMs
+  { signal, timeoutMs = codeLimits.timeoutMs, onOutput }: RunOptions = {}
 ): Promise<CodeRun> => {
   const limit = deadline(timeoutMs, signal);
+  let over = false;
+  // What the isolate streams is checked like what it returns: a string,
+  // no longer than a line may be, and only while the run is open.
+  const stream = (line: unknown): void => {
+    if (!over && typeof line === "string" && line.length <= room) {
+      onOutput?.(line);
+    }
+  };
   // The phase it is in, for a failure the runtime throws: a module that
   // doesn't compile fails as it loads, before `run` is ever called.
   let phase: "load" | "run" = "load";
@@ -427,7 +484,7 @@ export const runCode = async (
     });
     const entry = worker.getEntrypoint<Harness>();
     const verified = parsed(
-      await Promise.race([entry.verify(), whenAborted(limit.signal)])
+      await Promise.race([entry.verify(stream), whenAborted(limit.signal)])
     );
     // An outcome that isn't one the harness returns came from the code,
     // which may change anything in its isolate: it didn't load (verify)
@@ -444,7 +501,7 @@ export const runCode = async (
     }
     phase = "run";
     const ran = parsed(
-      await Promise.race([entry.run(), whenAborted(limit.signal)])
+      await Promise.race([entry.run(stream), whenAborted(limit.signal)])
     );
     if (ran === undefined) {
       return ended("threw", notAResult);
@@ -484,14 +541,63 @@ export const runCode = async (
     }
     return ended(phase === "load" ? "load_failed" : "crashed", message);
   } finally {
+    over = true;
     limit.clear();
   }
 };
 
+const encoder = new TextEncoder();
+
+/** The UTF-8 bytes of `text`. */
+export const utf8Bytes = (text: string): number => encoder.encode(text).length;
+
+/** `text` cut to at most `bytes` UTF-8 bytes, never inside a character. */
+export const cutToBytes = (text: string, bytes: number): string => {
+  if (bytes <= 0) {
+    return "";
+  }
+  // Text no longer than this in characters can't be longer in bytes:
+  // only longer text is measured, at most four bytes a character.
+  if (text.length * 3 <= bytes) {
+    return text;
+  }
+  const { read } = encoder.encodeInto(text, new Uint8Array(bytes));
+  return text.slice(0, read);
+};
+
+/** The marker where output was cut, saying where. */
+export const cutMarker = `\n… (cut: over ${codeLimits.outputBytes} bytes of output)`;
+
+/**
+ * Credentials as text that could only leak through output: bearer and
+ * basic authorization values, provider API keys, JSON Web Tokens, private
+ * keys, and AWS access keys. A run holds no secret of its own; these are
+ * caught in case an outside system's data carries one. Applied to every
+ * line before it streams to the chat, and to what the model reads.
+ */
+const credentials = [
+  /\b(?:bearer|basic)\s+[\w\-.~+/]{16,}=*/giu,
+  /\b(?:sk|pk|rk)-[\w-]{16,}/gu,
+  /\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/gu,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/gu,
+  /\bAKIA[0-9A-Z]{16}\b/gu,
+];
+
+/** `text` with every credential in it replaced by `[redacted]`. */
+export const redact = (text: string): string => {
+  let redacted = text;
+  for (const pattern of credentials) {
+    redacted = redacted.replace(pattern, "[redacted]");
+  }
+  return redacted;
+};
+
 /**
  * A run as the model reads it: its logs, then its result or, for a run
- * that didn't complete, its error under its status, at most `outputChars`
- * of it. Built only that far, however much the run sent.
+ * that didn't complete, its error under its status, redacted, in at most
+ * {@link codeLimits}' `outputBytes` UTF-8 bytes. Logs and result share the
+ * budget less `diagnosticBytes`, which stay for the error, so a flood of
+ * logs never hides how a run ended. Cut text ends with {@link cutMarker}.
  */
 export const describeRun = ({
   status,
@@ -499,31 +605,35 @@ export const describeRun = ({
   result,
   error,
 }: CodeRun): string => {
-  const max = codeLimits.outputChars;
-  let text = "";
-  // One character past `max` at most: enough to know it was cut.
-  const add = (piece: string) => {
-    text += piece.slice(0, Math.max(0, max + 1 - text.length));
-  };
-  const part = (title: string, lines: readonly string[]) => {
-    add(text === "" ? `${title}:` : `\n\n${title}:`);
-    for (const line of lines) {
-      add(`\n${line}`);
-    }
-  };
+  const { outputBytes, diagnosticBytes } = codeLimits;
+  const markerBytes = utf8Bytes(cutMarker);
+  const parts: string[] = [];
   if (logs.length > 0) {
-    part("Logs", logs);
+    parts.push(`Logs:\n${logs.join("\n")}`);
   }
   if (status === "completed" && result !== undefined) {
-    part("Returned", [result]);
+    parts.push(`Returned:\n${result}`);
   }
-  if (status !== "completed") {
-    part(`Error (${status})`, [error ?? "The run failed."]);
+  const body = redact(parts.join("\n\n"));
+  const ending =
+    status === "completed"
+      ? ""
+      : redact(`Error (${status}):\n${error ?? "The run failed."}`);
+  // The body's share: everything but the ending, or the reserve for one.
+  const bodyRoom =
+    outputBytes - Math.min(utf8Bytes(ending), diagnosticBytes) - 2;
+  const bodyCut = utf8Bytes(body) > bodyRoom;
+  const shownBody = bodyCut
+    ? `${cutToBytes(body, bodyRoom - markerBytes)}${cutMarker}`
+    : body;
+  if (ending === "") {
+    return shownBody === "" ? "(no logs, returned nothing)" : shownBody;
   }
-  if (text === "") {
-    return "(no logs, returned nothing)";
-  }
-  return text.length <= max
-    ? text
-    : `${text.slice(0, max)}\n… (cut: longer than ${max} characters)`;
+  const lead = shownBody === "" ? "" : `${shownBody}\n\n`;
+  const endingRoom = outputBytes - utf8Bytes(lead);
+  const shownEnding =
+    utf8Bytes(ending) > endingRoom
+      ? `${cutToBytes(ending, endingRoom - markerBytes)}${cutMarker}`
+      : ending;
+  return `${lead}${shownEnding}`;
 };

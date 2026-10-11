@@ -1,5 +1,7 @@
 import type {
   ChatMessage,
+  ChatOutput,
+  ChatOutputUpdate,
   ChatPartial,
   ChatPartialUpdate,
   ChatProvenance,
@@ -13,6 +15,8 @@ export type ChatListener = Rpc.Stub<(update: ChatUpdate) => Promise<void>>;
 export interface ChatState {
   /** The response being written, whole; `null` between responses. */
   partial: ChatPartial | null;
+  /** The running code step's output so far; `null` while none runs. */
+  output: ChatOutput | null;
   running: boolean;
   stopped: string | null;
   held: number;
@@ -50,6 +54,21 @@ export const partialUpdate = (
   };
 };
 
+/** What `now` adds to the running step's output the watcher has (`shown`). */
+export const outputUpdate = (
+  shown: ChatOutput | null,
+  now: ChatOutput | null
+): ChatOutputUpdate | null => {
+  if (now === null) {
+    return null;
+  }
+  const { from, added } = gained(
+    shown?.callId === now.callId ? shown.text : "",
+    now.text
+  );
+  return { callId: now.callId, from, text: added };
+};
+
 /**
  * One watcher of a chat (the Workspace object's `watch`). Updates go out
  * one at a time: while one is on its way, whatever changes waits, and the
@@ -69,6 +88,8 @@ export class ChatWatch {
   readonly #unsent: ChatMessage[] = [];
   /** The response being written, as this watcher has it. */
   #shown: ChatPartial | null = null;
+  /** The running step's output, as this watcher has it. */
+  #shownOutput: ChatOutput | null = null;
   /** The provenance version this watcher has; none at first. */
   #provenanceSent: number | undefined;
   /** Something changed since the last update went out. */
@@ -95,11 +116,19 @@ export class ChatWatch {
   }
 
   #next(): ChatUpdate {
-    const { partial, running, stopped, held, drafts, provenanceVersion } =
-      this.#state();
+    const {
+      partial,
+      output,
+      running,
+      stopped,
+      held,
+      drafts,
+      provenanceVersion,
+    } = this.#state();
     const update: ChatUpdate = {
       messages: this.#unsent.splice(0),
       partial: partialUpdate(this.#shown, partial),
+      output: outputUpdate(this.#shownOutput, output),
       running,
       stopped,
       held,
@@ -109,6 +138,7 @@ export class ChatWatch {
         : { provenance: this.#provenance() }),
     };
     this.#shown = partial;
+    this.#shownOutput = output;
     this.#provenanceSent = provenanceVersion;
     return update;
   }

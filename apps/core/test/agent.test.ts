@@ -1,6 +1,8 @@
 import piAgentCore from "@earendil-works/pi-agent-core/package.json" with { type: "json" };
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { applyOutput } from "@grasp-os/shared/chat";
+import type { ChatOutput, ChatUpdate } from "@grasp-os/shared/chat";
 import type { WorkspaceId } from "@grasp-os/shared/ids";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { memoryMaxLimit } from "@grasp-os/shared/memory";
@@ -17,7 +19,15 @@ import {
   maxSteps,
   requestChars,
 } from "../src/agent.ts";
-import { codeLimits, codeRuntime, sourceHash } from "../src/code-mode.ts";
+import {
+  codeLimits,
+  codeRuntime,
+  cutMarker,
+  cutToBytes,
+  redact,
+  sourceHash,
+  utf8Bytes,
+} from "../src/code-mode.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
   chatOf,
@@ -699,8 +709,10 @@ describe("chat agent sandbox", () => {
     );
 
     expect(result?.isError).toBeFalsy();
-    expect(result?.text.length).toBeLessThan(33 * 1024);
-    expect(result?.text).toMatch(/cut: longer than 32768 characters\)$/u);
+    expect(utf8Bytes(result?.text ?? "")).toBeLessThanOrEqual(
+      codeLimits.outputBytes
+    );
+    expect(result?.text.endsWith(cutMarker)).toBeTruthy();
   });
 
   it("keeps a run whose output is all characters JSON must escape, within its limits", async () => {
@@ -850,7 +862,7 @@ describe("chat agent sandbox", () => {
     [
       "a value that makes itself huge text",
       "export default async () => { const value = () => {}; value.toString = () => 'z'.repeat(30_000_000); return value; };",
-      /^Returned:\nz{32000,}\n… \(cut: longer than 32768 characters\)$/u,
+      /^Returned:\nz{60000,}\n… \(cut: over 65536 bytes of output\)$/u,
     ],
     [
       "a forged result through Object.prototype.then",
@@ -875,7 +887,7 @@ describe("chat agent sandbox", () => {
           )
           .toArray()
       );
-      expect(row?.longest).toBeLessThan(40_000);
+      expect(row?.longest).toBeLessThan(codeLimits.outputBytes + 2000);
     }
   );
 });
@@ -2019,5 +2031,109 @@ describe("chat agent code run leases", () => {
       runs: runs.length,
       requests: gateway.requests.length,
     }).toStrictEqual({ calls: 1, results: 0, runs: 1, requests: 1 });
+  });
+});
+
+describe("chat agent code output", () => {
+  it("streams what the code logs to the chat before its step ends, redacted, and drops it once the step ends", async () => {
+    const { stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { console.log('first'); console.log('key Bearer abcdefghijklmnopqrstuvwxyz0123'); await scheduler.wait(1_500); console.log('after the wait'); return 'done'; };"
+      ),
+      says("Done.")
+    );
+    // Put together as the page does, noting what showed before the result.
+    let output: ChatOutput | null = null;
+    const seen: { output: ChatOutput | null; result: boolean }[] = [];
+    await stub.watch(chat.id, personId, null, async (update: ChatUpdate) => {
+      output = applyOutput(output, update.output);
+      seen.push({
+        output,
+        result: update.messages.some(({ role }) => role === "result"),
+      });
+      await Promise.resolve();
+    });
+
+    await ask("Log it.");
+
+    const [callId] = await toolCallIds(stub, chat.id);
+    await vi.waitFor(() => {
+      expect(seen.at(-1)?.output).toBeNull();
+    });
+    const firstResult = seen.findIndex(({ result }) => result);
+    const before = seen.slice(0, firstResult).map((step) => step.output);
+    expect(before).toContainEqual({
+      callId,
+      text: "first\nkey [redacted]",
+    });
+    expect(before).toContainEqual({
+      callId,
+      text: "first\nkey [redacted]\nafter the wait",
+    });
+    // What the model reads is redacted the same way.
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      {
+        isError: false,
+        text: "Logs:\nfirst\nkey [redacted]\nafter the wait\n\nReturned:\ndone",
+      },
+    ]);
+
+    // A line that comes after the run closed shows nowhere.
+    const [record] = await runRecords(stub, chat.id);
+    const shown = seen.length;
+    await stub.codeRunOutput(
+      chatIdSchema.parse(chat.id),
+      String(record?.id),
+      callId ?? "",
+      "late"
+    );
+    await scheduler.wait(200);
+    expect(seen.slice(shown).some((step) => step.output !== null)).toBeFalsy();
+  });
+
+  it("shares one output budget between logs and result, and keeps room for how the run ended", async () => {
+    const { stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { for (let i = 0; i < 5_000; i++) console.log('é'.repeat(200)); throw new Error('the end'); };"
+      ),
+      says("Done.")
+    );
+    let output: ChatOutput | null = null;
+    let longest = 0;
+    await stub.watch(chat.id, personId, null, async (update: ChatUpdate) => {
+      output = applyOutput(output, update.output);
+      longest = Math.max(longest, utf8Bytes(output?.text ?? ""));
+      await Promise.resolve();
+    });
+
+    await ask("Flood it.");
+
+    const [result] = await codeResults(stub, chat.id);
+    const text = result?.text ?? "";
+    expect({
+      within: utf8Bytes(text) <= codeLimits.outputBytes,
+      cut: text.includes(cutMarker),
+      ending: /\n\nError \(threw\):\nError: the end/u.test(text),
+      streamed:
+        longest > 0 &&
+        longest <= codeLimits.outputBytes - codeLimits.diagnosticBytes,
+    }).toStrictEqual({ within: true, cut: true, ending: true, streamed: true });
+  });
+
+  it("cuts text by UTF-8 bytes, never inside a character, and redacts credentials", () => {
+    expect({
+      cut: cutToBytes("é".repeat(10), 5),
+      short: cutToBytes("abc", 10),
+      emoji: cutToBytes("😀😀", 5),
+      redacted: redact(
+        "Authorization: Bearer abcdefghijklmnop1234 key sk-abcdefghijklmnop1234 jwt eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2Q aws AKIAABCDEFGHIJKLMNOP plain words"
+      ),
+    }).toStrictEqual({
+      cut: "éé",
+      short: "abc",
+      emoji: "😀",
+      redacted:
+        "Authorization: [redacted] key [redacted] jwt [redacted] aws [redacted] plain words",
+    });
   });
 });
