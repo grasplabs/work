@@ -28,8 +28,10 @@ import {
   routed,
 } from "./screen-frames.ts";
 import type { Framed } from "./screen-frames.ts";
+import type { RawSettled } from "./sign-in.ts";
 import {
   countingSessionReads,
+  openRawRpc,
   openRpc,
   outcome,
   signedIn,
@@ -289,6 +291,31 @@ const nestedArrays = (depth: number): unknown => {
     value = [value];
   }
   return value;
+};
+
+/** `nestedArrays(depth)` as Cap'n Web writes it: each array as `[[...]]`. */
+const wireArrays = (depth: number): unknown => {
+  let value: unknown = "bottom";
+  for (let level = 1; level < depth; level += 1) {
+    value = [[value]];
+  }
+  return value;
+};
+
+/** Whether `value` is an object with a `code`, as an error's own properties travel. */
+const isCoded = (value: unknown): value is { code: unknown } =>
+  typeof value === "object" && value !== null && "code" in value;
+
+/**
+ * How a raw call settled: what it answered, or the code of its error
+ * (Cap'n Web writes one as `["error", name, message, stack?, own]`).
+ */
+const rawOutcome = ([kind, , value]: RawSettled): unknown => {
+  if (kind === "resolve") {
+    return { answered: value };
+  }
+  const own = Array.isArray(value) ? value.find(isCoded) : undefined;
+  return own?.code ?? value;
 };
 
 const minuteMs = 60_000;
@@ -1905,6 +1932,65 @@ describe("screens", { timeout: 60_000 }, () => {
       tooDeepAnswered: false,
       afterOnIt: false,
       after: "ok",
+    });
+  });
+
+  it("refuses a value built from many messages deeper than values may be, before any of core's code runs, and passes one as deep", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const raw = await openRawRpc(builder.session);
+    const session = raw.push(["pipeline", 0, ["authenticate"], []]);
+    // A value `base` levels deep, then `levels` more pushes, each an array
+    // around the push before: no message is deeper than `base`.
+    const built = (base: number, levels: number): number => {
+      let pushed = raw.push(wireArrays(base));
+      for (let level = 0; level < levels; level += 1) {
+        pushed = raw.push([[["pipeline", pushed]]]);
+      }
+      return pushed;
+    };
+    const echoed = async (pushed: number): Promise<unknown> =>
+      rawOutcome(
+        await raw.pull(
+          raw.push([
+            "pipeline",
+            session,
+            ["screens", "call"],
+            [app, "echo", [[["pipeline", pushed]]]],
+          ])
+        )
+      );
+
+    const deepest = await echoed(built(valueDepth - 8, 8));
+    const oneMore = await echoed(built(valueDepth - 8, 9));
+    // Thousands of levels: refused as such, not by running out of stack.
+    const farDeeper = await echoed(built(30, 100));
+    const after = await echoed(built(1, 0));
+    raw.close();
+
+    expect({ deepest, oneMore, farDeeper, after }).toStrictEqual({
+      deepest: { answered: wireArrays(valueDepth) },
+      // Core's own code would have said `screen.invalid`.
+      oneMore: "request.too_deep",
+      farDeeper: "request.too_deep",
+      // The connection goes on.
+      after: { answered: "bottom" },
+    });
+  });
+
+  it("refuses an answer fed back into a call deeper than values may be", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const { screens } = builder.api;
+    // Not awaited: passed on as Cap'n Web's reference to the answer.
+    const answer = screens.call(app, "echo", [nestedArrays(valueDepth)]);
+
+    expect({
+      fedBack: await screens.call(app, "echo", [answer]),
+      wrapped: await outcome(screens.call(app, "echo", [[answer]])),
+    }).toStrictEqual({
+      fedBack: nestedArrays(valueDepth),
+      wrapped: "request.too_deep",
     });
   });
 });

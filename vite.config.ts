@@ -113,6 +113,32 @@ export default defineConfig({
         },
       },
       {
+        // A target a browser or a screen calls must hold what its methods
+        // get to the session's limits: Cap'n Web bounds each message, not
+        // a value built from several (@grasp-os/shared/rpc-target).
+        files: ["apps/core/src/**", "apps/web/src/**"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              paths: [
+                {
+                  name: "capnweb",
+                  importNames: ["RpcTarget"],
+                  message:
+                    "Extend CoreRpcTarget (core) or a boundedRpcTarget (@grasp-os/shared/rpc-target), so every call's arguments are bounded.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        // A test's stand-ins are called by the test alone.
+        files: ["apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx"],
+        rules: { "no-restricted-imports": "off" },
+      },
+      {
         // Schema files start as comment-only placeholders until their first table.
         files: ["apps/*/src/db/**/schema.ts"],
         rules: { "unicorn/no-empty-file": "off" },

@@ -1,5 +1,4 @@
 import type { Identity, SessionApi } from "@grasp-os/shared/rpc";
-import { RpcTarget } from "capnweb";
 
 import { AppsRpc } from "./apps-rpc.ts";
 import { AuditRpc } from "./audit-rpc.ts";
@@ -19,6 +18,7 @@ import { OnboardingRpc } from "./onboarding/rpc.ts";
 import { OnboardingStaffRpc } from "./onboarding/staff-rpc.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { ScreenTrustRpc } from "./screen-trust-rpc.ts";
 import { ScreensRpc } from "./screens-rpc.ts";
 import { fullAccess, withPerson } from "./session-check.ts";
@@ -37,7 +37,7 @@ import { WorkflowsRpc } from "./workflows/rpc.ts";
  * class: an RpcTarget's methods, protected ones too, can be called over
  * RPC, so each keeps its env and check in private fields.
  */
-export class SessionRpc extends RpcTarget implements SessionApi {
+export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #check: SessionCheck;
   readonly #apps: AppsRpc;
   readonly #knowledge: KnowledgeRpc;

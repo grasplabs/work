@@ -5,7 +5,6 @@ import type {
   FileDiff,
   VersionReview,
 } from "@grasp-os/shared/apps";
-import { RpcTarget } from "capnweb";
 
 import {
   diffVersions,
@@ -15,12 +14,13 @@ import {
   setCurrentVersion,
 } from "./apps.ts";
 import { indexAppNow } from "./knowledge/apps-collection.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { reviewVersion } from "./version-review.ts";
 
 /** A signed-in person's `apps.versions`. */
-export class AppVersionsRpc extends RpcTarget implements AppVersionsApi {
+export class AppVersionsRpc extends CoreRpcTarget implements AppVersionsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

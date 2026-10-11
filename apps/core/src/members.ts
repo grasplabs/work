@@ -12,7 +12,6 @@ import type { Member, MembersApi } from "@grasp-os/shared/members";
 import { isAdmin, roleErrors, roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { RpcTarget } from "capnweb";
 import { and, asc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -37,6 +36,7 @@ import {
   users,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
@@ -490,7 +490,7 @@ export const retryDisconnects = async (env: Env): Promise<void> => {
  * A signed-in admin's `members`. Every call checks the session first,
  * then the caller's role.
  */
-export class MembersRpc extends RpcTarget implements MembersApi {
+export class MembersRpc extends CoreRpcTarget implements MembersApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

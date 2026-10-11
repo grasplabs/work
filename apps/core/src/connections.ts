@@ -27,7 +27,6 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { isAdmin, requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { RpcTarget } from "capnweb";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -41,6 +40,7 @@ import { providerIds, signInConfig } from "./auth/config.ts";
 import { identifyFull } from "./auth/identity.ts";
 import { accounts, hiddenConnectors, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
@@ -308,7 +308,7 @@ const requireListedToolkit = async (env: Env, slug: string): Promise<void> => {
  * first; connect checks the rest: who may connect
  * or disconnect what.
  */
-export class ConnectionsRpc extends RpcTarget implements ConnectionsApi {
+export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

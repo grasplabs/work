@@ -23,8 +23,8 @@ import type {
   SearchResults,
   SkillCollections,
 } from "@grasp-os/shared/knowledge";
-import { RpcTarget } from "capnweb";
 
+import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import type { Reader } from "./access.ts";
@@ -48,7 +48,7 @@ import { catalog, follow, read } from "./tools.ts";
  * the person that check returns. Each takes what the client sent as it is;
  * the Knowledge functions validate it and check access on every call.
  */
-export class KnowledgeRpc extends RpcTarget implements KnowledgeApi {
+export class KnowledgeRpc extends CoreRpcTarget implements KnowledgeApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

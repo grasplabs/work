@@ -9,7 +9,6 @@ import type {
   NotificationsApi,
 } from "@grasp-os/shared/notifications";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { RpcTarget } from "capnweb";
 import { and, count, desc, eq, isNull, lt, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -21,6 +20,7 @@ import { outboxedWhere } from "./audit-outbox.ts";
 import { activeMember } from "./auth/auth.ts";
 import { apps, notifications } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
@@ -212,7 +212,10 @@ export const markNotificationsRead = async (
 };
 
 /** The signed-in person's notifications, over `/rpc`. */
-export class NotificationsRpc extends RpcTarget implements NotificationsApi {
+export class NotificationsRpc
+  extends CoreRpcTarget
+  implements NotificationsApi
+{
   readonly #env: Env;
   readonly #check: SessionCheck;
 

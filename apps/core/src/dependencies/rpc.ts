@@ -13,11 +13,11 @@ import type {
   PackageBuild,
   PackageBuildRequest,
 } from "@grasp-os/shared/packages";
-import { RpcTarget } from "capnweb";
 
 import { buildDependencies } from "../packages/build.ts";
 import { resolveDependencies } from "../packages/resolve.ts";
 import type { Resolved } from "../packages/resolve.ts";
+import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { grantApprover, listApprovers, revokeApprover } from "./approvers.ts";
@@ -35,7 +35,7 @@ import {
  * functions, which validate what the client sent and check who the person
  * is now.
  */
-export class DependenciesRpc extends RpcTarget implements DependenciesApi {
+export class DependenciesRpc extends CoreRpcTarget implements DependenciesApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

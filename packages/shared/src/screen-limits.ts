@@ -33,6 +33,16 @@ export const screenModulePath = "/screen-modules";
 const rpcWrapperLevels = 2;
 
 /**
+ * How deep a call's argument may be once it arrives, the value it refers
+ * to in place (@grasp-os/shared/rpc-target): as deep as one message lets
+ * a direct argument be, the call's list of arguments apart, so a call
+ * sent whole in one message is never refused for its depth. A screen's
+ * list of arguments for its App is one of these levels, so a value in it
+ * may be `valueDepth` deep.
+ */
+export const rpcArgumentDepth = valueDepth + rpcWrapperLevels - 1;
+
+/**
  * The limits of a screen's start and traffic, in one place. They are the
  * product's defaults: nothing an App declares or a frame sends raises
  * them. Each is in the unit it names; a count of characters is never
@@ -61,8 +71,9 @@ export const screenLimits = {
    *
    * It bounds one message, not the value a call ends up with: a message
    * can refer to what earlier ones sent (Cap'n Web's pipelining), so a
-   * value built over several messages can be deeper. That is bounded
-   * where values reach core, not here (GRA-423).
+   * value built over several messages can be deeper and bigger. Each
+   * target a side calls holds what its methods get to the same depth and
+   * size (`rpcArgumentDepth`, @grasp-os/shared/rpc-target).
    */
   rpc: {
     maxDepth: valueDepth + rpcWrapperLevels,
@@ -132,26 +143,9 @@ export const screenFrameMounted = "grasp:screen-mounted";
 /** Past any limit: what a value that can't be measured counts as. */
 const unmeasured = Number.POSITIVE_INFINITY;
 
-/** Measures a value held inside the one being measured. */
-type Measure = (held: unknown) => number;
-
 /** The bytes of `text` as a JSON string, in UTF-8. */
 const textBytes = (text: string): number =>
   new TextEncoder().encode(JSON.stringify(text)).byteLength;
-
-/** The bytes of `members`, each already measured, with the commas between. */
-const listBytes = (members: number[]): number =>
-  members.reduce((sum, member) => sum + member, 2) +
-  Math.max(0, members.length - 1);
-
-/** The bytes of an object's members: each key, a colon, and its value. */
-const membersBytes = (members: [string, unknown][], measure: Measure): number =>
-  listBytes(
-    members
-      // As JSON, a member with no value isn't written.
-      .filter(([, held]) => held !== undefined)
-      .map(([key, held]) => textBytes(key) + 1 + measure(held))
-  );
 
 /** Whether `value` is an object written with braces, and nothing more. */
 const isPlainObject = (value: object): boolean => {
@@ -159,56 +153,15 @@ const isPlainObject = (value: object): boolean => {
   return prototype === Object.prototype || prototype === null;
 };
 
-/**
- * The bytes of an array, an error or a plain object, by what it holds;
- * of anything else, past any limit.
- */
-const holderBytes = (value: object, measure: Measure): number => {
-  if (Array.isArray(value)) {
-    return listBytes(value.map((held: unknown) => measure(held)));
-  }
-  if (value instanceof Error) {
-    // An error travels with its name, message and stack, which JSON
-    // itself would leave out, and with whatever else was put on it.
-    return membersBytes(
-      [
-        ["name", value.name],
-        ["message", value.message],
-        ["stack", value.stack],
-        ...Object.entries(value),
-      ],
-      measure
-    );
-  }
-  return isPlainObject(value)
-    ? membersBytes(Object.entries(value), measure)
-    : unmeasured;
-};
+/** Whether `value` may hold others: an object, but a date or bytes. */
+const isHolder = (value: unknown): value is object =>
+  typeof value === "object" &&
+  value !== null &&
+  !(value instanceof Date) &&
+  !(value instanceof Uint8Array);
 
-/** The bytes of an object; `holders` are the ones it is inside of. */
-const objectBytes = (
-  value: object,
-  holders: Set<object>,
-  measure: Measure
-): number => {
-  if (value instanceof Date) {
-    return textBytes(new Date(0).toISOString());
-  }
-  if (value instanceof Uint8Array) {
-    // As the base64 it travels as.
-    return Math.ceil(value.byteLength / 3) * 4 + 2;
-  }
-  // A value that holds itself has no end.
-  if (holders.has(value)) {
-    return unmeasured;
-  }
-  holders.add(value);
-  const bytes = holderBytes(value, measure);
-  holders.delete(value);
-  return bytes;
-};
-
-const measured = (value: unknown, holders: Set<object>): number => {
+/** The bytes of a value that holds no other. */
+const leafBytes = (value: unknown): number => {
   if (typeof value === "string") {
     return textBytes(value);
   }
@@ -225,20 +178,127 @@ const measured = (value: unknown, holders: Set<object>): number => {
   if (value === null || value === undefined) {
     return "null".length;
   }
+  if (value instanceof Date) {
+    return textBytes(new Date(0).toISOString());
+  }
+  if (value instanceof Uint8Array) {
+    // As the base64 it travels as.
+    return Math.ceil(value.byteLength / 3) * 4 + 2;
+  }
   // A function or a symbol has no measure.
-  return typeof value === "object"
-    ? objectBytes(value, holders, (held) => measured(held, holders))
-    : unmeasured;
+  return unmeasured;
 };
 
 /**
- * How many bytes `value` takes as UTF-8 JSON: the limit a call's
- * arguments and answer are held to, so it must never come out smaller
- * than what travels. It reads the value itself, calling nothing on it.
+ * An error's or a plain object's keys and values, as they travel; for
+ * anything else, `undefined`.
+ */
+const entriesOf = (value: object): [string, unknown][] | undefined => {
+  if (value instanceof Error) {
+    // An error travels with its name, message and stack, which JSON
+    // itself would leave out, and with whatever else was put on it.
+    return [
+      ["name", value.name],
+      ["message", value.message],
+      ["stack", value.stack],
+      ...Object.entries(value),
+    ];
+  }
+  return isPlainObject(value) ? Object.entries(value) : undefined;
+};
+
+/**
+ * What an array, an error or a plain object holds, as its members are
+ * written: an array's elements, or an object's keys and values; for
+ * anything else, `undefined`.
+ */
+const membersOf = (
+  value: object
+): { keys: string[] | undefined; held: unknown[] } | undefined => {
+  if (Array.isArray(value)) {
+    return { keys: undefined, held: value };
+  }
+  const entries = entriesOf(value);
+  if (entries === undefined) {
+    return undefined;
+  }
+  // As JSON, a member with no value isn't written.
+  const written = entries.filter(([, held]) => held !== undefined);
+  return {
+    keys: written.map(([key]) => key),
+    held: written.map(([, held]) => held),
+  };
+};
+
+/**
+ * The bytes a holder adds around its members: brackets, commas, and an
+ * object's keys with their colons.
+ */
+const holderBytes = (members: {
+  keys: string[] | undefined;
+  held: unknown[];
+}): number => {
+  const commas = Math.max(0, members.held.length - 1);
+  const keys =
+    members.keys?.reduce((sum, key) => sum + textBytes(key) + 1, 0) ?? 0;
+  return 2 + commas + keys;
+};
+
+/** A step of the walk: measure a value, or leave a holder. */
+type Step = { value: unknown } | { left: object };
+
+/**
+ * How many bytes `value` takes as UTF-8 JSON, or past any limit once that
+ * is more than `limit`: the limit a call's arguments and answer are held
+ * to, so it must never come out smaller than what travels. It reads the
+ * value itself, calling nothing on it but the getters of a plain object.
  * Bytes count as their base64, a big integer as its digits, an error as
  * its name, message and stack. Anything it has no measure for is past any
  * limit: a map, a set, a buffer, an instance of a class, a function, or a
  * value that holds itself.
+ *
+ * It walks with a stack of its own, so a value nested however deep can't
+ * exhaust the call stack, and stops once past `limit`, so a value held
+ * many times over (as each is written out) costs no more than the limit.
  */
-export const jsonBytes = (value: unknown): number =>
-  measured(value, new Set<object>());
+export const jsonBytes = (value: unknown, limit: number): number => {
+  const steps: Step[] = [{ value }];
+  // The holders the walk is inside of: one it meets again has no end.
+  const holders = new Set<object>();
+  let bytes = 0;
+  while (steps.length > 0) {
+    const step = steps.pop();
+    if (step === undefined) {
+      break;
+    }
+    if ("left" in step) {
+      holders.delete(step.left);
+      continue;
+    }
+    const { value: next } = step;
+    if (isHolder(next)) {
+      const members = membersOf(next);
+      if (members === undefined || holders.has(next)) {
+        return unmeasured;
+      }
+      bytes += holderBytes(members);
+      // Before its members are queued: it counts a byte at least for each.
+      if (bytes > limit) {
+        return unmeasured;
+      }
+      holders.add(next);
+      steps.push({ left: next });
+      // One at a time, not spread: a long array would pass too many
+      // arguments at once.
+      for (const inner of members.held) {
+        steps.push({ value: inner });
+      }
+    } else {
+      bytes += leafBytes(next);
+    }
+    if (bytes > limit) {
+      return unmeasured;
+    }
+  }
+  return bytes;
+};
