@@ -295,13 +295,21 @@ type MemoryReading =
   | { kind: "gone" }
   | { kind: "unreadable"; why: string };
 
-/** Whether a process with this ID is still running. */
-const isAlive = (pid: number): boolean => {
+/**
+ * Whether `pid` is confirmed gone: the supervisor saw it exit (`exited`),
+ * or the system has no such process at all (`ESRCH`; a zombie we still
+ * hold isn't that). Nothing else counts: a reading that fails for any
+ * other reason leaves the process unbounded, so it's `unreadable`.
+ */
+const confirmedGone = (pid: number, exited: () => boolean): boolean => {
+  if (exited()) {
+    return true;
+  }
   try {
     process.kill(pid, 0);
-    return true;
-  } catch {
     return false;
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "ESRCH";
   }
 };
 
@@ -309,20 +317,23 @@ const vmRss = /^VmRSS:\s+(?<kib>\d+)\s+kB$/mu;
 /** A process that has exited, zombie (`Z`) or dead (`X`), not yet reaped. */
 const procExited = /^State:\s+[ZX]\b/mu;
 
-/** Whether `error` says the process or its procfs entry is gone. */
-const isGoneError = (error: unknown): boolean =>
-  error instanceof Error &&
-  "code" in error &&
-  (error.code === "ENOENT" || error.code === "ESRCH");
+/** Gone if confirmed, otherwise unreadable for `why`. */
+const goneOr = (
+  pid: number,
+  exited: () => boolean,
+  why: string
+): MemoryReading =>
+  confirmedGone(pid, exited) ? { kind: "gone" } : { kind: "unreadable", why };
 
 /**
- * `pid`'s resident memory on Linux, from `/proc/<pid>/status`. A process
- * that has exited is gone, though `kill(pid, 0)` still finds it until it's
- * reaped: a crash mid-call is the App's, never an unreadable process.
+ * `pid`'s resident memory on Linux, from `<procRoot>/<pid>/status`. Its
+ * own `State: Z` or `X` says it exited, though `kill(pid, 0)` still finds
+ * it until it's reaped: a crash mid-call is the App's, not an outage.
  */
 const procMemory = async (
   procRoot: string,
-  pid: number
+  pid: number,
+  exited: () => boolean
 ): Promise<MemoryReading> => {
   let status: string;
   try {
@@ -331,82 +342,102 @@ const procMemory = async (
       "utf-8"
     );
   } catch (error) {
-    if (isGoneError(error) || !isAlive(pid)) {
-      return { kind: "gone" };
-    }
-    return { kind: "unreadable", why: String(error) };
+    return goneOr(pid, exited, String(error));
   }
   if (procExited.test(status)) {
     return { kind: "gone" };
   }
   const kib = vmRss.exec(status)?.groups?.kib;
-  if (kib !== undefined) {
-    return { kind: "bytes", bytes: Number(kib) * 1024 };
-  }
-  return isAlive(pid)
-    ? { kind: "unreadable", why: "no VmRSS in a running process's status" }
-    : { kind: "gone" };
+  return kib === undefined
+    ? goneOr(pid, exited, "no VmRSS in its status")
+    : { kind: "bytes", bytes: Number(kib) * 1024 };
 };
 
+const psOutput = /^(?<state>\S+)\s+(?<kib>\d+)$/u;
+
 /** `pid`'s resident memory on macOS, as `ps` says, with its state. */
-const psMemory = async (ps: string, pid: number): Promise<MemoryReading> => {
+const psMemory = async (
+  ps: string,
+  pid: number,
+  exited: () => boolean
+): Promise<MemoryReading> => {
   const child = spawn(ps, ["-o", "stat=,rss=", "-p", String(pid)], {
     stdio: ["ignore", "pipe", "ignore"],
   });
-  const exited = exitOf(child);
+  const done = exitOf(child);
   let output = "";
   try {
     for await (const chunk of child.stdout) {
       output += String(chunk);
     }
   } catch (error) {
-    await exited;
-    return isAlive(pid)
-      ? { kind: "unreadable", why: String(error) }
-      : { kind: "gone" };
+    await done;
+    return goneOr(pid, exited, String(error));
   }
-  await exited;
-  const [state = "", rss = ""] = output.trim().split(/\s+/u);
-  // Exited, a zombie until reaped: gone, as on Linux.
-  if (state.startsWith("Z")) {
+  await done;
+  const parsed = psOutput.exec(output.trim())?.groups;
+  if (parsed?.state?.startsWith("Z") === true) {
+    // Exited, a zombie until reaped: gone, as on Linux.
     return { kind: "gone" };
   }
-  const kib = Number(rss);
-  if (rss !== "" && Number.isFinite(kib)) {
-    return { kind: "bytes", bytes: kib * 1024 };
-  }
-  return isAlive(pid)
-    ? {
-        kind: "unreadable",
-        why: `ps answered ${JSON.stringify(output.trim())} (exit ${child.exitCode})`,
-      }
-    : { kind: "gone" };
+  return parsed?.kib === undefined
+    ? goneOr(
+        pid,
+        exited,
+        `ps answered ${JSON.stringify(output.trim())} (exit ${child.exitCode})`
+      )
+    : { kind: "bytes", bytes: Number(parsed.kib) * 1024 };
 };
 
 /**
- * `pid`'s resident memory, or that it's gone. A running process whose
- * memory can't be read is `unreadable`, never skipped: then nothing bounds it.
+ * `pid`'s resident memory, or that it's confirmed gone. Anything else is
+ * `unreadable`, never skipped: then nothing would bound it.
  */
 const residentMemory = async (
   probe: MemoryProbe,
-  pid: number
+  pid: number,
+  exited: () => boolean
 ): Promise<MemoryReading> => {
   const platform = probe.platform ?? process.platform;
-  if (platform === "linux") {
-    return await procMemory(probe.procRoot, pid);
+  try {
+    if (platform === "linux") {
+      return await procMemory(probe.procRoot, pid, exited);
+    }
+    if (platform === "darwin") {
+      return await psMemory(probe.ps, pid, exited);
+    }
+    return goneOr(pid, exited, `no way to read memory on ${platform}`);
+  } catch (error) {
+    // A reader that throws (`spawn` refused, say) reads nothing.
+    return goneOr(pid, exited, String(error));
   }
-  if (platform === "darwin") {
-    return await psMemory(probe.ps, pid);
+};
+
+/**
+ * Refuses a memory source that doesn't work here, before any App code
+ * runs: reading this process's own memory as a child's would be read
+ * (`<procRoot>/<pid>/status` on Linux, `ps` on macOS). Without one, nothing would bound memory.
+ */
+const checkMemoryProbe = async (probe: MemoryProbe): Promise<void> => {
+  const platform = probe.platform ?? process.platform;
+  const reading = await residentMemory(probe, process.pid, () => false);
+  if (reading.kind !== "bytes") {
+    const sources: Partial<Record<NodeJS.Platform, string>> = {
+      linux: path.join(probe.procRoot, String(process.pid), "status"),
+      darwin: probe.ps,
+    };
+    const source = sources[platform] ?? "nothing";
+    throw new Error(
+      `The sandbox can't read processes' memory on ${platform} (from ${source}), so it would run App code without a memory bound: ${reading.kind === "unreadable" ? reading.why : "no reading"}.`
+    );
   }
-  return isAlive(pid)
-    ? { kind: "unreadable", why: `no way to read memory on ${platform}` }
-    : { kind: "gone" };
 };
 
 /** Whether `pid` passes `limit` bytes before `signal` aborts, or can't be read. */
 const watchMemory = async (
   probe: MemoryProbe,
   pid: number,
+  exited: () => boolean,
   limit: number,
   pollMs: number,
   signal: AbortSignal
@@ -415,7 +446,7 @@ const watchMemory = async (
 > => {
   while (!signal.aborted) {
     // oxlint-disable-next-line no-await-in-loop -- read once per poll
-    const reading = await residentMemory(probe, pid);
+    const reading = await residentMemory(probe, pid, exited);
     if (reading.kind === "unreadable") {
       return reading;
     }
@@ -782,6 +813,7 @@ class SandboxPool {
     const watched = await watchMemory(
       memoryProbe,
       host.pid,
+      () => host.gone,
       memoryLimitBytes,
       memoryPollMs,
       signal
@@ -1193,6 +1225,25 @@ export const startSandboxSupervisor = async (
       `The sandbox's processes must be a whole number from 1 to ${maxProcesses}, not ${String(settings.processes)}.`
     );
   }
+  // A bound that isn't a positive number (NaN, say) would bound nothing.
+  for (const name of [
+    "memoryLimitBytes",
+    "memoryPollMs",
+    "maxDeadlineMs",
+    "maxWaitMs",
+    "maxCallBytes",
+    "maxAnswerBytes",
+    "startupMs",
+  ] as const) {
+    const value = settings[name];
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(
+        `The sandbox's ${name} must be a positive number, not ${String(value)}.`
+      );
+    }
+  }
+  // No App code runs where memory can't be bounded.
+  await checkMemoryProbe(settings.memoryProbe);
   // Checked before anything starts: past the limit, workerd would only say
   // it didn't listen.
   const longest = path.join(

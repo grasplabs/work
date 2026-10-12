@@ -649,16 +649,25 @@ describe("the sandbox supervisor", () => {
 
   /**
    * A supervisor reading memory as Linux does, from a procfs of the test's
-   * own: each test writes its process's `status` once it knows its ID.
+   * own: this process's status for the check at start, and each test's
+   * status for its sandbox process once it knows its ID (or none).
    */
   const withFakeProc = async (
-    status: string,
+    status: string | undefined,
     test: (
       supervisor: SandboxSupervisor,
       events: Record<string, unknown>[]
     ) => Promise<void>
   ): Promise<void> => {
     const procRoot = tempDir();
+    const statusOf = (pid: number, text: string): void => {
+      mkdirSync(path.join(procRoot, String(pid)), { recursive: true });
+      writeFileSync(path.join(procRoot, String(pid), "status"), text);
+    };
+    statusOf(
+      process.pid,
+      "Name:\tnode\nState:\tR (running)\nVmRSS:\t1000 kB\n"
+    );
     const events: Record<string, unknown>[] = [];
     await withSupervisor(
       {
@@ -668,9 +677,10 @@ describe("the sandbox supervisor", () => {
         },
       },
       async (supervisor) => {
-        for (const pid of supervisor.pids()) {
-          mkdirSync(path.join(procRoot, String(pid)));
-          writeFileSync(path.join(procRoot, String(pid), "status"), status);
+        if (status !== undefined) {
+          for (const pid of supervisor.pids()) {
+            statusOf(pid, status);
+          }
         }
         await test(supervisor, events);
       }
@@ -683,10 +693,13 @@ describe("the sandbox supervisor", () => {
     deadlineMs: 5000,
   };
 
-  it("fails a call loudly, as unavailable, when a running process's memory can't be read (Linux)", async () => {
-    await withFakeProc(
-      "Name:\tworkerd\nState:\tR (running)\n",
-      async ({ socket }, events) => {
+  it.each([
+    ["has no VmRSS in its status", "Name:\tworkerd\nState:\tR (running)\n"],
+    ["has no status at all", undefined],
+  ])(
+    "fails a call loudly, as unavailable, when a running process %s (Linux)",
+    async (_, status) => {
+      await withFakeProc(status, async ({ socket }, events) => {
         const result = await callSupervisor(socket, slowCall);
         expect(result.status).toBe(503);
         expect(events).toContainEqual(
@@ -695,32 +708,46 @@ describe("the sandbox supervisor", () => {
             level: "error",
           })
         );
-      }
-    );
-  });
+      });
+    }
+  );
 
-  it("fails a call loudly, as unavailable, when it has no ps to read memory with (macOS)", async () => {
-    const events: Record<string, unknown>[] = [];
-    await withSupervisor(
-      {
-        memoryProbe: {
-          procRoot: tempDir(),
-          ps: "/nonexistent/ps",
-          platform: "darwin",
-        },
-        log: (event) => {
-          events.push(event);
-        },
-      },
-      async ({ socket }) => {
-        const result = await callSupervisor(socket, slowCall);
-        expect(result.status).toBe(503);
-        expect(events).toContainEqual(
-          expect.objectContaining({ event: "sandbox.memory_unreadable" })
-        );
-      }
-    );
-  });
+  it.each([
+    [
+      "no procfs",
+      { procRoot: "/nonexistent/proc", ps: "/bin/ps", platform: "linux" },
+    ],
+    ["no ps", { procRoot: "/proc", ps: "/nonexistent/ps", platform: "darwin" }],
+    ["no reader at all", { procRoot: "/proc", ps: "/bin/ps", platform: "aix" }],
+  ] as const)(
+    "refuses to start where it can't read memory (%s)",
+    async (_, memoryProbe) => {
+      await expect(
+        startSandboxSupervisor({
+          workerd: nativeWorkerd,
+          memoryProbe,
+          log: quiet,
+        })
+      ).rejects.toThrow("can't read processes' memory");
+    }
+  );
+
+  it.each([
+    ["memoryLimitBytes", Number.NaN],
+    ["memoryPollMs", 0],
+    ["maxDeadlineMs", -1],
+  ] as const)(
+    "refuses a %s of %s, which would bound nothing",
+    async (name, value) => {
+      await expect(
+        startSandboxSupervisor({
+          workerd: nativeWorkerd,
+          [name]: value,
+          log: quiet,
+        })
+      ).rejects.toThrow(`${name} must be a positive number`);
+    }
+  );
 
   it("reads an exited process as gone, not unreadable, as Linux shows it until it's reaped", async () => {
     await withFakeProc(
