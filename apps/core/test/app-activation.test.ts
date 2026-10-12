@@ -18,7 +18,7 @@ import {
   findApp,
   setCurrentVersion,
 } from "../src/apps.ts";
-import { deleteStore } from "../src/data-stores.ts";
+import { deleteStore, openStore } from "../src/data-stores.ts";
 import { appDefaultStores, sdkStoreOwners } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { racingDb } from "./apps.ts";
@@ -339,6 +339,62 @@ describe(
       await expect(
         call(owner, release, "notes.create", { title: "Fresh" })
       ).resolves.toMatchObject({ ok: true });
+    });
+
+    it("refuses a rollback onto a store whose deletion has begun, and the deletion finishes", async () => {
+      const { owner, app } = await appWith(notesFiles());
+      await activateVersion(env, owner, app, 1);
+      const [recorded] = await defaultStores(app);
+      const store = recorded?.storeId ?? "";
+      await commitFiles(env, owner, app, emptyFiles, "No tables");
+      await activateVersion(env, owner, app, 2);
+      // The rollback onto version 1 lands after the deletion's check, just
+      // before the store's object is closed.
+      const getByName = env.DATA_STORES.getByName.bind(env.DATA_STORES);
+      let rollback: string | undefined;
+      const interleaved = (name: string) => {
+        const stub = getByName(name);
+        return new Proxy(stub, {
+          get: (target, property): unknown =>
+            property === "close"
+              ? async (...args: Parameters<typeof stub.close>) => {
+                  rollback ??= await failure(
+                    async () => await activateVersion(env, owner, app, 1)
+                  );
+                  return await target.close(...args);
+                }
+              : Reflect.get(target, property),
+        });
+      };
+      Reflect.set(env.DATA_STORES, "getByName", interleaved);
+      try {
+        await deleteStore(env, owner, store);
+      } finally {
+        Reflect.set(env.DATA_STORES, "getByName", getByName);
+      }
+      expect([
+        rollback,
+        await currentOf(app),
+        await failure(async () => await openStore(env, store)),
+      ]).toStrictEqual(["data.store_unavailable", 2, "data.store_unavailable"]);
+    });
+
+    it("lets a version back onto a store whose deletion was refused", async () => {
+      const { owner, app } = await appWith(notesFiles());
+      await activateVersion(env, owner, app, 1);
+      const first = await loadRelease(env, app, 1);
+      // A note committed: its receipt keeps the store from being deleted.
+      await call(owner, first, "notes.create", { title: "Receipt" });
+      const [recorded] = await defaultStores(app);
+      await commitFiles(env, owner, app, emptyFiles, "No tables");
+      await activateVersion(env, owner, app, 2);
+      await expect(
+        failure(async () => {
+          await deleteStore(env, owner, recorded?.storeId ?? "");
+        })
+      ).resolves.toBe("data.store_in_use");
+      const rolledBack = await activateVersion(env, owner, app, 1);
+      expect(rolledBack.currentVersion).toBe(1);
     });
 
     it("refuses a version whose store is deleted as it is made current", async () => {

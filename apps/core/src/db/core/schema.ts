@@ -1549,6 +1549,14 @@ export const businessStores = sqliteTable("business_stores", {
   }).notNull(),
   createdAt: timestamp("created_at").notNull(),
   deletedAt: timestamp("deleted_at"),
+  /**
+   * When a deletion of the store began, if one is in flight: set before
+   * its object is closed, only while no App's current or pending version
+   * binds the store, and while set (for `storeClosingMs`) no version bound
+   * to it is made current (data-stores.ts, apps.ts). Cleared if the close
+   * is refused; a deletion finished sets `deletedAt`.
+   */
+  closingAt: timestamp("closing_at"),
 });
 
 /**

@@ -123,6 +123,11 @@ describe("the host's JSON module, bundled as Wrangler bundles core", () => {
       execFileSync(
         process.execPath,
         [
+          // Wrangler's launcher passes Node's flags on to the CLI it
+          // spawns: without Sparkplug, Node 24's GC segfault (vite.config.ts)
+          // can't kill it. A CLI that died anyway leaves no bundle, which
+          // the import below fails on.
+          "--no-sparkplug",
           wrangler,
           "deploy",
           "--dry-run",

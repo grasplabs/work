@@ -19,18 +19,14 @@ import type {
   StagedWrites,
   StoredRecord,
 } from "@grasp-os/shared/stores";
-import { and, asc, eq, exists, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, exists, isNull, lte, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
-import {
-  apps,
-  businessStoreMembers,
-  businessStores,
-  sdkResourceBindings,
-} from "./db/core/schema.ts";
+import { businessStoreMembers, businessStores } from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import {
   memberEntry,
@@ -40,7 +36,7 @@ import {
   stillMembers,
 } from "./sharing.ts";
 import type { MemberRef } from "./sharing.ts";
-import { recordStoreDeleted } from "./store-deletion.ts";
+import { recordStoreDeleted, storeClosingMs } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import type { ReadResult } from "./store-host.ts";
 
@@ -256,36 +252,66 @@ export const requireStoreManager = async (
 };
 
 /**
- * Whether the current or pending version of some App has a sealed release
+ * That the current or pending version of some App has a sealed release
  * bound to store `id` (`sdk_resource_bindings`): one that new calls run.
  */
+const boundToCurrentSql = (id: StoreId): SQL =>
+  sql`EXISTS (SELECT 1 FROM sdk_resource_bindings AS bound
+    JOIN apps ON apps.id = bound.resource_id
+    WHERE bound.kind = 'store' AND bound.target_id = ${id}
+      AND (apps.current_version = bound.resource_version
+        OR apps.pending_version = bound.resource_version))`;
+
+/**
+ * Marks store `id` closing at `now`, in one statement that requires it
+ * live, not closing already, and bound to no App's current or pending
+ * version: the mark `setCurrentVersion` honours, so of this deletion and
+ * an activation of a version bound to the store, exactly one wins. True
+ * when this call marked it.
+ */
+const markClosing = async (
+  env: Env,
+  id: StoreId,
+  now: Date
+): Promise<boolean> => {
+  const marked = await drizzle(env.DB)
+    .update(businessStores)
+    .set({ closingAt: now })
+    .where(
+      and(
+        eq(businessStores.id, id),
+        isNull(businessStores.deletedAt),
+        or(
+          isNull(businessStores.closingAt),
+          lte(
+            businessStores.closingAt,
+            new Date(now.getTime() - storeClosingMs)
+          )
+        ),
+        sql`NOT ${boundToCurrentSql(id)}`
+      )
+    )
+    .returning({ id: businessStores.id });
+  return marked.length > 0;
+};
+
+/** Whether store `id` is bound to an App's current or pending version. */
 const boundToCurrentRelease = async (
   env: Env,
   id: StoreId
 ): Promise<boolean> => {
-  const db = drizzle(env.DB);
-  const bound = await db
+  const row = await drizzle(env.DB)
     .select({ one: sql`1` })
-    .from(sdkResourceBindings)
-    .innerJoin(apps, eq(apps.id, sdkResourceBindings.resourceId))
-    .where(
-      and(
-        eq(sdkResourceBindings.kind, "store"),
-        eq(sdkResourceBindings.targetId, id),
-        or(
-          eq(apps.currentVersion, sdkResourceBindings.resourceVersion),
-          eq(apps.pendingVersion, sdkResourceBindings.resourceVersion)
-        )
-      )
-    )
+    .from(businessStores)
+    .where(and(eq(businessStores.id, id), boundToCurrentSql(id)))
     .get();
-  return bound !== undefined;
+  return row !== undefined;
 };
 
 /**
  * Deletes store `id` for `by`, who must manage it and isn't Grasp staff:
- * refused, and audited, while an App's current or pending version has a
- * sealed release bound to it (`data.store_bound`: its calls would fail
+ * marked closing first (`markClosing`), then refused, and audited, while
+ * an App's current or pending version has a sealed release bound to it (`data.store_bound`: its calls would fail
  * with `data.store_unavailable`), or while a receipt not yet expired
  * refers to it (`data.store_in_use`: the store's object decides,
  * store-host.ts). The
@@ -301,7 +327,12 @@ export const deleteStore = async (
   requireNotStaff(by);
   const store = await managedBy(env, by, id);
   const actor = by.actor ?? actorOf(by);
-  if (await boundToCurrentRelease(env, store.id)) {
+  // Marked closing first, before its object is touched: refused here while
+  // a current or pending version binds it (unless another deletion of it
+  // is in flight, whose mark holds the same).
+  const closing = new Date();
+  const marked = await markClosing(env, store.id, closing);
+  if (!marked && (await boundToCurrentRelease(env, store.id))) {
     const db = drizzle(env.DB);
     await auditedBatch(env, db, [
       outboxed(
@@ -319,6 +350,18 @@ export const deleteStore = async (
       .getByName(store.id)
       .close(store.id, actor);
   } catch (error) {
+    if (marked) {
+      // Not deleted after all: its versions may be made current again.
+      await drizzle(env.DB)
+        .update(businessStores)
+        .set({ closingAt: null })
+        .where(
+          and(
+            eq(businessStores.id, store.id),
+            eq(businessStores.closingAt, closing)
+          )
+        );
+    }
     if (dataErrors.codeOf(error) === "data.store_in_use") {
       const db = drizzle(env.DB);
       await auditedBatch(env, db, [

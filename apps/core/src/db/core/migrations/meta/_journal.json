@@ -435,6 +435,13 @@
       "when": 1791802472714,
       "tag": "0061_app_default_stores",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1791807453343,
+      "tag": "0062_store_closing",
+      "breakpoints": true
     }
   ]
 }

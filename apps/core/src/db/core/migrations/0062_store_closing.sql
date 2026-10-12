@@ -1,0 +1,1 @@
+ALTER TABLE `business_stores` ADD `closing_at` integer;

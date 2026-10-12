@@ -31,7 +31,7 @@ import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
-import { and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -50,7 +50,6 @@ import type { Acting, Member } from "./auth/identity.ts";
 import {
   apps,
   appVersions,
-  businessStores,
   sdkReleaseManifests,
   sdkResourceBindings,
 } from "./db/core/schema.ts";
@@ -60,6 +59,7 @@ import { requireOwnTypes } from "./knowledge/record-types.ts";
 import { madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
 import { recordVersionBuilds } from "./screen-builds.ts";
+import { liveStoreSql } from "./store-deletion.ts";
 import { requireWorkflowTestsPass, workflowCallsIn } from "./workflows/code.ts";
 import {
   registerTriggers,
@@ -1024,7 +1024,10 @@ export const proposeVersion = async (
 /**
  * Holds while `version` of `app` has a sealed release that isn't revoked
  * (app-releases.ts, release-retention.ts), and whose bound store, if any,
- * isn't deleted (data-stores.ts), as the statement runs.
+ * is neither deleted nor being deleted (data-stores.ts), as the statement
+ * runs: a deletion marks the store closing first, in a statement of its
+ * own that requires no current version to bind it, so of a deletion and
+ * an activation of a version bound to the store, one wins.
  */
 const runnableReleaseSql = (app: AppId, version: number) =>
   sql`EXISTS (SELECT 1 FROM sdk_release_manifests
@@ -1032,8 +1035,7 @@ const runnableReleaseSql = (app: AppId, version: number) =>
     AND NOT EXISTS (SELECT 1 FROM sdk_resource_bindings AS bound
       WHERE bound.resource_id = ${app} AND bound.resource_version = ${version}
         AND bound.kind = 'store'
-        AND NOT EXISTS (SELECT 1 FROM business_stores AS store
-          WHERE store.id = bound.target_id AND store.deleted_at IS NULL))`;
+        AND NOT ${liveStoreSql(sql`bound.target_id`, Date.now())})`;
 
 /**
  * Refuses `version` of `app` unless it has a sealed release that isn't
@@ -1064,19 +1066,12 @@ const requireRunnableRelease = async (
   const goneStore = await drizzle(env.DB)
     .select({ store: sdkResourceBindings.targetId })
     .from(sdkResourceBindings)
-    .leftJoin(
-      businessStores,
-      and(
-        eq(businessStores.id, sdkResourceBindings.targetId),
-        isNull(businessStores.deletedAt)
-      )
-    )
     .where(
       and(
         eq(sdkResourceBindings.resourceId, app),
         eq(sdkResourceBindings.resourceVersion, version),
         eq(sdkResourceBindings.kind, "store"),
-        isNull(businessStores.id)
+        sql`NOT ${liveStoreSql(sql`${sdkResourceBindings.targetId}`, Date.now())}`
       )
     )
     .get();
