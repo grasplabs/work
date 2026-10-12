@@ -14,7 +14,6 @@ import {
   categoryOf,
   isRetryableCode,
   operationErrors,
-  readJsonValue,
 } from "@grasp-os/shared/operations";
 import type {
   AppErrorPayload,
@@ -24,7 +23,6 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 import { commitMaxInputBytes } from "@grasp-os/shared/stores";
-import { valueDepth } from "@grasp-os/shared/value-depth";
 import type { RpcTarget } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -37,6 +35,7 @@ import { appFor } from "./apps.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { sdkReleaseManifests } from "./db/core/schema.ts";
+import { hostJsonModule, hostJsonSource } from "./host-json.ts";
 import { callOperation } from "./operations.ts";
 import type { HostedApp, Invocation, Runner } from "./operations.ts";
 import { sandbox } from "./sandbox.ts";
@@ -77,23 +76,6 @@ import { sandbox } from "./sandbox.ts";
 
 /** The module that runs one function in its isolate. */
 const runModule = "grasp-function.js";
-
-/**
- * The host's reading of what App code answers, as a module of its own in
- * the isolate: the host's own `readJsonValue`, by its source, so the
- * isolate reads a value exactly as the host does. A host module, loaded
- * last under a platform name App code can't take, never an SDK export:
- * the host's half of the isolate protocol imports from the sealed SDK
- * only what `sdkProtocolVersion` pinned.
- */
-const hostJsonModule = "grasp-host-json.js";
-const hostJsonMain = `${readJsonValue.toString()}
-
-export const jsonAnswer = (value) => {
-  const json = ${readJsonValue.name}(value, 1, ${valueDepth});
-  return json === undefined ? undefined : JSON.stringify(json);
-};
-`;
 
 /** The longest answer, in characters, an isolate hands back as text. */
 const answerMaxLength = operationResultMaxBytes;
@@ -339,7 +321,8 @@ const runnerOf =
       modules: {
         ...release.modules,
         ...release.sdk,
-        [hostJsonModule]: hostJsonMain,
+        // The host's reading of what App code answers (host-json.ts).
+        [hostJsonModule]: hostJsonSource(),
         [runModule]: runMain,
       },
       env: {},

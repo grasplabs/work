@@ -7,7 +7,7 @@ import { sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore } from "../src/data-stores.ts";
+import { createStore, shareStore } from "../src/data-stores.ts";
 
 // Apps of spec 8's layout as the release tests build them: a builder's
 // App committed with given files, a store for it, and its seal.
@@ -51,6 +51,20 @@ export const appWith = async (
   const { id } = await createApp(env, owner, { name: "Notes" });
   await commitFiles(env, owner, id, files, "First version");
   return { owner, app: id, store: await createStore(env, owner) };
+};
+
+/**
+ * Shares `fixture`'s store with `other`'s owner, to manage: so `other`'s
+ * owner may bind it to a release too.
+ */
+export const shareStoreWith = async (
+  fixture: Fixture,
+  other: Fixture
+): Promise<void> => {
+  await shareStore(env, fixture.owner, fixture.store, {
+    type: "person",
+    id: other.owner.userId,
+  });
 };
 
 /** Seals the fixture's `version`, with its store. */

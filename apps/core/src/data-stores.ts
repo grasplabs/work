@@ -19,7 +19,8 @@ import type {
   StagedWrites,
   StoredRecord,
 } from "@grasp-os/shared/stores";
-import { and, asc, eq, exists, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, exists, isNull, lte, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -35,7 +36,7 @@ import {
   stillMembers,
 } from "./sharing.ts";
 import type { MemberRef } from "./sharing.ts";
-import { recordStoreDeleted } from "./store-deletion.ts";
+import { recordStoreDeleted, storeClosingMs } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import type { ReadResult } from "./store-host.ts";
 
@@ -234,9 +235,91 @@ const managedBy = async (
 };
 
 /**
+ * Requires that `by` may bind store `id` to an App's release: they manage
+ * it and aren't Grasp staff, as for sharing it, since a binding hands the
+ * App's callers its records as sharing hands its managers them. Otherwise
+ * `data.store_unavailable`, as for a store that doesn't exist, or
+ * `role.forbidden` for staff.
+ */
+export const requireStoreManager = async (
+  env: Env,
+  by: Acting,
+  id: string
+): Promise<StoreId> => {
+  requireNotStaff(by);
+  const store = await managedBy(env, by, id);
+  return store.id;
+};
+
+/**
+ * That the current or pending version of some App has a sealed release
+ * bound to store `id` (`sdk_resource_bindings`): one that new calls run.
+ */
+const boundToCurrentSql = (id: StoreId): SQL =>
+  sql`EXISTS (SELECT 1 FROM sdk_resource_bindings AS bound
+    JOIN apps ON apps.id = bound.resource_id
+    WHERE bound.kind = 'store' AND bound.target_id = ${id}
+      AND (apps.current_version = bound.resource_version
+        OR apps.pending_version = bound.resource_version))`;
+
+/**
+ * Marks store `id` closing at `now` for the deletion `owner`, in one
+ * statement that requires it live, bound to no App's current or pending
+ * version, and not closing for another deletion (unless that mark lapsed,
+ * `storeClosingMs`): the mark `setCurrentVersion` honours, so of this
+ * deletion and an activation of a version bound to the store, exactly one
+ * wins. True when this call holds the mark: only then may it close the
+ * store.
+ */
+const markClosing = async (
+  env: Env,
+  id: StoreId,
+  owner: string,
+  now: Date
+): Promise<boolean> => {
+  const marked = await drizzle(env.DB)
+    .update(businessStores)
+    .set({ closingAt: now, closingOwner: owner })
+    .where(
+      and(
+        eq(businessStores.id, id),
+        isNull(businessStores.deletedAt),
+        or(
+          isNull(businessStores.closingAt),
+          lte(
+            businessStores.closingAt,
+            new Date(now.getTime() - storeClosingMs)
+          )
+        ),
+        sql`NOT ${boundToCurrentSql(id)}`
+      )
+    )
+    .returning({ owner: businessStores.closingOwner });
+  return marked[0]?.owner === owner;
+};
+
+/** Whether store `id` is bound to an App's current or pending version. */
+const boundToCurrentRelease = async (
+  env: Env,
+  id: StoreId
+): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ one: sql`1` })
+    .from(businessStores)
+    .where(and(eq(businessStores.id, id), boundToCurrentSql(id)))
+    .get();
+  return row !== undefined;
+};
+
+/**
  * Deletes store `id` for `by`, who must manage it and isn't Grasp staff:
- * refused with `data.store_in_use`, and audited, while a receipt not yet
- * expired refers to it (the store's object decides, store-host.ts). The
+ * marked closing first, by this deletion alone (`markClosing`), and
+ * refused, and audited, while another deletion holds the mark
+ * (`data.store_closing`), while an App's current or pending version has a
+ * sealed release bound to it (`data.store_bound`: its calls would fail
+ * with `data.store_unavailable`), or while a receipt not yet expired
+ * refers to it (`data.store_in_use`: the store's object decides,
+ * store-host.ts). The
  * object is marked deleted first, with `by` and the time; then the
  * inventory row and its event, which the object's alarm also ensures
  * before it purges anything, so they happen even if this call stops here.
@@ -249,16 +332,60 @@ export const deleteStore = async (
   requireNotStaff(by);
   const store = await managedBy(env, by, id);
   const actor = by.actor ?? actorOf(by);
+  // Marked closing first, by this deletion alone, before its object is
+  // touched: refused while a current or pending version binds it, or while
+  // another deletion holds the mark (it alone closes the store, or clears
+  // the mark if its close is refused).
+  const owner = crypto.randomUUID();
+  if (!(await markClosing(env, store.id, owner, new Date()))) {
+    const reason = (await boundToCurrentRelease(env, store.id))
+      ? "data.store_bound"
+      : "data.store_closing";
+    const db = drizzle(env.DB);
+    await auditedBatch(env, db, [
+      outboxed(
+        db,
+        storeEntry(by, "store.delete_refused", store.id, { reason })
+      ),
+    ]);
+    throw dataErrors.create(reason);
+  }
   let mark: StoreDeletionMark;
   try {
+    // Still this deletion's mark, not one taken over after it lapsed: the
+    // window left is only a close already on its way.
+    const held = await drizzle(env.DB)
+      .select({ owner: businessStores.closingOwner })
+      .from(businessStores)
+      .where(eq(businessStores.id, store.id))
+      .get();
+    if (held?.owner !== owner) {
+      throw dataErrors.create("data.store_closing");
+    }
     mark = await inJurisdiction(env, env.DATA_STORES)
       .getByName(store.id)
       .close(store.id, actor);
   } catch (error) {
+    // Not deleted after all: its versions may be made current again. Only
+    // this deletion's own mark, never one another took over since.
+    await drizzle(env.DB)
+      .update(businessStores)
+      .set({ closingAt: null, closingOwner: null })
+      .where(
+        and(
+          eq(businessStores.id, store.id),
+          eq(businessStores.closingOwner, owner)
+        )
+      );
     if (dataErrors.codeOf(error) === "data.store_in_use") {
       const db = drizzle(env.DB);
       await auditedBatch(env, db, [
-        outboxed(db, storeEntry(by, "store.delete_refused", store.id)),
+        outboxed(
+          db,
+          storeEntry(by, "store.delete_refused", store.id, {
+            reason: "data.store_in_use",
+          })
+        ),
       ]);
     }
     throw error;

@@ -12,6 +12,16 @@ export const isUniqueViolation = (error: unknown): boolean =>
     isUniqueViolation(error.cause));
 
 /**
+ * Whether D1 refused a write because `column` (`table.column`) would be
+ * NULL, however it was wrapped: the guard of an insert that selects its
+ * value only where a condition holds.
+ */
+export const notNullFailed = (error: unknown, column: string): boolean =>
+  error instanceof Error &&
+  (error.message.includes(`NOT NULL constraint failed: ${column}`) ||
+    notNullFailed(error.cause, column));
+
+/**
  * `value IN (...values)`, bound as one parameter however many values there
  * are: D1 binds at most 100 to one statement.
  */
