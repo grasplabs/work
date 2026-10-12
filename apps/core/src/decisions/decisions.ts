@@ -544,12 +544,17 @@ export const decisionFor = async (
   toView(env, await allowedDecision(env, by, decision));
 
 /**
- * Wakes the run waiting on the decision. A run that misses it still finds
- * the answer: when its wait ends, it reads the decision again.
+ * Wakes the run waiting on the decision, once: the decision's ID names the
+ * delivery, so a wake sent again is the same event. A run that misses it
+ * still finds the answer: when its wait ends, it reads the decision again.
  */
 const wake = async (env: Env, row: DecisionRow): Promise<void> => {
   try {
-    await runEngine(env).sendEvent(row.runId, decisionEventType(row.id));
+    await runEngine(env).sendEvent(
+      row.runId,
+      decisionEventType(row.id),
+      row.id
+    );
   } catch (error) {
     log.warn("decision.wake_failed", {
       decision: row.id,

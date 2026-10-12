@@ -1,6 +1,6 @@
 import { isExpectedCode, isExpectedError } from "@grasp-os/shared/errors";
-import type { WorkflowStepConfig } from "cloudflare:workers";
-import { NonRetryableError } from "cloudflare:workflows";
+import type { WorkflowStepConfig } from "@grasp-os/workerflow/contracts";
+import { NonRetryableError } from "@grasp-os/workerflow/errors";
 import { z } from "zod";
 
 import type { RunStep } from "../workflows/host.ts";

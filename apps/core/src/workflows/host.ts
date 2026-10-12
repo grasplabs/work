@@ -20,12 +20,12 @@ import {
   workflowErrors,
 } from "@grasp-os/shared/workflows";
 import type { InputShape, WorkflowCalls } from "@grasp-os/shared/workflows";
-import { RpcTarget } from "cloudflare:workers";
 import type {
+  WorkflowDuration,
   WorkflowStepConfig,
-  WorkflowTimeoutDuration,
-} from "cloudflare:workers";
-import { NonRetryableError } from "cloudflare:workflows";
+} from "@grasp-os/workerflow/contracts";
+import { NonRetryableError } from "@grasp-os/workerflow/errors";
+import { RpcTarget } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import type { Email } from "postal-mime";
 import { z } from "zod";
@@ -54,15 +54,16 @@ import type { Settled, StepError } from "./code.ts";
 import { attachmentOf, keptMessage } from "./kept-email.ts";
 
 // The engine a run's workflow code runs on, as core's side of it: the SDK's
-// `WorkflowEngine` (`@grasp-os/sdk/engine`) on Cloudflare's `step` API. The
+// `WorkflowEngine` (`@grasp-os/sdk/engine`) on the engine's `step` API
+// (Workerflow, engine.ts). The
 // run's main module (code.ts) sends each engine call here over RPC. The
 // isolate is untrusted, so everything it sends is checked, and what it can
 // do is only this run's: steps, waits and model calls, all as this
 // run and this workflow, for the person it acts for while they are there.
 //
-// Errors cross as plain data both ways (`Settled`). Cloudflare Workflows
-// keeps only a failed step's name and message, and RPC carries errors'
-// fields as the runtime sees fit; the SDK recovers its error codes from the
+// Errors cross as plain data both ways (`Settled`). The engine keeps only
+// a failed step's name, message and a well-formed code, and RPC carries
+// errors' fields as the runtime sees fit; the SDK recovers its error codes from the
 // name, so the name must come back as it was sent. Core's own errors reach
 // the isolate as the sandbox sees them: expected ones as they are, anything
 // else as `internal.unexpected`.
@@ -112,9 +113,8 @@ export interface HostedRun {
 }
 
 /**
- * Cloudflare's `step`, as far as core uses it. Values are `unknown` here,
- * and checked as JSON where they are used: Workflows' own types for them
- * are more than the type checker can follow for recursive JSON.
+ * The engine's `step`, as far as core uses it. Values are `unknown` here,
+ * and checked as JSON where they are used.
  */
 export interface RunStep {
   do: (
@@ -125,7 +125,7 @@ export interface RunStep {
   sleep: (name: string, duration: number) => Promise<void>;
   waitForEvent: (
     name: string,
-    options: { type: string; timeout: number | WorkflowTimeoutDuration }
+    options: { type: string; timeout: WorkflowDuration }
   ) => Promise<{ payload: unknown }>;
 }
 
@@ -215,6 +215,12 @@ const milliseconds = z
   .positive()
   .max(365 * 86_400_000);
 
+/**
+ * The longest a step's attempt may run: all of a fresh activation's
+ * budget, the engine's limit. A longer timeout would never fire.
+ */
+const maxAttemptMs = 14 * 60_000;
+
 const doOptionsSchema = z.object({
   retries: z
     .object({
@@ -223,7 +229,7 @@ const doOptionsSchema = z.object({
       backoff: z.enum(["constant", "linear", "exponential"]).optional(),
     })
     .optional(),
-  timeout: milliseconds.optional(),
+  timeout: z.int().positive().max(maxAttemptMs).optional(),
   sideEffect: z.boolean().optional(),
   input: z.json().optional(),
 });
@@ -252,6 +258,20 @@ const decisionSchema = z.object({
   description: z.string().min(1),
   timeout: milliseconds,
 });
+
+/** What a decision wait recorded when it was first reached. */
+const reachedSchema = z.object({ at: z.number(), answered: z.boolean() });
+
+/** How a decision wait ended, as recorded (`DecisionOutcome`). */
+const outcomeSchema = z.discriminatedUnion("answered", [
+  z.object({
+    answered: z.literal(true),
+    approved: z.boolean(),
+    by: z.string(),
+    payload: z.json().nullable(),
+  }),
+  z.object({ answered: z.literal(false) }),
+]);
 
 const decisionWaitSchema = z.object({
   decision: identifierSchema,
@@ -335,10 +355,10 @@ export const fromIsolate = (value: unknown): Settled<unknown> => {
       };
 };
 
-/** Cloudflare Workflows' delay before a retry when the SDK names none. */
+/** The engine's delay before a retry when the SDK names none. */
 const defaultRetryDelayMs = 10_000;
 
-/** The step config Cloudflare takes; its defaults where the SDK gave none. */
+/** The step config the engine takes; its defaults where the SDK gave none. */
 const stepConfig = ({
   retries,
   timeout,
@@ -356,10 +376,9 @@ const stepConfig = ({
 });
 
 /**
- * How a wait or an attempt that ran out of time ends in Cloudflare
- * Workflows: a `WorkflowTimeoutError`, whose name doesn't always survive
- * the way to core, but whose message does ("Execution timed out after
- * 500ms").
+ * How a wait or an attempt that ran out of time ends in the engine: a
+ * `WorkflowTimeoutError` ("Execution timed out after 500ms"), recognised
+ * by its message too, which survives every way to core.
  */
 const timedOut = /^(?:WorkflowTimeoutError: )?Execution timed out\b/u;
 const isTimeout = (error: unknown): boolean =>
@@ -367,26 +386,9 @@ const isTimeout = (error: unknown): boolean =>
   (error.name === "WorkflowTimeoutError" || timedOut.test(error.message));
 
 /**
- * How the engine stops an execution it will resume or end itself, when
- * someone pauses, terminates (cancels), restarts or deletes the run: in
- * the local runtime (Miniflare), an `Error` "Aborting engine: User called
- * pause" and so on, maybe with the name in front once it crossed to core.
- * The engine also aborts with "Aborting engine: …" when it fails a run
- * itself (a NonRetryableError, a value it can't serialise, the storage
- * limit): those, like any other error of the engine's (a step name it
- * refuses, the step limit, a storage failure), are real failures.
- * TODO(GRA-44): confirm that production's engine stops with these same
- * messages.
- */
-const userStop =
-  /^(?:\w+: )?Aborting engine: User called (?:pause|terminate|restart|delete)$/u;
-export const isEngineStop = (error: unknown): boolean =>
-  error instanceof Error && userStop.test(error.message);
-
-/**
- * The engine's limit on steps in one execution: Cloudflare's default, as
- * wrangler.jsonc sets no `limits.steps`. Only tests lower it, the
- * engine's and this one alike (`WORKFLOW_STEP_LIMIT`, vite.config.ts).
+ * Core's limit on the steps one activation of a run takes: so a run
+ * whose code loops on steps without end can't journal without bound.
+ * Only tests lower it (`WORKFLOW_STEP_LIMIT`, vite.config.ts).
  */
 const defaultStepLimit = 10_000;
 
@@ -452,7 +454,7 @@ const waitMsOf = (env: Env): number => {
  */
 const budgetBusyWaitMs = 15_000;
 
-/** Cloudflare Workflows' retries of a step when the SDK names none. */
+/** The engine's retries of a step when the SDK names none. */
 const defaultRetryLimit = 5;
 
 /** What core reads of the context the engine gives a step's attempt. */
@@ -529,12 +531,23 @@ const busyAgain = (known: BusyBudget) => {
 };
 
 /** The last refusal of a step's AI call for a budget held by calls under way. */
-interface BusyBudget {
+export interface BusyBudget {
   at: number;
   details: ErrorPayload["details"];
 }
 
-/** The engine's step limit for this deployment. */
+/**
+ * Where a run keeps each step's last busy-budget refusal, by step name:
+ * durably, with the run (run-object.ts), as each retry of a step may run
+ * in an activation of its own. A `Map` will do where nothing outlives one
+ * host.
+ */
+export interface BusyRefusals {
+  get: (step: string) => BusyBudget | undefined;
+  set: (step: string, refusal: BusyBudget) => unknown;
+}
+
+/** Core's step limit for this deployment. */
 export const stepLimitOf = (env: Env): number => {
   const set = Number(env.WORKFLOW_STEP_LIMIT);
   return Number.isInteger(set) && set > 0 && set < defaultStepLimit
@@ -543,33 +556,11 @@ export const stepLimitOf = (env: Env): number => {
 };
 
 /**
- * Whether the engine threw an attempt's own error back: that error, or
- * its copy, which has only the message, maybe with the name in front.
+ * `step`, counting every call, as each journals a step, and refusing the
+ * run's own ones {@link coreStepReserve} short of `stepLimit`, as a
+ * failure of that step.
  */
-const isAttemptError = (error: unknown, attempt: unknown): boolean =>
-  error === attempt ||
-  (error instanceof Error &&
-    attempt instanceof Error &&
-    (error.message === attempt.message ||
-      error.message.endsWith(`: ${attempt.message}`)));
-
-/**
- * `step`, telling `engineStopped` when one of its calls throws the error
- * the engine stops the execution with (`isEngineStop`): a pause or a
- * cancel, after which the run goes on, or ends, in the engine's hands.
- * The dispatcher hands that error back (dispatcher.ts). A step's own
- * error, from any of its attempts, never counts, even one shaped like a
- * stop: workflow code throws what it likes.
- *
- * It counts every call, as the engine may, and refuses the run's own
- * ones {@link coreStepReserve} short of `stepLimit`, as a failure of that
- * step.
- */
-export const watchedStep = (
-  step: RunStep,
-  engineStopped: (error: unknown) => void,
-  stepLimit: number
-): RunStep => {
+export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
   let taken = 0;
   const take = (name: string): void => {
     taken += 1;
@@ -579,50 +570,18 @@ export const watchedStep = (
       throw workflowErrors.create("workflow.too_many_steps");
     }
   };
-  const heard = (error: unknown, attempts: ReadonlySet<unknown>): void => {
-    const own = [...attempts].some((attempt) => isAttemptError(error, attempt));
-    if (isEngineStop(error) && !own) {
-      engineStopped(error);
-    }
-  };
-  const none: ReadonlySet<unknown> = new Set();
   return {
     do: async (name, config, fn) => {
-      // Every attempt's error: an attempt the engine gave up on may still
-      // end, late, after the next one began.
-      const attempts = new Set<unknown>();
       take(name);
-      try {
-        return await step.do(name, config, async () => {
-          try {
-            return await fn();
-          } catch (error) {
-            attempts.add(error);
-            throw error;
-          }
-        });
-      } catch (error) {
-        heard(error, attempts);
-        throw error;
-      }
+      return await step.do(name, config, fn);
     },
     sleep: async (name, duration) => {
       take(name);
-      try {
-        await step.sleep(name, duration);
-      } catch (error) {
-        heard(error, none);
-        throw error;
-      }
+      await step.sleep(name, duration);
     },
     waitForEvent: async (name, options) => {
       take(name);
-      try {
-        return await step.waitForEvent(name, options);
-      } catch (error) {
-        heard(error, none);
-        throw error;
-      }
+      return await step.waitForEvent(name, options);
     },
   };
 };
@@ -762,8 +721,8 @@ export interface FailedStep {
 export interface HostHooks {
   /** Hears of each step that failed, with the error it failed with. */
   stepFailed: (failure: FailedStep) => void;
-  /** Whether the engine has stopped this execution (`watchedStep`). */
-  engineStopped: () => boolean;
+  /** Each step's last refusal for a busy budget (`#untilAsking`). */
+  busyRefusals: BusyRefusals;
   /**
    * Hears, once, that the run's isolate asked for what only code that
    * gets past the SDK could (a step its review doesn't show, an attempt
@@ -805,12 +764,6 @@ export class RunHost extends RpcTarget {
   #running: StepAttempt | undefined;
   /** Every attempt of a step this execution started, by its ID. */
   readonly #attempts = new Map<string, StepAttempt>();
-  /**
-   * Each step's last AI call the model budget turned away while other
-   * calls under way hold it, by step name: a later attempt within
-   * {@link budgetBusyWaitMs} is answered from here.
-   */
-  readonly #busyBudgets = new Map<string, BusyBudget>();
   /**
    * Each step's AI call in flight, by step name: a later attempt of the
    * step waits for it rather than ask the gateway beside it.
@@ -952,9 +905,6 @@ export class RunHost extends RpcTarget {
         return null;
       });
     } catch (error) {
-      if (isEngineStop(error)) {
-        throw error;
-      }
       log.error("workflow.waiting.audit_failed", {
         runId: this.#run.runId,
         ...why,
@@ -977,10 +927,10 @@ export class RunHost extends RpcTarget {
    * and timeout. A replay answers the recorded result, or throws the
    * recorded error, without calling it. Its outcome is audited, and a
    * failure reported (`stepFailed`), only when it was attempted in this
-   * execution and the engine didn't stop the execution: a failure workflow
-   * code caught is replayed on every later execution, and was recorded
-   * when it happened; a step the engine stopped (a pause, a cancel) runs,
-   * or replays, in the execution that goes on, if any. A step that fails
+   * activation: a failure workflow code caught is replayed on every later
+   * activation, and was recorded when it happened. A step the engine
+   * fenced (a pause, a cancel, a newer activation) never settles here, so
+   * nothing is recorded for it in an activation that is over. A step that fails
    * before it starts (options that don't parse, a person who has left) is
    * neither: the run's own failure records it. When a side effect of the
    * step is held for the person the run acts for, the step ends as held,
@@ -1136,7 +1086,7 @@ export class RunHost extends RpcTarget {
     } catch (error) {
       this.#stepEnded(step);
       const reported = failed ?? forIsolate(error);
-      if (attempted && !this.#hooks.engineStopped()) {
+      if (attempted) {
         this.#hooks.stepFailed({ step, input, error: reported });
         await this.#audited(step, "failed", {
           sideEffect,
@@ -1182,7 +1132,7 @@ export class RunHost extends RpcTarget {
           typeof error === "object" && error !== null && "details" in error
             ? errorPayloadSchema.shape.details.safeParse(error.details).data
             : undefined;
-        this.#busyBudgets.set(attempt.step, { at: Date.now(), details });
+        this.#hooks.busyRefusals.set(attempt.step, { at: Date.now(), details });
         if (!attempt.last) {
           await waitWithin(attempt, budgetBusyWaitMs);
         }
@@ -1212,7 +1162,7 @@ export class RunHost extends RpcTarget {
   async #untilAsking(attempt: StepAttempt): Promise<void> {
     for (;;) {
       const asking = this.#asking.get(attempt.step);
-      const known = this.#busyBudgets.get(attempt.step);
+      const known = this.#hooks.busyRefusals.get(attempt.step);
       const left =
         known === undefined ? 0 : known.at + budgetBusyWaitMs - Date.now();
       if (asking === undefined && left <= 0) {
@@ -1236,7 +1186,7 @@ export class RunHost extends RpcTarget {
         await scheduler.wait(left);
       }
       if (this.#running !== attempt) {
-        const latest = this.#busyBudgets.get(attempt.step);
+        const latest = this.#hooks.busyRefusals.get(attempt.step);
         throw latest === undefined
           ? modelErrors.create("model.failed")
           : busyAgain(latest);
@@ -1742,23 +1692,32 @@ export class RunHost extends RpcTarget {
       this.#requireUntampered();
       const step = checked(stepNameSchema, name);
       const { decision, timeout, last } = checked(decisionWaitSchema, options);
-      const before = await decisionOutcome(
-        this.#env,
-        this.#run,
-        decision,
-        false
+      // Whether it was answered when the run first got here, and when that
+      // was: recorded, so every replay decides as the first activation did
+      // whether to wait, and for how long. The engine journals a wait's
+      // timeout when it is first reached, and stops a run whose replay
+      // asks for another (or skips a wait it holds).
+      const prefix = `${waitStepPrefix}${await waitKeyOf(step)}`;
+      const reached = reachedSchema.parse(
+        await this.#step.do(`${prefix}:reached`, {}, async () => {
+          const at = Date.now();
+          const { answered } = await decisionOutcome(
+            this.#env,
+            this.#run,
+            decision,
+            false
+          );
+          return { at, answered };
+        })
       );
-      if (before.answered) {
-        return before;
-      }
       // The SDK worked `timeout` out from when it asked, but a pause or a
       // restart may have outlasted that: so never wait past the decision's
-      // deadline, as its row has it. Once
-      // that has passed, the decision is closed as timed out at once, so a
-      // reminder that follows asks nobody.
+      // deadline, as its row has it, from when the wait was first reached.
+      // Once that has passed, the decision is closed as timed out at once,
+      // so a reminder that follows asks nobody.
       const deadline = await decisionDeadline(this.#env, this.#run, decision);
-      const left = Math.min(timeout, deadline - Date.now());
-      if (left > 0) {
+      const left = Math.min(timeout, deadline - reached.at);
+      if (!reached.answered && left > 0) {
         try {
           await this.#step.waitForEvent(step, {
             type: decisionEventType(decision),
@@ -1770,11 +1729,20 @@ export class RunHost extends RpcTarget {
           }
         }
       }
-      return await decisionOutcome(
-        this.#env,
-        this.#run,
-        decision,
-        last || Date.now() >= deadline
+      // Recorded too: an answer that comes after this can't change what a
+      // replay of the run hears it ended with.
+      return outcomeSchema.parse(
+        await this.#step.do(
+          `${prefix}:outcome`,
+          {},
+          async () =>
+            await decisionOutcome(
+              this.#env,
+              this.#run,
+              decision,
+              last || Date.now() >= deadline
+            )
+        )
       );
     });
   }

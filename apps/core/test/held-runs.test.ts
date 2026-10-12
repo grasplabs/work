@@ -1,7 +1,7 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
 import { appHost } from "../src/durable-objects.ts";
@@ -75,6 +75,14 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
     if (held === undefined || heldSearch === undefined) {
       throw new Error("Nothing held");
     }
+    // Asleep between its checks, with nothing of it running.
+    await vi.waitFor(
+      async () => {
+        await expect(liveStatus(run.id)).resolves.toBe("waiting");
+        await expect(liveStatus(search.id)).resolves.toBe("waiting");
+      },
+      { timeout: 10_000, interval: 100 }
+    );
     const before = {
       live: [await liveStatus(run.id), await liveStatus(search.id)],
       server: await mail.did(),
@@ -98,7 +106,7 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
         { mode: "workflow", restricted: true },
       ],
       before: {
-        live: ["running", "running"],
+        live: ["waiting", "waiting"],
         server: { calls: 0, sent: [] },
         searched: [],
       },

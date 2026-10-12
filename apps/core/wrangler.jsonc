@@ -1,8 +1,7 @@
 // grasp-os-staging deployment. Client deployments are provisioned by the console,
 // which creates the D1 databases and R2 buckets below in the EU jurisdiction;
-// Durable Objects run in it through `jurisdiction("eu")` (src/durable-objects.ts).
-// One resource can't be pinned to the EU: Workflows takes only a location
-// hint (`weur`, set on each run).
+// Durable Objects run in it through `jurisdiction("eu")` (src/durable-objects.ts),
+// workflow runs included: each is a Durable Object of its own.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "grasp-os-core",
@@ -115,6 +114,11 @@
       // One object per business store, named by the store's ID
       // (src/data-store.ts, src/data-stores.ts).
       { "name": "DATA_STORES", "class_name": "DataStore" },
+      // One object per workflow run, App's and core's own alike: the
+      // engine (src/workflows/engine.ts, run-object.ts). Its definition is
+      // loaded per activation by App and pinned version, with an env
+      // rebuilt from permissions every time (src/workflows/dispatcher.ts).
+      { "name": "WORKFLOW_RUNS", "class_name": "WorkflowRuns" },
     ],
   },
   "migrations": [
@@ -123,17 +127,7 @@
     { "tag": "v3", "new_sqlite_classes": ["Onboarding"] },
     { "tag": "v4", "new_sqlite_classes": ["ModelLedger"] },
     { "tag": "v5", "new_sqlite_classes": ["DataStore"] },
-  ],
-  // The one dispatcher of every App's workflow runs (src/workflows/): it
-  // loads each run's code by App and pinned version, with an env rebuilt
-  // from permissions on every start and resume. Runs are created with the
-  // `weur` location hint, a preference Cloudflare may not follow.
-  "workflows": [
-    {
-      "name": "grasp-os-workflows",
-      "binding": "WORKFLOWS",
-      "class_name": "WorkflowDispatcher",
-    },
+    { "tag": "v6", "new_sqlite_classes": ["WorkflowRuns"] },
   ],
   // Runs App sandboxes and the screen compiler.
   "worker_loaders": [{ "binding": "LOADER" }],

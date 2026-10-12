@@ -28,8 +28,8 @@ const connectMigrations = await readD1Migrations(
 );
 
 /**
- * The engine's step limit in tests: well above what any test workflow
- * takes, but low enough to reach.
+ * Core's step limit in tests: well above what any test workflow takes,
+ * but low enough to reach.
  */
 const testStepLimit = 60;
 
@@ -157,23 +157,13 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
             RUNTIME_PROFILE: "workerd",
             // So the test of a call that never ends doesn't wait a minute.
             APP_CALL_TIMEOUT_MS: "10000",
-            // The engine's step limit, lowered below (`workflows`) so a test
-            // reaches it; core must know it too.
+            // Core's step limit, lowered so a test reaches it.
             WORKFLOW_STEP_LIMIT: String(testStepLimit),
             // So a run waiting on a held side effect checks again at once.
             WORKFLOW_OFF_WAIT_MS: "250",
             CORE_MIGRATIONS: coreMigrations,
             KNOWLEDGE_MIGRATIONS: knowledgeMigrations,
             CONNECT_MIGRATIONS: connectMigrations,
-          },
-          // The dispatcher as wrangler.jsonc has it, with a step limit a
-          // test can reach.
-          workflows: {
-            WORKFLOWS: {
-              name: "grasp-os-workflows",
-              className: "WorkflowDispatcher",
-              stepLimit: testStepLimit,
-            },
           },
           // Connect's database, as CONNECT_DB, so the setup can migrate it.
           d1Databases: { CONNECT_DB: "grasp-os-connect" },

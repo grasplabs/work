@@ -50,6 +50,11 @@ interface __BaseEnv_Env {
    */
   WORKFLOW_OFF_WAIT_MS?: string;
   /**
+   * Tests only: the delay before every step's retry, in place of the one
+   * its config says (src/workflows/dispatcher.ts).
+   */
+  WORKFLOW_RETRY_DELAY_MS?: string;
+  /**
    * Tests only: the UTC month model budgets count in, such as `2031-01`
    * (src/model-budgets.ts).
    */

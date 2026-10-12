@@ -1,37 +1,50 @@
-import { wrapWorkflowBinding } from "@cloudflare/dynamic-workflows";
 import { deploymentConfig } from "@grasp-os/shared/config";
 import {
   runRetentionDefaultDays,
   runRetentionSchema,
 } from "@grasp-os/shared/deployment-config";
+import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
+import { Workflow } from "@grasp-os/workerflow/binding";
+import type { WorkflowOptions } from "@grasp-os/workerflow/binding";
+import { encode } from "@grasp-os/workerflow/codec";
+import type {
+  DefinitionIdentity,
+  InstanceStatus,
+} from "@grasp-os/workerflow/contracts";
+import { runObjectName } from "@grasp-os/workerflow/identity";
+import type { RunStub } from "@grasp-os/workerflow/instance";
+import { z } from "zod";
+
+import { inJurisdiction } from "../durable-objects.ts";
 
 // The engine that runs Apps' workflow runs, behind the little core asks of
 // it: create a run, see where it is, terminate it, send it an event, remove
-// it. This is the only module that touches the engine (`WORKFLOWS`,
-// Cloudflare Workflows), so another profile swaps it here and nowhere else.
+// it. This is the only module that reaches the engine's runs, so the rest
+// of core never depends on how it keeps them.
 //
-// The engine keeps a run's record (its input, what its steps returned, its
-// output and error) only for the deployment's run retention once the run
-// has ended: every App's run is created with that as its `retention`, so the
-// engine removes the record itself, on the same clock as core removes the
-// rest of the run's details (retention.ts).
+// The engine is Workerflow (@grasp-os/workerflow): one SQLite Durable
+// Object per run (`WORKFLOW_RUNS`, run-object.ts), the only authority on
+// the run's steps, waits and lifecycle. It runs on Cloudflare and on plain
+// workerd alike, its objects in the EU where the platform has
+// jurisdictions (durable-objects.ts). Every run, an App's or one of
+// core's own, is a run of one definition, `grasp`, so its object is named
+// by the run's ID alone; what it runs is the opaque version it was created
+// with (`pinOf`), which the dispatcher checks against the run's row on
+// every activation (dispatcher.ts).
 //
-// On-prem (plain workerd, scripts/workerd-smoke.ts) has no `WORKFLOWS`:
-// workerd has no Workflows engine (Wrangler's local dev and the tests get
-// one from Miniflare, which emulates it with a Worker of its own). Nor does
-// it have `LOADER` unless workerd runs with `--experimental`: workerd
-// refuses a Worker Loader binding without it. The loader runs App methods
-// (app.ts), the screen compiler (screens.ts) and workflow code (code.ts).
-// So on-prem, Apps and screens need workerd's `--experimental`, and
-// workflow runs and uploads (whose extractions are core's own runs,
-// knowledge/uploads.ts) fail either way: the on-prem profile needs an
-// engine of its own behind this module before they work there.
+// Starts are admissions under the run's own ID as their key: the same
+// start sent again, after an answer that never came, finds the run it
+// created, and finds a run deleted since as deleted rather than create it
+// again. So a start is retried safely, and nothing creates a run twice.
+//
+// The engine keeps a run's record only for the deployment's run retention
+// once the run has ended: every run is created with that as its
+// retention, so the engine purges the record itself, on the same clock as
+// core removes the rest of the run's details (retention.ts).
 
-export { DynamicWorkflowBinding } from "@cloudflare/dynamic-workflows";
-
-/** What a run is tagged with: the dispatcher loads it by these. */
+/** What an App's run is pinned to: the dispatcher loads it by these. */
 export interface PinnedRun {
   app: AppId;
   workflow: WorkflowId;
@@ -47,15 +60,69 @@ export const internalWorkflows = ["extraction", "build"] as const;
 
 export type InternalWorkflow = (typeof internalWorkflows)[number];
 
+/** What a run executes: an App's pinned workflow, or one of core's own. */
+export type RunPin =
+  | ({ type: "app" } & PinnedRun)
+  | { type: "internal"; workflow: InternalWorkflow };
+
+/** The one definition every run is a run of. */
+export const runDefinition = "grasp";
+
+const pinSchema = z.union([
+  z
+    .tuple([
+      z.literal("app"),
+      appIdSchema,
+      workflowIdSchema,
+      z.int().positive(),
+    ])
+    .transform(([, app, workflow, version]): RunPin => ({
+      type: "app",
+      app,
+      workflow,
+      version,
+    })),
+  z
+    .tuple([z.literal("internal"), z.enum(internalWorkflows)])
+    .transform(([, workflow]): RunPin => ({ type: "internal", workflow })),
+]);
+
+/** A pin as the engine keeps it: the run's opaque definition version. */
+const versionOf = (pin: RunPin): string =>
+  JSON.stringify(
+    pin.type === "app"
+      ? ["app", pin.app, pin.workflow, pin.version]
+      : ["internal", pin.workflow]
+  );
+
+/**
+ * What a run the engine activates is pinned to, from the definition and
+ * version it was created with; nothing for anything core never created.
+ */
+export const pinOf = (identity: DefinitionIdentity): RunPin | undefined => {
+  if (identity.definition !== runDefinition || identity.version === undefined) {
+    return undefined;
+  }
+  try {
+    return pinSchema.safeParse(JSON.parse(identity.version)).data;
+  } catch {
+    return undefined;
+  }
+};
+
 /** The engine core runs workflow runs on. */
 export interface RunEngine {
-  /** Creates the run `id`, pinned to its App version, with its input. */
+  /**
+   * Creates the run `id`, pinned to its App version, with its input. Sent
+   * again, it finds the run the first one created, ended or deleted
+   * since included: it never creates a second one.
+   */
   create: (run: {
     id: string;
     pinned: PinnedRun;
     input: Json | undefined;
   }) => Promise<void>;
-  /** Creates the run `id` of one of core's own workflows, with its input. */
+  /** As `create`, for a run of one of core's own workflows. */
   createInternal: (run: {
     id: string;
     workflow: InternalWorkflow;
@@ -64,20 +131,21 @@ export interface RunEngine {
   /** Where the engine has the run; nothing when it has no such run. */
   status: (id: string) => Promise<InstanceStatus | undefined>;
   /**
-   * Terminates the run; one that has ended already, or that the engine has
-   * no instance of, stays as it is.
+   * Terminates the run; one that has ended already, that is rolling back,
+   * or that the engine has no record of, stays as it is.
    */
   terminate: (id: string) => Promise<void>;
   /**
-   * Sends the run an event of `type`, which ends a wait on that type: it
-   * carries nothing (`RunHost.waitForDecision`).
+   * Delivers the run an event of `type`, which ends a wait on that type: it
+   * carries nothing (`RunHost.waitForDecision`). `key` names the delivery:
+   * the same key again is the same event, taken once. A run that has
+   * ended takes none, and that is no error.
    */
-  sendEvent: (id: string, type: string) => Promise<void>;
+  sendEvent: (id: string, type: string, key: string) => Promise<void>;
   /**
-   * Removes the run's instance, with all the engine kept of it, whether
-   * or not it has ended; one it has no instance of stays as it is. For a
-   * run core ended that the engine may not have (retention.ts): every
-   * other ended run's record the engine removes itself.
+   * Removes the run, with all the engine kept of it, whether or not it has
+   * ended; one it has no record of stays as it is. For a run core ended
+   * that the engine's own retention may not reach (retention.ts).
    */
   remove: (id: string) => Promise<void>;
 }
@@ -98,16 +166,14 @@ export const runRetentionDays = (
       );
 
 /**
- * How long the engine keeps an instance once it has ended, as `create`
- * takes it: the deployment's run retention, for one that completed or was
- * terminated (`successRetention`) and for one that errored
- * (`errorRetention`), which are all the ways an instance ends. None while
- * the deployment's config is invalid: the engine then keeps it as long as
- * the account's plan lets it, 30 days at most.
+ * How long the engine keeps a run once it has ended, after it completed
+ * or was terminated and after it errored: the deployment's run retention.
+ * While the deployment's config is invalid, the engine's default, 30
+ * days, the longest the deployment may set.
  */
 const retentionOf = (
   env: Pick<Env, "RUN_RETENTION_DAYS">
-): Pick<WorkflowInstanceCreateOptions, "retention"> => {
+): Pick<WorkflowOptions, "retention"> => {
   const days = runRetentionDays(env);
   if (days === undefined) {
     return {};
@@ -116,97 +182,70 @@ const retentionOf = (
   return { retention: { successRetention: kept, errorRetention: kept } };
 };
 
-/** How Workflows says it has no instance of that ID. */
-const instanceNotFound = /\binstance\.not_found\b/u;
+const runs = (
+  env: Pick<Env, "WORKFLOW_RUNS" | "DURABLE_OBJECT_JURISDICTION">
+) => inJurisdiction(env, env.WORKFLOW_RUNS);
 
-const isNotFound = (error: unknown): boolean =>
-  error instanceof Error && instanceNotFound.test(error.message);
-
-/** Where Cloudflare Workflows has a run that has ended. */
-const endedStatuses = new Set<InstanceStatus["status"]>([
-  "terminated",
-  "complete",
-  "errored",
-]);
-
-/** Whether the instance has ended; not when its status can't be read. */
-const hasEnded = async (instance: WorkflowInstance): Promise<boolean> => {
-  try {
-    const { status } = await instance.status();
-    return endedStatuses.has(status);
-  } catch {
-    return false;
-  }
+/** The run `id`'s object, whether or not it has a run. */
+const runStub = (env: Env, id: string): RunStub => {
+  const namespace = runs(env);
+  return namespace.get(namespace.idFromName(runObjectName(runDefinition, id)));
 };
 
-/** Cloudflare Workflows, through the deployment's one dispatcher. */
+/**
+ * A run's params, as the engine keeps them: its input under `input`, left
+ * out when the run has none, so a run started with nothing gets nothing
+ * (the engine makes absent params `{}`, as Cloudflare does).
+ */
+export const runParamsSchema = z.object({ input: z.json().optional() });
+
+/** Admits the run `id` of `pin`: created once, however often sent. */
+const admit = async (
+  env: Env,
+  id: string,
+  pin: RunPin,
+  input: Json | undefined
+): Promise<void> => {
+  const binding = new Workflow<{ input?: Json }>(runs(env), runDefinition, {
+    version: versionOf(pin),
+    ...retentionOf(env),
+  });
+  await binding.admit({
+    id,
+    key: id,
+    params: input === undefined ? {} : { input },
+  });
+};
+
+/** Workerflow, through the deployment's one run object class. */
 export const runEngine = (env: Env): RunEngine => ({
-  create: async ({ id, pinned: { app, workflow, version }, input }) => {
-    // Tagged with what the dispatcher loads it by; it reads the rest from
-    // the run's row. Placed in the EU where the platform can.
-    await wrapWorkflowBinding({ app, workflow, version }).create({
-      id,
-      params: input,
-      locationHint: "weur",
-      ...retentionOf(env),
-    });
+  create: async ({ id, pinned, input }) => {
+    await admit(env, id, { type: "app", ...pinned }, input);
   },
   createInternal: async ({ id, workflow, input }) => {
-    // Tagged with the workflow it is: the dispatcher runs it by that.
-    // Kept, once ended, as long as an App's run is.
-    await wrapWorkflowBinding({ internal: workflow }).create({
-      id,
-      params: input,
-      locationHint: "weur",
-      ...retentionOf(env),
-    });
+    await admit(env, id, { type: "internal", workflow }, input);
   },
-  status: async (id): Promise<InstanceStatus | undefined> => {
-    try {
-      const instance = await env.WORKFLOWS.get(id);
-      return await instance.status();
-    } catch (error) {
-      if (!isNotFound(error)) {
-        throw error;
-      }
-      return undefined;
-    }
-  },
+  status: async (id) => await runStub(env, id).status(),
   terminate: async (id) => {
-    let instance: WorkflowInstance;
-    try {
-      instance = await env.WORKFLOWS.get(id);
-    } catch (error) {
-      // No instance, nothing to terminate: a run whose start failed, as a
-      // cancel racing it finds it.
-      if (isNotFound(error)) {
-        return;
-      }
-      throw error;
-    }
-    try {
-      await instance.terminate();
-    } catch (error) {
-      // The terminate's own error, unless the run has ended anyway.
-      if (!(await hasEnded(instance))) {
-        throw error;
-      }
-    }
+    // Ended, rolling back or missing: nothing to terminate, and nothing
+    // to fail over (a cancel racing a run's own end finds it ended).
+    await runStub(env, id).terminate({ rollback: false });
   },
-  sendEvent: async (id, type) => {
-    const instance = await env.WORKFLOWS.get(id);
-    await instance.sendEvent({ type, payload: null });
+  sendEvent: async (id, type, key) => {
+    const outcome = await runStub(env, id).sendEvent({
+      type,
+      payload: encode(null),
+      key,
+    });
+    if (
+      outcome !== "accepted" &&
+      outcome !== "duplicate" &&
+      outcome !== "ended"
+    ) {
+      throw new Error(`Run ${id} didn't take the event ${type}: ${outcome}`);
+    }
   },
   remove: async (id) => {
-    let instance: WorkflowInstance;
-    try {
-      instance = await env.WORKFLOWS.get(id);
-    } catch (error) {
-      if (isNotFound(error)) {
-        return;
-      }
-      throw error;
-    }
-    await instance.delete();
+    await runStub(env, id).deleteRun();
   },
 });

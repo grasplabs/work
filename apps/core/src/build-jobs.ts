@@ -4,7 +4,7 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import type { WorkflowStepConfig } from "cloudflare:workers";
+import type { WorkflowStepConfig } from "@grasp-os/workerflow/contracts";
 import { z } from "zod";
 
 import {

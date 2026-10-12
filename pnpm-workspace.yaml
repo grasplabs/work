@@ -37,7 +37,6 @@ catalog:
   wrangler: 4.136.0
 
   # Workers runtime and data
-  "@cloudflare/dynamic-workflows": 0.1.1
   "@cloudflare/vite-plugin": 1.57.0
   "@cloudflare/vitest-pool-workers": 0.22.0
   "@cloudflare/workers-types": 5.20260921.1

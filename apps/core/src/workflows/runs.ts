@@ -16,6 +16,7 @@ import type {
   RunStatus,
   WorkflowRun,
 } from "@grasp-os/shared/workflows";
+import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import {
   and,
   asc,
@@ -652,13 +653,12 @@ export const startWorkflow = async (
   });
 };
 
-/** Where Cloudflare Workflows says a run is, as a run's status. */
+/** Where the engine says a run is, as a run's status. */
 const liveStatuses: Record<InstanceStatus["status"], RunStatus> = {
   queued: "running",
   running: "running",
   waitingForPause: "running",
   rollingBack: "running",
-  unknown: "running",
   waiting: "waiting",
   paused: "paused",
   errored: "failed",
@@ -746,16 +746,15 @@ export const runStatus = async (
   if (found.detailsRemoved || !(live && seesDetails(by, row, ownerId))) {
     return found;
   }
-  const output = z.json().safeParse(live.output);
-  return {
-    ...found,
-    ...(live.status === "complete" && output.success
-      ? { output: output.data }
-      : {}),
-    ...(live.error === undefined
-      ? {}
-      : { error: { name: live.error.name, message: live.error.message } }),
-  };
+  if (live.status === "complete") {
+    const output = z.json().safeParse(live.output);
+    return output.success ? { ...found, output: output.data } : found;
+  }
+  if (live.status === "errored") {
+    const { name, message } = live.error;
+    return { ...found, error: { name, message } };
+  }
+  return found;
 };
 
 /** An App's runs, newest first; `app.not_found` for an App there isn't. */

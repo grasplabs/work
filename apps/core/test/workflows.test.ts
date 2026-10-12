@@ -3,8 +3,6 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import { introspectWorkflow } from "cloudflare:test";
-import type { WorkflowInstanceIntrospector } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -22,6 +20,7 @@ import {
   finished,
   leave,
   liveStatus,
+  runObject,
   stepDone,
   stopped,
   woken,
@@ -38,9 +37,9 @@ import {
 } from "./workflow-apps.ts";
 
 // Workflows are code the agent writes, run for real: committed to an App,
-// tested when their version is made current, and run on Cloudflare
-// Workflows by the dispatcher, each in an isolate of its own. Workflows'
-// test helpers skip sleeps; the outside systems faked
+// tested when their version is made current, and run on the engine
+// (Workerflow) by the dispatcher, each in an isolate of its own. Time is
+// moved on where a run sleeps (`woken`); the outside systems faked
 // here are the model provider behind AI Gateway, and a mail provider's MCP
 // server behind the real connect (test/mail-server.ts).
 //
@@ -163,21 +162,6 @@ const mailStep = (
     }
   });`;
 
-/** The run the introspector saw start, once it has. */
-const onlyRun = async (
-  introspector: Awaited<ReturnType<typeof introspectWorkflow>>
-): Promise<WorkflowInstanceIntrospector> =>
-  await vi.waitFor(
-    async () => {
-      const [instance] = await introspector.get();
-      if (!instance) {
-        throw new Error("No run yet");
-      }
-      return instance;
-    },
-    { timeout: 10_000 }
-  );
-
 /**
  * Where core's record has a run now, as the App's run list shows it: unlike
  * a run's status, the list never asks the engine.
@@ -229,13 +213,16 @@ describe("workflow runs", { timeout: 60_000 }, () => {
       "workflows/invoice-approval.ts": invoiceWorkflow,
       "workflows/invoice-approval.workflow-tests.ts": invoiceTests,
     });
-    await using introspector = await introspectWorkflow(env.WORKFLOWS);
-    await introspector.modifyAll(async (modifier) => {
-      await modifier.mockStepResult(
-        { name: "extract" },
-        { total: 800_000, currency: "EUR" }
-      );
+    // The model reads the invoice's total.
+    const gateway = fakeGateway({
+      text: JSON.stringify({ total: 800_000, currency: "EUR" }),
+      inputTokens: 10,
+      outputTokens: 5,
     });
+    const ai: AiBinding = env.AI;
+    const answering = vi
+      .spyOn(ai, "fetch")
+      .mockImplementation(gateway.binding.fetch);
     const invoice = {
       number: "INV-7",
       purchaseOrder: "PO-1",
@@ -246,7 +233,6 @@ describe("workflow runs", { timeout: 60_000 }, () => {
       "invoice-approval",
       invoice
     );
-    const instance = await onlyRun(introspector);
     // An admin, as the reviewer parameter says, approves.
     const decision = await vi.waitFor(
       async () => {
@@ -262,14 +248,17 @@ describe("workflow runs", { timeout: 60_000 }, () => {
       },
       { timeout: 10_000 }
     );
+    answering.mockRestore();
     await reviewer.api.decisions.answer(decision, { approved: true });
-    await instance.waitForStatus("complete");
+    await finished(run.id);
     const logged = await allEvents();
     const audited = logged.filter(({ target }) => target?.id === run.id);
 
     expect({
-      output: await instance.getOutput(),
-      matched: await instance.waitForStepResult({ name: "match-po" }),
+      matched: await runObject(run.id).stepOutput({
+        name: "match-po",
+        count: 1,
+      }),
       status: await builder.api.workflows.status(run.id),
       runs: await builder.api.workflows.list(app),
       audited: audited
@@ -279,19 +268,23 @@ describe("workflow runs", { timeout: 60_000 }, () => {
         audited.map(({ detail }) => `${detail.app}/${detail.version}`)
       ),
     }).toMatchObject({
-      output: {
-        status: "booked",
-        entry: `ledger-INV-7-for-${builder.userId}`,
+      matched: { kind: "value", value: { amount: 800_000 } },
+      status: {
+        status: "completed",
+        version: 1,
+        workflow: "invoice-approval",
+        output: {
+          status: "booked",
+          entry: `ledger-INV-7-for-${builder.userId}`,
+        },
       },
-      matched: { amount: 800_000 },
-      status: { status: "completed", version: 1, workflow: "invoice-approval" },
       runs: [{ id: run.id, status: "completed" }],
-      // The extraction is mocked, so it ran no step of its own.
       audited: [
         "workflow.run.completed",
         "workflow.run.started",
         "workflow.step.completed $params",
         "workflow.step.completed book",
+        "workflow.step.completed extract",
         "workflow.step.completed match-po",
         "workflow.step.completed review",
         "workflow.step.completed review#ask",
@@ -733,11 +726,8 @@ Object.hasOwn = (target, name) => {
   return "slept";`
       )
     );
-    await using introspector = await introspectWorkflow(env.WORKFLOWS);
-    await introspector.modifyAll(async (modifier) => {
-      await modifier.disableSleeps();
-    });
     const run = await builder.api.workflows.start(app, "sleeper");
+    await woken(run.id, "nap");
     await finished(run.id);
     const { status, output } = await builder.api.workflows.status(run.id);
     expect({ status, output }).toStrictEqual({
@@ -919,9 +909,8 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
     // instance goes on. Its next load does nothing more, and cancelling
     // again terminates it.
     const leftOver = await builder.api.workflows.start(app, "cancellable");
-    // Stopped once it waits: a run the local engine pauses while its code
-    // still loads can go on in that execution after it resumes, with the
-    // row it read before this test marked it cancelled.
+    // Stopped once it waits, so its next activation reads the row this
+    // test marks cancelled.
     await stepDone(leftOver.id, "$params");
     await stopped(leftOver.id);
     await env.DB.prepare(

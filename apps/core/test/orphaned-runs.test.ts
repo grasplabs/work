@@ -9,7 +9,7 @@ import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { planOf, recordedQueries } from "./query-plans.ts";
-import { endLiveRuns, liveStatus } from "./runs.ts";
+import { aroundEngine, endLiveRuns, liveStatus, runObjectId } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 import { appWith, runEvents, workflowFiles } from "./workflow-apps.ts";
 
@@ -399,25 +399,23 @@ describe("runs that never reached the engine", () => {
       null,
       "80000000-0000-4000-8000-000000000000"
     );
-    const failing = new Set(unanswered);
-    const workflows = env.WORKFLOWS;
-    const get = workflows.get.bind(workflows);
-    const broken = vi.spyOn(workflows, "get").mockImplementation(async (id) => {
-      if (failing.has(id)) {
-        throw new Error("The engine can't be reached");
+    const failing = unanswered.map((run) => runObjectId(run));
+    const fromFirst = await aroundEngine(
+      async (_method, call, object) => {
+        if (failing.some((id) => id.equals(object))) {
+          throw new Error("The engine can't be reached");
+        }
+        return await call();
+      },
+      async () => {
+        // From the first ID, the rows it can't check fill the sweep.
+        await failOrphans(env, "00000000-0000-4000-8000-000000000000");
+        const first = await rowStatus(orphan);
+        // From an ID past them, the orphan comes first.
+        await failOrphans(env, "40000000-0000-4000-8000-000000000000");
+        return first;
       }
-      return await get(id);
-    });
-    let fromFirst: string | undefined;
-    try {
-      // From the first ID, the rows it can't check fill the sweep.
-      await failOrphans(env, "00000000-0000-4000-8000-000000000000");
-      fromFirst = await rowStatus(orphan);
-      // From an ID past them, the orphan comes first.
-      await failOrphans(env, "40000000-0000-4000-8000-000000000000");
-    } finally {
-      broken.mockRestore();
-    }
+    );
     const stillStarting = await Promise.all(
       unanswered.map(async (run) => await rowStatus(run))
     );

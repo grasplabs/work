@@ -807,7 +807,7 @@ export const recordTypeOwners = sqliteTable(
  * Every run of an App's workflow (src/workflows/): the App version it is
  * pinned to, and who it acts for. A run a person started acts for them
  * (`started_by`); one a trigger started (`started_by` null) for the App's
- * owner. Cloudflare Workflows keeps the run's steps; this row is what core
+ * owner. The engine keeps the run's steps (src/workflows/engine.ts); this row is what core
  * needs to load it again, and lists runs. `status` is where the run was
  * last seen by core: `running` covers waiting too. `failure` is a failed
  * run's report (JSON): where and why it stopped, without the values it

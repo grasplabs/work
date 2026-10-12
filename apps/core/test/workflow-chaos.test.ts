@@ -15,6 +15,7 @@ import {
   finished,
   liveStatus,
   resumed,
+  runInstance,
   sleeping,
   stepDone,
   stopped,
@@ -32,7 +33,7 @@ import {
 
 // Workflow runs under failure: crashes mid-step, restarts, long sleeps,
 // starts delivered twice, and failures that pass or last. Runs
-// are real, on the Workflows engine (Miniflare's). Their side effects go
+// are real, on the engine (Workerflow). Their side effects go
 // through the real connect to a fake mail server (test/mail-server.ts)
 // that counts every call that reached it, so a mail sent twice shows
 // there; the App's counters (`hitsOf`) show how often a step really ran.
@@ -282,7 +283,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     await stepDone(run.id, "send");
     // Runs the step again from scratch, as if its result had never been
     // stored: only its idempotency key stands between it and a second mail.
-    const instance = await env.WORKFLOWS.get(run.id);
+    const instance = runInstance(run.id);
     await instance.restart({ from: { name: "send" } });
     await vi.waitFor(
       async () => {
@@ -425,7 +426,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     const once = await count("kept");
     // Runs the step again from scratch, as if its result had never been
     // stored, after its points were added up.
-    const instance = await env.WORKFLOWS.get(forgetful.id);
+    const instance = runInstance(forgetful.id);
     await instance.restart({ from: { name: "count" } });
     await vi.waitFor(
       async () => {
@@ -445,7 +446,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
 
     const silent = await builder.api.workflows.start(app, "silent");
     await stepDone(silent.id, "count");
-    const silentInstance = await env.WORKFLOWS.get(silent.id);
+    const silentInstance = runInstance(silent.id);
     await silentInstance.restart({ from: { name: "count" } });
     await vi.waitFor(
       async () => {
@@ -786,17 +787,6 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     await stepDone(run.id, "before");
     await stopped(run.id);
     await woken(run.id);
-    // The local engine starts no execution while the one it stopped still
-    // winds down, and then leaves the run queued. Only an event makes it
-    // look again: one the run waits for nowhere, sent until it has.
-    const instance = await env.WORKFLOWS.get(run.id);
-    await vi.waitFor(
-      async () => {
-        await instance.sendEvent({ type: "look-again", payload: null });
-        await expect(liveStatus(run.id)).resolves.not.toBe("queued");
-      },
-      { timeout: 10_000, interval: 200 }
-    );
     await finished(run.id);
 
     expect({
@@ -874,9 +864,9 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       },
       { timeout: 10_000, interval: 100 }
     );
-    // Paused while the step runs: the engine lets it end, then stops the
-    // execution, which throws out of the step's call.
-    const instance = await env.WORKFLOWS.get(run.id);
+    // Paused while the step runs: the engine lets it end, then lets go of
+    // the run at that safe boundary, its activation's later calls fenced.
+    const instance = runInstance(run.id);
     await instance.pause();
     await callApp(
       env,
@@ -969,14 +959,13 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     await grantMail(idp, admin, app, mail.id);
     const run = await admin.api.workflows.start(app, "started");
     await stepDone(run.id, "send");
-    // The same start again, under the run's ID. The local engine takes it
-    // as the run it already has; Cloudflare refuses an ID it has instead.
-    // Either way: no second run and no second mail.
+    // The same start again, under the run's ID: the engine takes it as the
+    // run it already has. No second run and no second mail.
     await expect(
       runEngine(env).create({
         id: run.id,
         pinned: { app: run.app, workflow: run.workflow, version: run.version },
-        input: null,
+        input: undefined,
       })
     ).resolves.toBeUndefined();
     await woken(run.id);
