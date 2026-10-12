@@ -132,10 +132,10 @@ const hostHeldTo = async (calls: WorkflowCalls) => {
   const tampered: string[] = [];
   const hooks: HostHooks = {
     stepFailed: () => {},
+    busyRefusals: new Map(),
     tampered: (error) => {
       tampered.push(error.code ?? error.message);
     },
-    engineStopped: () => false,
     waiting: async () => {
       await Promise.resolve();
     },

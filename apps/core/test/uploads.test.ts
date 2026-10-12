@@ -8,7 +8,6 @@ import {
   uploadTypes,
 } from "@grasp-os/shared/uploads";
 import type { Upload } from "@grasp-os/shared/uploads";
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
@@ -93,6 +92,41 @@ const uploaded = async (
     bytes: await fixture(file),
   });
   return await ended(person.api, upload.id);
+};
+
+/** Runs `run` with every step's retry due at once. */
+const withRetriesAtOnce = async <T>(run: () => Promise<T>): Promise<T> => {
+  env.WORKFLOW_RETRY_DELAY_MS = "0";
+  try {
+    return await run();
+  } finally {
+    Reflect.deleteProperty(env, "WORKFLOW_RETRY_DELAY_MS");
+  }
+};
+
+/**
+ * Runs `run` while R2 fails the first `times` reads of an original, as R2
+ * down for a moment, every retry due at once.
+ */
+const whileR2Fails = async <T>(
+  times: number,
+  run: () => Promise<T>
+): Promise<T> => {
+  const files: R2Bucket = env.FILES;
+  const get = files.get.bind(files);
+  let failed = 0;
+  const failing = vi.spyOn(files, "get").mockImplementation(async (key) => {
+    if (failed < times) {
+      failed += 1;
+      throw new Error("R2 is down for a moment");
+    }
+    return await get(key);
+  });
+  try {
+    return await withRetriesAtOnce(run);
+  } finally {
+    failing.mockRestore();
+  }
 };
 
 /** A file's SHA-256, in hex. */
@@ -514,33 +548,21 @@ describe("uploads", { timeout: 60_000 }, () => {
 
   it("retry an extraction that fails for a moment", async () => {
     const person = await personWithCollection();
-    await using introspector = await introspectWorkflow(env.WORKFLOWS);
-    await introspector.modifyAll(async (modifier) => {
-      await modifier.disableRetryDelays();
-      await modifier.mockStepError(
-        { name: "extract" },
-        new Error("R2 is down for a moment"),
-        2
-      );
-    });
-    const upload = await uploaded(person, "travel-policy.docx");
+    const upload = await whileR2Fails(
+      2,
+      async () => await uploaded(person, "travel-policy.docx")
+    );
 
     expect([upload.status, upload.version]).toStrictEqual(["ready", 1]);
   });
 
   it("fail an extraction that keeps failing once its retries run out", async () => {
     const person = await personWithCollection();
-    await using introspector = await introspectWorkflow(env.WORKFLOWS);
-    await introspector.modifyAll(async (modifier) => {
-      await modifier.disableRetryDelays();
-      // The first attempt and its three retries.
-      await modifier.mockStepError(
-        { name: "extract" },
-        new Error("R2 is down"),
-        4
-      );
-    });
-    const upload = await uploaded(person, "offices.xlsx");
+    // The first attempt and its three retries.
+    const upload = await whileR2Fails(
+      4,
+      async () => await uploaded(person, "offices.xlsx")
+    );
 
     expect({
       status: upload.status,
@@ -602,17 +624,16 @@ describe("uploads", { timeout: 60_000 }, () => {
 
   it("fail a file that runs the extractor out of its limits once, and say why", async () => {
     const person = await personWithCollection();
-    await using introspector = await introspectWorkflow(env.WORKFLOWS);
-    await introspector.modifyAll(async (modifier) => {
-      await modifier.disableRetryDelays();
-    });
     let upload: Upload | undefined;
     // As the runtime answers once it stopped the isolate over its limits.
-    const started = await withSandboxAnswering(
-      'throw new Error("Worker exceeded CPU time limit.");',
-      async () => {
-        upload = await uploaded(person, "expense-policy.pdf");
-      }
+    const started = await withRetriesAtOnce(
+      async () =>
+        await withSandboxAnswering(
+          'throw new Error("Worker exceeded CPU time limit.");',
+          async () => {
+            upload = await uploaded(person, "expense-policy.pdf");
+          }
+        )
     );
 
     expect({ started, failure: upload?.failure }).toStrictEqual({

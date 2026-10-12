@@ -2,7 +2,7 @@ import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { setCurrentVersion } from "../src/apps.ts";
 import { setParam } from "../src/workflows/params.ts";
@@ -13,7 +13,12 @@ import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { racingDb } from "./racing-db.ts";
-import { endLiveRuns, finished, liveStatus } from "./runs.ts";
+import {
+  endLiveRuns,
+  finished,
+  liveStatus,
+  whileEngineRefuses,
+} from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith } from "./workflow-apps.ts";
 
@@ -274,19 +279,11 @@ describe("schedule triggers", () => {
 });
 
 /**
- * Runs `run` while the engine takes no new run, as when Cloudflare
- * Workflows is down: every start fails once its run's row is written.
+ * Runs `run` while the engine takes no new run, as when its storage is
+ * down: every start fails once its run's row is written.
  */
-const whileEngineDown = async <T>(run: () => Promise<T>): Promise<T> => {
-  const down = vi
-    .spyOn(env.WORKFLOWS, "create")
-    .mockRejectedValue(new Error("Workflows unavailable"));
-  try {
-    return await run();
-  } finally {
-    down.mockRestore();
-  }
-};
+const whileEngineDown = async <T>(run: () => Promise<T>): Promise<T> =>
+  await whileEngineRefuses((method) => method === "start", run);
 
 /**
  * Runs the cron trigger for each of `minutes` after `due`, in order; how
@@ -692,8 +689,8 @@ describe("trigger deliveries", () => {
     await runCron({}, due);
 
     await expect(nextRunOf(app)).resolves.toStrictEqual(due);
-    await expect(outcome(liveStatus(orphan))).resolves.toBe(
-      "Error: instance.not_found"
+    await expect(outcome(liveStatus(orphan))).resolves.toContain(
+      "instance.not_found"
     );
 
     // Two minutes on, as a stopped start would be by the next tries.

@@ -218,6 +218,10 @@ describe(describeWorkflow, () => {
         "up to 365 days",
       ],
       [
+        `await step.do("go", { description: "Go", timeout: "15 minutes" }, async () => 1);`,
+        "at most 14 minutes",
+      ],
+      [
         `await step.decision("go", { description: "Go", from: params.reviewer, ask });`,
         "needs timeout",
       ],

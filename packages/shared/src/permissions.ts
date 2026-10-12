@@ -185,8 +185,9 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "TOKEN_ENCRYPTION_KEY",
   "TOKEN_ENCRYPTION_KEY_PREVIOUS",
   "WORKFLOW_OFF_WAIT_MS",
+  "WORKFLOW_RETRY_DELAY_MS",
+  "WORKFLOW_RUNS",
   "WORKFLOW_STEP_LIMIT",
-  "WORKFLOWS",
   "WORKSPACES",
 ]);
 
