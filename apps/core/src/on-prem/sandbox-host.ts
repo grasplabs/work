@@ -14,30 +14,24 @@
  *
  * Core never sees this module. On Cloudflare, whose runtime enforces
  * `cpuMs`, core loads the isolate with its own Loader, as it always has
- * (apps/core/src/sandboxed.ts). Only env-less isolates come here: a call is
- * modules in and JSON out, as no stub crosses a process.
+ * (apps/core/src/sandboxed.ts). An env-less isolate comes as one call,
+ * modules in and JSON out (`/call`). One that reaches back into core comes
+ * as a session (`/session`, sandbox-session.ts): a WebSocket per call that
+ * carries the capabilities core passes it, as no workerd stub crosses a
+ * process.
  *
  * Whatever it's sent, the isolate gets no env and no network: this Worker
  * sets both itself. It has no binding but its Loader, so code that escaped
  * its isolate would find nothing here: no storage, no secrets.
  */
 
+import { sessionResponse } from "./sandbox-session.ts";
+import { isolateSettings } from "./sandbox-settings.ts";
+
 /** What the workerd config gives this Worker. */
 interface SandboxHostEnv {
   LOADER: WorkerLoader;
 }
-
-/**
- * How every isolate here runs, whatever a call says: this Worker sets it,
- * not its caller. The same as core's `sandbox` (apps/core/src/sandbox.ts:
- * `isolateBase` and its CPU limit), which a test holds them to; plain
- * workerd ignores `cpuMs`, which is why the supervisor bounds the time.
- */
-export const isolateSettings = {
-  compatibilityDate: "2026-09-15",
-  compatibilityFlags: ["disallow_importable_env"],
-  limits: { cpuMs: 10_000 },
-};
 
 /** The isolate's code: its modules, and which is its main one. */
 interface IsolateCode {
@@ -133,6 +127,12 @@ export default {
     const { pathname } = new URL(request.url);
     if (pathname === "/health" && request.method === "GET") {
       return new Response("ok");
+    }
+    if (
+      pathname === "/session" &&
+      request.headers.get("upgrade") === "websocket"
+    ) {
+      return sessionResponse(request, env, isolateSettings);
     }
     if (pathname !== "/call" || request.method !== "POST") {
       return new Response("Not found", { status: 404 });
