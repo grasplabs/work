@@ -43,11 +43,12 @@ import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
-import { findVersion, versionFiles } from "./apps.ts";
+import { appFor, findVersion, versionFiles } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { openStore, requireStoreManager } from "./data-stores.ts";
 import {
+  appDefaultStores,
   sdkArtifactDeletions,
   sdkReleaseArtifacts,
   sdkReleaseManifests,
@@ -99,9 +100,12 @@ import { buildAppCode } from "./screens.ts";
 // - A release vouches for itself: its trust is always `unreviewed` in the
 //   manifest; approval and revocation are the host's records of its hash.
 //
-// What `sealRelease` leaves to its caller: that `by` may build the App
-// (activation checks it), and which store to bind (the host's choice,
-// never App code's). It checks itself that `by` manages that store.
+// - Someone seals an App they don't build, or binds a store they may not:
+//   `sealRelease` checks itself that `by` builds the App, then that they
+//   manage the store, unless it is the App's own default store, which the
+//   host chose for it (`app_default_stores`, app-activation.ts) and the
+//   App's builders bind by their builder rights. Which store to bind is its
+//   caller's choice, the host's, never App code's.
 
 /** Where an artifact's bytes are, by their SHA-256. */
 const artifactKey = (sha256: string): string => `release-artifacts/${sha256}`;
@@ -651,6 +655,22 @@ const requireAsTombstoned = async (
 /** The empty dependency lock: server code imports no packages. */
 const emptyLock = "{}";
 
+/** Whether `store` is App `app`'s own default store, as the host records it. */
+const isDefaultStore = async (
+  env: Env,
+  app: AppId,
+  store: StoreId
+): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ store: appDefaultStores.storeId })
+    .from(appDefaultStores)
+    .where(
+      and(eq(appDefaultStores.appId, app), eq(appDefaultStores.storeId, store))
+    )
+    .get();
+  return row !== undefined;
+};
+
 /**
  * Claims `store` for `app` for good (`sdk_store_owners`), or refuses
  * (`version.store_bound_elsewhere`) a store another App claimed: one
@@ -732,6 +752,8 @@ export const sealRelease = async (
   request: SealRequest
 ): Promise<Release> => {
   const { app, version } = request;
+  // Only the App's builders seal its versions.
+  await appFor(env, request.by, app, "builder");
   const sealed = await drizzle(env.DB)
     .select({ manifest: sdkReleaseManifests.manifest })
     .from(sdkReleaseManifests)
@@ -754,9 +776,14 @@ export const sealRelease = async (
     );
     return await loadRelease(env, app, version);
   }
-  // Only someone who manages the store binds it, and before any App code
-  // is inspected: a binding hands the App's callers its records.
-  if (request.store !== undefined) {
+  // Before any App code is inspected: the App's own default store, which
+  // the host chose for it (`app_default_stores`), is bound by its builder
+  // rights; any other store only by someone who manages it, since a
+  // binding hands the App's callers its records.
+  if (
+    request.store !== undefined &&
+    !(await isDefaultStore(env, app, request.store))
+  ) {
     await requireStoreManager(env, request.by, request.store);
   }
   const row = await findVersion(env, app, version);

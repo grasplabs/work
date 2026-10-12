@@ -1,3 +1,4 @@
+import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
@@ -8,7 +9,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { activateVersion } from "../src/app-activation.ts";
 import { callAppFunction } from "../src/app-functions.ts";
-import { loadRelease } from "../src/app-releases.ts";
+import { addMember } from "../src/app-members.ts";
+import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import {
   commitFiles,
@@ -195,6 +197,46 @@ describe(
         ok: true,
         value: ["Kept"],
       });
+    });
+
+    it("lets another builder of the App activate on the default store the first one created", async () => {
+      const { owner, app } = await appWith(notesFiles());
+      await activateVersion(env, owner, app, 1);
+      const first = await loadRelease(env, app, 1);
+      await call(owner, first, "notes.create", { title: "Shared" });
+      // A second builder, who doesn't manage the store the first created.
+      const other = await person("builder");
+      await addMember(env, owner, app, {
+        type: "person",
+        id: other.userId,
+        role: "builder",
+      });
+      await commitFiles(env, other, app, notesFiles("Notes 2"), "Second");
+      const activated = await activateVersion(env, other, app, 2);
+      const second = await loadRelease(env, app, 2);
+      expect([
+        activated.currentVersion,
+        second.store?.storeId === first.store?.storeId,
+        await call(other, second, "notes.titles", {}),
+      ]).toStrictEqual([2, true, { ok: true, value: ["Shared"] }]);
+    });
+
+    it("is refused to someone who builds no App, sealing directly onto its store", async () => {
+      const { owner, app } = await appWith(notesFiles());
+      await activateVersion(env, owner, app, 1);
+      const [recorded] = await defaultStores(app);
+      const stranger = await person("builder");
+      await expect(
+        failure(
+          async () =>
+            await sealRelease(env, {
+              app,
+              version: 1,
+              store: storeIdSchema.parse(recorded?.storeId),
+              by: stranger,
+            })
+        )
+      ).resolves.toBe("app.not_found");
     });
 
     it("creates no store for an App without tables", async () => {
