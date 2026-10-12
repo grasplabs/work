@@ -23,13 +23,23 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 //
 // - a new table: no record of it exists yet, so any fields;
 // - a new optional field on a table the contract has: records without it
-//   stay valid, and nothing is rewritten. A required, nullable-only or
-//   defaulted field would need every existing record filled in first,
-//   which is a migration (a defaulted one a generated backfill, spec 17.2;
-//   never a default made up while reading);
-// - a table, or an optional field, the schema leaves out: kept in the
-//   contract, and its data with it, never dropped. A required or defaulted
-//   field left out is refused: the schema's inserts would lack it;
+//   stay valid, and nothing is rewritten;
+// - a new defaulted field on a table the contract has: safe once every
+//   record the store holds has it, so the plan lists it as a field to
+//   fill (`filledFields`), and the store fills it in, where it is
+//   missing, before its contract takes the field (spec 17.2's generated
+//   fill-missing backfill; never a default made up while reading). A
+//   required or nullable-only field has no value to fill in: a migration.
+//   So is a defaulted field that can hold a record ID at any depth: a
+//   default reference would make every record refer to one record, which
+//   the store's reference index (and its restrict and cascade rules)
+//   must be told of, so it is an explicit migration, never a fill;
+// - a table, or an optional or defaulted field, the schema leaves out:
+//   kept in the contract, and its data with it, never dropped. The
+//   store fills a defaulted field in on every write that lacks it, so the
+//   schema's inserts still fit (the fill-missing rule is the compatible
+//   mapping spec 17.4 step 5 asks of retained writers). A required field
+//   left out is refused: the schema's inserts would lack it;
 // - an index added or changed: installed beside the old ones, which stay
 //   for versions pinned to them; the contract lists the newest. Indexes
 //   don't constrain data.
@@ -45,7 +55,7 @@ export type PlanRefusalReason =
   | "access_changed"
   | "field_changed"
   | "required_field_added"
-  | "defaulted_field_added"
+  | "defaulted_reference_added"
   | "required_field_removed"
   | "contract_invalid";
 
@@ -72,11 +82,17 @@ export interface PlannedIndex {
 export interface PlannedChanges {
   readonly addedTables: readonly string[];
   readonly addedFields: readonly PlannedField[];
+  /**
+   * Defaulted fields added to a table the contract has, also listed in
+   * `addedFields`: each to be filled in with its default in every record
+   * that lacks it before the contract takes it.
+   */
+  readonly filledFields: readonly PlannedField[];
   /** Indexes added or whose fields changed: each a new physical index. */
   readonly addedIndexes: readonly PlannedIndex[];
   /** Tables the schema leaves out, kept with their records. */
   readonly retainedTables: readonly string[];
-  /** Optional fields the schema leaves out, kept in every record. */
+  /** Optional or defaulted fields the schema leaves out, kept in every record. */
   readonly retainedFields: readonly PlannedField[];
   /** Indexes the schema leaves out or redefines, kept as they are. */
   readonly retainedIndexes: readonly PlannedIndex[];
@@ -229,17 +245,38 @@ const unionOf = (
   }
 };
 
+/** Whether `descriptor` can hold a record ID, at any depth. */
+const holdsId = (descriptor: ValueDescriptor): boolean => {
+  if (descriptor.kind === "id") {
+    return true;
+  }
+  if (descriptor.kind === "object") {
+    return Object.values(descriptor.fields).some((field) => holdsId(field));
+  }
+  if (descriptor.kind === "array") {
+    return holdsId(descriptor.item);
+  }
+  if (descriptor.kind === "union") {
+    return descriptor.members.some((member) => holdsId(member));
+  }
+  if (descriptor.kind === "record") {
+    return holdsId(descriptor.value);
+  }
+  return false;
+};
+
 /** Where a field's change goes: refused, added or retained. */
 interface FieldOutcomes {
   readonly refused: PlanRefusal[];
   readonly addedFields: PlannedField[];
+  readonly filledFields: PlannedField[];
   readonly retainedFields: PlannedField[];
 }
 
 /** Classifies one change of a field of a table on both sides (see the header). */
 const classifyField = (
   change: FieldChange,
-  { refused, addedFields, retainedFields }: FieldOutcomes
+  { refused, addedFields, filledFields, retainedFields }: FieldOutcomes
 ): void => {
   const { table, field } = change;
   if (change.change === "changed") {
@@ -250,17 +287,22 @@ const classifyField = (
     const presence = change.after?.presence;
     if (presence === "optional") {
       addedFields.push({ table, field });
+    } else if (
+      presence === "default" &&
+      change.after !== undefined &&
+      holdsId(change.after)
+    ) {
+      refused.push({ table, field, reason: "defaulted_reference_added" });
+    } else if (presence === "default") {
+      addedFields.push({ table, field });
+      filledFields.push({ table, field });
     } else {
-      refused.push({
-        table,
-        field,
-        reason:
-          presence === "default"
-            ? "defaulted_field_added"
-            : "required_field_added",
-      });
+      refused.push({ table, field, reason: "required_field_added" });
     }
-  } else if (change.before?.presence === "optional") {
+  } else if (
+    change.before?.presence === "optional" ||
+    change.before?.presence === "default"
+  ) {
     retainedFields.push({ table, field });
   } else {
     refused.push({ table, field, reason: "required_field_removed" });
@@ -290,10 +332,16 @@ export const planSchemaChange = (
 
   const refused: PlanRefusal[] = [];
   const addedFields: PlannedField[] = [];
+  const filledFields: PlannedField[] = [];
   const retainedFields: PlannedField[] = [];
   for (const change of diff.fields) {
     if (onBothSides(change.table)) {
-      classifyField(change, { refused, addedFields, retainedFields });
+      classifyField(change, {
+        refused,
+        addedFields,
+        filledFields,
+        retainedFields,
+      });
     }
   }
   for (const { table } of diff.access) {
@@ -317,6 +365,7 @@ export const planSchemaChange = (
   const changes: PlannedChanges = {
     addedTables: [...addedTables],
     addedFields,
+    filledFields,
     addedIndexes,
     retainedTables: [...retainedTables],
     retainedFields,

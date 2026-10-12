@@ -211,6 +211,92 @@ export const schemaActivations = sqliteTable("sdk_schema_activations", {
 });
 
 /**
+ * A schema change the store took but whose contract isn't in force yet:
+ * the pending target (spec 17.4 step 4), kept apart from the contract in
+ * `sdk_store`, with the bounded fill-missing backfill that has to finish
+ * before the contract moves to it (store-host.ts, `fillMissing`). At most
+ * one is pending (running or failed) at a time; a completed one stays as
+ * the receipt of its activation.
+ */
+export const backfills = sqliteTable(
+  "sdk_schema_backfills",
+  {
+    /** The hash of the pending contract: the target's identity. */
+    targetHash: text("target_hash").primaryKey(),
+    /** The pending contract, as canonical manifest text. */
+    targetManifest: text("target_manifest").notNull(),
+    /**
+     * The contract hash `sdk_store` held when the change was planned:
+     * activation compares and sets against it. Null for a contract the
+     * store's row didn't hold (rebuilt from its schemas).
+     */
+    baseHash: text("base_hash"),
+    /** The fields to fill, as canonical JSON: `[[table, field], ...]`. */
+    fills: text().notNull(),
+    /**
+     * Where the scan ends in each table it fills, as canonical JSON
+     * `{tableId: recordId}`: the highest record ID the table held when the
+     * target became pending. Every commit since filled in what it wrote,
+     * so nothing past it needs a look; a table that held no record then
+     * isn't scanned.
+     */
+    scanBounds: text("scan_bounds").notNull(),
+    state: text({ enum: ["running", "complete", "failed"] }).notNull(),
+    /**
+     * The fence: the run of the backfill the store answers, moved on when
+     * a new run takes over from one that ended (`restartBackfill`).
+     */
+    attempt: integer().notNull().default(1),
+    /** Until when the current run's lease holds, by the store's clock. */
+    leaseUntil: integer("lease_until"),
+    /**
+     * When the backfill's run was last looked after: handed over
+     * (`restartBackfill`), or found going by the store's alarm. The next
+     * look is due at the end of the run's lease, or a lease's time after
+     * this once that ended (store-host.ts, `#backfillDueAt`).
+     */
+    lookedAt: integer("looked_at"),
+    /**
+     * Hand-overs in a row that found no progress since the last
+     * (`scanned` still `stall_scanned`): the third fails the backfill as
+     * stalled, rather than starting runs that can't move on, forever.
+     */
+    stalls: integer().notNull().default(0),
+    stallScanned: integer("stall_scanned"),
+    /** The last batch the current run committed, and what it answered. */
+    lastBatch: integer("last_batch").notNull().default(0),
+    lastOutcome: text("last_outcome"),
+    /** Where the scan is: the table and record it reached last. */
+    cursorTable: text("cursor_table"),
+    cursorRecord: text("cursor_record"),
+    /** Records looked at, and records filled in, so far. */
+    scanned: integer().notNull().default(0),
+    filled: integer().notNull().default(0),
+    /** For a failed backfill: the record whose value doesn't fit (JSON). */
+    failure: text(),
+    /**
+     * The revision that record was at when it failed the backfill: a
+     * retry runs only once it moved on (`retryBackfill`), so a failure
+     * nobody changed anything for isn't retried in a loop.
+     */
+    failureRevision: integer("failure_revision"),
+    createdAt: integer("created_at").notNull(),
+    completedAt: integer("completed_at"),
+  },
+  (table) => [
+    check("sdk_schema_backfills_attempt", sql`${table.attempt} >= 1`),
+    check(
+      "sdk_schema_backfills_failure",
+      sql`(${table.state} = 'failed') = (${table.failure} IS NOT NULL)`
+    ),
+    // One pending target at a time.
+    uniqueIndex("sdk_schema_backfills_pending")
+      .on(table.state)
+      .where(sql`state <> 'complete'`),
+  ]
+);
+
+/**
  * A mutation's receipt (data-store.ts), under the hash of its scope and
  * key: the hash of its input, the fence the attempt holding it claimed
  * last, and, once its mutation committed, the outcome, committed in the

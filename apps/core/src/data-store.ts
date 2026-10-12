@@ -17,6 +17,13 @@ import { migrateOnWake } from "./db/migrate.ts";
 import { outboxConsumers } from "./outbox-delivery.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { StoreHost } from "./store-host.ts";
+import type {
+  BackfillOutcome,
+  BackfillRestart,
+  BackfillStatus,
+  BackfillStep,
+  SchemaStatus,
+} from "./store-host.ts";
 
 // A business store: one Durable Object per store, named by the store's ID
 // (data-stores.ts), with a SQLite database of its own. What it does, and
@@ -50,6 +57,31 @@ export class DataStore extends DurableObject<Env> {
     consumer?: SchemaConsumer
   ): Promise<DefinedTables> {
     return await this.#host.defineTables(storeId, manifest, consumer);
+  }
+
+  /** `StoreHost.fillMissing`: one batch of the pending target's backfill. */
+  fillMissing(storeId: StoreId, step: BackfillStep): BackfillOutcome {
+    return this.#host.fillMissing(storeId, step);
+  }
+
+  /** `StoreHost.restartBackfill`. */
+  restartBackfill(storeId: StoreId, restart: BackfillRestart): number {
+    return this.#host.restartBackfill(storeId, restart);
+  }
+
+  /** `StoreHost.backfillStatus`. */
+  backfillStatus(storeId: StoreId): BackfillStatus | null {
+    return this.#host.backfillStatus(storeId);
+  }
+
+  /** `StoreHost.retryBackfill`. */
+  retryBackfill(storeId: StoreId, target: string): BackfillStatus | null {
+    return this.#host.retryBackfill(storeId, target);
+  }
+
+  /** `StoreHost.schemaStatus`. */
+  schemaStatus(storeId: StoreId, schemaHash: string): SchemaStatus {
+    return this.#host.schemaStatus(storeId, schemaHash);
   }
 
   /** `StoreHost.get`. */
