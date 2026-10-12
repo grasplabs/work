@@ -413,6 +413,12 @@ interface FunctionCaller {
   readonly by: Pick<Identity, "userId" | "role">;
   readonly requestId: string;
   readonly deadline: number;
+  /**
+   * What else must still hold before every protected step, for a caller
+   * whose call core admitted on more than the person's role (an agent's
+   * permission, agent-apps.ts): throws once it doesn't.
+   */
+  readonly stillAllowed?: () => Promise<void>;
 }
 
 /**
@@ -423,7 +429,7 @@ interface FunctionCaller {
 export const invocationFor = async (
   env: Env,
   release: Release,
-  { by, requestId, deadline }: FunctionCaller
+  { by, requestId, deadline, stillAllowed }: FunctionCaller
 ): Promise<Invocation> => {
   // SAFETY: a release's resource ID is the App it was sealed for.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -445,6 +451,7 @@ export const invocationFor = async (
     // commits. A release revoked meanwhile stops a call already running.
     authorize: async () => {
       await requireNotRevoked(env, app, release.manifest.resourceVersion);
+      await stillAllowed?.();
       return await operationRoles(env, by, app);
     },
   };
@@ -506,7 +513,8 @@ export const callAppFunction = async (
   by: Pick<Identity, "userId" | "role" | "teams">,
   app: unknown,
   request: unknown,
-  deadline = Date.now() + 60_000
+  deadline = Date.now() + 60_000,
+  stillAllowed?: () => Promise<void>
 ): Promise<FunctionAnswer> => {
   const requestId = crypto.randomUUID();
   const refused = (error: unknown): FunctionAnswer => ({
@@ -569,6 +577,7 @@ export const callAppFunction = async (
       by,
       requestId,
       deadline,
+      ...(stillAllowed === undefined ? {} : { stillAllowed }),
     });
     const result = await callOperation(
       hostedRelease(env, release),
