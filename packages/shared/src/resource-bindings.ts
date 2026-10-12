@@ -156,6 +156,120 @@ export interface ResourceBinding {
 }
 
 /**
+ * Whether a declared resource is served now, as a request of the App's
+ * current version would resolve it:
+ *
+ * - `served`: its active binding serves it;
+ * - `unbound`: it has no active binding;
+ * - `declaration_changed`: the current version declares it differently
+ *   from the version its binding was approved for;
+ * - `contract_changed`: its binding's target serves another contract, or
+ *   the same one changed, since it was approved;
+ * - `grant_lost`: its binding's target can't be bound any more: the
+ *   permission it names was revoked, the deployment no longer allows its
+ *   model, or its template version can't be served;
+ * - `unchecked`: the review couldn't ask connect about its binding within
+ *   its limit, so it is never reported served; the next request checks it
+ *   live;
+ * - `budget_damaged`: its stored budget doesn't read (`budgetDamaged` on
+ *   the binding), so it serves nothing rather than run uncapped, until an
+ *   admin binds it again.
+ *
+ * A model binding's caps are on the binding itself (`budget`).
+ */
+export type BindingState =
+  | "served"
+  | "unbound"
+  | "declaration_changed"
+  | "contract_changed"
+  | "grant_lost"
+  | "unchecked"
+  | "budget_damaged";
+
+/** One of the App's connection permissions, as a connector's choice. */
+export interface ConnectorChoice {
+  permissionId: string;
+  connectionId: string;
+  /** The one resource of the connection it is limited to, if any. */
+  resource: string | null;
+}
+
+/** One of the App's collection permissions, as a collection's choice. */
+export interface CollectionChoice {
+  permissionId: string;
+  collectionId: string;
+  /** The collection's name; null once it is gone. */
+  name: string | null;
+}
+
+/**
+ * What an admin may bind a declared resource to now, by its kind:
+ *
+ * - `model`: the models the deployment allows;
+ * - `connector`: the App's own active connection permissions that serve
+ *   the declared contract and allow the tool of every declared action;
+ * - `knowledge`: the App's own active permissions to read a collection,
+ *   one for each declared collection;
+ * - `template`: the published versions of the declared contract.
+ *
+ * Approving checks the choice again: one that stopped serving since is
+ * refused (`resource.target_invalid`). `truncated` says some were left
+ * out: a review reads a bounded number of grants and versions, and asks
+ * connect a bounded number of times.
+ */
+export type BindingChoices = { truncated: boolean } & (
+  | { kind: "model"; models: string[] }
+  | { kind: "connector"; permissions: ConnectorChoice[] }
+  | { kind: "knowledge"; permissions: CollectionChoice[] }
+  | { kind: "template"; versions: PublishedTemplate[] }
+);
+
+/** A resource the App's current version declares for its actions. */
+export interface DeclaredResource {
+  alias: string;
+  kind: BindingTarget["kind"];
+  /** A connector's or a template's contract; null for the other kinds. */
+  contract: string | null;
+  /** A connector's declared actions; empty for the other kinds. */
+  actions: string[];
+  /** Knowledge's declared operations; empty for the other kinds. */
+  operations: string[];
+  /** Knowledge's declared collections, by the names App code uses. */
+  collections: string[];
+  /** A model's output token ceiling; null for the other kinds. */
+  maxOutputTokens: number | null;
+  /** Whether a model answers in a structure the App declares. */
+  structuredOutput: boolean;
+  /** The paths of the App's actions that use it. */
+  usedBy: string[];
+  state: BindingState;
+  /** Its active binding, serving or not; null when `unbound`. */
+  binding: ResourceBinding | null;
+  /** What it may be bound to: for admins of the organization only. */
+  choices: BindingChoices | null;
+}
+
+/** An App's declared resources and how each is bound, for its settings. */
+export interface ResourceBindingsReview {
+  app: string;
+  /** The App's current version, null before it has one. */
+  version: number | null;
+  /** What the current version declares for its actions, by alias. */
+  resources: DeclaredResource[];
+  /**
+   * Active bindings of aliases the current version doesn't declare: they
+   * serve nothing until a version declares the alias again, and can be
+   * revoked.
+   */
+  undeclared: ResourceBinding[];
+  /**
+   * The review reached its limit on asking connect: some bindings are
+   * `unchecked`, or some connector choices left out (`truncated` there).
+   */
+  truncated: boolean;
+}
+
+/**
  * An App's resource bindings, over `/rpc`. Approving and revoking are for
  * admins of the organization only, never Grasp staff or builders, and
  * audited; listing is for admins and the App's builders.
@@ -184,6 +298,12 @@ export interface ResourceBindingsApi {
   revoke: (id: string) => Promise<ResourceBinding>;
   /** The App's bindings, active first, then newest first. */
   list: (app: string) => Promise<ResourceBinding[]>;
+  /**
+   * What the App's current version declares for its actions, each with
+   * whether a binding serves it now, and why not, and for admins what it
+   * may be bound to. For admins and the App's builders.
+   */
+  review: (app: string) => Promise<ResourceBindingsReview>;
 }
 
 /**

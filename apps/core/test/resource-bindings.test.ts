@@ -4,7 +4,10 @@ import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import type { ModelBindingBudgetInput } from "@grasp-os/shared/resource-bindings";
+import type {
+  ModelBindingBudgetInput,
+  ResourceBindingsReview,
+} from "@grasp-os/shared/resource-bindings";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -16,7 +19,11 @@ import { callAppFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
-import { appMembers, appResourceBindings } from "../src/db/core/schema.ts";
+import {
+  appMembers,
+  appResourceBindings,
+  permissions as permissionRows,
+} from "../src/db/core/schema.ts";
 import { createCollection } from "../src/knowledge/collections.ts";
 import { saveDocument } from "../src/knowledge/documents.ts";
 import {
@@ -29,6 +36,7 @@ import { invocationSources } from "../src/resource-adapter.ts";
 import {
   approveResourceBinding,
   listResourceBindings,
+  reviewResourceBindings,
   revokeResourceBinding,
 } from "../src/resource-bindings.ts";
 import { publishTemplate, templateAdapter } from "../src/resource-templates.ts";
@@ -1448,11 +1456,12 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       alias: "letter",
       contract: "grasp.letter@1",
     } as const;
-    const served = await templateAdapter.bind(env, sealed.app, declaration, {
+    const bound = await templateAdapter.bind(env, sealed.app, declaration, {
       kind: "template",
       templateId: letter.templateId,
       version: 1,
     });
+    const served = typeof bound === "object" ? bound : undefined;
     // Between the request resolving its binding and reading it, the row
     // and its hash are both replaced: the read must not serve the new row.
     const gotcha = JSON.stringify({ greeting: "Gotcha" });
@@ -1911,6 +1920,382 @@ describe("model binding budgets", { timeout: 120_000 }, () => {
       outcome: { failed: "resource.unavailable" },
       sent: 0,
       shown: [null, true],
+    });
+  });
+});
+
+/**
+ * An App whose actions use a model (unless `withWriter` is false), two
+ * Knowledge collections and a template of `contract`.
+ */
+const deskFiles = (
+  contract: string,
+  withWriter = true
+): Record<string, string> => ({
+  "schema.ts": modelFiles()["schema.ts"] ?? "",
+  "operations/desk.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+${withWriter ? `export const writer = resource.model("writer", { maxOutputTokens: 300 });` : ""}
+
+export const help = resource.knowledge("help", {
+  operations: ["search"],
+  collections: ["handbook", "salaries"],
+});
+
+export const letter = resource.template("letter", { contract: ${JSON.stringify(contract)} });
+
+${
+  withWriter
+    ? `export const draft = action({
+  args: { prompt: v.string().min(1) },
+  returns: v.string(),
+  uses: [writer],
+  handler: async (ctx, args) => await ctx.resources.writer.generate({ prompt: args.prompt }),
+});`
+    : ""
+}
+
+export const find = action({
+  args: { text: v.string().min(1) },
+  returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
+  uses: [help],
+  handler: async (ctx, args) => await ctx.resources.help.search({ text: args.text }),
+});
+
+export const read = action({
+  args: {},
+  returns: v.number(),
+  uses: [letter],
+  handler: async (ctx) => {
+    const template = await ctx.resources.letter.read();
+    return template.version;
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { ${withWriter ? "draft, writer, " : ""}find, help, letter, read } from "./operations/desk.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Desk",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { desk: { ${withWriter ? "draft, " : ""}find, read } },
+  internalOperations: {},
+  screens: [],
+  uses: [${withWriter ? "writer, " : ""}help, letter],
+});
+`,
+});
+
+/** A template contract of the test's own: templates are the organization's. */
+const ownContract = (): string =>
+  `grasp.desk-${crypto.randomUUID().slice(0, 8)}@1`;
+
+/**
+ * The Desk App, sealed and current, granted to read one collection, with a
+ * version of its template's contract and one of another contract published.
+ */
+const deskApp = async () => {
+  const contract = ownContract();
+  const sealed = await sealedApp(deskFiles(contract));
+  const admin = await person("admin");
+  const handbook = await createCollection(env, admin, {
+    name: "Handbook",
+    access: "everyone",
+  });
+  const permission = await grantedCollection(
+    sealed,
+    admin,
+    handbook.id,
+    "HANDBOOK"
+  );
+  const template = await publishTemplate(env, admin, {
+    contract,
+    content: { greeting: "Dear" },
+  });
+  await publishTemplate(env, admin, {
+    contract: ownContract(),
+    content: { greeting: "Other" },
+  });
+  return { contract, sealed, admin, handbook, permission, template };
+};
+
+type Desk = Awaited<ReturnType<typeof deskApp>>;
+
+/** Binds each of the Desk's resources, as its admin, to what it is offered. */
+const bindDesk = async ({ sealed, admin, permission, template }: Desk) => {
+  const approve = async (alias: string, target: object) =>
+    await approveResourceBinding(env, admin, {
+      app: sealed.app,
+      alias,
+      target,
+      reviewed: { version: 1 },
+    });
+  await approve("writer", { kind: "model", model: allowedModel });
+  await approve("help", {
+    kind: "knowledge",
+    collections: { handbook: permission, salaries: permission },
+  });
+  await approve("letter", {
+    kind: "template",
+    templateId: template.templateId,
+    version: template.version,
+  });
+};
+
+/**
+ * A copy of the App's permission `id` that holds in one chat only, as a
+ * chat's agent asks for one: it never serves a binding.
+ */
+const chatScopedCopy = async (id: string): Promise<void> => {
+  const db = drizzle(env.DB);
+  const row = await db
+    .select()
+    .from(permissionRows)
+    .where(eq(permissionRows.id, id))
+    .get();
+  if (row === undefined) {
+    throw new Error(`No permission ${id}`);
+  }
+  await db
+    .insert(permissionRows)
+    .values({ ...row, id: crypto.randomUUID(), chatId: crypto.randomUUID() });
+};
+
+/** Each declared resource's state, by alias, as a review answers it. */
+const statesOf = (review: ResourceBindingsReview): Record<string, string> =>
+  Object.fromEntries(
+    review.resources.map(({ alias, state }) => [alias, state])
+  );
+
+describe("an App's resource review", { timeout: 120_000 }, () => {
+  it("lists what the current version declares, and offers an admin only what may serve it", async () => {
+    const { sealed, admin, contract, handbook, permission, template } =
+      await deskApp();
+    // Neither another App's grant nor one held in a chat only is offered.
+    await deskApp();
+    await chatScopedCopy(permission);
+    const review = await reviewResourceBindings(env, admin, sealed.app);
+    expect(review).toStrictEqual({
+      app: sealed.app,
+      version: 1,
+      undeclared: [],
+      truncated: false,
+      resources: [
+        {
+          alias: "help",
+          kind: "knowledge",
+          contract: null,
+          actions: [],
+          operations: ["search"],
+          collections: ["handbook", "salaries"],
+          maxOutputTokens: null,
+          structuredOutput: false,
+          usedBy: ["desk.find"],
+          state: "unbound",
+          binding: null,
+          // The App's own grant to read, and no other collection.
+          choices: {
+            kind: "knowledge",
+            permissions: [
+              {
+                permissionId: permission,
+                collectionId: handbook.id,
+                name: "Handbook",
+              },
+            ],
+            truncated: false,
+          },
+        },
+        {
+          alias: "letter",
+          kind: "template",
+          contract,
+          actions: [],
+          operations: [],
+          collections: [],
+          maxOutputTokens: null,
+          structuredOutput: false,
+          usedBy: ["desk.read"],
+          state: "unbound",
+          binding: null,
+          // Versions of the declared contract only.
+          choices: {
+            kind: "template",
+            versions: [template],
+            truncated: false,
+          },
+        },
+        {
+          alias: "writer",
+          kind: "model",
+          contract: null,
+          actions: [],
+          operations: [],
+          collections: [],
+          maxOutputTokens: 300,
+          structuredOutput: false,
+          usedBy: ["desk.draft"],
+          state: "unbound",
+          binding: null,
+          choices: {
+            kind: "model",
+            models: [allowedModel],
+            truncated: false,
+          },
+        },
+      ],
+    });
+  });
+
+  it("says a resource is served exactly when its next request is", async () => {
+    const desk = await deskApp();
+    const unbound = await call(env, desk.sealed, "desk.read", {});
+    await bindDesk(desk);
+    const review = await reviewResourceBindings(
+      env,
+      desk.admin,
+      desk.sealed.app
+    );
+    const bound = await call(env, desk.sealed, "desk.read", {});
+    const letter = review.resources.find(({ alias }) => alias === "letter");
+    // Revoked: unbound again, and the next request is refused.
+    await revokeResourceBinding(env, desk.admin, letter?.binding?.id);
+    const revoked = await reviewResourceBindings(
+      env,
+      desk.admin,
+      desk.sealed.app
+    );
+    const afterRevoke = await call(env, desk.sealed, "desk.read", {});
+    expect({
+      unbound: outcomeOf(unbound),
+      states: statesOf(review),
+      bound: outcomeOf(bound),
+      revoked: statesOf(revoked),
+      afterRevoke: outcomeOf(afterRevoke),
+      letter: letter?.binding?.target,
+    }).toStrictEqual({
+      unbound: { failed: "resource.unavailable" },
+      states: { help: "served", letter: "served", writer: "served" },
+      bound: 1,
+      revoked: { help: "served", letter: "unbound", writer: "served" },
+      afterRevoke: { failed: "resource.unavailable" },
+      letter: {
+        kind: "template",
+        templateId: desk.template.templateId,
+        version: 1,
+      },
+    });
+  });
+
+  it("says why a binding no longer serves: a lost grant, or a changed declaration", async () => {
+    const desk = await deskApp();
+    const { sealed, admin, permission } = desk;
+    await bindDesk(desk);
+    // The collection grant is revoked, and the deployment stops allowing
+    // the model: both targets are lost.
+    await revokePermission(env, admin, permission);
+    const { gatewayEnv: narrowed } = gatewayEnv([], []);
+    const lost = await reviewResourceBindings(narrowed, admin, sealed.app);
+    const found = await call(env, sealed, "desk.find", { text: "leave" });
+    // A version that declares a template of another contract, and no
+    // model at all.
+    const next = await nextVersion(sealed, deskFiles(ownContract(), false), 2);
+    const changed = await reviewResourceBindings(env, admin, sealed.app);
+    const read = await call(env, next, "desk.read", {});
+    expect({
+      lost: statesOf(lost),
+      found: outcomeOf(found),
+      changed: statesOf(changed),
+      undeclared: changed.undeclared.map(({ alias }) => alias),
+      read: outcomeOf(read),
+    }).toStrictEqual({
+      lost: { help: "grant_lost", letter: "served", writer: "grant_lost" },
+      found: { failed: "resource.unavailable" },
+      changed: { help: "grant_lost", letter: "declaration_changed" },
+      undeclared: ["writer"],
+      read: { failed: "resource.unavailable" },
+    });
+  });
+
+  it("shows a model binding's budget, and a damaged one as serving nothing", async () => {
+    const { sealed, admin } = await deskApp();
+    const capped = await approveResourceBinding(env, admin, {
+      app: sealed.app,
+      alias: "writer",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+      budget: { perDay: 1 },
+    });
+    const writerIn = async () => {
+      const review = await reviewResourceBindings(env, admin, sealed.app);
+      const writer = review.resources.find(({ alias }) => alias === "writer");
+      return {
+        state: writer?.state,
+        perDay: writer?.binding?.budget?.perDay ?? null,
+        damaged: writer?.binding?.budgetDamaged,
+      };
+    };
+    const intact = await writerIn();
+    await drizzle(env.DB)
+      .update(appResourceBindings)
+      .set({ budget: JSON.stringify({ perDay: "lots" }) })
+      .where(eq(appResourceBindings.id, capped.id));
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      answer("Uncapped."),
+    ]);
+    const drafted = await call(withGateway, sealed, "desk.draft", {
+      prompt: "Hi",
+    });
+    expect({
+      intact,
+      damaged: await writerIn(),
+      drafted: outcomeOf(drafted),
+      sent: gateway.requests.length,
+    }).toStrictEqual({
+      intact: { state: "served", perDay: 1, damaged: false },
+      damaged: { state: "budget_damaged", perDay: null, damaged: true },
+      drafted: { failed: "resource.unavailable" },
+      sent: 0,
+    });
+  });
+
+  it("shows the App's builders its bindings with nothing to choose, and nobody else", async () => {
+    const desk = await deskApp();
+    await bindDesk(desk);
+    const builders = await reviewResourceBindings(
+      env,
+      desk.sealed.owner,
+      desk.sealed.app
+    );
+    // Grasp staff build as admins do, but never decide a binding.
+    const staff = await reviewResourceBindings(
+      env,
+      { ...(await person("admin")), staff: true },
+      desk.sealed.app
+    );
+    const member = await person("user");
+    // A builder, of an App of their own, but not of this one.
+    const { owner: otherBuilder } = await appWith(deskFiles(ownContract()));
+    expect({
+      states: statesOf(builders),
+      choices: builders.resources.map(({ choices }) => choices),
+      staff: staff.resources.map(({ choices }) => choices),
+      member: await failure(
+        async () => await reviewResourceBindings(env, member, desk.sealed.app)
+      ),
+      otherBuilder: await failure(
+        async () =>
+          await reviewResourceBindings(env, otherBuilder, desk.sealed.app)
+      ),
+    }).toStrictEqual({
+      states: { help: "served", letter: "served", writer: "served" },
+      choices: [null, null, null],
+      staff: [null, null, null],
+      member: "app.not_found",
+      otherBuilder: "app.not_found",
     });
   });
 });

@@ -6,7 +6,7 @@ import type {
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
-import type { PermissionId } from "@grasp-os/shared/ids";
+import type { ConnectionId, PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
@@ -20,8 +20,10 @@ import { readContractSchema } from "./connector-contracts.ts";
 import type { ReadSchema } from "./connector-contracts.ts";
 import { permissions } from "./db/core/schema.ts";
 import type { ResourceContext } from "./operations.ts";
+import { unchecked } from "./resource-adapter.ts";
 import type {
   BindingCaller,
+  ContractAsks,
   DeclarationOf,
   ResourceAdapter,
 } from "./resource-adapter.ts";
@@ -115,12 +117,12 @@ interface BoundAction {
 const contractOf = async (
   env: Env,
   contract: string,
-  grant: ConnectionGrant
+  connectionId: ConnectionId
 ): Promise<ConnectorContract | undefined> => {
   try {
     const served: ConnectorContract = await env.CONNECT.connectorContract({
       contract,
-      connectionId: grant.connection.connectionId,
+      connectionId,
     });
     return served;
   } catch (error) {
@@ -161,6 +163,93 @@ const boundActions = (
   }
   return bound;
 };
+
+/** One of the App's active connection permissions, as its row reads. */
+export interface ConnectionGrantRow {
+  readonly id: string;
+  readonly objectId: string;
+  readonly resource: string | null;
+  readonly actions: string;
+}
+
+/** `row` as a binding reads it; undefined when its actions don't read. */
+const grantOf = (row: ConnectionGrantRow): ConnectionGrant | undefined => {
+  const actions = actionsSchema.safeParse(JSON.parse(row.actions));
+  const permissionId = permissionIdSchema.safeParse(row.id);
+  const connectionId = connectionIdSchema.safeParse(row.objectId);
+  return actions.success && permissionId.success && connectionId.success
+    ? {
+        permissionId: permissionId.data,
+        connection: {
+          type: "connection",
+          connectionId: connectionId.data,
+          ...(row.resource === null ? {} : { resource: row.resource }),
+        },
+        actions: actions.data,
+      }
+    : undefined;
+};
+
+/**
+ * Asks connect what connections serve, for one review of an App's
+ * resources: each connection's contract at most once, however many
+ * declarations or permissions name it, and at most `limit` asks in all.
+ * `truncated` says whether the limit left something unasked.
+ */
+export const contractReader = (env: Env, limit: number) => {
+  const asked = new Map<string, Promise<ConnectorContract | undefined>>();
+  let truncated = false;
+  const asks: ContractAsks = {
+    contractOf: async (connectionId, contract) => {
+      const key = JSON.stringify([connectionId, contract]);
+      let served = asked.get(key);
+      if (served === undefined) {
+        if (asked.size >= limit) {
+          truncated = true;
+          return unchecked;
+        }
+        served = contractOf(env, contract, connectionId);
+        asked.set(key, served);
+      }
+      return await served;
+    },
+  };
+  return {
+    /** For the adapter's bind, within the same review. */
+    asks,
+    /**
+     * Whether `row`, already read as one of the App's active connection
+     * permissions, binds `declaration` exactly as the adapter would: its
+     * connection serves the declared contract and the permission allows
+     * the tool of every declared action. Undefined when the limit left it
+     * unasked.
+     */
+    serves: async (
+      row: ConnectionGrantRow,
+      declaration: DeclarationOf<"connector">
+    ): Promise<boolean | undefined> => {
+      const grant = grantOf(row);
+      if (grant === undefined) {
+        return false;
+      }
+      const contract = await asks.contractOf(
+        grant.connection.connectionId,
+        declaration.contract
+      );
+      if (contract === unchecked) {
+        return undefined;
+      }
+      return (
+        contract !== undefined &&
+        boundActions(declaration, contract.actions, grant) !== undefined
+      );
+    },
+    /** Whether the limit left something unasked. */
+    truncated: (): boolean => truncated,
+  };
+};
+
+export type ContractReader = ReturnType<typeof contractReader>;
 
 /**
  * `value` as `read` normalizes it, if it fits the descriptor and every
@@ -284,12 +373,20 @@ const fingerprintOf = async (
   );
 
 export const connectorAdapter: ResourceAdapter<"connector"> = {
-  bind: async (env, app, declaration, target) => {
+  bind: async (env, app, declaration, target, asks) => {
     const grant = await connectionGrant(env, app, target.permissionId);
-    const served =
-      grant === undefined
+    const { connectionId } = grant?.connection ?? {};
+    // A review shares and bounds what it asks connect; a request asks live.
+    const answered =
+      connectionId === undefined
         ? undefined
-        : await contractOf(env, declaration.contract, grant);
+        : await (asks === undefined
+            ? contractOf(env, declaration.contract, connectionId)
+            : asks.contractOf(connectionId, declaration.contract));
+    if (answered === unchecked) {
+      return unchecked;
+    }
+    const served = answered;
     const actions =
       grant === undefined || served === undefined
         ? undefined
