@@ -1,6 +1,7 @@
 import { appModuleName, kitModuleName } from "@grasp-os/compiler";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { versionErrors } from "@grasp-os/shared/app-releases";
+import { whenAborted } from "@grasp-os/shared/deadline";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -353,14 +354,19 @@ export const releaseRunner =
     const host = sessionHost(env);
     const answer = settledSchema.safeParse(
       host === undefined
-        ? await env.LOADER.get(null, () => ({
-            ...sandbox,
-            mainModule: runModule,
-            modules,
-            env: {},
-          }))
-            .getEntrypoint<RunEntrypoint>("Run")
-            .run(path, args, isolateChannel)
+        ? await Promise.race([
+            env.LOADER.get(null, () => ({
+              ...sandbox,
+              mainModule: runModule,
+              modules,
+              env: {},
+            }))
+              .getEntrypoint<RunEntrypoint>("Run")
+              .run(path, args, isolateChannel),
+            // Given up on: settled at once, its isolate left to the
+            // runtime, as nothing of core's is held for it.
+            ...(signal === undefined ? [] : [whenAborted(signal)]),
+          ])
         : await runInSession(
             host,
             {

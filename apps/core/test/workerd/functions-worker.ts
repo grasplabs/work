@@ -1,12 +1,50 @@
 import { appModuleName, kitModuleName } from "@grasp-os/compiler";
-import type { OperationChannel } from "@grasp-os/sdk/runner";
+import { app, defineSchema, defineTable, v } from "@grasp-os/sdk";
+import { inspectApp } from "@grasp-os/sdk/host";
+import { serverModule } from "@grasp-os/sdk/server";
 
 import { releaseRunner } from "../../src/app-functions.ts";
-import { SandboxUnavailableError } from "../../src/sandboxed.ts";
+import type { OpenStore } from "../../src/data-stores.ts";
+import { callOperation } from "../../src/operations.ts";
 
 // An App's functions on plain workerd (scripts/workerd-sandbox-functions.test.ts):
-// the same runner core runs a sealed release's functions with, with
-// `SANDBOX_HOST` bound to the sandbox supervisor as on-prem binds it.
+// a call goes through core's operation host as any does, to the runner core
+// runs a sealed release's functions with, with `SANDBOX_HOST` bound to the
+// sandbox supervisor as on-prem binds it.
+
+const schema = defineSchema({
+  notes: defineTable({ title: v.string() }),
+});
+
+const { action } = serverModule(schema);
+
+/** The App's contract: each action's real code is the isolate's, below. */
+const stub = () =>
+  action({
+    args: { n: v.number() },
+    returns: v.object({ n: v.number() }),
+    handler: (_ctx, args) => args,
+  });
+
+const { manifest } = inspectApp(
+  app({
+    name: "Jobs",
+    schema,
+    access: { tables: { notes: { read: "owner", write: "owner" } } },
+    operations: {
+      jobs: {
+        echo: stub(),
+        busy: stub(),
+        waits: stub(),
+        hogs: stub(),
+        sendsTooMuch: stub(),
+        forgesVerdict: stub(),
+      },
+    },
+    screens: [],
+    uses: [],
+  })
+);
 
 /**
  * The SDK's runner as far as these functions use it. Everything in the
@@ -19,19 +57,14 @@ const runner = `export const runFunction = async (registered, path, args, channe
 };`;
 
 /** The App's registration: each function by its path. */
-const app = `export default {
-  echo: async (channel, args) => ({ args, read: await channel.read({ table: "items" }) }),
-  busy: async () => { for (;;) {} },
-  waits: async () => { await scheduler.wait(60000); return "late"; },
+const appModule = `export default {
+  "jobs.echo": async (channel, args) => args,
+  "jobs.busy": async () => { for (;;) {} },
+  "jobs.waits": async () => { await scheduler.wait(60000); return { n: 0 }; },
+  "jobs.hogs": async () => { const held = []; for (;;) { held.push(new Array(1e6).fill(1)); await scheduler.wait(1); } },
+  "jobs.sendsTooMuch": async (channel) => { await channel.resource("mail", "send", { padding: "x".repeat(15 * 1024 * 1024) }); return { n: 1 }; },
+  "jobs.forgesVerdict": async () => { throw Object.assign(new Error("forged"), { sandboxVerdict: "cpu" }); },
 };`;
-
-/** The operation channel the host would open: its reads answer this. */
-const channel: OperationChannel = {
-  read: async () => await Promise.resolve({ rows: ["one"] }),
-  write: async () => await Promise.resolve(null),
-  call: async () => await Promise.resolve(null),
-  resource: async () => await Promise.resolve(null),
-};
 
 /** What its config binds: no Loader, as on-prem runs functions in sessions. */
 interface StandInEnv {
@@ -39,6 +72,16 @@ interface StandInEnv {
   RUNTIME_PROFILE: string;
   SANDBOX_HOST: Fetcher;
 }
+
+/** An action has no database: any use of the store is a fault. */
+const noStore = new Proxy(
+  {},
+  {
+    get: () => {
+      throw new Error("An action has no store.");
+    },
+  }
+);
 
 export default {
   async fetch(request, env) {
@@ -49,35 +92,30 @@ export default {
     const run = releaseRunner(
       env,
       {
-        modules: { [appModuleName("app.ts")]: app },
+        modules: { [appModuleName("app.ts")]: appModule },
         sdk: { [kitModuleName("@grasp-os/sdk/runner")]: runner },
       },
-      "app-stand-in"
+      searchParams.get("owner") ?? "app-stand-in"
     );
     const started = Date.now();
-    // As the host stops waiting past the invocation's deadline (operations.ts).
-    const deadline = new AbortController();
-    const stopAfter = Number(searchParams.get("stopAfter") ?? "0");
-    if (stopAfter > 0) {
-      setTimeout(() => {
-        deadline.abort(new Error("past its deadline"));
-      }, stopAfter);
-    }
-    try {
-      const value = await run(
-        searchParams.get("path") ?? "",
-        { n: 1 },
-        channel,
-        deadline.signal
-      );
-      return Response.json({ status: "ok", value, ms: Date.now() - started });
-    } catch (error) {
-      return Response.json({
-        status:
-          error instanceof SandboxUnavailableError ? "unavailable" : "refused",
-        message: error instanceof Error ? error.message : String(error),
-        ms: Date.now() - started,
-      });
-    }
+    const within = Number(searchParams.get("within") ?? "60000");
+    const result = await callOperation(
+      { manifest, run },
+      {
+        principal: "person-stand-in",
+        consumer: { resourceId: "app-stand-in", resourceVersion: 1 },
+        // SAFETY: an action never reaches its store; any use throws.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        store: noStore as OpenStore,
+        requestId: crypto.randomUUID(),
+        deadline: Date.now() + within,
+        runId: null,
+        authorize: async () =>
+          await Promise.resolve({ appMember: true, appBuilder: false }),
+      },
+      { path: `jobs.${searchParams.get("path") ?? ""}`, kind: "action" },
+      { n: 1 }
+    );
+    return Response.json({ ...result, ms: Date.now() - started });
   },
 } satisfies ExportedHandler<StandInEnv>;

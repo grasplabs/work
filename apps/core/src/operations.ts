@@ -68,6 +68,8 @@ import { z } from "zod";
 import type { OpenStore } from "./data-stores.ts";
 import { openChannel } from "./operation-channel.ts";
 import type { OpenChannel } from "./operation-channel.ts";
+import { sandboxVerdictOf } from "./sandbox-session.ts";
+import { SandboxUnavailableError } from "./sandboxed.ts";
 import {
   queryMaxReruns,
   readConsistently,
@@ -604,6 +606,48 @@ const failureOf = (
     code: typeof code === "string" ? code : undefined,
   });
   return Object.assign(new Error("Unexpected failure"), { unexpected: true });
+};
+
+/** The error each verdict of the sandbox's becomes for a function's caller. */
+const sandboxCodes = {
+  cpu: "operation.cpu_exceeded",
+  memory: "operation.memory_exceeded",
+  deadline: "operation.deadline_exceeded",
+  refused: "operation.sandbox_refused",
+  busy: "operation.sandbox_busy",
+} as const;
+
+const isSandboxVerdict = (
+  verdict: string | undefined
+): verdict is keyof typeof sandboxCodes =>
+  verdict !== undefined && Object.hasOwn(sandboxCodes, verdict);
+
+/**
+ * What a function the on-prem sandbox ended fails with, or undefined for
+ * any other failure: the App's (CPU time, memory, deadline, what its code
+ * sent) or the platform's, to try again (its share of the sandbox in use,
+ * the sandbox down). A crash stays `internal.unexpected`. Only what core
+ * made: never a property App code may set on an error it throws.
+ */
+const sandboxFailureOf = (
+  thrown: unknown,
+  requestId: string,
+  path: string
+): Error | undefined => {
+  if (thrown instanceof SandboxUnavailableError) {
+    log.error("operation.sandbox_unavailable", {
+      requestId,
+      path,
+      ...errorFields(thrown),
+    });
+    return hostError(operationErrors.create("operation.sandbox_unavailable"));
+  }
+  const verdict = sandboxVerdictOf(thrown);
+  if (!isSandboxVerdict(verdict)) {
+    return undefined;
+  }
+  log.warn("operation.sandbox_ended", { requestId, path, verdict });
+  return hostError(operationErrors.create(sandboxCodes[verdict]));
 };
 
 /** A JSON object: `Array.isArray` doesn't narrow a readonly array type. */
@@ -1512,6 +1556,19 @@ const refusalsOf = {
   },
 } as const;
 
+/** How long a run stopped at its deadline gets to let go of what it held. */
+const letGoMs = 1000;
+
+/**
+ * Waits, a little, for a run stopped at its deadline to let go of what it
+ * holds (an on-prem sandbox process, which its runner frees when the run's
+ * signal aborts): past the answer, the request that frees it may itself be
+ * cancelled.
+ */
+const letGo = async (ran: Promise<unknown>): Promise<void> => {
+  await Promise.race([ran, scheduler.wait(letGoMs)]);
+};
+
 /**
  * Runs `operation`'s handler with `args` over a channel of `capabilities`,
  * ended once it settles, and answers its checked return; a failure as the
@@ -1538,14 +1595,14 @@ const runHandler = async (
     refusals: refusalsOf[operation.kind],
   });
   const stopped = new AbortController();
+  const ran = settle(
+    run.app.run(operation.path, fresh(args), open.channel, stopped.signal)
+  );
+  let expired = false;
   try {
-    const outcome = await untilDeadline(
-      settle(
-        run.app.run(operation.path, fresh(args), open.channel, stopped.signal)
-      ),
-      run.invocation.deadline
-    );
+    const outcome = await untilDeadline(ran, run.invocation.deadline);
     if (outcome === "expired") {
+      expired = true;
       // Stopped at its deadline: its channel ends as this returns (the
       // `finally` below), so nothing it still does reaches the store, and
       // what it staged never commits.
@@ -1557,6 +1614,14 @@ const runHandler = async (
     if ("thrown" in outcome) {
       if (stale !== undefined && (await stale())) {
         throw staleRun;
+      }
+      const sandboxed = sandboxFailureOf(
+        outcome.thrown,
+        run.invocation.requestId,
+        operation.path
+      );
+      if (sandboxed !== undefined) {
+        throw sandboxed;
       }
       throw failureOf(
         outcome.thrown,
@@ -1596,6 +1661,9 @@ const runHandler = async (
     // ends with its channel.
     stopped.abort();
     open.end();
+    if (expired) {
+      await letGo(ran);
+    }
   }
 };
 
