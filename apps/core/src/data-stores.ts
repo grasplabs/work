@@ -304,7 +304,12 @@ export const deleteStore = async (
   if (await boundToCurrentRelease(env, store.id)) {
     const db = drizzle(env.DB);
     await auditedBatch(env, db, [
-      outboxed(db, storeEntry(by, "store.delete_refused", store.id)),
+      outboxed(
+        db,
+        storeEntry(by, "store.delete_refused", store.id, {
+          reason: "data.store_bound",
+        })
+      ),
     ]);
     throw dataErrors.create("data.store_bound");
   }
@@ -317,7 +322,12 @@ export const deleteStore = async (
     if (dataErrors.codeOf(error) === "data.store_in_use") {
       const db = drizzle(env.DB);
       await auditedBatch(env, db, [
-        outboxed(db, storeEntry(by, "store.delete_refused", store.id)),
+        outboxed(
+          db,
+          storeEntry(by, "store.delete_refused", store.id, {
+            reason: "data.store_in_use",
+          })
+        ),
       ]);
     }
     throw error;

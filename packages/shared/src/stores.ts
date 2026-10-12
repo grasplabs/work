@@ -424,7 +424,7 @@ export const dataErrors = defineErrorFamily({
   "data.index_required":
     "This query needs an index this store doesn't hold for its schema.",
   "data.store_bound":
-    "This store can't be deleted while an App's current version reads and writes it. Make a version current that doesn't, first.",
+    "This store can't be deleted while an App's current version reads and writes it.",
   "data.store_in_use":
     "This store can't be deleted while a mutation's receipt still refers to it. Try again once its receipts have expired.",
 });

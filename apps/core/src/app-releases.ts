@@ -98,6 +98,10 @@ import { buildAppCode } from "./screens.ts";
 //   claimed, so no claim is ever written for a store that isn't.
 // - A release vouches for itself: its trust is always `unreviewed` in the
 //   manifest; approval and revocation are the host's records of its hash.
+//
+// What `sealRelease` leaves to its caller: that `by` may build the App
+// (activation checks it), and which store to bind (the host's choice,
+// never App code's). It checks itself that `by` manages that store.
 
 /** Where an artifact's bytes are, by their SHA-256. */
 const artifactKey = (sha256: string): string => `release-artifacts/${sha256}`;

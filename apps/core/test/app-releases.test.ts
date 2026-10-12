@@ -126,6 +126,12 @@ const artifactAt = (release: Release, path: string) => {
   return entry;
 };
 
+/** How many builds of an App's server code R2 holds. */
+const builds = async (): Promise<number> => {
+  const listed = await env.FILES.list({ prefix: "app-builds/" });
+  return listed.objects.length;
+};
+
 describe("sealing a release", { timeout: 120_000 }, () => {
   it("seals the SDK it was inspected with, and loads it back", async () => {
     const fixture = await appWith(notesFiles());
@@ -748,9 +754,14 @@ JSON.stringify = (value, ...rest) => {
     await expect(opened.generations([loser])).resolves.toStrictEqual({});
   });
 
-  it("is refused a store its sealer doesn't manage, before any App code runs, and claims nothing", async () => {
+  it("is refused a store its sealer doesn't manage, before its code is built or run, and claims nothing", async () => {
     const first = await appWith(notesFiles());
-    const second = await appWith(withTable(notesFiles(), "beta"));
+    // Files no other seal builds: any build of them is this seal's.
+    const second = await appWith({
+      ...withTable(notesFiles(), "beta"),
+      "operations/marker.ts": `export const marker = ${JSON.stringify(crypto.randomUUID())};\n`,
+    });
+    const before = await builds();
     await expect(
       failure(
         async () =>
@@ -768,7 +779,8 @@ JSON.stringify = (value, ...rest) => {
       .bind(first.store)
       .all();
     const opened = await openStore(env, first.store);
-    expect(claims.results).toStrictEqual([]);
+    // Nothing built, so nothing inspected: the store was checked first.
+    expect([await builds(), claims.results]).toStrictEqual([before, []]);
     // Never handed a schema: no tables were defined there either.
     await expect(opened.generations(["beta"])).rejects.toThrow(
       /wasn't handed/u
@@ -805,7 +817,8 @@ JSON.stringify = (value, ...rest) => {
       events.some(
         (event) =>
           event.action === "store.delete_refused" &&
-          event.target?.id === fixture.store
+          event.target?.id === fixture.store &&
+          event.detail?.reason === "data.store_bound"
       ),
       await failure(async () => await openStore(env, fixture.store)),
     ]).toStrictEqual([

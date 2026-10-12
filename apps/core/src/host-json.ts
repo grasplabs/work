@@ -13,9 +13,13 @@ import { valueDepth } from "@grasp-os/shared/value-depth";
 //   and never called by `.name`; a named function expression still calls
 //   itself by whatever name the bundler gave it.
 // - The bundler adds a helper to the source: `keepNames` wraps named
-//   functions nested in a body in `__name(...)`, which the isolate doesn't
-//   have. Such a source is refused, loudly, rather than loaded to fail on
-//   every answer (host-json.bundle.test.ts bundles it as Wrangler does).
+//   functions nested in a body in `__name(...)`, and other transforms call
+//   other `__` helpers, none of which the isolate has. Such a source is
+//   refused, loudly, rather than loaded to fail on every answer. A minifier
+//   renames the helpers past what this can see, so the test bundles the
+//   module with core's own Wrangler settings, minified and not, and runs
+//   the source it yields with nothing but the language's built-ins in
+//   scope (host-json.bundle.test.ts).
 // - The host's half of the isolate protocol comes to depend on the sealed
 //   SDK: this is a host module, never an SDK export, so the run module
 //   imports from a release's SDK only what `sdkProtocolVersion` pins.
@@ -23,8 +27,8 @@ import { valueDepth } from "@grasp-os/shared/value-depth";
 /** The host module's name in the isolate: a platform name, loaded last. */
 export const hostJsonModule = "grasp-host-json.js";
 
-/** The bundler helper `keepNames` calls, which an isolate doesn't define. */
-const bundlerHelper = "__name(";
+/** A call of a bundler helper (`__name(`, `__publicField(`, ...). */
+const bundlerHelper = /(?:^|[^\w$])__[\w$]+\(/u;
 
 /**
  * The host module's source: `jsonAnswer(value)`, the JSON text of a value
@@ -39,7 +43,7 @@ export const hostJsonSource = (
   ) => unknown = readJsonValue
 ): string => {
   const reader = read.toString();
-  if (reader.includes(bundlerHelper)) {
+  if (bundlerHelper.test(reader)) {
     throw new Error(
       "readJsonValue's source calls a bundler helper an App's isolate doesn't have: keep it free of nested named functions"
     );
