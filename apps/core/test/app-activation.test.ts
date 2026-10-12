@@ -9,7 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { activateVersion } from "../src/app-activation.ts";
 import { callAppFunction } from "../src/app-functions.ts";
-import { addMember } from "../src/app-members.ts";
+import { addMember, removeMember } from "../src/app-members.ts";
 import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import {
@@ -18,7 +18,15 @@ import {
   findApp,
   setCurrentVersion,
 } from "../src/apps.ts";
-import { deleteStore, openStore } from "../src/data-stores.ts";
+import type { Acting } from "../src/auth/identity.ts";
+import {
+  createStore,
+  deleteStore,
+  openStore,
+  shareStore,
+  storeManagers,
+  unshareStore,
+} from "../src/data-stores.ts";
 import { appDefaultStores, sdkStoreOwners } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { storeClosingMs } from "../src/store-deletion.ts";
@@ -575,3 +583,141 @@ describe(
     });
   }
 );
+
+/** Whom `by` sees listed as managing store `store`, by ID. */
+const managerIds = async (by: Acting, store: string): Promise<string[]> => {
+  const managers = await storeManagers(env, by, store);
+  return managers.map(({ id }) => id);
+};
+
+/** Makes `userId` a user of the organization, a role that doesn't build. */
+const demote = async (userId: string): Promise<void> => {
+  await env.DB.prepare("UPDATE members SET role = 'user' WHERE user_id = ?")
+    .bind(userId)
+    .run();
+};
+
+describe("an App's default store", { timeout: 120_000 }, () => {
+  it("is managed by whoever builds the App, not by the builder who first activated once they leave", async () => {
+    const { owner, app } = await appWith(notesFiles());
+    // A builder the App is shared with activates first, so the store is
+    // theirs as `createStore` records it.
+    const first = await person("builder");
+    await addMember(env, owner, app, {
+      type: "person",
+      id: first.userId,
+      role: "builder",
+    });
+    await activateVersion(env, first, app, 1);
+    const [recorded] = await defaultStores(app);
+    const store = recorded?.storeId ?? "";
+    const whileBuilding = await storeManagers(env, first, store);
+    await removeMember(env, owner, app, { type: "person", id: first.userId });
+    const admin = await person("admin");
+    expect([
+      whileBuilding.map(({ id }) => id),
+      await failure(async () => await storeManagers(env, first, store)),
+      await failure(async () => {
+        await deleteStore(env, first, store);
+      }),
+      await managerIds(owner, store),
+      await managerIds(admin, store),
+    ]).toStrictEqual([
+      [owner.userId, first.userId],
+      "data.store_unavailable",
+      "data.store_unavailable",
+      // The owner is left, as an admin sees it too.
+      [owner.userId],
+      [owner.userId],
+    ]);
+  });
+
+  it("lists as managers only who builds the App now, its owner included", async () => {
+    const { owner, app } = await appWith(notesFiles());
+    await activateVersion(env, owner, app, 1);
+    const [recorded] = await defaultStores(app);
+    const store = recorded?.storeId ?? "";
+    const capped = await person("builder");
+    const builds = await person("builder");
+    for (const member of [capped, builds]) {
+      // oxlint-disable-next-line no-await-in-loop -- shared in turn, so the order they are listed in is theirs
+      await addMember(env, owner, app, {
+        type: "person",
+        id: member.userId,
+        role: "builder",
+      });
+    }
+    const admin = await person("admin");
+    const before = await managerIds(admin, store);
+    // Their role in the organization caps their role in the App.
+    await demote(capped.userId);
+    const memberCapped = await managerIds(admin, store);
+    await demote(owner.userId);
+    expect([
+      before,
+      memberCapped,
+      await managerIds(admin, store),
+    ]).toStrictEqual([
+      [owner.userId, capped.userId, builds.userId],
+      [owner.userId, builds.userId],
+      [builds.userId],
+    ]);
+  });
+
+  it("is refused to everyone, never managed as a plain store, once its App row is gone", async () => {
+    const creator = await person("builder");
+    const store = await createStore(env, creator);
+    await drizzle(env.DB).insert(appDefaultStores).values({
+      appId: "app_00000000000000000000missing",
+      storeId: store,
+      createdAt: new Date(),
+    });
+    const admin = await person("admin");
+    expect([
+      await failure(async () => await storeManagers(env, creator, store)),
+      await failure(async () => await storeManagers(env, admin, store)),
+      await failure(async () => {
+        await deleteStore(env, creator, store);
+      }),
+    ]).toStrictEqual([
+      "data.store_unavailable",
+      "data.store_unavailable",
+      "data.store_unavailable",
+    ]);
+  });
+
+  it("is managed by none of the App's users, and shared or unshared only with the App", async () => {
+    const { owner, app } = await appWith(notesFiles());
+    await activateVersion(env, owner, app, 1);
+    const [recorded] = await defaultStores(app);
+    const store = recorded?.storeId ?? "";
+    const reader = await person("builder");
+    await addMember(env, owner, app, {
+      type: "person",
+      id: reader.userId,
+      role: "user",
+    });
+    const outsider = await person("builder");
+    expect([
+      await failure(async () => await storeManagers(env, reader, store)),
+      await failure(async () => {
+        await shareStore(env, owner, store, {
+          type: "person",
+          id: outsider.userId,
+        });
+      }),
+      await failure(async () => {
+        await unshareStore(env, owner, store, {
+          type: "person",
+          id: outsider.userId,
+        });
+      }),
+      await failure(async () => await storeManagers(env, outsider, store)),
+    ]).toStrictEqual([
+      "data.store_unavailable",
+      "data.store_managed_by_app",
+      "data.store_managed_by_app",
+      "data.store_unavailable",
+    ]);
+  });
+});
