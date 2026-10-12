@@ -296,6 +296,49 @@ export const connectorManifestSchema = z
   );
 export type ConnectorManifest = z.infer<typeof connectorManifestSchema>;
 
+/** One action of a generated connector contract, and the tool it calls. */
+export interface ContractAction {
+  /** The connector's tool, e.g. `mail.send`. */
+  readonly tool: string;
+  readonly declared: ActionManifest;
+}
+
+/**
+ * The one major version connector contracts are generated at: a change of
+ * an action's shape is drift on the bindings that use it, never a new
+ * major.
+ */
+export const generatedContractMajor = 1;
+
+/** An action's name in a contract: what an App's declaration may list. */
+const contractActionPattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
+
+/**
+ * The contracts `manifest` generates (spec 12): one per family of its
+ * tools, `<connector>.<family>@1`, holding each tool of the family under
+ * its name after the family (`mail.send` is `send` of
+ * `microsoft-365.mail@1`). Connect serves contracts from this, and the
+ * SDK's connector catalog is typed from it, so both name the same
+ * contracts and actions.
+ */
+export const generatedContracts = (
+  manifest: ConnectorManifest
+): ReadonlyMap<string, ReadonlyMap<string, ContractAction>> => {
+  const contracts = new Map<string, Map<string, ContractAction>>();
+  for (const [tool, declared] of Object.entries(manifest.actions)) {
+    const dot = tool.indexOf(".");
+    const action = tool.slice(dot + 1);
+    if (dot > 0 && contractActionPattern.test(action)) {
+      const contract = `${manifest.name}.${tool.slice(0, dot)}@${generatedContractMajor}`;
+      const actions =
+        contracts.get(contract) ?? new Map<string, ContractAction>();
+      actions.set(action, { tool, declared });
+      contracts.set(contract, actions);
+    }
+  }
+  return contracts;
+};
+
 const decodedSegment = (segment: string): string | undefined => {
   try {
     return decodeURIComponent(segment);
