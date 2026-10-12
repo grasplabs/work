@@ -130,6 +130,8 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "resource.idempotency_conflict": "contract",
   "data.write_denied": "authorization",
   "data.conflict": "domain",
+  "data.referenced": "domain",
+  "data.reference_invalid": "domain",
   "data.not_unique": "domain",
   "data.result_limit": "domain",
   "data.aggregate_overflow": "domain",

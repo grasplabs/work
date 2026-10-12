@@ -613,6 +613,13 @@ describe("deleting stores", () => {
     const store = await storeOf(owner);
     await commitNote(store, owner);
     await commitNote(store, owner);
+    // What a record referring to another leaves in the reference index:
+    // the purge drains it with the records.
+    await runInDurableObject(objectOf(store.id), (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO sdk_record_refs (table_id, record_id, to_table_id, to_record_id) VALUES ('t', 'a', 't', 'b')"
+      );
+    });
     await expireReceipts(store.id);
     await deleteStore(env, owner, store.id);
 
@@ -632,6 +639,9 @@ describe("deleting stores", () => {
         receipts: state.storage.sql
           .exec("SELECT count(*) AS n FROM sdk_mutation_receipts")
           .one().n,
+        references: state.storage.sql
+          .exec("SELECT count(*) AS n FROM sdk_record_refs")
+          .one().n,
         deleted: state.storage.sql
           .exec("SELECT deleted_at IS NOT NULL AS d FROM sdk_store")
           .one().d,
@@ -641,6 +651,7 @@ describe("deleting stores", () => {
       records: 0,
       tables: 0,
       receipts: 0,
+      references: 0,
       deleted: 1,
     });
   });
