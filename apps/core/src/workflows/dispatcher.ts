@@ -12,10 +12,11 @@ import { runBindingsFor } from "../bindings.ts";
 import { runBuildJob } from "../build-jobs.ts";
 import { runExtraction } from "../knowledge/extraction.ts";
 import type { WorkContext } from "../restricted.ts";
+import { runBackfill } from "../store-backfill.ts";
 import { declaredParams, loadRun } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
 import { runParamsSchema } from "./engine.ts";
-import type { PinnedRun, RunPin } from "./engine.ts";
+import type { InternalWorkflow, PinnedRun, RunPin } from "./engine.ts";
 import {
   countedStep,
   coreStepPrefix,
@@ -285,6 +286,16 @@ const runWorkflow = async (
   return result.ok ? result.value : undefined;
 };
 
+/** Each of core's own workflows, by name. */
+const internalRuns: Record<
+  InternalWorkflow,
+  (env: Env, input: unknown, step: RunStep) => Promise<void>
+> = {
+  extraction: runExtraction,
+  build: runBuildJob,
+  backfill: runBackfill,
+};
+
 /**
  * Runs (or resumes) one activation of the run `event` names, as it is
  * pinned: an App's workflow at its version, or one of core's own.
@@ -299,9 +310,7 @@ export const runPinned = async (
   const step = runStepOf(env, engineStep);
   const { input } = runParamsSchema.parse(event.payload);
   if (pin.type === "internal") {
-    await (pin.workflow === "extraction"
-      ? runExtraction(env, input, step)
-      : runBuildJob(env, input, step));
+    await internalRuns[pin.workflow](env, input, step);
     return null;
   }
   const { app, workflow, version } = pin;
