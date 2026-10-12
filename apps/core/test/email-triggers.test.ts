@@ -10,7 +10,7 @@ import { allEvents } from "./audit-events.ts";
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { racingDb } from "./racing-db.ts";
-import { endLiveRuns, finished } from "./runs.ts";
+import { aroundEngine, endLiveRuns, finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith } from "./workflow-apps.ts";
 
@@ -912,47 +912,53 @@ describe("attachments of mail", () => {
     ]);
   });
 
-  it("are read by a run whose start stopped, from the delivery that starts it again", async () => {
+  it("are read by a run whose first delivery stopped while starting it, started once by the delivery that comes again", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, reader("restarted"));
     const to = "restarted@grasp.test";
     const messageId = `${crypto.randomUUID()}@acme.test`;
-    // A first delivery whose run can't be created (an ID Workflows
-    // refuses): it says the message's key, and gives it up.
-    const unstartable: ReturnType<typeof crypto.randomUUID> =
-      `run-${"x".repeat(100)}-${crypto.randomUUID()}`;
-    const uuid = vi
-      .spyOn(crypto, "randomUUID")
-      .mockReturnValueOnce(unstartable);
-    try {
-      await outcome(
-        deliver(to, invoiceMail({ to, messageId, receivedBy: "mx1" }))
-      );
-    } finally {
-      uuid.mockRestore();
-    }
-    const events = await allEvents();
-    const key = events.find(
-      ({ action, target }) =>
-        action === "workflow.run.started" && target?.id === unstartable
-    )?.detail.key;
-    // A start under that key that stopped once its row was written, two
-    // minutes ago: no engine instance, and its input nowhere.
-    const orphan = crypto.randomUUID();
-    await env.DB.prepare(
-      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, trigger_key) VALUES (?, ?, 'reader', 1, NULL, 'starting', ?, ?)"
-    )
-      .bind(orphan, app, Date.now() - 2 * 60_000, key)
-      .run();
+    // The first delivery stops with its run's row written and its start
+    // not yet at the engine, as when core goes down there.
+    const { promise: stuck, resolve: unstick } = Promise.withResolvers<null>();
+    const { promise: asked, resolve: startAsked } =
+      Promise.withResolvers<null>();
+    let held = false;
+    let first: Promise<string> | undefined;
+    await aroundEngine(
+      async (method, call) => {
+        if (method === "start" && !held) {
+          held = true;
+          startAsked(null);
+          await stuck;
+        }
+        return await call();
+      },
+      async () => {
+        first = outcome(
+          deliver(to, invoiceMail({ to, messageId, receivedBy: "mx1" }))
+        );
+        await asked;
+        // Delivered again, through another server: it sends that run's
+        // start again, and the run reads the message as the first
+        // delivery kept it.
+        await deliver(to, invoiceMail({ to, messageId, receivedBy: "mx2" }));
+      }
+    );
+    const [run] = await runsOf(builder, app);
+    await finished(run?.id ?? "");
+    unstick(null);
+    await first;
+    const { status, output } = await builder.api.workflows.status(
+      run?.id ?? ""
+    );
 
-    // Delivered again, through another server: it starts that run, which
-    // reads the message as it came this time.
-    await deliver(to, invoiceMail({ to, messageId, receivedBy: "mx2" }));
-    await finished(orphan);
-    const { status, output } = await builder.api.workflows.status(orphan);
-
-    expect({ key: typeof key, status, output }).toMatchObject({
-      key: "string",
+    const runs = await runsOf(builder, app);
+    expect({
+      runs: runs.length,
+      status,
+      output,
+    }).toMatchObject({
+      runs: 1,
       status: "completed",
       output: { content: "%PDF-" },
     });

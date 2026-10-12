@@ -668,6 +668,61 @@ describe("model rules", { timeout: 60_000 }, () => {
     });
   });
 
+  it("give an AI step's next attempt the answer its timed-out attempt was still waiting for, asking and paying once", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "reader",
+        `  return await step.llm("extract", {
+    description: "Read the total",
+    model: "${anthropic}",
+    instructions: "Read the total in cents.",
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+    timeout: 1000,
+    retries: { limit: 3, delay: 1 },
+  });`,
+        { extract: { total: 1234 } }
+      )
+    );
+    const release = Promise.withResolvers<boolean>();
+
+    // The gateway answers the first attempt only after its second.
+    const { result } = await withDeploymentRules(
+      { gateway, models: [workersAi, anthropic] },
+      [
+        {
+          text: '{ "total": 1234 }',
+          inputTokens: 10,
+          outputTokens: 5,
+          pause: { at: 1, until: release.promise },
+        },
+        { text: '{ "total": 9999 }', inputTokens: 10, outputTokens: 5 },
+      ],
+      async () => {
+        const run = await builder.api.workflows.start(app, "reader");
+        await scheduler.wait(2500);
+        release.resolve(true);
+        await finished(run.id);
+        return {
+          run: await builder.api.workflows.status(run.id),
+          events: await eventsOf(
+            runActorOf({ runId: run.id, app, workflow: "reader" })
+          ),
+        };
+      }
+    );
+
+    expect({
+      run: result.run,
+      models: modelActions(result.events),
+    }).toMatchObject({
+      run: { status: "completed", output: { total: 1234 } },
+      models: ["model.call"],
+    });
+  });
+
   it("ask the ledger again once 15 seconds passed since a busy step's refusal, on its last attempt too, when the budget freed meanwhile", async () => {
     const builder = await signedInApi(idp, "builder");
     // Attempts at about 0, 6 and 12 seconds: the third, the last, runs
