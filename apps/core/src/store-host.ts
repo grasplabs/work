@@ -100,6 +100,7 @@ import {
   handOver,
 } from "./outbox-delivery.ts";
 import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
+import { keepStoreBackfillGoing } from "./store-backfill.ts";
 import { cursorKeysOf, openCursor, sealCursor } from "./store-cursors.ts";
 import type { CursorBinding, CursorKeys } from "./store-cursors.ts";
 import { inventoriedDeleted, recordStoreDeleted } from "./store-deletion.ts";
@@ -640,6 +641,23 @@ const ontoPending = (
   });
 };
 
+/**
+ * When the alarm next looks after a running backfill (#keepBackfillGoing):
+ * when its run's lease runs out, unless it looked since; otherwise a
+ * lease's time after it last looked (or the target became pending). So a
+ * run that renews its lease is never asked after, and one whose lease
+ * ran out while the engine still has it alive is asked after once a
+ * lease, not every second.
+ */
+const backfillDueAt = (row: {
+  leaseUntil: number | null;
+  lookedAt: number | null;
+  createdAt: number;
+}): number =>
+  row.leaseUntil !== null && row.leaseUntil > (row.lookedAt ?? 0)
+    ? row.leaseUntil
+    : (row.lookedAt ?? row.createdAt) + backfillLeaseMs;
+
 /** A pending target, as `backfillStatus` reports it. */
 const statusOf = (pending: PendingTarget): BackfillStatus => ({
   target: pending.hash,
@@ -846,6 +864,9 @@ export class StoreHost {
         this.#defineIn(storeId, before, planned, plan, schemaHash, text, change)
       );
       if (defined !== null) {
+        // A target it made pending gets the alarm's look (#keepBackfillGoing).
+        // oxlint-disable-next-line no-await-in-loop -- once, then it returns
+        await this.schedule();
         return { schemaHash, ...defined };
       }
       if (attempt >= 3) {
@@ -3469,9 +3490,66 @@ export class StoreHost {
     } catch (error) {
       failed = true;
       log.error("store.sweep_failed", errorFields(error));
+    }
+    try {
+      await this.#keepBackfillGoing();
+    } catch (error) {
+      // Not the alarm's failure: its next look is a lease's time away
+      // anyway (#backfillDueAt), and the outbox shouldn't wait for it.
+      log.error("store.backfill_failed", errorFields(error));
     } finally {
       await this.schedule(failed ? alarmRetryMs : alarmGapMs);
     }
+  }
+
+  /**
+   * The alarm's look at a running backfill whose run's lease ran out, or
+   * never started: core's own way of keeping it going
+   * (store-backfill.ts), with this host for its store. So a backfill
+   * whose run stopped is handed over to a new one whatever App, if any,
+   * comes back to it; a run that keeps renewing its lease is left be.
+   * The store's object has core's env, as its deletion's record in core
+   * does (store-deletion.ts).
+   */
+  async #keepBackfillGoing(): Promise<void> {
+    const now = Date.now();
+    // Looked at only when due, and marked looked at before anything else,
+    // so neither an alarm fired for something else nor one that fails
+    // here asks the engine again before another lease's time.
+    const storeId = this.ctx.storage.transactionSync((): StoreId | null => {
+      const row = this.#db
+        .select({
+          storeId: store.storeId,
+          targetHash: backfills.targetHash,
+          leaseUntil: backfills.leaseUntil,
+          lookedAt: backfills.lookedAt,
+          createdAt: backfills.createdAt,
+        })
+        .from(backfills)
+        .innerJoin(store, sql`1 = 1`)
+        .where(eq(backfills.state, "running"))
+        .get();
+      if (row === undefined || backfillDueAt(row) > now) {
+        return null;
+      }
+      this.#db
+        .update(backfills)
+        .set({ lookedAt: now })
+        .where(eq(backfills.targetHash, row.targetHash))
+        .run();
+      return storeIdSchema.parse(row.storeId);
+    });
+    if (storeId === null) {
+      return;
+    }
+    await keepStoreBackfillGoing(this.env, {
+      id: storeId,
+      status: async () => await Promise.resolve(this.backfillStatus(storeId)),
+      retry: async (target) =>
+        await Promise.resolve(this.retryBackfill(storeId, target)),
+      restart: async (restart) =>
+        await Promise.resolve(this.restartBackfill(storeId, restart)),
+    });
   }
 
   /**
@@ -3512,9 +3590,20 @@ export class StoreHost {
       .from(receipts)
       .where(isNotNull(receipts.expiredAt))
       .all();
+    // A running backfill: looked at when it is due (`backfillDueAt`).
+    const backfill = this.#db
+      .select({
+        leaseUntil: backfills.leaseUntil,
+        lookedAt: backfills.lookedAt,
+        createdAt: backfills.createdAt,
+      })
+      .from(backfills)
+      .where(eq(backfills.state, "running"))
+      .get();
     const times = [
       entry?.at,
       receipt?.at,
+      backfill === undefined ? null : backfillDueAt(backfill),
       typeof tombstone?.at === "number" ? tombstone.at + tombstoneMs : null,
     ].filter((time): time is number => typeof time === "number");
     if (times.length === 0) {

@@ -7,7 +7,7 @@ import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { activateVersion } from "../src/app-activation.ts";
 import { callAppFunction } from "../src/app-functions.ts";
@@ -902,24 +902,42 @@ describe(
       });
     });
 
-    it("waits to make a version current until its store has filled in a defaulted field", async () => {
+    it("fills in a defaulted field in the background, then makes the version current", async () => {
       const { owner, app } = await appWith(evolvingFiles());
       await activateVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
-
       const defaulted = await nextVersion(
         owner,
         app,
         evolvingFiles({}, { category: 'v.string().default("general")' })
       );
 
-      await expect(
-        failure(async () => await activateVersion(env, owner, app, defaulted))
-      ).resolves.toBe("migration.pending");
+      // Sealed, and its store's backfill started: current once it ended
+      // (`migration.pending` until then, which store-backfill.test.ts
+      // holds on to; one note's backfill may be done before the answer).
+      await vi.waitFor(
+        async () => {
+          await activateVersion(env, owner, app, defaulted);
+        },
+        { timeout: 20_000, interval: 200 }
+      );
+      const filled = await valueOf(owner, app, "notes.rows");
+      // The first version, made current again, writes without the field;
+      // the store fills it in.
+      await activateVersion(env, owner, app, 1);
+      await valueOf(owner, app, "notes.create", { title: "Hiring" });
+      await activateVersion(env, owner, app, defaulted);
+
       expect({
-        current: await currentOf(app),
-        rows: await valueOf(owner, app, "notes.rows"),
-      }).toStrictEqual({ current: 1, rows: [{ title: "Launch" }] });
+        filled,
+        after: await valueOf(owner, app, "notes.rows"),
+      }).toStrictEqual({
+        filled: [{ title: "Launch", category: "general" }],
+        after: [
+          { title: "Hiring", category: "general" },
+          { title: "Launch", category: "general" },
+        ],
+      });
     });
 
     it("makes one of two conflicting versions current when both are activated at once", async () => {
