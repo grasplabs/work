@@ -39,7 +39,7 @@ import type { ResourceAdapter } from "./resource-adapter.ts";
 
 type Row = typeof resourceTemplates.$inferSelect;
 
-const toPublished = (row: Row): PublishedTemplate => ({
+const toPublished = (row: Omit<Row, "content">): PublishedTemplate => ({
   templateId: row.id,
   version: row.version,
   contract: row.contract,
@@ -49,6 +49,22 @@ const toPublished = (row: Row): PublishedTemplate => ({
 });
 
 const encoder = new TextEncoder();
+
+/**
+ * The level a template's content sits at in the answer a binding gives
+ * (`{ contract, version, content }`), so content is held to the depth an
+ * answer can carry from there, at publication and at every read.
+ */
+const contentLevel = 2;
+
+/** `text` read as template content, or undefined when it can't be served. */
+const servableContent = (text: string): Json | undefined => {
+  try {
+    return jsonOf(JSON.parse(text), contentLevel);
+  } catch {
+    return undefined;
+  }
+};
 
 type Admin = Identity & Pick<Acting, "actor">;
 
@@ -65,34 +81,48 @@ export const publishTemplate = async (
   requireMemberAdmin(by);
   const parsed = templatePublicationSchema.safeParse(input);
   const content = parsed.success ? canonicalJson(parsed.data.content) : "";
+  // Content an answer couldn't carry would be published only to fail
+  // every read: refused here instead.
   if (
     !parsed.success ||
-    encoder.encode(content).byteLength > templateContentMaxBytes
+    encoder.encode(content).byteLength > templateContentMaxBytes ||
+    servableContent(content) === undefined
   ) {
     throw resourceBindingErrors.create("resource.template_invalid");
   }
   const { contract } = parsed.data;
   const db = drizzle(env.DB);
   const templateId = parsed.data.templateId ?? crypto.randomUUID();
+  let version = 1;
   if (parsed.data.templateId !== undefined) {
-    const first = await db
-      .select({ contract: resourceTemplates.contract })
-      .from(resourceTemplates)
-      .where(eq(resourceTemplates.id, templateId))
-      .orderBy(asc(resourceTemplates.version))
-      .get();
-    if (first === undefined) {
+    const [first, latest] = await Promise.all([
+      db
+        .select({ contract: resourceTemplates.contract })
+        .from(resourceTemplates)
+        .where(eq(resourceTemplates.id, templateId))
+        .orderBy(asc(resourceTemplates.version))
+        .get(),
+      db
+        .select({ version: resourceTemplates.version })
+        .from(resourceTemplates)
+        .where(eq(resourceTemplates.id, templateId))
+        .orderBy(desc(resourceTemplates.version))
+        .get(),
+    ]);
+    if (first === undefined || latest === undefined) {
       throw resourceBindingErrors.create("resource.template_not_found");
     }
     if (first.contract !== contract) {
       throw resourceBindingErrors.create("resource.template_contract_changed");
     }
+    version = latest.version + 1;
   }
   const contentHash = await sha256Hex(content);
   const now = new Date();
-  // Numbered by the insert itself, and only while `by` is still an admin
-  // and the template's first version still has this contract (none yet
-  // for a new one). Two at once: one takes the number, the other fails.
+  // The next number, read just above, so the event can record it; taken
+  // only while `by` is still an admin and the template's first version
+  // still has this contract (none yet for a new one). Two at once: the
+  // key lets one take the number, and the other fails as a conflict.
   const sameContract = sql`NOT EXISTS (SELECT 1 FROM ${resourceTemplates} WHERE ${resourceTemplates.id} = ${templateId} AND ${resourceTemplates.contract} <> ${contract})`;
   let inserted: Row[];
   try {
@@ -100,14 +130,14 @@ export const publishTemplate = async (
       db
         .insert(resourceTemplates)
         .select(
-          sql`SELECT ${templateId}, COALESCE((SELECT MAX(${resourceTemplates.version}) FROM ${resourceTemplates} WHERE ${resourceTemplates.id} = ${templateId}), 0) + 1, ${contract}, ${content}, ${contentHash}, ${by.userId}, ${now.getTime()} WHERE ${stillAdminSql(by)} AND ${sameContract}`
+          sql`SELECT ${templateId}, ${version}, ${contract}, ${content}, ${contentHash}, ${by.userId}, ${now.getTime()} WHERE ${stillAdminSql(by)} AND ${sameContract}`
         )
         .returning(),
       outboxedIfChanged(db, {
         actor: by.actor ?? actorOf(by),
         action: "resource.template.published",
         target: { type: "template", id: templateId },
-        detail: { contract, contentHash },
+        detail: { contract, version, contentHash },
       }),
     ]);
   } catch (error) {
@@ -135,8 +165,16 @@ export const listTemplates = async (
   if (by.staff || (!isAdmin(by.role) && by.role !== "builder")) {
     throw roleErrors.create("role.forbidden");
   }
+  // Everything but the content, which a listing never returns.
   const rows = await drizzle(env.DB)
-    .select()
+    .select({
+      id: resourceTemplates.id,
+      version: resourceTemplates.version,
+      contract: resourceTemplates.contract,
+      contentHash: resourceTemplates.contentHash,
+      publishedBy: resourceTemplates.publishedBy,
+      publishedAt: resourceTemplates.publishedAt,
+    })
     .from(resourceTemplates)
     .orderBy(desc(resourceTemplates.publishedAt))
     .limit(200);
@@ -162,23 +200,25 @@ const versionOf = async (
 
 /**
  * The content of `row` as a template binding answers it, if the row is a
- * version of `contract` whose content still hashes to what it was
- * published with; undefined otherwise.
+ * version of `contract` whose content, and the hash stored with it, are
+ * still `contentHash` (what was approved; the row's own hash when there's
+ * nothing approved to hold it to yet); undefined otherwise, as for content
+ * that isn't JSON an answer can carry.
  */
 const intactContent = async (
   row: Row | undefined,
-  contract: string
+  contract: string,
+  contentHash = row?.contentHash
 ): Promise<TemplateContent | undefined> => {
-  const content =
-    row === undefined ? undefined : jsonOf(JSON.parse(row.content));
   const intact =
     row !== undefined &&
-    content !== undefined &&
     row.contract === contract &&
-    (await sha256Hex(row.content)) === row.contentHash;
-  return intact
-    ? { contract: row.contract, version: row.version, content }
-    : undefined;
+    row.contentHash === contentHash &&
+    (await sha256Hex(row.content)) === contentHash;
+  const content = intact ? servableContent(row.content) : undefined;
+  return row === undefined || content === undefined
+    ? undefined
+    : { contract: row.contract, version: row.version, content };
 };
 
 /** What a template binding answers: the pinned version, as published. */
@@ -202,9 +242,12 @@ export const templateAdapter: ResourceAdapter<"template"> = {
           contractId: declaration.contract,
           fingerprint: row.contentHash,
           call: async (caller, _request, context, pin) => {
+            // Held to the approved hash, not the row's own: a row changed
+            // with its hash after the binding resolved serves nothing.
             const read = await intactContent(
               await versionOf(env, target.templateId, target.version),
-              declaration.contract
+              declaration.contract,
+              pin.fingerprint
             );
             if (read === undefined) {
               throw operationErrors.create("resource.unavailable");
@@ -219,7 +262,7 @@ export const templateAdapter: ResourceAdapter<"template"> = {
               detail: {
                 version: target.version,
                 binding: pin.id,
-                contentHash: row.contentHash,
+                contentHash: pin.fingerprint,
               },
             });
             return read;
