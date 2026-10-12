@@ -4,6 +4,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { RunControl, WorkflowRun } from "@grasp-os/shared/workflows";
+import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -95,10 +96,18 @@ type Admission =
       code: "workflow.control_conflict" | "workflow.control_refused";
     };
 
+/**
+ * What the host makes of a request for `kind` of `row`, with the run's
+ * receipts still unresolved and where the engine has the run now (`engine`,
+ * nothing when it has no record of it yet). Whether a pause or resume is
+ * one the run is already past is the engine's to say, not the row's, which
+ * follows the engine's notifications and may lag behind it.
+ */
 const admissionOf = (
   row: RunRow,
   unresolved: readonly ControlRow[],
-  kind: ControlKind
+  kind: ControlKind,
+  engine: InstanceStatus | undefined
 ): Admission => {
   const same = unresolved.find((control) => control.kind === kind);
   if (same !== undefined) {
@@ -125,8 +134,12 @@ const admissionOf = (
   ) {
     return { type: "refused", code: "workflow.control_conflict" };
   }
-  const already =
-    kind === "pause" ? row.status === "paused" : row.status !== "paused";
+  // A run the engine has no record of yet is still starting: a pause of
+  // it is admitted, and applies once it starts (`apply`); it has nothing
+  // to resume.
+  const paused =
+    engine?.status === "paused" || engine?.status === "waitingForPause";
+  const already = kind === "pause" ? engine?.status === "paused" : !paused;
   return already ? { type: "done" } : { type: "admit" };
 };
 
@@ -180,7 +193,7 @@ const writeReceipt = async (
     db
       .insert(workflowRunControls)
       .select(
-        sql`SELECT ${id}, ${row.id}, ${kind}, ${done ? "applied" : "admitted"}, ${generation}, ${by.userId}, ${now}, ${done ? now : null} WHERE changes() > 0`
+        sql`SELECT ${id}, ${row.id}, ${kind}, ${done ? "applied" : "admitted"}, ${generation}, ${by.userId}, ${now}, ${done ? now : null}, (SELECT ${workflowRuns.engineSequence} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id}) WHERE changes() > 0`
       ),
     outboxedEventWhere(db, event, written),
     ...(kind === "cancel" && !done
@@ -248,14 +261,24 @@ const apply = async (env: Env, control: ControlRow): Promise<void> => {
     return;
   }
   const engine = runEngine(env);
-  if (control.kind === "pause") {
-    await engine.pause(row.id);
-  } else if (control.kind === "resume") {
-    await engine.resume(row.id);
-  } else {
+  if (control.kind === "cancel") {
     await engine.terminate(row.id);
+  } else {
+    // A run the engine has no record of yet hasn't started: nothing to
+    // pause or resume, and nothing ended either. The receipt stays
+    // admitted, and the repair sends it again once the run has started.
+    // Only a cancel ends a run the engine has no record of.
+    if ((await engine.status(row.id)) === undefined) {
+      return;
+    }
+    await (control.kind === "pause"
+      ? engine.pause(row.id)
+      : engine.resume(row.id));
   }
   const live = await engine.status(row.id);
+  if (live === undefined && control.kind !== "cancel") {
+    return;
+  }
   if (live === undefined || endedLive.has(live.status)) {
     // Ended: whatever was asked, the run is past it. Its row says so, and
     // the receipt settles with it: a cancel as done once the run ended
@@ -302,7 +325,12 @@ const control = async (
   for (let tries = 0; tries < 5; tries += 1) {
     // oxlint-disable-next-line no-await-in-loop -- read again after a race
     const unresolved = await unresolvedOf(env, row.id);
-    const admission = admissionOf(row, unresolved, kind);
+    const live =
+      kind === "cancel"
+        ? undefined
+        : // oxlint-disable-next-line no-await-in-loop -- read again after a race
+          await runEngine(env).status(row.id);
+    const admission = admissionOf(row, unresolved, kind, live);
     if (admission.type === "refused") {
       throw workflowErrors.create(admission.code);
     }

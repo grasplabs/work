@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "780d72e9-0f4c-4358-b3a7-7cf285d6d841",
-  "prevId": "a8fecb93-c55f-413f-baed-a96fa86bd1eb",
+  "id": "e772fa97-781f-46d5-aef0-13b7475bb88f",
+  "prevId": "780d72e9-0f4c-4358-b3a7-7cf285d6d841",
   "tables": {
     "accounts": {
       "name": "accounts",
@@ -4429,6 +4429,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        },
+        "admitted_sequence": {
+          "name": "admitted_sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         }
       },

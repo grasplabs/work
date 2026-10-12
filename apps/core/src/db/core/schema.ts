@@ -1056,6 +1056,12 @@ export const workflowRunControls = sqliteTable(
     requestedBy: text("requested_by").notNull(),
     createdAt: timestamp("created_at").notNull(),
     settledAt: timestamp("settled_at"),
+    /**
+     * The last engine notification the run's row had taken when this was
+     * admitted (`workflow_runs.engine_sequence`): only a newer one settles
+     * it, so one delivered again can't confirm what came after it.
+     */
+    admittedSequence: integer("admitted_sequence").notNull(),
   },
   (table) => [
     uniqueIndex("workflow_run_controls_unresolved_idx")

@@ -959,7 +959,12 @@ const controlsSettledBy = (
       eq(workflowRunControls.runId, run),
       eq(workflowRunControls.state, "admitted"),
       inArray(workflowRunControls.kind, kinds),
-      took
+      took,
+      // Only a notification newer than the receipt: one delivered again
+      // says nothing of what was admitted after it.
+      sequence === undefined
+        ? undefined
+        : lt(workflowRunControls.admittedSequence, sequence)
     );
   if (endedLive.has(status)) {
     // A cancel is done once the run ended other than completed (its next

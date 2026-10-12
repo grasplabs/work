@@ -1,9 +1,10 @@
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
+import { runEngine } from "../src/workflows/engine.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
@@ -11,6 +12,7 @@ import {
   aroundEngine,
   endLiveRuns,
   finished,
+  liveStatus,
   runObject,
   sleeping,
   woken,
@@ -313,6 +315,92 @@ describe(
         otherApp: "workflow.run_not_found",
         unknownKind: "workflow.invalid",
         receipts: [],
+      });
+    });
+
+    it("keep a pause of a run still starting admitted, never ending the run, and apply it once the run started", async () => {
+      const builder = await personApi("builder");
+      const app = await appWith(builder, napper);
+      // A run whose start the engine hasn't had yet: no record of it.
+      const run = crypto.randomUUID();
+      await env.DB.prepare(
+        "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, pending_start) VALUES (?, ?, 'napper', 1, ?, 'starting', ?, '{}')"
+      )
+        .bind(run, app, builder.userId, Date.now())
+        .run();
+
+      const pause = await builder.api.screens.control(app, run, "pause");
+      const whileStarting = {
+        row: await env.DB.prepare(
+          "SELECT status, ended_at IS NOT NULL AS ended FROM workflow_runs WHERE id = ?"
+        )
+          .bind(run)
+          .first(),
+        receipts: await receiptStates(run),
+      };
+      // The start reaches the engine; the repair sends the pause again.
+      await runEngine(env).create({
+        id: run,
+        pinned: {
+          app: appIdSchema.parse(app),
+          workflow: workflowIdSchema.parse("napper"),
+          version: 1,
+        },
+        input: undefined,
+      });
+      await sleeping(run, "go");
+      await env.DB.prepare(
+        "UPDATE workflow_run_controls SET created_at = ? WHERE run_id = ?"
+      )
+        .bind(Date.now() - 60_000, run)
+        .run();
+      await runCron();
+      await until(async () => (await shown(builder, app, run)) === "paused");
+
+      expect({
+        pause: { kind: pause.kind, state: pause.state },
+        whileStarting,
+        receipts: await receiptStates(run),
+      }).toStrictEqual({
+        pause: { kind: "pause", state: "admitted" },
+        whileStarting: {
+          row: { status: "starting", ended: 0 },
+          receipts: [["pause", "admitted"]],
+        },
+        receipts: [["pause", "applied"]],
+      });
+    });
+
+    it("resume a paused run asked for before its row heard it paused, judged by the engine", async () => {
+      const builder = await personApi("builder");
+      const app = await appWith(builder, napper);
+      const { id: run } = await builder.api.screens.startRun(app, "napper");
+      await sleeping(run, "go");
+      await until(async () => (await sleepDeadline(run)) !== undefined);
+
+      const paused = await builder.api.screens.control(app, run, "pause");
+      // The engine paused it; its row still says what it said before, as
+      // when the engine's notification is still on the way.
+      await env.DB.prepare(
+        "UPDATE workflow_runs SET status = 'running' WHERE id = ?"
+      )
+        .bind(run)
+        .run();
+      const resumed = await builder.api.screens.control(app, run, "resume");
+      const stillPaused = (await liveStatus(run)) === "paused";
+      await woken(run);
+      await finished(run);
+
+      expect({
+        paused: paused.state,
+        resumed: { kind: resumed.kind, state: resumed.state },
+        stillPaused,
+        after: await hitsOf(app, builder.userId, "after"),
+      }).toStrictEqual({
+        paused: "applied",
+        resumed: { kind: "resume", state: "applied" },
+        stillPaused: false,
+        after: 1,
       });
     });
 
