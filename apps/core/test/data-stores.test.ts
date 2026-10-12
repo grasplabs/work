@@ -10,6 +10,7 @@ import type { AccessMode } from "@grasp-os/sdk/host";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { storeMaxTables } from "@grasp-os/shared/store-limits";
 import {
+  commitMaxCascade,
   commitMaxGuards,
   commitMaxInputBytes,
   commitMaxWrites,
@@ -1925,5 +1926,210 @@ describe("a store's references", () => {
       { code: "data.referenced", details: { table: "notes", id: note } },
       { code: "data.referenced", details: { table: "notes", id: note } },
     ]);
+  });
+});
+
+/**
+ * A schema whose `links` are deleted with the note they refer to, and
+ * whose `subs` with their link, unless a restricting field holds it too.
+ * Only the App's builders write `links`.
+ */
+const cascadeManifest = manifestText(
+  schemaManifest(
+    defineSchema({
+      notes: defineTable({ title: v.string() }),
+      links: defineTable({
+        note: v.id("notes", { onDelete: "cascade" }).optional(),
+        kept: v.id("notes").optional(),
+      }),
+      subs: defineTable({
+        link: v.id("links", { onDelete: "cascade" }).optional(),
+        pinned: v.id("links").optional(),
+        parent: v.id("subs", { onDelete: "cascade" }).optional(),
+      }),
+    }),
+    {
+      tables: {
+        notes: { read: "appMembers", write: "appMembers" },
+        links: { read: "appMembers", write: "appBuilders" },
+        subs: { read: "appMembers", write: "appMembers" },
+      },
+    }
+  )
+);
+const cascadeHash = await manifestHash(cascadeManifest);
+
+/** A new store with the `notes`, `links` and `subs` tables. */
+const newCascadeStore = async (): Promise<OpenStore> => {
+  const store = await openStore(env, await createStore(env, builder));
+  await store.defineTables(cascadeManifest);
+  return store;
+};
+
+/** Inserts records of `table`, one per entry of `fields`, and answers their IDs. */
+const insertCascading = async (
+  store: OpenStore,
+  table: "notes" | "links" | "subs",
+  ...fields: StoreFields[]
+): Promise<string[]> => {
+  const ids = fields.map(() => newRecordId());
+  await commitIn(store, {
+    principal: ada,
+    schemaHash: cascadeHash,
+    writes: fields.map((value, at) => ({
+      op: "insert" as const,
+      id: ids[at] ?? "",
+      table,
+      fields: value,
+    })),
+  });
+  return ids;
+};
+
+/** A commit deleting note `id`, by a member who can't write `links`. */
+const deleteNote = async (store: OpenStore, id: string): Promise<Committed> =>
+  await commitIn(store, {
+    principal: ada,
+    schemaHash: cascadeHash,
+    roles: { appMember: true, appBuilder: false },
+    writes: [{ op: "delete", table: "notes", id, expectedRevision: 1 }],
+  });
+
+/** The fields of `count` links to `note`. */
+const linksTo = (note: string, count: number): StoreFields[] =>
+  Array.from({ length: count }, () => ({ note }));
+
+describe("a store's cascades", () => {
+  it("deletes what refers to a deleted record where its field says so, level by level, whoever writes", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Gone",
+    });
+    const [link = ""] = await insertCascading(store, "links", { note });
+    const [sub = ""] = await insertCascading(store, "subs", { link });
+    const [other = ""] = await insertCascading(store, "notes", {
+      title: "Kept",
+    });
+    const [otherLink = ""] = await insertCascading(store, "links", {
+      note: other,
+    });
+
+    await deleteNote(store, note);
+    await expect(store.get("notes", note)).resolves.toBeNull();
+    await expect(store.get("links", link)).resolves.toBeNull();
+    await expect(store.get("subs", sub)).resolves.toBeNull();
+    await expect(store.get("links", otherLink)).resolves.not.toBeNull();
+    // What went took its own references with it: the other note goes on
+    // its own, and takes only its link.
+    await deleteNote(store, other);
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+
+  it("takes a cycle of cascading records once, and a record the commit deletes itself", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Gone",
+    });
+    const [link = ""] = await insertCascading(store, "links", { note });
+    // Two subs each deleted with the other, and with the link.
+    const first = newRecordId();
+    const second = newRecordId();
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: cascadeHash,
+      writes: [
+        {
+          op: "insert",
+          id: first,
+          table: "subs",
+          fields: { link, parent: second },
+        },
+        { op: "insert", id: second, table: "subs", fields: { parent: first } },
+      ],
+    });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: cascadeHash,
+      writes: [
+        { op: "delete", table: "links", id: link, expectedRevision: 1 },
+        { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+      ],
+    });
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+
+  it("refuses the deletion, writing nothing, where a restricting field holds a record it would take", async () => {
+    const store = await newCascadeStore();
+    const [first = "", second = ""] = await insertCascading(
+      store,
+      "notes",
+      { title: "Held twice" },
+      { title: "Held below" }
+    );
+    // The same note held by a cascading field and a restricting one.
+    await insertCascading(store, "links", { note: first, kept: first });
+    // A link that would go with its note, held by a restricting field.
+    const [link = ""] = await insertCascading(store, "links", { note: second });
+    await insertCascading(store, "subs", { pinned: link });
+
+    await Promise.all(
+      [first, second].map(async (note) => {
+        await expect(deleteNote(store, note)).rejects.toMatchObject({
+          code: "data.referenced",
+        });
+      })
+    );
+    await expect(recordCount(store)).resolves.toBe(5);
+  });
+
+  it("refuses a deletion that would take more than one commit may, for a workflow to batch", async () => {
+    const store = await newCascadeStore();
+    const [many = "", most = ""] = await insertCascading(
+      store,
+      "notes",
+      { title: "Too many" },
+      { title: "Just enough" }
+    );
+    await insertCascading(store, "links", ...linksTo(many, commitMaxCascade));
+    await insertCascading(store, "links", ...linksTo(many, 1));
+    await insertCascading(store, "links", ...linksTo(most, commitMaxCascade));
+    const before = await recordCount(store);
+
+    await expect(deleteNote(store, many)).rejects.toMatchObject({
+      code: "data.cascade_limit",
+      details: { limit: commitMaxCascade },
+    });
+    await expect(recordCount(store)).resolves.toBe(before);
+    await deleteNote(store, most);
+    await expect(recordCount(store)).resolves.toBe(
+      before - commitMaxCascade - 1
+    );
+  });
+
+  it("shows a mutation's staged reads what its deletion takes, as its commit will", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Gone",
+    });
+    const [link = ""] = await insertCascading(store, "links", { note });
+    const { value } = await store.read(
+      {
+        schemaHash: cascadeHash,
+        principal: "ada",
+        appMember: true,
+        appBuilder: false,
+        consumer: { resourceId: "notes-app", resourceVersion: 1 },
+      },
+      { kind: "get", table: "links", id: link, expectedRevision: null },
+      {
+        stagedAt: Date.now(),
+        writes: [
+          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+        ],
+      }
+    );
+    expect(value).toBeNull();
+    // A staged read keeps nothing.
+    await expect(store.get("links", link)).resolves.not.toBeNull();
   });
 });

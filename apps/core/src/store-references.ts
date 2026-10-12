@@ -8,7 +8,8 @@ import { validates } from "./store-queries.ts";
 // contract declares them: every `v.id("table")` field, at any depth (in
 // objects, arrays, records and union members). The store host indexes them
 // as it commits (store-host.ts), so deleting a record another refers to is
-// refused in the same transaction (restrict).
+// refused in the same transaction (restrict), or deletes the record
+// referring to it where its field says `onDelete: "cascade"`.
 //
 // Each place in a record that holds a record ID is one reference, checked
 // on its own: references are never merged across fields or places, even
@@ -26,8 +27,26 @@ import { validates } from "./store-queries.ts";
  */
 export interface RecordReference {
   readonly id: string;
-  readonly tables: readonly string[];
+  readonly tables: readonly ReferenceTable[];
 }
+
+/**
+ * A table a record ID may name, and whether deleting the record there
+ * deletes the one holding it.
+ */
+export interface ReferenceTable {
+  readonly table: string;
+  readonly cascade: boolean;
+}
+
+/** The table a `v.id` descriptor names, with its delete policy. */
+const tableOf = (descriptor: {
+  readonly tableName: string;
+  readonly onDelete?: "cascade";
+}): ReferenceTable => ({
+  table: descriptor.tableName,
+  cascade: descriptor.onDelete === "cascade",
+});
 
 /** Whether `value` is a JSON array. */
 const isArray = (value: Json): value is readonly Json[] => Array.isArray(value);
@@ -47,7 +66,7 @@ const referencesIn = (
   }
   if (descriptor.kind === "id") {
     if (typeof value === "string") {
-      found.push({ id: value, tables: [descriptor.tableName] });
+      found.push({ id: value, tables: [tableOf(descriptor)] });
     }
   } else if (descriptor.kind === "object") {
     if (isObject(value)) {
@@ -86,7 +105,7 @@ const referencesIn = (
           .slice(first)
           .flatMap((member) =>
             member.kind === "id" && validates(member, value)
-              ? [member.tableName]
+              ? [tableOf(member)]
               : []
           ),
       });

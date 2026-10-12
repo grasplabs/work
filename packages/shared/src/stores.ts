@@ -72,6 +72,13 @@ export const documentMaxDepth = valueDepth;
 /** The most writes one commit may stage. */
 export const commitMaxWrites = 100;
 
+/**
+ * The most records one commit's deletions may delete by cascade (records
+ * whose `v.id` field says `onDelete: "cascade"`), across every level:
+ * more is a workflow's, deleting them in batches first.
+ */
+export const commitMaxCascade = 100;
+
 /** The most revision guards (records read) one commit may carry. */
 export const commitMaxGuards = 100;
 
@@ -456,6 +463,7 @@ export const dataErrors = defineErrorFamily({
     "This record can't be deleted while another record refers to it. Remove those references first.",
   "data.reference_invalid":
     "This record refers to a record that doesn't exist or that you can't read.",
+  "data.cascade_limit": `Deleting this would also delete more than ${commitMaxCascade} records that refer to it, more than one change may. Delete those from a workflow, in batches, first.`,
   "data.store_bound":
     "This store can't be deleted while an App's kept versions read and write it.",
   "data.store_managed_by_app":

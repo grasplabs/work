@@ -28,6 +28,7 @@ import type { QueryRequest, ReadRequest } from "@grasp-os/shared/store-reads";
 import {
   claimSchema,
   commitSchema,
+  commitMaxCascade,
   committedSchema,
   dataErrors,
   documentMaxBytes,
@@ -1711,7 +1712,69 @@ export class StoreHost {
         );
       }
     }
+    this.#cascade(staged, stage);
     return { staged: [...staged.values()], inserted };
+  }
+
+  /**
+   * Deletes, with the records `staged` deletes, every record that refers to
+   * one of them through fields that all say `onDelete: "cascade"`, and so
+   * on from those, as the schema each was written under declared it
+   * (`sdk_record_refs`). The policy is the schema's, declared by the App's
+   * builders: it deletes a referring record whatever the writer could
+   * write, as the record it refers to is gone. At most `commitMaxCascade`
+   * records in all; past that the commit is refused (`data.cascade_limit`,
+   * naming nothing that would have gone) for a workflow to delete them in
+   * batches. A referring record this commit writes itself is left to its
+   * write: if it still refers to a deleted record, the commit is refused
+   * as restrict refuses it (`#indexReferences`).
+   */
+  #cascade(
+    staged: ReadonlyMap<string, Staged>,
+    stage: (table: string, tableId: string, recordId: string) => Staged
+  ): void {
+    const pending = [...staged.values()].filter(
+      ({ base, fields }) => base !== undefined && fields === null
+    );
+    let cascaded = 0;
+    for (let gone = pending.pop(); gone !== undefined; gone = pending.pop()) {
+      const referring = this.#db
+        .select({ tableId: recordRefs.tableId, recordId: recordRefs.recordId })
+        .from(recordRefs)
+        .where(
+          and(
+            eq(recordRefs.toTableId, gone.tableId),
+            eq(recordRefs.toRecordId, gone.recordId),
+            eq(recordRefs.cascade, true)
+          )
+        )
+        .all();
+      for (const { tableId, recordId } of referring) {
+        if (staged.has(keyOf(tableId, recordId))) {
+          continue;
+        }
+        cascaded += 1;
+        if (cascaded > commitMaxCascade) {
+          throw dataErrors.create("data.cascade_limit", {
+            limit: commitMaxCascade,
+          });
+        }
+        const entry = stage(this.#tableName(tableId), tableId, recordId);
+        entry.fields = null;
+        pending.push(entry);
+      }
+    }
+  }
+
+  /** The name of the store's table `tableId`, for what a refusal says. */
+  #tableName(tableId: string): string {
+    return (
+      this.#db
+        .select({ name: tables.name })
+        .from(tables)
+        .where(eq(tables.tableId, tableId))
+        .get()?.name ?? tableId
+    );
   }
 
   /**
@@ -1780,7 +1843,7 @@ export class StoreHost {
         // to, held already or holding a record the writer may read. A
         // union offering several keeps only the one that holds it. Never
         // satisfied by another place holding the same ID.
-        const targets = reference.tables.flatMap((name) => {
+        const targets = reference.tables.flatMap(({ table: name, cascade }) => {
           const toTableId = tableIdOf(name);
           return toTableId !== undefined &&
             (held.has(keyOf(toTableId, reference.id)) ||
@@ -1789,7 +1852,7 @@ export class StoreHost {
                 tableId: toTableId,
                 recordId: reference.id,
               }))
-            ? [toTableId]
+            ? [{ toTableId, cascade }]
             : [];
         });
         if (targets.length === 0) {
@@ -1798,11 +1861,27 @@ export class StoreHost {
             id: recordId,
           });
         }
-        for (const toTableId of targets) {
+        for (const { toTableId, cascade } of targets) {
           this.#db
             .insert(recordRefs)
-            .values({ tableId, recordId, toTableId, toRecordId: reference.id })
-            .onConflictDoNothing()
+            .values({
+              tableId,
+              recordId,
+              toTableId,
+              toRecordId: reference.id,
+              cascade,
+            })
+            // Several places resolving to the same row cascade only if
+            // every one of them says so.
+            .onConflictDoUpdate({
+              target: [
+                recordRefs.tableId,
+                recordRefs.recordId,
+                recordRefs.toTableId,
+                recordRefs.toRecordId,
+              ],
+              set: { cascade: sql`${recordRefs.cascade} AND excluded.cascade` },
+            })
             .run();
         }
       }
