@@ -60,6 +60,7 @@ import { requireOwnTypes } from "./knowledge/record-types.ts";
 import { madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
 import { recordVersionBuilds } from "./screen-builds.ts";
+import { requireStoreSchemaActive } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 import { requireWorkflowTestsPass, workflowCallsIn } from "./workflows/code.ts";
 import {
@@ -1112,6 +1113,9 @@ export const setCurrentVersion = async (
   const sealedLayout = isAppLayout(files);
   if (sealedLayout) {
     await requireRunnableRelease(env, appId, number);
+    // Its store's contract holds its schema, or it waits: once in force a
+    // schema stays so, so the check needn't be part of the batch below.
+    await requireStoreSchemaActive(env, appId, number);
   }
   await requireWorkflowTestsPass(env, number, files);
   const triggers = await triggerRegistration(env, appId, number, files);

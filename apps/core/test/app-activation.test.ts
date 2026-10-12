@@ -168,17 +168,24 @@ const defaultStores = async (app: string) =>
  * note's fields this version declares) as its functions.
  */
 const evolvingFiles = (
-  optional: Record<string, string> = {}
+  optional: Record<string, string> = {},
+  defaulted: Record<string, string> = {},
+  { indexed = false } = {}
 ): Record<string, string> => {
-  const extra = Object.entries(optional)
-    .map(([name, validator]) => `${name}: ${validator}.optional(), `)
-    .join("");
+  const extra = [
+    ...Object.entries(optional).map(
+      ([name, validator]) => `${name}: ${validator}.optional(), `
+    ),
+    ...Object.entries(defaulted).map(
+      ([name, validator]) => `${name}: ${validator}, `
+    ),
+  ].join("");
   const fields = `title: v.string().min(1).max(200), ${extra}`;
   return {
     "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  notes: defineTable({ ${fields} }),
+  notes: defineTable({ ${fields} })${indexed ? '.index("by_title", ["title"])' : ""},
 });
 `,
     "operations/notes.ts": `import { v } from "@grasp-os/sdk";
@@ -848,6 +855,25 @@ describe(
       });
     });
 
+    it("makes an older version current again after a newer one changed only its indexes", async () => {
+      const { owner, app } = await appWith(evolvingFiles());
+      await activateVersion(env, owner, app, 1);
+      await valueOf(owner, app, "notes.create", { title: "Launch" });
+      const indexed = await nextVersion(
+        owner,
+        app,
+        evolvingFiles({}, {}, { indexed: true })
+      );
+      await activateVersion(env, owner, app, indexed);
+
+      await activateVersion(env, owner, app, 1);
+
+      expect({
+        current: await currentOf(app),
+        rows: await valueOf(owner, app, "notes.rows"),
+      }).toStrictEqual({ current: 1, rows: [{ title: "Launch" }] });
+    });
+
     it("refuses a change that needs a migration, and the current version keeps running", async () => {
       const { owner, app } = await appWith(
         evolvingFiles({ category: "v.string()" })
@@ -874,6 +900,26 @@ describe(
         current: 1,
         rows: [{ title: "Launch", category: "news" }],
       });
+    });
+
+    it("waits to make a version current until its store has filled in a defaulted field", async () => {
+      const { owner, app } = await appWith(evolvingFiles());
+      await activateVersion(env, owner, app, 1);
+      await valueOf(owner, app, "notes.create", { title: "Launch" });
+
+      const defaulted = await nextVersion(
+        owner,
+        app,
+        evolvingFiles({}, { category: 'v.string().default("general")' })
+      );
+
+      await expect(
+        failure(async () => await activateVersion(env, owner, app, defaulted))
+      ).resolves.toBe("migration.pending");
+      expect({
+        current: await currentOf(app),
+        rows: await valueOf(owner, app, "notes.rows"),
+      }).toStrictEqual({ current: 1, rows: [{ title: "Launch" }] });
     });
 
     it("makes one of two conflicting versions current when both are activated at once", async () => {

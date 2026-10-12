@@ -301,11 +301,6 @@ describe("changes that need a migration", () => {
       "required_field_added",
     ],
     [
-      "a defaulted field",
-      notes({ ...noteFields, summary: v.string().default("") }),
-      "defaulted_field_added",
-    ],
-    [
       "a field turned into a reference",
       manifestText(
         schemaManifest(
@@ -325,6 +320,28 @@ describe("changes that need a migration", () => {
         )
       ),
       "field_changed",
+    ],
+    [
+      "a defaulted reference",
+      manifestText(
+        schemaManifest(
+          defineSchema({
+            notes: defineTable({
+              ...noteFields,
+              category: v.string().optional(),
+              tag: v.id("tags").nullable().default(null),
+            }),
+            tags: defineTable({ name: v.string() }),
+          }),
+          {
+            tables: {
+              notes: { read: "appMembers", write: "appMembers" },
+              tags: { read: "appMembers", write: "appMembers" },
+            },
+          }
+        )
+      ),
+      "defaulted_reference_added",
     ],
     [
       "a tighter access mode",
