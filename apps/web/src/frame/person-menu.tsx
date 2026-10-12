@@ -96,17 +96,13 @@ const themeIcons: Record<Theme, LucideIcon> = {
 
 /**
  * Light, dark or the system's, as a submenu of the person menu: the
- * person's own choice in this browser (theme.ts), applied as soon as they
- * are signed in.
+ * person's own choice in this browser (theme.ts). The person menu applies
+ * it; this mounts only while the menu is open.
  */
 const ThemeMenu = ({ userId }: { userId: string }) => {
   const { t, i18n } = useLingui();
   // Read where it is kept, so a choice made in another tab shows here too.
   const theme = useSyncExternalStore(onThemeChange, () => readTheme(userId));
-  // What theme.js painted first was whoever was here last; this is theirs.
-  useEffect(() => {
-    applyTheme(readTheme(userId));
-  }, [userId]);
   const Icon = themeIcons[theme];
   return (
     <DropdownMenuSub>
@@ -145,6 +141,11 @@ export const PersonMenu = ({
   identity: Identity;
 }) => {
   const { t } = useLingui();
+  // What theme.js painted first was whoever was here last; this is theirs.
+  // Here, not in the theme menu, which mounts only once the menu opens.
+  useEffect(() => {
+    applyTheme(readTheme(identity.userId));
+  }, [identity.userId]);
   const { isMobile } = useSidebar();
   return (
     <SidebarMenu>
