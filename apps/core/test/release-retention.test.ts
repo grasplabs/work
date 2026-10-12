@@ -14,10 +14,12 @@ import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { callOperation } from "../src/operations.ts";
 import type { Runner } from "../src/operations.ts";
 import {
+  candidatePage,
   deleteUnreservedArtifacts,
   finishDeletion,
   leaseRelease,
   markArtifact,
+  markDeadlineMs,
   markTakeoverMs,
   pinRelease,
   placeHold,
@@ -26,6 +28,7 @@ import {
   releaseRetentionMs,
   revokeRelease,
   sweepReleases,
+  unpinRelease,
 } from "../src/release-retention.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, artifactKey, failure, person, seal } from "./sealed-apps.ts";
@@ -241,6 +244,20 @@ describe("retention", { timeout: 120_000 }, () => {
     await expect(
       loosePin(env, { app, version: 1 }, { kind: "hold", id: "x" }, new Date())
     ).rejects.toThrow(/placeHold/u);
+    const admin = await person("admin");
+    await placeHold(env, admin, { app, version: 1 }, "legal-1", "Litigation");
+    // SAFETY: as above, for unpinning a hold.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const looseUnpin = unpinRelease as (...args: unknown[]) => Promise<void>;
+    await expect(
+      looseUnpin(env, { app, version: 1 }, { kind: "hold", id: "legal-1" })
+    ).rejects.toThrow(/releaseHold/u);
+    const holds = await env.DB.prepare(
+      "SELECT holder_id FROM sdk_release_pins WHERE app_id = ? AND holder_kind = 'hold'"
+    )
+      .bind(app)
+      .all();
+    expect(holds.results).toStrictEqual([{ holder_id: "legal-1" }]);
   });
 
   it("deletes a lapsed lease at the next sweep", async () => {
@@ -397,6 +414,87 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     await expect(env.FILES.head(artifactKey(orphan))).resolves.not.toBeNull();
     await sweepsAt(after(start, releaseGraceMs + 60_000));
     await expect(env.FILES.head(artifactKey(orphan))).resolves.toBeNull();
+  });
+});
+
+describe("bytes left without a reservation", { timeout: 120_000 }, () => {
+  it("are deleted by a deleter only before its mark's deadline", async () => {
+    const sha256 = await sha256Hex(crypto.randomUUID());
+    await env.FILES.put(artifactKey(sha256), "bytes");
+    const owner = (await markArtifact(env, sha256)) ?? "";
+    // Its own clock says the deadline passed: it gives up, leaving all.
+    const late = await finishDeletion(
+      env,
+      sha256,
+      owner,
+      () => Date.now() + markDeadlineMs + 1000
+    );
+    const mark = await env.DB.prepare(
+      "SELECT owner FROM sdk_artifact_deletions WHERE sha256 = ?"
+    )
+      .bind(sha256)
+      .first<{ owner: string }>();
+    expect([late, mark?.owner]).toStrictEqual([false, owner]);
+    await expect(env.FILES.head(artifactKey(sha256))).resolves.not.toBeNull();
+    // In time, it deletes them.
+    await expect(finishDeletion(env, sha256, owner)).resolves.toBeTruthy();
+    await expect(env.FILES.head(artifactKey(sha256))).resolves.toBeNull();
+  });
+
+  it("of more seals than one page holds are all deleted", async () => {
+    const start = new Date();
+    const hashes = await Promise.all(
+      Array.from(
+        { length: candidatePage + 20 },
+        async () => await sha256Hex(crypto.randomUUID())
+      )
+    );
+    await Promise.all(
+      hashes.map(async (sha256) => {
+        await env.FILES.put(artifactKey(sha256), "left behind");
+      })
+    );
+    await env.DB.batch(
+      hashes.map((sha256) =>
+        env.DB.prepare(
+          "INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at) VALUES (?, 'app_gone', 1, ?)"
+        ).bind(sha256, start.getTime())
+      )
+    );
+    await sweepsAt(after(start, releaseGraceMs + 60_000));
+    const left = await Promise.all(
+      hashes.map(async (sha256) => await env.FILES.head(artifactKey(sha256)))
+    );
+    expect(left.filter((object) => object !== null)).toHaveLength(0);
+  });
+
+  it("a sweep queued and didn't get to are dealt with by the next", async () => {
+    const [gone, kept] = await Promise.all([
+      sha256Hex(crypto.randomUUID()),
+      sha256Hex(crypto.randomUUID()),
+    ]);
+    await env.FILES.put(artifactKey(gone), "queued");
+    await env.FILES.put(artifactKey(kept), "reserved again");
+    // Queued as their reservations went; one was reserved again since.
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO sdk_artifact_candidates (sha256, queued_at) VALUES (?1, ?3), (?2, ?3)"
+      ).bind(gone, kept, Date.now()),
+      env.DB.prepare(
+        "INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at) VALUES (?, 'app_sealing', 1, ?)"
+      ).bind(kept, Date.now()),
+    ]);
+    await sweepsAt(new Date());
+    const queued = await env.DB.prepare(
+      "SELECT sha256 FROM sdk_artifact_candidates WHERE sha256 IN (?, ?)"
+    )
+      .bind(gone, kept)
+      .all();
+    expect([
+      await env.FILES.head(artifactKey(gone)),
+      (await env.FILES.head(artifactKey(kept))) !== null,
+      queued.results,
+    ]).toStrictEqual([null, true, []]);
   });
 });
 
@@ -559,5 +657,20 @@ describe("a deleted release", { timeout: 120_000 }, () => {
       .run();
     const again = await seal({ owner, app, store }, 1);
     expect(again.manifestHash).toBe(first.manifestHash);
+  });
+
+  it("leaves its store serving its App alone, even with every binding gone", async () => {
+    const start = new Date();
+    const { app, store } = await twoVersions(start);
+    // As retention leaves the store once every release of the App went.
+    await env.DB.prepare(
+      "DELETE FROM sdk_resource_bindings WHERE resource_id = ?"
+    )
+      .bind(app)
+      .run();
+    const other = await appWith(files("other"));
+    await expect(
+      failure(async () => await seal({ ...other, store }))
+    ).resolves.toBe("version.store_bound_elsewhere");
   });
 });

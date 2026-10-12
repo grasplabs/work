@@ -668,14 +668,26 @@ export const sdkReleaseArtifacts = sqliteTable(
 /**
  * An artifact's bytes being deleted: marked when no release named it, so
  * no seal reserves it again until the bytes are gone and the mark is
- * removed. Only its owner finishes a mark, and removes it only once the
- * bytes are deleted; a mark older than any invocation can run is taken
- * over by whoever finds it (src/release-retention.ts).
+ * removed. Only its owner finishes a mark, before its deadline (15
+ * minutes after it was placed), and removes it only once the bytes are
+ * deleted; a mark an hour old is taken over by whoever finds it
+ * (src/release-retention.ts).
  */
 export const sdkArtifactDeletions = sqliteTable("sdk_artifact_deletions", {
   sha256: text().primaryKey(),
   owner: text().notNull(),
   startedAt: timestamp("started_at").notNull(),
+});
+
+/**
+ * Bytes whose last reservation went: queued in the statement that removes
+ * the reservation, and dequeued only once the bytes are dealt with
+ * (deleted, reserved again, or another deleter's), so no bytes are ever
+ * left without a reservation or a queue entry (src/release-retention.ts).
+ */
+export const sdkArtifactCandidates = sqliteTable("sdk_artifact_candidates", {
+  sha256: text().primaryKey(),
+  queuedAt: timestamp("queued_at").notNull(),
 });
 
 /**

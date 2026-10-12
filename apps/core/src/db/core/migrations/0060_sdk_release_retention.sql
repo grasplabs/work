@@ -1,3 +1,8 @@
+CREATE TABLE `sdk_artifact_candidates` (
+	`sha256` text PRIMARY KEY NOT NULL,
+	`queued_at` integer NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE `sdk_artifact_deletions` (
 	`sha256` text PRIMARY KEY NOT NULL,
 	`owner` text NOT NULL,
