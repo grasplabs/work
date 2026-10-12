@@ -1340,6 +1340,10 @@ msgctxt "severity of a finding"
 msgid "Critical"
 msgstr "Critique"
 
+#: src/frame/person-menu.tsx
+msgid "Dark"
+msgstr "Sombre"
+
 #: src/dashboard/nav-item.tsx
 #: src/routes/_shell.dashboard.tsx
 msgid "Dashboard"
@@ -2237,6 +2241,10 @@ msgstr "Licence"
 msgctxt "kind of finding"
 msgid "Licence"
 msgstr "Licence"
+
+#: src/frame/person-menu.tsx
+msgid "Light"
+msgstr "Clair"
 
 #: src/onboarding/staff-words.ts
 msgid "Links out: {count} of {of}"
@@ -3792,6 +3800,10 @@ msgstr "A arrêté de suivre ce qui change sur une connexion"
 msgid "Stopped."
 msgstr "Arrêté."
 
+#: src/frame/person-menu.tsx
+msgid "System"
+msgstr "Système"
+
 #: src/engines/screen-approval.tsx
 msgid "Take back"
 msgstr "Retirer"
@@ -4121,6 +4133,10 @@ msgstr "Le CSE n’a pas été consulté"
 msgctxt "kickoff field"
 msgid "Their tools"
 msgstr "Leurs outils"
+
+#: src/frame/person-menu.tsx
+msgid "Theme"
+msgstr "Thème"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "There are no collections you can read yet."
