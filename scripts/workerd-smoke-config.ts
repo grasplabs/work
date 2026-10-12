@@ -2,7 +2,10 @@
  * The workerd config the on-prem smoke run (`workerd-smoke.ts`) serves core
  * with: plain workerd, as on-prem runs it. So it says
  * `RUNTIME_PROFILE=workerd`: Code Mode's run record then claims no CPU limit
- * (apps/core/src/code-mode.ts), which plain workerd doesn't enforce.
+ * (apps/core/src/code-mode.ts), which plain workerd doesn't enforce. And it
+ * binds `SANDBOX_HOST` to the sandbox supervisor (workerd-sandbox.ts), so
+ * core inspects untrusted App code in workerd processes of its own, killed
+ * at their deadline, never in its own (apps/core/src/sandboxed.ts).
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -42,6 +45,8 @@ const coreDurableObjects = (): { name: string; className: string }[] =>
 export interface SmokeConfigInputs {
   /** The local port core is served on. */
   port: number;
+  /** The Unix socket the sandbox supervisor answers on. */
+  sandboxSocket: string;
   /** The router secret every request to core must carry. */
   routerSecret: string;
   /** Core's modules, as capnp module entries. */
@@ -56,6 +61,7 @@ export interface SmokeConfigInputs {
 /** The `config.capnp` text that serves core on plain workerd. */
 export const smokeConfig = ({
   port,
+  sandboxSocket,
   routerSecret,
   modules,
   storage,
@@ -83,6 +89,9 @@ const config :Workerd.Config = (
     # Core's R2 buckets, on the on-prem profile's R2 service: workerd has
     # R2's client but no R2 (apps/core/src/on-prem/r2.ts).
     ${r2Service("storage")},
+    # Where untrusted App code runs: the sandbox supervisor, outside core's
+    # process, which plain workerd's lack of a CPU limit can't stall.
+    (name = "sandbox", external = (address = "unix:${sandboxSocket}", http = ())),
   ],
   sockets = [(name = "http", address = "127.0.0.1:${port}", http = (), service = "core")],
 );
@@ -95,6 +104,7 @@ const core :Workerd.Worker = (
     (name = "ROUTER_SECRET", text = "${routerSecret}"),
     (name = "DURABLE_OBJECT_JURISDICTION", text = "none"),
     (name = "RUNTIME_PROFILE", text = "workerd"),
+    (name = "SANDBOX_HOST", service = "sandbox"),
     ${durableObjectBindings.join(",\n    ")},
     ${d1Bindings(d1DatabasesOf(coreWranglerConfig)).join(",\n    ")},
     ${r2Bindings(r2BucketsOf(coreWranglerConfig)).join(",\n    ")},
