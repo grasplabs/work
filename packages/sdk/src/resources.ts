@@ -264,12 +264,13 @@ const filesOperations: readonly FilesOperation[] = [
 ];
 
 /**
- * An HTTPS origin's form: lower-case host labels or an IP address, and an
- * optional port. What a URL parser lets through beyond it (a `*`, say) is
+ * An HTTPS origin's form: lower-case host labels, an IPv4 address or a
+ * bracketed IPv6 one as the URL standard serializes it, and an optional
+ * port. What a URL parser lets through beyond it (a `*`, say) is
  * no origin a browser navigates to exactly.
  */
 const originPattern =
-  /^https:\/\/(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?::\d{1,5})?$/u;
+  /^https:\/\/(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?$/u;
 
 /** The most bytes of one link origin. */
 const originMaxLength = 253 + "https://".length + ":65535".length;

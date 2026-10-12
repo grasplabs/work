@@ -245,6 +245,19 @@ const appKeys: ReadonlySet<string> = new Set([
  */
 export const reservedSegment = "preferences";
 
+/**
+ * Path segments no function registers at, at any depth: the names a
+ * reference answers as data (`contractId`, `visibility`, `kind`), which a
+ * reference tree can't also hold as children, and `then`, which would
+ * make a reference look like a promise to whatever awaits it.
+ */
+export const referenceKeys: ReadonlySet<string> = new Set([
+  "contractId",
+  "visibility",
+  "kind",
+  "then",
+]);
+
 const requiredKeys = [
   "name",
   "schema",
@@ -279,6 +292,11 @@ const walk = (
     ) {
       refuse(
         `\`${what}\` has a path that isn't up to ${operationPathMaxSegments} identifiers: ${operationSegmentPattern.test(name) ? `\`${path}\`` : "a key that isn't an identifier"}.`
+      );
+    }
+    if (referenceKeys.has(name)) {
+      refuse(
+        `\`${path}\` can't be registered: \`${name}\` is a name a reference itself answers, never a path segment.`
       );
     }
     if (prefix.length === 0 && name === reservedSegment) {

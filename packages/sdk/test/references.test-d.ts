@@ -8,6 +8,7 @@
 import { expectTypeOf } from "vite-plus/test";
 
 import type {
+  AnyOperationReference,
   ArgsOf,
   Id,
   Infer,
@@ -184,3 +185,14 @@ expectTypeOf(preferences).toExtend<{ readonly resourceId: string }>();
 
 // No workflow bindings yet, and no children of any.
 expectTypeOf(workflows).toEqualTypeOf<Readonly<Record<never, never>>>();
+
+// Any reference takes a single answer's and a stream's alike.
+const anyReferences: readonly AnyOperationReference[] = [
+  api.notes.create,
+  api.notes.exportAll,
+  internal.notes.count,
+];
+void anyReferences;
+// And its mode says so: either, never only a stream.
+const anyModes: readonly AnyOperationReference["mode"][] = ["single", "stream"];
+void anyModes;

@@ -420,6 +420,20 @@ describe("references in uses", () => {
   });
 });
 
+describe("reserved segments", () => {
+  test.each(["contractId", "visibility", "kind", "then"])(
+    "no function registers at a segment named %s, at any depth",
+    (name) => {
+      expect(
+        refusal(() => small({ operations: { notes: { list, [name]: send } } }))
+      ).toContain("is a name a reference itself answers");
+      expect(
+        refusal(() => small({ operations: { [name]: { list } } }))
+      ).toContain("is a name a reference itself answers");
+    }
+  );
+});
+
 describe("screens and preferences", () => {
   test.each([
     ["a map instead of a list", {}, "is a list"],
@@ -542,6 +556,28 @@ describe("browser resources", () => {
     ["no origin at all", []],
   ])("links with %s are refused", (_case, origins) => {
     expect(() => looseResource.links("help", { origins })).toThrow(/origin/u);
+  });
+
+  test.each([
+    ["an IPv6 address", "https://[2001:db8::1]"],
+    ["an IPv6 address and a port", "https://[2001:db8::1]:8443"],
+    ["an IPv4 address", "https://192.0.2.1"],
+  ])("links accept %s as an exact origin", (_case, origin) => {
+    expect(resource.links("help", { origins: [origin] }).origins).toStrictEqual(
+      [origin]
+    );
+  });
+
+  test.each([
+    [
+      "an IPv6 address not as the URL standard writes it",
+      "https://[2001:DB8:0::1]",
+    ],
+    ["an IPv6 address with a path", "https://[2001:db8::1]/docs"],
+  ])("links with %s are refused too", (_case, origin) => {
+    expect(() => looseResource.links("help", { origins: [origin] })).toThrow(
+      /origin/u
+    );
   });
 
   test("files list only the operations there are, each once", () => {

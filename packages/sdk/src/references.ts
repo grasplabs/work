@@ -75,14 +75,16 @@ export interface OperationReference<
   readonly [progressType]?: Progress;
 }
 
-/** Any generated function reference. */
-export type AnyOperationReference = OperationReference<
-  unknown,
-  unknown,
-  ReferenceKind,
-  ReferenceVisibility,
-  unknown
->;
+/** Any generated function reference: a single answer's or a stream's. */
+export type AnyOperationReference =
+  | OperationReference<unknown, unknown, ReferenceKind, ReferenceVisibility>
+  | OperationReference<
+      unknown,
+      unknown,
+      ReferenceKind,
+      ReferenceVisibility,
+      unknown
+    >;
 
 /** The arguments a caller passes to `Reference`. */
 export type ArgsOf<Reference> =
