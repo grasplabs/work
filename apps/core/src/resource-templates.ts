@@ -1,5 +1,5 @@
 import { appErrors } from "@grasp-os/shared/apps";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -15,7 +15,11 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+import {
+  auditedBatch,
+  keepAuditEvent,
+  outboxedIfChanged,
+} from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { resourceTemplates } from "./db/core/schema.ts";
 import {
@@ -197,7 +201,7 @@ export const templateAdapter: ResourceAdapter<"template"> = {
       : {
           contractId: declaration.contract,
           fingerprint: row.contentHash,
-          call: async () => {
+          call: async (caller, _request, context, pin) => {
             const read = await intactContent(
               await versionOf(env, target.templateId, target.version),
               declaration.contract
@@ -205,6 +209,19 @@ export const templateAdapter: ResourceAdapter<"template"> = {
             if (read === undefined) {
               throw operationErrors.create("resource.unavailable");
             }
+            // Recorded as Knowledge records an App's reads, through the
+            // outbox, which never fails the read.
+            await keepAuditEvent(env, drizzle(env.DB), {
+              actor: delegateActorOf(caller.authority),
+              action: "resource.template.read",
+              target: { type: "template", id: target.templateId },
+              requestId: context.requestId,
+              detail: {
+                version: target.version,
+                binding: pin.id,
+                contentHash: row.contentHash,
+              },
+            });
             return read;
           },
         };

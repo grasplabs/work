@@ -1232,6 +1232,9 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       pinned: { version: 1, greeting: "Dear" },
       moved: { version: 2, greeting: "Hello" },
     });
+    // Each read is recorded, by the App, of the version it read.
+    const reads = await auditedFor("resource.template.read", sealed.app);
+    expect(reads.map(({ detail }) => detail?.version)).toStrictEqual([1, 2]);
   });
 
   it("publish templates by admins only, keeping each one's contract", async () => {
@@ -1265,6 +1268,26 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       otherContract: "resource.template_contract_changed",
       unknown: "resource.template_not_found",
       tooLarge: "resource.template_invalid",
+    });
+  });
+
+  it("refuse a publication by an admin demoted since their session was checked", async () => {
+    const admin = await person("admin");
+    await env.DB.prepare("UPDATE members SET role = 'member' WHERE user_id = ?")
+      .bind(admin.userId)
+      .run();
+    const refused = await publishRefusal(admin, {
+      contract: "grasp.letter@1",
+      content: { greeting: "Stale" },
+    });
+    const rows = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM resource_templates WHERE published_by = ?"
+    )
+      .bind(admin.userId)
+      .first<{ count: number }>();
+    expect({ refused, published: rows?.count }).toStrictEqual({
+      refused: "role.forbidden",
+      published: 0,
     });
   });
 
