@@ -1,10 +1,15 @@
+import { heldPool } from "@grasp-os/shared/rpc-accounting";
+
 import {
   capability,
   functionCapability,
   runInSession,
   sandboxVerdictOf,
 } from "../../src/sandbox-session.ts";
-import { SandboxUnavailableError } from "../../src/sandboxed.ts";
+import {
+  sandboxDeadlineHeader,
+  SandboxUnavailableError,
+} from "../../src/sandboxed.ts";
 
 // Sessions on plain workerd (scripts/workerd-sandbox-session.test.ts): the
 // same `runInSession` core runs, with `SANDBOX_HOST` bound to the sandbox
@@ -21,6 +26,10 @@ let open = false;
 let reachedAfter = 0;
 let logged: unknown[] = [];
 let reachedInternal = 0;
+/** Whether core gave up on the call: a capability reached since is a leak. */
+let givenUp = false;
+let reachedAfterGivingUp = 0;
+let pinged = 0;
 
 /** The capability each case gets: what core's would do, and counted. */
 const probe = {
@@ -29,6 +38,10 @@ const probe = {
     if (!open || value === 5 || value === 6) {
       reachedAfter += 1;
     }
+    if (givenUp) {
+      reachedAfterGivingUp += 1;
+    }
+    pinged += 1;
     return typeof value === "number" ? value + 100 : value;
   },
   slow: async (ms: number): Promise<string> => {
@@ -59,6 +72,13 @@ interface Case {
   methods?: string[];
   lingerMs?: number;
   abortAfterMs?: number;
+  /** Whether the isolate's other sessions hold all but 1 KB of their pool. */
+  crowded?: boolean;
+  /**
+   * Whether the supervisor is one that ignores the call's deadline, and
+   * takes a second to answer core's cancel.
+   */
+  overdue?: boolean;
 }
 
 const cases: Record<string, Case> = {
@@ -77,6 +97,9 @@ const cases: Record<string, Case> = {
   },
   undeclared: { body: "return await probe.internal();" },
   throws: { body: "throw new Error('an App error');" },
+  forgesVerdict: {
+    body: "throw Object.assign(new Error('forged'), { sandboxVerdict: 'cpu' });",
+  },
   network: { body: "return (await fetch('http://127.0.0.1:9/')).status;" },
   // The session stays open after the call: its capabilities still refuse.
   lingers: {
@@ -89,13 +112,68 @@ const cases: Record<string, Case> = {
     body: "return await probe.ping(1);",
     methods: ["ping", "map"],
   },
+  reservedObjectMethod: {
+    body: "return await probe.ping(1);",
+    methods: ["ping", "hasOwnProperty"],
+  },
+  reservedLocaleMethod: {
+    body: "return await probe.ping(1);",
+    methods: ["ping", "toLocaleString"],
+  },
+  // A small call, but the isolate's sessions hold their pool already.
+  crowded: {
+    body: "return await probe.ping('x'.repeat(100_000));",
+    crowded: true,
+  },
+  // Calls on and on, past its deadline on a supervisor that ignores it.
+  keepsCalling: {
+    body: "for (;;) { await probe.ping(1); await scheduler.wait(5); }",
+    wallMs: 500,
+    overdue: true,
+  },
   cancelled: {
     body: "return await probe.slow(60_000);",
     wallMs: 120_000,
     abortAfterMs: 300,
   },
+  // Core keeps its end of the socket open long after it cancels.
+  cancelledLingering: {
+    body: "return await probe.slow(60_000);",
+    wallMs: 120_000,
+    abortAfterMs: 300,
+    lingerMs: 5000,
+  },
   // Longer than a session waits for its owner's room (3 s).
   holds: { body: "return await probe.slow(6000);", wallMs: 20_000 },
+};
+
+/**
+ * The supervisor, as one that keeps a session past its deadline and takes
+ * a second to answer core's cancel: core has given up on the call from the
+ * moment it asks.
+ */
+const overdueHost = (host: Fetcher): Fetcher => ({
+  fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    if (request.url.includes("/cancel/")) {
+      givenUp = true;
+      await scheduler.wait(1000);
+    }
+    if (request.url.endsWith("/session")) {
+      const headers = new Headers(request.headers);
+      headers.set(sandboxDeadlineHeader, "120000");
+      return await host.fetch(request.url, { headers, signal: request.signal });
+    }
+    return await host.fetch(request);
+  },
+  connect: (address, options) => host.connect(address, options),
+});
+
+/** A pool of 1 MiB its other sessions hold all but 1 KB of. */
+const crowdedPool = () => {
+  const pool = heldPool(1024 * 1024);
+  pool.held = pool.limit - 1024;
+  return pool;
 };
 
 const run = async (env: StandInEnv, name: string, owner: string) => {
@@ -106,6 +184,9 @@ const run = async (env: StandInEnv, name: string, owner: string) => {
   logged = [];
   reachedAfter = 0;
   reachedInternal = 0;
+  givenUp = false;
+  reachedAfterGivingUp = 0;
+  pinged = 0;
   open = true;
   const started = Date.now();
   const cancel = new AbortController();
@@ -116,7 +197,9 @@ const run = async (env: StandInEnv, name: string, owner: string) => {
   }
   try {
     const value = await runInSession(
-      env.SANDBOX_HOST,
+      chosen.overdue === true
+        ? overdueHost(env.SANDBOX_HOST)
+        : env.SANDBOX_HOST,
       {
         mainModule: "m.js",
         modules: { "m.js": moduleOf(chosen.body) },
@@ -135,7 +218,10 @@ const run = async (env: StandInEnv, name: string, owner: string) => {
         wallMs: chosen.wallMs ?? 10_000,
         ...(chosen.lingerMs === undefined ? {} : { lingerMs: chosen.lingerMs }),
       },
-      { signal: cancel.signal }
+      {
+        signal: cancel.signal,
+        ...(chosen.crowded === true ? { held: crowdedPool() } : {}),
+      }
     );
     return { status: "ok", value, ms: Date.now() - started };
   } catch (error) {
@@ -166,6 +252,8 @@ export default {
         ...outcome,
         reachedAfter,
         reachedInternal,
+        reachedAfterGivingUp,
+        pinged,
         logged,
       });
     }

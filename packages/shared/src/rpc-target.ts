@@ -87,7 +87,6 @@ const wrapMethods = (
     current !== null && current !== base && !wrapped.has(current);
     current = Reflect.getPrototypeOf(current)
   ) {
-    wrapped.add(current);
     for (const name of Reflect.ownKeys(current)) {
       const property = Reflect.getOwnPropertyDescriptor(current, name);
       const method: unknown = property?.value;
@@ -110,6 +109,9 @@ const wrapMethods = (
         );
       }
     }
+    // Only once every method of it is bounded: a prototype that threw is
+    // tried again, and throws again, at its next construction.
+    wrapped.add(current);
   }
 };
 

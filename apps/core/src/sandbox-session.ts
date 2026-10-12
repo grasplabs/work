@@ -1,5 +1,8 @@
 import { whenAborted } from "@grasp-os/shared/deadline";
-import type { RpcAccountingLimits } from "@grasp-os/shared/rpc-accounting";
+import type {
+  HeldPool,
+  RpcAccountingLimits,
+} from "@grasp-os/shared/rpc-accounting";
 import {
   accountedTransport,
   heldPool,
@@ -79,6 +82,11 @@ export interface SessionCall {
 export interface SessionOptions {
   /** Ends the call and frees its process: a cancel, or a deadline core keeps. */
   readonly signal?: AbortSignal;
+  /**
+   * What every session of the isolate holds together; `sessionsHeld`
+   * unless a test gives a pool of its own.
+   */
+  readonly held?: HeldPool;
 }
 
 /** The methods `target`'s class and those above it declare, by name. */
@@ -127,19 +135,28 @@ export const functionCapability = (
  */
 const sessionMessageSize = browserMessageSize;
 
-/** What a session may spend, as a browser's connection may (rpc-target.ts). */
+/**
+ * What one session may hold: a message of the largest size at one byte a
+ * character, and some room besides. A session past it is the App's fault.
+ */
+const sessionHeldBytes = 16 * 1024 * 1024;
+
+/** What a session may spend: a browser's message size (rpc-target.ts). */
 const sessionAccounting: RpcAccountingLimits = {
   ...rpcCopyNodeBounds,
   maxMessageBytes: sessionMessageSize,
-  maxSessionBytes: 32 * 1024 * 1024,
+  maxSessionBytes: sessionHeldBytes,
 };
 
 /**
  * What every session of this isolate may hold together: a pool of their
  * own, apart from the browsers' (`isolateRpcHeld`), so App code reaching
- * back through sessions can't end people's browser connections.
+ * back through sessions can't end people's browser connections. Room for
+ * the supervisor's default four processes each at their own limit; past
+ * that (a larger pool of processes), a full pool ends the session that
+ * crosses it as `busy`, never as the App's fault.
  */
-const sessionsHeld = heldPool(32 * 1024 * 1024);
+const sessionsHeld = heldPool(4 * sessionHeldBytes);
 
 /** What a forwarder's methods take: as deep and big as one message makes. */
 const SessionTarget = boundedRpcTarget({
@@ -203,11 +220,18 @@ const verdictSchema = (body: unknown): Verdict | undefined =>
     ? { verdict: body.verdict, message: body.message }
     : undefined;
 
+/**
+ * The verdicts of errors core made, by error: never a property of the
+ * error itself, which App code could set on one it throws.
+ */
+const verdicts = new WeakMap<Error, string>();
+
 /** An error saying the sandbox ended the call for the App's code, and why. */
-const verdictError = (verdict: Verdict, cause?: unknown): Error =>
-  Object.assign(new Error(verdict.message, { cause }), {
-    sandboxVerdict: verdict.verdict,
-  });
+const verdictError = (verdict: Verdict, cause?: unknown): Error => {
+  const error = new Error(verdict.message, { cause });
+  verdicts.set(error, verdict.verdict);
+  return error;
+};
 
 /**
  * Why the sandbox ended a session's call, for an error `runInSession`
@@ -215,11 +239,8 @@ const verdictError = (verdict: Verdict, cause?: unknown): Error =>
  * `refused` (the App's code sent what a session doesn't take), `busy` (its
  * owner holds as many sessions as it may); undefined otherwise.
  */
-export const sandboxVerdictOf = (error: unknown): string | undefined => {
-  const verdict: unknown =
-    error instanceof Error ? Reflect.get(error, "sandboxVerdict") : undefined;
-  return typeof verdict === "string" ? verdict : undefined;
-};
+export const sandboxVerdictOf = (error: unknown): string | undefined =>
+  error instanceof Error ? verdicts.get(error) : undefined;
 
 /** What the supervisor blamed the App for in session `id`, if anything. */
 const verdictOf = async (
@@ -370,7 +391,7 @@ const failureOf = async (
 export const runInSession = async (
   host: Fetcher,
   call: SessionCall,
-  { signal }: SessionOptions = {}
+  { signal, held = sessionsHeld }: SessionOptions = {}
 ): Promise<unknown> => {
   signal?.throwIfAborted();
   const id = crypto.randomUUID();
@@ -381,15 +402,38 @@ export const runInSession = async (
   });
   // What the App's code sends that a session doesn't take (too much, too
   // deep, a value of no kind a call takes) is its own failure.
+  // A refusal ends the session whichever way the message went: one of
+  // core's own answers (or the call itself) past a bound is refused as it's
+  // sent, which no pending call hears of, so the call waits on this too.
+  const { promise: refusedWith, resolve: refused } =
+    Promise.withResolvers<Error>();
+  // Raced with the call below from its start, so its rejection is handled.
+  const whenRefused = (async (): Promise<never> => {
+    throw await refusedWith;
+  })();
   const transport = accountedTransport(
     new WebSocketTransport(socket),
     sessionAccounting,
-    () =>
-      verdictError({
-        verdict: "refused",
-        message: "The App's code sent more than a call in the sandbox takes.",
-      }),
-    sessionsHeld
+    (refusal) => {
+      // Every session's holdings together past the isolate's pool: the
+      // session crossing it is ended, but the App may hold little; it's
+      // busy, as an owner at its cap is, never the App's fault.
+      const error =
+        refusal === "isolate"
+          ? verdictError({
+              verdict: "busy",
+              message:
+                "Core holds as much for calls in the sandbox as it may. Try again shortly.",
+            })
+          : verdictError({
+              verdict: "refused",
+              message:
+                "The App's code sent more than a call in the sandbox takes.",
+            });
+      refused(error);
+      return error;
+    },
+    held
   );
   const session = new RpcSession(transport, undefined, {
     limits: {
@@ -401,6 +445,12 @@ export const runInSession = async (
   // sees these, only what the sandbox host makes of them.
   let live = true;
   const isLive = (): boolean => live;
+  // Given up on: its capabilities refuse from now, not once the supervisor
+  // has been asked to end the call.
+  const giveUp = (): void => {
+    live = false;
+  };
+  signal?.addEventListener("abort", giveUp, { once: true });
   const specs: Record<string, { methods: string[] } | { function: true }> = {};
   const stubs: Record<string, object> = {};
   const named = (given: SessionCapability): string => {
@@ -445,10 +495,12 @@ export const runInSession = async (
     ]);
     return await Promise.race([
       answer,
+      whenRefused,
       backstop,
       ...(signal === undefined ? [] : [whenAborted(signal)]),
     ]);
   } catch (error) {
+    giveUp();
     if (signal?.aborted === true || error === overdue) {
       // Given up on: the supervisor ends the call and frees its process at
       // once, whatever the sandbox host does with the closing socket.
@@ -456,7 +508,8 @@ export const runInSession = async (
     }
     throw await failureOf(error, { host, id, closed, signal });
   } finally {
-    live = false;
+    giveUp();
+    signal?.removeEventListener("abort", giveUp);
     settled.abort();
     if (call.lingerMs !== undefined && !closed) {
       await scheduler.wait(call.lingerMs);

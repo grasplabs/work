@@ -43,9 +43,11 @@ describe("a bounded RPC target", () => {
     expect(target.ran).toBe(1);
   });
 
-  it("refuses to be made with a method it can't wrap", () => {
-    expect(() => {
-      Reflect.construct(Target, [], Locked);
-    }).toThrow("can't be bounded");
+  it("refuses to be made with a method it can't wrap, every time", () => {
+    for (const attempt of [1, 2]) {
+      expect(() => {
+        Reflect.construct(Target, [], Locked);
+      }, `attempt ${attempt}`).toThrow("can't be bounded");
+    }
   });
 });

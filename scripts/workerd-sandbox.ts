@@ -162,6 +162,8 @@ export interface SandboxStats {
   abandoned: number;
   waiting: number;
   inFlight: number;
+  /** Sessions waiting for their owner's room. */
+  waitingForOwners: number;
 }
 
 /** A running supervisor. */
@@ -486,6 +488,12 @@ const ownerPattern = /^[A-Za-z0-9:_.-]{1,200}$/u;
 const callIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
+/**
+ * How long a session the host closed waits for its process's exit, before
+ * it's taken as closed by a host still running.
+ */
+const sessionExitWaitMs = 1000;
+
 /** The pool of sandbox processes, and the calls it serves. */
 class SandboxPool {
   readonly #settings: Settings;
@@ -521,6 +529,9 @@ class SandboxPool {
   readonly #running = new Map<string, () => void>();
   /** Sessions each owner holds now, waiting or running. */
   readonly #owners = new Map<string, number>();
+  /** Sessions each owner has waiting for its room, and all of them. */
+  readonly #ownerWaiters = new Map<string, number>();
+  #waitingForOwners = 0;
   readonly #maxPerOwner: number;
   /** Verdicts on sessions, by call ID, oldest first. */
   readonly #verdicts = new Map<string, Verdict>();
@@ -544,6 +555,7 @@ class SandboxPool {
       ...this.#counts,
       waiting: this.#waiting,
       inFlight: this.#inFlight,
+      waitingForOwners: this.#waitingForOwners,
     };
   }
 
@@ -612,9 +624,8 @@ class SandboxPool {
     request: IncomingMessage,
     response: ServerResponse
   ): Promise<void> {
-    const settings = this.#settings;
     // Refused unread past what the pool serves and lets wait.
-    if (this.#inFlight >= settings.processes + settings.maxWaiting) {
+    if (this.#full()) {
       send(response, 503, refusal("The sandbox is full."));
       request.resume();
       return;
@@ -940,7 +951,7 @@ class SandboxPool {
         );
       }
     };
-    if (this.#inFlight >= settings.processes + settings.maxWaiting) {
+    if (this.#full()) {
       refuse(503, "The sandbox is full.");
       return;
     }
@@ -970,7 +981,6 @@ class SandboxPool {
       refuse(429, "This owner already holds as many sessions as it may.");
       return;
     }
-    this.#owners.set(owner, (this.#owners.get(owner) ?? 0) + 1);
     // Given back as soon as the session ends for core, before its process
     // is killed: core may start the owner's next call at once.
     let ownerHeld = true;
@@ -987,6 +997,13 @@ class SandboxPool {
       }
       this.#released.dispatchEvent(new Event("released"));
     };
+    // Counted as it waited, so never past: checked again all the same, as
+    // nothing else may take its place meanwhile.
+    if (this.#inFlight >= settings.processes + settings.maxWaiting) {
+      giveBack();
+      refuse(503, "The sandbox is full.");
+      return;
+    }
     this.#inFlight += 1;
     try {
       await this.#relay(request, client, head, {
@@ -1106,7 +1123,10 @@ class SandboxPool {
       // Core closed it: the call is over, however it went.
       return { kind: "answered", status: 101, body: Buffer.alloc(0) };
     }
-    await Promise.race([host.exited, sleep(100)]);
+    // The host closes a session itself only as its process dies, mostly:
+    // waited for long enough that a process reaped slowly under load is
+    // still the crash it is, not an unavailable sandbox.
+    await Promise.race([host.exited, sleep(sessionExitWaitMs)]);
     if (host.gone && !this.#stopping) {
       return { kind: "crashed" };
     }
@@ -1197,27 +1217,65 @@ class SandboxPool {
   }
 
   /**
-   * Whether `owner` has room for one more session, waiting up to `waitMs`
-   * (or until the caller leaves) for one of its sessions to end.
+   * Whether the pool takes no more calls or sessions: those running and
+   * waiting for a process, and the sessions waiting for their owner's room,
+   * which hold a connection each just the same.
+   */
+  #full(): boolean {
+    const { processes, maxWaiting } = this.#settings;
+    return this.#inFlight + this.#waitingForOwners >= processes + maxWaiting;
+  }
+
+  /**
+   * Takes a place for one more session of `owner`, waiting up to `waitMs`
+   * (or until the caller leaves) for one of its sessions to end; false if
+   * none comes. At most as many of an owner's sessions wait as it may
+   * hold: one past that is refused at once.
    */
   async #ownerRoom(
     owner: string,
     waitMs: number,
     client: Socket
   ): Promise<boolean> {
-    const gone = new AbortController();
-    client.once("close", () => {
-      gone.abort();
-    });
-    const signal = AbortSignal.any([gone.signal, AbortSignal.timeout(waitMs)]);
-    while ((this.#owners.get(owner) ?? 0) >= this.#maxPerOwner) {
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- until one of its sessions ends
-        await once(this.#released, "released", { signal });
-      } catch {
+    const hasRoom = (): boolean =>
+      (this.#owners.get(owner) ?? 0) < this.#maxPerOwner;
+    if (!hasRoom()) {
+      const waiters = this.#ownerWaiters.get(owner) ?? 0;
+      if (waiters >= this.#maxPerOwner) {
         return false;
       }
+      this.#ownerWaiters.set(owner, waiters + 1);
+      this.#waitingForOwners += 1;
+      const gone = new AbortController();
+      const leave = (): void => {
+        gone.abort();
+      };
+      client.once("close", leave);
+      const signal = AbortSignal.any([
+        gone.signal,
+        AbortSignal.timeout(waitMs),
+      ]);
+      try {
+        while (!hasRoom()) {
+          // oxlint-disable-next-line no-await-in-loop -- until one of its sessions ends
+          await once(this.#released, "released", { signal });
+        }
+      } catch {
+        return false;
+      } finally {
+        client.off("close", leave);
+        this.#waitingForOwners -= 1;
+        const left = (this.#ownerWaiters.get(owner) ?? 1) - 1;
+        if (left <= 0) {
+          this.#ownerWaiters.delete(owner);
+        } else {
+          this.#ownerWaiters.set(owner, left);
+        }
+      }
     }
+    // Taken at once, in the same turn as the check: two waiters woken by
+    // one session's end never both take its place.
+    this.#owners.set(owner, (this.#owners.get(owner) ?? 0) + 1);
     return true;
   }
 
@@ -1646,6 +1704,10 @@ export const startSandboxSupervisor = async (
       void relaySession(pool, request, client, head);
     }
   );
+  // Calls and sessions together, running or waiting for a process or their
+  // owner's room, hold at most processes + maxWaiting connections (`#full`):
+  // the rest is headroom for `/cancel`, `/verdict` and `/health`, which core
+  // must reach however busy the pool is, and for refusals on their way out.
   server.maxConnections = 2 * (settings.processes + settings.maxWaiting) + 4;
   server.headersTimeout = HEADERS_TIMEOUT_MS;
   server.requestTimeout = REQUEST_TIMEOUT_MS;

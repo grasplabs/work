@@ -21,6 +21,8 @@
 import {
   // oxlint-disable-next-line no-restricted-imports -- its only caller is core, over the supervisor's private socket: nothing untrusted calls it
   RpcTarget as CapnwebTarget,
+  RpcPromise,
+  RpcStub,
   newWorkersWebSocketRpcResponse,
 } from "capnweb";
 import type { RpcTarget } from "cloudflare:workers";
@@ -64,21 +66,20 @@ const maxMethods = 64;
 
 /** A method name a capability may have: no getters, nothing internal. */
 const methodName = /^[a-zA-Z][a-zA-Z0-9_]{0,99}$/u;
-const reserved = new Set([
-  "constructor",
-  "fetch",
-  "connect",
-  // What a Cap'n Web stub's prototype has of its own: never a capability's.
-  "then",
-  "catch",
-  "finally",
-  "map",
-  "onRpcBroken",
-  "dup",
-  "dispose",
-  "toString",
-  "valueOf",
-]);
+/**
+ * Whether `name` is one a Cap'n Web stub or any object answers itself
+ * (`then`, `map`, `toString`, `hasOwnProperty`, ...): never a capability's,
+ * as a call by it would never reach core. Read from the classes, so a
+ * name either gains is refused too.
+ */
+const isReserved = (name: string): boolean =>
+  name in Object.prototype ||
+  name in RpcPromise.prototype ||
+  name in RpcStub.prototype ||
+  // A Worker's own (a WorkerEntrypoint's), and what disposes a stub.
+  name === "fetch" ||
+  name === "connect" ||
+  name === "dispose";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -100,7 +101,7 @@ const capabilitySpecOf = (value: unknown): CapabilitySpec | undefined => {
     methods.length <= maxMethods &&
     methods.every(
       (name) =>
-        typeof name === "string" && methodName.test(name) && !reserved.has(name)
+        typeof name === "string" && methodName.test(name) && !isReserved(name)
     )
   ) {
     return { methods: methods.map(String) };

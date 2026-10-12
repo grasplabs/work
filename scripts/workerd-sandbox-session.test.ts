@@ -27,6 +27,8 @@ const outcomeSchema = z.object({
   ms: z.number(),
   reachedAfter: z.number(),
   reachedInternal: z.number(),
+  reachedAfterGivingUp: z.number(),
+  pinged: z.number(),
   verdict: z.string().nullable().optional(),
   logged: z.array(z.unknown()),
 });
@@ -148,11 +150,14 @@ describe("a session on the on-prem sandbox", () => {
     });
   });
 
-  it("refuses a capability named with a method a Cap'n Web stub has of its own", async () => {
-    const outcome = await run("reservedMethod");
-    expect(outcome.status).toBe("refused");
-    expect(outcome.message).toContain("expected shape");
-  });
+  it.each(["reservedMethod", "reservedObjectMethod", "reservedLocaleMethod"])(
+    "refuses a capability named with a method a stub or any object answers itself (%s)",
+    async (name) => {
+      const outcome = await run(name);
+      expect(outcome.status).toBe("refused");
+      expect(outcome.message).toContain("expected shape");
+    }
+  );
 
   it("frees the process of a call its caller cancelled", async () => {
     const outcome = await run("cancelled");
@@ -162,6 +167,56 @@ describe("a session on the on-prem sandbox", () => {
       .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
       .toBe(0);
   });
+
+  it(
+    "frees a cancelled call's process while core's end of its socket is still open",
+    { timeout: 20_000 },
+    async () => {
+      const lingering = run("cancelledLingering");
+      // Core holds its socket for 5 s past the cancel: only the supervisor's
+      // own cancel frees the process before then.
+      await expect
+        .poll(() => supervisor.stats().inFlight, {
+          timeout: 2500,
+          interval: 50,
+        })
+        .toBe(1);
+      await expect
+        .poll(() => supervisor.stats().inFlight, {
+          timeout: 2500,
+          interval: 50,
+        })
+        .toBe(0);
+      const outcome = await lingering;
+      expect(outcome.message).toContain("cancelled");
+    }
+  );
+
+  it(
+    "refuses its capabilities the moment core gives up on the call",
+    { timeout: 20_000 },
+    async () => {
+      const outcome = await run("keepsCalling");
+      expect(outcome.message).toContain("didn't end the call in time");
+      expect(outcome.pinged).toBeGreaterThan(0);
+      expect(outcome.reachedAfterGivingUp).toBe(0);
+    }
+  );
+
+  it("keeps an error the App's code threw its own, whatever it says of itself", async () => {
+    const outcome = await run("forgesVerdict");
+    expect(outcome).toMatchObject({ status: "refused", verdict: null });
+    expect(outcome.message).toContain("forged");
+  });
+
+  it(
+    "ends a call as busy, never the App's fault, when the isolate's sessions hold their pool",
+    { timeout: 30_000 },
+    async () => {
+      const outcome = await run("crowded");
+      expect(outcome).toMatchObject({ status: "refused", verdict: "busy" });
+    }
+  );
 
   it(
     "lets one owner hold only its share of the pool",
@@ -181,6 +236,61 @@ describe("a session on the on-prem sandbox", () => {
         status: "ok",
       });
       await expect(holding).resolves.toMatchObject({ status: "ok" });
+    }
+  );
+
+  it(
+    "refuses an owner's session at once while as many of its sessions wait as it may hold",
+    { timeout: 30_000 },
+    async () => {
+      const holding = run("holds", "app-one");
+      await expect
+        .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
+        .toBe(1);
+      // app-one may hold one: one more may wait for it, a third may not.
+      const waiting = run("capabilities", "app-one");
+      await expect
+        .poll(() => supervisor.stats().waitingForOwners, { timeout: 2000 })
+        .toBe(1);
+      const third = await run("capabilities", "app-one");
+      expect(third).toMatchObject({ status: "refused", verdict: "busy" });
+      expect(third.ms).toBeLessThan(1000);
+      await expect(waiting).resolves.toMatchObject({ verdict: "busy" });
+      await expect(holding).resolves.toMatchObject({ status: "ok" });
+    }
+  );
+
+  it(
+    "counts the sessions waiting for their owner's room toward what the pool takes",
+    { timeout: 60_000 },
+    async () => {
+      // Two processes and one more call waiting: three in all.
+      const small = await startSandboxSupervisor({
+        workerd: nativeWorkerd,
+        processes: 2,
+        maxWaiting: 1,
+        log: () => {},
+      });
+      try {
+        const url = await serveStandIn("session-worker.ts", small.socket);
+        const holdingOne = run("holds", "app-one", url);
+        const holdingTwo = run("holds", "app-two", url);
+        await expect
+          .poll(() => small.stats().inFlight, { timeout: 3000 })
+          .toBe(2);
+        // Waits for app-one's room: the third of three.
+        const waiting = run("capabilities", "app-one", url);
+        await expect
+          .poll(() => small.stats().waitingForOwners, { timeout: 2000 })
+          .toBe(1);
+        const fourth = await run("capabilities", "app-three", url);
+        expect(fourth.status).toBe("unavailable");
+        expect(fourth.message).toContain("503");
+        expect(fourth.ms).toBeLessThan(1000);
+        await Promise.all([holdingOne, holdingTwo, waiting]);
+      } finally {
+        await small.stop();
+      }
     }
   );
 

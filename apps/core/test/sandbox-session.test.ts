@@ -1,7 +1,11 @@
 import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 import { describe, expect, it } from "vite-plus/test";
 
-import { capability, sessionForwarder } from "../src/sandbox-session.ts";
+import {
+  capability,
+  sandboxVerdictOf,
+  sessionForwarder,
+} from "../src/sandbox-session.ts";
 
 // What reaches a capability through a sandbox session (on-prem) arrives
 // over Cap'n Web from the sandbox host, where App code runs: the forwarder
@@ -67,5 +71,14 @@ describe("a session's forwarder to a capability", () => {
     live = false;
     await expect(take(2)).rejects.toThrow("is over");
     expect(reached).toStrictEqual([1]);
+  });
+});
+
+describe("why the sandbox ended a call", () => {
+  it("is never what an error says of itself, as one App code throws may", () => {
+    const forged = Object.assign(new Error("forged"), {
+      sandboxVerdict: "cpu",
+    });
+    expect(sandboxVerdictOf(forged)).toBeUndefined();
   });
 });
