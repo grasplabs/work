@@ -770,6 +770,18 @@ export const sdkStoreOwners = sqliteTable("sdk_store_owners", {
 });
 
 /**
+ * The store an App of spec 8's layout runs on, one per App: created by the
+ * host when it first seals a version of the App whose schema has tables
+ * (app-activation.ts), and bound to every later version, so the App's data
+ * outlives its versions. Never chosen by a request.
+ */
+export const appDefaultStores = sqliteTable("app_default_stores", {
+  appId: text("app_id").primaryKey(),
+  storeId: text("store_id").notNull().unique(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
  * Which App a record type in a collection (a Knowledge collection, by ID)
  * belongs to: the first whose declaration took effect there
  * (knowledge/record-types.ts). Claimed when an App's write permission on
