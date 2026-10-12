@@ -9,15 +9,24 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
+import type { FunctionAnswer } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { appMembers, appResourceBindings } from "../src/db/core/schema.ts";
+import { createCollection } from "../src/knowledge/collections.ts";
+import { saveDocument } from "../src/knowledge/documents.ts";
+import {
+  grantPermission,
+  requestPermission,
+  revokePermission,
+} from "../src/permissions.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import {
   approveResourceBinding,
   listResourceBindings,
   revokeResourceBinding,
 } from "../src/resource-bindings.ts";
+import { isRestricted } from "../src/restricted.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
@@ -214,6 +223,11 @@ const call = async (
 const codeOfError = (error: unknown): string =>
   error instanceof Error ? String(Reflect.get(error, "code")) : "?";
 
+/** Knowledge hits, as an action answers them. */
+const hitsSchema = z.array(
+  z.strictObject({ title: z.string(), excerpt: z.string() })
+);
+
 /** What a call answered: its value, or its error's code. */
 const outcomeOf = (result: OperationResult): Json =>
   result.ok ? result.value : { failed: result.error.code };
@@ -258,6 +272,168 @@ const writerApproval = (sealed: Sealed) => ({
   target: { kind: "model", model: allowedModel },
   reviewed: { version: 1 },
 });
+
+/** An App whose actions search and read two Knowledge collections. */
+const knowledgeFiles = (): Record<string, string> => ({
+  "schema.ts": modelFiles()["schema.ts"] ?? "",
+  "operations/help.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const help = resource.knowledge("help", {
+  operations: ["search", "read"],
+  collections: ["handbook", "salaries"],
+});
+
+export const find = action({
+  args: { text: v.string().min(1) },
+  returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
+  uses: [help],
+  handler: async (ctx, args) => await ctx.resources.help.search({ text: args.text, limit: 5 }),
+});
+
+export const open = action({
+  args: { id: v.string().min(1) },
+  returns: v.object({ title: v.string(), text: v.string() }),
+  uses: [help],
+  handler: async (ctx, args) => await ctx.resources.help.read({ id: args.id }),
+});
+
+export const writer = resource.model("writer", { maxOutputTokens: 300 });
+
+/** Reads a document, then has the model summarize it. */
+export const summarize = action({
+  args: { id: v.string().min(1) },
+  returns: v.string(),
+  uses: [help, writer],
+  handler: async (ctx, args) => {
+    const document = await ctx.resources.help.read({ id: args.id });
+    return await ctx.resources.writer.generate({ prompt: document.text });
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { find, help, open, summarize, writer } from "./operations/help.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Help",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { help: { find, open, summarize } },
+  internalOperations: {},
+  screens: [],
+  uses: [help, writer],
+});
+`,
+});
+
+/** A collection permission of the App, asked for by its owner and granted. */
+const grantedCollection = async (
+  sealed: Sealed,
+  admin: Awaited<ReturnType<typeof person>>,
+  collectionId: string,
+  binding: string
+): Promise<string> => {
+  const requested = await requestPermission(
+    env,
+    sealed.owner,
+    {
+      subject: { type: "app", appId: sealed.app },
+      object: { type: "collection", collectionId },
+      actions: ["read"],
+      binding,
+    },
+    async (app, role) => await appFor(env, sealed.owner, app, role)
+  );
+  await grantPermission(env, admin, requested.id, {
+    version: sealed.release.manifest.resourceVersion,
+  });
+  return requested.id;
+};
+
+/**
+ * The Help App, sealed and current, with a handbook everyone reads, a
+ * sensitive salaries collection of a team its owner is in, and one more
+ * collection it was never granted; each holds one document.
+ */
+const knowledgeApp = async () => {
+  const sealed = await sealedApp(knowledgeFiles());
+  const admin = await person("admin");
+  const team = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Payroll', 'organization', ?)"
+    ).bind(team, Date.now()),
+    ...[sealed.owner, admin].map((member) =>
+      env.DB.prepare(
+        "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
+      ).bind(crypto.randomUUID(), team, member.userId, Date.now())
+    ),
+  ]);
+  const teamAdmin = { ...admin, teams: [{ id: team, name: "Payroll" }] };
+  const documentIn = async (collectionId: string, path: string, text: string) =>
+    await saveDocument(env, teamAdmin, {
+      collectionId,
+      path,
+      text,
+      ifVersion: 0,
+    });
+  const handbook = await createCollection(env, admin, {
+    name: "Handbook",
+    access: "everyone",
+  });
+  const salaries = await createCollection(env, teamAdmin, {
+    name: "Salaries",
+    access: "teams",
+    teams: [team],
+    sensitive: true,
+  });
+  const other = await createCollection(env, admin, {
+    name: "Other",
+    access: "everyone",
+  });
+  const leave = await documentIn(
+    handbook.id,
+    "leave.md",
+    "# Leave\nAsk your lead before you take leave."
+  );
+  const pay = await documentIn(
+    salaries.id,
+    "pay.md",
+    "# Pay\nLeave is paid at the usual rate."
+  );
+  const secret = await documentIn(other.id, "other.md", "# Other\nNot bound.");
+  const permissions = {
+    handbook: await grantedCollection(sealed, admin, handbook.id, "HANDBOOK"),
+    salaries: await grantedCollection(sealed, admin, salaries.id, "SALARIES"),
+  };
+  const binding = await approveResourceBinding(env, admin, {
+    app: sealed.app,
+    alias: "help",
+    target: { kind: "knowledge", collections: permissions },
+    reviewed: { version: 1 },
+  });
+  return {
+    sealed,
+    admin,
+    binding,
+    permissions,
+    collections: { handbook: handbook.id, salaries: salaries.id },
+    documents: {
+      leave: leave.id,
+      pay: pay.id,
+      secret: secret.id,
+    },
+  };
+};
+
+/** Calls `path` of the App as its owner: the whole answer. */
+const answerOf = async (
+  { app, owner, release }: Sealed,
+  path: string,
+  input: unknown
+): Promise<FunctionAnswer> =>
+  await callAppFunction(env, owner, app, requestFor(release, path, input));
 
 describe("resource bindings", { timeout: 120_000 }, () => {
   it("refuse a model an action declares until an admin binds it", async () => {
@@ -780,5 +956,129 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       two: two?.status,
       recorded: revoked.length,
     }).toStrictEqual({ one: "revoked", two: "revoked", recorded: 1 });
+  });
+
+  it("search and read only the bound collections, as the person may", async () => {
+    const { sealed, documents, collections } = await knowledgeApp();
+    const found = await answerOf(sealed, "help.find", { text: "leave" });
+    const opened = await answerOf(sealed, "help.open", {
+      id: documents.leave,
+    });
+    // A document of a collection the binding doesn't name is no item at
+    // all, whatever else the App may read.
+    const unbound = await answerOf(sealed, "help.open", {
+      id: documents.secret,
+    });
+    const hits = hitsSchema.parse(outcomeOf(found.result));
+    expect({
+      // Each collection's best, interleaved; a hit is a title and an excerpt.
+      found: hits.map(({ title, excerpt }) => [
+        title,
+        excerpt.toLowerCase().includes("leave"),
+      ]),
+      opened: outcomeOf(opened.result),
+      unbound: outcomeOf(unbound.result),
+    }).toStrictEqual({
+      found: [
+        ["Leave", true],
+        ["Pay", true],
+      ],
+      opened: {
+        title: "Leave",
+        text: "# Leave\nAsk your lead before you take leave.",
+      },
+      unbound: { failed: "resource.item_not_found" },
+    });
+    // The handbook alone was read: nothing sensitive in the answer.
+    expect(opened.provenance).toStrictEqual({
+      collectionIds: [collections.handbook],
+      sensitive: false,
+      restricted: false,
+    });
+  });
+
+  it("carry a sensitive source's classification and restrict the App", async () => {
+    const { sealed, documents, collections } = await knowledgeApp();
+    const authority = {
+      subject: { type: "app" as const, appId: sealed.app },
+      onBehalfOf: sealed.owner.userId,
+      mode: "interactive" as const,
+      appVersion: 1,
+    };
+    const context = { type: "app" as const, appId: sealed.app };
+    const before = await isRestricted(env, authority, context);
+    const opened = await answerOf(sealed, "help.open", { id: documents.pay });
+    expect({
+      before,
+      after: await isRestricted(env, authority, context),
+      provenance: opened.provenance,
+    }).toStrictEqual({
+      before: false,
+      after: true,
+      provenance: {
+        collectionIds: [collections.salaries],
+        sensitive: true,
+        restricted: true,
+      },
+    });
+  });
+
+  it("hand what a call read to the gateway's data rules", async () => {
+    const { sealed, documents } = await knowledgeApp();
+    await approveModel(sealed, "writer");
+    // Sensitive data may go to another model only.
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv(
+      [answer("Leave needs your lead's yes.")],
+      [allowedModel, "openai/gpt-5.4"],
+      { sensitive: { models: ["openai/gpt-5.4"], connections: [] } }
+    );
+    const plain = await call(withGateway, sealed, "help.summarize", {
+      id: documents.leave,
+    });
+    const sensitive = await call(withGateway, sealed, "help.summarize", {
+      id: documents.pay,
+    });
+    expect({
+      plain: outcomeOf(plain),
+      sensitive: outcomeOf(sensitive),
+      sent: gateway.requests.length,
+    }).toStrictEqual({
+      plain: "Leave needs your lead's yes.",
+      sensitive: { failed: "resource.unavailable" },
+      sent: 1,
+    });
+  });
+
+  it("stop knowledge whose collection permission was revoked", async () => {
+    const { sealed, admin, permissions } = await knowledgeApp();
+    await revokePermission(env, admin, permissions.salaries);
+    const found = await answerOf(sealed, "help.find", { text: "leave" });
+    expect(outcomeOf(found.result)).toStrictEqual({
+      failed: "resource.unavailable",
+    });
+  });
+
+  it("bind knowledge only to the App's own grants, for every collection declared", async () => {
+    const { sealed, admin, permissions } = await knowledgeApp();
+    const other = await sealedApp(knowledgeFiles());
+    const refusal = async (collections: Record<string, string>, app = sealed) =>
+      await failure(
+        async () =>
+          await approveResourceBinding(env, admin, {
+            app: app.app,
+            alias: "help",
+            target: { kind: "knowledge", collections },
+            reviewed: { version: 1 },
+          })
+      );
+    expect({
+      missing: await refusal({ handbook: permissions.handbook }),
+      extra: await refusal({ ...permissions, more: permissions.handbook }),
+      anotherApps: await refusal(permissions, other),
+    }).toStrictEqual({
+      missing: "resource.target_invalid",
+      extra: "resource.target_invalid",
+      anotherApps: "resource.target_invalid",
+    });
   });
 });
