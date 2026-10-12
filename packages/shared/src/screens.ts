@@ -9,7 +9,7 @@ import {
   screenLimits,
 } from "./screen-limits.ts";
 import type { ScreenDelivery } from "./screen-trust.ts";
-import type { RunControl, WorkflowRun } from "./workflows.ts";
+import type { RunControl, RunSummary, WorkflowRun } from "./workflows.ts";
 
 // An App's screens run in a sandboxed frame in the frontend (apps/web): a
 // document core serves for one build (core's screen-frame.ts), which runs
@@ -254,6 +254,13 @@ export interface ScreensApi {
   runs: (app: string, workflow: string) => Promise<ScreenRun[]>;
   /** One of the App's runs as it is now; another App's is not found. */
   run: (app: string, run: string) => Promise<ScreenRun>;
+  /**
+   * The summary of one of the App's runs, all of one revision: status,
+   * identity, times, the decisions it waits for, a compensation, and what
+   * the person may do with it now (`control`). Another App's run is not
+   * found.
+   */
+  summary: (app: string, run: string) => Promise<RunSummary>;
   /**
    * Answers the decision `decision` (its name in the workflow) of one of
    * the App's runs, as the person, by the decision's own rules: only

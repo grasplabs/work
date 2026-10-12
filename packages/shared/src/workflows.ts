@@ -464,6 +464,56 @@ export type RunStatus =
   | "cancelled";
 
 /**
+ * A run as an App's screens observe it, all of one revision of the run
+ * (core's workflows/summary.ts): its status, who it is, its times (Unix
+ * milliseconds), the decisions it waits for, a compensation's cause and
+ * activity, and what the person asking may do with it now. `revision`
+ * orders snapshots: a greater one is newer.
+ */
+export interface RunSummary {
+  revision: number;
+  runId: string;
+  workflowId: string;
+  workflowVersion: number;
+  status:
+    | "queued"
+    | "running"
+    | "waiting"
+    | "paused"
+    | "compensating"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  createdAt: number;
+  /** When the engine first ran it; null until it has. */
+  startedAt: number | null;
+  /** Once it has ended; null before. */
+  finishedAt: number | null;
+  /** While it compensates: why, and what its cleanup is doing. */
+  compensation?: {
+    cause: "failure" | "cancellation";
+    activity: "running" | "waiting" | "paused";
+  };
+  /** Why it failed, once failed: a code and message, no values. */
+  error?: { code: string; message: string };
+  /** The decisions it waits for now: none once it has ended. */
+  waits: { kind: "decision"; name: string; expiresAt: number }[];
+  /**
+   * What the person asking may do now, as the host would admit it, and a
+   * control the host admitted that the engine is still applying.
+   */
+  control: {
+    canPause: boolean;
+    canResume: boolean;
+    canCancel: boolean;
+    pendingControl: {
+      kind: "pause" | "resume" | "cancel";
+      stage: "applying";
+    } | null;
+  };
+}
+
+/**
  * The receipt of a pause, resume or cancel of a run the host admitted:
  * `admitted` until the engine confirms it, then `applied`; `superseded`
  * when a cancel overtook it first.

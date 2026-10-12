@@ -74,6 +74,12 @@ import type { TriggerType } from "./trigger-registry.ts";
 export type RunRow = typeof workflowRuns.$inferSelect;
 
 /**
+ * A run's next summary revision (summary.ts), for the write that changes
+ * what its summary shows.
+ */
+export const nextRevision = sql`${workflowRuns.summaryRevision} + 1`;
+
+/**
  * The statuses of a run that hasn't ended. A run is `starting` from its
  * row until the engine's first notification of it; then where the engine
  * says it is.
@@ -370,6 +376,7 @@ const failStart = async (
         failure: sql`CASE WHEN ${workflowRuns.cancelRequestedAt} IS NULL THEN ${JSON.stringify(failure)} ELSE NULL END`,
         triggerKey: sql`CASE WHEN ${workflowRuns.cancelRequestedAt} IS NULL THEN NULL ELSE ${workflowRuns.triggerKey} END`,
         pendingStart: null,
+        summaryRevision: nextRevision,
       })
       .where(
         and(eq(workflowRuns.id, row.id), eq(workflowRuns.status, "starting"))
@@ -912,7 +919,7 @@ export const recordFailure = async (
   };
   await drizzle(env.DB)
     .update(workflowRuns)
-    .set({ failure })
+    .set({ failure, summaryRevision: nextRevision })
     .where(and(eq(workflowRuns.id, row.id), isNull(workflowRuns.failure)));
 };
 
@@ -1023,6 +1030,20 @@ export interface EngineStatus {
 }
 
 /**
+ * What the projection of `engine` writes of the engine itself: its own
+ * status, the notification's sequence (none for an end core's own command
+ * confirmed), the run's next summary revision, and when it first ran.
+ */
+const engineFields = (engine: EngineStatus) => ({
+  engineStatus: engine.status,
+  summaryRevision: nextRevision,
+  ...(engine.sequence === undefined ? {} : { engineSequence: engine.sequence }),
+  ...(engine.status === "running" || engine.status === "waiting"
+    ? { startedAt: sql`COALESCE(${workflowRuns.startedAt}, ${engine.at})` }
+    : {}),
+});
+
+/**
  * Makes the run's row say where the engine says it is: the one writer of
  * a run's status. A notification no newer than the last the row took is
  * late and changes nothing; an ended run's row never changes again. The
@@ -1061,8 +1082,6 @@ export const projectStatus = async (
       ? undefined
       : lt(workflowRuns.engineSequence, engine.sequence)
   );
-  const sequence =
-    engine.sequence === undefined ? {} : { engineSequence: engine.sequence };
   const ended = endedLive.has(engine.status);
   const report = errored ? (row.failure ?? stoppedReport(row, at)) : null;
   const endedFailed = sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.status} = 'failed')`;
@@ -1077,7 +1096,7 @@ export const projectStatus = async (
               failure: sql`CASE WHEN ${workflowRuns.cancelRequestedAt} IS NULL THEN ${JSON.stringify(report)} ELSE ${workflowRuns.failure} END`,
             }),
         pendingStart: null,
-        ...sequence,
+        ...engineFields(engine),
         ...(ended ? { endedAt: at } : {}),
       })
       .where(fenced)
@@ -1152,6 +1171,7 @@ export const completeCancel = async (
         // As a cancel's receipt does (controls.ts): a pause or resume
         // admitted before it is fenced, its generation no longer the run's.
         controlGeneration: sql`${workflowRuns.controlGeneration} + 1`,
+        summaryRevision: nextRevision,
       })
       .where(
         and(
