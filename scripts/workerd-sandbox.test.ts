@@ -11,6 +11,7 @@ import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import {
+  chmodSync,
   mkdirSync,
   readdirSync,
   rmSync,
@@ -582,6 +583,31 @@ describe("the sandbox supervisor", () => {
           answer: { ok: false },
         });
         expect(supervisor.stats().crashed).toBe(1);
+      }
+    );
+  }, 30_000);
+
+  it("blames the App whose call crashed its process, however slowly the process goes", async () => {
+    // workerd behind a shell that goes two seconds after it does: a process
+    // V8 aborted, slow to exit on a loaded machine (a core to write, say).
+    const slow = path.join(tempDir(), "slow-to-exit.sh");
+    writeFileSync(
+      slow,
+      `#!/bin/sh\n"${nativeWorkerd}" "$@"\ncode=$?\nsleep 2\nexit $code\n`
+    );
+    chmodSync(slow, 0o755);
+    await withSupervisor(
+      { workerd: slow, memoryLimitBytes: 64 * 1024 ** 3 },
+      async (supervisor) => {
+        const result = await callSupervisor(supervisor.socket, {
+          body: "const a = []; for (;;) a.push(new Array(1e5).fill(1));",
+          deadlineMs: 20_000,
+        });
+        expect(result).toMatchObject({
+          status: 200,
+          verdict: "crashed",
+          answer: { ok: false },
+        });
       }
     );
   }, 30_000);
