@@ -37,7 +37,7 @@ import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -211,19 +211,30 @@ const encoder = new TextEncoder();
 const sha256Of = async (bytes: ArrayBuffer | Uint8Array): Promise<string> =>
   toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
 
-/** One artifact, as the manifest names it, and its text. */
+/** One artifact, as the manifest names it, and the bytes hashed. */
 interface Artifact {
   readonly entry: ReleaseArtifact;
-  readonly text: string;
+  readonly bytes: Uint8Array;
 }
 
-/** `text` as the artifact at `path`. */
+/** `text` as the artifact at `path`: its UTF-8 bytes, as stored. */
 const artifactOf = async (path: string, text: string): Promise<Artifact> => {
   const bytes = encoder.encode(text);
   return {
     entry: { path, sha256: await sha256Of(bytes), bytes: bytes.byteLength },
-    text,
+    bytes,
   };
+};
+
+/** `value` with every object and array in it frozen. */
+const deepFreeze = <Value>(value: Value): Value => {
+  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const entry of Object.values(value)) {
+      deepFreeze(entry);
+    }
+  }
+  return value;
 };
 
 /** What the host that seals a release gives it. */
@@ -287,7 +298,7 @@ const artifactText = async (
       path: entry.path,
     });
   }
-  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
+  return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
     bytes
   );
 };
@@ -341,7 +352,9 @@ const verifiedRelease = async (
       modules[path.slice("modules/".length)] = text;
     }
   }
-  return { manifest, app, fingerprints, modules, store };
+  // Shared by every load of the release in this isolate: frozen, so no
+  // caller changes what another runs.
+  return deepFreeze({ manifest, app, fingerprints, modules, store });
 };
 
 /**
@@ -518,6 +531,22 @@ export const sealRelease = async (
     if (request.store === undefined) {
       throw versionErrors.create("version.store_unbound");
     }
+    // A store serves one App's releases: refused before its tables are
+    // touched (and again where the binding is written, below).
+    const other = await drizzle(env.DB)
+      .select({ app: sdkResourceBindings.resourceId })
+      .from(sdkResourceBindings)
+      .where(
+        and(
+          eq(sdkResourceBindings.kind, "store"),
+          eq(sdkResourceBindings.targetId, request.store),
+          ne(sdkResourceBindings.resourceId, app)
+        )
+      )
+      .get();
+    if (other !== undefined) {
+      throw versionErrors.create("version.store_bound_elsewhere");
+    }
     const opened = await openStore(env, request.store);
     const defined = await opened.defineTables(manifestText(manifest.schema));
     if (defined.schemaHash !== schema) {
@@ -586,8 +615,9 @@ export const sealRelease = async (
   // The bytes first, each under its hash: a manifest never names a missing
   // artifact. Storing the same bytes again changes nothing.
   await Promise.all(
-    artifacts.map(async ({ entry, text: content }) => {
-      await env.FILES.put(artifactKey(entry.sha256), content, {
+    artifacts.map(async ({ entry, bytes }) => {
+      // The very bytes hashed, so what is stored is what the hash names.
+      await env.FILES.put(artifactKey(entry.sha256), bytes, {
         sha256: entry.sha256,
       });
     })
@@ -606,12 +636,16 @@ export const sealRelease = async (
       ...(store === null
         ? []
         : [
+            // The target only while no other App's release is bound to
+            // the store: otherwise NULL, which the column refuses, and the
+            // whole seal with it.
             db.insert(sdkResourceBindings).values({
               resourceId: app,
               resourceVersion: version,
               alias: store.alias,
               kind: "store" as const,
-              targetId: store.storeId,
+              targetId: sql`(SELECT ${store.storeId} WHERE NOT EXISTS (SELECT 1 FROM sdk_resource_bindings
+                WHERE kind = 'store' AND target_id = ${store.storeId} AND resource_id <> ${app}))`,
               schemaHash: store.schemaHash,
               manifestHash: hash,
             }),
@@ -630,6 +664,14 @@ export const sealRelease = async (
       }),
     ]);
   } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes(
+        "NOT NULL constraint failed: sdk_resource_bindings.target_id"
+      )
+    ) {
+      throw versionErrors.create("version.store_bound_elsewhere");
+    }
     if (!isUniqueViolation(error)) {
       throw error;
     }
@@ -642,12 +684,12 @@ export const sealRelease = async (
   }
   // What was just built and stored, as it was verified here: the next load
   // reads it all back from storage.
-  return {
+  return deepFreeze({
     manifest: releaseManifest,
     manifestHash: hash,
     app: manifest,
     fingerprints: await contractFingerprints(manifest),
-    modules: final,
+    modules: { ...final },
     store,
-  };
+  });
 };

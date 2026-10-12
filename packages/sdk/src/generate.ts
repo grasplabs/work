@@ -585,6 +585,6 @@ export const symbolicModules = (): Record<string, string> => {
 `;
   return {
     [generatedPaths.serverReferences]: `${prelude}\nexport const internal = ${symbolicTree("internal")};\n`,
-    [generatedPaths.references]: `${prelude}\nexport const api = ${symbolicTree("public")};\nexport const workflows = Object.freeze({});\nexport const resources = Object.freeze({});\nexport const screens = Object.freeze({});\n`,
+    [generatedPaths.references]: `${prelude}\nexport const api = ${symbolicTree("public")};\nexport const workflows = Object.freeze({});\nexport const resources = Object.freeze({});\nexport const screens = Object.freeze({});\nexport const preferences = Object.freeze({ resourceId: "", descriptor: null });\n`,
   };
 };

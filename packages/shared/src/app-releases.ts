@@ -72,7 +72,9 @@ export const releaseManifestSchema = z.strictObject({
   artifacts: z.array(releaseArtifactSchema).min(1).max(1024),
   bindings: z.array(resourceBindingSchema).max(64),
   verificationReportHash: sha256Schema,
-  artifactTrust: z.enum(["unreviewed", "approved", "revoked"]),
+  // Always `unreviewed` as sealed: trust is never the manifest's to say
+  // (approval and revocation are the host's records of its hash).
+  artifactTrust: z.literal("unreviewed"),
 });
 
 export type ReleaseManifest = z.infer<typeof releaseManifestSchema>;
@@ -92,6 +94,10 @@ export const versionErrors = defineErrorFamily({
     "This version's registration changed between two inspections of the same code.",
   "version.store_unbound":
     "This version declares tables, but no store is bound for it.",
+  "version.store_bound_elsewhere":
+    "That store is bound to another App's releases, and serves only that App.",
+  "version.seal_busy":
+    "Some of this version's artifacts are being deleted. Seal it again in a moment.",
   "version.seal_conflict":
     "This version was already sealed with a different manifest.",
   "version.not_sealed": "This version hasn't been sealed.",

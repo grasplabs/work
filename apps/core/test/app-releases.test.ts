@@ -1,5 +1,8 @@
 import { schemaHash } from "@grasp-os/sdk/host";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
+import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
@@ -294,6 +297,91 @@ describe("sealing a release", { timeout: 120_000 }, () => {
   });
 });
 
+/** A table-less App: nothing to store, so no store binding. */
+const tablelessFiles = (): Record<string, string> => ({
+  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+export default defineSchema({});
+`,
+  "operations/hello.ts": `import { v } from "@grasp-os/sdk";
+import { query } from "#grasp/server";
+export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { hello } from "./operations/hello.ts";
+import schema from "./schema.ts";
+export default app({
+  name: "Hello",
+  schema,
+  access: {},
+  operations: { hello: { hello } },
+  screens: [],
+  uses: [],
+});
+`,
+});
+
+/** JSON text that holds an object, as a mutable record. */
+const jsonRecord = (text: string): Record<string, Json> => {
+  const parsed: unknown = JSON.parse(text);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("Not a JSON object");
+  }
+  // SAFETY: parsed JSON, checked just above to be an object.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return parsed as Record<string, Json>;
+};
+
+/** What a consistent rewrite of a sealed release changes. */
+interface Rewrite {
+  /** Changes `contracts.json`, stored again under its new hash. */
+  readonly contracts?: (contracts: Record<string, Json>) => void;
+  /** Changes the manifest. */
+  readonly manifest?: (manifest: Record<string, Json>) => void;
+  /** The manifest's text, when not canonical. */
+  readonly text?: (manifest: Record<string, Json>) => string;
+}
+
+/**
+ * Rewrites the stored release of `app`'s version 1 as someone with write
+ * access to storage could, consistently: every hash recomputed, the
+ * manifest's, its artifacts' and the binding's, so only what the change
+ * itself breaks can be refused.
+ */
+const rewrite = async (
+  app: string,
+  release: Release,
+  change: Rewrite
+): Promise<void> => {
+  const manifest = jsonRecord(JSON.stringify(release.manifest));
+  if (change.contracts !== undefined) {
+    const entry = artifactAt(release, ".grasp/contracts.json");
+    const stored = await env.FILES.get(artifactKey(entry.sha256));
+    const contracts = jsonRecord((await stored?.text()) ?? "{}");
+    change.contracts(contracts);
+    const text = `${canonicalJson(contracts)}\n`;
+    const bytes = new TextEncoder().encode(text);
+    const sha256 = await sha256Hex(text);
+    await env.FILES.put(artifactKey(sha256), bytes);
+    manifest.artifacts = release.manifest.artifacts.map((artifact) =>
+      artifact.path === entry.path
+        ? { path: artifact.path, sha256, bytes: bytes.byteLength }
+        : { ...artifact }
+    );
+    manifest.contractHash = sha256;
+  }
+  change.manifest?.(manifest);
+  const text = change.text?.(manifest) ?? canonicalJson(manifest);
+  const hash = await sha256Hex(text);
+  await drizzle(env.DB)
+    .update(sdkReleaseManifests)
+    .set({ manifest: text, manifestHash: hash })
+    .where(eq(sdkReleaseManifests.appId, app));
+  await drizzle(env.DB)
+    .update(sdkResourceBindings)
+    .set({ manifestHash: hash })
+    .where(eq(sdkResourceBindings.resourceId, app));
+};
+
 describe("a sealed release that changed", { timeout: 120_000 }, () => {
   it("is refused when one of its artifacts' bytes no longer match their hash", async () => {
     const fixture = await appWith(notesFiles());
@@ -311,6 +399,91 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     await expect(
       failure(async () => await loadRelease(env, fixture.app, 1))
     ).resolves.toBe("version.artifact_corrupt");
+  });
+
+  it("is refused when it vouches for itself, even rewritten with every hash", async () => {
+    const fixture = await appWith(tablelessFiles());
+    const release = await seal(fixture);
+    await rewrite(fixture.app, release, {
+      manifest: (manifest) => {
+        manifest.artifactTrust = "approved";
+      },
+    });
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.manifest_corrupt");
+  });
+
+  it("is refused when its manifest hashes right but isn't canonical", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    await rewrite(fixture.app, release, {
+      text: (manifest) => JSON.stringify(manifest, null, 2),
+    });
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.manifest_corrupt");
+  });
+
+  it.each([
+    [
+      "fingerprints that aren't its functions'",
+      (contracts: Record<string, Json>) => {
+        contracts.fingerprints = { "notes.get": "0".repeat(64) };
+      },
+    ],
+    [
+      "another version",
+      (contracts: Record<string, Json>) => {
+        contracts.resourceVersion = 2;
+      },
+    ],
+    [
+      "another App",
+      (contracts: Record<string, Json>) => {
+        contracts.resourceId = "app_other";
+      },
+    ],
+  ])(
+    "is refused when its contracts name %s, every hash rewritten",
+    async (_case, change) => {
+      const fixture = await appWith(notesFiles());
+      const release = await seal(fixture);
+      await rewrite(fixture.app, release, { contracts: change });
+      await expect(
+        failure(async () => await loadRelease(env, fixture.app, 1))
+      ).resolves.toBe("version.artifact_corrupt");
+    }
+  );
+
+  it("is refused when its schema hash isn't its contracts' schema's, every hash rewritten", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    await rewrite(fixture.app, release, {
+      manifest: (manifest) => {
+        manifest.schemaHash = "1".repeat(64);
+        manifest.dataStoreBindings = [];
+      },
+    });
+    await drizzle(env.DB)
+      .delete(sdkResourceBindings)
+      .where(eq(sdkResourceBindings.resourceId, fixture.app));
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.artifact_corrupt");
+  });
+
+  it("hands out releases nobody can change for the next load", async () => {
+    const fixture = await appWith(notesFiles());
+    const sealed = await seal(fixture);
+    const loaded = await loadRelease(env, fixture.app, 1);
+    expect([
+      Object.isFrozen(sealed.modules),
+      Object.isFrozen(sealed.fingerprints),
+      Object.isFrozen(loaded.modules),
+      Object.isFrozen(loaded.fingerprints),
+      Object.isFrozen(loaded.manifest.artifacts),
+    ]).toStrictEqual([true, true, true, true, true]);
   });
 
   it("is refused when an artifact is gone", async () => {
@@ -349,7 +522,6 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);
     const forged = JSON.stringify({ ...release.manifest, bindings: [] });
-    const { sha256Hex } = await import("@grasp-os/shared/encoding");
     await drizzle(env.DB)
       .update(sdkReleaseManifests)
       .set({ manifest: forged, manifestHash: await sha256Hex(forged) })
@@ -470,6 +642,64 @@ JSON.stringify = (value, ...rest) => {
     ],
   ])("doesn't build with %s", async (_case, changes) => {
     await expect(sealedWith(changes)).resolves.toBe("version.build_failed");
+  });
+
+  it("can't be bound to a store another App's releases use", async () => {
+    const first = await appWith(notesFiles());
+    await seal(first);
+    const second = await appWith(notesFiles());
+    await expect(
+      failure(
+        async () =>
+          await sealRelease(env, {
+            app: second.app,
+            version: 1,
+            store: first.store,
+            by: second.owner,
+          })
+      )
+    ).resolves.toBe("version.store_bound_elsewhere");
+  });
+
+  it("seals server code that imports the App's preferences, and functions at any segment a reference doesn't answer", async () => {
+    const files = notesFiles();
+    const fixture = await appWith({
+      ...files,
+      "operations/extra.ts": `import { v } from "@grasp-os/sdk";
+import { api, preferences } from "#grasp";
+import { action, query } from "#grasp/server";
+
+export const defaults = query({
+  args: {},
+  returns: v.boolean(),
+  handler: () => preferences.descriptor !== null,
+});
+
+export const reach = action({
+  args: {},
+  returns: v.boolean(),
+  uses: [api.extra.defaults],
+  handler: async (ctx) => await ctx.runQuery(api.extra.defaults, {}),
+});
+`,
+      "app.ts": (files["app.ts"] ?? "")
+        .replace(
+          'import schema from "./schema.ts";',
+          'import schema from "./schema.ts";\nimport { defaults, reach } from "./operations/extra.ts";\nimport { v } from "@grasp-os/sdk";'
+        )
+        .replace(
+          "operations: { notes: { get, create, tally } },",
+          "operations: { notes: { get, create, tally }, extra: { defaults, reach } },\n  preferences: v.object({ compact: v.boolean().default(false) }),"
+        ),
+    });
+    const release = await seal(fixture);
+    expect([
+      release.app.preferences !== null,
+      release.app.operations["extra.reach"]?.uses,
+    ]).toStrictEqual([
+      true,
+      [{ type: "function", path: "extra.defaults", kind: "query" }],
+    ]);
   });
 
   it("needs a store the host binds when it declares tables", async () => {
