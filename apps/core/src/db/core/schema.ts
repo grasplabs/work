@@ -606,6 +606,65 @@ export const appVersions = sqliteTable(
 );
 
 /**
+ * The sealed release of an App version of spec 8's layout (spec 16;
+ * src/app-releases.ts): its manifest's canonical text, which pins the
+ * version's source tree, schema, contracts, runtime and artifacts, and the
+ * SHA-256 of that text. Written once, by the seal, and never changed: a
+ * seal of the same version with another manifest is refused. Its trust
+ * isn't here: the manifest always says `unreviewed`.
+ */
+export const sdkReleaseManifests = sqliteTable(
+  "sdk_release_manifests",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    manifest: text().notNull(),
+    sealedAt: timestamp("sealed_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.version] })]
+);
+
+/**
+ * What a sealed release binds, by alias (spec 16.1): for now the store it
+ * reads and writes, which only the host chose when it sealed the release.
+ * Routing, not a grant: whoever calls is authorized on every call. Also
+ * how a store finds the releases that still rely on it.
+ */
+export const sdkResourceBindings = sqliteTable(
+  "sdk_resource_bindings",
+  {
+    resourceId: text("resource_id").notNull(),
+    resourceVersion: integer("resource_version").notNull(),
+    alias: text().notNull(),
+    kind: text({ enum: ["store"] }).notNull(),
+    targetId: text("target_id").notNull(),
+    schemaHash: text("schema_hash").notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.resourceId, table.resourceVersion, table.alias],
+    }),
+    index("sdk_resource_bindings_target").on(table.kind, table.targetId),
+  ]
+);
+
+/**
+ * The App a store serves, claimed by the first seal that binds it and kept
+ * for good: retention deletes releases and their bindings, never this. So
+ * a store an App stopped using never comes to serve another App, which
+ * would read what the first left behind.
+ */
+export const sdkStoreOwners = sqliteTable("sdk_store_owners", {
+  storeId: text("store_id").primaryKey(),
+  appId: text("app_id").notNull(),
+  claimedAt: timestamp("claimed_at").notNull(),
+});
+
+/**
  * Which App a record type in a collection (a Knowledge collection, by ID)
  * belongs to: the first whose declaration took effect there
  * (knowledge/record-types.ts). Claimed when an App's write permission on

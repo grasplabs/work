@@ -414,6 +414,13 @@
       "when": 1791752753555,
       "tag": "0058_workflow_runs_root",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1791792388495,
+      "tag": "0059_sdk_release_manifests",
+      "breakpoints": true
     }
   ]
 }

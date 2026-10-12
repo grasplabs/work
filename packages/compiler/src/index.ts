@@ -21,8 +21,20 @@ import type ScreenCompiler from "./worker.ts";
 export type { Diagnostic } from "./diagnostic.ts";
 export type { KitModules } from "./kit.ts";
 export type { BuildRequest, InspectRequest } from "./packages/worker.ts";
-export type { ScreenBuild, ServerBuild, WorkflowBuild } from "./worker.ts";
+export type {
+  AppCodeBuild,
+  ScreenBuild,
+  ServerBuild,
+  WorkflowBuild,
+} from "./worker.ts";
 export {
+  appCodeFiles,
+  appCodeKind,
+  generatedModules,
+  isAppLayout,
+} from "./app-code.ts";
+export {
+  appCodeLimitErrors,
   buildFiles,
   limitErrors,
   serverFiles,

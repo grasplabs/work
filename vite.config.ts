@@ -29,6 +29,8 @@ const generated = [
   "scripts/release/testdata/**",
   // Third-party files vendored byte for byte, pinned by their hashes.
   "packages/*/vendor/**",
+  // What the host generates for an App, byte for byte (spec 8).
+  "**/.grasp/**",
 ];
 
 /** Why a target may not extend Cap'n Web's or workerd's RpcTarget itself. */
