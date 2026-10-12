@@ -1,3 +1,4 @@
+import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { appMaxOperations } from "@grasp-os/shared/operation-limits";
@@ -40,13 +41,6 @@ import type { AnySchema } from "./value-schema.ts";
 // a use of something unregistered, a public function in the internal
 // tree, a key no declaration has, a descriptor out of bounds) is refused.
 // There is no other path from text to an `AppManifest`.
-
-/**
- * The most bytes of an App's manifest's text, as UTF-8, checked before it
- * is parsed: room for the schema's own megabyte and every function's
- * descriptors.
- */
-export const appManifestMaxBytes = 4 * 1024 * 1024;
 
 const refuse = (message: string): never => {
   throw new AppDefinitionError(message);

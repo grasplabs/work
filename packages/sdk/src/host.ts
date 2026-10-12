@@ -101,7 +101,8 @@ export const schemaFromDescriptor = (
 
 // An App's manifest as the host reads it back from what inspection or a
 // release answered, and the modules and references it generates from it.
-export { appManifestMaxBytes, readAppManifest } from "./app-manifest.ts";
+export { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
+export { readAppManifest } from "./app-manifest.ts";
 export {
   contractFingerprint,
   contractFingerprints,

@@ -623,8 +623,113 @@ export const sdkReleaseManifests = sqliteTable(
     manifestHash: text("manifest_hash").notNull(),
     manifest: text().notNull(),
     sealedAt: timestamp("sealed_at").notNull(),
+    /**
+     * When the retention sweep last saw the version current or pending
+     * (src/release-retention.ts): it is kept at least 90 days after that.
+     * Null for one never seen so; its seal starts its retention then.
+     */
+    lastCurrentAt: timestamp("last_current_at"),
+    /**
+     * When the sweep first found nothing that keeps it: deleted once that
+     * has held for a day and still holds. Null while something keeps it.
+     */
+    unreferencedSince: timestamp("unreferenced_since"),
+    /**
+     * When an admin revoked it: it runs no more (`version.revoked`), but
+     * its bytes stay for audit and recovery, under the same retention.
+     */
+    revokedAt: timestamp("revoked_at"),
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
+);
+
+/**
+ * Which sealed releases name which artifact, by its SHA-256 (src/app-
+ * releases.ts, src/release-retention.ts): a seal reserves its artifacts
+ * here before it stores their bytes, and an artifact's bytes are deleted
+ * only once no row names it, under a deletion mark
+ * (`sdk_artifact_deletions`) a seal can't reserve past. A reservation of
+ * a seal that never finished is swept with its release's grace.
+ */
+export const sdkReleaseArtifacts = sqliteTable(
+  "sdk_release_artifacts",
+  {
+    sha256: text().notNull(),
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    reservedAt: timestamp("reserved_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sha256, table.appId, table.version] }),
+    index("sdk_release_artifacts_release").on(table.appId, table.version),
+  ]
+);
+
+/**
+ * An artifact's bytes being deleted: marked when no release named it, so
+ * no seal reserves it again until the bytes are gone and the mark is
+ * removed. Only its owner finishes a mark, before its deadline (15
+ * minutes after it was placed), and removes it only once the bytes are
+ * deleted; a mark an hour old is taken over by whoever finds it
+ * (src/release-retention.ts).
+ */
+export const sdkArtifactDeletions = sqliteTable("sdk_artifact_deletions", {
+  sha256: text().primaryKey(),
+  owner: text().notNull(),
+  startedAt: timestamp("started_at").notNull(),
+});
+
+/**
+ * Bytes whose last reservation went: queued in the statement that removes
+ * the reservation, and dequeued only once the bytes are dealt with
+ * (deleted, reserved again, or another deleter's), so no bytes are ever
+ * left without a reservation or a queue entry (src/release-retention.ts).
+ */
+export const sdkArtifactCandidates = sqliteTable("sdk_artifact_candidates", {
+  sha256: text().primaryKey(),
+  queuedAt: timestamp("queued_at").notNull(),
+});
+
+/**
+ * The manifest hash of each sealed release the retention sweep deleted:
+ * sealing that App version again must make the same manifest, so a
+ * version's number never comes to name other code.
+ */
+export const sdkReleaseTombstones = sqliteTable(
+  "sdk_release_tombstones",
+  {
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    deletedAt: timestamp("deleted_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.version] })]
+);
+
+/**
+ * What keeps a sealed release past its retention (spec 16.3): an open
+ * screen's lease, which lapses 15 minutes after its last renewal, or a
+ * run, a compatible migration, a pinned trigger or a legal hold, held
+ * until released.
+ */
+export const sdkReleasePins = sqliteTable(
+  "sdk_release_pins",
+  {
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    holderKind: text("holder_kind", {
+      enum: ["frame", "run", "migration", "trigger", "hold"],
+    }).notNull(),
+    holderId: text("holder_id").notNull(),
+    /** When it lapses, for a frame's lease; null for a held pin. */
+    expiresAt: timestamp("expires_at"),
+    pinnedAt: timestamp("pinned_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.appId, table.version, table.holderKind, table.holderId],
+    }),
+  ]
 );
 
 /**

@@ -26,6 +26,8 @@ import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 import { commitMaxInputBytes } from "@grasp-os/shared/stores";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import type { RpcTarget } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { operationRoles } from "./app-access.ts";
@@ -34,6 +36,7 @@ import type { Release } from "./app-releases.ts";
 import { appFor } from "./apps.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
+import { sdkReleaseManifests } from "./db/core/schema.ts";
 import { callOperation } from "./operations.ts";
 import type { HostedApp, Invocation, Runner } from "./operations.ts";
 import { sandbox } from "./sandbox.ts";
@@ -397,6 +400,30 @@ const noStore = (): OpenStore => ({
   generations: unbound,
 });
 
+/** Refuses with `version.revoked` once release `version` of `app` is revoked. */
+const requireNotRevoked = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select({ revokedAt: sdkReleaseManifests.revokedAt })
+    .from(sdkReleaseManifests)
+    .where(
+      and(
+        eq(sdkReleaseManifests.appId, app),
+        eq(sdkReleaseManifests.version, version)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    throw versionErrors.create("version.not_sealed");
+  }
+  if (row.revokedAt !== null) {
+    throw versionErrors.create("version.revoked");
+  }
+};
+
 /** What core resolved of the caller, for an invocation. */
 export interface FunctionCaller {
   readonly by: Pick<Identity, "userId" | "role">;
@@ -430,7 +457,12 @@ export const invocationFor = async (
     requestId,
     deadline,
     runId: null,
-    authorize: async () => await operationRoles(env, by, app),
+    // Before every protected step: the call starts, and each mutation
+    // commits. A release revoked meanwhile stops a call already running.
+    authorize: async () => {
+      await requireNotRevoked(env, app, release.manifest.resourceVersion);
+      return await operationRoles(env, by, app);
+    },
   };
 };
 
