@@ -98,3 +98,17 @@ export const schemaFromDescriptor = (
   }
   return schemaOf(readDescriptor(data, 1, { nodes: 0 }));
 };
+
+// An App's manifest as the host reads it back from what inspection or a
+// release answered, and the modules and references it generates from it.
+export { appManifestMaxBytes, readAppManifest } from "./app-manifest.ts";
+export {
+  contractFingerprint,
+  contractFingerprints,
+  contractsFormatVersion,
+  generatedPaths,
+  generateModules,
+  symbolicModules,
+} from "./generate.ts";
+export type { ReleaseIdentity } from "./generate.ts";
+export type { ScreenManifest } from "./app.ts";
