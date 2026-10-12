@@ -1,16 +1,20 @@
+import { actorOf } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
+import { markRunCancelled } from "../src/workflows/engine.ts";
 import { busyRefusalsIn } from "../src/workflows/run-object.ts";
+import { cancelRun } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
   aroundEngine,
   endLiveRuns,
   finished,
+  liveStatus,
   runObject,
   sleeping,
 } from "./runs.ts";
@@ -59,6 +63,32 @@ const leftIn = async (run: string) =>
       .map(({ name }) => name),
     kv: [...state.storage.kv.list()].length,
   }));
+
+/** How often the audit log has `run` cancelled. */
+const cancelsOf = async (run: string) => {
+  const events = await allEvents();
+  return events.filter(
+    ({ action, target }) =>
+      action === "workflow.run.cancelled" && target?.id === run
+  ).length;
+};
+
+/** Once `run`'s row says it was cancelled. */
+const ended = async (run: string) => {
+  await vi.waitFor(
+    async () => {
+      const row = await env.DB.prepare(
+        "SELECT status FROM workflow_runs WHERE id = ?"
+      )
+        .bind(run)
+        .first<string>("status");
+      if (row !== "cancelled") {
+        throw new Error(`The run is ${String(row)}`);
+      }
+    },
+    { timeout: 15_000, interval: 100 }
+  );
+};
 
 describe("a run's object", { timeout: 60_000 }, () => {
   afterEach(endLiveRuns);
@@ -143,6 +173,86 @@ describe("a run's object", { timeout: 60_000 }, () => {
       cancelled: "internal.unexpected",
       roundsStopped: true,
       refused: true,
+    });
+  });
+
+  it("finishes a cancel whose database write failed, or whose request died, from the run's object, audited once", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const identity = await builder.api.whoami();
+    const app = await appWith(builder, napper);
+    const runIn = async () => {
+      const { id } = await builder.api.workflows.start(app, "napper");
+      await sleeping(id, "go");
+      return id;
+    };
+    // Core's database, refusing every write batch, as D1 can.
+    const failing = new Proxy(env.DB, {
+      get: (target, key) => {
+        if (key === "batch") {
+          return async () => {
+            await Promise.resolve();
+            throw new Error("D1_ERROR: broken for the test");
+          };
+        }
+        const value: unknown = Reflect.get(target, key);
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+
+    // The database write fails after the mark: the object's alarm finishes it.
+    const failed = await runIn();
+    const refused = await outcome(
+      cancelRun({ ...env, DB: failing }, identity, failed)
+    );
+    await runDurableObjectAlarm(runObject(failed));
+    await ended(failed);
+    // The request dies right after the mark: the same.
+    const died = await runIn();
+    await markRunCancelled(env, died, actorOf(identity));
+    await runDurableObjectAlarm(runObject(died));
+    await ended(died);
+    // The write fails, and the cancel is asked for again: that finishes it.
+    const retried = await runIn();
+    await outcome(cancelRun({ ...env, DB: failing }, identity, retried));
+    await cancelRun(env, identity, retried);
+    await ended(retried);
+    // Written, but the engine can't be told: the alarm terminates it, and
+    // audits nothing again.
+    const unterminated = await runIn();
+    await aroundEngine(
+      async (method, call) => {
+        if (method === "terminate") {
+          throw new Error("The engine is unavailable");
+        }
+        return await call();
+      },
+      async () => await outcome(cancelRun(env, identity, unterminated))
+    );
+    await runDurableObjectAlarm(runObject(unterminated));
+    await ended(unterminated);
+
+    expect({
+      refused,
+      audited: [
+        await cancelsOf(failed),
+        await cancelsOf(died),
+        await cancelsOf(retried),
+        await cancelsOf(unterminated),
+      ],
+      engine: [
+        await liveStatus(failed),
+        await liveStatus(died),
+        await liveStatus(retried),
+        await liveStatus(unterminated),
+      ],
+    }).toStrictEqual({
+      refused: "Error: D1_ERROR: broken for the test",
+      audited: [1, 1, 1, 1],
+      engine: ["terminated", "terminated", "terminated", "terminated"],
     });
   });
 });

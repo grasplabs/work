@@ -8,8 +8,10 @@ import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { statisticCallerOf } from "../src/app-bindings.ts";
+import { callApp } from "../src/app.ts";
 import { runBindingsFor } from "../src/bindings.ts";
 import type { CollectionBinding } from "../src/knowledge/binding.ts";
 import {
@@ -19,13 +21,15 @@ import {
 import type { Settled } from "../src/workflows/code.ts";
 import { RunHost } from "../src/workflows/host.ts";
 import { keepMessage } from "../src/workflows/kept-email.ts";
-import { requestGranted } from "./apps.ts";
+import { requestGranted, serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, readCollection } from "./knowledge.ts";
+import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import { engineOfTest } from "./run-host.ts";
-import { signedInApi } from "./sign-in.ts";
-import { appWith } from "./workflow-apps.ts";
+import { aroundEngine, endLiveRuns } from "./runs.ts";
+import { outcome as codeOfCall, signedInApi } from "./sign-in.ts";
+import { appWith, workflowFiles } from "./workflow-apps.ts";
 
 // What leaves the host for an attempt's code passes one fence
 // (attempt-host.ts): checked as each call starts and again as it returns,
@@ -529,3 +533,77 @@ describe("the hosts a run's code reaches", () => {
     });
   });
 });
+
+describe(
+  "a stub call of an App method a step's attempt runs",
+  { timeout: 60_000 },
+  () => {
+    afterEach(endLiveRuns);
+
+    it("acts only while the method still runs as its last check is made, the attempt's checked before", async () => {
+      const builder = await personApi("builder");
+      const app = await appWith(
+        builder,
+        workflowFiles(
+          "parks",
+          `  await step.do("park", { description: "Park" }, async () => {
+    await env.APP.call("parkAtMail");
+    // Still holding the attempt once the method has ended.
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    return null;
+  });
+  return null;`,
+          { park: null }
+        )
+      );
+      const appId = appIdSchema.parse(app);
+      const server = await mailConnection([], mailWithSearch);
+      await requestGranted(idp, builder, {
+        subject: { type: "app", appId },
+        object: { type: "connection", connectionId: server.id },
+        actions: ["mail.search"],
+        binding: "MAIL",
+      });
+      await serverBuilt(app, 1);
+      await builder.api.workflows.start(app, "parks");
+      // The method waits at the mail server, its search naming its token.
+      let token = "";
+      await vi.waitFor(
+        async () => {
+          const searched = await server.searched();
+          const parked = searched.find((query) => query.startsWith("hold "));
+          if (parked === undefined) {
+            throw new Error("Not at the mail server yet");
+          }
+          token = parked.slice("hold ".length);
+        },
+        { timeout: 20_000, interval: 50 }
+      );
+
+      // The method ends while its stub call's attempt is checked: the App
+      // answers anything else only once it has. Only that check is held: the
+      // method's mail search, let go, checks its attempt too on its way back.
+      let holding = true;
+      const recorded = await aroundEngine(
+        async (method, call) => {
+          if (method === "attemptHolds" && holding) {
+            holding = false;
+            await server.release();
+            await callApp(
+              env,
+              appId,
+              { userId: builder.userId, mode: "interactive" },
+              "hits",
+              ["parked:done"]
+            );
+          }
+          return await call();
+        },
+        async () =>
+          await codeOfCall(statisticCallerOf(env, appId, { token }, "point"))
+      );
+
+      expect(recorded).toBe("app.caller_invalid");
+    });
+  }
+);

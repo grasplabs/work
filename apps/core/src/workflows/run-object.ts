@@ -1,4 +1,7 @@
+import { auditActorSchema } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { errorFields, log } from "@grasp-os/shared/log";
 import type {
   DefinitionIdentity,
   WorkflowDefinition,
@@ -10,7 +13,7 @@ import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
 import type { AiCalls, BusyRefusals } from "./host.ts";
-import { projectStatus } from "./runs.ts";
+import { completeCancel, projectStatus } from "./runs.ts";
 
 /**
  * Where a run keeps each step's last busy-budget refusal (host.ts): a
@@ -84,6 +87,34 @@ export const busyRefusalsIn = (sql: SqlStorage): BusyRefusals => ({
  */
 const cancelTable = "grasp_run_cancelled";
 
+/** How long a cancel's request has to finish it before the object does. */
+const cancelRepairMs = 5000;
+
+/** The cancel a run is marked with (`markCancelled`). */
+interface CancelMark {
+  runId: string;
+  actor: AuditActor;
+  at: number;
+  settled?: boolean;
+}
+
+/** The cancel kept in `sql`, if any (`markCancelled`). */
+const cancelMarkIn = (sql: SqlStorage): CancelMark | undefined => {
+  const [row] = sql
+    .exec<{ run_id: string; actor: string; at: number; settled: number }>(
+      `SELECT run_id, actor, at, settled FROM ${cancelTable} LIMIT 1`
+    )
+    .toArray();
+  return row === undefined
+    ? undefined
+    : {
+        runId: row.run_id,
+        actor: auditActorSchema.parse(JSON.parse(row.actor)),
+        at: row.at,
+        settled: row.settled === 1,
+      };
+};
+
 /** Whether the run in `sql` was marked cancelled (`markCancelled`). */
 const cancelledIn = (sql: SqlStorage): boolean =>
   sql
@@ -139,15 +170,24 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   }
 
   /**
-   * Marks the run cancelled in its object, before anything else of a
-   * cancel (runs.ts, `cancelRun`): from then on no attempt of it holds
+   * Marks the run cancelled in its object, the first step of a cancel and
+   * its record (runs.ts, `cancelRun`): who cancelled it and when, kept with
+   * the run until the cancel is done in core's database and the engine
+   * (`settleCancel`). From then on no attempt of the run holds
    * (`#leaseOf`), so every fenced call of it is refused at once, in this
-   * object, with no read of core's database, whether or not the engine
-   * terminates it after. A run the engine has no journal of yet has no
-   * attempt to fence: its start, should it come, finds its row
-   * cancelled. Synchronous: once this returns, the mark is stored.
+   * object, with no read of core's database, whatever happens to the rest
+   * of the cancel. A second cancel finds the first's mark and finishes it.
+   * Should the rest of the cancel fail, or its request die, the object
+   * finishes it on its next alarm (`alarm`), which is armed here. A run
+   * the engine has no journal of yet has no attempt to fence, and nothing
+   * is kept: its start, should it come, finds its row cancelled. Answers
+   * the cancel the run is marked with.
    */
-  markCancelled(): void {
+  async markCancelled(
+    runId: string,
+    actor: AuditActor,
+    at: number
+  ): Promise<CancelMark> {
     const { sql } = this.ctx.storage;
     const hasRun =
       sql
@@ -155,11 +195,65 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run'"
         )
         .toArray().length > 0;
-    if (hasRun) {
+    if (!hasRun) {
+      return { runId, actor, at };
+    }
+    sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${cancelTable} (run_id TEXT NOT NULL, actor TEXT NOT NULL, at INTEGER NOT NULL, settled INTEGER NOT NULL DEFAULT 0)`
+    );
+    if (cancelMarkIn(sql) === undefined) {
       sql.exec(
-        `CREATE TABLE IF NOT EXISTS ${cancelTable} (at INTEGER NOT NULL)`
+        `INSERT INTO ${cancelTable} (run_id, actor, at) VALUES (?, ?, ?)`,
+        runId,
+        JSON.stringify(actor),
+        at
       );
     }
+    const mark = cancelMarkIn(sql);
+    if (mark === undefined) {
+      throw new Error(`Run ${runId}'s cancel wasn't kept`);
+    }
+    // Armed for the cancel's repair, should its request not finish it.
+    const due = Date.now() + cancelRepairMs;
+    const armed = await this.ctx.storage.getAlarm();
+    if (armed === null || armed > due) {
+      await this.ctx.storage.setAlarm(due);
+    }
+    return mark;
+  }
+
+  /** Records that the run's cancel is done (`markCancelled`). */
+  settleCancel(): void {
+    const { sql } = this.ctx.storage;
+    if (cancelledIn(sql)) {
+      sql.exec(`UPDATE ${cancelTable} SET settled = 1`);
+    }
+  }
+
+  /**
+   * Finishes a cancel its request didn't (`markCancelled`), then does what
+   * the engine's alarm does. The cancel is finished as its request would:
+   * the run's row tombstoned and the cancel audited, once whoever gets
+   * there first, and the run terminated.
+   */
+  override async alarm(): Promise<void> {
+    const { sql } = this.ctx.storage;
+    const mark = cancelledIn(sql) ? cancelMarkIn(sql) : undefined;
+    if (mark !== undefined && mark.settled !== true) {
+      try {
+        await completeCancel(this.env, mark);
+        await this.terminate({ rollback: false });
+        this.settleCancel();
+      } catch (error) {
+        // Tried again by the engine's next alarm, which a run that goes
+        // on has; one that doesn't is cancelled again by its next request.
+        log.error("workflow.cancel_repair_failed", {
+          runId: mark.runId,
+          ...errorFields(error),
+        });
+      }
+    }
+    await super.alarm();
   }
 
   /**

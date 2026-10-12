@@ -1,3 +1,5 @@
+import { auditActorSchema } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import { deploymentConfig } from "@grasp-os/shared/config";
 import {
   runRetentionDefaultDays,
@@ -199,16 +201,32 @@ export const runObjectOf = (
 const runStub = (env: Env, id: string): RunStub => runObjectOf(env, id);
 
 /**
- * Marks run `id` cancelled in its object (run-object.ts,
- * `markCancelled`), the first step of a cancel: no attempt of it holds
- * from then on, whatever the engine does after. Throws when the object
- * can't be told, so a cancel fails before anything else of it.
+ * Marks run `id` cancelled in its object by `actor` (run-object.ts,
+ * `markCancelled`), the first step of a cancel and its record: no attempt
+ * of it holds from then on, whatever the engine does after. Answers the
+ * cancel it is marked with, a first one's if it was cancelled before.
+ * Throws when the object can't be told, so a cancel fails before anything
+ * else of it.
  */
 export const markRunCancelled = async (
   env: Pick<Env, "WORKFLOW_RUNS" | "DURABLE_OBJECT_JURISDICTION">,
+  id: string,
+  actor: AuditActor
+): Promise<{ runId: string; actor: AuditActor; at: number }> => {
+  const mark = await runObjectOf(env, id).markCancelled(id, actor, Date.now());
+  return {
+    runId: mark.runId,
+    actor: auditActorSchema.parse(mark.actor),
+    at: mark.at,
+  };
+};
+
+/** Records that run `id`'s cancel is done (`markRunCancelled`). */
+export const settleRunCancel = async (
+  env: Pick<Env, "WORKFLOW_RUNS" | "DURABLE_OBJECT_JURISDICTION">,
   id: string
 ): Promise<void> => {
-  await runObjectOf(env, id).markCancelled();
+  await runObjectOf(env, id).settleCancel();
 };
 
 /**

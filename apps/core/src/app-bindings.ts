@@ -83,8 +83,9 @@ export const tokenOf = (caller: unknown): string => {
 /**
  * Admits one stub call for the call `token` names: `first` asks the host
  * (`App.admit`, or `App.claimStatistic`, which also counts the use), what
- * let the call in is checked again (`requireStillAdmitted`), and the host
- * is asked once more, last, for `use`. That is not yet the act: a stub
+ * let the call in is checked again (`requireStillAdmitted`) and so is its
+ * workflow attempt's fence (attempt-fence.ts), and the host is asked once
+ * more, last, for `use`: no check is awaited after the host's. That is not yet the act: a stub
  * that awaits more before it acts (a permission check, signing, a lookup)
  * admits the call again, in full, just before (`stillAdmitted`): a
  * connection call before it
@@ -100,13 +101,15 @@ const admitted = async (
   first: (host: ReturnType<typeof appHost>) => Promise<Admitted>
 ): Promise<Admitted> => {
   const host = appHost(env, app);
-  const { admission } = await first(host);
+  const { admission, fence } = await first(host);
+  // Every awaited check first: what let the call in, and, for a workflow
+  // run's step, that its attempt still holds.
   await requireStillAdmitted(env, app, admission);
-  const admittedNow = await host.admit(token, use);
-  // Last before the act: for a workflow run's step, its attempt must
-  // still hold, so nothing it started acts once the engine gave up on it.
-  await requireAttemptHolds(env, admittedNow.fence);
-  return admittedNow;
+  await requireAttemptHolds(env, fence);
+  // Last, with nothing awaited between it and the act: the host's word
+  // that the call still runs (its token, its deadline, its code), so a
+  // call that ended while the checks above awaited acts no more.
+  return await host.admit(token, use);
 };
 
 /**

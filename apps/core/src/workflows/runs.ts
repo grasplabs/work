@@ -50,7 +50,7 @@ import { apps, workflowRuns } from "../db/core/schema.ts";
 import { failureNoticed } from "../notifications.ts";
 import { stepStatisticsForgotten } from "../statistic-steps.ts";
 import { hasWorkflow } from "./code.ts";
-import { markRunCancelled, runEngine } from "./engine.ts";
+import { markRunCancelled, runEngine, settleRunCancel } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellScreens } from "./run-changes.ts";
@@ -1049,6 +1049,38 @@ export const projectStatus = async (
 };
 
 /**
+ * Does in core's database what a cancel marked in the run's object
+ * (`markRunCancelled`) asks: the run's row tombstoned and the cancel
+ * audited, as of who cancelled it and when, once, whichever of the
+ * cancel's request, a cancel asked for again, or the object's repair gets
+ * there first; nothing for a run that has ended.
+ */
+export const completeCancel = async (
+  env: Env,
+  mark: { runId: string; actor: AuditActor; at: number }
+): Promise<void> => {
+  const id = runIdSchema.safeParse(mark.runId);
+  const row = id.success ? await findRun(env, id.data) : undefined;
+  if (row === undefined) {
+    return;
+  }
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    db
+      .update(workflowRuns)
+      .set({ cancelRequestedAt: new Date(mark.at), pendingStart: null })
+      .where(
+        and(
+          eq(workflowRuns.id, row.id),
+          inArray(workflowRuns.status, unended),
+          isNull(workflowRuns.cancelRequestedAt)
+        )
+      ),
+    outboxedIfChanged(db, runEntry(mark.actor, "workflow.run.cancelled", row)),
+  ]);
+};
+
+/**
  * Stops a run for good, and records who did; a run that ended otherwise
  * stays as it is. Its tombstone is written first, with the audit event,
  * so the dispatcher runs nothing more of it whatever the engine still
@@ -1068,26 +1100,15 @@ export const cancelRun = async (
   if (!unended.includes(row.status)) {
     return toRun(env, row);
   }
-  // First, in the run's object: from then on no attempt of it holds, so
-  // nothing more of it is handed back or acts, even should the engine
-  // never terminate it. Should this fail, nothing of the cancel happened.
-  await markRunCancelled(env, row.id);
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    db
-      .update(workflowRuns)
-      .set({ cancelRequestedAt: new Date(), pendingStart: null })
-      .where(
-        and(
-          eq(workflowRuns.id, row.id),
-          inArray(workflowRuns.status, unended),
-          isNull(workflowRuns.cancelRequestedAt)
-        )
-      ),
-    outboxedIfChanged(db, runEntry(actorOf(by), "workflow.run.cancelled", row)),
-  ]);
+  // First, in the run's object, the cancel's record: from then on no
+  // attempt of it holds, so nothing more of it is handed back or acts,
+  // even should the rest of this never happen. Should this fail, nothing
+  // of the cancel happened. A run cancelled before keeps its first cancel.
+  const mark = await markRunCancelled(env, row.id, actorOf(by));
+  await completeCancel(env, mark);
   const engine = runEngine(env);
   await engine.terminate(row.id);
+  await settleRunCancel(env, row.id);
   const live = await engine.status(row.id);
   if (live === undefined || endedLive.has(live.status)) {
     await projectStatus(env, row.id, {

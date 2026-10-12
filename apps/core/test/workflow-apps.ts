@@ -87,6 +87,13 @@ export class App extends DurableObject {
     }
   }
 
+  // Waits at the mail server, its search naming its caller's token, until
+  // the test lets it go, then counts \`parked:done\`.
+  async parkAtMail(caller: Caller): Promise<void> {
+    await (this.env as any).MAIL.call(caller, "mail.search", { query: "hold " + ((caller as { token?: string }).token ?? "") });
+    this.hit(caller, "parked:done");
+  }
+
   // Waits at the mail server, which holds its search until the test lets
   // it go (MAIL, granted \`mail.search\`), then records a point of
   // \`measure\`, and counts whether the call was taken
