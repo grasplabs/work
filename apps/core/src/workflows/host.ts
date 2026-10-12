@@ -14,6 +14,7 @@ import {
   callReviewed,
   stepReviewed,
   isRetryable,
+  maxAttemptTimeoutMs,
   stepIdempotencyKey,
   inboundEmailIndexSchema,
   storedEmailSchema,
@@ -215,12 +216,6 @@ const milliseconds = z
   .positive()
   .max(365 * 86_400_000);
 
-/**
- * The longest a step's attempt may run: all of a fresh activation's
- * budget, the engine's limit. A longer timeout would never fire.
- */
-const maxAttemptMs = 14 * 60_000;
-
 const doOptionsSchema = z.object({
   retries: z
     .object({
@@ -229,7 +224,7 @@ const doOptionsSchema = z.object({
       backoff: z.enum(["constant", "linear", "exponential"]).optional(),
     })
     .optional(),
-  timeout: z.int().positive().max(maxAttemptMs).optional(),
+  timeout: z.int().positive().max(maxAttemptTimeoutMs).optional(),
   sideEffect: z.boolean().optional(),
   input: z.json().optional(),
 });
