@@ -16,7 +16,7 @@ import { keepMessage } from "../src/workflows/kept-email.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { engineOfTest } from "./run-host.ts";
-import { signedInWithRole } from "./sign-in.ts";
+import { signedInApi } from "./sign-in.ts";
 
 // A run's reads of a kept message's attachments where the outside systems
 // fail: R2 (a fetch that fails once) and the database the audit record is
@@ -68,12 +68,20 @@ const hooks: HostHooks = {
  * who is there, on `changes` to the env.
  */
 const runReading = async (changes: Partial<Env> = {}) => {
-  const { userId } = await signedInWithRole(idp, "builder");
-  const app = appIdSchema.parse(crypto.randomUUID());
+  const builder = await signedInApi(idp, "builder");
+  const { userId } = builder;
+  const created = await builder.api.apps.create({ name: "Scans" });
+  const app = appIdSchema.parse(created.id);
   const raw = new TextEncoder().encode(mail);
   const id = toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", raw)));
   const stored = await keepMessage(env, [app], id, raw);
   const runId = runIdSchema.parse(crypto.randomUUID());
+  // Its row: a read is handed on only while the run goes on.
+  await env.DB.prepare(
+    "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at) VALUES (?, ?, 'scans', 1, ?, 'running', ?)"
+  )
+    .bind(runId, app, userId, Date.now())
+    .run();
   const host = new RunHost(
     { ...env, ...changes },
     step,

@@ -90,6 +90,18 @@ export class AppCollectionBinding extends WorkerEntrypoint<
     };
   }
 
+  /**
+   * What `read` read, handed on only once `caller` is admitted again as it
+   * returns (`callerOf`): a read whose call was let go of meanwhile (for a
+   * workflow run's step, its attempt no longer holds, attempt-fence.ts)
+   * hands nothing on, whatever the read awaited on the way.
+   */
+  async #leaving<T>(caller: unknown, read: Promise<T>): Promise<T> {
+    const value = await read;
+    await callerOf(this.env, this.ctx.props.app, caller, "read");
+    return value;
+  }
+
   #reads(caller: unknown) {
     const { app: _app, ...grant } = this.ctx.props;
     return collectionReads(this.env, this.#authorityOf(caller), grant);
@@ -99,7 +111,10 @@ export class AppCollectionBinding extends WorkerEntrypoint<
     caller: unknown,
     options?: unknown
   ): Promise<DocumentPage> {
-    return await this.#reads(caller).listDocuments(options);
+    return await this.#leaving(
+      caller,
+      this.#reads(caller).listDocuments(options)
+    );
   }
 
   async getDocument(
@@ -107,7 +122,10 @@ export class AppCollectionBinding extends WorkerEntrypoint<
     documentId: unknown,
     version?: unknown
   ): Promise<DocumentRead> {
-    return await this.#reads(caller).getDocument(documentId, version);
+    return await this.#leaving(
+      caller,
+      this.#reads(caller).getDocument(documentId, version)
+    );
   }
 
   async history(
@@ -115,7 +133,10 @@ export class AppCollectionBinding extends WorkerEntrypoint<
     documentId: unknown,
     options?: unknown
   ): Promise<HistoryPage> {
-    return await this.#reads(caller).history(documentId, options);
+    return await this.#leaving(
+      caller,
+      this.#reads(caller).history(documentId, options)
+    );
   }
 
   async backlinks(
@@ -123,7 +144,10 @@ export class AppCollectionBinding extends WorkerEntrypoint<
     documentId: unknown,
     options?: unknown
   ): Promise<BacklinkPage> {
-    return await this.#reads(caller).backlinks(documentId, options);
+    return await this.#leaving(
+      caller,
+      this.#reads(caller).backlinks(documentId, options)
+    );
   }
 
   async search(
@@ -131,7 +155,10 @@ export class AppCollectionBinding extends WorkerEntrypoint<
     query: unknown,
     options?: unknown
   ): Promise<SearchResults> {
-    return await this.#reads(caller).search(query, options);
+    return await this.#leaving(
+      caller,
+      this.#reads(caller).search(query, options)
+    );
   }
 
   async read(
@@ -139,11 +166,14 @@ export class AppCollectionBinding extends WorkerEntrypoint<
     documentId: unknown,
     options?: unknown
   ): Promise<KnowledgeRead> {
-    return await this.#reads(caller).read(documentId, options);
+    return await this.#leaving(
+      caller,
+      this.#reads(caller).read(documentId, options)
+    );
   }
 
   async follow(caller: unknown, documentId: unknown): Promise<FollowResult> {
-    return await this.#reads(caller).follow(documentId);
+    return await this.#leaving(caller, this.#reads(caller).follow(documentId));
   }
 
   /**
@@ -157,12 +187,15 @@ export class AppCollectionBinding extends WorkerEntrypoint<
     version?: unknown
   ): Promise<RecordRead> {
     const { context, permissionId } = this.ctx.props;
-    return await readAsDelegate(
-      this.env,
-      this.#authorityOf(caller),
-      context,
-      permissionId,
-      async (reader) => await getRecord(this.env, reader, documentId, version)
+    return await this.#leaving(
+      caller,
+      readAsDelegate(
+        this.env,
+        this.#authorityOf(caller),
+        context,
+        permissionId,
+        async (reader) => await getRecord(this.env, reader, documentId, version)
+      )
     );
   }
 
@@ -174,13 +207,16 @@ export class AppCollectionBinding extends WorkerEntrypoint<
    */
   async listRecords(caller: unknown, options?: unknown): Promise<RecordPage> {
     const { context, permissionId, collectionId } = this.ctx.props;
-    return await readAsDelegate(
-      this.env,
-      this.#authorityOf(caller),
-      context,
-      permissionId,
-      async (reader) =>
-        await listRecords(this.env, reader, collectionId, options)
+    return await this.#leaving(
+      caller,
+      readAsDelegate(
+        this.env,
+        this.#authorityOf(caller),
+        context,
+        permissionId,
+        async (reader) =>
+          await listRecords(this.env, reader, collectionId, options)
+      )
     );
   }
 

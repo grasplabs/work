@@ -35,6 +35,52 @@ export interface AttemptCalls {
 }
 
 /**
+ * The one check every call of an attempt passes (`AttemptHost`): the
+ * refusal to answer, as `Settled`, when the attempt no longer holds its
+ * lease (it timed out, the run was cancelled or paused, another
+ * activation took over), or nothing while it holds.
+ */
+export type AttemptFenceCheck = (
+  call: string
+) => Promise<Settled<never> | undefined>;
+
+/**
+ * `calls`, each fenced: refused before it runs once its attempt no longer
+ * holds, and again as it returns, so what it read or got never leaves the
+ * host for an attempt the engine let go of meanwhile, whatever the call
+ * awaited on the way. Every entry of `calls` is wrapped, so a call added
+ * to `AttemptCalls` is fenced without anyone remembering to.
+ */
+const fenced = (
+  calls: AttemptCalls,
+  check: AttemptFenceCheck
+): AttemptCalls => {
+  const wrap =
+    <Args extends unknown[], T>(
+      name: string,
+      call: (...args: Args) => Promise<Settled<T>>
+    ) =>
+    async (...args: Args): Promise<Settled<T>> => {
+      const before = await check(name);
+      if (before !== undefined) {
+        return before;
+      }
+      const result = await call(...args);
+      return (await check(name)) ?? result;
+    };
+  return {
+    callModel: wrap("model", calls.callModel),
+    callCollection: wrap("collection", calls.callCollection),
+    callConnection: wrap("connection", calls.callConnection),
+    callApp: wrap("APP", calls.callApp),
+    callExport: wrap("export", calls.callExport),
+    openDecision: wrap("decision", calls.openDecision),
+    decisionRecipients: wrap("decision", calls.decisionRecipients),
+    readAttachment: wrap("attachment", calls.readAttachment),
+  } satisfies { [Name in keyof AttemptCalls]: AttemptCalls[Name] };
+};
+
+/**
  * The host of one attempt of a step, minted when the engine claims it and
  * handed to that attempt's code alone: what the code does inside a step
  * (its bindings, a model call, a decision) goes through it, each call as
@@ -47,9 +93,9 @@ export interface AttemptCalls {
 export class AttemptHost extends RpcTarget {
   readonly #calls: AttemptCalls;
 
-  constructor(calls: AttemptCalls) {
+  constructor(calls: AttemptCalls, check: AttemptFenceCheck) {
     super();
-    this.#calls = calls;
+    this.#calls = fenced(calls, check);
   }
 
   async callModel(request: unknown): Promise<Settled<unknown>> {

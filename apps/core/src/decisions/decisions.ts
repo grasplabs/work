@@ -14,6 +14,7 @@ import {
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { executionErrors } from "@grasp-os/shared/workflows";
 import { and, eq, exists, gt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -21,7 +22,11 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
-import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
+import {
+  auditedBatch,
+  outboxedIfChanged,
+  outboxedWhere,
+} from "../audit-outbox.ts";
 import { notRemoved, organizationId } from "../auth/auth.ts";
 import { signInConfig } from "../auth/config.ts";
 import type { Member } from "../auth/identity.ts";
@@ -348,7 +353,10 @@ export const decisionRecipients = async (
   env: Env,
   run: DecisionRun,
   decision: string,
-  reminder: boolean
+  reminder: boolean,
+  stillAsking: () => Promise<void> = async () => {
+    await Promise.resolve();
+  }
 ): Promise<DecisionRecipient[]> => {
   const row = await runDecision(env, run, decision);
   // Past its deadline, nobody can answer it, so nobody is asked: a link
@@ -371,15 +379,32 @@ export const decisionRecipients = async (
   if (people.length > maxDeciders) {
     throw decisionErrors.create("decision.too_many_deciders");
   }
-  await auditedBatch(env, db, [
-    outboxed(db, {
-      ...decisionEntry(runActorOf(run), "workflow.decision.asked", run, row, {
-        recipients: people.length,
-        reminder,
-      }),
-      provenance: people.map(({ userId }) => userId),
-    }),
+  // Last before the ask is recorded: the step asking may have been let go
+  // of while the people were read (the caller's check, `stillAsking`), and
+  // its run cancelled or ended, which the write itself checks, so an ask
+  // of a run that was cancelled meanwhile is never recorded.
+  await stillAsking();
+  const liveRun = sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run.runId} AND ${workflowRuns.cancelRequestedAt} IS NULL AND ${workflowRuns.endedAt} IS NULL)`;
+  const [, live] = await auditedBatch(env, db, [
+    outboxedWhere(
+      db,
+      {
+        ...decisionEntry(runActorOf(run), "workflow.decision.asked", run, row, {
+          recipients: people.length,
+          reminder,
+        }),
+        provenance: people.map(({ userId }) => userId),
+      },
+      liveRun
+    ),
+    db
+      .select({ id: workflowRuns.id })
+      .from(workflowRuns)
+      .where(and(eq(workflowRuns.id, run.runId), liveRun)),
   ]);
+  if (live.length === 0) {
+    throw executionErrors.create("execution.stale_attempt");
+  }
   const link = new URL(`/decisions/${encodeURIComponent(row.id)}`, origin);
   return people.map((person) => ({ ...person, link: link.href }));
 };

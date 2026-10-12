@@ -1,5 +1,5 @@
 import { runActorOf } from "@grasp-os/shared/audit";
-import type { AuditActor } from "@grasp-os/shared/audit";
+import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { toHex } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema, isExpectedError } from "@grasp-os/shared/errors";
@@ -29,15 +29,17 @@ import type {
 import { NonRetryableError } from "@grasp-os/workerflow/errors";
 import type { AttemptLease } from "@grasp-os/workerflow/run";
 import { RpcTarget } from "cloudflare:workers";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Email } from "postal-mime";
 import { z } from "zod";
 
 import { callExport } from "../app-calls.ts";
 import type { AppAnswer, AppCallerInput } from "../app.ts";
-import { auditedBatch, outboxed } from "../audit-outbox.ts";
+import { auditedBatch, outboxed, outboxedWhere } from "../audit-outbox.ts";
 import { forSandbox, requireStepKey, runStubCall } from "../bindings.ts";
 import type { ConnectionGrant, ExportGrant } from "../bindings.ts";
+import { workflowRuns } from "../db/core/schema.ts";
 import {
   decisionDeadline,
   decisionEventType,
@@ -1412,22 +1414,43 @@ export class RunHost extends RpcTarget {
 
   /** The host `attempt`'s code reaches core through, every call as it. */
   #attemptHost(attempt: StepAttempt): AttemptHost {
-    return new AttemptHost({
-      callModel: async (request) => await this.#callModel(attempt, request),
-      callCollection: async (binding, method, args) =>
-        await this.#callCollection(attempt, binding, method, args),
-      callConnection: async (binding, call) =>
-        await this.#callConnection(attempt, binding, call),
-      callApp: async (method, args) =>
-        await this.#callApp(attempt, method, args),
-      callExport: async (binding, method, input) =>
-        await this.#callExport(attempt, binding, method, input),
-      openDecision: async (request) =>
-        await this.#openDecision(attempt, request),
-      decisionRecipients: async (decision, reminder) =>
-        await this.#decisionRecipients(attempt, decision, reminder),
-      readAttachment: async (stored, index) =>
-        await this.#readAttachment(attempt, stored, index),
+    return new AttemptHost(
+      {
+        callModel: async (request) => await this.#callModel(attempt, request),
+        callCollection: async (binding, method, args) =>
+          await this.#callCollection(attempt, binding, method, args),
+        callConnection: async (binding, call) =>
+          await this.#callConnection(attempt, binding, call),
+        callApp: async (method, args) =>
+          await this.#callApp(attempt, method, args),
+        callExport: async (binding, method, input) =>
+          await this.#callExport(attempt, binding, method, input),
+        openDecision: async (request) =>
+          await this.#openDecision(attempt, request),
+        decisionRecipients: async (decision, reminder) =>
+          await this.#decisionRecipients(attempt, decision, reminder),
+        readAttachment: async (stored, index) =>
+          await this.#readAttachment(attempt, stored, index),
+      },
+      async (call) => await this.#leaseRefusal(attempt, call)
+    );
+  }
+
+  /**
+   * The refusal of a call of `attempt` once it no longer holds
+   * (`#requireCurrent`, audited once), or nothing while it holds: the one
+   * check `AttemptHost` makes before each call and again as it returns.
+   */
+  async #leaseRefusal(
+    attempt: StepAttempt,
+    call: string
+  ): Promise<Settled<never> | undefined> {
+    if (this.#holds(attempt)) {
+      return undefined;
+    }
+    return await settle(async (): Promise<never> => {
+      await this.#requireCurrent(attempt, call);
+      throw executionErrors.create("execution.stale_attempt");
     });
   }
 
@@ -1799,7 +1822,10 @@ export class RunHost extends RpcTarget {
         this.#env,
         this.#run,
         checked(identifierSchema, decision),
-        checked(z.boolean(), reminder)
+        checked(z.boolean(), reminder),
+        async () => {
+          await this.#requireCurrent(attempt, "decision");
+        }
       );
     });
   }
@@ -1948,39 +1974,58 @@ export class RunHost extends RpcTarget {
         }
         throw error;
       }
-      await this.#auditRead({ ...sent, bytes: content.byteLength });
+      // Recorded, and handed on, only while its run goes on: one cancelled
+      // meanwhile gets nothing (`AttemptHost` checks the attempt again as
+      // the call returns).
+      if (!(await this.#auditRead({ ...sent, bytes: content.byteLength }))) {
+        throw executionErrors.create("execution.stale_attempt");
+      }
       return content;
     });
   }
 
-  /** Records a read of a kept message's attachment, through the outbox. */
+  /**
+   * Records a read of a kept message's attachment, through the outbox. A
+   * read that hands the attachment on (`bytes`) is recorded only while the
+   * run is neither cancelled nor ended, as the write finds it; whether it
+   * was. A refusal is always recorded.
+   */
   async #auditRead(read: {
     step: string | null;
     message: string | null;
     index: number | null;
     bytes?: number;
     errorCode?: string;
-  }): Promise<void> {
+  }): Promise<boolean> {
     const { app, workflow, version, runId } = this.#run;
     const db = drizzle(this.#env.DB);
-    await auditedBatch(this.#env, db, [
-      outboxed(db, {
-        actor: this.#actor,
-        action: "workflow.email.read",
-        target: { type: "workflow_run", id: runId },
-        detail: {
-          app,
-          workflow,
-          version,
-          step: read.step,
-          message: read.message,
-          attachment: read.index,
-          ...(read.bytes === undefined ? {} : { bytes: read.bytes }),
-          ...(read.errorCode === undefined
-            ? {}
-            : { errorCode: read.errorCode }),
-        },
-      }),
+    const entry: AuditEntry = {
+      actor: this.#actor,
+      action: "workflow.email.read",
+      target: { type: "workflow_run", id: runId },
+      detail: {
+        app,
+        workflow,
+        version,
+        step: read.step,
+        message: read.message,
+        attachment: read.index,
+        ...(read.bytes === undefined ? {} : { bytes: read.bytes }),
+        ...(read.errorCode === undefined ? {} : { errorCode: read.errorCode }),
+      },
+    };
+    if (read.bytes === undefined) {
+      await auditedBatch(this.#env, db, [outboxed(db, entry)]);
+      return true;
+    }
+    const live = sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${runId} AND ${workflowRuns.cancelRequestedAt} IS NULL AND ${workflowRuns.endedAt} IS NULL)`;
+    const [, still] = await auditedBatch(this.#env, db, [
+      outboxedWhere(db, entry, live),
+      db
+        .select({ id: workflowRuns.id })
+        .from(workflowRuns)
+        .where(and(eq(workflowRuns.id, runId), live)),
     ]);
+    return still.length > 0;
   }
 }

@@ -750,8 +750,9 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     const ranOut = {
       status: await statusOf(running.id),
       hits: await hitsOf(app, builder.userId, "running"),
-      // The first attempt's code went on past its time, and what it then
-      // called was refused, as an attempt the engine had given up on.
+      // The first attempt's code went on past its time: the answer to its
+      // App call came after that, and was refused as it returned, as an
+      // attempt the engine had given up on, and so was what it called next.
       stale: await staleCalls(running.id),
     };
 
@@ -774,11 +775,12 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
         { timeout: 15_000, interval: 100 }
       );
       const waiting = await builder.api.workflows.start(app, "waiting");
-      // Once the first attempt was cut off: its code's late call refused.
+      // Once the first attempt was cut off: the answer to its App call,
+      // which came after its time, refused as it returned.
       await vi.waitFor(
         async () => {
           await expect(staleCalls(waiting.id)).resolves.toStrictEqual([
-            "count MAIL",
+            "count APP",
           ]);
         },
         { timeout: 15_000, interval: 100 }
@@ -823,12 +825,12 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       ranOut: {
         status: { status: "completed", output: 2 },
         hits: 2,
-        stale: ["count MAIL"],
+        stale: ["count APP"],
       },
       waited: {
         status: { status: "completed", output: 1 },
         hits: 1,
-        stale: ["count MAIL"],
+        stale: ["count APP"],
       },
       cutShort: { status: "failed", hits: 1 },
     });
