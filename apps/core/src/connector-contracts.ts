@@ -115,12 +115,10 @@ const typedOf = (
   read: Read
 ): Draft | undefined => {
   if (type === "string") {
-    return base("string", {
-      trim: false,
-      email: schema.format === "email",
-      ...countOf(schema, "minLength", "min"),
-      ...countOf(schema, "maxLength", "max"),
-    });
+    // Lengths and formats are the schema check's to enforce: it counts
+    // code points, as JSON Schema does, where a descriptor counts UTF-16
+    // units and would be stricter than the contract.
+    return base("string", { trim: false, email: false });
   }
   if (type === "integer" || type === "number") {
     return base("number", {

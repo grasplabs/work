@@ -21,7 +21,7 @@ import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
-import { testBinding } from "./test-env.ts";
+import { connectDb, testBinding } from "./test-env.ts";
 
 // An App's connector resources reach an outside system only through
 // connect, under a binding an admin approved and the App's own connection
@@ -94,6 +94,26 @@ export const sendFresh = action({
   },
 });
 
+/** Every name App code can reach of its connector client and globals. */
+export const probe = action({
+  args: {},
+  returns: v.string(),
+  uses: [mail],
+  handler: async (ctx) => {
+    const client = ctx.resources.mail;
+    const listed = await client.call("list", { mailbox: "team@acme.test" });
+    const prototype = Object.getPrototypeOf(client) ?? {};
+    return [
+      ...Object.getOwnPropertyNames(globalThis),
+      ...Object.getOwnPropertyNames(client),
+      ...Object.getOwnPropertyNames(prototype),
+      JSON.stringify(listed),
+      JSON.stringify(client),
+      String(client.call),
+    ].join(",");
+  },
+});
+
 /** Sends without what the contract requires. */
 export const careless = action({
   args: {},
@@ -106,14 +126,42 @@ export const careless = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { careless, inbox, mail, send, sendFresh } from "./operations/mail.ts";
+import { careless, inbox, mail, probe, send, sendFresh } from "./operations/mail.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Mailer",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { mail: { send, inbox, careless, sendFresh } },
+  operations: { mail: { send, inbox, careless, sendFresh, probe } },
+  internalOperations: {},
+  screens: [],
+  uses: [mail],
+});
+`,
+});
+
+/** The Mailer, declaring its mail resource still, with no action that uses it. */
+const unusedMailFiles = (): Record<string, string> => ({
+  "operations/mail.ts": `import { resource, v } from "@grasp-os/sdk";
+import { query } from "#grasp/server";
+
+export const mail = resource.connector("mail", {
+  contract: "microsoft-365.mail@1",
+  actions: ["send", "list"],
+});
+
+export const ping = query({ args: {}, returns: v.string(), handler: () => "pong" });
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { mail, ping } from "./operations/mail.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Mailer",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { mail: { ping } },
   internalOperations: {},
   screens: [],
   uses: [mail],
@@ -426,6 +474,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     );
     const permissions = await mailer.admin.api.permissions.list();
     const connection = permissions.find(({ id }) => id === mailer.permission);
+    expect(answered.provenance?.truncated).toBeFalsy();
     expect(answered.provenance?.connections).toStrictEqual([
       {
         connectionId:
@@ -520,7 +569,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     });
   });
 
-  it("refuse to confirm a held side effect its binding no longer serves", async () => {
+  it("refuse to confirm a held side effect its binding no longer serves, and drop it", async () => {
     const mailer = await mailerApp();
     await call(
       mailer,
@@ -535,14 +584,18 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       .update(appResourceBindings)
       .set({ status: "revoked", revokedAt: new Date(), revokedBy: "test" })
       .where(eq(appResourceBindings.id, mailer.binding?.id ?? ""));
+    // Through the session, as the person's client confirms: the refusal
+    // reaches it with its code, not redacted.
     const refused = await failure(
       async () =>
-        await confirmPendingAction(env, mailer.by, held.id, held.inputHash)
+        await mailer.builder.api.pendingActions.confirm(held.id, held.inputHash)
     );
-    expect({ refused, sent: await sentCount("Stale") }).toStrictEqual({
-      refused: "resource.unavailable",
-      sent: 0,
-    });
+    const waiting = await mailer.builder.api.pendingActions.list();
+    expect({
+      refused,
+      sent: await sentCount("Stale"),
+      waiting: waiting.length,
+    }).toStrictEqual({ refused: "resource.unavailable", sent: 0, waiting: 0 });
   });
 
   it("refuse to confirm a held side effect whose contract drifted since", async () => {
@@ -566,10 +619,12 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       async () =>
         await confirmPendingAction(changed, mailer.by, held.id, held.inputHash)
     );
-    expect({ refused, sent: await sentCount("Drift") }).toStrictEqual({
-      refused: "resource.unavailable",
-      sent: 0,
-    });
+    const waiting = await mailer.builder.api.pendingActions.list();
+    expect({
+      refused,
+      sent: await sentCount("Drift"),
+      waiting: waiting.length,
+    }).toStrictEqual({ refused: "resource.unavailable", sent: 0, waiting: 0 });
   });
 
   it("refuse to confirm a held side effect once a version widened its declaration", async () => {
@@ -595,10 +650,119 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       async () =>
         await confirmPendingAction(env, mailer.by, held.id, held.inputHash)
     );
-    expect({ refused, sent: await sentCount("Wider") }).toStrictEqual({
+    const waiting = await mailer.builder.api.pendingActions.list();
+    expect({
+      refused,
+      sent: await sentCount("Wider"),
+      waiting: waiting.length,
+    }).toStrictEqual({ refused: "resource.unavailable", sent: 0, waiting: 0 });
+  });
+
+  it("leave a dropped held call's key free: the same call is asked again, never answered as declined", async () => {
+    const mailer = await mailerApp();
+    const input = { to: "ada@acme.test", subject: "Again" };
+    await call(mailer, "mail.send", input, "again-1");
+    // Approved again: the binding is replaced, its held call dropped.
+    await mailer.admin.api.resourceBindings.approve(mailer.approval);
+    const afterReplace = await call(mailer, "mail.send", input, "again-1");
+    // Revoked, then approved anew: dropped again.
+    const [current] = await mailer.admin.api.resourceBindings.list(
+      mailer.release.manifest.resourceId
+    );
+    await mailer.admin.api.resourceBindings.revoke(current?.id ?? "");
+    await mailer.admin.api.resourceBindings.approve(mailer.approval);
+    const afterRevoke = await call(mailer, "mail.send", input, "again-1");
+    expect({
+      afterReplace: outcomeOf(afterReplace),
+      afterRevoke: outcomeOf(afterRevoke),
+      sent: await sentCount("Again"),
+    }).toStrictEqual({
+      afterReplace: { failed: "resource.awaiting_confirmation" },
+      afterRevoke: { failed: "resource.awaiting_confirmation" },
+      sent: 0,
+    });
+  });
+
+  it("refuse to confirm a held call whose stored binding no longer reads", async () => {
+    const mailer = await mailerApp();
+    await call(
+      mailer,
+      "mail.send",
+      { to: "ada@acme.test", subject: "Garbled" },
+      "garbled-1"
+    );
+    const held = await heldSend(mailer);
+    await connectDb()
+      .prepare("UPDATE pending_actions SET binding = ? WHERE id = ?")
+      .bind("not a binding", held.id)
+      .run();
+    const refused = await failure(
+      async () =>
+        await mailer.builder.api.pendingActions.confirm(held.id, held.inputHash)
+    );
+    expect({ refused, sent: await sentCount("Garbled") }).toStrictEqual({
       refused: "resource.unavailable",
       sent: 0,
     });
+  });
+
+  it("refuse to confirm a held call once no action of the current version uses its alias", async () => {
+    const mailer = await mailerApp();
+    await call(
+      mailer,
+      "mail.send",
+      { to: "ada@acme.test", subject: "Unused" },
+      "unused-1"
+    );
+    const held = await heldSend(mailer);
+    const app = mailer.release.manifest.resourceId;
+    await mailer.builder.api.apps.files.commit(app, unusedMailFiles(), "Quiet");
+    await mailer.builder.api.apps.versions.setCurrent(app, 2);
+    await mailer.admin.api.permissions.grant(mailer.permission, { version: 2 });
+    const refused = await failure(
+      async () =>
+        await mailer.builder.api.pendingActions.confirm(held.id, held.inputHash)
+    );
+    expect({ refused, sent: await sentCount("Unused") }).toStrictEqual({
+      refused: "resource.unavailable",
+      sent: 0,
+    });
+  });
+
+  it("expose no binding, key or token to App code", async () => {
+    const mailer = await mailerApp();
+    const result = await call(mailer, "mail.probe", {});
+    const seen =
+      result.ok && typeof result.value === "string" ? result.value : "";
+    const names = new Set(seen.split(","));
+    // Core's and connect's bindings and secrets, by name and by value.
+    const bindings = [
+      "CONNECT",
+      "DB",
+      "AI",
+      "KNOWLEDGE",
+      "LOADER",
+      "APPS",
+      "DATA_STORES",
+      "FILES",
+      "WORKSPACES",
+      "MODEL_GATEWAY",
+      "CAPABILITY_SIGNING_KEY",
+      "TOKEN_ENCRYPTION_KEY",
+      "env",
+    ];
+    const secrets = [
+      env.CAPABILITY_SIGNING_KEY,
+      env.BETTER_AUTH_SECRET,
+      "access.",
+      "refresh.",
+      "Bearer",
+    ];
+    expect({
+      probed: seen.length > 0,
+      bindings: bindings.filter((name) => names.has(name)),
+      secrets: secrets.filter((secret) => seen.includes(secret)),
+    }).toStrictEqual({ probed: true, bindings: [], secrets: [] });
   });
 
   it("stop when the connection permission is revoked", async () => {

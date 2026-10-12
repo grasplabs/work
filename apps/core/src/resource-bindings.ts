@@ -473,7 +473,7 @@ const notServed = () => operationErrors.create("resource.unavailable");
  * binding would still serve it now, exactly as a live request of the App's
  * current version would resolve it (`resourceBindingsFor`): the binding is
  * the same one and still active, the current release declares exactly
- * what was approved, its target still serves exactly the contract pinned,
+ * what was approved and an action of it uses the alias, its target still serves exactly the contract pinned,
  * and that contract still names the call's tool. A binding revoked or
  * replaced since, a version that widened the declaration, a drifted
  * contract or a lost grant: `resource.unavailable`, and nothing runs.
@@ -510,9 +510,20 @@ export const requireHeldBinding = async (
     ? release.app.resources[row.alias]
     : undefined;
   const target = bindingTargetSchema.safeParse(JSON.parse(row.target));
+  // As a live request needs: an action of the current release lists the
+  // alias in its `uses`, so a version that keeps the declaration but no
+  // longer uses it runs nothing through it.
+  const used = Object.values(release.app.operations).some(
+    (operation) =>
+      operation.kind === "action" &&
+      operation.uses.some(
+        (use) => use.type === "resource" && use.alias === row.alias
+      )
+  );
   if (
     declaration === undefined ||
     !target.success ||
+    !used ||
     (await declarationHash(declaration)) !== row.declarationHash
   ) {
     throw notServed();

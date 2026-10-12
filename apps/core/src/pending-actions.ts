@@ -7,6 +7,7 @@ import type {
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { operationErrors } from "@grasp-os/shared/operations";
 import {
   authoritySchema,
   permissionErrors,
@@ -134,6 +135,9 @@ export const confirmPendingAction = async (
     throw connectErrors.create("connect.run_ended");
   }
   let capability: string;
+  // Set while the held call's binding is being checked: refused there, it
+  // could never be confirmed, so it leaves the person's list.
+  let staleBinding = false;
   try {
     // An App's action names the version whose code asked for it, or no
     // version was approved for it: refused, as `authorize` would.
@@ -144,13 +148,19 @@ export const confirmPendingAction = async (
     }
     // A call an App's action made through a resource binding runs only if
     // that binding would still serve it now, as a live request would.
+    // A binding connect can no longer read is refused, never skipped.
     if (held.subject.type === "app" && held.binding !== null) {
+      staleBinding = true;
+      if (held.binding === "unreadable") {
+        throw operationErrors.create("resource.unavailable");
+      }
       await requireHeldBinding(
         env,
         held.subject.appId,
         held.binding,
         held.action
       );
+      staleBinding = false;
     }
     const authority = authoritySchema.parse({
       subject: held.subject,
@@ -176,7 +186,7 @@ export const confirmPendingAction = async (
   } catch (error) {
     // Refused here (the permission is gone, the person has left, the
     // context is invalid): recorded as connect records its own refusals,
-    // and the action keeps waiting.
+    // and the action keeps waiting, unless its binding is stale (below).
     await env.CONNECT.refuseConfirmation({
       person,
       id: held.id,
@@ -184,6 +194,16 @@ export const confirmPendingAction = async (
     }).catch((auditError: unknown) => {
       log.error("audit.record_failed", errorFields(auditError));
     });
+    // Its binding no longer serves it (revoked, replaced, drifted, a
+    // version that changed the declaration): dropped, recorded, its key
+    // left free, so the same call made again is decided afresh.
+    if (staleBinding) {
+      await env.CONNECT.dropStaleBinding({ person, id: held.id }).catch(
+        (dropError: unknown) => {
+          log.error("pending.stale_drop_failed", errorFields(dropError));
+        }
+      );
+    }
     throw error;
   }
   let result: ConnectResult;

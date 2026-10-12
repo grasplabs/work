@@ -507,9 +507,10 @@ export interface PendingAction {
   requestedAt: string;
   /**
    * The App's approved resource binding it came through, as it served then
-   * (`HeldBinding`); null for any other call.
+   * (`HeldBinding`); null for any other call; `unreadable` when what connect
+   * stored no longer reads as one, which core never confirms.
    */
-  binding: HeldBinding | null;
+  binding: HeldBinding | "unreadable" | null;
 }
 
 const inputHashSchema = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -830,6 +831,12 @@ export interface ConnectApi extends PackageRegistryApi {
    * Recorded as `connection.action.dropped`, reason `binding.revoked`.
    */
   dropForBinding: (request: BindingDropRequest) => Promise<void>;
+  /**
+   * Drops one held action of `person`'s that came through a resource
+   * binding core refused to confirm because the binding no longer serves
+   * it. Its key stays free. Recorded, reason `binding.stale`.
+   */
+  dropStaleBinding: (request: HeldRequest) => Promise<void>;
   /**
    * Runs a held action its person confirmed: only with the capability core
    * signed for confirming it, and only for that person.

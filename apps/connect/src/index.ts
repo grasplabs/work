@@ -73,6 +73,7 @@ import {
   dropForEndedRun,
   dropForBinding,
   dropForEndedRuns,
+  dropStaleBinding,
   heldFor,
   declineChatActions,
   heldCall,
@@ -395,6 +396,10 @@ export default class Connect
 
   async dropForBinding(request: unknown): Promise<void> {
     await dropForBinding(this.env, request);
+  }
+
+  async dropStaleBinding(request: unknown): Promise<void> {
+    await dropStaleBinding(this.env, request);
   }
 
   async anyPending(request: unknown): Promise<boolean> {

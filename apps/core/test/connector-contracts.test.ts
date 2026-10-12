@@ -19,13 +19,15 @@ const read = (schema: unknown) => {
   if (result === undefined) {
     throw new Error("Unreadable");
   }
-  return result.schema;
+  return result;
 };
 
-/** Whether `value` passes `schema`. */
-const passes = (schema: ReturnType<typeof read>, value: unknown): boolean => {
-  const result = schema["~standard"].validate(value);
-  return !("then" in result) && result.issues === undefined;
+/** Whether `value` passes `read`: its descriptor and its full check. */
+const passes = (schema: ReturnType<typeof read>, value: Json): boolean => {
+  const result = schema.schema["~standard"].validate(value);
+  return (
+    !("then" in result) && result.issues === undefined && schema.accepts(value)
+  );
 };
 
 describe("generated connector contracts", () => {
@@ -91,20 +93,42 @@ describe("generated connector contracts", () => {
     const list = read(
       microsoft365.manifest.actions["mail.list"]?.contract.input
     );
-    const accepted = readContractSchema(
-      JSON.stringify(microsoft365.manifest.actions["mail.list"]?.contract.input)
-    );
-    const fits = (value: Record<string, Json>) =>
-      passes(list, value) && accepted?.accepts(value) === true;
+    const at = (receivedAfter: string) =>
+      passes(list, { mailbox: "team@acme.test", receivedAfter });
     expect({
-      valid: fits({
-        mailbox: "team@acme.test",
-        receivedAfter: "2026-10-12T09:00:00Z",
-      }),
+      valid: at("2026-10-12T09:00:00Z"),
+      leapDay: at("2028-02-29T09:00:00+01:00"),
       // A mailbox with a path in it, which the connector's pattern refuses.
-      badPattern: fits({ mailbox: "team/../other" }),
-      notADate: fits({ mailbox: "team@acme.test", receivedAfter: "yesterday" }),
-    }).toStrictEqual({ valid: true, badPattern: false, notADate: false });
+      badPattern: passes(list, { mailbox: "team/../other" }),
+      notADate: at("yesterday"),
+      noSuchDay: at("2026-02-31T09:00:00Z"),
+      notALeapYear: at("2027-02-29T09:00:00Z"),
+    }).toStrictEqual({
+      valid: true,
+      leapDay: true,
+      badPattern: false,
+      notADate: false,
+      noSuchDay: false,
+      notALeapYear: false,
+    });
+  });
+
+  it("check formats as exactly as the connectors' own schemas, and count code points", () => {
+    const email = read({ type: "string", format: "email" });
+    const short = read({ type: "string", maxLength: 2 });
+    expect({
+      email: passes(email, "ada.lovelace@acme.test"),
+      doubleDot: passes(email, "ada..lovelace@acme.test"),
+      noTopLevel: passes(email, "ada@acme"),
+      twoEmoji: passes(short, "😀😀"),
+      threeEmoji: passes(short, "😀😀😀"),
+    }).toStrictEqual({
+      email: true,
+      doubleDot: false,
+      noTopLevel: false,
+      twoEmoji: true,
+      threeEmoji: false,
+    });
   });
 
   it("refuse any keyword it doesn't enforce, rather than drop it", () => {

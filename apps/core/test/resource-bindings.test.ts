@@ -1001,6 +1001,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       sensitive: false,
       restricted: false,
       connections: [],
+      truncated: false,
     });
   });
 
@@ -1028,6 +1029,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
         sensitive: false,
         restricted: false,
         connections: [],
+        truncated: false,
       },
       // As a document that doesn't exist.
       opened: { failed: "resource.item_not_found" },
@@ -1076,6 +1078,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
         sensitive: true,
         restricted: true,
         connections: [],
+        truncated: false,
       },
     });
   });

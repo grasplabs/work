@@ -53,18 +53,37 @@ const types = new Set([
   "object",
 ]);
 
-/** An address, as `format: email` asks: the SDK's practical check. */
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+/**
+ * An address, as `format: email` asks: zod's own rule, the one the native
+ * connectors' schemas are made with, so `format` here is as exact as the
+ * connectors' own check, not a looser one.
+ */
+const emailPattern =
+  /^(?!\.)(?!.*\.\.)(?:[A-Za-z0-9_'+\-.]*)[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/u;
 
-/** A timestamp, as `format: date-time` asks (RFC 3339, with an offset). */
+/** A timestamp's form, as `format: date-time` asks (RFC 3339, with an offset). */
 const dateTimePattern =
-  /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/u;
+  /^(?<year>\d{4})-(?<month>0[1-9]|1[0-2])-(?<day>0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:(?:[0-5]\d|60)(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/iu;
+
+/** The days of `month` (1–12) in `year`, leap years counted. */
+const daysIn = (year: number, month: number): number =>
+  new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+/** Whether `text` is an RFC 3339 timestamp of a day that exists. */
+const isDateTime = (text: string): boolean => {
+  const parts = dateTimePattern.exec(text)?.groups;
+  if (parts === undefined) {
+    return false;
+  }
+  const year = Number(parts.year);
+  const month = Number(parts.month);
+  return Number(parts.day) <= daysIn(year, month);
+};
 
 /** Each format checked, and how. */
 const formats: Readonly<Record<string, (text: string) => boolean>> = {
-  email: (text) => text.length <= 254 && emailPattern.test(text),
-  "date-time": (text) =>
-    dateTimePattern.test(text) && !Number.isNaN(Date.parse(text)),
+  email: (text) => emailPattern.test(text),
+  "date-time": isDateTime,
 };
 
 /** The most a schema nests here, as the SDK's descriptors do. */
@@ -161,13 +180,27 @@ const isOfType = (type: Json, value: Json): boolean => {
   return typeof value === type;
 };
 
+/** How many code points `text` holds: each surrogate pair counts once. */
+const codePoints = (text: string): number => {
+  let count = 0;
+  let index = 0;
+  while (index < text.length) {
+    const point = text.codePointAt(index) ?? 0;
+    index += point > 0xff_ff ? 2 : 1;
+    count += 1;
+  }
+  return count;
+};
+
 /** Whether a string fits `schema`'s length, pattern and format. */
 const stringFits = (schema: Schema, text: string): boolean => {
   const { minLength, maxLength, format } = schema;
   const pattern = patterns.get(schema);
+  // JSON Schema counts characters as code points, not UTF-16 units.
+  const length = codePoints(text);
   return (
-    (typeof minLength !== "number" || text.length >= minLength) &&
-    (typeof maxLength !== "number" || text.length <= maxLength) &&
+    (typeof minLength !== "number" || length >= minLength) &&
+    (typeof maxLength !== "number" || length <= maxLength) &&
     (pattern === undefined || pattern.test(text)) &&
     (typeof format !== "string" || formats[format]?.(text) === true)
   );

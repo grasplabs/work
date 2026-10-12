@@ -26,6 +26,11 @@ export interface InvocationProvenance extends Provenance {
     readonly connectionId: string;
     readonly resources: readonly string[];
   }[];
+  /**
+   * Some connection resources read were left out: past
+   * `provenanceMaxResources`, only the connection is named.
+   */
+  readonly truncated: boolean;
 }
 
 /** The most connection resources one invocation's provenance names. */
@@ -51,6 +56,7 @@ export const invocationSources = (): InvocationSources => {
   const collectionIds = new Set<Provenance["collectionIds"][number]>();
   const connections = new Map<string, Set<string>>();
   let resourceCount = 0;
+  let truncated = false;
   let sensitive = false;
   let restricted = false;
   return {
@@ -71,6 +77,7 @@ export const invocationSources = (): InvocationSources => {
           connectionId,
           resources: [...resources].toSorted(),
         })),
+      truncated,
     }),
     noteConnection: (id, resources) => {
       const known = connections.get(id) ?? new Set<string>();
@@ -78,9 +85,14 @@ export const invocationSources = (): InvocationSources => {
       // Bounded: the connection is always named, its resources up to a
       // limit across the invocation.
       for (const resource of resources) {
-        if (resourceCount < provenanceMaxResources && !known.has(resource)) {
+        if (known.has(resource)) {
+          continue;
+        }
+        if (resourceCount < provenanceMaxResources) {
           known.add(resource);
           resourceCount += 1;
+        } else {
+          truncated = true;
         }
       }
     },
