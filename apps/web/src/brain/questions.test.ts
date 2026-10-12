@@ -48,6 +48,19 @@ describe(parseQuestions, () => {
     expect(questions[2]?.multiSelect).toBeTruthy();
   });
 
+  it("gives each question its own id, though one it gave itself is another's suffixed id", () => {
+    const question = (id: string) => ({
+      id,
+      header: "Pick",
+      question: "Which one?",
+      options: [option("This"), option("That")],
+    });
+    const { questions } = parseQuestions({
+      questions: [question("x-3"), question("x"), question("x")],
+    });
+    expect(questions.map(({ id }) => id)).toStrictEqual(["x-3", "x", "x-4"]);
+  });
+
   it("needs two different answers to pick from", () => {
     expect(() =>
       parseQuestions({

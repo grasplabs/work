@@ -185,9 +185,12 @@ export const parseQuestions = (input: unknown): Questions => {
         );
       }
       const given = typeof question.id === "string" ? slug(question.id) : "";
-      let id = given === "" ? `question-${n}` : given;
-      if (seen.has(id)) {
-        id = `${id}-${n}`;
+      const base = given === "" ? `question-${n}` : given;
+      // A taken ID gets the first free suffix, from the question's number
+      // up: one a question gave itself can be the suffixed form of another.
+      let id = base;
+      for (let suffix = n; seen.has(id); suffix += 1) {
+        id = `${base}-${suffix}`;
       }
       seen.add(id);
       return {
