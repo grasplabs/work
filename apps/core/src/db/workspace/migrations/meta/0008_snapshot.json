@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "61e7fc2d-b10b-4d19-9a7b-968bcf000189",
+  "id": "6ff8b1a6-ebe3-4f73-a2c7-318833ab78d1",
   "prevId": "842142da-ee11-4b56-bd29-cd2164d918bc",
   "tables": {
     "audit_outbox": {
@@ -94,6 +94,140 @@
       },
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "chat_code_runs": {
+      "name": "chat_code_runs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "chat_id": {
+          "name": "chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tool_call_id": {
+          "name": "tool_call_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_hash": {
+          "name": "source_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_chars": {
+          "name": "source_chars",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent": {
+          "name": "agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "compatibility_date": {
+          "name": "compatibility_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "runtime": {
+          "name": "runtime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cpu_limit": {
+          "name": "cpu_limit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "chat_code_runs_chat": {
+          "name": "chat_code_runs_chat",
+          "columns": [
+            "chat_id",
+            "started_at"
+          ],
+          "isUnique": false
+        },
+        "chat_code_runs_running": {
+          "name": "chat_code_runs_running",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false,
+          "where": "status = 'running'"
+        }
+      },
+      "foreignKeys": {
+        "chat_code_runs_chat_id_chats_id_fk": {
+          "name": "chat_code_runs_chat_id_chats_id_fk",
+          "tableFrom": "chat_code_runs",
+          "tableTo": "chats",
+          "columnsFrom": [
+            "chat_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "chat_code_runs_status": {
+          "name": "chat_code_runs_status",
+          "value": "\"chat_code_runs\".\"status\" IN ('running', 'completed', 'threw', 'refused', 'load_failed', 'cpu_exceeded', 'crashed', 'wall_expired', 'cancelled', 'revoked', 'interrupted')"
+        },
+        "chat_code_runs_tool_call_id": {
+          "name": "chat_code_runs_tool_call_id",
+          "value": "length(\"chat_code_runs\".\"tool_call_id\") BETWEEN 1 AND 200"
+        }
+      }
     },
     "chat_draft_files": {
       "name": "chat_draft_files",
@@ -286,143 +420,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "chat_project_documents": {
-      "name": "chat_project_documents",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "content": {
-          "name": "content",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "bytes": {
-          "name": "bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "chat_project_documents_name": {
-          "name": "chat_project_documents_name",
-          "columns": [
-            "project_id",
-            "name"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "chat_project_documents_project_id_chat_projects_id_fk": {
-          "name": "chat_project_documents_project_id_chat_projects_id_fk",
-          "tableFrom": "chat_project_documents",
-          "tableTo": "chat_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "chat_projects": {
-      "name": "chat_projects",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "person_id": {
-          "name": "person_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "goal": {
-          "name": "goal",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "''"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "chat_projects_person": {
-          "name": "chat_projects_person",
-          "columns": [
-            "person_id",
-            "created_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "chat_sources": {
       "name": "chat_sources",
       "columns": {
@@ -521,13 +518,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -536,13 +526,6 @@
           "columns": [
             "person_id",
             "created_at"
-          ],
-          "isUnique": false
-        },
-        "chats_project": {
-          "name": "chats_project",
-          "columns": [
-            "project_id"
           ],
           "isUnique": false
         }

@@ -40,9 +40,12 @@ export interface PinnedRun {
 
 /**
  * A workflow of core's own, not an App's, run on the same engine and
- * dispatcher: extracting an upload's text (knowledge/extraction.ts).
+ * dispatcher: extracting an upload's text (knowledge/extraction.ts), or a
+ * build a chat's code handed to a durable job (build-jobs.ts).
  */
-export type InternalWorkflow = "extraction";
+export const internalWorkflows = ["extraction", "build"] as const;
+
+export type InternalWorkflow = (typeof internalWorkflows)[number];
 
 /** The engine core runs workflow runs on. */
 export interface RunEngine {
@@ -150,10 +153,12 @@ export const runEngine = (env: Env): RunEngine => ({
   },
   createInternal: async ({ id, workflow, input }) => {
     // Tagged with the workflow it is: the dispatcher runs it by that.
+    // Kept, once ended, as long as an App's run is.
     await wrapWorkflowBinding({ internal: workflow }).create({
       id,
       params: input,
       locationHint: "weur",
+      ...retentionOf(env),
     });
   },
   status: async (id): Promise<InstanceStatus | undefined> => {

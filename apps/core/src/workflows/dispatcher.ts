@@ -12,10 +12,12 @@ import { z } from "zod";
 import { callApp } from "../app.ts";
 import { callsFor, versionFiles } from "../apps.ts";
 import { runBindingsFor } from "../bindings.ts";
+import { runBuildJob } from "../build-jobs.ts";
 import { runExtraction } from "../knowledge/extraction.ts";
 import type { WorkContext } from "../restricted.ts";
 import { declaredParams, loadRun } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
+import { internalWorkflows } from "./engine.ts";
 import {
   coreStepPrefix,
   fromIsolate,
@@ -67,7 +69,7 @@ const pinnedSchema = z.object({
 });
 
 /** What the dispatcher tags each of core's own runs with (engine.ts). */
-const internalSchema = z.object({ internal: z.literal("extraction") });
+const internalSchema = z.object({ internal: z.enum(internalWorkflows) });
 
 /**
  * Who a run acts for now: its person, or its App's owner; and the App
@@ -199,6 +201,10 @@ const runWorkflow = async (
     const run: HostedRun = {
       ...pinned.data,
       runId,
+      // The engine's record of the run, never its input.
+      ...(row.rootRunId === null
+        ? {}
+        : { rootRunId: runIdSchema.parse(row.rootRunId) }),
       authority,
       collections: bindings,
       connections,
@@ -273,8 +279,13 @@ export const WorkflowDispatcher = createDynamicWorkflowEntrypoint<Env>(
       // the dispatcher, typed loosely so it needn't depend on its types.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       const step = loose as RunStep;
-      if (internalSchema.safeParse(metadata).success) {
+      const internal = internalSchema.safeParse(metadata);
+      if (internal.data?.internal === "extraction") {
         await runExtraction(env, event.payload, step);
+        return null;
+      }
+      if (internal.data?.internal === "build") {
+        await runBuildJob(env, event.payload, step);
         return null;
       }
       return await runWorkflow(env, metadata, event, step);

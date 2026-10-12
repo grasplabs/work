@@ -1,21 +1,44 @@
 /**
  * On-prem smoke run: bundles core and serves it on plain workerd (no
- * Wrangler, no Miniflare), then checks it answers. Keeps the code on-prem
- * ready: only platform APIs that also run on workerd.
+ * Wrangler, no Miniflare), checks it answers, and waits for its built-in
+ * content to install: it fails on any failure core or workerd logs before
+ * that. Keeps the code on-prem ready: only platform APIs that also run on
+ * workerd.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createInterface } from "node:readline";
+import { PassThrough } from "node:stream";
 
 import { routerSecretHeader } from "../packages/shared/src/router.ts";
-import { coreStarted } from "./workerd-smoke-start.ts";
+import { d1DatabasesOf, writeD1Service } from "./workerd-d1.ts";
+import { writeR2Service } from "./workerd-r2.ts";
+import { coreWranglerConfig, smokeConfig } from "./workerd-smoke-config.ts";
+import { coreStarted, installedOnWorkerd } from "./workerd-smoke-start.ts";
+import type { KnownGap } from "./workerd-smoke-start.ts";
 
 const ROUTER_SECRET = "smoke-router-secret";
 const ATTEMPTS = 50;
 const RETRY_DELAY_MS = 100;
+const INSTALL_TIMEOUT_MS = 120_000;
+
+/**
+ * What the on-prem profile can't do yet, so the install can't complete:
+ * each would excuse exactly its own failure (its event, error and the
+ * function that threw it), and the run says so. None now: the install must
+ * be complete.
+ */
+const knownGaps: KnownGap[] = [];
 const core = path.join(import.meta.dirname, "../apps/core");
 const out = mkdtempSync(path.join(tmpdir(), "grasp-os-workerd-"));
 
@@ -51,47 +74,34 @@ const modules = [
     .map((file) => `(name = "${file}", text = embed "${file}")`),
 ];
 
+// The on-prem profile's D1 service, and core's D1 migrations for it.
+writeD1Service(out, d1DatabasesOf(coreWranglerConfig));
+// And its R2 service.
+writeR2Service(out);
+
+// Durable Objects keep their SQLite databases on disk, as on-prem. Removed
+// with the rest of `out`.
+const storage = path.join(out, "storage");
+mkdirSync(storage);
+
 writeFileSync(
   path.join(out, "config.capnp"),
-  `using Workerd = import "/workerd/workerd.capnp";
-
-const config :Workerd.Config = (
-  services = [(name = "core", worker = .core)],
-  sockets = [(name = "http", address = "127.0.0.1:${PORT}", http = (), service = "core")],
-);
-
-const core :Workerd.Worker = (
-  modules = [${modules.join(", ")}],
-  compatibilityDate = "2026-09-15",
-  compatibilityFlags = ["nodejs_compat"],
-  bindings = [
-    (name = "ROUTER_SECRET", text = "${ROUTER_SECRET}"),
-    (name = "DURABLE_OBJECT_JURISDICTION", text = "none"),
-    # No LOADER (experimental in workerd) and no WORKFLOWS (no engine):
-    # apps and screens need workerd's --experimental, and workflows don't
-    # run on-prem (apps/core/src/workflows/engine.ts).
-  ],
-  durableObjectNamespaces = [
-    (className = "Workspace", uniqueKey = "workspace", enableSql = true),
-    (className = "App", uniqueKey = "app", enableSql = true),
-    (className = "AuditLog", uniqueKey = "audit-log", enableSql = true),
-    (className = "Builtins", uniqueKey = "builtins", enableSql = true),
-    (className = "Onboarding", uniqueKey = "onboarding", enableSql = true),
-  ],
-  # In-memory storage aborts workerd when a Durable Object alarm fires, so
-  # the smoke run must not write audit events or run the 15-minute cron
-  # trigger: either arms the audit log's retention alarm
-  # (apps/core/src/audit-log.ts). That alarm is a day out, so it wouldn't
-  # fire within one smoke run, but anything left running that long would
-  # abort. On-prem runs use localDisk storage, where alarms work.
-  durableObjectStorage = (inMemory = void),
-);
-`
+  smokeConfig({ port: PORT, routerSecret: ROUTER_SECRET, modules, storage })
 );
 
 const server = spawn("workerd", ["serve", path.join(out, "config.capnp")], {
-  stdio: "inherit",
+  stdio: ["ignore", "pipe", "pipe"],
 });
+
+// Everything workerd writes, line by line, both shown and checked.
+const output = new PassThrough();
+for (const stream of [server.stdout, server.stderr]) {
+  createInterface({ input: stream }).on("line", (line) => {
+    console.info(line);
+    output.write(`${line}\n`);
+  });
+}
+const lines = createInterface({ input: output })[Symbol.asyncIterator]();
 
 try {
   await coreStarted(server, {
@@ -101,7 +111,20 @@ try {
     attempts: ATTEMPTS,
     retryDelayMs: RETRY_DELAY_MS,
   });
-  console.info("core runs on workerd");
+  const excused = await installedOnWorkerd(
+    server,
+    { [Symbol.asyncIterator]: () => lines },
+    knownGaps,
+    INSTALL_TIMEOUT_MS
+  );
+  for (const { why } of excused) {
+    console.warn(`known on-prem gap: ${why}`);
+  }
+  console.info(
+    excused.length === 0
+      ? "core runs on workerd, and its built-in content installed"
+      : "core runs on workerd, and its built-in content installed but for the known gaps above"
+  );
 } finally {
   server.kill();
   rmSync(out, { force: true, recursive: true });

@@ -1,4 +1,3 @@
-import { whenAborted } from "@grasp-os/shared/deadline";
 import {
   appIdSchema,
   collectionIdSchema,
@@ -10,20 +9,12 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { SubmissionIntent } from "@grasp-os/shared/submissions";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callApp } from "../src/app.ts";
 import type { AppCallerInput } from "../src/app.ts";
-import {
-  defaultMaxAttempts as maxAttempts,
-  drainSubmissionOutbox,
-} from "../src/knowledge/outbox.ts";
-import type {
-  OutboxConsumer,
-  OutboxConsumers,
-  OutboxEntry,
-} from "../src/knowledge/outbox.ts";
+import { drainSubmissionOutbox } from "../src/knowledge/outbox.ts";
 import {
   claim,
   inputHashOf,
@@ -32,8 +23,15 @@ import {
 } from "../src/knowledge/receipts.ts";
 import type { Submission } from "../src/knowledge/receipts.ts";
 import { saveRecordAsDelegate } from "../src/knowledge/records.ts";
+import { defaultMaxAttempts as maxAttempts } from "../src/outbox-delivery.ts";
+import type {
+  OutboxConsumer,
+  OutboxConsumers,
+  OutboxEntry,
+} from "../src/outbox-delivery.ts";
 import { restrict } from "../src/restricted.ts";
 import { release, requestGranted, serverBuilt } from "./apps.ts";
+import { gatedConsumer } from "./gated-consumer.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
@@ -1088,8 +1086,11 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       unchanged: unchanged.currentVersion,
       kinds: entries.map(({ kind }) => kind),
       intents: entries.map(({ intent }) => intent),
-      // One receipt's, numbered in order.
-      ids: entries.map(({ id }) => id.replace(/^[0-9a-f]{64}:/u, "")),
+      // One receipt's commit's, numbered in order.
+      commits: new Set(entries.map(({ id }) => id.replace(/:\d+$/u, ""))).size,
+      ids: entries.map(({ id }) =>
+        id.replace(/^[0-9a-f]{64}:[0-9a-f-]{36}:/u, "")
+      ),
       versions: await versionsAt(setup.collectionId, path),
     }).toStrictEqual({
       stale: "ok",
@@ -1097,12 +1098,13 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       unchanged: 1,
       kinds: ["workflow.notify", "workflow.start"],
       intents: [notify, start],
+      commits: 1,
       ids: ["0", "1"],
       versions: 1,
     });
   });
 
-  it("answer a committed save's retry with its outcome, though its intent's consumer has gone since", async () => {
+  it("answer a committed save's retry with its outcome, though its intent's consumer has gone since, and settle the entry as owed to nobody only after its attempts, so the receipt expires", async () => {
     const setup = await setUp();
     const path = `notes/${unique()}.md`;
     const key = `consumer-gone-${unique()}`;
@@ -1123,13 +1125,120 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       key,
       intents,
     });
+    // Draining with no consumers touches every due entry in this file's
+    // shared database, not only this test's: each counts a failed attempt.
+    await drainSubmissionOutbox(env, {});
+    const kept = await entriesOf(marker);
+    await drainSubmissionOutbox(
+      env,
+      {},
+      {
+        now: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        maxAttempts: 2,
+      }
+    );
     const entries = await entriesOf(marker);
+    await sweepReceipts(env, new Date(Date.now() + 31 * dayMs));
+    // Past its retention, under a release whose consumer is back.
+    const expired = await outcome(
+      directSave(setup, docSave(path, "Plan"), {
+        key,
+        intents,
+        consumers: consumersFor(marker),
+      })
+    );
     expect({
       retried,
       again,
       versions: await versionsAt(setup.collectionId, path),
-      entries: entries.length,
-    }).toStrictEqual({ retried: "ok", again: saved, versions: 1, entries: 1 });
+      kept: kept.map(({ settled, attempts }) => ({ settled, attempts })),
+      entries: entries.map(({ settled, undeliverable }) => ({
+        settled,
+        undeliverable,
+      })),
+      expired,
+    }).toStrictEqual({
+      retried: "ok",
+      again: saved,
+      versions: 1,
+      kept: [{ settled: false, attempts: 1 }],
+      entries: [{ settled: true, undeliverable: "outbox.no_consumer" }],
+      expired: "submission.expired",
+    });
+  });
+
+  it("wait out a release without their consumer, such as a rollback, and are handed over once it is back", async () => {
+    const setup = await setUp();
+    const marker = unique();
+    const handed: OutboxEntry[] = [];
+    const consumers = consumersFor(marker, async (entry) => {
+      handed.push(entry);
+      return await Promise.resolve("delivered");
+    });
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key: unique(),
+      intents: [{ kind: "workflow.notify", data: { marker } }],
+      consumers,
+    });
+    // The previous release runs the drain: it has no consumer for these.
+    // Draining with no consumers touches every due entry in this file's
+    // shared database, not only this test's.
+    await drainSubmissionOutbox(env, {});
+    const rolledBack = await entriesOf(marker);
+    await drainSubmissionOutbox(env, consumers, {
+      now: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    const back = await entriesOf(marker);
+    expect({
+      rolledBack: rolledBack.map(({ settled, attempts }) => ({
+        settled,
+        attempts,
+      })),
+      handed: handed.map(({ id, attempts }) => ({ id, attempts })),
+      back: back.map(({ settled, undeliverable }) => ({
+        settled,
+        undeliverable,
+      })),
+    }).toStrictEqual({
+      rolledBack: [{ settled: false, attempts: 1 }],
+      handed: [{ id: rolledBack[0]?.id, attempts: 1 }],
+      back: [{ settled: true, undeliverable: null }],
+    });
+  });
+
+  it("are handed over under new IDs when a key commits again after its tombstone went", async () => {
+    const setup = await setUp();
+    const key = `again-${unique()}`;
+    const marker = unique();
+    const handed: string[] = [];
+    const consumers = consumersFor(marker, async (entry) => {
+      handed.push(entry.id);
+      return await Promise.resolve("delivered");
+    });
+    const intents: SubmissionIntent[] = [
+      { kind: "workflow.notify", data: { marker } },
+    ];
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key,
+      intents,
+      consumers,
+    });
+    await drainSubmissionOutbox(env, consumers);
+    // Expired, then its tombstone deleted: the key can be told from a new
+    // one no more.
+    await sweepReceipts(env, new Date(Date.now() + 31 * dayMs));
+    await sweepReceipts(env, new Date(Date.now() + 62 * dayMs));
+    const again = await directSave(
+      setup,
+      docSave(`notes/${unique()}.md`, "Plan"),
+      { key, intents, consumers }
+    );
+    await drainSubmissionOutbox(env, consumers);
+    expect({
+      again: again.currentVersion,
+      handed: handed.length,
+      distinct: new Set(handed).size,
+    }).toStrictEqual({ again: 1, handed: 2, distinct: 2 });
   });
 
   it("refuse an intent nothing takes before anything is saved", async () => {
@@ -1151,14 +1260,25 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
         },
       })
     );
+    // A map built from an optional lookup: the kind is there, its consumer
+    // isn't.
+    const unset = await outcome(
+      directSave(setup, docSave(path, "Plan"), {
+        key: unique(),
+        intents: [{ kind: "workflow.start", data: { marker } }],
+        consumers: { "workflow.start": undefined },
+      })
+    );
     expect({
       refused,
       partly,
+      unset,
       versions: await versionsAt(setup.collectionId, path),
       entries: await entriesOf(marker),
     }).toStrictEqual({
       refused: "submission.intent_unsupported",
       partly: "submission.intent_unsupported",
+      unset: "submission.intent_unsupported",
       versions: 0,
       entries: [],
     });
@@ -1286,19 +1406,6 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
   it("lease each entry when its turn comes, so a drain started meanwhile hands none over again", async () => {
     const setup = await setUp();
     const marker = unique();
-    const handed: string[] = [];
-    // How long a hand-over may take. A lease lasts twice that, so a lease
-    // outlives its hand-over by this much: room enough for the writes
-    // around it on a loaded machine, so no lease here runs out while its
-    // hand-over is still going.
-    const timeoutMs = 300;
-    // Slower than a hand-over may take: each one fails, and is put back.
-    const consumers = consumersFor(marker, async (entry) => {
-      handed.push(entry.id);
-      // Answers only once its hand-over gave up on it.
-      await outcome(whenAborted(entry.signal));
-      return "delivered";
-    });
     const count = 6;
     await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
       key: unique(),
@@ -1306,17 +1413,107 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
         kind: "workflow.notify" as const,
         data: { marker, n },
       })),
-      consumers,
+      consumers: consumersFor(marker),
     });
-    const first = drainSubmissionOutbox(env, consumers, { timeoutMs });
-    // Once a lease taken as the first drain started would have run out,
-    // and long before that drain has handed all of them over.
-    await scheduler.wait(timeoutMs * 3);
-    await drainSubmissionOutbox(env, consumers, { timeoutMs });
-    await first;
+    // The drains' clock and their hand-overs' time limits are the test's
+    // to move, so no lease runs out unless the test moves the clock past
+    // it: a busy machine changes nothing here.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    // Each hand-over answers only once its time is up: each fails, and is
+    // put back for later.
+    const first = gatedConsumer();
+    const second = gatedConsumer();
+    const timeoutMs = 1000;
+    // Every drain started, to wait out however the test ends.
+    const drains: Promise<void>[] = [];
+    try {
+      const firstDrain = drainSubmissionOutbox(
+        env,
+        consumersFor(marker, first.consumer),
+        { timeoutMs }
+      );
+      drains.push(firstDrain);
+      // The first drain hands three entries over, one limit each.
+      for (let n = 0; n < 3; n += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one after the other
+        await first.entered(n);
+        // oxlint-disable-next-line no-await-in-loop -- one after the other
+        await vi.advanceTimersByTimeAsync(timeoutMs);
+      }
+      // Its fourth hand-over is going, all but done: that entry's lease,
+      // taken when its turn came, holds yet; one taken as the drain
+      // started (two limits long) would have run out about two limits ago.
+      await first.entered(3);
+      await vi.advanceTimersByTimeAsync(timeoutMs - 1);
+      // Another drain starts meanwhile, and is handing over the first
+      // entry it finds due when the first drain's hand-over runs out.
+      const secondDrain = drainSubmissionOutbox(
+        env,
+        consumersFor(marker, second.consumer),
+        { timeoutMs }
+      );
+      drains.push(secondDrain);
+      await second.entered(0);
+      await vi.advanceTimersByTimeAsync(1);
+      // The first drain goes on past the entry the other one holds.
+      await first.entered(4);
+      await vi.advanceTimersByTimeAsync(timeoutMs);
+      // Every hand-over here has run out by now. Let go of any that hasn't
+      // (an entry handed over twice), so the drains end either way.
+      first.release();
+      second.release();
+      await Promise.all([firstDrain, secondDrain]);
+    } finally {
+      first.release();
+      second.release();
+      await Promise.allSettled(drains);
+      vi.useRealTimers();
+    }
     const entries = await entriesOf(marker);
     const ids = entries.map(({ id }) => id);
-    expect(handed.toSorted()).toStrictEqual(ids.toSorted());
+    // Each drain hands over only entries no other drain holds: never one
+    // twice, however they overlap.
+    expect({ first: first.handed, second: second.handed }).toStrictEqual({
+      first: [...ids.slice(0, 4), ids[5]],
+      second: [ids[4]],
+    });
+  });
+
+  it("refuse a drain whose hand-over limit is not above 0 ms, handing nothing over", async () => {
+    const setup = await setUp();
+    const marker = unique();
+    let calls = 0;
+    const consumers = consumersFor(marker, async () => {
+      calls += 1;
+      return await Promise.resolve("delivered");
+    });
+    await directSave(setup, docSave(`notes/${unique()}.md`, "Plan"), {
+      key: unique(),
+      intents: [{ kind: "workflow.notify", data: { marker } }],
+      consumers,
+    });
+    const zero = await outcome(
+      drainSubmissionOutbox(env, consumers, { timeoutMs: 0 })
+    );
+    const negative = await outcome(
+      drainSubmissionOutbox(env, consumers, { timeoutMs: -1 })
+    );
+    const entries = await entriesOf(marker);
+    const refusedCalls = calls;
+    // A drain with a limit takes it then, leaving nothing due behind for
+    // the other tests on this database.
+    await drainSubmissionOutbox(env, consumers);
+    expect({
+      zero,
+      negative,
+      calls: refusedCalls,
+      settled: entries.map(({ settled }) => settled),
+    }).toStrictEqual({
+      zero: "RangeError: A hand-over's limit must be above 0 ms, not 0.",
+      negative: "RangeError: A hand-over's limit must be above 0 ms, not -1.",
+      calls: 0,
+      settled: [false],
+    });
   });
 
   it("hand over one entry with no budget left, and stop", async () => {

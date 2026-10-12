@@ -1,5 +1,6 @@
 import type { RunSubscriptionApi } from "@grasp-os/shared/screens";
-import { RpcTarget } from "capnweb";
+
+import { CoreRpcTarget } from "./rpc-target.ts";
 
 /**
  * A page's hold on updates it follows: a screen's on its App's runs of one
@@ -8,7 +9,10 @@ import { RpcTarget } from "capnweb";
  * connection's subscriptions, and the object that pushes the updates keeps
  * its callback. Releasing it twice does nothing.
  */
-export class RunSubscription extends RpcTarget implements RunSubscriptionApi {
+export class RunSubscription
+  extends CoreRpcTarget
+  implements RunSubscriptionApi
+{
   readonly #release: () => Promise<void>;
   #released = false;
 

@@ -153,6 +153,7 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "CF_VERSION_METADATA",
   "COMPOSIO_API_KEY",
   "CONNECT",
+  "DATA_STORES",
   "DB",
   "DEV_SKIP_ROUTER_SECRET",
   "DURABLE_OBJECT_JURISDICTION",
@@ -167,12 +168,15 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "MICROSOFT_CLIENT_ID",
   "MICROSOFT_CLIENT_SECRET",
   "MODEL_GATEWAY",
+  "MODEL_LEDGER",
   "ONBOARDING",
   "PACKAGE_LIMITS",
   "PLATFORM_CHANGE",
   "ROUTER_SECRET",
   "ROUTER_SECRET_PREVIOUS",
   "RUN_RETENTION_DAYS",
+  // Whether Code Mode's CPU limit is enforced (core's src/code-mode.ts).
+  "RUNTIME_PROFILE",
   "SIGN_IN",
   // An App's statistics (core's src/statistics.ts), next to its permissions.
   "STATISTICS",

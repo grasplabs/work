@@ -1,0 +1,1 @@
+ALTER TABLE `sdk_tables` ADD `generation` integer DEFAULT 0 NOT NULL;

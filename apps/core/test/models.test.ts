@@ -225,9 +225,16 @@ describe("model gateway", { timeout: 30_000 }, () => {
         // answer it kept would be someone else's.
         skipsCache: headers.get("cf-aig-skip-cache"),
       }).toStrictEqual({ logsPayload: "false", skipsCache: "true" });
-      expect(
-        JSON.parse(headers.get("cf-aig-metadata") ?? "null")
-      ).toStrictEqual({ purpose: "chat.turn", actor: "person" });
+      // Identifiers only: why, for what kind of caller, and the provider
+      // request's own ID, which the model ledger keeps it under.
+      const { providerRequest, ...metadata } = z
+        .object({ providerRequest: z.uuid() })
+        .catchall(z.unknown())
+        .parse(JSON.parse(headers.get("cf-aig-metadata") ?? "null"));
+      expect([metadata, typeof providerRequest]).toStrictEqual([
+        { purpose: "chat.turn", actor: "person" },
+        "string",
+      ]);
     }
     // Nor could core send one: its env holds no provider key or gateway token.
     expect(
@@ -536,8 +543,9 @@ describe("model gateway", { timeout: 30_000 }, () => {
         gatewayLogId: "log-1",
       },
     });
-    // At Claude Sonnet 4.5's list prices: $3 per million tokens in, $15 out.
-    expect(event?.cost?.amount).toBeCloseTo(4.5);
+    // At Claude Sonnet 4.5's long-context prices, as its prompt is past
+    // 200K tokens: $6 per million tokens in, $22.50 out.
+    expect(event?.cost?.amount).toBeCloseTo(8.25);
     // Never the prompt or the answer.
     const stored = JSON.stringify(event);
     expect(stored).not.toContain("Acme");

@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1791652516632,
+      "tag": "0000_model_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791717941067,
+      "tag": "0001_request_deadline",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791726633796,
+      "tag": "0002_lineage_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791752753980,
+      "tag": "0003_request_scopes_scope_key",
+      "breakpoints": true
+    }
+  ]
+}

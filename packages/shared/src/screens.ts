@@ -19,6 +19,7 @@ import type { WorkflowRun } from "./workflows.ts";
 
 export {
   jsonBytes,
+  rpcArgumentDepth,
   screenFrameMessage,
   screenFrameMounted,
   screenFramePath,

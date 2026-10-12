@@ -754,6 +754,7 @@ describe("App server code", { timeout: 60_000 }, () => {
       appHost(env, app).call(caller, "remember", ["pinned"], {
         version: 1,
         chain: [],
+        holding: [],
         deadline: Date.now() + 10_000,
         readOnly: false,
         onPinned: async () => {
@@ -789,6 +790,7 @@ describe("App server code", { timeout: 60_000 }, () => {
         appHost(env, app).call(caller, "writeLater", [cutShort.wait, "short"], {
           version: 1,
           chain: [],
+          holding: [],
           deadline: Date.now() + 5000,
           readOnly: false,
           onPinned: async () => {},

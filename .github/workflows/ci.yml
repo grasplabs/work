@@ -49,12 +49,38 @@ jobs:
       # 8 to 10.5 minutes when it passes. Vitest's default runs a worker per
       # CPU but one, which left a third of the runner's CPU idle; a worker
       # per CPU measured about 6% faster.
-      # Nothing in Vitest times out a test worker stuck after its tests (see
-      # apps/core/vite.config.ts): this step timeout is the only backstop, so
-      # a hang fails here after 16 minutes, with no earlier warning, instead
-      # of at the job's limit: half again over the slowest pass.
-      - run: vp test --maxWorkers=100%
+      # Vitest times a test out from inside its worker, so a worker that is
+      # blocked, or whose request workerd cancelled, never reports its test.
+      # The stall reporter (scripts/stall-reporter.ts) names such a test or
+      # file and ends the run once it is well past its timeout. A hang
+      # outside any test (teardown, shutting the pool down) fails at this
+      # step's timeout after 16 minutes, instead of at the job's limit: half
+      # again over the slowest pass. A minute before that, the reporter
+      # prints the files and tests still running, and each finished test is
+      # in the test-progress artifact. "0 files, 0 tests" there means the
+      # hang is in teardown or in shutting the pool down. Reporters given
+      # here replace Vitest's defaults, so github-actions is listed for the
+      # inline failure annotations.
+      - run: vp test --maxWorkers=100% --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts
         timeout-minutes: 16
+        env:
+          GRASP_STALL_REPORT_AFTER_MINUTES: 15
+          # Seconds past a test's own timeout (counted for each attempt):
+          # room for the hooks around it, which have timeouts of their own.
+          # The longest is 120 s, set by workerflow's process tests
+          # (packages/workerflow/vite.process.config.ts); the rest use
+          # Vitest's 10 s. 300 s covers that 120 s before and after a test,
+          # with headroom for a loaded runner. Only lower it below twice the
+          # longest hook timeout if that drops.
+          GRASP_TEST_OVERDUE_GRACE_SECONDS: 300
+          GRASP_TEST_PROGRESS_FILE: ${{ runner.temp }}/test-progress.log
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-progress
+          path: ${{ runner.temp }}/test-progress.log
+          if-no-files-found: ignore
+          retention-days: 14
       - run: vp run -r build
       # The console isn't deployed from here (see deploy-staging): check that
       # its build is a Worker wrangler would deploy. No credentials needed.
@@ -110,6 +136,8 @@ jobs:
             - args: ["--frozen-lockfile"]
       - run: vp run --filter @grasp-os/web build
       - run: vp run smoke:workerd
+      # Code Mode's executor, with a Worker Loader, on plain workerd.
+      - run: vp run smoke:code-mode
 
   # Builds a release bundle as main will publish it (core, connect, the
   # frontend's static files and D1 migrations, with its manifest) and checks
