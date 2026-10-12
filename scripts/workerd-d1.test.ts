@@ -4,27 +4,20 @@
  * runs each test's statements on its `DB` and `OTHER` bindings and answers
  * what D1 returned, or the error it threw.
  */
-import { spawn } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
-import { once } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { d1Bindings, d1Service, writeD1Service } from "./workerd-d1.ts";
 import type { D1DatabaseConfig } from "./workerd-d1.ts";
-
-const workerdBinary = path.join(
-  import.meta.dirname,
-  "../node_modules/.bin/workerd"
-);
-const STARTUP_ATTEMPTS = 100;
-const STARTUP_RETRY_MS = 50;
+import {
+  cleanUp,
+  serveOnWorkerd,
+  storageDir,
+  tempDir,
+} from "./workerd-test-server.ts";
 
 /**
  * Runs the steps it's sent on its D1 bindings and answers each one's result.
@@ -68,18 +61,6 @@ export default {
 };
 `;
 
-const freePort = async (): Promise<number> => {
-  const probe = createServer().listen(0, "127.0.0.1");
-  await once(probe, "listening");
-  const address = probe.address();
-  probe.close();
-  await once(probe, "close");
-  if (address === null || typeof address === "string") {
-    throw new Error("no free port");
-  }
-  return address.port;
-};
-
 interface Step {
   db: "DB" | "OTHER";
   sql?: string;
@@ -95,19 +76,10 @@ const resultsSchema = z.array(
 );
 
 /** A workerd serving the D1 service and the test Worker, on one storage. */
-interface Served {
+interface ServedD1 {
   run: (steps: Step[]) => Promise<z.infer<typeof resultsSchema>>;
   stop: () => Promise<void>;
 }
-
-const temporary: string[] = [];
-const running: ChildProcess[] = [];
-
-const tempDir = (): string => {
-  const dir = mkdtempSync(path.join(tmpdir(), "grasp-os-d1-"));
-  temporary.push(dir);
-  return dir;
-};
 
 /** A database's migrations directory with `files` in it. */
 const migrationsDir = (files: Record<string, string>): string => {
@@ -118,38 +90,17 @@ const migrationsDir = (files: Record<string, string>): string => {
   return dir;
 };
 
-const waitUntilServing = async (
-  url: string,
-  workerd: ChildProcess,
-  stderr: () => string,
-  attempt = 0
-): Promise<void> => {
-  if (workerd.exitCode !== null) {
-    throw new Error(`workerd exited (${workerd.exitCode}): ${stderr()}`);
-  }
-  if (attempt >= STARTUP_ATTEMPTS) {
-    throw new Error(`workerd did not start: ${stderr()}`);
-  }
-  try {
-    await fetch(url, { method: "POST", body: "[]" });
-  } catch {
-    await sleep(STARTUP_RETRY_MS);
-    await waitUntilServing(url, workerd, stderr, attempt + 1);
-  }
-};
-
 /** Serves `databases` from `storage`, which outlives the workerd. */
 const serve = async (
   databases: D1DatabaseConfig[],
   storage: string
-): Promise<Served> => {
+): Promise<ServedD1> => {
   const out = tempDir();
-  const port = await freePort();
   writeFileSync(path.join(out, "test.js"), testWorker);
   writeD1Service(out, databases);
-  writeFileSync(
-    path.join(out, "config.capnp"),
-    `using Workerd = import "/workerd/workerd.capnp";
+  const { url, stop } = await serveOnWorkerd(
+    out,
+    (address) => `using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
   services = [
@@ -161,23 +112,10 @@ const config :Workerd.Config = (
     (name = "storage", disk = (path = "${storage}", writable = true)),
     ${d1Service("storage")},
   ],
-  sockets = [(name = "http", address = "127.0.0.1:${port}", http = (), service = "test")],
+  sockets = [(name = "http", address = "${address}", http = (), service = "test")],
 );
 `
   );
-  const workerd = spawn(
-    workerdBinary,
-    ["serve", path.join(out, "config.capnp")],
-    { stdio: ["ignore", "ignore", "pipe"] }
-  );
-  running.push(workerd);
-  // What workerd says when it can't start: a startup failure names it.
-  let stderr = "";
-  workerd.stderr?.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString();
-  });
-  const url = `http://127.0.0.1:${port}/`;
-  await waitUntilServing(url, workerd, () => stderr);
   return {
     run: async (steps) => {
       const response = await fetch(url, {
@@ -186,10 +124,7 @@ const config :Workerd.Config = (
       });
       return resultsSchema.parse(await response.json());
     },
-    stop: async () => {
-      workerd.kill();
-      await once(workerd, "exit");
-    },
+    stop,
   };
 };
 
@@ -200,21 +135,8 @@ const notes = {
     "CREATE TABLE `attachments` (`note_id` integer NOT NULL, `bytes` blob NOT NULL);",
 };
 
-const storageDir = (): string => {
-  const dir = path.join(tempDir(), "storage");
-  mkdirSync(dir);
-  return dir;
-};
-
 describe("the on-prem D1 service", () => {
-  afterEach(() => {
-    for (const workerd of running.splice(0)) {
-      workerd.kill();
-    }
-    for (const dir of temporary.splice(0)) {
-      rmSync(dir, { force: true, recursive: true });
-    }
-  });
+  afterEach(cleanUp);
 
   it("applies each database's migrations once, recorded as Wrangler records them, and later ones as they come", async () => {
     const storage = storageDir();
