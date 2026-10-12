@@ -135,7 +135,8 @@ export interface SessionApi {
   readonly signals: SignalsApi;
   /**
    * The onboarding: who works where, the plan, and numbers per team, never
-   * anyone's words. Admins only, Grasp staff included.
+   * anyone's words. Admins only, Grasp staff included; its programme (the
+   * dates and the stage) for everyone signed in.
    */
   readonly onboarding: OnboardingApi;
   /** What only Grasp's staff do in the onboarding: pause it, the agreements. */
