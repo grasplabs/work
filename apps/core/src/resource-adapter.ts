@@ -1,6 +1,7 @@
 import type { AnyResource } from "@grasp-os/sdk";
 import type { HeldBinding } from "@grasp-os/shared/capability";
-import type { AppId } from "@grasp-os/shared/ids";
+import type { ConnectorContract } from "@grasp-os/shared/connect";
+import type { AppId, ConnectionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { Provenance } from "@grasp-os/shared/knowledge";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
@@ -160,6 +161,29 @@ export interface ServedBinding extends ServedContract {
   readonly tools?: readonly string[];
 }
 
+/**
+ * How one review of an App's resources asks connect what connections
+ * serve: each (connection, contract) once, across every binding and
+ * choice it checks, and no more than its limit. A request never uses it:
+ * it asks connect live, every time.
+ */
+export interface ContractAsks {
+  /**
+   * What connection `connectionId` serves of `contract` (undefined when it
+   * serves none), or `unchecked` once the review's limit is spent.
+   */
+  readonly contractOf: (
+    connectionId: ConnectionId,
+    contract: string
+  ) => Promise<ConnectorContract | undefined | typeof unchecked>;
+}
+
+/**
+ * What a review's bind answers for a target it couldn't check within its
+ * limit: never served, and said to be unchecked.
+ */
+export const unchecked = "unchecked";
+
 /** One kind's adapter. */
 export interface ResourceAdapter<Kind extends BindingTarget["kind"]> {
   /**
@@ -168,12 +192,14 @@ export interface ResourceAdapter<Kind extends BindingTarget["kind"]> {
    * version of the declared contract; with the contract it serves now.
    * Undefined otherwise. Asked as an admin approves the binding, and
    * again for every request, so a drifted contract or a lost grant stops
-   * it.
+   * it. A review passes its `asks`, so what it asks connect is shared and
+   * bounded; then a target it couldn't check is `unchecked`.
    */
   readonly bind: (
     env: Env,
     app: AppId,
     declaration: DeclarationOf<Kind>,
-    target: TargetOf<Kind>
-  ) => Promise<ServedBinding | undefined>;
+    target: TargetOf<Kind>,
+    asks?: ContractAsks
+  ) => Promise<ServedBinding | undefined | typeof unchecked>;
 }

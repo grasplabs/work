@@ -14,9 +14,15 @@ import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
-import { appResourceBindings } from "../src/db/core/schema.ts";
+import {
+  appResourceBindings,
+  permissions as permissionRows,
+} from "../src/db/core/schema.ts";
 import { confirmPendingAction } from "../src/pending-actions.ts";
-import { approveResourceBinding } from "../src/resource-bindings.ts";
+import {
+  approveResourceBinding,
+  reviewResourceBindings,
+} from "../src/resource-bindings.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -141,6 +147,44 @@ export default app({
 `,
 });
 
+/** The Mailer, with a second alias of the same contract: its archive. */
+const archiveFiles = (): Record<string, string> => ({
+  ...mailFiles(),
+  "operations/archive.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const archive = resource.connector("archive", {
+  contract: "microsoft-365.mail@1",
+  actions: ["send", "list"],
+});
+
+export const archived = action({
+  args: {},
+  returns: v.boolean(),
+  uses: [archive],
+  handler: async (ctx) => {
+    await ctx.resources.archive.call("list", { mailbox: "team@acme.test" });
+    return true;
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { archive, archived } from "./operations/archive.ts";
+import { careless, inbox, mail, probe, send, sendFresh } from "./operations/mail.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Mailer",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { mail: { send, inbox, careless, sendFresh, probe }, archive: { archived } },
+  internalOperations: {},
+  screens: [],
+  uses: [mail, archive],
+});
+`,
+});
+
 /** The Mailer, declaring its mail resource still, with no action that uses it. */
 const unusedMailFiles = (): Record<string, string> => ({
   "operations/mail.ts": `import { resource, v } from "@grasp-os/sdk";
@@ -223,14 +267,19 @@ const sentCount = async (subject: string): Promise<number> => {
  * mail resource bound to it.
  */
 const mailerApp = async (
-  options: { tools?: string[]; contract?: string; bind?: boolean } = {}
+  options: {
+    tools?: string[];
+    contract?: string;
+    bind?: boolean;
+    files?: Record<string, string>;
+  } = {}
 ) => {
   const admin = await signedInApi(idp, "admin");
   const builder = await signedInApi(idp, "builder");
   const created = await builder.api.apps.create({ name: "Mailer" });
   await builder.api.apps.files.commit(
     created.id,
-    mailFiles(options.contract),
+    options.files ?? mailFiles(options.contract),
     "First"
   );
   await builder.api.apps.versions.setCurrent(created.id, 1);
@@ -299,6 +348,19 @@ const call = async (
 const outcomeOf = (result: OperationResult): Json =>
   result.ok ? result.value : { failed: result.error.code };
 
+/** The Mailer's declared resources and what its admin may bind each to. */
+const choicesOf = async ({ admin, release }: Mailer) => {
+  const review = await admin.api.resourceBindings.review(
+    release.manifest.resourceId
+  );
+  return review.resources.map(({ alias, state, actions, choices }) => ({
+    alias,
+    state,
+    actions,
+    choices,
+  }));
+};
+
 /** The error code `work` fails with, or "ok". */
 const failure = async (work: () => Promise<unknown>): Promise<string> => {
   try {
@@ -340,6 +402,16 @@ const servingEnv = (
     },
   });
   return { ...env, CONNECT: changed };
+};
+
+/** Core's env as it is, counting how often core asks connect for a contract. */
+const askCountingEnv = () => {
+  let asks = 0;
+  const counting = servingEnv((contract) => {
+    asks += 1;
+    return contract;
+  });
+  return { env: counting, asks: () => asks };
 };
 
 /** `contract` with `action`'s output schema replaced by `output`. */
@@ -795,6 +867,148 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       narrow: "resource.target_invalid",
       google: "resource.target_invalid",
       unknown: "resource.target_invalid",
+    });
+  });
+
+  it("offer an admin only the connection permissions that serve the declared actions", async () => {
+    const narrow = await mailerApp({ tools: ["mail.list"], bind: false });
+    const full = await mailerApp({ bind: false });
+    const db = drizzle(env.DB);
+    const granted = await db
+      .select()
+      .from(permissionRows)
+      .where(eq(permissionRows.id, full.permission))
+      .get();
+    const connectionId = granted?.objectId ?? "";
+    // On the same connection, the Mailer also holds a permission that
+    // doesn't allow `mail.send`, and a copy of its full one that holds in
+    // one chat only: neither is offered, nor is the other App's.
+    const listOnly = await full.builder.api.permissions.request({
+      subject: { type: "app", appId: full.release.manifest.resourceId },
+      object: { type: "connection", connectionId },
+      actions: ["mail.list"],
+      binding: "MAIL_LIST",
+    });
+    await full.admin.api.permissions.grant(listOnly.id, { version: 1 });
+    if (granted !== undefined) {
+      await db.insert(permissionRows).values({
+        ...granted,
+        id: crypto.randomUUID(),
+        chatId: crypto.randomUUID(),
+      });
+    }
+    expect({
+      narrow: await choicesOf(narrow),
+      full: await choicesOf(full),
+    }).toStrictEqual({
+      // The permission doesn't allow `mail.send`, which the App declares.
+      narrow: [
+        {
+          alias: "mail",
+          state: "unbound",
+          actions: ["send", "list"],
+          choices: { kind: "connector", permissions: [], truncated: false },
+        },
+      ],
+      full: [
+        {
+          alias: "mail",
+          state: "unbound",
+          actions: ["send", "list"],
+          choices: {
+            kind: "connector",
+            permissions: [
+              {
+                permissionId: full.permission,
+                connectionId,
+                resource: null,
+              },
+            ],
+            truncated: false,
+          },
+        },
+      ],
+    });
+  });
+
+  it("ask connect once per connection and contract in a review, however many bindings and choices name it", async () => {
+    // A second alias of the same contract, bound to the same permission.
+    const mailer = await mailerApp({ files: archiveFiles() });
+    const app = mailer.release.manifest.resourceId;
+    await mailer.admin.api.resourceBindings.approve({
+      ...mailer.approval,
+      alias: "archive",
+    });
+    const counted = askCountingEnv();
+    const review = await reviewResourceBindings(
+      counted.env,
+      await mailer.admin.api.whoami(),
+      app
+    );
+    expect({
+      states: review.resources.map(({ alias, state }) => [alias, state]),
+      offered: review.resources.map(
+        ({ choices }) =>
+          choices?.kind === "connector" && choices.permissions.length
+      ),
+      truncated: review.truncated,
+      asks: counted.asks(),
+    }).toStrictEqual({
+      states: [
+        ["archive", "served"],
+        ["mail", "served"],
+      ],
+      offered: [1, 1],
+      truncated: false,
+      asks: 1,
+    });
+  });
+
+  it("never report a connector binding served when the review's asks run out", async () => {
+    const mailer = await mailerApp();
+    const counted = askCountingEnv();
+    const review = await reviewResourceBindings(
+      counted.env,
+      await mailer.admin.api.whoami(),
+      mailer.release.manifest.resourceId,
+      0
+    );
+    expect({
+      states: review.resources.map(({ state }) => state),
+      choices: review.resources.map(({ choices }) => choices),
+      truncated: review.truncated,
+      asks: counted.asks(),
+    }).toStrictEqual({
+      states: ["unchecked"],
+      choices: [{ kind: "connector", permissions: [], truncated: true }],
+      truncated: true,
+      asks: 0,
+    });
+  });
+
+  it("say a connector binding no longer serves once its contract changed or its connection is gone", async () => {
+    const mailer = await mailerApp();
+    const admin = await mailer.admin.api.whoami();
+    const app = mailer.release.manifest.resourceId;
+    const stateIn = async (reviewEnv: Env) => {
+      const review = await reviewResourceBindings(reviewEnv, admin, app);
+      return review.resources.map(({ state }) => state);
+    };
+    const served = await stateIn(env);
+    const reshaped = await stateIn(
+      servingEnv(withOutput("list", someMessages))
+    );
+    const listed = await mailer.admin.api.connections.list();
+    const shared = listed.find((connection) => connection.scope === "shared");
+    await mailer.admin.api.connections.disconnect(shared?.id ?? "");
+    expect({
+      served,
+      reshaped,
+      disconnected: await stateIn(env),
+    }).toStrictEqual({
+      served: ["served"],
+      reshaped: ["contract_changed"],
+      disconnected: ["grant_lost"],
     });
   });
 });

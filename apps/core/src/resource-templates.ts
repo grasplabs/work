@@ -157,14 +157,16 @@ export const publishTemplate = async (
   return toPublished(row);
 };
 
-/** Every template version, newest first: for admins and builders. */
-export const listTemplates = async (
+/**
+ * The published versions of `contract` (every contract's when undefined),
+ * newest first, at most `limit`, without their content: what a template
+ * resource of that contract may be bound to. The caller checks who asks.
+ */
+export const templateVersionsOf = async (
   env: Env,
-  by: Identity
+  contract: string | undefined,
+  limit: number
 ): Promise<PublishedTemplate[]> => {
-  if (by.staff || (!isAdmin(by.role) && by.role !== "builder")) {
-    throw roleErrors.create("role.forbidden");
-  }
   // Everything but the content, which a listing never returns.
   const rows = await drizzle(env.DB)
     .select({
@@ -176,9 +178,25 @@ export const listTemplates = async (
       publishedAt: resourceTemplates.publishedAt,
     })
     .from(resourceTemplates)
+    .where(
+      contract === undefined
+        ? undefined
+        : eq(resourceTemplates.contract, contract)
+    )
     .orderBy(desc(resourceTemplates.publishedAt))
-    .limit(200);
+    .limit(limit);
   return rows.map(toPublished);
+};
+
+/** Every template version, newest first: for admins and builders. */
+export const listTemplates = async (
+  env: Env,
+  by: Identity
+): Promise<PublishedTemplate[]> => {
+  if (by.staff || (!isAdmin(by.role) && by.role !== "builder")) {
+    throw roleErrors.create("role.forbidden");
+  }
+  return await templateVersionsOf(env, undefined, 200);
 };
 
 /** Version `version` of template `templateId`, if it is published. */

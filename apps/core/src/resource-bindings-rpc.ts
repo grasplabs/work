@@ -2,11 +2,13 @@ import type {
   BindingApproval,
   ResourceBinding,
   ResourceBindingsApi,
+  ResourceBindingsReview,
 } from "@grasp-os/shared/resource-bindings";
 
 import {
   approveResourceBinding,
   listResourceBindings,
+  reviewResourceBindings,
   revokeResourceBinding,
 } from "./resource-bindings.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -50,6 +52,13 @@ export class ResourceBindingsRpc
     return await withPerson(
       this.#check,
       async (person) => await listResourceBindings(this.#env, person, app)
+    );
+  }
+
+  async review(app: string): Promise<ResourceBindingsReview> {
+    return await withPerson(
+      this.#check,
+      async (person) => await reviewResourceBindings(this.#env, person, app)
     );
   }
 }
