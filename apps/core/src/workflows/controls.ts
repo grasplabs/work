@@ -12,7 +12,7 @@ import { z } from "zod";
 import { appFor } from "../apps.ts";
 import { auditedBatch, outboxedEventWhere } from "../audit-outbox.ts";
 import { workflowRunControls, workflowRuns } from "../db/core/schema.ts";
-import { markRunCancelled, runEngine } from "./engine.ts";
+import { markRunCancelled, runEngine, settleRunCancel } from "./engine.ts";
 import {
   endedLive,
   findRun,
@@ -157,11 +157,13 @@ const writeReceipt = async (
   row: RunRow,
   kind: ControlKind,
   done: boolean,
-  via?: "screen"
+  via?: "screen",
+  cancelledAt?: number
 ): Promise<string | undefined> => {
   const db = drizzle(env.DB);
   const id = crypto.randomUUID();
   const now = Date.now();
+  const cancelling = kind === "cancel" && !done;
   const generation = done ? row.controlGeneration : row.controlGeneration + 1;
   const written = sql`EXISTS (SELECT 1 FROM ${workflowRunControls} WHERE ${workflowRunControls.id} = ${id})`;
   const event = createAuditEvent(
@@ -172,47 +174,61 @@ const writeReceipt = async (
     }),
     "core"
   );
-  await auditedBatch(env, db, [
-    db
-      .update(workflowRuns)
-      .set({
-        controlGeneration: generation,
-        ...(kind === "cancel" && !done
-          ? { cancelRequestedAt: new Date(now), pendingStart: null }
-          : {}),
-      })
-      .where(
-        and(
-          eq(workflowRuns.id, row.id),
-          eq(workflowRuns.controlGeneration, row.controlGeneration),
-          // An acknowledgement may be of an ended run (a cancelled run
-          // cancelled again); nothing else is admitted once it has ended.
-          done ? undefined : inArray(workflowRuns.status, unended)
-        )
-      ),
-    db
-      .insert(workflowRunControls)
-      .select(
-        sql`SELECT ${id}, ${row.id}, ${kind}, ${done ? "applied" : "admitted"}, ${generation}, ${by.userId}, ${now}, ${done ? now : null} WHERE changes() > 0`
-      ),
-    outboxedEventWhere(db, event, written),
-    ...(kind === "cancel" && !done
-      ? [
-          db
-            .update(workflowRunControls)
-            .set({ state: "superseded", settledAt: new Date(now) })
-            .where(
-              and(
-                eq(workflowRunControls.runId, row.id),
-                eq(workflowRunControls.state, "admitted"),
-                inArray(workflowRunControls.kind, ["pause", "resume"]),
-                lt(workflowRunControls.generation, generation),
-                written
-              )
-            ),
-        ]
-      : []),
-  ]);
+  const admits = and(
+    eq(workflowRuns.id, row.id),
+    eq(workflowRuns.controlGeneration, row.controlGeneration),
+    // An acknowledgement may be of an ended run (a cancelled run
+    // cancelled again); nothing else is admitted once it has ended.
+    done ? undefined : inArray(workflowRuns.status, unended)
+  );
+  const update = db
+    .update(workflowRuns)
+    .set({
+      controlGeneration: generation,
+      ...(cancelling
+        ? {
+            cancelRequestedAt: sql`COALESCE(${workflowRuns.cancelRequestedAt}, ${cancelledAt ?? now})`,
+            pendingStart: null,
+          }
+        : {}),
+    })
+    .where(admits);
+  const receipt = db
+    .insert(workflowRunControls)
+    .select(
+      sql`SELECT ${id}, ${row.id}, ${kind}, ${done ? "applied" : "admitted"}, ${generation}, ${by.userId}, ${now}, ${done ? now : null} WHERE changes() > 0`
+    );
+  await (cancelling
+    ? auditedBatch(env, db, [
+        // A cancel is audited once, by whichever writes its tombstone
+        // first: this receipt, or the run object's repair of a cancel
+        // whose request didn't (runs.ts, `completeCancel`). So before this
+        // write, while the run has none.
+        outboxedEventWhere(
+          db,
+          event,
+          sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${and(admits, isNull(workflowRuns.cancelRequestedAt))})`
+        ),
+        update,
+        receipt,
+        db
+          .update(workflowRunControls)
+          .set({ state: "superseded", settledAt: new Date(now) })
+          .where(
+            and(
+              eq(workflowRunControls.runId, row.id),
+              eq(workflowRunControls.state, "admitted"),
+              inArray(workflowRunControls.kind, ["pause", "resume"]),
+              lt(workflowRunControls.generation, generation),
+              written
+            )
+          ),
+      ])
+    : auditedBatch(env, db, [
+        update,
+        receipt,
+        outboxedEventWhere(db, event, written),
+      ]));
   const found = await db
     .select({ id: workflowRunControls.id })
     .from(workflowRunControls)
@@ -274,6 +290,7 @@ const apply = async (env: Env, control: ControlRow): Promise<void> => {
   const engine = runEngine(env);
   if (control.kind === "cancel") {
     await engine.terminate(row.id);
+    await settleRunCancel(env, row.id);
   } else {
     // A run the engine has no record of yet hasn't started: nothing to
     // pause or resume, and nothing ended either. The receipt stays
@@ -367,16 +384,23 @@ const control = async (
       throw workflowErrors.create(admission.code);
     }
     let id: string | undefined;
+    let cancelledAt: number | undefined;
     if (admission.type === "join") {
       ({ id } = admission.control);
     } else {
       if (kind === "cancel" && admission.type === "admit") {
-        // First, in the run's object: from then on no attempt of it
-        // holds, so nothing more of it is handed back or acts, even
-        // should the engine never terminate it. Should this fail, nothing
-        // of the cancel happened.
+        // First, in the run's object, the cancel's record: from then on
+        // no attempt of it holds, so nothing more of it is handed back or
+        // acts, even should the engine never terminate it. Should this
+        // fail, nothing of the cancel happened; should what follows fail,
+        // the object finishes it (run-object.ts). A run cancelled before
+        // keeps its first cancel's time.
         // oxlint-disable-next-line no-await-in-loop -- once, before the receipt
-        await markRunCancelled(env, row.id);
+        ({ at: cancelledAt } = await markRunCancelled(
+          env,
+          row.id,
+          actorOf(by)
+        ));
       }
       // oxlint-disable-next-line no-await-in-loop -- read again after a race
       id = await writeReceipt(
@@ -385,7 +409,8 @@ const control = async (
         row,
         kind,
         admission.type === "done",
-        via
+        via,
+        cancelledAt
       );
     }
     if (id !== undefined) {
