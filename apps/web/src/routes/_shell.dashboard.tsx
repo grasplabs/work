@@ -1,5 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Await, createFileRoute } from "@tanstack/react-router";
+import { Await, createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { Activity } from "../dashboard/activity.tsx";
@@ -30,6 +30,7 @@ const DashboardPage = () => {
     Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { i18n, t } = useLingui();
+  const router = useRouter();
   const [exporting, setExporting] = useState(false);
   // A programme only with a plan; none read, no line and no report.
   const planned = programme.state === "ready" ? programme.data : null;
@@ -59,7 +60,12 @@ const DashboardPage = () => {
             <ReportBar
               next={next}
               onExport={() => {
-                setExporting(true);
+                // Read again first, so the report is as it stands now,
+                // not as it stood when the page was opened.
+                void (async () => {
+                  await router.invalidate();
+                  setExporting(true);
+                })();
               }}
             />
             <ReportDialog

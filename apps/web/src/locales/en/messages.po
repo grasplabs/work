@@ -1663,8 +1663,8 @@ msgid "Everyone"
 msgstr "Everyone"
 
 #: src/dashboard/report.ts
-msgid "Everyone else: {talked} of {asked}"
-msgstr "Everyone else: {talked} of {asked}"
+msgid "Everyone else, in the teams whose counts may be shown: {talked} of {asked}"
+msgstr "Everyone else, in the teams whose counts may be shown: {talked} of {asked}"
 
 #: src/routes/_shell.settings.audit.tsx
 msgid "Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen."
@@ -4341,6 +4341,10 @@ msgstr "To"
 msgctxt "dashboard: what waits on you"
 msgid "To do"
 msgstr "To do"
+
+#: src/dashboard/report.ts
+msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
+msgstr "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
 
 #: src/chat/chat-list.tsx
 msgctxt "chats from today"

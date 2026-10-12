@@ -1663,8 +1663,8 @@ msgid "Everyone"
 msgstr "Tout le monde"
 
 #: src/dashboard/report.ts
-msgid "Everyone else: {talked} of {asked}"
-msgstr "Tous les autres : {talked} sur {asked}"
+msgid "Everyone else, in the teams whose counts may be shown: {talked} of {asked}"
+msgstr "Tous les autres, dans les équipes dont les chiffres peuvent être affichés : {talked} sur {asked}"
 
 #: src/routes/_shell.settings.audit.tsx
 msgid "Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen."
@@ -4341,6 +4341,10 @@ msgstr "Au"
 msgctxt "dashboard: what waits on you"
 msgid "To do"
 msgstr "À faire"
+
+#: src/dashboard/report.ts
+msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
+msgstr "Pour que l’on ne sache pas qui a parlé, une équipe n’apparaît pas tant que cinq de ses membres n’ont pas été sollicités, ni son chiffre tant que trois n’ont pas été entendus. Ni l’un ni l’autre ne veut dire que personne n’a participé."
 
 #: src/chat/chat-list.tsx
 msgctxt "chats from today"

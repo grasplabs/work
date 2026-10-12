@@ -66,9 +66,9 @@ describe("the next weekly report", () => {
     });
   });
 
-  it("is a week after the start before the programme begins", () => {
+  it("counts down to a week after the start before the programme begins", () => {
     expect(nextReport(start, "2026-09-01")).toStrictEqual({
-      inDays: 7,
+      inDays: 13,
       week: 1,
       through: 0,
     });

@@ -231,8 +231,15 @@ const peopleSection = (people: ReportReads["people"], i18n: I18n): string[] => {
     heading,
     [
       item(i18n._(msg`Team leads: ${leadsTalked} of ${leads}`)),
-      item(i18n._(msg`Everyone else: ${talked} of ${asked}`)),
+      item(
+        i18n._(
+          msg`Everyone else, in the teams whose counts may be shown: ${talked} of ${asked}`
+        )
+      ),
     ].join("\n"),
+    i18n._(
+      msg`To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part.`
+    ),
   ];
 };
 
