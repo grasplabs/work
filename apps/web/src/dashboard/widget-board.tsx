@@ -753,6 +753,10 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
     if (end === "saved") {
       confirmed.current = next;
     } else if (end === "refused") {
+      // A drag under way began from the layout core just refused: it
+      // ends here, so it can neither put that back nor save on top of it.
+      stopDrag.current?.();
+      setDragged(null);
       setWidgets(confirmed.current);
     }
   };
