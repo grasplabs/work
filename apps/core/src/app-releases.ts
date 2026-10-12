@@ -4,7 +4,7 @@ import {
   isAppLayout,
   kitModuleName,
   kitModules,
-  sdkModules,
+  serverSdkModules,
 } from "@grasp-os/compiler";
 import type { Diagnostic } from "@grasp-os/compiler";
 import {
@@ -20,6 +20,7 @@ import {
   symbolicModules,
 } from "@grasp-os/sdk/host";
 import type { AppManifest } from "@grasp-os/sdk/host";
+import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 import {
   releaseFormatVersion,
   releaseManifestSchema,
@@ -32,15 +33,12 @@ import type {
   ReleaseManifest,
 } from "@grasp-os/shared/app-releases";
 import { actorOf } from "@grasp-os/shared/audit";
-import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
+import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
-import type { Json } from "@grasp-os/shared/json";
+import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { and, eq, sql } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { appFor, findVersion, versionFiles } from "./apps.ts";
@@ -56,7 +54,7 @@ import {
   sdkResourceBindings,
   sdkStoreOwners,
 } from "./db/core/schema.ts";
-import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
+import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { finishDeletion, markArtifact } from "./release-retention.ts";
 import { sandbox } from "./sandbox.ts";
 import { buildAppCode } from "./screens.ts";
@@ -110,8 +108,11 @@ import { buildAppCode } from "./screens.ts";
 /** Where an artifact's bytes are, by their SHA-256. */
 const artifactKey = (sha256: string): string => `release-artifacts/${sha256}`;
 
-/** The most characters an inspection may answer: an App manifest's bound. */
-const inspectionMaxLength = 4 * 1024 * 1024;
+/**
+ * The most characters an inspection may answer: an App manifest's bound
+ * in bytes, never fewer characters (the host checks the bytes on reading).
+ */
+const inspectionMaxLength = appManifestMaxBytes;
 
 /** The module that inspects the App in its isolate. */
 const inspectModule = "grasp-inspect.js";
@@ -224,20 +225,7 @@ const readManifest = (text: string): AppManifest => {
   }
 };
 
-/** The canonical text of JSON data. */
-const canonicalText = (value: unknown): string => {
-  // SAFETY: what JSON.parse answers is JSON; everything read here (a
-  // manifest, a report) is JSON data to begin with.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const json = JSON.parse(JSON.stringify(value) ?? "null") as Json;
-  return canonicalJson(json);
-};
-
 const encoder = new TextEncoder();
-
-/** The SHA-256, in hex, of `bytes`. */
-const sha256Of = async (bytes: ArrayBuffer | Uint8Array): Promise<string> =>
-  toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
 
 /** One artifact, as the manifest names it, and the bytes hashed. */
 interface Artifact {
@@ -249,24 +237,34 @@ interface Artifact {
 const artifactOf = async (path: string, text: string): Promise<Artifact> => {
   const bytes = encoder.encode(text);
   return {
-    entry: { path, sha256: await sha256Of(bytes), bytes: bytes.byteLength },
+    entry: {
+      path,
+      sha256: await sha256HexOfBytes(bytes),
+      bytes: bytes.byteLength,
+    },
     bytes,
   };
 };
 
 /** `value` with every object and array in it frozen. */
-const deepFreeze = <Value>(value: Value): Value => {
-  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+const deepFreeze = <Value>(
+  value: Value,
+  seen = new WeakSet<object>()
+): Value => {
+  // Into frozen objects too, whose own entries may not be (as the SDK's
+  // does); `seen` only so a shared or cyclic value is walked once.
+  if (typeof value === "object" && value !== null && !seen.has(value)) {
+    seen.add(value);
     Object.freeze(value);
     for (const entry of Object.values(value)) {
-      deepFreeze(entry);
+      deepFreeze(entry, seen);
     }
   }
   return value;
 };
 
 /** What the host that seals a release gives it. */
-export interface SealRequest {
+interface SealRequest {
   readonly app: AppId;
   readonly version: number;
   /**
@@ -322,7 +320,7 @@ const artifactText = async (
   if (
     bytes === undefined ||
     bytes.byteLength !== entry.bytes ||
-    (await sha256Of(bytes)) !== entry.sha256
+    (await sha256HexOfBytes(bytes)) !== entry.sha256
   ) {
     log.error("release.artifact_corrupt", {
       path: entry.path,
@@ -427,9 +425,12 @@ const manifestOf = (
   } catch {
     throw versionErrors.create("version.manifest_corrupt");
   }
+  // An App's release, binding one store at most (the one the host chose).
   if (
     manifest.resourceId !== key.app ||
     manifest.resourceVersion !== key.version ||
+    manifest.target !== "app" ||
+    manifest.dataStoreBindings.length > 1 ||
     canonicalText(manifest) !== text
   ) {
     throw versionErrors.create("version.manifest_corrupt");
@@ -543,13 +544,6 @@ export const loadRelease = async (
   }
 };
 
-/**
- * That `column` is one of `values`, bound as one JSON parameter: a
- * release names more artifacts than D1 binds variables in a statement.
- */
-const inJson = (column: SQLiteColumn, values: readonly string[]): SQL =>
-  sql`${column} IN (SELECT value FROM json_each(${JSON.stringify(values)}))`;
-
 /** How often, and how long, a seal waits for a deletion in flight. */
 const reserveWait = { attempts: 50, ms: 200 };
 
@@ -594,7 +588,7 @@ const reserveArtifacts = async (
         and(
           eq(sdkReleaseArtifacts.appId, key.app),
           eq(sdkReleaseArtifacts.version, key.version),
-          inJson(sdkReleaseArtifacts.sha256, unique)
+          inList(sdkReleaseArtifacts.sha256, unique)
         )
       );
     const have = new Set(reserved.map(({ sha256 }) => sha256));
@@ -606,7 +600,7 @@ const reserveArtifacts = async (
     const marked = await drizzle(env.DB)
       .select({ sha256: sdkArtifactDeletions.sha256 })
       .from(sdkArtifactDeletions)
-      .where(inJson(sdkArtifactDeletions.sha256, missing));
+      .where(inList(sdkArtifactDeletions.sha256, missing));
     if (marked.length === 0) {
       // Unmarked since the batch: reserved on the next try, at once.
       continue;
@@ -794,7 +788,7 @@ export const sealRelease = async (
 
   // The SDK read once: the modules both inspections run with are the
   // modules sealed with the release, and what it runs with.
-  const sdk = await sdkModules(env.ASSETS);
+  const sdk = await serverSdkModules(env.ASSETS);
 
   // The first inspection: symbolic references, resolved against the
   // registration they come with.

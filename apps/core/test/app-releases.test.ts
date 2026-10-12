@@ -1,4 +1,4 @@
-import { sdkModules } from "@grasp-os/compiler";
+import { serverSdkModules } from "@grasp-os/compiler";
 import { schemaHash } from "@grasp-os/sdk/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
@@ -136,7 +136,7 @@ describe("sealing a release", { timeout: 120_000 }, () => {
   it("seals the SDK it was inspected with, and loads it back", async () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);
-    const sdk = await sdkModules(env.ASSETS);
+    const sdk = await serverSdkModules(env.ASSETS);
     const hashed: [string, string][] = await Promise.all(
       Object.entries(sdk.modules).map(
         async ([name, code]): Promise<[string, string]> => [
@@ -152,11 +152,13 @@ describe("sealing a release", { timeout: 120_000 }, () => {
         .map((artifact) => [artifact.path, artifact.sha256])
     );
     const loaded = await loadRelease(env, fixture.app, 1);
-    expect([named, loaded.sdk, release.manifest.sdkVersion]).toStrictEqual([
-      sealed,
-      sdk.modules,
-      sdk.version,
-    ]);
+    expect([
+      named,
+      loaded.sdk,
+      release.manifest.sdkVersion,
+      // The server's SDK set only: never the workflow SDK it doesn't use.
+      Object.keys(named).filter((path) => path.includes("workflow")),
+    ]).toStrictEqual([sealed, sdk.modules, sdk.version, []]);
   });
 
   it("seals an App at exactly the App's file and size limits", async () => {
@@ -472,6 +474,34 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     await expect(
       failure(async () => await loadRelease(env, fixture.app, 1))
     ).resolves.toBe("version.protocol_unsupported");
+  });
+
+  it.each([
+    [
+      "names another kind of release",
+      (manifest: Record<string, Json>) => {
+        manifest.target = "workflow";
+      },
+    ],
+    [
+      "binds a second store",
+      (manifest: Record<string, Json>) => {
+        // Its one binding, twice: the first still agrees with the host's.
+        const bindings: readonly Json[] = Array.isArray(
+          manifest.dataStoreBindings
+        )
+          ? manifest.dataStoreBindings.map((binding: Json) => binding)
+          : [];
+        manifest.dataStoreBindings = [...bindings, ...bindings];
+      },
+    ],
+  ])("is refused when it %s, every hash rewritten", async (_case, change) => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    await rewrite(fixture.app, release, { manifest: change });
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.manifest_corrupt");
   });
 
   it("is refused when its manifest hashes right but isn't canonical", async () => {
