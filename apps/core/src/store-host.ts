@@ -76,6 +76,7 @@ import { z } from "zod";
 import {
   outbox,
   receipts,
+  recordRefs,
   records,
   schemaActivations,
   schemas,
@@ -113,6 +114,7 @@ import type {
   QueryAnswer,
   RecordSql,
 } from "./store-queries.ts";
+import { recordReferences } from "./store-references.ts";
 
 // The host of a business store (data-store.ts is its Durable Object): one
 // object per store, named by the store's ID (data-stores.ts), with a SQLite database of its own that holds all
@@ -295,6 +297,7 @@ const purgeBudgetMs = 10_000;
  * Fixed names, never an author's.
  */
 const purgedTables = [
+  "sdk_record_refs",
   "sdk_records",
   "sdk_schemas",
   "sdk_change_outbox",
@@ -1498,6 +1501,7 @@ export class StoreHost {
         }
       );
       this.#flush(staged, principal.userId, schemaHash, stagedAt);
+      this.#indexReferences(pinned, staged);
       const counted = this.#db
         .update(store)
         .set({ commits: sql`${store.commits} + 1` })
@@ -1706,6 +1710,66 @@ export class StoreHost {
       }
     }
     return { staged: [...staged.values()], inserted };
+  }
+
+  /**
+   * Keeps the references the records a commit changed make
+   * (`sdk_record_refs`), as its schema declares them (store-references.ts),
+   * then refuses (`data.referenced`) the commit if a record it deleted is
+   * still referred to by a record it didn't (restrict): call it inside the
+   * commit's transaction, after its writes, so the refusal undoes them all.
+   * A record referring to itself, or to another this commit deletes too,
+   * doesn't keep it.
+   */
+  #indexReferences(pinned: PinnedSchema, staged: readonly Staged[]): void {
+    for (const { table, tableId, recordId, base, fields } of staged) {
+      if (base !== undefined) {
+        this.#db
+          .delete(recordRefs)
+          .where(
+            and(
+              eq(recordRefs.tableId, tableId),
+              eq(recordRefs.recordId, recordId)
+            )
+          )
+          .run();
+      }
+      const declared = pinned.manifest.tables[table]?.fields;
+      if (fields === null || declared === undefined) {
+        continue;
+      }
+      for (const reference of recordReferences(declared, fields)) {
+        const toTableId = pinned.tableIds[reference.table];
+        if (toTableId === undefined) {
+          continue;
+        }
+        this.#db
+          .insert(recordRefs)
+          .values({ tableId, recordId, toTableId, toRecordId: reference.id })
+          .onConflictDoNothing()
+          .run();
+      }
+    }
+    for (const { table, tableId, recordId, base, fields } of staged) {
+      if (base === undefined || fields !== null) {
+        continue;
+      }
+      const referred = this.#db
+        .select({ one: sql`1` })
+        .from(recordRefs)
+        .where(
+          and(
+            eq(recordRefs.toTableId, tableId),
+            eq(recordRefs.toRecordId, recordId)
+          )
+        )
+        .get();
+      if (referred !== undefined) {
+        // The record's own table and ID only: nothing of what refers to
+        // it, which may be another's.
+        throw dataErrors.create("data.referenced", { table, id: recordId });
+      }
+    }
   }
 
   /**

@@ -1393,3 +1393,181 @@ describe("a staged read", () => {
     });
   });
 });
+
+/**
+ * A schema whose `links` refer to `notes`, and to each other, in every way
+ * a field can hold a reference.
+ */
+const linksManifest = manifestText(
+  schemaManifest(
+    defineSchema({
+      notes: defineTable({ title: v.string() }),
+      links: defineTable({
+        note: v.id("notes").optional(),
+        nested: v.object({ to: v.id("notes").optional() }).optional(),
+        many: v.array(v.id("notes")).optional(),
+        byName: v.record(v.id("notes")).optional(),
+        either: v.union(v.id("notes"), v.number()).optional(),
+        parent: v.id("links").optional(),
+      }),
+    }),
+    {
+      tables: {
+        notes: { read: "appMembers", write: "appMembers" },
+        links: { read: "appMembers", write: "appMembers" },
+      },
+    }
+  )
+);
+const linksHash = await manifestHash(linksManifest);
+
+/** A new store with the `notes` and `links` tables. */
+const newLinkedStore = async (): Promise<OpenStore> => {
+  const store = await openStore(env, await createStore(env, builder));
+  await store.defineTables(linksManifest);
+  return store;
+};
+
+/** Inserts one record of `table` with `fields` and answers its ID. */
+const insertLinked = async (
+  store: OpenStore,
+  table: "notes" | "links",
+  fields: StoreFields
+): Promise<string> => {
+  const id = newRecordId();
+  await commitIn(store, {
+    principal: ada,
+    schemaHash: linksHash,
+    writes: [{ op: "insert", id, table, fields }],
+  });
+  return id;
+};
+
+/** Deletes the record `id` of `table`, at revision `revision`. */
+const deleteFrom = async (
+  store: OpenStore,
+  table: "notes" | "links",
+  id: string,
+  revision = 1
+): Promise<Committed> =>
+  await commitIn(store, {
+    principal: ada,
+    schemaHash: linksHash,
+    writes: [{ op: "delete", table, id, expectedRevision: revision }],
+  });
+
+describe("a store's references", () => {
+  it("refuses to delete a record another refers to, at any depth, and writes nothing", async () => {
+    const holders = [
+      (id: string) => ({ note: id }),
+      (id: string) => ({ nested: { to: id } }),
+      (id: string) => ({ many: [newRecordId(), id] }),
+      (id: string) => ({ byName: { first: id } }),
+      (id: string) => ({ either: id }),
+    ];
+    // A store of its own for each way of holding a reference.
+    await Promise.all(
+      holders.map(async (holder) => {
+        const store = await newLinkedStore();
+        const note = await insertLinked(store, "notes", { title: "Kept" });
+        await insertLinked(store, "links", holder(note));
+        await expect(deleteFrom(store, "notes", note)).rejects.toMatchObject({
+          code: "data.referenced",
+        });
+        await expect(store.get("notes", note)).resolves.not.toBeNull();
+        await expect(recordCount(store)).resolves.toBe(2);
+      })
+    );
+  });
+
+  it("deletes a record once nothing refers to it, or with what refers to it", async () => {
+    const store = await newLinkedStore();
+    const first = await insertLinked(store, "notes", { title: "First" });
+    const firstLink = await insertLinked(store, "links", { note: first });
+    await deleteFrom(store, "links", firstLink);
+    await deleteFrom(store, "notes", first);
+    await expect(store.get("notes", first)).resolves.toBeNull();
+
+    const second = await insertLinked(store, "notes", { title: "Second" });
+    const secondLink = await insertLinked(store, "links", { many: [second] });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: linksHash,
+      writes: [
+        { op: "delete", table: "notes", id: second, expectedRevision: 1 },
+        { op: "delete", table: "links", id: secondLink, expectedRevision: 1 },
+      ],
+    });
+    await expect(store.get("notes", second)).resolves.toBeNull();
+  });
+
+  it("follows a reference as its record changes", async () => {
+    const store = await newLinkedStore();
+    const first = await insertLinked(store, "notes", { title: "First" });
+    const second = await insertLinked(store, "notes", { title: "Second" });
+    const link = await insertLinked(store, "links", { note: first });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: linksHash,
+      writes: [
+        {
+          op: "patch",
+          table: "links",
+          id: link,
+          fields: { note: second },
+          expectedRevision: 1,
+        },
+      ],
+    });
+    await deleteFrom(store, "notes", first);
+    await expect(deleteFrom(store, "notes", second)).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+  });
+
+  it("lets a record that refers only to itself be deleted", async () => {
+    const store = await newLinkedStore();
+    const link = newRecordId();
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: linksHash,
+      writes: [
+        { op: "insert", id: link, table: "links", fields: { parent: link } },
+      ],
+    });
+    await deleteFrom(store, "links", link);
+    await expect(store.get("links", link)).resolves.toBeNull();
+  });
+
+  it("keeps a reference written under one schema after the store moves to the next", async () => {
+    const store = await newLinkedStore();
+    const note = await insertLinked(store, "notes", { title: "Kept" });
+    await insertLinked(store, "links", { note });
+    // The next schema no longer declares `links.note` as a reference: the
+    // record written under the first still holds it.
+    const next = manifestText(
+      schemaManifest(
+        defineSchema({
+          notes: defineTable({ title: v.string() }),
+          links: defineTable({ note: v.string().optional() }),
+        }),
+        {
+          tables: {
+            notes: { read: "appMembers", write: "appMembers" },
+            links: { read: "appMembers", write: "appMembers" },
+          },
+        }
+      )
+    );
+    await store.defineTables(next);
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash: await manifestHash(next),
+        writes: [
+          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.referenced" });
+  });
+});

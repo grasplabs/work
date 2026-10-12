@@ -143,6 +143,34 @@ export const records = sqliteTable(
 );
 
 /**
+ * The references the store's records make: one row per record and each
+ * record ID one of its `v.id` fields holds, as the schema it was written
+ * under declares them (store-references.ts). Kept in the transaction that
+ * writes the record, so a deletion of a record still referred to is
+ * refused in its own transaction (restrict, store-host.ts).
+ */
+export const recordRefs = sqliteTable(
+  "sdk_record_refs",
+  {
+    tableId: text("table_id").notNull(),
+    recordId: text("record_id").notNull(),
+    toTableId: text("to_table_id").notNull(),
+    toRecordId: text("to_record_id").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.tableId,
+        table.recordId,
+        table.toTableId,
+        table.toRecordId,
+      ],
+    }),
+    index("sdk_record_refs_target").on(table.toTableId, table.toRecordId),
+  ]
+);
+
+/**
  * Every schema the store was handed, by its hash, with its canonical
  * manifest: what a read pinned to that schema is checked against, and
  * whose indexes it reads through. Kept as long as the store, so a

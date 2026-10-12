@@ -452,6 +452,8 @@ export const dataErrors = defineErrorFamily({
     "That aggregate is past the largest number there is.",
   "data.index_required":
     "This query needs an index this store doesn't hold for its schema.",
+  "data.referenced":
+    "This record can't be deleted while another record refers to it. Remove those references first.",
   "data.store_bound":
     "This store can't be deleted while an App's kept versions read and write it.",
   "data.store_managed_by_app":
