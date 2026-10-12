@@ -734,7 +734,10 @@ const operationManifestHash = async (app: AppManifest): Promise<string> =>
  * when the change to its contract is safe (store-host.ts,
  * `defineTables`), and refuses one that needs a migration
  * (`migration.required`), so no release is sealed on a store whose data
- * its schema doesn't fit. A seal that fails after the store applied the
+ * its schema doesn't fit. A schema whose defaulted fields the store's
+ * records lack is taken as the store's pending target: the release is
+ * sealed, and runs only once the store has filled them in
+ * (store-backfill.ts). A seal that fails after the store applied the
  * schema leaves it applied: a retry finds it so, and its receipt.
  */
 const boundStore = async (
@@ -871,6 +874,7 @@ const storeEvidence = (
         storeContractHash: bound.contract.hash,
         storePlanHash: bound.contract.planHash,
         storeContractChanged: bound.contract.changed,
+        storeContractPending: bound.contract.pending,
         storeReceipt: bound.contract.receiptId,
       };
 

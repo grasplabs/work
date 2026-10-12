@@ -403,6 +403,12 @@ export interface AppliedContract {
   planHash: string;
   changed: boolean;
   receiptId: string | null;
+  /**
+   * Whether the contract `hash` names is still pending: its defaulted
+   * fields are being filled in (`StoreHost.fillMissing`), and the store's
+   * contract in force is the one before it until that finishes.
+   */
+  pending: boolean;
 }
 
 /**
@@ -491,17 +497,28 @@ export const dataErrors = defineErrorFamily({
  * record of its contract disagrees with its own recorded schemas, or
  * can't be rebuilt from them, which blocks every schema change until
  * repaired, since guessing could lose data; or other schemas kept
- * changing the contract meanwhile (retryable).
+ * changing the contract meanwhile (retryable). And why a schema the store
+ * took isn't in force yet: its defaulted fields are still being filled in
+ * (`migration.pending`, retryable, with the backfill's progress), or the
+ * fill found a record whose value doesn't fit the field
+ * (`migration.backfill_failed`, naming the record); a backfill's step
+ * from a run the store moved past is `migration.superseded`.
  */
 export const migrationErrors = defineErrorFamily({
   "migration.required":
-    "This schema change can't be applied on its own: it needs a migration. Add only new tables, optional fields and indexes, or keep the fields as they were.",
+    "This schema change can't be applied on its own: it needs a migration. Add only new tables, optional or defaulted fields and indexes, or keep the fields as they were.",
   "migration.metadata_missing":
     "This store's schema contract is missing and can't be rebuilt from the schemas it recorded, so no schema change can be applied until it is repaired.",
   "migration.busy":
     "This store kept changing while the schema was applied. Try again in a moment.",
   "migration.metadata_corrupt":
     "This store's record of its schema contract is damaged, so no schema change can be applied until it is repaired.",
+  "migration.pending":
+    "This store is still filling in the defaults of a schema change. Try again once it has finished.",
+  "migration.backfill_failed":
+    "This store couldn't fill in a schema change's defaults: a record already holds a value the new field doesn't accept, so the change needs a migration.",
+  "migration.superseded":
+    "This backfill step belongs to a run the store has moved past.",
 });
 
 /**

@@ -96,6 +96,21 @@ const linked = (target: "notes" | "tags", asId: boolean): SchemaManifest =>
     }
   );
 
+/** Notes with `fields` besides a title, beside a Tags table. */
+const linkedNotes = (fields: ValueShape): SchemaManifest =>
+  schemaManifest(
+    defineSchema({
+      notes: defineTable({ title: v.string(), ...fields }),
+      tags: defineTable({ name: v.string() }),
+    }),
+    {
+      tables: {
+        notes: { read: "owner", write: "owner" },
+        tags: { read: "owner", write: "owner" },
+      },
+    }
+  );
+
 const tableNames = (prefix: string): string[] =>
   Array.from({ length: 40 }, (_, index) => `${prefix}${index}`);
 const many = (names: string[]): SchemaManifest =>
@@ -142,6 +157,61 @@ describe("safe changes", () => {
       addedFields: [{ table: "notes", field: "category" }],
     });
     expect(manifestText(contractOf(plan))).toBe(manifestText(v2));
+  });
+
+  test("a defaulted field left out stays in the contract: the store fills it in", () => {
+    const v2 = notes({
+      ...noteFields,
+      category: v.string().default("general"),
+    });
+    const contract = contractOf(planSchemaChange(v1, v2));
+    expect(planSchemaChange(contract, v1)).toMatchObject({
+      accepted: true,
+      changed: false,
+      retainedFields: [{ table: "notes", field: "category" }],
+    });
+  });
+
+  test("a defaulted field is added to the contract, to be filled in first", () => {
+    const v2 = notes({
+      ...noteFields,
+      category: v.string().default("general"),
+      archived: v.boolean().nullable().default(null),
+    });
+    const plan = planSchemaChange(v1, v2);
+    expect(plan).toMatchObject({
+      accepted: true,
+      changed: true,
+      addedFields: [
+        { table: "notes", field: "archived" },
+        { table: "notes", field: "category" },
+      ],
+      filledFields: [
+        { table: "notes", field: "archived" },
+        { table: "notes", field: "category" },
+      ],
+    });
+    expect(manifestText(contractOf(plan))).toBe(manifestText(v2));
+    // Applied: the contract has it, so nothing is left to fill.
+    expect(planSchemaChange(contractOf(plan), v2)).toMatchObject({
+      changed: false,
+      filledFields: [],
+    });
+  });
+
+  test("a new table's defaulted fields fill nothing: it holds no records", () => {
+    const v2 = schemaManifest(
+      defineSchema({
+        notes: defineTable(noteFields).index("by_title", ["title"]),
+        tags: defineTable({ weight: v.number().default(1) }),
+      }),
+      { tables: { ...ownerOnly.tables, tags: { read: "owner" } } }
+    );
+    expect(planSchemaChange(v1, v2)).toMatchObject({
+      accepted: true,
+      addedTables: ["tags"],
+      filledFields: [],
+    });
   });
 
   test("a new table may have required fields: it holds no records", () => {
@@ -294,7 +364,28 @@ describe("safe changes", () => {
 });
 
 describe("changes that need a migration", () => {
-  test("a required, nullable-only or defaulted field added is refused", () => {
+  test("a defaulted field that can hold a record ID, at any depth, is refused", () => {
+    const before = linkedNotes({});
+    const after = linkedNotes({
+      tag: v.id("tags").nullable().default(null),
+      tags: v.array(v.id("tags")).default([]),
+      either: v.union(v.string(), v.id("tags")).default("none"),
+      nested: v.object({ tag: v.id("tags").optional() }).default({}),
+      label: v.string().default("none"),
+    });
+    const plan = planSchemaChange(before, after);
+    expect(refusedOf(plan)).toStrictEqual([
+      { table: "notes", field: "either", reason: "defaulted_reference_added" },
+      { table: "notes", field: "nested", reason: "defaulted_reference_added" },
+      { table: "notes", field: "tag", reason: "defaulted_reference_added" },
+      { table: "notes", field: "tags", reason: "defaulted_reference_added" },
+    ]);
+    expect(plan.filledFields).toStrictEqual([
+      { table: "notes", field: "label" },
+    ]);
+  });
+
+  test("a required or nullable-only field added is refused: it has no value to fill in", () => {
     const v2 = notes({
       ...noteFields,
       category: v.string().default("general"),
@@ -302,7 +393,6 @@ describe("changes that need a migration", () => {
       summary: v.string().nullable(),
     });
     expect(refusedOf(planSchemaChange(v1, v2))).toStrictEqual([
-      { table: "notes", field: "category", reason: "defaulted_field_added" },
       { table: "notes", field: "priority", reason: "required_field_added" },
       { table: "notes", field: "summary", reason: "required_field_added" },
     ]);
