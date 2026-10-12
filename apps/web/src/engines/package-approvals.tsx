@@ -365,7 +365,8 @@ const ApprovalsTable = ({
 /**
  * An engine's approved packages, newest first, with ending each for who
  * may. Read again here once someone ends one, whatever the outcome, so an
- * open dialog keeps why it failed while the list shows how things stand.
+ * open dialog keeps why it failed while the list shows how things stand;
+ * and taken from the page's own read whenever that comes again.
  */
 export const PackageApprovals = ({
   listed: loaded,
@@ -374,6 +375,13 @@ export const PackageApprovals = ({
 }) => {
   const { run } = useCoreAction();
   const [listed, setListed] = useState(loaded);
+  // What the page read last: when it reads again (a language switch, say),
+  // its answer replaces the list, and an open dialog stays as it is.
+  const [read, setRead] = useState(loaded);
+  if (loaded !== read) {
+    setRead(loaded);
+    setListed(loaded);
+  }
   const [asked, setAsked] = useState<Asked>();
   const refresh = async (): Promise<void> => {
     const now = await run(

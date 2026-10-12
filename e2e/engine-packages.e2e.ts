@@ -16,7 +16,7 @@ const pageRead = { timeout: 20_000 };
 
 /** An engine of `builder`'s with one approved package, and `approver` given the permission. */
 const engineWithPackages = async (
-  scene: "enginePackages" | "enginePackagesRefresh",
+  scene: "enginePackages" | "enginePackagesRefresh" | "enginePackagesFresh",
   name: string
 ) => {
   const people = peopleIn(scene);
@@ -140,4 +140,45 @@ test("reads the packages again when a decision fails, keeping why", async ({
   await expect(
     page.getByText("No packages are approved for this engine.")
   ).toBeVisible();
+});
+
+test("shows the packages as the page reads them again, when someone else ended them meanwhile", async ({
+  browser,
+}) => {
+  const { approver, app, request } = await engineWithPackages(
+    "enginePackagesFresh",
+    "Budget"
+  );
+  const page = await pageOf(browser, approver);
+  await page.goto(`/engines/${app}`);
+  await expect(
+    page
+      .getByRole("table", { name: "Approved packages" })
+      .getByRole("row")
+      .filter({ hasText: "charts@3.1.0" })
+  ).toContainText("Approved", pageRead);
+
+  // Retired by someone else, then the page reads its data again: switching
+  // language re-runs the page's loaders (main.tsx).
+  const asApprover = apiOf(approver);
+  const impact = await asApprover.api.dependencies.impact(request.id);
+  await asApprover.api.dependencies.retire(request.id, {
+    reviewed: {
+      graphHash: impact.graphHash,
+      policyGeneration: impact.policyGeneration,
+      approvalsDigest: impact.endings.retire.digest,
+    },
+    reason: "Replaced.",
+  });
+  asApprover.core[Symbol.dispose]();
+  await page.getByRole("button", { name: /^P Person/u }).click();
+  await page.getByRole("menuitem", { name: /^Language/u }).click();
+  await page.getByRole("menuitemradio", { name: "Nederlands" }).click();
+
+  await expect(
+    page
+      .getByRole("table", { name: "Pakketten goedgekeurd" })
+      .getByRole("row")
+      .filter({ hasText: "charts@3.1.0" })
+  ).toContainText("Uitgefaseerd", pageRead);
 });
