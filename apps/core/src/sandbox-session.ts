@@ -12,6 +12,7 @@ import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { rpcArgumentDepth, screenLimits } from "@grasp-os/shared/screens";
 import { RpcSession, WebSocketTransport } from "capnweb";
 
+import { sessionMaxRuns } from "./call-limits.ts";
 import { browserMessageSize } from "./rpc-target.ts";
 import {
   sandboxCpuHeader,
@@ -568,7 +569,17 @@ export const runInSession = async (
   ];
   // A nested call ends as its own call does, its capabilities with it, or
   // as the session does.
+  // Runs of App code in the session: past what one call makes, refused
+  // here, never reaching the sandbox host's own bound.
+  let runs = 1;
   nesting?.open(async (given, nestedSignal) => {
+    if (runs >= sessionMaxRuns) {
+      throw verdictError({
+        verdict: "call_limit",
+        message: "This call ran more functions than one call may.",
+      });
+    }
+    runs += 1;
     let nestedLive = true;
     try {
       return await Promise.race([

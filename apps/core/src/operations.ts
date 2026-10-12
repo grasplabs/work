@@ -65,16 +65,13 @@ import {
 } from "@grasp-os/shared/submissions";
 import { z } from "zod";
 
+import { callMaxNested, queryMaxReruns } from "./call-limits.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { openChannel } from "./operation-channel.ts";
 import type { OpenChannel } from "./operation-channel.ts";
 import { sandboxVerdictOf } from "./sandbox-session.ts";
 import { SandboxUnavailableError } from "./sandboxed.ts";
-import {
-  queryMaxReruns,
-  readConsistently,
-  StoreReader,
-} from "./store-reader.ts";
+import { readConsistently, StoreReader } from "./store-reader.ts";
 
 // Core's operation host (spec 7.4, 7.5, 9.2, 9.5, 32.1): runs one of an
 // App's server functions for one caller, through the trusted host, and
@@ -621,6 +618,7 @@ const sandboxCodes = {
   deadline: "operation.deadline_exceeded",
   refused: "operation.sandbox_refused",
   busy: "operation.sandbox_busy",
+  call_limit: "operation.call_limit",
 } as const;
 
 const isSandboxVerdict = (
@@ -1351,13 +1349,6 @@ interface Run {
   /** The caller's call, as its runner knows it: the same at any depth. */
   readonly call: object;
 }
-
-/**
- * The most functions one call may run nested in its own, at any depth:
- * past it, `operation.call_limit`. With `callMaxDepth`, it keeps one
- * action call from fanning out into thousands of invocations.
- */
-export const callMaxNested = 64;
 
 /** The most resource requests one call may make, at any depth. */
 export const callMaxResourceRequests = 32;

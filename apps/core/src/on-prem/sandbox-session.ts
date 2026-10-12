@@ -27,6 +27,7 @@ import {
 } from "capnweb";
 import type { RpcTarget } from "cloudflare:workers";
 
+import { sessionMaxRuns } from "../call-limits.ts";
 import { invoke, objectCapability, outward } from "./sandbox-capability.ts";
 
 /** What the workerd config gives the sandbox host. */
@@ -59,12 +60,6 @@ interface SessionCall {
   args: ArgumentSpec[];
   capabilities: Record<string, CapabilitySpec>;
 }
-
-/**
- * The most calls one session runs: the function a caller named and the
- * most it may nest, as core counts them (operations.ts `callMaxNested`).
- */
-export const maxRunsPerSession = 1 + 64;
 
 /** The most capabilities, and methods of one, a call may name. */
 const maxCapabilities = 32;
@@ -194,8 +189,9 @@ class Session extends CapnwebTarget {
    * all in this process, which is killed once the session ends.
    */
   async run(call: unknown, stubs: unknown): Promise<unknown> {
-    // Never more than core lets one call run, as a bound of its own.
-    if (this.#runs >= maxRunsPerSession) {
+    // Never more than core lets one call run (call-limits.ts), retries
+    // included, as a bound of its own: core refuses past it first.
+    if (this.#runs >= sessionMaxRuns) {
       throw new Error("This session has run as many calls as one may.");
     }
     this.#runs += 1;

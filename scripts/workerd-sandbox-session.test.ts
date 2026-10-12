@@ -41,6 +41,7 @@ const outcomeSchema = z.object({
   pinged: z.number(),
   nestedRan: z.number(),
   nestedRefused: z.number(),
+  refusedVerdict: z.string().nullable(),
   verdict: z.string().nullable().optional(),
   logged: z.array(z.unknown()),
 });
@@ -327,7 +328,12 @@ describe("a session on the on-prem sandbox", () => {
     async () => {
       const outcome = await run("manyRuns");
       expect(outcome.status).toBe("ok");
-      expect(outcome).toMatchObject({ nestedRan: 64, nestedRefused: 1 });
+      // The call itself, and 64 nested, each run up to four times.
+      expect(outcome).toMatchObject({
+        nestedRan: 259,
+        nestedRefused: 1,
+        refusedVerdict: "call_limit",
+      });
     }
   );
 

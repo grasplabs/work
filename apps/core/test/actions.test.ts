@@ -23,11 +23,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { operationRoles } from "../src/app-access.ts";
 import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { callMaxNested } from "../src/call-limits.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import {
   callMaxDepth,
-  callMaxNested,
   callMaxResourceRequests,
   callOperation,
 } from "../src/operations.ts";

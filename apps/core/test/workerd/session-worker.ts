@@ -1,5 +1,6 @@
 import { heldPool } from "@grasp-os/shared/rpc-accounting";
 
+import { sessionMaxRuns } from "../../src/call-limits.ts";
 import type { NestedCall, NestedRun } from "../../src/sandbox-session.ts";
 import {
   capability,
@@ -34,6 +35,7 @@ let pinged = 0;
 /** The nested calls a session ran, and those it refused. */
 let nestedRan = 0;
 let nestedRefused = 0;
+let refusedVerdict: string | null = null;
 
 /** The capability each case gets: what core's would do, and counted. */
 const probe = {
@@ -204,14 +206,16 @@ const manyRunsNesting = () => {
       // The case's own outcome is what the session answers.
     },
     drain: async () => {
-      // One past what a session runs: the call itself, and 64 nested.
-      for (let index = 0; index < 65; index += 1) {
+      // One past what a session runs, its own call among them: as many
+      // as one call nests, each with every rerun stale reads may take.
+      for (let index = 0; index < sessionMaxRuns; index += 1) {
         try {
           // oxlint-disable-next-line no-await-in-loop -- one after the other
           await nested?.(trivial);
           nestedRan += 1;
-        } catch {
+        } catch (error) {
           nestedRefused += 1;
+          refusedVerdict = sandboxVerdictOf(error) ?? null;
         }
       }
     },
@@ -238,6 +242,7 @@ const run = async (env: StandInEnv, name: string, owner: string) => {
   pinged = 0;
   nestedRan = 0;
   nestedRefused = 0;
+  refusedVerdict = null;
   open = true;
   const started = Date.now();
   const cancel = new AbortController();
@@ -308,6 +313,7 @@ export default {
         pinged,
         nestedRan,
         nestedRefused,
+        refusedVerdict,
         logged,
       });
     }
