@@ -1416,6 +1416,9 @@ const linksManifest = manifestText(
         many: v.array(v.id("notes")).optional(),
         byName: v.record(v.id("notes")).optional(),
         either: v.union(v.id("notes"), v.number()).optional(),
+        noteOrLink: v.union(v.id("notes"), v.id("links")).optional(),
+        noneOr: v.union(v.literal("none"), v.id("notes")).optional(),
+        textOr: v.union(v.string(), v.id("notes")).optional(),
         parent: v.id("links").optional(),
         secret: v.id("secrets").optional(),
         draft: v.id("drafts").optional(),
@@ -1585,6 +1588,46 @@ describe("a store's references", () => {
     await expect(deleteFrom(store, "notes", second)).rejects.toMatchObject({
       code: "data.referenced",
     });
+  });
+
+  it("reads a union's value as the member it matches, and names only the table holding the record", async () => {
+    const store = await newLinkedStore();
+    const note = await insertLinked(store, "notes", { title: "Kept" });
+    const plain = await insertLinked(store, "notes", { title: "Free" });
+    const link = await insertLinked(store, "links", { noteOrLink: note });
+    // Each of these matches a member that isn't a record ID: none refers.
+    const plainValues: StoreFields[] = [
+      { noneOr: "none" },
+      { textOr: "hello" },
+      { textOr: plain },
+    ];
+    await Promise.all(
+      plainValues.map(
+        async (fields) => await insertLinked(store, "links", fields)
+      )
+    );
+    const indexed = await runInDurableObject(
+      objectOf(store.id),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ table: string; to: string }>(
+            `SELECT tables.name AS "table", refs.to_record_id AS "to"
+              FROM sdk_record_refs AS refs
+              JOIN sdk_tables AS tables ON tables.table_id = refs.to_table_id`
+          )
+          .toArray()
+    );
+    expect(indexed).toStrictEqual([{ table: "notes", to: note }]);
+    await expect(deleteFrom(store, "notes", note)).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+    await deleteFrom(store, "notes", plain);
+    // A union's record ID that names no record of any of its tables.
+    await expect(
+      insertLinked(store, "links", { noteOrLink: newRecordId() })
+    ).rejects.toMatchObject({ code: "data.reference_invalid" });
+    await deleteFrom(store, "links", link);
+    await deleteFrom(store, "notes", note);
   });
 
   it("names only the record the refused deletion asked for", async () => {

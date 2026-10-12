@@ -267,7 +267,10 @@ const validators = new WeakMap<
 >();
 
 /** Whether `value` is valid under `descriptor`, as the SDK checks it. */
-const validates = (descriptor: ValueDescriptor, value: unknown): boolean => {
+export const validates = (
+  descriptor: ValueDescriptor,
+  value: unknown
+): boolean => {
   let schema = validators.get(descriptor);
   if (schema === undefined) {
     schema = schemaFromDescriptor(JSON.stringify(descriptor));

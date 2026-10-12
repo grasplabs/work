@@ -1776,26 +1776,34 @@ export class StoreHost {
         continue;
       }
       for (const reference of recordReferences(declared, fields)) {
-        const toTableId = tableIdOf(reference.table);
-        if (
-          toTableId === undefined ||
-          (!held.has(keyOf(toTableId, reference.id)) &&
-            !this.#referable(pinned, byKey, principal, roles, {
-              table: reference.table,
-              tableId: toTableId,
-              recordId: reference.id,
-            }))
-        ) {
+        // The tables it may name that it refers to: held already, or
+        // holding a record the writer may read. A union offering several
+        // keeps only the one that holds it.
+        const targets = reference.tables.flatMap((name) => {
+          const toTableId = tableIdOf(name);
+          return toTableId !== undefined &&
+            (held.has(keyOf(toTableId, reference.id)) ||
+              this.#referable(pinned, byKey, principal, roles, {
+                table: name,
+                tableId: toTableId,
+                recordId: reference.id,
+              }))
+            ? [toTableId]
+            : [];
+        });
+        if (targets.length === 0) {
           throw dataErrors.create("data.reference_invalid", {
             table,
             id: recordId,
           });
         }
-        this.#db
-          .insert(recordRefs)
-          .values({ tableId, recordId, toTableId, toRecordId: reference.id })
-          .onConflictDoNothing()
-          .run();
+        for (const toTableId of targets) {
+          this.#db
+            .insert(recordRefs)
+            .values({ tableId, recordId, toTableId, toRecordId: reference.id })
+            .onConflictDoNothing()
+            .run();
+        }
       }
     }
     for (const { table, tableId, recordId, base, fields } of staged) {
