@@ -2,6 +2,7 @@ import type { ValueDescriptor } from "@grasp-os/sdk";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { modelErrors } from "@grasp-os/shared/models";
@@ -12,6 +13,7 @@ import { gatewaySettings, models } from "./models.ts";
 import type { ResourceContext } from "./operations.ts";
 import type {
   BindingCaller,
+  BindingRecord,
   DeclarationOf,
   ResourceAdapter,
   TargetOf,
@@ -22,10 +24,12 @@ import type {
 // provider and with no key anywhere near App code. The gateway applies the
 // deployment's allowlist and data rules, reserves and settles the call
 // against every budget it counts against (the deployment's, the person's
-// it acts for), and audits it as metadata only. The declaration bounds the
-// answer's tokens, and a structured output is the descriptor's: the model
-// is told its JSON Schema, asked once more when an answer doesn't fit, and
-// the operation host checks the answer against the descriptor again.
+// it acts for, the binding's own caps per request, day and month in
+// model-budgets.ts), and audits it as metadata only. The declaration
+// bounds the answer's tokens, and a structured output is the descriptor's:
+// the model is told its JSON Schema, asked once more when an answer
+// doesn't fit, and the operation host checks the answer against the
+// descriptor again.
 
 /** What every model binding serves: a prompt in, text or the declared value out. */
 const modelContract = {
@@ -99,9 +103,10 @@ const answerSchema = (descriptor: ValueDescriptor) => {
 /**
  * What a gateway refusal means to App code, from an allow-list: a model the
  * deployment no longer lets this call use is a binding that can't serve,
- * a budget used up is that, an answer that never fit is a contract the
- * provider broke. Anything else stays the gateway's, for the operation host
- * to redact.
+ * a budget used up is that, a budget held by requests still under way is
+ * busy (worth asking again, after the gateway's suggested wait), an answer
+ * that never fit is a contract the provider broke. Anything else stays the
+ * gateway's, for the operation host to redact.
  */
 const refusalOf = (error: unknown): unknown => {
   const code = modelErrors.codeOf(error);
@@ -116,6 +121,15 @@ const refusalOf = (error: unknown): unknown => {
   }
   if (code === "model.over_budget" || code === "model.run_limit") {
     return operationErrors.create("resource.budget_exhausted");
+  }
+  if (code === "model.budget_busy") {
+    const wait = isExpectedError(error)
+      ? error.details?.retryAfterSeconds
+      : undefined;
+    return operationErrors.create(
+      "resource.budget_busy",
+      typeof wait === "number" ? { retryAfterSeconds: wait } : undefined
+    );
   }
   if (code === "model.invalid_output") {
     return operationErrors.create("contract.invalid_resource_result");
@@ -141,6 +155,7 @@ const tokensFor = ({
 const generate = async (
   env: Env,
   caller: BindingCaller,
+  record: BindingRecord,
   declaration: DeclarationOf<"model">,
   target: TargetOf<"model">,
   args: readonly Json[],
@@ -164,6 +179,7 @@ const generate = async (
       connections: [...caller.sources.connections()],
       work: { authority: caller.authority, context: caller.context },
       requestId: context.requestId,
+      binding: { app: caller.app, alias: record.alias, budget: record.budget },
       ...(structuredOutput === null
         ? {}
         : { schema: answerSchema(structuredOutput) }),
@@ -180,8 +196,16 @@ export const modelAdapter: ResourceAdapter<"model"> = {
       ? {
           contractId: modelContract.contractId,
           fingerprint: await modelFingerprint,
-          call: async (caller, { args }, context) =>
-            await generate(env, caller, declaration, target, args, context),
+          call: async (caller, { args }, context, _pin, record) =>
+            await generate(
+              env,
+              caller,
+              record,
+              declaration,
+              target,
+              args,
+              context
+            ),
         }
       : undefined,
 };

@@ -369,7 +369,7 @@ export const runOfStepKey = (key: string): string | undefined => {
  * native connector said nothing was done); a call with the same
  * idempotency key still running, whose answer a retry gets; a model call
  * that failed, or that the model budget turned away only while other calls
- * under way hold it (nothing was sent); something unplanned in the
+ * under way hold it (nothing was sent), a model binding's too; something unplanned in the
  * platform, where connect's idempotency keys keep a retried side effect to
  * once; and a model's answer that didn't fit, which the SDK asks for
  * again. Any other failure stops the run: a refusal, a tool's own error (it
@@ -381,6 +381,7 @@ const retryableCodes: ReadonlySet<unknown> = new Set([
   "connect.call_in_progress",
   "model.failed",
   "model.budget_busy",
+  "resource.budget_busy",
   "internal.unexpected",
   "workflow.invalid_model_output",
 ]);

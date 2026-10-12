@@ -68,6 +68,17 @@ const scheduledOn = (every: string, timeZone?: string) =>
     async () => null
   );
 
+/** What `work` came to: its answer, or its error's message. */
+const settledOutcome = async (
+  work: () => Promise<unknown>
+): Promise<unknown> => {
+  try {
+    return await work();
+  } catch (error) {
+    return error instanceof Error ? error.message : error;
+  }
+};
+
 describe("workflow definitions", () => {
   it("rejects an empty ID and a default that doesn't fit its kind", () => {
     expect(() => workflow("", { params: noParams }, async () => null)).toThrow(
@@ -424,9 +435,20 @@ describe("step.do", () => {
     const budgetHeld = failingWith(() =>
       Object.assign(new Error("Held"), { code: "model.budget_busy" })
     );
+    // As an App's model binding answers while its budget is held so.
+    const bindingHeld = failingWith(() =>
+      Object.assign(new Error("Binding held"), {
+        code: "resource.budget_busy",
+      })
+    );
     // As the model gateway answers once the budget is spent: it stays so.
     const budgetSpent = failingWith(() =>
       Object.assign(new Error("Spent"), { code: "model.over_budget" })
+    );
+    const bindingSpent = failingWith(() =>
+      Object.assign(new Error("Binding spent"), {
+        code: "resource.budget_exhausted",
+      })
     );
     // As a tool reports bad input: trying again changes nothing.
     const refused = failingWith(() =>
@@ -434,17 +456,27 @@ describe("step.do", () => {
     );
     const thrown = failingWith(() => new Error("No such customer"));
 
-    await expect(rateLimited.run(createFakeEngine().engine)).resolves.toBe(3);
-    await expect(budgetHeld.run(createFakeEngine().engine)).resolves.toBe(3);
-    await expect(budgetSpent.run(createFakeEngine().engine)).rejects.toThrow(
-      "Spent"
-    );
-    await expect(refused.run(createFakeEngine().engine)).rejects.toThrow(
-      "Refused"
-    );
-    await expect(thrown.run(createFakeEngine().engine)).rejects.toThrow(
-      "No such customer"
-    );
+    const outcomeOf = async (definition: typeof thrown) =>
+      await settledOutcome(
+        async () => await definition.run(createFakeEngine().engine)
+      );
+    expect({
+      rateLimited: await outcomeOf(rateLimited),
+      budgetHeld: await outcomeOf(budgetHeld),
+      bindingHeld: await outcomeOf(bindingHeld),
+      budgetSpent: await outcomeOf(budgetSpent),
+      bindingSpent: await outcomeOf(bindingSpent),
+      refused: await outcomeOf(refused),
+      thrown: await outcomeOf(thrown),
+    }).toStrictEqual({
+      rateLimited: 3,
+      budgetHeld: 3,
+      bindingHeld: 3,
+      budgetSpent: "Spent",
+      bindingSpent: "Binding spent",
+      refused: "Refused",
+      thrown: "No such customer",
+    });
   });
 
   it("fails a step whose result isn't JSON, which an engine can't store", async () => {

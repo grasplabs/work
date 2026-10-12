@@ -1112,6 +1112,8 @@ describe("the model ledger", () => {
       { ...budget(1000, "max"), scope: "workflow", key: "flow" },
       budget(1000, "max"),
       { ...budget(1000, "max"), scope: "run", key: "run" },
+      { ...budget(1000, "max"), scope: "binding", key: "binding" },
+      { ...budget(1000, "max"), scope: "binding_day", key: "binding-day" },
     ];
     const fits = admission(10, scopes);
     const tooMany = admission(10, [...scopes, budget(1000, "nia")]);

@@ -41,7 +41,11 @@ import {
   modelRulesConfigSchema as rulesConfigSchema,
 } from "@grasp-os/shared/deployment-config";
 import type { ModelRules } from "@grasp-os/shared/deployment-config";
-import { connectionIdSchema, identifierSchema } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  connectionIdSchema,
+  identifierSchema,
+} from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import {
@@ -49,11 +53,18 @@ import {
   permissionErrors,
   workContextSchema,
 } from "@grasp-os/shared/permissions";
+import { modelBindingBudgetSchema } from "@grasp-os/shared/resource-bindings";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { budgetMonth, hasBudget, scopesFor } from "./model-budgets.ts";
+import {
+  bindingRequestMicros,
+  bindingScopes,
+  budgetPeriods,
+  hasBudget,
+  scopesFor,
+} from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type {
   LedgerScope,
@@ -346,6 +357,18 @@ const sessionShape = {
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,
+  /**
+   * The App's model binding the call is made through, with its own caps
+   * (model-budgets.ts): set by core's model resource only, from the
+   * binding's row, never by App code.
+   */
+  binding: z
+    .strictObject({
+      app: appIdSchema,
+      alias: z.string().min(1).max(64),
+      budget: modelBindingBudgetSchema.nullable(),
+    })
+    .optional(),
 };
 
 const sessionSchema = z.strictObject(sessionShape);
@@ -575,6 +598,13 @@ interface Route extends Admitted {
   price: PinnedPrice | undefined;
   /** The scopes a provider request sent now counts against, in this month. */
   scopesNow: () => { period: string; scopes: LedgerScope[] };
+  /**
+   * What the call's provider requests may reserve together, under its
+   * binding's cap per request, and what they hold of it now: each one's
+   * reservation, less what settled below it. Its requests go one at a
+   * time, so nothing races it. None without a cap.
+   */
+  perRequest: { limitMicros: number; heldMicros: number } | undefined;
   /** Core's env, for the model ledger. */
   env: ModelsEnv;
 }
@@ -812,6 +842,40 @@ const settleRequest = async (
 };
 
 /**
+ * Settles provider request `admission` of `route`'s call, as
+ * `settleRequest` does, and gives back to its cap per request what it
+ * settled below its reservation: everything, for one the ledger has no
+ * record of. One whose outcome is unknown keeps holding all of it.
+ */
+const settleAdmitted = async (
+  route: Route,
+  admission: Admission,
+  settlement: Settlement
+): Promise<RequestSettled> => {
+  const settled = await settleRequest(route.env, admission.id, settlement);
+  // Charged what it used, never clamped: that is what the provider bills.
+  // Above its reservation it means the bound was wrong, which budgets
+  // rely on.
+  if (
+    settled?.state === "settled" &&
+    settled.chargedMicros > admission.reservedMicros
+  ) {
+    log.warn("model.charge_over_reservation", {
+      model: route.call.model,
+      reservedMicros: admission.reservedMicros,
+      chargedMicros: settled.chargedMicros,
+    });
+  }
+  const { perRequest } = route;
+  if (perRequest !== undefined && settled?.state === "settled") {
+    perRequest.heldMicros -= admission.reservedMicros - settled.chargedMicros;
+  } else if (perRequest !== undefined && settled?.state === "missing") {
+    perRequest.heldMicros -= admission.reservedMicros;
+  }
+  return { reservedMicros: admission.reservedMicros, settled };
+};
+
+/**
  * Asks the model ledger to admit one provider request, with the body it
  * will send: reserves the most it can cost, its prompt bounded by the
  * body's size and its answer by the cap the body sets (or the model's,
@@ -823,9 +887,9 @@ const admitRequest = async (
   body: unknown,
   endsAt: number
 ): Promise<Admission | { held: Refusal }> => {
-  const { env, call, model, price } = route;
+  const { env, call, model, price, perRequest } = route;
   const { period, scopes } = route.scopesNow();
-  const budgeted = hasBudget(scopes);
+  const budgeted = hasBudget(scopes) || perRequest !== undefined;
   if (price === undefined && budgeted) {
     return { held: { code: "model.unpriced" } };
   }
@@ -854,6 +918,15 @@ const admitRequest = async (
     inputTokens: promptBound,
     outputTokens,
   });
+  // The binding's cap per request holds the App's request as a whole: a
+  // second attempt or a retry needs room beside what the earlier ones
+  // still hold, an unknown outcome all of its reservation.
+  if (
+    perRequest !== undefined &&
+    perRequest.heldMicros + reservedMicros > perRequest.limitMicros
+  ) {
+    return { held: { code: "model.over_budget", because: "binding_request" } };
+  }
   try {
     const admitted = await modelLedger(env).admit({
       id,
@@ -867,6 +940,9 @@ const admitRequest = async (
       reconcileAt: callDeadline + reconcileGraceMs,
     });
     if (admitted.ok) {
+      if (perRequest !== undefined) {
+        perRequest.heldMicros += reservedMicros;
+      }
       return { id, reservedMicros };
     }
     if ("unpriced" in admitted) {
@@ -940,7 +1016,7 @@ const open = (
   context: TranscriptContext,
   { signal, endsAt }: { signal: AbortSignal; endsAt: number }
 ) => {
-  const { model, ref, call, transport, env } = route;
+  const { model, ref, call, transport } = route;
   const response: GatewayResponse = {
     status: undefined,
     logId: undefined,
@@ -970,32 +1046,27 @@ const open = (
     try {
       answered = await transport(input, withRequestId(init, admitted.id));
     } catch (error) {
-      response.settled.push({
-        reservedMicros: admitted.reservedMicros,
-        settled: await settleRequest(env, admitted.id, { by: "unknown" }),
-      });
+      response.settled.push(
+        await settleAdmitted(route, admitted, { by: "unknown" })
+      );
       throw error;
     }
     response.refusal = undefined;
     if (!answered.ok) {
       // A refusal before the provider took the request on costs nothing;
       // a server error may have come after it did.
-      response.settled.push({
-        reservedMicros: admitted.reservedMicros,
-        settled: await settleRequest(env, admitted.id, {
+      response.settled.push(
+        await settleAdmitted(route, admitted, {
           by: answered.status < 500 ? "refused" : "unknown",
-        }),
-      });
+        })
+      );
       response.refusal = refusalOf(await answered.clone().text());
       return answered;
     }
     if (response.pending !== undefined) {
-      response.settled.push({
-        reservedMicros: response.pending.reservedMicros,
-        settled: await settleRequest(env, response.pending.id, {
-          by: "unknown",
-        }),
-      });
+      response.settled.push(
+        await settleAdmitted(route, response.pending, { by: "unknown" })
+      );
     }
     response.pending = admitted;
     return answered;
@@ -1318,6 +1389,10 @@ const keepingProvenance = (
   return entryKeeping(kept);
 };
 
+/** The App's model binding a call is made through, for its audit events. */
+const bindingOf = ({ binding }: Session): { binding?: string } =>
+  binding === undefined ? {} : { binding: binding.alias };
+
 const auditEntry = (
   { call, ref, judged }: Admitted,
   recorded: Recorded
@@ -1359,6 +1434,7 @@ const auditEntry = (
       sensitive: judged.sensitive ?? null,
       provenanceDropped: dropped,
       chat: chatOf(call),
+      ...bindingOf(call),
     },
   }));
 };
@@ -1443,11 +1519,11 @@ const record = async (
     const tokens = hasFailed(sent.answer)
       ? undefined
       : countedTokens(sent.answer.usage);
-    settled = await settleRequest(
-      env,
-      pending.id,
+    ({ settled } = await settleAdmitted(
+      admitted,
+      pending,
       tokens === undefined ? { by: "unknown" } : { by: "usage", tokens }
-    );
+    ));
   }
   const used = usedBy(admitted, sent);
   await keepAuditEvent(
@@ -1495,6 +1571,7 @@ const refusedEntry = (
       model,
       provenanceDropped: dropped,
       chat: chatOf(call),
+      ...bindingOf(call),
     },
   }));
 };
@@ -1589,8 +1666,17 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   const price = await pinnedPrice(
     listPricesOf(ref.provider, ref.id, ref.catalog.cost)
   );
+  const { binding } = call;
   const scopes = scopesFor(rules.budgets, call);
-  if (price === undefined && hasBudget(scopes)) {
+  const scopesOn = (day: string): LedgerScope[] =>
+    binding === undefined
+      ? scopes
+      : [...scopes, ...bindingScopes(binding, day)];
+  const requestMicros = bindingRequestMicros(binding);
+  if (
+    price === undefined &&
+    (hasBudget(scopesOn(budgetPeriods(env).day)) || requestMicros !== undefined)
+  ) {
     return await refuse(env, call, { code: "model.unpriced" });
   }
   return {
@@ -1600,7 +1686,16 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     model: gatewayModel(config.gateway, ref),
     transport: createAiBindingFetch(env.AI),
     price,
-    scopesNow: () => ({ period: budgetMonth(env), scopes }),
+    scopesNow: () => {
+      // One clock for both, so a request at a month's last instant never
+      // counts its day in one month and its month in the next.
+      const { month, day } = budgetPeriods(env);
+      return { period: month, scopes: scopesOn(day) };
+    },
+    perRequest:
+      requestMicros === undefined
+        ? undefined
+        : { limitMicros: requestMicros, heldMicros: 0 },
     env,
   };
 };

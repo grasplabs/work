@@ -477,6 +477,13 @@
       "when": 1791830712225,
       "tag": "0067_resource_templates",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1791834823487,
+      "tag": "0068_binding_budgets",
+      "breakpoints": true
     }
   ]
 }

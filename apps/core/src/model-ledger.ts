@@ -48,10 +48,11 @@ import { endedLineages, lineagesAsked } from "./run-lineage-ends.ts";
 //
 // - Concurrent requests overspend a budget: an admission reserves the
 //   request's most possible cost (its bound) against every one of its
-//   scopes (the deployment, the workflow, the person, the run lineage) in
-//   one synchronous transaction that first checks each scope's spend plus
-//   what is reserved plus the bound against its limit, and its requests
-//   against its request limit. Nothing else runs in between, so
+//   scopes (the deployment, the workflow, the person, the run lineage, a
+//   model binding's month and day) in one synchronous transaction that
+//   first checks each scope's spend plus what is reserved plus the bound
+//   against its limit, and its requests against its request limit.
+//   Nothing else runs in between, so
 //   reservations never oversubscribe a limit, and a scope without room
 //   refuses the whole request: no partial reservation.
 // - A run lineage escapes its limits: its scope is keyed by the lineage's
@@ -155,7 +156,14 @@ const damagedMembers = auditDetailMaxKeys - decisionMembers;
 /** How often the alarm looks again for receipts to sweep, while any are kept. */
 const sweepEveryMs = 24 * 60 * 60 * 1000;
 
-const scopeNames = ["deployment", "workflow", "user", "run"] as const;
+const scopeNames = [
+  "deployment",
+  "workflow",
+  "user",
+  "run",
+  "binding",
+  "binding_day",
+] as const;
 
 /**
  * The period a run lineage's spend, requests and alerts are kept under,
@@ -230,8 +238,9 @@ const admissionSchema = z
     period: z.string().regex(periodPattern),
     /**
      * Each scope once, at most one of each kind the gateway counts (the
-     * deployment, the workflow, the person, the run): a bound that also
-     * keeps a decision's audit event within its detail limit.
+     * deployment, the workflow, the person, the run, a model binding's
+     * month and day): a bound that also keeps a decision's audit event
+     * within its detail limit.
      */
     scopes: z
       .array(scopeSchema)
