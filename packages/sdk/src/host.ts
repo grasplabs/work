@@ -41,6 +41,17 @@ export type {
   SchemaReference,
   TableChange,
 } from "./schema-diff.ts";
+export { planSchemaChange } from "./schema-plan.ts";
+export type {
+  AcceptedPlan,
+  PlannedChanges,
+  PlannedField,
+  PlannedIndex,
+  PlanRefusal,
+  PlanRefusalReason,
+  RefusedPlan,
+  SchemaPlan,
+} from "./schema-plan.ts";
 export {
   manifestMaxBytes,
   manifestText,
