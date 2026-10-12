@@ -1,3 +1,5 @@
+import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -22,6 +24,7 @@ import type { Acting } from "../src/auth/identity.ts";
 import {
   createStore,
   deleteStore,
+  openStore,
   shareStore,
   storeManagers,
   unshareStore,
@@ -29,6 +32,7 @@ import {
 import { appDefaultStores, sdkStoreOwners } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { racingDb } from "./apps.ts";
+import { allEvents } from "./audit-events.ts";
 import { failure, person, sweptAway } from "./sealed-apps.ts";
 
 // Making a version of spec 8's layout current seals it on the App's one
@@ -156,6 +160,118 @@ const defaultStores = async (app: string) =>
     .from(appDefaultStores)
     .where(eq(appDefaultStores.appId, app))
     .all();
+
+/**
+ * A Notes App whose `notes` hold a title and the optional fields
+ * `optional` (TypeScript source of each field's validator, by name), with
+ * `create`, `rename` (a patch), `retitle` (a replacement) and `rows` (each
+ * note's fields this version declares) as its functions.
+ */
+const evolvingFiles = (
+  optional: Record<string, string> = {}
+): Record<string, string> => {
+  const extra = Object.entries(optional)
+    .map(([name, validator]) => `${name}: ${validator}.optional(), `)
+    .join("");
+  const fields = `title: v.string().min(1).max(200), ${extra}`;
+  return {
+    "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  notes: defineTable({ ${fields} }),
+});
+`,
+    "operations/notes.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "#grasp/server";
+
+const note = v.object({ ${fields} });
+
+export const create = mutation({
+  args: { ${fields} },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});
+
+export const rename = mutation({
+  args: { id: v.id("notes"), title: v.string().min(1).max(200) },
+  returns: v.null(),
+  handler: async (ctx, { id, title }) => {
+    const found = await ctx.db.get("notes", id);
+    if (found === null) throw new Error("No such note");
+    await ctx.db.patch("notes", id, { title }, { expectedRevision: found._rev });
+    return null;
+  },
+});
+
+export const retitle = mutation({
+  args: { id: v.id("notes"), title: v.string().min(1).max(200) },
+  returns: v.null(),
+  handler: async (ctx, { id, title }) => {
+    const found = await ctx.db.get("notes", id);
+    if (found === null) throw new Error("No such note");
+    await ctx.db.replace("notes", id, { title }, { expectedRevision: found._rev });
+    return null;
+  },
+});
+
+export const rows = query({
+  args: {},
+  returns: v.array(note),
+  handler: async (ctx) =>
+    (await ctx.db.query("notes").take(100))
+      .map(({ _id, _ownerId, _rev, _createdAt, _updatedAt, ...fields }) => fields)
+      .toSorted((a, b) => (a.title < b.title ? -1 : 1)),
+});
+`,
+    "app.ts": `import { app } from "@grasp-os/sdk";
+import { create, rename, retitle, rows } from "./operations/notes.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Notes",
+  schema,
+  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
+  operations: { notes: { create, rename, retitle, rows } },
+  internalOperations: {},
+  screens: [],
+  uses: [],
+});
+`,
+  };
+};
+
+/** The value `path` of the current release of `app` answers `by` for `input`. */
+const valueOf = async (
+  by: Caller,
+  app: AppId,
+  path: string,
+  input: Json = {}
+): Promise<Json> => {
+  const current = await currentOf(app);
+  if (current === null) {
+    throw new Error("The App has no current version");
+  }
+  const result = await call(
+    by,
+    await loadRelease(env, app, current),
+    path,
+    input
+  );
+  if (!result.ok) {
+    throw new Error(`${path} failed: ${JSON.stringify(result)}`);
+  }
+  return result.value;
+};
+
+/** Commits `files` as the App's next version, and answers its number. */
+const nextVersion = async (
+  owner: Caller,
+  app: AppId,
+  files: Record<string, string>
+): Promise<number> => {
+  const committed = await commitFiles(env, owner, app, files, "Next version");
+  return committed.version;
+};
 
 describe(
   "activating a version of spec 8's layout",
@@ -680,3 +796,169 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
     ]);
   });
 });
+
+describe(
+  "a version's schema changing on activation",
+  { timeout: 180_000 },
+  () => {
+    it("applies an optional field, and an older version made current again keeps it", async () => {
+      const { owner, app } = await appWith(evolvingFiles());
+      await activateVersion(env, owner, app, 1);
+      await valueOf(owner, app, "notes.create", { title: "Launch" });
+
+      const second = await nextVersion(
+        owner,
+        app,
+        evolvingFiles({ category: "v.string()" })
+      );
+      await activateVersion(env, owner, app, second);
+      const renamed = await valueOf(owner, app, "notes.create", {
+        title: "Hiring",
+        category: "jobs",
+      });
+      const replaced = await valueOf(owner, app, "notes.create", {
+        title: "News",
+        category: "press",
+      });
+
+      // Back to the first version: it reads and writes its own fields,
+      // and keeps what the second stored.
+      await activateVersion(env, owner, app, 1);
+      await valueOf(owner, app, "notes.rename", {
+        id: renamed,
+        title: "Hired",
+      });
+      await valueOf(owner, app, "notes.retitle", {
+        id: replaced,
+        title: "Newsroom",
+      });
+      const firstRows = await valueOf(owner, app, "notes.rows");
+
+      await activateVersion(env, owner, app, second);
+      expect({
+        first: firstRows,
+        second: await valueOf(owner, app, "notes.rows"),
+      }).toStrictEqual({
+        first: [{ title: "Hired" }, { title: "Launch" }, { title: "Newsroom" }],
+        second: [
+          { title: "Hired", category: "jobs" },
+          { title: "Launch" },
+          { title: "Newsroom", category: "press" },
+        ],
+      });
+    });
+
+    it("refuses a change that needs a migration, and the current version keeps running", async () => {
+      const { owner, app } = await appWith(
+        evolvingFiles({ category: "v.string()" })
+      );
+      await activateVersion(env, owner, app, 1);
+      await valueOf(owner, app, "notes.create", {
+        title: "Launch",
+        category: "news",
+      });
+
+      const retyped = await nextVersion(
+        owner,
+        app,
+        evolvingFiles({ category: "v.number()" })
+      );
+      await expect(
+        failure(async () => await activateVersion(env, owner, app, retyped))
+      ).resolves.toBe("migration.required");
+
+      expect({
+        current: await currentOf(app),
+        rows: await valueOf(owner, app, "notes.rows"),
+      }).toStrictEqual({
+        current: 1,
+        rows: [{ title: "Launch", category: "news" }],
+      });
+    });
+
+    it("makes one of two conflicting versions current when both are activated at once", async () => {
+      const { owner, app } = await appWith(evolvingFiles());
+      await activateVersion(env, owner, app, 1);
+      const asText = await nextVersion(
+        owner,
+        app,
+        evolvingFiles({ colour: "v.string()" })
+      );
+      const asNumber = await nextVersion(
+        owner,
+        app,
+        evolvingFiles({ colour: "v.number()" })
+      );
+
+      const outcomes = await Promise.all([
+        failure(async () => await activateVersion(env, owner, app, asText)),
+        failure(async () => await activateVersion(env, owner, app, asNumber)),
+      ]);
+
+      const winner = outcomes[0] === "ok" ? asText : asNumber;
+      expect({
+        outcomes: outcomes.toSorted(),
+        current: await currentOf(app),
+      }).toStrictEqual({
+        outcomes: ["migration.required", "ok"],
+        current: winner,
+      });
+    });
+
+    it("finishes an activation whose store applied the schema before it stopped, with the store's evidence", async () => {
+      const { owner, app } = await appWith(evolvingFiles());
+      await activateVersion(env, owner, app, 1);
+      const [recorded] = await defaultStores(app);
+      const store = await openStore(
+        env,
+        storeIdSchema.parse(recorded?.storeId)
+      );
+      const second = await nextVersion(
+        owner,
+        app,
+        evolvingFiles({ category: "v.string()" })
+      );
+      // What a seal that stopped after the store applied its schema left:
+      // the schema applied for version 2, and nothing in core.
+      const applied = await store.defineTables(
+        manifestText(
+          schemaManifest(
+            defineSchema({
+              notes: defineTable({
+                title: v.string().min(1).max(200),
+                category: v.string().optional(),
+              }),
+            }),
+            { tables: { notes: { read: "appMembers", write: "appMembers" } } }
+          )
+        ),
+        { resourceId: app, resourceVersion: second }
+      );
+
+      await activateVersion(env, owner, app, second);
+
+      const events = await allEvents();
+      const sealed = events.filter(
+        (event) =>
+          event.action === "app.release.sealed" &&
+          event.target?.id === app &&
+          event.detail.version === second
+      );
+      expect({
+        current: await currentOf(app),
+        evidence: sealed.map(({ detail }) => detail),
+      }).toStrictEqual({
+        current: second,
+        evidence: [
+          expect.objectContaining({
+            store: store.id,
+            storeContractHash: applied.contract.hash,
+            storePlanHash: applied.contract.planHash,
+            storeContractChanged: true,
+            storeReceipt: applied.contract.receiptId,
+          }),
+        ],
+      });
+    });
+  }
+);
