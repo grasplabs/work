@@ -737,9 +737,8 @@ export const sdkReleasePins = sqliteTable(
  * reads and writes, which only the host chose when it sealed the release.
  * Routing, not a grant: whoever calls is authorized on every call. Also
  * how a store finds the releases that still rely on it: it can't be
- * deleted while an App's current or pending version's release is bound
- * to it (data-stores.ts). An older release kept for retention may still
- * be bound; its calls fail once the store is gone.
+ * deleted while any release kept is bound to it (data-stores.ts), and
+ * retention deletes a release's rows here with it.
  */
 export const sdkResourceBindings = sqliteTable(
   "sdk_resource_bindings",
@@ -1551,10 +1550,11 @@ export const businessStores = sqliteTable("business_stores", {
   deletedAt: timestamp("deleted_at"),
   /**
    * When a deletion of the store began, if one is in flight: set before
-   * its object is closed, only while no App's current or pending version
-   * binds the store, and while set (for `storeClosingMs`) no version bound
-   * to it is made current (data-stores.ts, apps.ts). Cleared, by its owner
-   * alone, if the close is refused; a deletion finished sets `deletedAt`.
+   * its object is closed, only while no sealed release binds the store,
+   * and while set (for `storeClosingMs`) no seal binds it and no version
+   * bound to it is made current (data-stores.ts, app-releases.ts,
+   * apps.ts). Cleared, by its owner alone, if the close is refused; a
+   * deletion finished sets `deletedAt`.
    */
   closingAt: timestamp("closing_at"),
   /** The deletion that set `closingAt`: only it closes the store, or clears the mark. */

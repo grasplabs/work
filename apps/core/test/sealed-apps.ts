@@ -8,6 +8,11 @@ import type { Release } from "../src/app-releases.ts";
 import { commitFiles, createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, shareStore } from "../src/data-stores.ts";
+import {
+  releaseGraceMs,
+  releaseRetentionMs,
+  sweepReleases,
+} from "../src/release-retention.ts";
 
 // Apps of spec 8's layout as the release tests build them: a builder's
 // App committed with given files, a store for it, and its seal.
@@ -93,3 +98,31 @@ export const failure = async (
 /** Where an artifact's bytes are kept. */
 export const artifactKey = (sha256: string): string =>
   `release-artifacts/${sha256}`;
+
+/**
+ * Lets retention delete App `app`'s release `version`, kept by nothing
+ * but its 90 days: sweeps past them and the grace, as often as it takes,
+ * since one sweep deletes a bounded batch of the releases due.
+ */
+export const sweptAway = async (app: AppId, version: number): Promise<void> => {
+  const now = Date.now();
+  await sweepReleases(env, new Date(now + releaseRetentionMs + 60_000));
+  for (let sweep = 0; sweep < 50; sweep += 1) {
+    // One sweep after the other: each sees what the one before left.
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const kept = await env.DB.prepare(
+      "SELECT 1 FROM sdk_release_manifests WHERE app_id = ? AND version = ?"
+    )
+      .bind(app, version)
+      .first();
+    if (kept === null) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await sweepReleases(
+      env,
+      new Date(now + releaseRetentionMs + releaseGraceMs + 120_000)
+    );
+  }
+  throw new Error(`Retention kept version ${version} of App ${app}`);
+};
