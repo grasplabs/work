@@ -2758,6 +2758,10 @@ msgstr "Non approuvé"
 msgid "Not bound"
 msgstr "Non lié"
 
+#: src/engines/resource-bindings.tsx
+msgid "Not checked"
+msgstr "Non vérifié"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not connected"
 msgstr "Non connectée"
@@ -4255,6 +4259,10 @@ msgstr "Par défaut, {each}"
 #: src/engines/resource-bindings.tsx
 msgid "The engine has no permission to read a collection. Grant one first."
 msgstr "Le moteur n'a aucune autorisation de lire une collection. Accordez-en une d'abord."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
+msgstr "Le moteur a trop d'intégrations pour toutes les vérifier sur cette page : cette liaison n'a donc pas été vérifiée. Sa prochaine requête est vérifiée comme toujours."
 
 #: src/engines/resource-bindings.tsx
 msgid "The engine's actions can't use it until an admin binds it."

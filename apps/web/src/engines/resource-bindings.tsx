@@ -79,6 +79,7 @@ const stateLabels: Readonly<Record<BindingState, MessageDescriptor>> = {
   declaration_changed: msg`Not served`,
   contract_changed: msg`Not served`,
   grant_lost: msg`Not served`,
+  unchecked: msg`Not checked`,
 };
 
 /** Why a binding no longer serves its resource, by its state. */
@@ -88,6 +89,7 @@ const stateReasons: Readonly<Partial<Record<BindingState, MessageDescriptor>>> =
     declaration_changed: msg`The current version declares it differently from the version its binding was approved for. Bind it again to approve what it declares now.`,
     contract_changed: msg`What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits.`,
     grant_lost: msg`What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read.`,
+    unchecked: msg`The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always.`,
   };
 
 /** A change to what core holds, then the page read again. */

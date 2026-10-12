@@ -2758,6 +2758,10 @@ msgstr "No aprobado"
 msgid "Not bound"
 msgstr "Sin vincular"
 
+#: src/engines/resource-bindings.tsx
+msgid "Not checked"
+msgstr "Sin comprobar"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not connected"
 msgstr "Sin conectar"
@@ -4255,6 +4259,10 @@ msgstr "Predeterminado, {each}"
 #: src/engines/resource-bindings.tsx
 msgid "The engine has no permission to read a collection. Grant one first."
 msgstr "El motor no tiene permiso para leer ninguna colección. Concede uno primero."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
+msgstr "El motor tiene demasiadas integraciones para comprobarlas todas en esta página, así que esta vinculación no se comprobó. Su siguiente solicitud se comprueba como siempre."
 
 #: src/engines/resource-bindings.tsx
 msgid "The engine's actions can't use it until an admin binds it."
