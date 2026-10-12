@@ -8,13 +8,14 @@ import type { CodedError } from "@grasp-os/shared/errors";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
-import type { Member, MembersApi } from "@grasp-os/shared/members";
+import type { Invitation, Member, MembersApi } from "@grasp-os/shared/members";
 import { isAdmin, roleErrors, roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
@@ -25,9 +26,11 @@ import {
   notRemoved,
   organizationId,
 } from "./auth/auth.ts";
+import { signInConfig } from "./auth/config.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import {
+  invitations,
   memberRemovals,
   members,
   notifications,
@@ -486,6 +489,223 @@ export const retryDisconnects = async (env: Env): Promise<void> => {
   );
 };
 
+// Invitations: people join by signing in through the organization's IdP,
+// as users, so an invitation is an admin naming the role someone gets on
+// that first sign-in (`ensureMember`, auth.ts). Grasp sends no email.
+// They live in Better Auth's `invitations` table, whose routes stay off
+// (routes.ts): each change here is one conditional statement, audited,
+// that also requires the admin making it still to be one. Events carry
+// the invitation's ID and role, never the address.
+
+/** How long an invitation can be taken up: after that, they join as users. */
+const invitationLifetimeMs = 30 * 24 * 60 * 60 * 1000;
+
+const inviteEmailSchema = z.email().max(254).toLowerCase();
+
+/** The lowercased domain of `email`, as sign-in reads it (claims.ts). */
+const domainOf = (email: string): string =>
+  email.slice(email.lastIndexOf("@") + 1);
+
+/** That an account with `email` holds a membership now, as SQL. */
+const isMemberEmail = (email: string): SQL => sql`EXISTS (
+  SELECT 1 FROM ${members} JOIN ${users} ON ${users.id} = ${members.userId}
+  WHERE ${members.organizationId} = ${organizationId}
+    AND lower(${users.email}) = ${email}
+)`;
+
+/** That an admin removed an account with `email`, as SQL. */
+const isRemovedEmail = (email: string): SQL => sql`EXISTS (
+  SELECT 1 FROM ${memberRemovals}
+    JOIN ${users} ON ${users.id} = ${memberRemovals.userId}
+  WHERE ${memberRemovals.organizationId} = ${organizationId}
+    AND lower(${users.email}) = ${email}
+)`;
+
+/** That `email` has an invitation nobody has taken up at `now`, as SQL. */
+const isInvitedEmail = (email: string, now: Date): SQL => sql`EXISTS (
+  SELECT 1 FROM ${invitations}
+  WHERE ${invitations.organizationId} = ${organizationId}
+    AND ${invitations.email} = ${email}
+    AND ${invitations.status} = 'pending'
+    AND ${invitations.expiresAt} > ${now.getTime()}
+)`;
+
+/** The organization's open invitations, newest first. For admins. */
+const listInvitations = async (
+  env: Env,
+  by: Identity
+): Promise<Invitation[]> => {
+  requireMemberAdmin(by);
+  const rows = await drizzle(env.DB)
+    .select({
+      id: invitations.id,
+      email: invitations.email,
+      role: invitations.role,
+      invitedBy: users.name,
+      invitedAt: invitations.createdAt,
+      expiresAt: invitations.expiresAt,
+    })
+    .from(invitations)
+    .innerJoin(users, eq(users.id, invitations.inviterId))
+    .where(
+      and(
+        eq(invitations.organizationId, organizationId),
+        eq(invitations.status, "pending"),
+        gt(invitations.expiresAt, new Date())
+      )
+    )
+    .orderBy(desc(invitations.createdAt), asc(invitations.id));
+  return rows.flatMap(({ role, invitedAt, expiresAt, ...invitation }) => {
+    const parsed = roleSchema.safeParse(role);
+    return parsed.success
+      ? [
+          {
+            ...invitation,
+            role: parsed.data,
+            invitedAt: invitedAt.toISOString(),
+            expiresAt: expiresAt.toISOString(),
+          },
+        ]
+      : [];
+  });
+};
+
+/** Why an invitation of `email` went in nowhere, read after the fact. */
+const inviteRefusal = async (
+  env: Env,
+  email: string,
+  now: Date
+): Promise<CodedError> => {
+  const row = await drizzle(env.DB).get<{
+    member: number;
+    removed: number;
+    invited: number;
+  }>(
+    sql`SELECT ${isMemberEmail(email)} AS member,
+      ${isRemovedEmail(email)} AS removed,
+      ${isInvitedEmail(email, now)} AS invited`
+  );
+  if (row.removed === 1) {
+    return memberErrors.create("member.invite_removed");
+  }
+  if (row.member === 1) {
+    return memberErrors.create("member.invite_member");
+  }
+  if (row.invited === 1) {
+    return memberErrors.create("member.invite_pending");
+  }
+  return roleErrors.create("role.forbidden");
+};
+
+/**
+ * Invites `email` as `role`. One statement puts it in, and only while
+ * nobody with that address is a member or removed, nobody invited them
+ * already, and the admin still is one, so two admins inviting the same
+ * person at once make one invitation.
+ */
+const inviteMember = async (
+  env: Env,
+  by: Identity,
+  email: unknown,
+  role: unknown
+): Promise<Invitation> => {
+  requireMemberAdmin(by);
+  const parsedRole = roleSchema.safeParse(role);
+  if (!parsedRole.success) {
+    throw refusal(by, memberErrors.create("member.role_invalid"));
+  }
+  const address = inviteEmailSchema.safeParse(
+    typeof email === "string" ? email.trim() : email
+  );
+  const domains = signInConfig(env)?.domains ?? [];
+  if (!(address.success && domains.includes(domainOf(address.data)))) {
+    throw refusal(by, memberErrors.create("member.invite_email"));
+  }
+  const db = drizzle(env.DB);
+  const id = crypto.randomUUID();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + invitationLifetimeMs);
+  const [inserted] = await auditedBatch(env, db, [
+    db
+      .insert(invitations)
+      .select(
+        sql`SELECT ${id}, ${organizationId}, ${address.data}, ${parsedRole.data},
+          NULL, 'pending', ${expiresAt.getTime()}, ${now.getTime()}, ${by.userId}
+          WHERE NOT ${isMemberEmail(address.data)}
+            AND NOT ${isRemovedEmail(address.data)}
+            AND NOT ${isInvitedEmail(address.data, now)}
+            AND ${isActiveAdmin(by.userId)}`
+      )
+      .returning({ id: invitations.id }),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "member.invited",
+      target: { type: "invitation", id },
+      detail: { role: parsedRole.data },
+    }),
+  ]);
+  if (inserted.length === 0) {
+    throw refusal(by, await inviteRefusal(env, address.data, now));
+  }
+  const [inviter] = await db
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, by.userId));
+  return {
+    id,
+    email: address.data,
+    role: parsedRole.data,
+    invitedBy: inviter?.name ?? "",
+    invitedAt: now.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+  };
+};
+
+/**
+ * Withdraws the invitation `invitationId` while nobody has taken it up and
+ * the admin still is one, in one statement.
+ */
+const withdrawInvitation = async (
+  env: Env,
+  by: Identity,
+  invitationId: unknown
+): Promise<void> => {
+  requireMemberAdmin(by);
+  const parsed = identifierSchema.safeParse(invitationId);
+  if (!parsed.success) {
+    throw refusal(by, memberErrors.create("member.invitation_not_found"));
+  }
+  const db = drizzle(env.DB);
+  const [withdrawn] = await auditedBatch(env, db, [
+    db
+      .update(invitations)
+      .set({ status: "canceled" })
+      .where(
+        and(
+          eq(invitations.id, parsed.data),
+          eq(invitations.organizationId, organizationId),
+          eq(invitations.status, "pending"),
+          isActiveAdmin(by.userId)
+        )
+      )
+      .returning({ role: invitations.role }),
+    outboxedIfChanged(db, {
+      actor: actorOf(by),
+      action: "member.invitation.withdrawn",
+      target: { type: "invitation", id: parsed.data },
+    }),
+  ]);
+  if (withdrawn.length > 0) {
+    return;
+  }
+  throw refusal(
+    by,
+    (await stillAdmin(env, by.userId))
+      ? memberErrors.create("member.invitation_not_found")
+      : roleErrors.create("role.forbidden")
+  );
+};
+
 /**
  * A signed-in admin's `members`. Every call checks the session first,
  * then the caller's role.
@@ -523,6 +743,26 @@ export class MembersRpc extends CoreRpcTarget implements MembersApi {
   async setRole(userId: string, role: Role): Promise<void> {
     await withPerson(this.#check, async (person) => {
       await setMemberRole(this.#env, person, userId, role);
+    });
+  }
+
+  async invitations(): Promise<Invitation[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await listInvitations(this.#env, person)
+    );
+  }
+
+  async invite(email: string, role: Role): Promise<Invitation> {
+    return await withPerson(
+      this.#check,
+      async (person) => await inviteMember(this.#env, person, email, role)
+    );
+  }
+
+  async withdrawInvitation(invitationId: string): Promise<void> {
+    await withPerson(this.#check, async (person) => {
+      await withdrawInvitation(this.#env, person, invitationId);
     });
   }
 }
