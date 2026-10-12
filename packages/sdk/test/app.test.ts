@@ -444,6 +444,27 @@ describe("uses", () => {
     ).toContain("alias `mail`");
   });
 
+  test("a contract is short enough to name in an audit event", () => {
+    // 256 characters, the most an identifier may be, then one more.
+    const longest = `${"a".repeat(254)}@1`;
+    const tooLong = `${"a".repeat(255)}@1`;
+    expect({
+      template: resource.template("letter", { contract: longest }).contract,
+      connector: resource.connector("mail", {
+        contract: longest,
+        actions: ["send"],
+      }).contract,
+    }).toStrictEqual({ template: longest, connector: longest });
+    expect(
+      [
+        refusal(() => resource.template("letter", { contract: tooLong })),
+        refusal(() =>
+          resource.connector("mail", { contract: tooLong, actions: ["send"] })
+        ),
+      ].map((message) => message.includes("at most 256 characters"))
+    ).toStrictEqual([true, true]);
+  });
+
   test("a function the App doesn't register can't be used", () => {
     const orphan = server.query({
       args: {},

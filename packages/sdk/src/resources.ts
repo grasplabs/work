@@ -1,3 +1,4 @@
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
 
 import type { FilesOperation } from "./references.ts";
@@ -332,11 +333,15 @@ const checkedConfig = (
   return config;
 };
 
+// No longer than an identifier, so the audit events that name a binding's
+// contract can carry it.
 const checkedContract = (contract: unknown): string =>
-  typeof contract === "string" && contractPattern.test(contract)
+  typeof contract === "string" &&
+  contract.length <= identifierMaxLength &&
+  contractPattern.test(contract)
     ? contract
     : refuse(
-        "A contract is a dotted name and its major version, e.g. `grasp.mail@1`."
+        `A contract is a dotted name and its major version, e.g. \`grasp.mail@1\`, of at most ${identifierMaxLength} characters.`
       );
 
 const checkedList = (

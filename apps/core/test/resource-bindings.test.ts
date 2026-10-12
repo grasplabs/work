@@ -1327,6 +1327,11 @@ describe("resource bindings", { timeout: 120_000 }, () => {
         contract: "grasp.letter@1",
         content: { text: "x".repeat(70_000) },
       }),
+      // A contract too long to name in the publication's audit event.
+      longContract: await publishRefusal(admin, {
+        contract: `${"a".repeat(255)}@1`,
+        content: {},
+      }),
       // Served inside its answer, one level down: too deep to be read.
       tooDeep: await publishRefusal(admin, {
         contract: "grasp.letter@1",
@@ -1337,6 +1342,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       otherContract: "resource.template_contract_changed",
       unknown: "resource.template_not_found",
       tooLarge: "resource.template_invalid",
+      longContract: "resource.template_invalid",
       tooDeep: "resource.template_invalid",
     });
   });
