@@ -33,6 +33,7 @@ import {
   person,
   seal,
   shareStoreWith,
+  sweptAway,
 } from "./sealed-apps.ts";
 
 // Sealing an App's release (spec 8, 16) through the real compiler, Loader
@@ -817,33 +818,28 @@ JSON.stringify = (value, ...rest) => {
     );
   });
 
-  it("keeps its store from being deleted while its version is current, and lets it go once none bound is", async () => {
+  it("keeps its store from being deleted while any release kept binds it, and lets it go once retention removed them", async () => {
     const fixture = await appWith(notesFiles());
     await seal(fixture);
     await setCurrentVersion(env, fixture.owner, fixture.app, 1);
-    const refused = await failure(async () => {
+    const current = await failure(async () => {
       await deleteStore(env, fixture.owner, fixture.store);
     });
     const events = await allEvents();
-    // A version without tables made current: no current release binds it.
+    // A version without tables made current: version 1 binds the store
+    // still, kept as a rollback target.
     await commitFiles(env, fixture.owner, fixture.app, tablelessFiles(), "Two");
     await seal(fixture, 2);
     await setCurrentVersion(env, fixture.owner, fixture.app, 2);
-    // Version 1 pending again (as an upgrade waiting for approval would
-    // leave it): its calls may run again, so the store stays.
-    await env.DB.prepare("UPDATE apps SET pending_version = 1 WHERE id = ?")
-      .bind(fixture.app)
-      .run();
-    const pending = await failure(async () => {
+    const retained = await failure(async () => {
       await deleteStore(env, fixture.owner, fixture.store);
     });
-    await env.DB.prepare("UPDATE apps SET pending_version = NULL WHERE id = ?")
-      .bind(fixture.app)
-      .run();
+    // Retention lets version 1 go: past its 90 days, then the grace.
+    await sweptAway(fixture.app, 1);
     await deleteStore(env, fixture.owner, fixture.store);
     expect([
-      pending,
-      refused,
+      current,
+      retained,
       events.some(
         (event) =>
           event.action === "store.delete_refused" &&
@@ -856,6 +852,34 @@ JSON.stringify = (value, ...rest) => {
       "data.store_bound",
       true,
       "data.store_unavailable",
+    ]);
+  });
+
+  it("is refused a store whose deletion has begun, and seals once that deletion let it be", async () => {
+    const fixture = await appWith(notesFiles());
+    // A deletion of the store in flight: its closing mark is set.
+    await env.DB.prepare(
+      "UPDATE business_stores SET closing_at = ?, closing_owner = 'deleting' WHERE id = ?"
+    )
+      .bind(Date.now(), fixture.store)
+      .run();
+    const refused = await failure(async () => await seal(fixture));
+    const bound = await env.DB.prepare(
+      "SELECT 1 FROM sdk_resource_bindings WHERE target_id = ?"
+    )
+      .bind(fixture.store)
+      .all();
+    // That deletion refused, and its mark cleared: the seal binds it.
+    await env.DB.prepare(
+      "UPDATE business_stores SET closing_at = NULL, closing_owner = NULL WHERE id = ?"
+    )
+      .bind(fixture.store)
+      .run();
+    const release = await seal(fixture);
+    expect([refused, bound.results, release.store?.storeId]).toStrictEqual([
+      "data.store_unavailable",
+      [],
+      fixture.store,
     ]);
   });
 

@@ -94,6 +94,14 @@ import type { ReadResult } from "./store-host.ts";
 //   the deletion mark are one transaction in the object, so no claim lands
 //   in between, and every call after the mark is refused there, whatever
 //   core's inventory says.
+// - A store is deleted under a sealed release that may still run on it (a
+//   current or pending version, a rollback target, a pinned run, an open
+//   screen's lease): refused (`data.store_bound`) while any release an App
+//   keeps is bound to it (`sdk_resource_bindings`, whose rows retention
+//   deletes with their release), read in the statement that marks the
+//   store closing, before its object is touched; a seal's binding in turn
+//   requires the store live and not closing (app-releases.ts), so of the
+//   two, one wins. Deleting an App never deletes its stores.
 // - A deletion stops half-way, or its records go unaudited: the object is
 //   marked first, with who deleted it and when; then the inventory row and
 //   the `store.deleted` event in one batch, which core runs at once and
@@ -336,24 +344,24 @@ export const requireStoreManager = async (
 };
 
 /**
- * That the current or pending version of some App has a sealed release
- * bound to store `id` (`sdk_resource_bindings`): one that new calls run.
+ * That some sealed release is bound to store `id` (`sdk_resource_bindings`):
+ * a retained consumer, which may still run (as current or pending, a
+ * rollback target, a pinned run or an open screen's lease). Retention
+ * deletes a release's bindings with it (release-retention.ts), so a
+ * binding is there exactly while its release is kept.
  */
-const boundToCurrentSql = (id: StoreId): SQL =>
+const boundSql = (id: StoreId): SQL =>
   sql`EXISTS (SELECT 1 FROM sdk_resource_bindings AS bound
-    JOIN apps ON apps.id = bound.resource_id
-    WHERE bound.kind = 'store' AND bound.target_id = ${id}
-      AND (apps.current_version = bound.resource_version
-        OR apps.pending_version = bound.resource_version))`;
+    WHERE bound.kind = 'store' AND bound.target_id = ${id})`;
 
 /**
  * Marks store `id` closing at `now` for the deletion `owner`, in one
- * statement that requires it live, bound to no App's current or pending
- * version, and not closing for another deletion (unless that mark lapsed,
- * `storeClosingMs`): the mark `setCurrentVersion` honours, so of this
- * deletion and an activation of a version bound to the store, exactly one
- * wins. True when this call holds the mark: only then may it close the
- * store.
+ * statement that requires it live, bound to no sealed release, and not
+ * closing for another deletion (unless that mark lapsed,
+ * `storeClosingMs`): the mark a seal's binding (app-releases.ts) and
+ * `setCurrentVersion` honour, so of this deletion and a seal that binds
+ * the store, exactly one wins. True when this call holds the mark: only
+ * then may it close the store.
  */
 const markClosing = async (
   env: Env,
@@ -375,22 +383,19 @@ const markClosing = async (
             new Date(now.getTime() - storeClosingMs)
           )
         ),
-        sql`NOT ${boundToCurrentSql(id)}`
+        sql`NOT ${boundSql(id)}`
       )
     )
     .returning({ owner: businessStores.closingOwner });
   return marked[0]?.owner === owner;
 };
 
-/** Whether store `id` is bound to an App's current or pending version. */
-const boundToCurrentRelease = async (
-  env: Env,
-  id: StoreId
-): Promise<boolean> => {
+/** Whether some sealed release is bound to store `id`. */
+const boundToRelease = async (env: Env, id: StoreId): Promise<boolean> => {
   const row = await drizzle(env.DB)
     .select({ one: sql`1` })
     .from(businessStores)
-    .where(and(eq(businessStores.id, id), boundToCurrentSql(id)))
+    .where(and(eq(businessStores.id, id), boundSql(id)))
     .get();
   return row !== undefined;
 };
@@ -465,9 +470,9 @@ const appBuilders = async (
  * Deletes store `id` for `by`, who must manage it and isn't Grasp staff:
  * marked closing first, by this deletion alone (`markClosing`), and
  * refused, and audited, while another deletion holds the mark
- * (`data.store_closing`), while an App's current or pending version has a
- * sealed release bound to it (`data.store_bound`: its calls would fail
- * with `data.store_unavailable`), or while a receipt not yet expired
+ * (`data.store_closing`), while any sealed release an App keeps is bound
+ * to it (`data.store_bound`: its calls would fail with
+ * `data.store_unavailable`), or while a receipt not yet expired
  * refers to it (`data.store_in_use`: the store's object decides,
  * store-host.ts). The
  * object is marked deleted first, with `by` and the time; then the
@@ -483,12 +488,12 @@ export const deleteStore = async (
   const store = await managedBy(env, by, id);
   const actor = by.actor ?? actorOf(by);
   // Marked closing first, by this deletion alone, before its object is
-  // touched: refused while a current or pending version binds it, or while
+  // touched: refused while any sealed release binds it, or while
   // another deletion holds the mark (it alone closes the store, or clears
   // the mark if its close is refused).
   const owner = crypto.randomUUID();
   if (!(await markClosing(env, store.id, owner, new Date()))) {
-    const reason = (await boundToCurrentRelease(env, store.id))
+    const reason = (await boundToRelease(env, store.id))
       ? "data.store_bound"
       : "data.store_closing";
     const db = drizzle(env.DB);

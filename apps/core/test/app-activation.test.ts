@@ -22,16 +22,14 @@ import type { Acting } from "../src/auth/identity.ts";
 import {
   createStore,
   deleteStore,
-  openStore,
   shareStore,
   storeManagers,
   unshareStore,
 } from "../src/data-stores.ts";
 import { appDefaultStores, sdkStoreOwners } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { storeClosingMs } from "../src/store-deletion.ts";
 import { racingDb } from "./apps.ts";
-import { failure, person } from "./sealed-apps.ts";
+import { failure, person, sweptAway } from "./sealed-apps.ts";
 
 // Making a version of spec 8's layout current seals it on the App's one
 // default store, which the host creates the first time a version needs
@@ -326,17 +324,22 @@ describe(
       await expect(currentOf(app)).resolves.toBe(3);
     });
 
-    it("refuses a rollback onto a deleted store, and gives later versions a fresh one", async () => {
+    it("refuses a rollback onto a store retention let go, and gives later versions a fresh one", async () => {
       const { owner, app } = await appWith(notesFiles());
       await activateVersion(env, owner, app, 1);
       const [deleted] = await defaultStores(app);
       await commitFiles(env, owner, app, emptyFiles, "No tables");
       await activateVersion(env, owner, app, 2);
+      // Version 1 kept binds its store; once retention lets it go, the
+      // store can be deleted.
+      await sweptAway(app, 1);
       await deleteStore(env, owner, deleted?.storeId ?? "");
 
+      // Sealed again, version 1 would bind a fresh store: another release
+      // than the one deleted, which its number never comes to name.
       await expect(
         failure(async () => await activateVersion(env, owner, app, 1))
-      ).resolves.toBe("data.store_unavailable");
+      ).resolves.toBe("version.seal_conflict");
       await expect(currentOf(app)).resolves.toBe(2);
 
       await commitFiles(env, owner, app, notesFiles("Notes 3"), "Tables again");
@@ -350,204 +353,20 @@ describe(
       ).resolves.toMatchObject({ ok: true });
     });
 
-    it("refuses a rollback onto a store whose deletion has begun, and the deletion finishes", async () => {
-      const { owner, app } = await appWith(notesFiles());
-      await activateVersion(env, owner, app, 1);
-      const [recorded] = await defaultStores(app);
-      const store = recorded?.storeId ?? "";
-      await commitFiles(env, owner, app, emptyFiles, "No tables");
-      await activateVersion(env, owner, app, 2);
-      // The rollback onto version 1 lands after the deletion's check, just
-      // before the store's object is closed.
-      const getByName = env.DATA_STORES.getByName.bind(env.DATA_STORES);
-      let rollback: string | undefined;
-      const interleaved = (name: string) => {
-        const stub = getByName(name);
-        return new Proxy(stub, {
-          get: (target, property): unknown =>
-            property === "close"
-              ? async (...args: Parameters<typeof stub.close>) => {
-                  rollback ??= await failure(
-                    async () => await activateVersion(env, owner, app, 1)
-                  );
-                  return await target.close(...args);
-                }
-              : Reflect.get(target, property),
-        });
-      };
-      Reflect.set(env.DATA_STORES, "getByName", interleaved);
-      try {
-        await deleteStore(env, owner, store);
-      } finally {
-        Reflect.set(env.DATA_STORES, "getByName", getByName);
-      }
-      expect([
-        rollback,
-        await currentOf(app),
-        await failure(async () => await openStore(env, store)),
-      ]).toStrictEqual(["data.store_unavailable", 2, "data.store_unavailable"]);
-    });
-
-    it("lets a version back onto a store whose deletion was refused", async () => {
-      const { owner, app } = await appWith(notesFiles());
-      await activateVersion(env, owner, app, 1);
-      const first = await loadRelease(env, app, 1);
-      // A note committed: its receipt keeps the store from being deleted.
-      await call(owner, first, "notes.create", { title: "Receipt" });
-      const [recorded] = await defaultStores(app);
-      await commitFiles(env, owner, app, emptyFiles, "No tables");
-      await activateVersion(env, owner, app, 2);
-      await expect(
-        failure(async () => {
-          await deleteStore(env, owner, recorded?.storeId ?? "");
-        })
-      ).resolves.toBe("data.store_in_use");
-      const rolledBack = await activateVersion(env, owner, app, 1);
-      expect(rolledBack.currentVersion).toBe(1);
-    });
-
-    it("closes a store only for the deletion holding its mark, whose refusal clears its own mark alone", async () => {
-      const { owner, app } = await appWith(notesFiles());
-      await activateVersion(env, owner, app, 1);
-      const first = await loadRelease(env, app, 1);
-      // A note committed: its receipt refuses the first deletion's close.
-      await call(owner, first, "notes.create", { title: "Receipt" });
-      const [recorded] = await defaultStores(app);
-      const store = recorded?.storeId ?? "";
-      await commitFiles(env, owner, app, emptyFiles, "No tables");
-      await activateVersion(env, owner, app, 2);
-      // A second deletion starts while the first holds the mark, just as
-      // the first is about to close the store.
-      const getByName = env.DATA_STORES.getByName.bind(env.DATA_STORES);
-      let closes = 0;
-      let second: string | undefined;
-      const overlapping = (name: string) => {
-        const stub = getByName(name);
-        return new Proxy(stub, {
-          get: (target, property): unknown =>
-            property === "close"
-              ? async (...args: Parameters<typeof stub.close>) => {
-                  closes += 1;
-                  second ??= await failure(async () => {
-                    await deleteStore(env, owner, store);
-                  });
-                  return await target.close(...args);
-                }
-              : Reflect.get(target, property),
-        });
-      };
-      Reflect.set(env.DATA_STORES, "getByName", overlapping);
-      let firstOutcome: string;
-      try {
-        firstOutcome = await failure(async () => {
-          await deleteStore(env, owner, store);
-        });
-      } finally {
-        Reflect.set(env.DATA_STORES, "getByName", getByName);
-      }
-      // The first's mark is cleared: a rollback onto the store is safe.
-      const rolledBack = await activateVersion(env, owner, app, 1);
-      const mark = await env.DB.prepare(
-        "SELECT closing_owner AS owner FROM business_stores WHERE id = ?"
-      )
-        .bind(store)
-        .first<{ owner: string | null }>();
-      expect([
-        firstOutcome,
-        second,
-        closes,
-        mark?.owner,
-        rolledBack.currentVersion,
-        await failure(async () => await openStore(env, store)),
-      ]).toStrictEqual([
-        "data.store_in_use",
-        "data.store_closing",
-        1,
-        null,
-        1,
-        "ok",
-      ]);
-    });
-
-    it("never clears a mark another deletion took over after its own lapsed", async () => {
-      const { owner, app } = await appWith(notesFiles());
-      await activateVersion(env, owner, app, 1);
-      const first = await loadRelease(env, app, 1);
-      await call(owner, first, "notes.create", { title: "Receipt" });
-      const [recorded] = await defaultStores(app);
-      const store = recorded?.storeId ?? "";
-      await commitFiles(env, owner, app, emptyFiles, "No tables");
-      await activateVersion(env, owner, app, 2);
-      // The first deletion stalls past its mark's lapse; a second takes the
-      // mark over and is held just before its own close.
-      const getByName = env.DATA_STORES.getByName.bind(env.DATA_STORES);
-      const secondAtClose = Promise.withResolvers<null>();
-      const letSecondClose = Promise.withResolvers<null>();
-      let secondOutcome: Promise<string> | undefined;
-      let closes = 0;
-      const stalling = (name: string) => {
-        const stub = getByName(name);
-        return new Proxy(stub, {
-          get: (target, property): unknown =>
-            property === "close"
-              ? async (...args: Parameters<typeof stub.close>) => {
-                  closes += 1;
-                  if (closes === 1) {
-                    await env.DB.prepare(
-                      "UPDATE business_stores SET closing_at = ? WHERE id = ?"
-                    )
-                      .bind(Date.now() - 2 * storeClosingMs, store)
-                      .run();
-                    secondOutcome = failure(async () => {
-                      await deleteStore(env, owner, store);
-                    });
-                    await secondAtClose.promise;
-                  } else {
-                    secondAtClose.resolve(null);
-                    await letSecondClose.promise;
-                  }
-                  return await target.close(...args);
-                }
-              : Reflect.get(target, property),
-        });
-      };
-      Reflect.set(env.DATA_STORES, "getByName", stalling);
-      let firstOutcome: string;
-      let duringSecond: string;
-      try {
-        firstOutcome = await failure(async () => {
-          await deleteStore(env, owner, store);
-        });
-        // The first was refused and cleared nothing of the second's: the
-        // store is still closing, so no version bound to it runs.
-        duringSecond = await failure(
-          async () => await activateVersion(env, owner, app, 1)
-        );
-        letSecondClose.resolve(null);
-      } finally {
-        Reflect.set(env.DATA_STORES, "getByName", getByName);
-      }
-      expect([
-        firstOutcome,
-        duringSecond,
-        await secondOutcome,
-        closes,
-      ]).toStrictEqual([
-        "data.store_in_use",
-        "data.store_unavailable",
-        "data.store_in_use",
-        2,
-      ]);
-    });
-
     it("refuses a version whose store is deleted as it is made current", async () => {
       const { owner, app } = await appWith(notesFiles());
       await activateVersion(env, owner, app, 1);
       const [store] = await defaultStores(app);
       await commitFiles(env, owner, app, emptyFiles, "No tables");
       await activateVersion(env, owner, app, 2);
+      // Its store gone as the statement runs (deletion itself is refused
+      // while version 1 is kept: this is the guard behind that).
       const racing = racingDb(async () => {
-        await deleteStore(env, owner, store?.storeId ?? "");
+        await env.DB.prepare(
+          "UPDATE business_stores SET deleted_at = ? WHERE id = ?"
+        )
+          .bind(Date.now(), store?.storeId ?? "")
+          .run();
       }, /update "apps"/iu);
       await expect(
         failure(
