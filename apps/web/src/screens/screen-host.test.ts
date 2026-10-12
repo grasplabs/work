@@ -49,4 +49,17 @@ describe("a screen's function call through the page", () => {
       { code: "internal.unexpected" },
     ]);
   });
+
+  it("turns a request that never reached core into a coded error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        await Promise.resolve();
+        throw new TypeError("Failed to fetch");
+      })
+    );
+    await expect(
+      outcome(callFunction("app", "lease", "{}"))
+    ).resolves.toStrictEqual({ code: "internal.unexpected" });
+  });
 });

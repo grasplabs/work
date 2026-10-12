@@ -179,6 +179,16 @@ const refusedForBuild = (error: unknown): boolean => {
 };
 
 /**
+ * A failure that isn't core's refusal (offline, a cut connection, a
+ * proxy's page), as the frame gets it: a coded error, never what was
+ * thrown or what the response held.
+ */
+const callFailed = (): Error =>
+  Object.assign(new Error("The call failed."), {
+    code: "internal.unexpected",
+  });
+
+/**
  * Calls one of `app`'s functions with `request`, as the frame sent it,
  * for the build `lease` names (core's app-function-route.ts): a plain
  * request, so core bounds its bytes as it reads them. Core's answer, or
@@ -189,9 +199,10 @@ export const callFunction = async (
   lease: string,
   request: string
 ): Promise<unknown> => {
-  const response = await fetch(
-    `${appFunctionPath}/${encodeURIComponent(app)}`,
-    {
+  let response: Response;
+  let answer: unknown;
+  try {
+    response = await fetch(`${appFunctionPath}/${encodeURIComponent(app)}`, {
       method: "POST",
       credentials: "same-origin",
       headers: {
@@ -199,26 +210,21 @@ export const callFunction = async (
         [screenLeaseHeader]: lease,
       },
       body: request,
-    }
-  );
-  let answer: unknown;
-  try {
+    });
     answer = await response.json();
   } catch {
-    // Not core's JSON (a proxy's page, a cut connection): a coded error,
-    // never what the response held.
-    throw Object.assign(new Error("The call failed."), {
-      code: "internal.unexpected",
-    });
+    throw callFailed();
   }
   if (response.ok) {
     return answer;
   }
   const payload = errorPayloadSchema.safeParse(answer);
-  throw Object.assign(
-    new Error(payload.success ? payload.data.message : "The call failed."),
-    { code: payload.success ? payload.data.code : "internal.unexpected" }
-  );
+  if (!payload.success) {
+    throw callFailed();
+  }
+  throw Object.assign(new Error(payload.data.message), {
+    code: payload.data.code,
+  });
 };
 
 /**
