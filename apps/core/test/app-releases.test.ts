@@ -255,6 +255,8 @@ describe("sealing a release", { timeout: 120_000 }, () => {
         targetId: fixture.store,
         schemaHash: release.manifest.schemaHash,
         manifestHash: release.manifestHash,
+        // The store's first definition (business_store_versions).
+        targetVersion: 1,
       },
     ]);
     const events = await allEvents();

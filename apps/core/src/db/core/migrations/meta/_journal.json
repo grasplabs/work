@@ -456,6 +456,13 @@
       "when": 1791824585550,
       "tag": "0064_app_resource_bindings",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "6",
+      "when": 1791826067644,
+      "tag": "0065_store_definitions",
+      "breakpoints": true
     }
   ]
 }

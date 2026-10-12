@@ -48,8 +48,9 @@ import {
 } from "./audit-outbox.ts";
 import type { Acting, Member } from "./auth/identity.ts";
 import {
-  apps,
   appVersions,
+  apps,
+  businessStores,
   sdkReleaseManifests,
   sdkResourceBindings,
 } from "./db/core/schema.ts";
@@ -1155,6 +1156,34 @@ export const setCurrentVersion = async (
       keep: previous === null && approved === 1,
     }),
     ...registerTriggers(db, appId, number, triggers, storedEvent(event.id)),
+    // The store the arriving version's release binds now serves its
+    // definition, and one the leaving version's bound and the arriving
+    // one's doesn't serves none (each subquery finds no binding): core's
+    // inventory follows (data-stores.ts).
+    db
+      .update(businessStores)
+      .set({
+        activeSchemaVersion: sql`(SELECT bound.target_version FROM sdk_resource_bindings AS bound
+          WHERE bound.resource_id = ${appId} AND bound.resource_version = ${number}
+            AND bound.kind = 'store' AND bound.target_id = ${businessStores.id})`,
+        activeSchemaHash: sql`(SELECT bound.schema_hash FROM sdk_resource_bindings AS bound
+          WHERE bound.resource_id = ${appId} AND bound.resource_version = ${number}
+            AND bound.kind = 'store' AND bound.target_id = ${businessStores.id})`,
+        activeOperationManifestHash: sql`(SELECT definition.operation_manifest_hash
+          FROM sdk_resource_bindings AS bound
+          JOIN business_store_versions AS definition
+            ON definition.store_id = bound.target_id AND definition.version = bound.target_version
+          WHERE bound.resource_id = ${appId} AND bound.resource_version = ${number}
+            AND bound.kind = 'store' AND bound.target_id = ${businessStores.id})`,
+      })
+      .where(
+        and(
+          sql`${businessStores.id} IN (SELECT target_id FROM sdk_resource_bindings
+            WHERE resource_id = ${appId} AND resource_version IN (${number}, ${previous ?? number})
+              AND kind = 'store')`,
+          storedEvent(event.id)
+        )
+      ),
     // The sealed releases of the version leaving and the one arriving
     // were current until now: their retention counts from here
     // (release-retention.ts), not from the sweep's last look.
