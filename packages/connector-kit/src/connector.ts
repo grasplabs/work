@@ -171,6 +171,18 @@ export interface Tool {
   call: (args: unknown) => Promise<CallResult>;
 }
 
+/**
+ * A tool's input or output schema as its generated contract holds it:
+ * JSON data, without the `$schema` marker, which says nothing about the
+ * values it allows.
+ */
+const contractSchemaOf = (
+  schema: Record<string, unknown>
+): ActionManifest["contract"]["input"] => {
+  const { $schema: _marker, ...rest } = schema;
+  return z.record(z.string(), z.json()).parse(structuredClone(rest));
+};
+
 const isObject = (value: unknown): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -282,6 +294,10 @@ export const defineTool = <
       readOnly,
       resource: resource ?? null,
       input: Object.keys(inputSchema.properties ?? {}),
+      contract: {
+        input: contractSchemaOf(inputSchema),
+        output: contractSchemaOf(outputSchema),
+      },
       ...(definition.describe === undefined
         ? {}
         : {

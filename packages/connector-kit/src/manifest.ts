@@ -207,6 +207,9 @@ const actionDescribeSchema = z.strictObject({
 });
 export type ActionDescribe = z.infer<typeof actionDescribeSchema>;
 
+/** A JSON Schema of a tool's input or output, as plain JSON data. */
+const jsonSchemaObject = z.record(z.string(), z.json());
+
 /**
  * What connect knows of one action (tool) before running it, and decides
  * by before it reads a token: whether it is read-only, the input property
@@ -223,6 +226,16 @@ const actionManifestSchema = z.strictObject({
     .nullable(),
   input: z.array(z.string().min(1).max(128)).max(128),
   describe: actionDescribeSchema.optional(),
+  /**
+   * Its input and its output, as the JSON Schemas the connector's own
+   * schemas make: the generated contract an App's resource binding is
+   * checked against (spec 12), in both directions. Data only: connect
+   * never runs anything from them.
+   */
+  contract: z.strictObject({
+    input: jsonSchemaObject,
+    output: jsonSchemaObject,
+  }),
 });
 export type ActionManifest = z.infer<typeof actionManifestSchema>;
 

@@ -2,13 +2,14 @@ import type { AnyResource } from "@grasp-os/sdk";
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
+import type { HeldBinding } from "@grasp-os/shared/capability";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { identifierMaxLength } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { jsonOf } from "@grasp-os/shared/operations";
+import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import {
   bindingApprovalSchema,
   bindingTargetSchema,
@@ -37,8 +38,9 @@ import {
 import type {
   BindingCaller,
   ResourceAdapter,
-  ServedContract,
+  ServedBinding,
 } from "./resource-adapter.ts";
+import { connectorAdapter } from "./resource-connector.ts";
 import { knowledgeAdapter } from "./resource-knowledge.ts";
 import { modelAdapter } from "./resource-model.ts";
 
@@ -86,6 +88,7 @@ const adapters: {
 } = {
   model: modelAdapter,
   knowledge: knowledgeAdapter,
+  connector: connectorAdapter,
 };
 
 /** The SHA-256 of `declaration`, canonical, as a release sealed it. */
@@ -99,13 +102,13 @@ export const declarationHash = async (
   return await sha256Hex(canonicalJson(json));
 };
 
-/** What `target` serves for `declaration`, by its kind's adapter. */
-const servedBy = async (
+/** `target` bound for `declaration`, by its kind's adapter. */
+const boundBy = async (
   env: Env,
   app: AppId,
   declaration: AnyResource,
   target: BindingTarget
-): Promise<ServedContract | undefined> => {
+): Promise<ServedBinding | undefined> => {
   if (declaration["~resource"] !== target.kind) {
     return undefined;
   }
@@ -114,10 +117,31 @@ const servedBy = async (
   // `adapters` holds each kind's own adapter.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const loose = adapter as ResourceAdapter<BindingTarget["kind"]> | undefined;
-  return await loose?.served(env, app, declaration, target);
+  return await loose?.bind(env, app, declaration, target);
 };
 
 type Row = typeof appResourceBindings.$inferSelect;
+
+/**
+ * Drops the held actions App `app` made through binding `bindingId`, now
+ * revoked or replaced: none of them could be confirmed anyway
+ * (`requireHeldBinding`), so the person isn't asked about them. Best
+ * effort: the check on confirming is what holds.
+ */
+const dropHeldFor = async (
+  env: Env,
+  app: string,
+  bindingId: string
+): Promise<void> => {
+  try {
+    await env.CONNECT.dropForBinding({ appId: app, bindingId });
+  } catch (error) {
+    log.warn("resource_binding.drop_failed", {
+      binding: bindingId,
+      ...errorFields(error),
+    });
+  }
+};
 
 /** A row as the API returns it. */
 const toBinding = (row: Row): ResourceBinding => ({
@@ -218,7 +242,7 @@ export const approveResourceBinding = async (
   if (declaration === undefined || declaration["~resource"] !== target.kind) {
     throw resourceBindingErrors.create("resource.undeclared");
   }
-  const served = await servedBy(env, found.id, declaration, target);
+  const served = await boundBy(env, found.id, declaration, target);
   if (served === undefined) {
     throw resourceBindingErrors.create("resource.target_invalid");
   }
@@ -303,6 +327,9 @@ export const approveResourceBinding = async (
     await requireStillAdmin(env, by);
     throw appErrors.create("app.conflict");
   }
+  if (previous !== undefined) {
+    await dropHeldFor(env, found.id, previous.id);
+  }
   return toBinding(written);
 };
 
@@ -359,6 +386,7 @@ export const revokeResourceBinding = async (
       .get();
     return toBinding(now ?? found);
   }
+  await dropHeldFor(env, row.appId, row.id);
   return toBinding(row);
 };
 
@@ -409,7 +437,7 @@ export const resourceBindingsFor =
     if ((await declarationHash(declaration)) !== row.declarationHash) {
       return undefined;
     }
-    const served = await servedBy(env, caller.app, declaration, target.data);
+    const served = await boundBy(env, caller.app, declaration, target.data);
     if (
       served?.contractId !== row.contractId ||
       served.fingerprint !== row.fingerprint
@@ -421,15 +449,6 @@ export const resourceBindingsFor =
       });
       return undefined;
     }
-    const adapter = adapters[target.data.kind];
-    // SAFETY: as in `servedBy`: the row's kind is the declaration's and
-    // the target's, and each kind has its own adapter.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    const loose = adapter as ResourceAdapter<BindingTarget["kind"]> | undefined;
-    if (loose === undefined) {
-      return undefined;
-    }
-    const bound = target.data;
     return {
       kind: declaration["~resource"],
       contract:
@@ -438,13 +457,83 @@ export const resourceBindingsFor =
           ? declaration.contract
           : null,
       call: async (method, args, context) =>
-        await loose.call(
-          env,
-          caller,
-          declaration,
-          bound,
-          { method, args },
-          context
-        ),
+        await served.call(caller, { method, args }, context, {
+          id: row.id,
+          declarationHash: row.declarationHash,
+          fingerprint: row.fingerprint,
+        }),
     };
   };
+
+/** A held call its binding no longer serves. */
+const notServed = () => operationErrors.create("resource.unavailable");
+
+/**
+ * Refuses a held call of App `app` through binding `pin` unless the
+ * binding would still serve it now, exactly as a live request of the App's
+ * current version would resolve it (`resourceBindingsFor`): the binding is
+ * the same one and still active, the current release declares exactly
+ * what was approved and an action of it uses the alias, its target still serves exactly the contract pinned,
+ * and that contract still names the call's tool. A binding revoked or
+ * replaced since, a version that widened the declaration, a drifted
+ * contract or a lost grant: `resource.unavailable`, and nothing runs.
+ */
+export const requireHeldBinding = async (
+  env: Env,
+  app: AppId,
+  pin: HeldBinding,
+  tool: string
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select()
+    .from(appResourceBindings)
+    .where(
+      and(
+        eq(appResourceBindings.id, pin.id),
+        eq(appResourceBindings.appId, app),
+        eq(appResourceBindings.status, "active")
+      )
+    )
+    .get();
+  const found = row === undefined ? undefined : await findApp(env, app);
+  if (
+    row === undefined ||
+    found?.currentVersion === null ||
+    found === undefined ||
+    row.declarationHash !== pin.declarationHash ||
+    row.fingerprint !== pin.fingerprint
+  ) {
+    throw notServed();
+  }
+  const release = await loadRelease(env, found.id, found.currentVersion);
+  const declaration = Object.hasOwn(release.app.resources, row.alias)
+    ? release.app.resources[row.alias]
+    : undefined;
+  const target = bindingTargetSchema.safeParse(JSON.parse(row.target));
+  // As a live request needs: an action of the current release lists the
+  // alias in its `uses`, so a version that keeps the declaration but no
+  // longer uses it runs nothing through it.
+  const used = Object.values(release.app.operations).some(
+    (operation) =>
+      operation.kind === "action" &&
+      operation.uses.some(
+        (use) => use.type === "resource" && use.alias === row.alias
+      )
+  );
+  if (
+    declaration === undefined ||
+    !target.success ||
+    !used ||
+    (await declarationHash(declaration)) !== row.declarationHash
+  ) {
+    throw notServed();
+  }
+  const served = await boundBy(env, found.id, declaration, target.data);
+  if (
+    served?.contractId !== row.contractId ||
+    served.fingerprint !== row.fingerprint ||
+    served.tools?.includes(tool) !== true
+  ) {
+    throw notServed();
+  }
+};

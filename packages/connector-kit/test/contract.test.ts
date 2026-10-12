@@ -243,6 +243,7 @@ describe("a connector", () => {
             readOnly: true,
             resource: null,
             input: [],
+            contract: { input: { type: "object" }, output: { type: "object" } },
           },
         },
       });

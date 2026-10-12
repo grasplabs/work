@@ -52,6 +52,7 @@ export const screenTests = [
   "test/app-activation.test.ts",
   "test/app-function-route.test.ts",
   "test/resource-bindings.test.ts",
+  "test/resource-connectors.test.ts",
   "test/agent-apps.test.ts",
   "test/agent-app-functions.test.ts",
   "test/agent-builds.test.ts",
@@ -202,6 +203,9 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
                 COMPOSIO_API_KEY: testComposioKey,
               },
               d1Databases: { DB: "grasp-os-connect" },
+              // Its native connectors, each loaded into an isolate of its
+              // own per call (connect's src/connectors.ts), as deployed.
+              workerLoaders: { LOADER: {} },
               // Entra and Composio, as connect reaches them
               // (test/connect-providers.ts).
               outboundService: "connect-providers",
