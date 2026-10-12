@@ -575,6 +575,23 @@ const maxExitWaitMs = 10_000;
 const exitWaitMs = (endsAt: number): number =>
   Math.min(Math.max(endsAt - Date.now(), minExitWaitMs), maxExitWaitMs);
 
+/**
+ * Waits for `host` to exit, `ms` at most, or until `until` aborts (a bound
+ * of its call that ends it first). Its timer never keeps the supervisor's
+ * own process running once it's stopped.
+ */
+const waitForExit = async (
+  host: HostProcess,
+  ms: number,
+  until?: AbortSignal
+): Promise<void> => {
+  await Promise.race([
+    host.exited,
+    sleep(ms, undefined, { ref: false }),
+    ...(until === undefined ? [] : [abortOf(until)]),
+  ]);
+};
+
 /** The pool of sandbox processes, and the calls it serves. */
 class SandboxPool {
   readonly #settings: Settings;
@@ -838,16 +855,22 @@ class SandboxPool {
     endsAt: number,
     error?: unknown
   ): Promise<Ending> {
+    const first = guard.reason();
+    if (first !== undefined && first !== "unreadable") {
+      return { kind: first };
+    }
+    // Unreadable, the process still runs as far as anyone can tell: no
+    // longer a wait for it to go than the least. Otherwise its bounds still
+    // hold while it may go: its caller leaving, its memory, its deadline.
+    await waitForExit(
+      host,
+      first === "unreadable" ? minExitWaitMs : exitWaitMs(endsAt),
+      first === undefined ? guard.signal : undefined
+    );
     const reason = guard.reason();
     if (reason !== undefined && reason !== "unreadable") {
       return { kind: reason };
     }
-    // Unreadable, the process still runs as far as anyone can tell: no
-    // longer a wait for it to go than the least.
-    await Promise.race([
-      host.exited,
-      sleep(reason === "unreadable" ? minExitWaitMs : exitWaitMs(endsAt)),
-    ]);
     if (host.gone && !this.#stopping) {
       return { kind: "crashed" };
     }
@@ -1257,7 +1280,7 @@ class SandboxPool {
     }
     // The host closes a session itself only as its process dies, mostly:
     // a process slow to go is still the crash it is (`exitWaitMs`).
-    await Promise.race([host.exited, sleep(exitWaitMs(endsAt))]);
+    await waitForExit(host, exitWaitMs(endsAt));
     if (host.gone && !this.#stopping) {
       return { kind: "crashed" };
     }

@@ -225,6 +225,34 @@ const healthOf = async (socket: string): Promise<string> => {
     .parse(JSON.parse(await textOf(response))).status;
 };
 
+/**
+ * A stand-in for workerd that listens as workerd does, then drops every
+ * call's connection and keeps running: a host that failed, not a crash.
+ */
+const droppingHost = (): string => {
+  const script = path.join(tempDir(), "dropping-host.mjs");
+  writeFileSync(
+    script,
+    `#!${process.execPath}
+import { createServer } from "node:http";
+import { createWriteStream } from "node:fs";
+const addr = process.argv.find((arg) => arg.startsWith("--socket-addr=http=unix:"));
+const socket = addr.slice("--socket-addr=http=unix:".length);
+const server = createServer((request) => {
+  request.socket.destroy();
+  // Then, a little later, past any memory limit a test sets.
+  setTimeout(() => { globalThis.held = Buffer.alloc(400 * 1024 * 1024, 1); }, 500);
+});
+server.listen(socket, () => {
+createWriteStream(null, { fd: 3 }).write(JSON.stringify({ event: "listen", socket: "http" }) + "\\n");
+});
+setInterval(() => {}, 1 << 30);
+`
+  );
+  chmodSync(script, 0o755);
+  return script;
+};
+
 /** A supervisor for one test, stopped after it. */
 const withSupervisor = async (
   options: Partial<SandboxSupervisorOptions>,
@@ -612,6 +640,47 @@ describe("the sandbox supervisor", () => {
     );
   }, 30_000);
 
+  it("ends at once, as its bound, a call whose host dropped it and still runs", async () => {
+    // Its memory past its limit half a second after the drop: the
+    // supervisor doesn't wait out a process that won't go.
+    await withSupervisor(
+      {
+        workerd: droppingHost(),
+        memoryLimitBytes: 256 * 1024 * 1024,
+      },
+      async (supervisor) => {
+        const result = await callSupervisor(supervisor.socket, {
+          body: "return 1;",
+          deadlineMs: 20_000,
+        });
+        expect(result).toMatchObject({ status: 200, verdict: "memory" });
+        expect(result.ms).toBeLessThan(3000);
+      }
+    );
+  });
+
+  it("frees the process of a call whose host dropped it as soon as its caller leaves", async () => {
+    await withSupervisor({ workerd: droppingHost() }, async (supervisor) => {
+      const leave = new AbortController();
+      const call = callSupervisor(supervisor.socket, {
+        body: "return 1;",
+        deadlineMs: 20_000,
+        signal: leave.signal,
+      });
+      await sleep(300);
+      leave.abort();
+      await expect(call).rejects.toThrow("aborted");
+      const left = Date.now();
+      await expect
+        .poll(() => supervisor.stats().abandoned, {
+          timeout: 3000,
+          interval: 50,
+        })
+        .toBe(1);
+      expect(Date.now() - left).toBeLessThan(3000);
+    });
+  });
+
   it("refuses a call unread when the pool and its queue are full", async () => {
     await withSupervisor({ maxWaiting: 1 }, async ({ socket }) => {
       const busy = callSupervisor(socket, {
@@ -927,6 +996,34 @@ setInterval(() => undefined, 1000);
       await expect.poll(() => pids.some(isRunning)).toBe(false);
     }
   );
+
+  it("lets its host process exit promptly once stopped while waiting for a process to go", async () => {
+    const parent = path.join(tempDir(), "stops.mjs");
+    writeFileSync(
+      parent,
+      `import { request } from "node:http";
+import { startSandboxSupervisor } from ${JSON.stringify(path.join(import.meta.dirname, "workerd-sandbox.ts"))};
+const supervisor = await startSandboxSupervisor({ workerd: ${JSON.stringify(droppingHost())}, processes: 1, log: () => undefined });
+// A call its host drops: the supervisor waits for that process to go.
+const call = request({ socketPath: supervisor.socket, path: "/call", method: "POST", headers: { ${JSON.stringify(deadlineHeader)}: "20000" } });
+call.on("error", () => undefined);
+call.end("{}");
+await new Promise((resolve) => setTimeout(resolve, 300));
+await supervisor.stop();
+process.stdout.write("stopped\\n");
+`
+    );
+    const host = tracked(
+      spawn(process.execPath, [parent], {
+        stdio: ["ignore", "pipe", "inherit"],
+      })
+    );
+    await once(createInterface({ input: host.stdout }), "line");
+    const stopped = Date.now();
+    await once(host, "exit");
+    // Nothing of the supervisor's keeps it running: not a wait's timer.
+    expect(Date.now() - stopped).toBeLessThan(2000);
+  });
 
   it("runs each call in a process of its own, so work an App leaves behind never reaches the next", async () => {
     await withSupervisor({}, async (supervisor) => {
