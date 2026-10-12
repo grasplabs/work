@@ -8,6 +8,7 @@
  * supervisor bounds a busy loop.
  */
 import { execFileSync, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import {
   mkdirSync,
@@ -22,7 +23,14 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+} from "vite-plus/test";
 import { z } from "zod";
 
 import { isolateSettings } from "../apps/core/src/on-prem/sandbox-host.ts";
@@ -91,6 +99,38 @@ const workerdIn = (dir: string): string[] => {
     // pgrep exits 1 when nothing matches.
     return [];
   }
+};
+
+/** The Node scripts a test started, stopped after it whatever its outcome. */
+const scripts: ChildProcess[] = [];
+
+/** `child`, stopped after its test (`stopStarted`). */
+const tracked = <Child extends ChildProcess>(child: Child): Child => {
+  scripts.push(child);
+  return child;
+};
+
+/**
+ * Stops every script a test started and left running (its assertions
+ * failed, or it timed out): SIGTERM first, so a supervisor stops its
+ * workerd, which are detached and would outlive a SIGKILL of their parent;
+ * then SIGKILL for one that ignores it.
+ */
+const stopStarted = async (): Promise<void> => {
+  await Promise.all(
+    scripts.splice(0).map(async (child) => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        return;
+      }
+      const exited = once(child, "exit");
+      child.kill("SIGTERM");
+      await Promise.race([exited, sleep(3000)]);
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+        await exited;
+      }
+    })
+  );
 };
 
 /** A module whose `E.go()` runs `body`. */
@@ -425,6 +465,10 @@ describe("a seal's inspection on plain workerd", () => {
 });
 
 describe("the sandbox supervisor", () => {
+  afterEach(async () => {
+    await stopStarted();
+  });
+
   afterAll(() => {
     cleanUp();
   });
@@ -829,9 +873,11 @@ process.stdout.write(JSON.stringify({ pids: supervisor.pids() }) + "\\n");
 setInterval(() => undefined, 1000);
 `
       );
-      const host = spawn(process.execPath, [parent], {
-        stdio: ["ignore", "pipe", "inherit"],
-      });
+      const host = tracked(
+        spawn(process.execPath, [parent], {
+          stdio: ["ignore", "pipe", "inherit"],
+        })
+      );
       const first: unknown[] = await once(
         createInterface({ input: host.stdout }),
         "line"
@@ -886,13 +932,15 @@ setInterval(() => undefined, 1000);
   it.each(["0", "two", "-1"])(
     "refuses --processes=%s when run on its own",
     async (processes) => {
-      const supervisor = spawn(
-        process.execPath,
-        [
-          path.join(import.meta.dirname, "workerd-sandbox.ts"),
-          `--processes=${processes}`,
-        ],
-        { stdio: ["ignore", "ignore", "pipe"] }
+      const supervisor = tracked(
+        spawn(
+          process.execPath,
+          [
+            path.join(import.meta.dirname, "workerd-sandbox.ts"),
+            `--processes=${processes}`,
+          ],
+          { stdio: ["ignore", "ignore", "pipe"] }
+        )
       );
       let stderr = "";
       supervisor.stderr.on("data", (chunk: Buffer) => {
@@ -905,14 +953,16 @@ setInterval(() => undefined, 1000);
   );
 
   it("stops its processes on SIGTERM when run on its own", async () => {
-    const supervisor = spawn(
-      process.execPath,
-      [
-        path.join(import.meta.dirname, "workerd-sandbox.ts"),
-        "--processes",
-        "1",
-      ],
-      { stdio: ["ignore", "ignore", "pipe"] }
+    const supervisor = tracked(
+      spawn(
+        process.execPath,
+        [
+          path.join(import.meta.dirname, "workerd-sandbox.ts"),
+          "--processes",
+          "1",
+        ],
+        { stdio: ["ignore", "ignore", "pipe"] }
+      )
     );
     const events = z.object({ event: z.string(), pid: z.number().optional() });
     let pid = 0;
