@@ -38,7 +38,7 @@ import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { dataErrors } from "@grasp-os/shared/stores";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -48,6 +48,7 @@ import type { Acting } from "./auth/identity.ts";
 import { openStore, requireStoreManager } from "./data-stores.ts";
 import {
   appDefaultStores,
+  businessStoreVersions,
   sdkArtifactDeletions,
   sdkReleaseArtifacts,
   sdkReleaseManifests,
@@ -760,6 +761,61 @@ const boundStore = async (
 };
 
 /**
+ * Records again, for a release sealed already, the definition of the store
+ * it binds in core's inventory (`business_store_versions`) and the
+ * binding's `target_version`, wherever either is missing: so making any
+ * sealed release current leaves the store's active definition complete
+ * (apps.ts), as a fresh seal does. Changes nothing when both are there.
+ */
+const restoreDefinition = async (
+  env: Env,
+  {
+    app,
+    version,
+    sourceTreeHash,
+  }: { app: AppId; version: number; sourceTreeHash: string },
+  store: DataStoreBinding
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  await db.batch([
+    db
+      .insert(businessStoreVersions)
+      .values({
+        storeId: store.storeId,
+        version: sql`COALESCE((SELECT MAX(version) FROM business_store_versions
+          WHERE store_id = ${store.storeId}), 0) + 1`,
+        schemaHash: store.schemaHash,
+        operationManifestHash: store.operationManifestHash,
+        sourceTreeHash,
+        createdAt: new Date(),
+      })
+      .onConflictDoNothing({
+        target: [
+          businessStoreVersions.storeId,
+          businessStoreVersions.schemaHash,
+          businessStoreVersions.operationManifestHash,
+        ],
+      }),
+    db
+      .update(sdkResourceBindings)
+      .set({
+        targetVersion: sql`(SELECT version FROM business_store_versions
+          WHERE store_id = ${store.storeId} AND schema_hash = ${store.schemaHash}
+            AND operation_manifest_hash = ${store.operationManifestHash})`,
+      })
+      .where(
+        and(
+          eq(sdkResourceBindings.resourceId, app),
+          eq(sdkResourceBindings.resourceVersion, version),
+          eq(sdkResourceBindings.kind, "store"),
+          eq(sdkResourceBindings.targetId, store.storeId),
+          isNull(sdkResourceBindings.targetVersion)
+        )
+      ),
+  ]);
+};
+
+/**
  * Seals the release of `request.app`'s `request.version` (see the header)
  * and answers it. A version sealed
  * already answers its release as sealed, whatever store is asked for now;
@@ -793,7 +849,15 @@ export const sealRelease = async (
       { app, version },
       named.artifacts.map(({ sha256 }) => sha256)
     );
-    return await loadRelease(env, app, version);
+    const release = await loadRelease(env, app, version);
+    if (release.store !== null) {
+      await restoreDefinition(
+        env,
+        { app, version, sourceTreeHash: release.manifest.sourceTreeHash },
+        release.store
+      );
+    }
+    return release;
   }
   // Before any App code is inspected: the App's own default store, which
   // the host chose for it (`app_default_stores`), is bound by its builder
@@ -935,6 +999,26 @@ export const sealRelease = async (
             // and not being deleted: otherwise NULL, which the column
             // refuses, and the whole seal with it. So of a seal binding the
             // store and its deletion's closing mark, one wins.
+            // The store's definition in core's inventory, numbered as it
+            // first appears; the binding below names its version.
+            db
+              .insert(businessStoreVersions)
+              .values({
+                storeId: store.storeId,
+                version: sql`COALESCE((SELECT MAX(version) FROM business_store_versions
+                  WHERE store_id = ${store.storeId}), 0) + 1`,
+                schemaHash: store.schemaHash,
+                operationManifestHash: store.operationManifestHash,
+                sourceTreeHash: row.tree,
+                createdAt: new Date(),
+              })
+              .onConflictDoNothing({
+                target: [
+                  businessStoreVersions.storeId,
+                  businessStoreVersions.schemaHash,
+                  businessStoreVersions.operationManifestHash,
+                ],
+              }),
             db.insert(sdkResourceBindings).values({
               resourceId: app,
               resourceVersion: version,
@@ -945,6 +1029,9 @@ export const sealRelease = async (
                 AND ${liveStoreSql(sql`${store.storeId}`, Date.now())})`,
               schemaHash: store.schemaHash,
               manifestHash: hash,
+              targetVersion: sql`(SELECT version FROM business_store_versions
+                WHERE store_id = ${store.storeId} AND schema_hash = ${store.schemaHash}
+                  AND operation_manifest_hash = ${store.operationManifestHash})`,
             }),
           ]),
       outboxed(db, {
