@@ -200,3 +200,11 @@ export const runFunction = async (
   const handler = fn.handler as (ctx: object, args: unknown) => unknown;
   return await handler(Object.freeze(ctx), args);
 };
+
+/**
+ * The manifest of `registered` (an App `app` made), as JSON text: what an
+ * App's inspection isolate answers its host, which reads it as hostile
+ * (`readAppManifest`). Throws for anything `app` didn't make.
+ */
+export const manifestOfApp = (registered: unknown): string =>
+  JSON.stringify(inspectApp(registered).manifest);

@@ -28,6 +28,7 @@ import type { InlineConfig, Plugin, Rolldown } from "vite-plus";
 import { z } from "zod";
 
 import { withBuildLock } from "./build-lock.ts";
+import { serverSdkImports } from "./src/app-code.ts";
 import { extractCandidates } from "./src/candidates.ts";
 import { compileModule } from "./src/compile.ts";
 import { sdkImports } from "./src/imports.ts";
@@ -386,10 +387,11 @@ const buildKitModules = async (entries: Entry[]): Promise<FlatModules> => {
 };
 
 /**
- * The workflow SDK's modules, which App workflows import (`sdkImports`):
- * one module per specifier, named by it (`@grasp-os~sdk~workflow.js`),
- * and chunks for what they share (Zod), importing each other by flat name
- * like the kit's modules.
+ * The SDK's modules App code runs with outside screens: the workflow SDK,
+ * which App workflows import (`sdkImports`), and what an App's server
+ * isolate loads (`serverSdkImports`). One module per specifier, named by
+ * it (`@grasp-os~sdk~workflow.js`), and chunks for what they share (Zod),
+ * importing each other by flat name like the kit's modules.
  */
 const buildSdkModules = async (): Promise<Record<string, string>> => {
   const exported = exportsOf(sdk);
@@ -408,7 +410,7 @@ const buildSdkModules = async (): Promise<Record<string, string>> => {
       copyPublicDir: false,
       rolldownOptions: {
         input: Object.fromEntries(
-          sdkImports.map((specifier) => {
+          [...sdkImports, ...serverSdkImports].map((specifier) => {
             const target =
               exported[`.${specifier.slice("@grasp-os/sdk".length)}`];
             if (typeof target !== "string") {

@@ -21,6 +21,7 @@ import { compile } from "tailwindcss";
 
 import kit from "#kit";
 
+import { appCodeFiles, appCodeImport, isAppLayout } from "./app-code.ts";
 import { extractCandidates } from "./candidates.ts";
 import { compileModule, stripTypes, transformModule } from "./compile.ts";
 import { isError } from "./diagnostic.ts";
@@ -29,6 +30,7 @@ import {
   collectImports,
   importError,
   codeImportError,
+  rewriteAppCodeImports,
   rewriteCodeImports,
   rewriteImports,
   serverCode,
@@ -36,6 +38,7 @@ import {
 } from "./imports.ts";
 import type { CodeKind, ImportSite, ModuleImports } from "./imports.ts";
 import {
+  appCodeLimitErrors,
   buildFiles,
   declarationFile,
   limitErrors,
@@ -496,6 +499,99 @@ export const buildWorkflows = (
     : compileCode(workflowCode, workflows);
 };
 
+/**
+ * An App's server code of spec 8's layout (app-code.ts) as modules by
+ * flat name, the host's generated modules among them; or why it failed.
+ */
+export type AppCodeBuild =
+  | { ok: true; modules: Record<string, string> }
+  | { ok: false; diagnostics: Diagnostic[] };
+
+/** Compiles one file of an App's server code, or says why it can't be. */
+const compileAppCodeFile = (
+  path: string,
+  source: string,
+  files: ReadonlySet<string>
+): { code: string } | { errors: Diagnostic[] } => {
+  const imports: ImportSite[] = [];
+  let compiled: string;
+  try {
+    compiled = stripTypes(source, path, [collectImports(imports)]);
+  } catch (error) {
+    const message = messageIn(path, error);
+    return {
+      errors: [
+        problem("compile", message, { file: path, ...locationOf(error) }),
+      ],
+    };
+  }
+  const errors = imports.flatMap(({ specifier, line }) => {
+    const resolved = appCodeImport(path, specifier, files);
+    return "error" in resolved
+      ? [
+          problem(
+            "imports",
+            resolved.error,
+            line === undefined ? { file: path } : { file: path, line }
+          ),
+        ]
+      : [];
+  });
+  if (errors.length > 0) {
+    return { errors };
+  }
+  try {
+    return {
+      code: transformModule(compiled, path, [
+        rewriteAppCodeImports(path, files),
+      ]),
+    };
+  } catch (error) {
+    return {
+      errors: [problem("imports", messageIn(path, error), { file: path })],
+    };
+  }
+};
+
+/**
+ * Builds an App's server code of spec 8's layout: its schema, values,
+ * registration and operations, with the modules the host generated for
+ * it (`.grasp/`), each held to what its kind may import. Types are
+ * stripped, not checked.
+ */
+export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
+  const code = appCodeFiles(files);
+  const tooMuch = appCodeLimitErrors(code);
+  if (tooMuch.length > 0) {
+    return { ok: false, diagnostics: tooMuch };
+  }
+  if (!isAppLayout(code)) {
+    return {
+      ok: false,
+      diagnostics: [
+        problem(
+          "server",
+          "The App has no app.ts and schema.ts: register it in app.ts and declare its schema in schema.ts."
+        ),
+      ],
+    };
+  }
+  const known = new Set(Object.keys(code));
+  const modules: Record<string, string> = {};
+  const errors: Diagnostic[] = [];
+  for (const [path, source] of Object.entries(code)) {
+    const result = compileAppCodeFile(path, source, known);
+    if ("code" in result) {
+      modules[appModuleName(path)] = result.code;
+    } else {
+      errors.push(...result.errors);
+    }
+  }
+  return errors.length > 0
+    ? { ok: false, diagnostics: errors }
+    : { ok: true, modules };
+};
+
 export default class ScreenCompiler extends WorkerEntrypoint {
   // RPC exposes prototype methods only, so these can't be static.
   // oxlint-disable-next-line class-methods-use-this
@@ -507,6 +603,12 @@ export default class ScreenCompiler extends WorkerEntrypoint {
   // oxlint-disable-next-line class-methods-use-this
   buildServer(files: Record<string, string>): ServerBuild {
     return buildServer(files);
+  }
+
+  /** Builds an App's server code of spec 8's layout (`buildAppCode`). */
+  // oxlint-disable-next-line class-methods-use-this
+  buildAppCode(files: Record<string, string>): AppCodeBuild {
+    return buildAppCode(files);
   }
 
   /** Builds the App's workflows (`buildWorkflows`). */
