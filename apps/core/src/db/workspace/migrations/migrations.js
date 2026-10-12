@@ -9,7 +9,8 @@ import m0006 from './0006_chat_attachments.sql';
 import m0007 from './0007_chat_owner_required.sql';
 import m0008 from './0008_chat_code_runs.sql';
 import m0009 from './0009_chat_build_jobs.sql';
-import m0010 from './0010_chat_projects.sql';
+import m0010 from './0010_dashboard_layouts.sql';
+import m0011 from './0011_chat_projects.sql';
 
   export default {
     journal,
@@ -24,7 +25,8 @@ m0006,
 m0007,
 m0008,
 m0009,
-m0010
+m0010,
+m0011
     }
   }
   

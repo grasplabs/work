@@ -22,6 +22,7 @@ export const familyNamespaces = [
   "connect",
   "connection",
   "contract",
+  "dashboard",
   "data",
   "decision",
   "dependency",
@@ -52,6 +53,7 @@ export const familyNamespaces = [
   "statistics",
   "submission",
   "upload",
+  "version",
   "workflow",
 ] as const;
 

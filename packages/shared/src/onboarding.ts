@@ -13,6 +13,7 @@ import type {
   StephenSetup,
   StephenSetupView,
 } from "./onboarding-staff.ts";
+import type { onboardingStages } from "./onboarding-summary.ts";
 
 // The onboarding's interviews: Stephen, or Claire if the person prefers,
 // talks with every team lead and then with everyone else, in the language
@@ -246,8 +247,34 @@ export interface OnboardingView {
   paused: boolean;
 }
 
-/** The onboarding, for the client's admin (Grasp staff included). */
+/** How many weeks the programme with Grasp runs. */
+export const programmeWeeks = 8;
+
+/**
+ * The programme with Grasp, as the dashboard shows it to everyone signed
+ * in: when it began and where the onboarding stands, nothing more. It
+ * begins on the Monday (UTC) of the week the interviews start, and runs in
+ * weeks from there.
+ */
+export interface Programme {
+  /** Its first day, a Monday: `YYYY-MM-DD`. */
+  start: string;
+  weeks: typeof programmeWeeks;
+  /**
+   * Where the onboarding stands (`onboarding-summary.ts`): being prepared,
+   * the interviews running, waiting for Grasp's go, or open; null when
+   * none has begun.
+   */
+  stage: Exclude<(typeof onboardingStages)[number], "none"> | null;
+}
+
+/**
+ * The onboarding, for the client's admin (Grasp staff included); its
+ * programme for everyone signed in.
+ */
 export interface OnboardingApi extends OnboardingDocumentsApi {
+  /** The programme, for the dashboard; null without a plan. Any role. */
+  programme: () => Promise<Programme | null>;
   view: () => Promise<OnboardingView>;
   /** Replaces who works where. */
   saveRoster: (roster: RosterInput) => Promise<OnboardingView>;
