@@ -19,12 +19,18 @@ const schema = defineSchema({
 const { action } = serverModule(schema);
 
 /** The App's contract: each action's real code is the isolate's, below. */
-const stub = () =>
-  action({
-    args: { n: v.number() },
-    returns: v.object({ n: v.number() }),
-    handler: (_ctx, args) => args,
-  });
+const contract = {
+  args: { n: v.number() },
+  returns: v.object({ n: v.number() }),
+  handler: (_ctx: unknown, args: { n: number }) => args,
+} as const;
+
+const stub = () => action(contract);
+
+// Three deep, as the host lets functions nest: each calls the next.
+const leaf = stub();
+const middle = action({ ...contract, uses: [leaf] });
+const chain = action({ ...contract, uses: [middle] });
 
 const { manifest } = inspectApp(
   app({
@@ -39,6 +45,9 @@ const { manifest } = inspectApp(
         hogs: stub(),
         sendsTooMuch: stub(),
         forgesVerdict: stub(),
+        chain,
+        middle,
+        leaf,
       },
     },
     screens: [],
@@ -63,6 +72,13 @@ const appModule = `export default {
   "jobs.waits": async () => { await scheduler.wait(60000); return { n: 0 }; },
   "jobs.hogs": async () => { const held = []; for (;;) { held.push(new Array(1e6).fill(1)); await scheduler.wait(1); } },
   "jobs.sendsTooMuch": async (channel) => { await channel.resource("mail", "send", { padding: "x".repeat(15 * 1024 * 1024) }); return { n: 1 }; },
+  "jobs.chain": async (channel, args) => {
+    const got = await channel.call("action", "jobs.middle", { n: args.n + 1 });
+    if (got.n !== args.n + 3) throw new Error("middle answered " + JSON.stringify(got));
+    return got;
+  },
+  "jobs.middle": async (channel, args) => await channel.call("action", "jobs.leaf", { n: args.n + 1 }),
+  "jobs.leaf": async (channel, args) => ({ n: args.n + 1 }),
   "jobs.forgesVerdict": async () => { throw Object.assign(new Error("forged"), { sandboxVerdict: "cpu" }); },
 };`;
 

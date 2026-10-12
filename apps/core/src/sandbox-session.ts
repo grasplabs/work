@@ -78,6 +78,21 @@ export interface SessionCall {
   readonly lingerMs?: number;
 }
 
+/** A call made in a session already open, in its process. */
+export type NestedCall = Pick<
+  SessionCall,
+  "mainModule" | "modules" | "entrypoint" | "method" | "args"
+>;
+
+/**
+ * Runs `call` in the open session it was given for, as the session's own
+ * call waits; `signal` gives up on it (its process is the session's).
+ */
+export type NestedRun = (
+  call: NestedCall,
+  signal?: AbortSignal
+) => Promise<unknown>;
+
 /** How a call in a session is followed, besides the call itself. */
 export interface SessionOptions {
   /** Ends the call and frees its process: a cancel, or a deadline core keeps. */
@@ -87,6 +102,17 @@ export interface SessionOptions {
    * unless a test gives a pool of its own.
    */
   readonly held?: HeldPool;
+  /**
+   * Lets more calls run in the session while it's open (`open` gets how),
+   * and keeps it open, once its own call settled, until they have
+   * (`drain`): an App function's nested calls, which run in the process of
+   * the call they're nested in, idle while it waits for them, rather than
+   * each take one of the owner's share.
+   */
+  readonly nesting?: {
+    readonly open: (run: NestedRun) => void;
+    readonly drain: () => Promise<void>;
+  };
 }
 
 /** The methods `target`'s class and those above it declare, by name. */
@@ -425,7 +451,7 @@ const failureOf = async (
 export const runInSession = async (
   host: Fetcher,
   call: SessionCall,
-  { signal, held = sessionsHeld }: SessionOptions = {}
+  { signal, held = sessionsHeld, nesting }: SessionOptions = {}
 ): Promise<unknown> => {
   signal?.throwIfAborted();
   const id = crypto.randomUUID();
@@ -487,19 +513,44 @@ export const runInSession = async (
   // Whether the supervisor was told the session is over already.
   let told = false;
   signal?.addEventListener("abort", giveUp, { once: true });
-  const specs: Record<string, { methods: string[] } | { function: true }> = {};
-  const stubs: Record<string, object> = {};
-  const named = (given: SessionCapability): string => {
-    const name = `c${Object.keys(specs).length}`;
-    specs[name] = given.function
-      ? { function: true }
-      : { methods: [...given.methods] };
-    stubs[name] = sessionForwarder(given, isLive);
-    return name;
+  // A call in the session: each capability by a name of the call's own,
+  // its forwarder live while `isLive` says; the isolate never sees these,
+  // only what the sandbox host makes of them.
+  const callIn = (given: NestedCall, isCallLive: () => boolean): unknown => {
+    const specs: Record<string, { methods: string[] } | { function: true }> =
+      {};
+    const stubs: Record<string, object> = {};
+    const named = (passed: SessionCapability): string => {
+      const name = `c${Object.keys(specs).length}`;
+      specs[name] = passed.function
+        ? { function: true }
+        : { methods: [...passed.methods] };
+      stubs[name] = sessionForwarder(passed, isCallLive);
+      return name;
+    };
+    const args = given.args.map((arg) =>
+      "capability" in arg ? { capability: named(arg.capability) } : arg
+    );
+    const remote: unknown = session.getRemoteMain();
+    const run: unknown =
+      typeof remote === "object" || typeof remote === "function"
+        ? Reflect.get(remote ?? {}, "run")
+        : undefined;
+    if (typeof run !== "function") {
+      throw new SandboxUnavailableError("The session has no call to run.");
+    }
+    return Reflect.apply(run, remote, [
+      {
+        mainModule: given.mainModule,
+        modules: given.modules,
+        entrypoint: given.entrypoint,
+        method: given.method,
+        args,
+        capabilities: specs,
+      },
+      stubs,
+    ]);
   };
-  const args = call.args.map((arg) =>
-    "capability" in arg ? { capability: named(arg.capability) } : arg
-  );
   const settled = new AbortController();
   const overdue = new SandboxUnavailableError(
     "The sandbox didn't end the call in time."
@@ -509,32 +560,34 @@ export const runInSession = async (
     overdue,
     settled.signal
   );
-  try {
-    const remote: unknown = session.getRemoteMain();
-    const run: unknown =
-      typeof remote === "object" || typeof remote === "function"
-        ? Reflect.get(remote ?? {}, "run")
-        : undefined;
-    if (typeof run !== "function") {
-      throw new SandboxUnavailableError("The session has no call to run.");
+  const bounds = [
+    whenRefused,
+    backstop,
+    ...(signal === undefined ? [] : [whenAborted(signal)]),
+  ];
+  // A nested call ends as its own call does, its capabilities with it, or
+  // as the session does.
+  nesting?.open(async (given, nestedSignal) => {
+    let nestedLive = true;
+    try {
+      return await Promise.race([
+        callIn(given, () => nestedLive && live),
+        ...bounds,
+        ...(nestedSignal === undefined ? [] : [whenAborted(nestedSignal)]),
+      ]);
+    } catch (error) {
+      nestedLive = false;
+      throw await failureOf(error, { host, id, closed, signal: nestedSignal });
+    } finally {
+      nestedLive = false;
     }
-    const answer: unknown = Reflect.apply(run, remote, [
-      {
-        mainModule: call.mainModule,
-        modules: call.modules,
-        entrypoint: call.entrypoint,
-        method: call.method,
-        args,
-        capabilities: specs,
-      },
-      stubs,
-    ]);
-    return await Promise.race([
-      answer,
-      whenRefused,
-      backstop,
-      ...(signal === undefined ? [] : [whenAborted(signal)]),
-    ]);
+  });
+  try {
+    const answer = await Promise.race([callIn(call, isLive), ...bounds]);
+    if (nesting !== undefined) {
+      await Promise.race([nesting.drain(), ...bounds]);
+    }
+    return answer;
   } catch (error) {
     giveUp();
     if (signal?.aborted === true || error === overdue) {

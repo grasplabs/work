@@ -182,7 +182,13 @@ export type Runner = (
    * runner that can end the run then does, and frees what it held (an
    * on-prem sandbox session's process, app-functions.ts).
    */
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /**
+   * The call it runs in: one object for every function one caller's call
+   * runs, nested or not, so a runner may run them together (on-prem, in
+   * the sandbox session of the function the caller named).
+   */
+  call?: object
 ) => Promise<unknown>;
 
 /** An App as the host runs it: its inspected manifest and its runner. */
@@ -1340,6 +1346,8 @@ interface Run {
   readonly depth: number;
   /** What the whole call may still do, shared by every function in it. */
   readonly budget: CallBudget;
+  /** The caller's call, as its runner knows it: the same at any depth. */
+  readonly call: object;
 }
 
 /**
@@ -1596,7 +1604,13 @@ const runHandler = async (
   });
   const stopped = new AbortController();
   const ran = settle(
-    run.app.run(operation.path, fresh(args), open.channel, stopped.signal)
+    run.app.run(
+      operation.path,
+      fresh(args),
+      open.channel,
+      stopped.signal,
+      run.call
+    )
   );
   let expired = false;
   try {
@@ -2076,7 +2090,14 @@ export const callOperation = async (
       };
     });
     const value = await execute(
-      { app, compiled, invocation, depth: 0, budget: callBudget() },
+      {
+        app,
+        compiled,
+        invocation,
+        depth: 0,
+        budget: callBudget(),
+        call: {},
+      },
       operation,
       admitted,
       ["call", key]

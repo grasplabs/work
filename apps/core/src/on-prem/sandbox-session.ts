@@ -167,11 +167,13 @@ const capabilityOf = (
         await invoke(stub, "call", args.map(outward))
     : objectCapability(stub, spec.methods);
 
-/** The session's main object, which core calls once. */
+/**
+ * The session's main object. Only core reaches it, over the supervisor's
+ * private socket; App code only ever gets the capabilities of its own call.
+ */
 class Session extends CapnwebTarget {
   readonly #env: SessionEnv;
   readonly #settings: IsolateSettings;
-  #ran = false;
 
   constructor(env: SessionEnv, settings: IsolateSettings) {
     super();
@@ -179,12 +181,12 @@ class Session extends CapnwebTarget {
     this.#settings = settings;
   }
 
-  /** Runs the call once: a session is one call. */
+  /**
+   * Runs a call in an isolate of its own: the session's call, and those
+   * core nests in it (an App function's calls of its other functions),
+   * all in this process, which is killed once the session ends.
+   */
   async run(call: unknown, stubs: unknown): Promise<unknown> {
-    if (this.#ran) {
-      throw new Error("A session runs one call.");
-    }
-    this.#ran = true;
     const parsed = sessionCallOf(call);
     if (parsed === undefined || !isRecord(stubs)) {
       throw new TypeError("The call isn't in the expected shape.");

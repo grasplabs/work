@@ -48,6 +48,7 @@ import type {
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
 import { capability, runInSession } from "./sandbox-session.ts";
+import type { NestedRun, SessionCall } from "./sandbox-session.ts";
 import { sandbox } from "./sandbox.ts";
 import { sessionHost } from "./sandboxed.ts";
 
@@ -324,6 +325,71 @@ const parsed = (text: string | undefined): unknown => {
  * sandbox session (sandbox-session.ts), its process killed past the CPU
  * time Cloudflare's runtime would give it.
  */
+/**
+ * The session each caller's call runs its functions in on-prem, by that
+ * call (operations.ts), while it's open: how to run one more function in
+ * it, and those running in it now.
+ */
+const openSessions = new WeakMap<
+  object,
+  { run: NestedRun; running: Set<Promise<unknown>> }
+>();
+
+/**
+ * Runs `sessionCall` in a sandbox session: the session the caller's
+ * `call` runs in already, for a function nested in another (in its
+ * process, idle while it waits, taking none of the owner's share, as it
+ * would each nested call deep enough to wait on a place its own callers
+ * hold); a session of its own otherwise, open to the functions it calls
+ * until they have all settled.
+ */
+const inSession = async (
+  host: Fetcher,
+  sessionCall: SessionCall,
+  { signal, call }: { signal?: AbortSignal; call?: object }
+): Promise<unknown> => {
+  const open = call === undefined ? undefined : openSessions.get(call);
+  if (open !== undefined) {
+    const nested = open.run(sessionCall, signal);
+    open.running.add(nested);
+    try {
+      return await nested;
+    } finally {
+      open.running.delete(nested);
+    }
+  }
+  const running = new Set<Promise<unknown>>();
+  try {
+    return await runInSession(host, sessionCall, {
+      ...(signal === undefined ? {} : { signal }),
+      ...(call === undefined
+        ? {}
+        : {
+            nesting: {
+              open: (run: NestedRun) => {
+                openSessions.set(call, { run, running });
+              },
+              drain: async () => {
+                // What runs in it may start more: until none is left.
+                while (running.size > 0) {
+                  // oxlint-disable-next-line no-await-in-loop -- until every nested call settled
+                  await Promise.allSettled(running);
+                }
+                // Past here a function of the call (one started after it
+                // ended) runs in a session of its own.
+                openSessions.delete(call);
+              },
+            },
+          }),
+    });
+  } finally {
+    // Ended however it did: no function runs in it any more.
+    if (call !== undefined && openSessions.get(call)?.running === running) {
+      openSessions.delete(call);
+    }
+  }
+};
+
 export const releaseRunner =
   (
     env: Pick<
@@ -338,7 +404,7 @@ export const releaseRunner =
     /** Whose release it is: the App, which the sandbox caps per owner. */
     owner: string
   ): Runner =>
-  async (path, args, channel, signal) => {
+  async (path, args, channel, signal, call) => {
     // The platform's modules last: no App module takes one's name.
     const modules = {
       ...release.modules,
@@ -367,7 +433,7 @@ export const releaseRunner =
             // runtime, as nothing of core's is held for it.
             ...(signal === undefined ? [] : [whenAborted(signal)]),
           ])
-        : await runInSession(
+        : await inSession(
             host,
             {
               mainModule: runModule,
@@ -386,7 +452,7 @@ export const releaseRunner =
               // bounds the session.
               wallMs: callTimeoutMs(env),
             },
-            signal === undefined ? {} : { signal }
+            { signal, call }
           )
     );
     if (!answer.success) {

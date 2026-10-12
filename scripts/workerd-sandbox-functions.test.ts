@@ -93,6 +93,24 @@ describe("an App's function on the on-prem sandbox", () => {
     }
   );
 
+  it("runs functions nested three deep in the session of the one called, whatever the owner's share", async () => {
+    // One process an owner here: each nested call taking one of its own
+    // would wait for the place its callers hold.
+    const outcome = await call("chain");
+    expect(outcome).toMatchObject({ ok: true, value: { n: 4 } });
+    expect(outcome.ms).toBeLessThan(3000);
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 1500, interval: 50 })
+      .toBe(0);
+  });
+
+  it("runs two such calls of one owner, one after the other within its share", async () => {
+    const outcomes = await Promise.all([call("chain"), call("chain")]);
+    for (const outcome of outcomes) {
+      expect(outcome).toMatchObject({ ok: true, value: { n: 4 } });
+    }
+  });
+
   it("ends a busy-looping function on its CPU-time budget while core keeps answering", async () => {
     const busy = call("busy");
     const answers: number[] = [];
