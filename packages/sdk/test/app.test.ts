@@ -75,7 +75,7 @@ const registration: Registration = {
     },
   },
   operations: { notes: { list, create, send } },
-  screens: {},
+  screens: [],
   uses: [],
 };
 
