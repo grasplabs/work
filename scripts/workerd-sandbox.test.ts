@@ -38,6 +38,7 @@ import type {
   SandboxSupervisor,
   SandboxSupervisorOptions,
 } from "./workerd-sandbox.ts";
+import { smokeConfig } from "./workerd-smoke-config.ts";
 import { cleanUp, serveOnWorkerd, tempDir } from "./workerd-test-server.ts";
 
 const repo = path.join(import.meta.dirname, "..");
@@ -935,5 +936,23 @@ setInterval(() => undefined, 1000);
     supervisor.kill("SIGTERM");
     await once(supervisor, "exit");
     expect(isRunning(pid)).toBeFalsy();
+  });
+});
+
+describe("the on-prem config", () => {
+  it("binds core's SANDBOX_HOST to the sandbox supervisor's socket, so no untrusted code runs in core's process", () => {
+    const config = smokeConfig({
+      port: 8790,
+      sandboxSocket: "/run/grasp-sandbox/supervisor.sock",
+      routerSecret: "s",
+      modules: [],
+      storage: "/tmp/storage",
+    });
+    const service = /name = "SANDBOX_HOST", service = "(?<name>[^"]+)"/u.exec(
+      config
+    )?.groups?.name;
+    expect(config).toContain(
+      `(name = "${service}", external = (address = "unix:/run/grasp-sandbox/supervisor.sock", http = ()))`
+    );
   });
 });
