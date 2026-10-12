@@ -18,6 +18,7 @@ import type {
   Commit,
   Committed,
   DefinedTables,
+  SchemaConsumer,
   StagedWrites,
   StoredRecord,
 } from "@grasp-os/shared/stores";
@@ -120,8 +121,14 @@ import type { ReadResult } from "./store-host.ts";
 /** A store, as core uses it: its ID bound to every call. */
 export interface OpenStore {
   id: StoreId;
-  /** Tables for a schema, from its manifest's text (`StoreHost.defineTables`). */
-  defineTables: (manifest: string) => Promise<DefinedTables>;
+  /**
+   * A schema applied to the store, from its manifest's text, for its
+   * consumer when named (`StoreHost.defineTables`).
+   */
+  defineTables: (
+    manifest: string,
+    consumer?: SchemaConsumer
+  ) => Promise<DefinedTables>;
   get: (table: string, id: string) => Promise<StoredRecord | null>;
   claim: (claim: Omit<ClaimInput, "storeId">) => Promise<Claimed>;
   commit: (commit: Omit<Commit, "storeId">) => Promise<Committed>;
@@ -721,8 +728,8 @@ export const openStore = async (
   const stub = inJurisdiction(env, env.DATA_STORES).getByName(storeId);
   return {
     id: storeId,
-    defineTables: async (manifest) =>
-      await stub.defineTables(storeId, manifest),
+    defineTables: async (manifest, consumer) =>
+      await stub.defineTables(storeId, manifest, consumer),
     get: async (table, recordId) => await stub.get(storeId, table, recordId),
     claim: async (claim) => claimedOf(await stub.claim({ ...claim, storeId })),
     commit: async (commit) =>

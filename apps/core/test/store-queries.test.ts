@@ -599,7 +599,7 @@ describe("pinned schemas", () => {
     const store = await openStore(env, await createStore(env, builder));
     const older = await store.defineTables(memberNotes({ title: v.string() }));
     const newer = await store.defineTables(
-      memberNotes({ title: v.string(), body: v.string().default("") })
+      memberNotes({ title: v.string(), body: v.string().optional() })
     );
     const fixture: Fixture = {
       store,
@@ -631,10 +631,7 @@ describe("pinned schemas", () => {
       newer: await read(newer.schemaHash),
     }).toStrictEqual({
       older: [{ title: "new" }, { title: "old" }],
-      newer: [
-        { title: "new", body: "text" },
-        { title: "old", body: "" },
-      ],
+      newer: [{ title: "new", body: "text" }, { title: "old" }],
     });
   });
 });

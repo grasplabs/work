@@ -363,8 +363,14 @@ describe("schemas", () => {
       "people",
     ]);
     // A later schema of fewer tables gets its own; the store keeps them all.
-    const fewer = await store.defineTables(tablesManifest("notes"));
-    expect(fewer.tables).toStrictEqual({ notes: defined.tables.notes });
+    const fewer = await store.defineTables(
+      manifestText(
+        schemaManifest(
+          defineSchema({ people: defineTable({ name: v.string() }) })
+        )
+      )
+    );
+    expect(fewer.tables).toStrictEqual({ people: defined.tables.people });
     expect(fewer.storeTables).toStrictEqual(defined.tables);
     // The same schema declared in another order, its text's keys in yet
     // another, is the same schema: the same hash, the same tables.
@@ -376,17 +382,26 @@ describe("schemas", () => {
           ? Object.fromEntries(Object.entries(part).toReversed())
           : part
     );
-    await expect(store.defineTables(reversed)).resolves.toStrictEqual(defined);
+    // Applied again, it leaves the contract as the last schema left it.
+    const again = await store.defineTables(reversed);
+    expect({
+      ...again,
+      contract: [again.contract.hash, again.contract.changed],
+    }).toStrictEqual({
+      ...defined,
+      contract: [fewer.contract.hash, false],
+    });
   });
 
-  it("a changed access mode alone is another schema, of the same tables", async () => {
+  it("a changed access mode needs a migration, either way", async () => {
     const store = await openStore(env, await createStore(env, builder));
-    const owned = await store.defineTables(manifestText(notesManifest()));
-    const shared = await store.defineTables(
-      manifestText(notesManifest({ read: "appMembers" }))
-    );
-    expect(shared.schemaHash).not.toBe(owned.schemaHash);
-    expect(shared.tables).toStrictEqual(owned.tables);
+    await store.defineTables(manifestText(notesManifest()));
+    await expect(
+      store.defineTables(manifestText(notesManifest({ read: "appMembers" })))
+    ).rejects.toMatchObject({
+      code: "migration.required",
+      details: { changes: [{ table: "notes", reason: "access_changed" }] },
+    });
   });
 
   it("indexes declared in another order alone are the same schema", async () => {
@@ -395,7 +410,11 @@ describe("schemas", () => {
     const reversed = await store.defineTables(
       manifestText(notesManifest({ indexes: "reversed" }))
     );
-    expect(reversed).toStrictEqual(declared);
+    expect({ ...reversed, contract: reversed.contract.hash }).toStrictEqual({
+      ...declared,
+      contract: declared.contract.hash,
+    });
+    expect(reversed.contract.changed).toBeFalsy();
   });
 
   it.each([

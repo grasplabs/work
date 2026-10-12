@@ -1,4 +1,5 @@
 import { diffSchemaManifests } from "./schema-diff.ts";
+import type { FieldChange } from "./schema-diff.ts";
 import {
   manifestText,
   manifestVersion,
@@ -7,6 +8,7 @@ import {
 import type { ManifestTable, SchemaManifest } from "./schema-manifest.ts";
 import { managedFields, SchemaDefinitionError } from "./schema.ts";
 import { descriptorVersion, ValueDefinitionError } from "./value-descriptor.ts";
+import type { ValueDescriptor } from "./value-descriptor.ts";
 
 // How a store's data contract changes when it is handed a new schema
 // (spec 17.1, 17.4): which changes are safe to apply on their own, and
@@ -105,6 +107,71 @@ const emptyContract: SchemaManifest = {
   tables: {},
 };
 
+/**
+ * `descriptor` with every enum's members sorted, at every depth: an enum
+ * is a set of strings, so declaring its members in another order permits
+ * exactly the same values. Walked by kind, through object fields, array
+ * items, union members and record values; a union's members keep their
+ * order, which can decide how a value is read, and data (defaults,
+ * literals) is never touched.
+ */
+const enumsSorted = (descriptor: ValueDescriptor): ValueDescriptor => {
+  if (descriptor.kind === "enum") {
+    return { ...descriptor, values: descriptor.values.toSorted() };
+  }
+  if (descriptor.kind === "object") {
+    return {
+      ...descriptor,
+      fields: Object.fromEntries(
+        Object.entries(descriptor.fields).map(([name, field]) => [
+          name,
+          enumsSorted(field),
+        ])
+      ),
+    };
+  }
+  if (descriptor.kind === "array") {
+    return { ...descriptor, item: enumsSorted(descriptor.item) };
+  }
+  if (descriptor.kind === "union") {
+    return {
+      ...descriptor,
+      members: descriptor.members.map((member) => enumsSorted(member)),
+    };
+  }
+  if (descriptor.kind === "record") {
+    return { ...descriptor, value: enumsSorted(descriptor.value) };
+  }
+  // Every other kind holds no descriptor and no enum.
+  return descriptor;
+};
+
+/** A descriptor's canonical text, its enums sorted (`enumsSorted`). */
+const sortedText = (descriptor: ValueDescriptor): string =>
+  manifestText({
+    ...emptyContract,
+    tables: {
+      t: {
+        fields: { f: enumsSorted(descriptor) },
+        indexes: {},
+        access: { read: "none", write: "none" },
+      },
+    },
+  });
+
+/**
+ * Whether two descriptors of a field permit the same values, enum
+ * members in any order: such a change is no change to the data a store
+ * holds.
+ */
+const sameUpToEnumOrder = (
+  before: ValueDescriptor | undefined,
+  after: ValueDescriptor | undefined
+): boolean =>
+  before !== undefined &&
+  after !== undefined &&
+  sortedText(before) === sortedText(after);
+
 const own = <Value>(
   map: Readonly<Record<string, Value>>,
   name: string
@@ -162,6 +229,44 @@ const unionOf = (
   }
 };
 
+/** Where a field's change goes: refused, added or retained. */
+interface FieldOutcomes {
+  readonly refused: PlanRefusal[];
+  readonly addedFields: PlannedField[];
+  readonly retainedFields: PlannedField[];
+}
+
+/** Classifies one change of a field of a table on both sides (see the header). */
+const classifyField = (
+  change: FieldChange,
+  { refused, addedFields, retainedFields }: FieldOutcomes
+): void => {
+  const { table, field } = change;
+  if (change.change === "changed") {
+    if (!sameUpToEnumOrder(change.before, change.after)) {
+      refused.push({ table, field, reason: "field_changed" });
+    }
+  } else if (change.change === "added") {
+    const presence = change.after?.presence;
+    if (presence === "optional") {
+      addedFields.push({ table, field });
+    } else {
+      refused.push({
+        table,
+        field,
+        reason:
+          presence === "default"
+            ? "defaulted_field_added"
+            : "required_field_added",
+      });
+    }
+  } else if (change.before?.presence === "optional") {
+    retainedFields.push({ table, field });
+  } else {
+    refused.push({ table, field, reason: "required_field_removed" });
+  }
+};
+
 /**
  * How `contract`, a store's data contract (null for a store holding
  * nothing yet), changes when the store is handed `target` (see the
@@ -187,30 +292,8 @@ export const planSchemaChange = (
   const addedFields: PlannedField[] = [];
   const retainedFields: PlannedField[] = [];
   for (const change of diff.fields) {
-    const { table, field } = change;
-    if (!onBothSides(table)) {
-      continue;
-    }
-    if (change.change === "changed") {
-      refused.push({ table, field, reason: "field_changed" });
-    } else if (change.change === "added") {
-      const presence = change.after?.presence;
-      if (presence === "optional") {
-        addedFields.push({ table, field });
-      } else {
-        refused.push({
-          table,
-          field,
-          reason:
-            presence === "default"
-              ? "defaulted_field_added"
-              : "required_field_added",
-        });
-      }
-    } else if (change.before?.presence === "optional") {
-      retainedFields.push({ table, field });
-    } else {
-      refused.push({ table, field, reason: "required_field_removed" });
+    if (onBothSides(change.table)) {
+      classifyField(change, { refused, addedFields, retainedFields });
     }
   }
   for (const { table } of diff.access) {
