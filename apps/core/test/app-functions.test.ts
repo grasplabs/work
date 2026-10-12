@@ -1,3 +1,5 @@
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
@@ -12,7 +14,11 @@ import {
 import type { FunctionAnswer } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
-import { appMembers, sdkReleaseManifests } from "../src/db/core/schema.ts";
+import {
+  appMembers,
+  sdkReleaseManifests,
+  sdkResourceBindings,
+} from "../src/db/core/schema.ts";
 import { appWith, artifactKey, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
@@ -187,6 +193,13 @@ export const checkRevision = query({
   },
 });
 
+/** What the SDK module it runs with marked, if it marked anything. */
+export const sdkMark = query({
+  args: {},
+  returns: v.string(),
+  handler: () => String(Reflect.get(globalThis, "sealedSdkMark") ?? "unmarked"),
+});
+
 let reads = 0;
 
 /**
@@ -252,7 +265,7 @@ export const recover = action({
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
 import {
-  bump, checkRevision, closed, count, create, flood, get, list, peekEnv, reach, recover, remember, remove, sneak, tally, update,
+  bump, checkRevision, closed, count, create, flood, get, list, peekEnv, reach, recover, remember, remove, sdkMark, sneak, tally, update,
 } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
@@ -261,7 +274,7 @@ export default app({
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
   operations: {
-    notes: { list, get, create, update, remove, tally, bump, remember, reach, flood, closed, checkRevision, recover, sneak, peekEnv },
+    notes: { list, get, create, update, remove, tally, bump, remember, reach, flood, closed, checkRevision, recover, sneak, peekEnv, sdkMark },
   },
   internalOperations: { notes: { count } },
   screens: [],
@@ -641,6 +654,46 @@ describe(
     });
   }
 );
+
+describe("the SDK a release runs with", { timeout: 120_000 }, () => {
+  it("is the one sealed with it, never the one the host serves now", async () => {
+    const notes = await sealedNotes();
+    const before = valueOf(await call(notes, notes.owner, "notes.sdkMark", {}));
+    // The sealed SDK differs from the host's from here on: its root
+    // module marks the isolate, every hash rewritten to match.
+    const path = "sdk/@grasp-os~sdk.js";
+    const entry = notes.release.manifest.artifacts.find(
+      (artifact) => artifact.path === path
+    );
+    const stored = await env.FILES.get(artifactKey(entry?.sha256 ?? ""));
+    const text = `globalThis.sealedSdkMark = "sealed";\n${(await stored?.text()) ?? ""}`;
+    const sha256 = await sha256Hex(text);
+    await env.FILES.put(artifactKey(sha256), text);
+    const manifest = canonicalJson({
+      ...notes.release.manifest,
+      artifacts: notes.release.manifest.artifacts.map((artifact) =>
+        artifact.path === path
+          ? { path, sha256, bytes: new TextEncoder().encode(text).byteLength }
+          : artifact
+      ),
+    });
+    const hash = await sha256Hex(manifest);
+    await drizzle(env.DB)
+      .update(sdkReleaseManifests)
+      .set({ manifest, manifestHash: hash })
+      .where(eq(sdkReleaseManifests.appId, notes.app));
+    await drizzle(env.DB)
+      .update(sdkResourceBindings)
+      .set({ manifestHash: hash })
+      .where(eq(sdkResourceBindings.resourceId, notes.app));
+    const after = valueOf(await call(notes, notes.owner, "notes.sdkMark", {}));
+    expect([entry === undefined, before, after]).toStrictEqual([
+      false,
+      "unmarked",
+      "sealed",
+    ]);
+  });
+});
 
 describe("a release changed since it was sealed", { timeout: 120_000 }, () => {
   it("doesn't run when an artifact's bytes changed", async () => {

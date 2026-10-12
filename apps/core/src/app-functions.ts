@@ -1,4 +1,4 @@
-import { appModuleName, kitModuleName, sdkModules } from "@grasp-os/compiler";
+import { appModuleName, kitModuleName } from "@grasp-os/compiler";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
@@ -301,17 +301,17 @@ const parsed = (text: string | undefined): unknown => {
 /**
  * The runner of `release`: each call in a fresh isolate of its own (the
  * loader names none, so none is shared or kept), loaded with the release's
- * verified modules and the SDK's, with no network and an empty env.
+ * verified modules and the SDK modules sealed with it (never the SDK the
+ * host serves now), with no network and an empty env.
  */
 const runnerOf =
   (env: Env, release: Release): Runner =>
   async (path, args, channel) => {
-    const sdk = await sdkModules(env.ASSETS);
     const isolate = env.LOADER.get(null, () => ({
       ...sandbox,
       mainModule: runModule,
       // The platform's modules last: no App module takes one's name.
-      modules: { ...release.modules, ...sdk.modules, [runModule]: runMain },
+      modules: { ...release.modules, ...release.sdk, [runModule]: runMain },
       env: {},
     })).getEntrypoint<RunEntrypoint>("Run");
     const answer = settledSchema.safeParse(
