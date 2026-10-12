@@ -2000,6 +2000,53 @@ const linksTo = (note: string, count: number): StoreFields[] =>
   Array.from({ length: count }, () => ({ note }));
 
 describe("a store's cascades", () => {
+  it("cascades through a field a newer version declared, after an older version's write", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const older = notesAndLinks({ label: v.string().optional() });
+    const newer = notesAndLinks({
+      label: v.string().optional(),
+      pin: v.id("notes", { onDelete: "cascade" }).optional(),
+    });
+    const [olderHash, newerHash] = await Promise.all([
+      manifestHash(older),
+      manifestHash(newer),
+    ]);
+    await store.defineTables(older);
+    await store.defineTables(newer);
+    const note = newRecordId();
+    const link = newRecordId();
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: newerHash,
+      writes: [
+        { op: "insert", id: note, table: "notes", fields: { title: "Gone" } },
+        { op: "insert", id: link, table: "links", fields: { pin: note } },
+      ],
+    });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: olderHash,
+      writes: [
+        {
+          op: "patch",
+          table: "links",
+          id: link,
+          fields: { label: "Rolled back" },
+          expectedRevision: 1,
+        },
+      ],
+    });
+    const committed = await commitIn(store, {
+      principal: ada,
+      schemaHash: olderHash,
+      writes: [{ op: "delete", table: "notes", id: note, expectedRevision: 1 }],
+    });
+    expect(committed.cascaded).toStrictEqual([
+      { table: "links", id: link, owner: ada.userId },
+    ]);
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+
   it("deletes what refers to a deleted record where its field says so, level by level, whoever writes", async () => {
     const store = await newCascadeStore();
     const [note = ""] = await insertCascading(store, "notes", {
