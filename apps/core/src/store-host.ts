@@ -76,6 +76,7 @@ import { z } from "zod";
 import {
   outbox,
   receipts,
+  recordRefs,
   records,
   schemaActivations,
   schemas,
@@ -113,6 +114,7 @@ import type {
   QueryAnswer,
   RecordSql,
 } from "./store-queries.ts";
+import { recordReferences } from "./store-references.ts";
 
 // The host of a business store (data-store.ts is its Durable Object): one
 // object per store, named by the store's ID (data-stores.ts), with a SQLite database of its own that holds all
@@ -295,6 +297,7 @@ const purgeBudgetMs = 10_000;
  * Fixed names, never an author's.
  */
 const purgedTables = [
+  "sdk_record_refs",
   "sdk_records",
   "sdk_schemas",
   "sdk_change_outbox",
@@ -506,6 +509,8 @@ export class StoreHost {
   #keys: CursorKeys | undefined;
   /** Each schema read so far, by hash (`#pinned`). */
   readonly #schemas = new Map<string, PinnedSchema>();
+  /** The store's contract as last read, by its hash (`#contractNow`). */
+  #contract: StoreContract | undefined;
 
   constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
@@ -1498,6 +1503,7 @@ export class StoreHost {
         }
       );
       this.#flush(staged, principal.userId, schemaHash, stagedAt);
+      this.#indexReferences(pinned, staged, principal.userId, roles);
       const counted = this.#db
         .update(store)
         .set({ commits: sql`${store.commits} + 1` })
@@ -1706,6 +1712,192 @@ export class StoreHost {
       }
     }
     return { staged: [...staged.values()], inserted };
+  }
+
+  /**
+   * Keeps the references the records a commit changed make
+   * (`sdk_record_refs`), as its schema declares them (store-references.ts),
+   * then refuses (`data.referenced`) the commit if a record it deleted is
+   * still referred to by a record it didn't (restrict): call it inside the
+   * commit's transaction, after its writes, so the refusal undoes them all.
+   * A record referring to itself, or to another this commit deletes too,
+   * doesn't keep it.
+   *
+   * A reference a record didn't hold before must name a record that
+   * exists, after this commit, and that `principal` with `roles` may read
+   * under the pinned schema (`#referable`); otherwise the commit is
+   * refused (`data.reference_invalid`, the same whether the record is
+   * missing or unreadable, so it learns nothing of others' records). So
+   * nobody can keep a record they may not see from being deleted by
+   * referring to it. A reference the record already held is kept as it
+   * is, whoever may read its record now.
+   *
+   * A record's references are read from all its fields as the store's
+   * contract declares them (`#contractNow`), not only the pinned table's:
+   * a field a newer version wrote, which an older version's write keeps,
+   * still refers, and the contract fixes each field's descriptor for good
+   * (`defineTables` refuses changing one), so a record ID stays one.
+   */
+  #indexReferences(
+    pinned: PinnedSchema,
+    staged: readonly Staged[],
+    principal: string,
+    roles: WriterRoles
+  ): void {
+    const byKey = new Map(
+      staged.map((entry) => [keyOf(entry.tableId, entry.recordId), entry])
+    );
+    const contract = this.#contractNow();
+    let storeTables: ReadonlyMap<string, string> | undefined;
+    const tableIdOf = (name: string): string | undefined => {
+      storeTables ??= new Map(
+        this.#tableRows().map((row) => [row.name, row.tableId])
+      );
+      return storeTables.get(name);
+    };
+    for (const { table, tableId, recordId, base, fields } of staged) {
+      const held = new Set<string>();
+      if (base !== undefined) {
+        const where = and(
+          eq(recordRefs.tableId, tableId),
+          eq(recordRefs.recordId, recordId)
+        );
+        for (const row of this.#db
+          .select({ to: recordRefs.toTableId, id: recordRefs.toRecordId })
+          .from(recordRefs)
+          .where(where)
+          .all()) {
+          held.add(keyOf(row.to, row.id));
+        }
+        this.#db.delete(recordRefs).where(where).run();
+      }
+      const declared = (contract ?? pinned.manifest).tables[table]?.fields;
+      if (fields === null || declared === undefined) {
+        continue;
+      }
+      for (const reference of recordReferences(declared, fields)) {
+        // Each place on its own: the tables it may name that it refers
+        // to, held already or holding a record the writer may read. A
+        // union offering several keeps only the one that holds it. Never
+        // satisfied by another place holding the same ID.
+        const targets = reference.tables.flatMap((name) => {
+          const toTableId = tableIdOf(name);
+          return toTableId !== undefined &&
+            (held.has(keyOf(toTableId, reference.id)) ||
+              this.#referable(pinned, byKey, principal, roles, {
+                table: name,
+                tableId: toTableId,
+                recordId: reference.id,
+              }))
+            ? [toTableId]
+            : [];
+        });
+        if (targets.length === 0) {
+          throw dataErrors.create("data.reference_invalid", {
+            table,
+            id: recordId,
+          });
+        }
+        for (const toTableId of targets) {
+          this.#db
+            .insert(recordRefs)
+            .values({ tableId, recordId, toTableId, toRecordId: reference.id })
+            .onConflictDoNothing()
+            .run();
+        }
+      }
+    }
+    for (const { table, tableId, recordId, base, fields } of staged) {
+      if (base === undefined || fields !== null) {
+        continue;
+      }
+      const referred = this.#db
+        .select({ one: sql`1` })
+        .from(recordRefs)
+        .where(
+          and(
+            eq(recordRefs.toTableId, tableId),
+            eq(recordRefs.toRecordId, recordId)
+          )
+        )
+        .get();
+      if (referred !== undefined) {
+        // The record's own table and ID only: nothing of what refers to
+        // it, which may be another's.
+        throw dataErrors.create("data.referenced", { table, id: recordId });
+      }
+    }
+  }
+
+  /**
+   * The store's contract as its row holds it now (call it inside a
+   * transaction), or undefined while it has none. Read again only when its
+   * hash moved on; its hash was checked when it was set (`defineTables`).
+   */
+  #contractNow(): SchemaManifest | undefined {
+    const row = this.#db
+      .select({
+        hash: store.contractHash,
+        manifest: store.contractManifest,
+      })
+      .from(store)
+      .get();
+    if (
+      row?.hash === null ||
+      row?.hash === undefined ||
+      row.manifest === null
+    ) {
+      return undefined;
+    }
+    if (this.#contract?.hash !== row.hash) {
+      this.#contract = {
+        hash: row.hash,
+        manifest: readSchemaManifest(row.manifest).manifest,
+      };
+    }
+    return this.#contract.manifest;
+  }
+
+  /**
+   * Whether record `target` exists once the commit's `staged` records are
+   * written, and `principal` with `roles` may read it under the pinned
+   * schema's access: its table's read mode admits them, and for an
+   * `owner` table, the record is theirs (one this commit inserts is).
+   */
+  #referable(
+    pinned: PinnedSchema,
+    staged: ReadonlyMap<string, Staged>,
+    principal: string,
+    roles: WriterRoles,
+    target: { table: string; tableId: string; recordId: string }
+  ): boolean {
+    const mode = Object.hasOwn(pinned.manifest.tables, target.table)
+      ? pinned.manifest.tables[target.table]?.access.read
+      : undefined;
+    const admitted =
+      mode === "owner" ||
+      (mode === "appMembers" && (roles.appMember || roles.appBuilder)) ||
+      (mode === "appBuilders" && roles.appBuilder);
+    if (!admitted) {
+      return false;
+    }
+    const entry = staged.get(keyOf(target.tableId, target.recordId));
+    let owner: string | undefined;
+    if (entry === undefined) {
+      owner = this.#db
+        .select({ owner: records.ownerId })
+        .from(records)
+        .where(
+          and(
+            eq(records.tableId, target.tableId),
+            eq(records.recordId, target.recordId)
+          )
+        )
+        .get()?.owner;
+    } else if (entry.fields !== null) {
+      owner = entry.base?.ownerId ?? principal;
+    }
+    return owner !== undefined && (mode !== "owner" || owner === principal);
   }
 
   /**
