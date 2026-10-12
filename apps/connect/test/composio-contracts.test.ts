@@ -4,7 +4,14 @@ import { exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { fakeComposioApi } from "./composio-api.ts";
-import { addConnection, connectWith, outcome } from "./connect.ts";
+import {
+  addConnection,
+  agentFor,
+  callAs,
+  chatOrigin,
+  connectWith,
+  outcome,
+} from "./connect.ts";
 import type { FakeTool } from "./mcp-server.ts";
 import { testComposioKey } from "./provider-config.ts";
 
@@ -142,6 +149,13 @@ const tools: FakeTool[] = [
     run: () => ({ output: {} }),
   },
   {
+    // Listed twice, once with no schema at all: still twice.
+    name: "HUBSPOT_SHADOWED",
+    inputSchema: { type: "object", properties: {} },
+    alsoListedBare: true,
+    run: () => ({ output: {} }),
+  },
+  {
     name: "HUBSPOT_PROTO",
     inputSchema: {
       type: "object",
@@ -170,6 +184,7 @@ const rules: (string | ComposioToolRule)[] = [
   "HUBSPOT_PATTERN_ANSWER",
   "HUBSPOT_SEARCH",
   "HUBSPOT_TWICE",
+  { name: "HUBSPOT_SHADOWED", read: true },
   "HUBSPOT_PROTO",
 ];
 
@@ -183,6 +198,7 @@ const unservable = [
   "HUBSPOT_DEEP_PATTERN",
   "HUBSPOT_PATTERN_ANSWER",
   "HUBSPOT_TWICE",
+  "HUBSPOT_SHADOWED",
 ];
 
 /** A connected account's ID at Composio, and the server URL for it. */
@@ -304,6 +320,30 @@ describe("a Composio connection's generated contract", () => {
         "HUBSPOT_SEARCH",
       ],
       nothingLeft: "connect.contract_not_found",
+    });
+  });
+
+  it("refuses a call of a tool its server lists twice, as no contract serves it", async () => {
+    const connectionId = await hubspot([
+      { name: "HUBSPOT_SHADOWED", read: true },
+      { name: "HUBSPOT_LIST_CONTACTS", read: true },
+    ]);
+    const served = await contractOf(connectionId);
+    const called = await outcome(
+      callAs(
+        agentFor("user-anna", "agent-chat", "interactive"),
+        { connectionId, action: "HUBSPOT_SHADOWED", input: {} },
+        { origin: chatOrigin }
+      )
+    );
+    expect({
+      served: Object.keys(served.actions),
+      called,
+      ran: composio.state.mcp.ran.map(({ tool }) => tool),
+    }).toStrictEqual({
+      served: ["HUBSPOT_LIST_CONTACTS"],
+      called: "connect.server_unavailable",
+      ran: [],
     });
   });
 

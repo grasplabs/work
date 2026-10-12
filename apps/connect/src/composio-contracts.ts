@@ -196,7 +196,11 @@ const servedSchema = (schema: unknown): string | undefined => {
     : text;
 };
 
-/** The tools the server lists, each named once; a name listed twice is left out. */
+/**
+ * The tools the server lists, each named once; a name listed twice is left
+ * out, whatever either entry holds (one without a schema too), as a call
+ * of it is refused (`McpServer.tool`).
+ */
 const listedOnce = (tools: readonly McpListedTool[]): McpListedTool[] => {
   const counts = new Map<string, number>();
   for (const { name } of tools) {
@@ -232,7 +236,10 @@ export const composioContract = async (
     const rule = actionNamePattern.test(name)
       ? allowedTool(connection, name)
       : undefined;
-    const input = rule === undefined ? undefined : servedSchema(inputSchema);
+    const input =
+      rule === undefined || inputSchema === undefined
+        ? undefined
+        : servedSchema(inputSchema);
     const output =
       input === undefined || outputSchema === undefined
         ? textAnswer

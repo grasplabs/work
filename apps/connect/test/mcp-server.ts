@@ -37,6 +37,8 @@ export interface FakeTool {
   outputSchema?: unknown;
   /** Other names it is listed under too, its own included for a duplicate. */
   alsoListedAs?: string[];
+  /** It is listed a second time by its name alone, with no schema. */
+  alsoListedBare?: boolean;
   /** What running it with `input` returns. */
   run: (input: Record<string, unknown>) => FakeResult | Promise<FakeResult>;
 }
@@ -150,6 +152,7 @@ const listedAs = async (
     return [
       entry,
       ...(tool?.alsoListedAs ?? []).map((name) => ({ ...entry, name })),
+      ...(tool?.alsoListedBare === true ? [{ name: entry.name }] : []),
     ];
   });
   let text = JSON.stringify({
