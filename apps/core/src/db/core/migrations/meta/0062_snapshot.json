@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7c617d61-0b9c-435e-97a3-1cec95dc7758",
+  "id": "6fbe62f8-a68d-40f1-a423-dc74b31b5a09",
   "prevId": "2a9b0a8b-cfa2-4c20-9a37-8be09dc7d9e0",
   "tables": {
     "accounts": {
@@ -1004,6 +1004,13 @@
         "closing_at": {
           "name": "closing_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "closing_owner": {
+          "name": "closing_owner",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
