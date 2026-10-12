@@ -1941,6 +1941,9 @@ const cascadeManifest = manifestText(
       links: defineTable({
         note: v.id("notes", { onDelete: "cascade" }).optional(),
         kept: v.id("notes").optional(),
+        either: v
+          .union(v.id("notes", { onDelete: "cascade" }), v.id("subs"))
+          .optional(),
       }),
       subs: defineTable({
         link: v.id("links", { onDelete: "cascade" }).optional(),
@@ -2070,6 +2073,18 @@ describe("a store's cascades", () => {
     // its own, and takes only its link.
     await deleteNote(store, other);
     await expect(recordCount(store)).resolves.toBe(0);
+  });
+
+  it("cascades through a union's record ID as the table holding the record says", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Gone",
+    });
+    const [link = ""] = await insertCascading(store, "links", { either: note });
+    const committed = await deleteNote(store, note);
+    expect(committed.cascaded).toStrictEqual([
+      { table: "links", id: link, owner: ada.userId },
+    ]);
   });
 
   it("takes a cycle of cascading records once, and a record the commit deletes itself", async () => {
