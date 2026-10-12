@@ -55,7 +55,7 @@ import {
   sdkResourceBindings,
   sdkStoreOwners,
 } from "./db/core/schema.ts";
-import { isUniqueViolation } from "./db/d1.ts";
+import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { finishDeletion, markArtifact } from "./release-retention.ts";
 import { sandbox } from "./sandbox.ts";
 import { buildAppCode } from "./screens.ts";
@@ -908,20 +908,10 @@ export const sealRelease = async (
       }),
     ]);
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message.includes(
-        "NOT NULL constraint failed: sdk_resource_bindings.target_id"
-      )
-    ) {
+    if (notNullFailed(error, "sdk_resource_bindings.target_id")) {
       throw versionErrors.create("version.store_bound_elsewhere");
     }
-    if (
-      error instanceof Error &&
-      error.message.includes(
-        "NOT NULL constraint failed: sdk_release_manifests.manifest_hash"
-      )
-    ) {
+    if (notNullFailed(error, "sdk_release_manifests.manifest_hash")) {
       throw versionErrors.create("version.seal_busy");
     }
     if (!isUniqueViolation(error)) {
