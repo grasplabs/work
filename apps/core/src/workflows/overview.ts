@@ -45,7 +45,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
-import { appsFoundBy, appsReadableBy } from "../app-access.ts";
+import { appsBuiltBy, appsFoundBy, appsReadableBy } from "../app-access.ts";
 import { appFor, versionFiles } from "../apps.ts";
 import type { Member } from "../auth/identity.ts";
 import {
@@ -58,6 +58,7 @@ import {
 } from "../db/core/schema.ts";
 import { answerableBy, stillOpen } from "../decisions/decisions.ts";
 import { declaredParams, dryRunTests, hasWorkflow } from "./code.ts";
+import { ownerKey, ownersSet, setWorkflowOwner } from "./owners.ts";
 import { paramValues } from "./param-values.ts";
 import { listParams } from "./params.ts";
 import { runFor, shownStatus, unended, workflowInputSchema } from "./runs.ts";
@@ -274,13 +275,15 @@ const latestRuns = async (
 };
 
 /**
- * The summaries of `workflows`: each one's latest run, its runs waiting
- * now (counted from the open decisions) and those failed lately (from the
- * failed runs ended since), and whether a schedule of it stopped
- * (triggers.ts): four queries, whatever the number of workflows.
+ * The summaries of `workflows`, for `by`: each one's owner (owners.ts),
+ * latest run, its runs waiting now (counted from the open decisions) and
+ * those failed lately (from the failed runs ended since), whether a
+ * schedule of it stopped (triggers.ts), and whether `by` may change its
+ * owner: six queries, whatever the number of workflows.
  */
 const summariesOf = async (
   env: Env,
+  by: Member,
   workflows: readonly AppWorkflow[]
 ): Promise<WorkflowSummary[]> => {
   if (workflows.length === 0) {
@@ -294,7 +297,7 @@ const summariesOf = async (
   };
   const now = new Date();
   const failedSince = new Date(now.getTime() - failedRunDays * dayMs);
-  const [latest, waiting, failed, stopped] = await Promise.all([
+  const [latest, waiting, failed, stopped, owners, built] = await Promise.all([
     latestRuns(db, workflows, now),
     db
       .select({
@@ -333,6 +336,9 @@ const summariesOf = async (
           gte(workflowTriggers.failedStarts, maxFailedStarts)
         )
       ),
+    ownersSet(env, appIds),
+    // Staff change no owner (owners.ts), so whether they build is moot.
+    by.staff ? new Set<string>() : appsBuiltBy(env, by, appIds),
   ]);
   const waitingOf = countsByKey(waiting);
   const failedOf = countsByKey(failed);
@@ -344,7 +350,11 @@ const summariesOf = async (
     appName: app.name,
     workflow,
     version: app.currentVersion ?? 0,
-    owner: { userId: app.ownerId, name: app.ownerName },
+    owner: owners.get(ownerKey(app.id, workflow)) ?? {
+      userId: app.ownerId,
+      name: app.ownerName,
+    },
+    changesOwner: built.has(app.id),
     lastRun: latest.get(keyOf(app.id, workflow)) ?? null,
     waiting: waitingOf.get(keyOf(app.id, workflow)) ?? 0,
     failed: failedOf.get(keyOf(app.id, workflow)) ?? 0,
@@ -367,6 +377,7 @@ export const workflowOverview = async (
 ): Promise<WorkflowSummary[]> =>
   await summariesOf(
     env,
+    by,
     workflowsOf(await visibleApps(env, by)).filter(({ app, workflow }) =>
       keep(app.id, workflow)
     )
@@ -756,7 +767,7 @@ export const workflowDetail = async (
 ): Promise<WorkflowDetail> => {
   const current = await currentWorkflow(env, by, app, workflow, "user");
   const [[summary], builds] = await Promise.all([
-    summariesOf(env, [current]),
+    summariesOf(env, by, [current]),
     buildsApp(env, by, current.app.id),
   ]);
   if (summary === undefined) {
@@ -806,4 +817,28 @@ export const dryRunWorkflow = async (
       Object.fromEntries(values)
     ),
   };
+};
+
+/**
+ * Makes `owner` the owner of an App's workflow (owners.ts), for an admin
+ * or a builder of the App, and returns the workflow's summary as it is
+ * now.
+ */
+export const setOwner = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  workflow: unknown,
+  owner: unknown
+): Promise<WorkflowSummary> => {
+  const set = await setWorkflowOwner(env, by, app, workflow, owner);
+  const [summary] = await workflowOverview(
+    env,
+    by,
+    (id, workflowId) => id === set.app && workflowId === set.workflow
+  );
+  if (summary === undefined) {
+    throw workflowErrors.create("workflow.not_found");
+  }
+  return summary;
 };

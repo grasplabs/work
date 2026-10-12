@@ -187,6 +187,51 @@ export const appsReadableBy = async (
 };
 
 /**
+ * Of the Apps `ids`, those `by` builds, as `requireAppRole` decides a
+ * builder for one: every one for an admin, none when their role in the
+ * organization doesn't build, otherwise their own and those shared with
+ * them (or a team of theirs) as builders. That each is one they may open
+ * (`appsReadableBy`) is for the caller to have checked. One read,
+ * whatever the number of Apps.
+ */
+export const appsBuiltBy = async (
+  env: Env,
+  by: Person,
+  ids: readonly string[]
+): Promise<Set<string>> => {
+  if (isAdmin(by.role)) {
+    return new Set(ids);
+  }
+  if (!canBuild(by.role) || ids.length === 0) {
+    return new Set();
+  }
+  const rows = await drizzle(env.DB)
+    .select({ id: apps.id })
+    .from(apps)
+    .where(
+      and(
+        inList(apps.id, ids),
+        or(
+          eq(apps.ownerId, by.userId),
+          exists(
+            drizzle(env.DB)
+              .select({ one: sql`1` })
+              .from(appMembers)
+              .where(
+                and(
+                  eq(appMembers.appId, apps.id),
+                  eq(appMembers.role, "builder"),
+                  rowsOf(by)
+                )
+              )
+          )
+        )
+      )
+    );
+  return new Set(rows.map(({ id }) => id));
+};
+
+/**
  * The Apps `by` has a role in, as a condition on `apps`: every App for an
  * admin (undefined), otherwise their own and those shared with them. One
  * shared with them that has read data they can't read is listed, and

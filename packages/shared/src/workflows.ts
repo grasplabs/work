@@ -10,7 +10,9 @@ import { permissionActionSchema } from "./permissions.ts";
 // A workflow is code in an App (`workflows/<id>.ts`), written with the
 // workflow SDK. Each run is pinned to the App version it started on, and
 // acts for one person: the one who started it, or the App's owner for a
-// run a trigger started.
+// run a trigger started. A workflow also has an owner, who answers for
+// it: shown with it and told when a run a trigger started fails. Its App's
+// owner unless someone set another; it never changes whom a run acts for.
 
 /** A workflow parameter's value: a number, or text. */
 export type ParamValue = string | number;
@@ -40,6 +42,8 @@ export const workflowErrors = defineErrorFamily({
     "The trigger belongs to a version of the App that is no longer current.",
   "workflow.start_pending":
     "The run this was delivered for is still starting. Try again shortly.",
+  "workflow.owner_invalid":
+    "Only a current member of the organization can own a workflow.",
   "workflow.email_taken":
     "Another App's workflow already receives mail at this address.",
   "workflow.attachment_not_found":
@@ -687,8 +691,18 @@ export interface WorkflowSummary {
   workflow: WorkflowId;
   /** The App's current version, which new runs run. */
   version: number;
-  /** The App's owner: whom a run no person started acts for. */
+  /**
+   * Who owns it: the person who answers for it, and is told when a run a
+   * trigger started fails. Its App's owner unless someone set another.
+   * Not whom its runs act for: a run no person started acts for the App's
+   * owner.
+   */
   owner: { userId: string; name: string | null };
+  /**
+   * Whether the person may change its owner (`setOwner`): an admin, or a
+   * builder of the App; never Grasp staff.
+   */
+  changesOwner: boolean;
   /**
    * Its latest run, of any version, `waiting` while it waits for a
    * decision; null before its first.
@@ -878,6 +892,16 @@ export interface WorkflowsApi {
   activity: (query?: RunActivityQuery) => Promise<RunActivity>;
   /** One workflow of an App's current version. */
   get: (app: string, workflow: string) => Promise<WorkflowDetail>;
+  /**
+   * Makes `owner`, a member of the organization, the owner of an App's
+   * workflow; for admins and the App's builders, audited. Returns the
+   * workflow's summary as it is now.
+   */
+  setOwner: (
+    app: string,
+    workflow: string,
+    owner: string
+  ) => Promise<WorkflowSummary>;
   /**
    * Dry-runs a workflow's tests at the App's current version, with the
    * parameter values set now; for the App's builders.
