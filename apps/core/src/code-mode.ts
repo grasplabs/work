@@ -5,7 +5,14 @@ import type { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
 
 import type { CodeRunStatus } from "./code-run-statuses.ts";
+import {
+  capability,
+  functionCapability,
+  runInSession,
+  sandboxVerdictOf,
+} from "./sandbox-session.ts";
 import { sandbox } from "./sandbox.ts";
+import { SandboxUnavailableError } from "./sandboxed.ts";
 
 // Code Mode: the agent acts by writing code against typed APIs, and the
 // code runs here, in a Dynamic Worker of its own, locked down like App code
@@ -62,21 +69,27 @@ export const codeLimits = {
  * loop's exact version (pi-ai is pinned to the same one in the catalog,
  * and exports no version of its own to read), the runtime's compatibility
  * date, and whether the runtime enforces the isolate's CPU limit. Only a
- * deployment that says `RUNTIME_PROFILE=cloudflare` is taken to: anything
- * else (unset, plain workerd in tests, local development and on-prem, a
- * typo) records `cpu_limit_unsupported`, so a record never claims a limit
- * nobody vouched for. On plain workerd a synchronous busy loop isn't even
- * bounded by the wall clock: it holds the thread the host's timer needs.
+ * deployment that says `RUNTIME_PROFILE=cloudflare` is taken to, or one
+ * that binds `SANDBOX_HOST`, whose supervisor ends a run past its CPU time
+ * (sandbox-session.ts): anything else (unset, plain workerd in tests,
+ * local development, a typo) records `cpu_limit_unsupported`, so a record
+ * never claims a limit nobody vouched for. On plain workerd without the
+ * sandbox, a synchronous busy loop isn't even bounded by the wall clock:
+ * it holds the thread the host's timer needs.
  */
-export const codeRuntime = (env: Pick<Env, "RUNTIME_PROFILE">) => {
+export const codeRuntime = (
+  env: Pick<Env, "RUNTIME_PROFILE" | "SANDBOX_HOST">
+) => {
   const cloudflare = env.RUNTIME_PROFILE === "cloudflare";
   return {
     agent: `${piAgentCore.name}@${piAgentCore.version}`,
     compatibilityDate,
     runtime: cloudflare ? ("cloudflare" as const) : ("workerd" as const),
-    cpuLimit: cloudflare
-      ? ("enforced" as const)
-      : ("cpu_limit_unsupported" as const),
+    // On-prem, the sandbox supervisor ends a run past its CPU time.
+    cpuLimit:
+      cloudflare || env.SANDBOX_HOST !== undefined
+        ? ("enforced" as const)
+        : ("cpu_limit_unsupported" as const),
   };
 };
 
@@ -149,6 +162,8 @@ const tooLarge = {};
 const undescribable = "(an error that can't be described)";
 const then = bind(Promise.prototype.then);
 const resolve = Promise.resolve.bind(Promise);
+const create = Object.create;
+const define = Object.defineProperty;
 
 Object.defineProperty(globalThis, "caches", { value: undefined });
 
@@ -267,6 +282,38 @@ for (const level of ["log", "info", "warn", "error", "debug"]) {
 // The code's default export, once \`verify\` found it a function.
 let code;
 
+// Runs the code's function with \`raw\` as its env, once \`verify\` found it.
+const runWith = async (own, raw, output) => {
+  out = output;
+  if (code === undefined) {
+    return outcome(false, false, "error", exportNeeded);
+  }
+  try {
+    const given = keys(raw);
+    const env = new ProxyOf(raw, {
+      get(target, name) {
+        if (typeof name === "string" && name !== "then" && !has(target, name)) {
+          throw new ErrorOf(
+            "This chat has no API named env." + name + ". It has: " +
+              (given.length === 0 ? "none" : join(map(given, (api) => "env." + api), ", ")) + "."
+          );
+        }
+        return get(target, name);
+      },
+    });
+    // The run's own context: waiting on more work extends nothing of
+    // core's (the run's stubs answer only while the host keeps it open).
+    const ctx = freeze({ waitUntil: (promise) => own.waitUntil(promise) });
+    const value = await code(null, env, ctx);
+    const result = value === undefined ? undefined : show(value);
+    await delivered();
+    return outcome(true, true, "result", result);
+  } catch (error) {
+    await delivered();
+    return outcome(false, true, "error", describe(error));
+  }
+};
+
 // Every outcome is returned, never thrown: a call that rejects was ended
 // by the runtime, so the code can't choose how its run ends. Each call
 // gets core's output callback anew: a stub works only in the call that
@@ -291,34 +338,36 @@ class Harness extends WorkerEntrypoint {
 
   async run(output) {
     out = output;
+    return await runWith(this.ctx, this.env, output);
+  }
+
+  // On-prem, one call in a sandbox session (sandbox-session.ts): verify,
+  // then run, with the APIs as the session passes them, since a loaded
+  // Worker's env can't hold them. Each API is a proxy whose methods go to
+  // core through \`bridge\`, by the API's name: what the code may call is
+  // what core's own stub of that API answers. Both outcomes, as JSON.
+  async session(output, names, bridge) {
+    const verified = await this.verify(output);
     if (code === undefined) {
-      return outcome(false, false, "error", exportNeeded);
+      return "[" + stringify(verified) + ",null]";
     }
-    try {
-      const given = keys(this.env);
-      const env = new ProxyOf(this.env, {
-        get(target, name) {
-          if (typeof name === "string" && name !== "then" && !has(target, name)) {
-            throw new ErrorOf(
-              "This chat has no API named env." + name + ". It has: " +
-                (given.length === 0 ? "none" : join(map(given, (api) => "env." + api), ", ")) + "."
-            );
-          }
-          return get(target, name);
-        },
-      });
-      // The run's own context: waiting on more work extends nothing of
-      // core's (the run's stubs answer only while the host keeps it open).
-      const own = this.ctx;
-      const ctx = freeze({ waitUntil: (promise) => own.waitUntil(promise) });
-      const value = await code(null, env, ctx);
-      const result = value === undefined ? undefined : show(value);
-      await delivered();
-      return outcome(true, true, "result", result);
-    } catch (error) {
-      await delivered();
-      return outcome(false, true, "error", describe(error));
+    const apis = create(null);
+    for (let index = 0; index < names.length; index += 1) {
+      const name = names[index];
+      if (typeof name === "string") {
+        const api = new ProxyOf(create(null), {
+          get(target, method) {
+            if (typeof method !== "string" || method === "then") {
+              return undefined;
+            }
+            return (...args) => bridge.invoke(name, method, args);
+          },
+        });
+        define(apis, name, { value: api, enumerable: true });
+      }
     }
+    const ran = await runWith(this.ctx, apis, output);
+    return "[" + stringify(verified) + "," + stringify(ran) + "]";
   }
 }
 
@@ -395,6 +444,188 @@ const cpuExceeded = /^Worker exceeded CPU time limit\.?$/u;
 const hung =
   "The Workers runtime canceled this request because it detected that your Worker's code had hung";
 
+/** How a run the sandbox ended ends, by the sandbox's verdict. */
+const sandboxStatuses: Readonly<Record<string, CodeRunStatus>> = {
+  cpu: "cpu_exceeded",
+  deadline: "wall_expired",
+  memory: "crashed",
+  crashed: "crashed",
+  // What the code sent that a session doesn't take: the code's failure.
+  refused: "threw",
+  // Its person already runs as much code in the sandbox as they may.
+  busy: "crashed",
+};
+
+/**
+ * How a run ends that the on-prem sandbox ended, and said why; or that it
+ * couldn't run, which ends it as a crash, not as anything its code did.
+ * Undefined for any other failure.
+ */
+const sandboxEnded = (error: unknown): CodeRun | undefined => {
+  const verdict = sandboxVerdictOf(error);
+  if (verdict === undefined && !(error instanceof SandboxUnavailableError)) {
+    return undefined;
+  }
+  return {
+    status: sandboxStatuses[verdict ?? ""] ?? "crashed",
+    logs: [],
+    error: (error instanceof Error ? error.message : "").slice(0, room),
+  };
+};
+
+/** Both of the harness's calls, as a run makes them. */
+interface HarnessCalls {
+  verify: () => Promise<unknown>;
+  run: () => Promise<unknown>;
+  /**
+   * Settles once a run given up on (cancelled, past its time) has let go
+   * of what it holds; on-prem, its sandbox process.
+   */
+  ended?: () => Promise<void>;
+}
+
+/** Both calls on one Loader isolate of core's own, `env` its APIs. */
+const loaderCalls = (
+  loader: WorkerLoader,
+  code: string,
+  env: Readonly<Record<string, Fetcher>>,
+  stream: (line: unknown) => void
+): HarnessCalls => {
+  const worker = loader.load({
+    ...sandbox,
+    mainModule: "harness.js",
+    modules: { "harness.js": harness, "code.js": code },
+    env,
+    limits: { ...sandbox.limits, subRequests: codeLimits.subRequests },
+  });
+  const entry = worker.getEntrypoint<Harness>();
+  return {
+    verify: async () => await entry.verify(stream),
+    run: async () => await entry.run(stream),
+  };
+};
+
+/** A method name the code may call on an API: never one every object has. */
+const apiMethod = /^[a-zA-Z][a-zA-Z0-9_]{0,99}$/u;
+const notApiMethods = new Set([
+  "constructor",
+  "then",
+  "dup",
+  "connect",
+  "toString",
+  "valueOf",
+]);
+
+/**
+ * The one capability a session's run reaches its APIs through: a call of
+ * `method` on the API named `api`, on core's own stub of it, which answers
+ * only while the run is open, as the code's env would.
+ */
+const apiBridge = (env: Readonly<Record<string, Fetcher>>) => ({
+  invoke: async (api: unknown, method: unknown, args: unknown) => {
+    if (
+      typeof api !== "string" ||
+      !Object.hasOwn(env, api) ||
+      typeof method !== "string" ||
+      !apiMethod.test(method) ||
+      notApiMethods.has(method) ||
+      !Array.isArray(args)
+    ) {
+      throw new TypeError("That isn't a call of one of this chat's APIs.");
+    }
+    const fn: unknown = Reflect.get(env[api] ?? {}, method);
+    if (typeof fn !== "function") {
+      throw new TypeError(`env.${api} has no method ${method}.`);
+    }
+    const answer: unknown = await Reflect.apply(fn, env[api], args);
+    return answer;
+  },
+});
+
+/** The harness's answer to a session: its two outcomes, as text. */
+const sessionAnswerSchema = z.tuple([z.string(), z.string().nullable()]);
+
+/** Both calls in one sandbox session, on-prem (sandbox-session.ts). */
+const sessionCalls = (
+  host: Fetcher,
+  code: string,
+  env: Readonly<Record<string, Fetcher>>,
+  stream: (line: unknown) => void,
+  {
+    timeoutMs,
+    signal,
+    owner,
+  }: { timeoutMs: number; signal: AbortSignal; owner: string }
+): HarnessCalls => {
+  const both = (async () => {
+    const answer = await runInSession(
+      host,
+      {
+        mainModule: "harness.js",
+        modules: { "harness.js": harness, "code.js": code },
+        entrypoint: "default",
+        method: "session",
+        args: [
+          { capability: functionCapability(stream) },
+          { value: Object.keys(env) },
+          { capability: capability(apiBridge(env), ["invoke"]) },
+        ],
+        owner,
+        cpuMs: sandbox.limits.cpuMs,
+        wallMs: timeoutMs,
+      },
+      // A cancel or the run's wall-clock limit ends the session, and frees
+      // its process at once.
+      { signal }
+    );
+    // Not the harness's answer, the code changed it: no outcome at all.
+    let json: unknown;
+    try {
+      json = typeof answer === "string" ? JSON.parse(answer) : undefined;
+    } catch {
+      json = undefined;
+    }
+    const pair = sessionAnswerSchema.safeParse(json);
+    return pair.success ? pair.data : ([undefined, undefined] as const);
+  })();
+  return {
+    verify: async () => {
+      const [verified] = await both;
+      return verified;
+    },
+    run: async () => {
+      const [, ran] = await both;
+      return ran;
+    },
+    ended: async () => {
+      try {
+        await both;
+      } catch {
+        // How it ended is the run's outcome, set already.
+      }
+    },
+  };
+};
+
+/** Both calls where the run goes: its sandbox on-prem, else the loader. */
+const harnessCalls = (
+  where: {
+    loader: WorkerLoader;
+    sandbox: RunOptions["sandbox"];
+    timeoutMs: number;
+    signal: AbortSignal;
+    owner: string;
+  },
+  code: string,
+  env: Readonly<Record<string, Fetcher>>,
+  stream: (line: unknown) => void
+): HarnessCalls => {
+  const host = where.sandbox?.();
+  return host === undefined
+    ? loaderCalls(where.loader, code, env, stream)
+    : sessionCalls(host, code, env, stream, where);
+};
+
 const ended = (status: CodeRunStatus, error: string): CodeRun => ({
   status,
   logs: [],
@@ -428,6 +659,16 @@ const parsed = (
   return checked.success ? checked.data : undefined;
 };
 
+/** Waits for a run given up on to let go of what it holds. */
+const letGo = async (
+  calls: HarnessCalls | undefined,
+  signal: AbortSignal
+): Promise<void> => {
+  if (signal.aborted) {
+    await calls?.ended?.();
+  }
+};
+
 const notAResult = "The run returned more than it may, or not a result.";
 
 /** How a run is limited and followed, besides its code and env. */
@@ -441,6 +682,16 @@ export interface RunOptions {
    * a line after that is dropped, whenever the isolate sends it.
    */
   onOutput?: (line: string) => void;
+  /**
+   * The sandbox supervisor the run goes to on-prem, or undefined where it
+   * runs in a Loader isolate of core's own (`sessionHost`, which refuses
+   * where neither may run it: the run then ends as `crashed`). On-prem,
+   * both of the harness's calls run in one session, its process killed
+   * past the run's CPU time, which plain workerd's Loader doesn't bound.
+   */
+  sandbox?: () => Fetcher | undefined;
+  /** Whose run it is, which the sandbox caps per owner: `person:` and an ID. */
+  owner?: string;
 }
 
 /**
@@ -454,7 +705,13 @@ export const runCode = async (
   loader: WorkerLoader,
   code: string,
   env: Readonly<Record<string, Fetcher>>,
-  { signal, timeoutMs = codeLimits.timeoutMs, onOutput }: RunOptions = {}
+  {
+    signal,
+    timeoutMs = codeLimits.timeoutMs,
+    onOutput,
+    sandbox: sandboxOf,
+    owner,
+  }: RunOptions = {}
 ): Promise<CodeRun> => {
   const limit = deadline(timeoutMs, signal);
   let over = false;
@@ -468,6 +725,7 @@ export const runCode = async (
   // The phase it is in, for a failure the runtime throws: a module that
   // doesn't compile fails as it loads, before `run` is ever called.
   let phase: "load" | "run" = "load";
+  let calls: HarnessCalls | undefined;
   try {
     if (code.length > codeLimits.sourceChars) {
       return ended(
@@ -475,16 +733,20 @@ export const runCode = async (
         `The module is ${code.length} characters long; a run takes at most ${codeLimits.sourceChars}.`
       );
     }
-    const worker = loader.load({
-      ...sandbox,
-      mainModule: "harness.js",
-      modules: { "harness.js": harness, "code.js": code },
+    calls = harnessCalls(
+      {
+        loader,
+        sandbox: sandboxOf,
+        timeoutMs,
+        signal: limit.signal,
+        owner: owner ?? "code-mode",
+      },
+      code,
       env,
-      limits: { ...sandbox.limits, subRequests: codeLimits.subRequests },
-    });
-    const entry = worker.getEntrypoint<Harness>();
+      stream
+    );
     const verified = parsed(
-      await Promise.race([entry.verify(stream), whenAborted(limit.signal)])
+      await Promise.race([calls.verify(), whenAborted(limit.signal)])
     );
     // An outcome that isn't one the harness returns came from the code,
     // which may change anything in its isolate: it didn't load (verify)
@@ -501,7 +763,7 @@ export const runCode = async (
     }
     phase = "run";
     const ran = parsed(
-      await Promise.race([entry.run(stream), whenAborted(limit.signal)])
+      await Promise.race([calls.run(), whenAborted(limit.signal)])
     );
     if (ran === undefined) {
       return ended("threw", notAResult);
@@ -523,6 +785,10 @@ export const runCode = async (
         `The run took longer than ${timeoutMs / 1000} seconds, so it was stopped.`
       );
     }
+    const sandboxed = sandboxEnded(error);
+    if (sandboxed !== undefined) {
+      return sandboxed;
+    }
     // A rejection is the runtime's, never the code's (the harness returns
     // every outcome): the module didn't compile (a syntax error, say) as
     // it loaded, or the runtime stopped it (CPU time, memory, a hang).
@@ -543,6 +809,10 @@ export const runCode = async (
   } finally {
     over = true;
     limit.clear();
+    // A run given up on is answered only once its session has asked the
+    // supervisor to free its process: past the answer, the request that
+    // would ask may itself be cancelled.
+    await letGo(calls, limit.signal);
   }
 };
 

@@ -381,7 +381,11 @@ const openSession = async (
         [sandboxCpuHeader]: String(call.cpuMs),
         [sandboxWaitHeader]: String(sandboxWaitMs),
         [sandboxCallIdHeader]: id,
-        [sandboxOwnerHeader]: call.owner,
+        // As the supervisor takes an owner: what else it holds, it holds
+        // as `_`, whatever an ID's own form.
+        [sandboxOwnerHeader]: call.owner
+          .replaceAll(/[^A-Za-z0-9:_.-]/gu, "_")
+          .slice(0, 200),
       },
       signal:
         signal === undefined
