@@ -24,7 +24,13 @@ import {
   settle,
   stepLimitOf,
 } from "./host.ts";
-import type { BusyRefusals, FailedStep, HostedRun, RunStep } from "./host.ts";
+import type {
+  AiCalls,
+  BusyRefusals,
+  FailedStep,
+  HostedRun,
+  RunStep,
+} from "./host.ts";
 import { paramValues } from "./param-values.ts";
 import { appRecord, findRun, recordFailure, recordWaiting } from "./runs.ts";
 import type { RunRow, Stopped } from "./runs.ts";
@@ -159,6 +165,8 @@ const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
 /** What a run keeps beside the engine's journal, in its own object. */
 export interface RunMemory {
   busyRefusals: BusyRefusals;
+  /** Its AI calls in flight and answers no attempt took (host.ts). */
+  aiCalls: AiCalls;
 }
 
 /** Runs (or resumes) one run of an App's workflow. */
@@ -242,6 +250,7 @@ const runWorkflow = async (
     const host = new RunHost(env, step, run, {
       stepFailed,
       busyRefusals: memory.busyRefusals,
+      aiCalls: memory.aiCalls,
       tampered: (error) => {
         tampered ??= error;
       },

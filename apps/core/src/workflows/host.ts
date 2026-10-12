@@ -237,6 +237,9 @@ const doOptionsSchema = z.object({
  */
 const maxSchemaLength = 32 * 1024;
 
+/** What the host takes from the gateway's answer to an AI step. */
+const modelAnswerSchema = z.object({ output: z.unknown() });
+
 const modelRequestSchema = z.object({
   step: stepNameSchema,
   model: z.string().min(1).max(200),
@@ -542,6 +545,28 @@ export interface BusyRefusals {
   set: (step: string, refusal: BusyBudget) => unknown;
 }
 
+/**
+ * A run's AI calls, by step name, kept in memory by the run's object
+ * across its activations, as a step's next attempt may run in another
+ * activation while an earlier attempt's call is still out:
+ * - `asking`: the call in flight, which a later attempt of the step waits
+ *   for rather than ask the gateway beside it;
+ * - `unclaimed`: an answer that landed after the attempt that asked for
+ *   it was given up on (it timed out while the gateway answered), which
+ *   the step's next attempt asking the same takes instead of asking, and
+ *   paying, again.
+ */
+export interface AiCalls {
+  asking: Map<string, Promise<unknown>>;
+  unclaimed: Map<string, { request: string; answer: unknown }>;
+}
+
+/** An empty `AiCalls`, for a run's object to keep. */
+export const newAiCalls = (): AiCalls => ({
+  asking: new Map(),
+  unclaimed: new Map(),
+});
+
 /** Core's step limit for this deployment. */
 export const stepLimitOf = (env: Env): number => {
   const set = Number(env.WORKFLOW_STEP_LIMIT);
@@ -719,6 +744,12 @@ export interface HostHooks {
   /** Each step's last refusal for a busy budget (`#untilAsking`). */
   busyRefusals: BusyRefusals;
   /**
+   * The run's AI calls in flight, and answers no attempt took, kept by
+   * its object across its activations (`AiCalls`); a host of its own
+   * when absent.
+   */
+  aiCalls?: AiCalls;
+  /**
    * Hears, once, that the run's isolate asked for what only code that
    * gets past the SDK could (a step its review doesn't show, an attempt
    * ID the host never gave): the run fails with `error`, whatever its
@@ -763,7 +794,11 @@ export class RunHost extends RpcTarget {
    * Each step's AI call in flight, by step name: a later attempt of the
    * step waits for it rather than ask the gateway beside it.
    */
-  readonly #asking = new Map<string, Promise<unknown>>();
+  readonly #asking: AiCalls["asking"];
+  /**
+   * Answers no attempt took, by step name (`AiCalls.unclaimed`).
+   */
+  readonly #unclaimed: AiCalls["unclaimed"];
   /**
    * The refusal that caught the run's isolate tampering
    * (`#refuseTampering`): once set, every later call of this execution
@@ -777,6 +812,9 @@ export class RunHost extends RpcTarget {
     this.#step = step;
     this.#run = run;
     this.#hooks = hooks;
+    const aiCalls = hooks.aiCalls ?? newAiCalls();
+    this.#asking = aiCalls.asking;
+    this.#unclaimed = aiCalls.unclaimed;
   }
 
   get #actor(): AuditActor {
@@ -1109,15 +1147,32 @@ export class RunHost extends RpcTarget {
    * {@link budgetBusyWaitMs} (as long as its timeout lets it) before it
    * fails, unless it is the last: nothing comes after it.
    */
-  async #waitingOutBusyBudget<T>(
+  async #waitingOutBusyBudget(
     attempt: StepAttempt,
-    call: () => Promise<T>
-  ): Promise<T> {
+    request: string,
+    call: () => Promise<unknown>
+  ): Promise<unknown> {
     await this.#untilAsking(attempt);
+    // Out of time while it waited: the engine has given up on it, and
+    // the next attempt takes what it waited for. It asks nothing.
+    if (this.#givenUp(attempt)) {
+      throw attemptTimedOut();
+    }
+    const left = this.#unclaimed.get(attempt.step);
+    if (left?.request === request) {
+      this.#unclaimed.delete(attempt.step);
+      return left.answer;
+    }
     const asking = call();
     this.#asking.set(attempt.step, asking);
     try {
-      return await asking;
+      const answer = await asking;
+      if (this.#givenUp(attempt)) {
+        // Given up on while the gateway answered: kept for the next
+        // attempt, which would otherwise ask, and pay, again.
+        this.#unclaimed.set(attempt.step, { request, answer });
+      }
+      return answer;
     } catch (error) {
       // Settled: stop holding later attempts on it before this one waits,
       // or they would await the same settled promise again and again.
@@ -1136,6 +1191,18 @@ export class RunHost extends RpcTarget {
     } finally {
       this.#stopAsking(attempt.step, asking);
     }
+  }
+
+  /**
+   * Whether the engine gave up on `attempt`: another attempt of this
+   * activation took over, or its timeout passed (the next attempt may run
+   * in another activation, which this host doesn't see).
+   */
+  #givenUp(attempt: StepAttempt): boolean {
+    return (
+      this.#running !== attempt ||
+      (attempt.ends !== undefined && Date.now() >= attempt.ends)
+    );
   }
 
   #stopAsking(step: string, asking: Promise<unknown>): void {
@@ -1213,36 +1280,39 @@ export class RunHost extends RpcTarget {
       } catch {
         throw modelErrors.create("model.invalid_call");
       }
-      const answer = await this.#waitingOutBusyBudget(
-        this.#running,
-        async () =>
-          await models(this.#env).call({
-            model,
-            system: instructions,
-            input,
-            schema,
-            purpose: "workflow.step",
-            trigger: this.#actor,
-            // The step may have read any of them into its input.
-            connections: [
-              ...new Set(
-                Object.values(this.#run.connections).map(
-                  ({ connection }) => connection.connectionId
-                )
-              ),
-            ],
-            // The run's restricted mode, which is its App's.
-            work: {
-              authority: this.#run.authority,
-              context: {
-                type: "run",
-                appId: this.#run.app,
-                runId: this.#run.runId,
+      const { output } = modelAnswerSchema.parse(
+        await this.#waitingOutBusyBudget(
+          this.#running,
+          JSON.stringify([model, instructions, input, outputSchema]),
+          async () =>
+            await models(this.#env).call({
+              model,
+              system: instructions,
+              input,
+              schema,
+              purpose: "workflow.step",
+              trigger: this.#actor,
+              // The step may have read any of them into its input.
+              connections: [
+                ...new Set(
+                  Object.values(this.#run.connections).map(
+                    ({ connection }) => connection.connectionId
+                  )
+                ),
+              ],
+              // The run's restricted mode, which is its App's.
+              work: {
+                authority: this.#run.authority,
+                context: {
+                  type: "run",
+                  appId: this.#run.app,
+                  runId: this.#run.runId,
+                },
               },
-            },
-          })
+            })
+        )
       );
-      return answer.output;
+      return output;
     });
   }
 

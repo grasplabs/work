@@ -8,7 +8,8 @@ import type { RunNotification } from "@grasp-os/workerflow/run";
 
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
-import type { BusyRefusals } from "./host.ts";
+import { newAiCalls } from "./host.ts";
+import type { AiCalls, BusyRefusals } from "./host.ts";
 import { projectStatus } from "./runs.ts";
 
 /**
@@ -92,6 +93,14 @@ export const busyRefusalsIn = (sql: SqlStorage): BusyRefusals => ({
 // core alone.
 
 export class WorkflowRuns extends WorkflowRun<Env> {
+  /**
+   * The run's AI calls, kept in memory across its activations (host.ts,
+   * `AiCalls`): an activation that starts after another gave up on an
+   * attempt finds the call that attempt still has out. Gone with the
+   * object, as the call is.
+   */
+  readonly #aiCalls: AiCalls = newAiCalls();
+
   // The engine's abstract hook, which a subclass can only override as it
   // is declared. Only core holds this namespace, and a definition built
   // for a caller runs nothing: the engine runs a run's definition itself.
@@ -107,6 +116,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       run: async (event, step) =>
         await runPinned(this.env, pin, event, step, {
           busyRefusals: busyRefusalsIn(this.ctx.storage.sql),
+          aiCalls: this.#aiCalls,
         }),
     };
   }
