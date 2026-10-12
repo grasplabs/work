@@ -60,6 +60,7 @@
     "./screen-port": "./src/screen-port.ts",
     "./screen-trust": "./src/screen-trust.ts",
     "./screens": "./src/screens.ts",
+    "./security": "./src/security.ts",
     "./sign-in": "./src/sign-in.ts",
     "./signals": "./src/signals.ts",
     "./statistics": "./src/statistics.ts",

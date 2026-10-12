@@ -16,6 +16,7 @@ import type { PermissionsApi } from "./permissions.ts";
 import type { Role } from "./roles.ts";
 import type { ScreenTrustApi } from "./screen-trust.ts";
 import type { ScreensApi } from "./screens.ts";
+import type { SecurityApi } from "./security.ts";
 import type { SignalsApi } from "./signals.ts";
 import type { UploadsApi } from "./uploads.ts";
 import type { WorkflowsApi } from "./workflows.ts";
@@ -112,6 +113,8 @@ export interface SessionApi {
   readonly screenTrust: ScreenTrustApi;
   /** The organization's members: offboarding. Admins only. */
   readonly members: MembersApi;
+  /** The person's own sign-in and the sessions they have, read only. */
+  readonly security: SecurityApi;
   /** The audit log: search, export and chain verification. Admins only. */
   readonly audit: AuditApi;
   /**
