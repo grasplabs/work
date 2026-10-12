@@ -125,7 +125,7 @@ export type Chat = typeof chats.$inferSelect;
  * The project a chat is in, as its agent's code reads it
  * (`env.chat.project()`): the person's goal and documents, whole. The code
  * returns the model what it needs of them, and no more of that reaches the
- * model than any code step's result (`codeLimits.outputChars`), so the
+ * model than any code step's result (`codeLimits.outputBytes`), so the
  * documents never crowd its window, whatever its size.
  */
 export interface ProjectForAgent {

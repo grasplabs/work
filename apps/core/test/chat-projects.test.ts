@@ -87,7 +87,7 @@ const outsideToolResults = (messages: readonly unknown[]): string =>
 const textOf = (bytes: number): string => "é".repeat(bytes / 2);
 
 const readProject = codeStep(
-  "export default async (env) => await env.chat.project();"
+  "export default async (self, env) => await env.chat.project();"
 );
 
 describe("a chat in a project", slow, () => {
@@ -166,7 +166,7 @@ describe("a chat in a project", slow, () => {
     await answering(
       ann,
       codeStep(
-        "export default async (env) => (await env.chat.project()).documents.map(({ name, content }) => [name, content.length]);"
+        "export default async (self, env) => (await env.chat.project()).documents.map(({ name, content }) => [name, content.length]);"
       ),
       says("Done.")
     );
