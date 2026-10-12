@@ -16,6 +16,7 @@ import {
   findApp,
   setCurrentVersion,
 } from "../src/apps.ts";
+import { deleteStore } from "../src/data-stores.ts";
 import { appDefaultStores, sdkStoreOwners } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { racingDb } from "./apps.ts";
@@ -272,6 +273,48 @@ describe(
         )
       ).resolves.toBe("version.revoked");
       await expect(currentOf(app)).resolves.toBe(3);
+    });
+
+    it("refuses a rollback onto a deleted store, and gives later versions a fresh one", async () => {
+      const { owner, app } = await appWith(notesFiles());
+      await activateVersion(env, owner, app, 1);
+      const [deleted] = await defaultStores(app);
+      await commitFiles(env, owner, app, emptyFiles, "No tables");
+      await activateVersion(env, owner, app, 2);
+      await deleteStore(env, owner, deleted?.storeId ?? "");
+
+      await expect(
+        failure(async () => await activateVersion(env, owner, app, 1))
+      ).resolves.toBe("data.store_unavailable");
+      await expect(currentOf(app)).resolves.toBe(2);
+
+      await commitFiles(env, owner, app, notesFiles("Notes 3"), "Tables again");
+      await activateVersion(env, owner, app, 3);
+      const [fresh] = await defaultStores(app);
+      expect(fresh?.storeId).not.toBe(deleted?.storeId);
+      const release = await loadRelease(env, app, 3);
+      expect(release.store?.storeId).toBe(fresh?.storeId);
+      await expect(
+        call(owner, release, "notes.create", { title: "Fresh" })
+      ).resolves.toMatchObject({ ok: true });
+    });
+
+    it("refuses a version whose store is deleted as it is made current", async () => {
+      const { owner, app } = await appWith(notesFiles());
+      await activateVersion(env, owner, app, 1);
+      const [store] = await defaultStores(app);
+      await commitFiles(env, owner, app, emptyFiles, "No tables");
+      await activateVersion(env, owner, app, 2);
+      const racing = racingDb(async () => {
+        await deleteStore(env, owner, store?.storeId ?? "");
+      }, /update "apps"/iu);
+      await expect(
+        failure(
+          async () =>
+            await setCurrentVersion({ ...env, DB: racing }, owner, app, 1)
+        )
+      ).resolves.toBe("data.store_unavailable");
+      await expect(currentOf(app)).resolves.toBe(2);
     });
 
     it("never makes such a version current unsealed", async () => {

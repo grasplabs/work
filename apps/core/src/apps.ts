@@ -27,10 +27,11 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { screenPath } from "@grasp-os/shared/screens";
+import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -46,7 +47,13 @@ import {
   storedEvent,
 } from "./audit-outbox.ts";
 import type { Acting, Member } from "./auth/identity.ts";
-import { apps, appVersions, sdkReleaseManifests } from "./db/core/schema.ts";
+import {
+  apps,
+  appVersions,
+  businessStores,
+  sdkReleaseManifests,
+  sdkResourceBindings,
+} from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { requireOwnTypes } from "./knowledge/record-types.ts";
@@ -1016,15 +1023,22 @@ export const proposeVersion = async (
 
 /**
  * Holds while `version` of `app` has a sealed release that isn't revoked
- * (app-releases.ts, release-retention.ts), as the statement runs.
+ * (app-releases.ts, release-retention.ts), and whose bound store, if any,
+ * isn't deleted (data-stores.ts), as the statement runs.
  */
 const runnableReleaseSql = (app: AppId, version: number) =>
   sql`EXISTS (SELECT 1 FROM sdk_release_manifests
-    WHERE app_id = ${app} AND version = ${version} AND revoked_at IS NULL)`;
+    WHERE app_id = ${app} AND version = ${version} AND revoked_at IS NULL)
+    AND NOT EXISTS (SELECT 1 FROM sdk_resource_bindings AS bound
+      WHERE bound.resource_id = ${app} AND bound.resource_version = ${version}
+        AND bound.kind = 'store'
+        AND NOT EXISTS (SELECT 1 FROM business_stores AS store
+          WHERE store.id = bound.target_id AND store.deleted_at IS NULL))`;
 
 /**
  * Refuses `version` of `app` unless it has a sealed release that isn't
- * revoked: `version.not_sealed`, or `version.revoked`.
+ * revoked, on a store that isn't deleted: `version.not_sealed`,
+ * `version.revoked` or `data.store_unavailable`.
  */
 const requireRunnableRelease = async (
   env: Env,
@@ -1046,6 +1060,28 @@ const requireRunnableRelease = async (
   }
   if (row.revokedAt !== null) {
     throw versionErrors.create("version.revoked");
+  }
+  const goneStore = await drizzle(env.DB)
+    .select({ store: sdkResourceBindings.targetId })
+    .from(sdkResourceBindings)
+    .leftJoin(
+      businessStores,
+      and(
+        eq(businessStores.id, sdkResourceBindings.targetId),
+        isNull(businessStores.deletedAt)
+      )
+    )
+    .where(
+      and(
+        eq(sdkResourceBindings.resourceId, app),
+        eq(sdkResourceBindings.resourceVersion, version),
+        eq(sdkResourceBindings.kind, "store"),
+        isNull(businessStores.id)
+      )
+    )
+    .get();
+  if (goneStore !== undefined) {
+    throw dataErrors.create("data.store_unavailable");
   }
 };
 
