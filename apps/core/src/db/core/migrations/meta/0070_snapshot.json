@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e5b31d45-e54b-4942-acb2-958b966c9dea",
-  "prevId": "9ba70f1c-c633-4c5a-82dd-c8926358b7cd",
+  "id": "ec54a2f6-5ea7-4c50-817e-6c8ded13038b",
+  "prevId": "e506c865-c5b0-4910-b773-924d79bea51e",
   "tables": {
     "accounts": {
       "name": "accounts",
@@ -4430,6 +4430,21 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "retry_at": {
+          "name": "retry_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "retries": {
+          "name": "retries",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         }
       },
       "indexes": {
@@ -4445,7 +4460,7 @@
         "workflow_run_controls_admitted_idx": {
           "name": "workflow_run_controls_admitted_idx",
           "columns": [
-            "created_at",
+            "retry_at",
             "id"
           ],
           "isUnique": false,
