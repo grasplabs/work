@@ -16,6 +16,13 @@ import { platformErrorNamespaces } from "./error-namespaces.ts";
 export const operationInputMaxBytes = 128 * 1024;
 
 /**
+ * The most bytes of one call's request as a screen or agent sends it, as
+ * UTF-8 JSON: the input's own bound and room for the reference and options
+ * around it. Every transport reads no more than this before parsing.
+ */
+export const functionRequestMaxBytes = operationInputMaxBytes + 4 * 1024;
+
+/**
  * The most bytes of what one operation returns, as UTF-8 JSON: the size
  * spec 18.1 gives a workflow step's result, so any operation's return
  * fits a step that calls it.

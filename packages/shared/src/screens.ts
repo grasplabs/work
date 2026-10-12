@@ -18,12 +18,14 @@ import type { WorkflowRun } from "./workflows.ts";
 // every call; the frame only ever talks to the page.
 
 export {
+  appFunctionPath,
   jsonBytes,
   rpcArgumentDepth,
   screenFrameMessage,
   screenFrameMounted,
   screenFramePath,
   screenFrameReady,
+  screenLeaseHeader,
   screenLimits,
   screenModulePath,
 } from "./screen-limits.ts";

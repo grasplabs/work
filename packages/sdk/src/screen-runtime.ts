@@ -34,6 +34,14 @@ export interface ScreenBridge {
    * can keep and call later.
    */
   call: (method: string, args: unknown[]) => Promise<unknown>;
+  /**
+   * Calls one of the App's functions (spec 32.6), for the person using the
+   * screen: `request` is the call as JSON text (its reference, input and
+   * idempotency key), passed to core as it is; the answer is core's
+   * `{ result, fingerprint, manifestHash }`. The transport the screen
+   * client builds on, not a call for screen code itself.
+   */
+  callFunction: (request: string) => Promise<unknown>;
   /** Adds a problem to the App's error log. */
   report: (problem: ScreenProblem) => void;
   /** Calls `onTheme` with the page's theme now and whenever it changes. */

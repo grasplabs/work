@@ -1,5 +1,6 @@
 import type { ScreenBridge, Theme } from "@grasp-os/sdk/screen-runtime";
 import { requestErrors } from "@grasp-os/shared/errors";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
   accountedTransport,
   rpcCopyNodeBounds,
@@ -42,6 +43,7 @@ import { RpcSession, RpcStub } from "capnweb";
  */
 export interface FrameTarget {
   call: (method: string, args: unknown[]) => Promise<unknown>;
+  callFunction: (request: string) => Promise<unknown>;
   report: (problem: ScreenProblem) => Promise<void>;
   startRun: (workflow: string, input: unknown) => Promise<unknown>;
   runs: (workflow: string) => Promise<unknown>;
@@ -125,6 +127,22 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
       throw screenErrors.create("screen.invalid");
     }
     return await this.#target.call(method, args);
+  }
+
+  /**
+   * Passes a function call's request on as the frame sent it: text, no
+   * longer than core reads of one (`functionRequestMaxBytes`, counted here
+   * in UTF-16 code units, which core then bounds again in bytes).
+   */
+  async callFunction(request: unknown): Promise<unknown> {
+    this.#request();
+    if (
+      typeof request !== "string" ||
+      request.length > functionRequestMaxBytes
+    ) {
+      throw screenErrors.create("screen.invalid");
+    }
+    return await this.#target.callFunction(request);
   }
 
   async startRun(workflow: unknown, input: unknown): Promise<unknown> {
