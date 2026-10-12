@@ -13,6 +13,7 @@ import {
 import type { AppManifest, OperationManifest } from "@grasp-os/sdk/host";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { appCallLimits } from "@grasp-os/shared/apps";
+import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -352,7 +353,8 @@ const publicOperation = (
  * `args` as the function's `args` normalize them, read as JSON and bounded:
  * measured as they are read, so input past the limit costs no more than
  * the limit to refuse. The bytes a call carries over the wire, before any
- * of this, are bounded where calls enter core (GRA-245).
+ * of this, are bounded where calls enter core, as text, before they are
+ * parsed (`callAppFunction`, app-functions.ts).
  */
 const admittedArgs = (
   compiled: Compiled,
@@ -1298,7 +1300,9 @@ const spendCall = (budget: CallBudget, what: "nested" | "requests"): void => {
  * the failure of the first that was still running when the handler
  * settled and then failed: one the handler never waited for, so it could
  * neither handle it nor report it. One the handler waited for is its own
- * to have handled, and doesn't fail the run again.
+ * to have handled, and doesn't fail the run again. One stopped at the
+ * deadline (`operation.deadline_exceeded`, nested calls sharing it) is
+ * answered as unfinished, the handler's own failure.
  */
 const trackedCalls = (
   capabilities: Capabilities,
@@ -1310,6 +1314,7 @@ const trackedCalls = (
   let handlerSettled = false;
   const running = new Set<Promise<unknown>>();
   let unfinished: { error: unknown } | undefined;
+  let pastDeadline = false;
   const track = <Args extends unknown[]>(
     use: ((...args: Args) => Promise<unknown>) | undefined
   ) =>
@@ -1324,8 +1329,19 @@ const trackedCalls = (
             try {
               await call;
             } catch (error) {
-              if (handlerSettled && unfinished === undefined) {
-                unfinished = { error };
+              if (!handlerSettled) {
+                return;
+              }
+              // Left running and stopped at the deadline: the handler's
+              // own failure is that it left the call unfinished, as when
+              // the wait for it runs out (the host's error, never one to
+              // read as App code's).
+              if (
+                operationErrors.codeOf(error) === "operation.deadline_exceeded"
+              ) {
+                pastDeadline = true;
+              } else {
+                unfinished ??= { error };
               }
             }
           })();
@@ -1360,9 +1376,33 @@ const trackedCalls = (
         ]);
         timer.abort();
       }
+      if (pastDeadline) {
+        throw hostError(operationErrors.create("operation.unfinished_call"));
+      }
       return unfinished?.error;
     },
   };
+};
+
+/**
+ * `work`, or "expired" once `deadline` (ms since the epoch) passes first:
+ * the sandbox limits CPU, not time, so a handler awaiting a long timer
+ * would otherwise hold its call and channel open. Nested calls share their
+ * caller's invocation, so they run to the same deadline.
+ */
+const untilDeadline = async <Answer>(
+  work: Promise<Answer>,
+  at: number
+): Promise<Answer | "expired"> => {
+  const limit = timeLimit(Math.max(0, at - Date.now()));
+  try {
+    return await Promise.race([
+      work,
+      whenAborted(limit.signal).catch(() => "expired" as const),
+    ]);
+  } finally {
+    limit.clear();
+  }
 };
 
 /** Thrown by a run whose failure came from stale reads: run it again. */
@@ -1429,9 +1469,16 @@ const runHandler = async (
     refusals: refusalsOf[operation.kind],
   });
   try {
-    const outcome = await settle(
-      run.app.run(operation.path, fresh(args), open.channel)
+    const outcome = await untilDeadline(
+      settle(run.app.run(operation.path, fresh(args), open.channel)),
+      run.invocation.deadline
     );
+    if (outcome === "expired") {
+      // Stopped at its deadline: its channel ends here, so nothing it
+      // still does reaches the store, and what it staged never commits.
+      open.end();
+      throw hostError(operationErrors.create("operation.deadline_exceeded"));
+    }
     // What it started and didn't wait for still runs: the run ends once
     // that has settled, and fails with what failed of it.
     const unfinished = await calls.settle();
