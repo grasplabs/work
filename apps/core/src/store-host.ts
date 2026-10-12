@@ -436,7 +436,27 @@ interface ContractChange {
   readonly plan: string;
   readonly consumer: SchemaConsumer | undefined;
   readonly receiptId: string | null;
+  /** Applied for its consumer already: answer the receipt, write nothing. */
+  readonly replay: boolean;
 }
+
+/** The IDs of the schema's tables, and of every table the store holds. */
+const definedTables = (
+  names: readonly string[],
+  all: readonly { name: string; tableId: string }[]
+): Pick<DefinedTables, "tables" | "storeTables"> => {
+  const schemaTables = new Set(names);
+  return {
+    tables: Object.fromEntries(
+      all
+        .filter(({ name }) => schemaTables.has(name))
+        .map(({ name, tableId }) => [name, tableId])
+    ),
+    storeTables: Object.fromEntries(
+      all.map(({ name, tableId }) => [name, tableId])
+    ),
+  };
+};
 
 const conflict = (table: string, id: string) =>
   dataErrors.create("data.conflict", { table, id });
@@ -622,6 +642,25 @@ export class StoreHost {
       throw dataErrors.create("data.too_many_tables");
     }
     const { stored, base } = await this.#currentContract(row);
+    // Applied for this consumer already: its receipt is the answer, after
+    // the checks above, and nothing is planned or written again, so a
+    // retry never moves the contract (nor the indexes it lists) under a
+    // receipt that recorded another change.
+    const { receiptId, kept } = await this.#receiptOf(consumer, schemaHash);
+    if (kept !== undefined) {
+      return {
+        stored,
+        base: base?.hash ?? null,
+        hash: stored ?? base?.hash ?? "",
+        text: "",
+        changed: false,
+        planHash: kept.planHash,
+        plan: "",
+        consumer,
+        receiptId,
+        replay: true,
+      };
+    }
     const plan = planSchemaChange(base?.manifest ?? null, target);
     if (!plan.accepted) {
       throw migrationErrors.create("migration.required", {
@@ -646,17 +685,38 @@ export class StoreHost {
       planHash: await sha256Hex(record),
       plan: record,
       consumer,
-      receiptId:
-        consumer === undefined
-          ? null
-          : await sha256Hex(
-              canonicalJson({
-                resourceId: consumer.resourceId,
-                resourceVersion: consumer.resourceVersion,
-                schemaHash,
-              })
-            ),
+      receiptId,
+      replay: false,
     };
+  }
+
+  /**
+   * The ID of `consumer`'s receipt for the schema `schemaHash` (null when
+   * no consumer is named), and the receipt itself if the store keeps one.
+   */
+  async #receiptOf(
+    consumer: SchemaConsumer | undefined,
+    schemaHash: string
+  ): Promise<{
+    receiptId: string | null;
+    kept: { planHash: string } | undefined;
+  }> {
+    if (consumer === undefined) {
+      return { receiptId: null, kept: undefined };
+    }
+    const receiptId = await sha256Hex(
+      canonicalJson({
+        resourceId: consumer.resourceId,
+        resourceVersion: consumer.resourceVersion,
+        schemaHash,
+      })
+    );
+    const kept = this.#db
+      .select({ planHash: schemaActivations.planHash })
+      .from(schemaActivations)
+      .where(eq(schemaActivations.receiptId, receiptId))
+      .get();
+    return { receiptId, kept };
   }
 
   /**
@@ -816,6 +876,12 @@ export class StoreHost {
     if (all.length > storeMaxTables) {
       throw dataErrors.create("data.too_many_tables");
     }
+    if (change.replay) {
+      return {
+        ...definedTables(names, all),
+        contract: this.#receive(schemaHash, change, now),
+      };
+    }
     installIndexes(this.ctx.storage.sql, plan);
     this.#db
       .insert(schemas)
@@ -828,16 +894,8 @@ export class StoreHost {
         .set({ contractHash: change.hash, contractManifest: change.text })
         .run();
     }
-    const schemaTables = new Set(names);
     return {
-      tables: Object.fromEntries(
-        all
-          .filter(({ name }) => schemaTables.has(name))
-          .map(({ name, tableId }) => [name, tableId])
-      ),
-      storeTables: Object.fromEntries(
-        all.map(({ name, tableId }) => [name, tableId])
-      ),
+      ...definedTables(names, all),
       contract: this.#receive(schemaHash, change, now),
     };
   }

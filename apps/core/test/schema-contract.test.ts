@@ -16,6 +16,7 @@ import type {
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
@@ -527,6 +528,63 @@ describe("failures and races", () => {
     const again = await store.defineTables(v2, consumer(2));
 
     expect(again.contract).toStrictEqual(first.contract);
+  });
+
+  it("write nothing when a schema is applied again for its consumer, after another moved the contract's indexes", async () => {
+    const store = await newStore();
+    const first = await store.defineTables(v1, consumer(1));
+    await store.defineTables(notes(noteFields, { indexed: true }), consumer(2));
+    const before = await snapshot(store);
+
+    const again = await store.defineTables(v1, consumer(1));
+
+    await expect(snapshot(store)).resolves.toStrictEqual(before);
+    expect(again.contract).toStrictEqual(first.contract);
+  });
+
+  it("record an index-only change under its own receipt, and keep the index", async () => {
+    const store = await newStore();
+    await store.defineTables(v1, consumer(1));
+    await store.defineTables(notes(noteFields, { indexed: true }), consumer(2));
+    const indexes = await inStore(store, (sql) =>
+      sql
+        .exec("SELECT name FROM sqlite_master WHERE name LIKE 'sdk_ix_%'")
+        .toArray()
+    );
+
+    const third = await store.defineTables(v1, consumer(3));
+
+    const { plan, manifest } = await inStore(store, (sql) => ({
+      plan: sql
+        .exec<{ plan: string }>(
+          "SELECT plan FROM sdk_schema_activations WHERE receipt_id = ?",
+          third.contract.receiptId
+        )
+        .one().plan,
+      manifest: sql
+        .exec<{ manifest: string }>(
+          "SELECT contract_manifest AS manifest FROM sdk_store"
+        )
+        .one().manifest,
+    }));
+    const recorded = z
+      .object({ retainedIndexes: z.array(z.array(z.string())) })
+      .parse(JSON.parse(plan));
+    expect({
+      plan: recorded.retainedIndexes,
+      indexes: await inStore(store, (sql) =>
+        sql
+          .exec("SELECT name FROM sqlite_master WHERE name LIKE 'sdk_ix_%'")
+          .toArray()
+      ),
+      listed: Object.keys(
+        readSchemaManifest(manifest).manifest.tables.notes?.indexes ?? {}
+      ),
+    }).toStrictEqual({
+      plan: [["notes", "by_title"]],
+      indexes,
+      listed: [],
+    });
   });
 
   it("refuse as busy, and retryable, a schema that keeps losing to others applied at once", async () => {
