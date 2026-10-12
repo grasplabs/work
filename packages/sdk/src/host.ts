@@ -125,3 +125,8 @@ export {
 } from "./generate.ts";
 export type { ReleaseIdentity } from "./generate.ts";
 export type { ScreenManifest } from "./app.ts";
+
+// A descriptor as JSON Schema, for what reads only JSON Schema (a model
+// told its answer's shape); values are still checked by the descriptor.
+export { jsonSchemaOf } from "./json-schema.ts";
+export type { JsonSchema, JsonSchemaOptions } from "./json-schema.ts";

@@ -784,6 +784,45 @@ export const appDefaultStores = sqliteTable("app_default_stores", {
 });
 
 /**
+ * Which provider serves each resource an App of spec 8's layout declares
+ * for its actions (resource-bindings.ts): approved by an admin, for the
+ * exact declaration they reviewed (`declaration_hash`) and the contract it
+ * serves as it was then (`contract_id`, `fingerprint`). `target` is the
+ * provider (JSON, `BindingTarget`): a model, one of the App's permissions
+ * or a template version. At most one active binding per alias; approving
+ * another revokes it in the same batch. Revoked rows stay, for the audit
+ * log's references.
+ */
+export const appResourceBindings = sqliteTable(
+  "app_resource_bindings",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    alias: text().notNull(),
+    kind: text({
+      enum: ["model", "connector", "knowledge", "template"],
+    }).notNull(),
+    target: text().notNull(),
+    declarationHash: text("declaration_hash").notNull(),
+    contractId: text("contract_id").notNull(),
+    fingerprint: text().notNull(),
+    reviewedVersion: integer("reviewed_version").notNull(),
+    status: text({ enum: ["active", "revoked"] }).notNull(),
+    approvedBy: text("approved_by").notNull(),
+    approvedAt: timestamp("approved_at").notNull(),
+    revokedBy: text("revoked_by"),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => [
+    uniqueIndex("app_resource_bindings_active_idx")
+      .on(table.appId, table.alias)
+      .where(sql`${table.status} = 'active'`),
+  ]
+);
+
+/**
  * Which App a record type in a collection (a Knowledge collection, by ID)
  * belongs to: the first whose declaration took effect there
  * (knowledge/record-types.ts). Claimed when an App's write permission on
