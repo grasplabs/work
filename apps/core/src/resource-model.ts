@@ -12,6 +12,7 @@ import { gatewaySettings, models } from "./models.ts";
 import type { ResourceContext } from "./operations.ts";
 import type {
   BindingCaller,
+  BindingRecord,
   DeclarationOf,
   ResourceAdapter,
   TargetOf,
@@ -22,10 +23,12 @@ import type {
 // provider and with no key anywhere near App code. The gateway applies the
 // deployment's allowlist and data rules, reserves and settles the call
 // against every budget it counts against (the deployment's, the person's
-// it acts for), and audits it as metadata only. The declaration bounds the
-// answer's tokens, and a structured output is the descriptor's: the model
-// is told its JSON Schema, asked once more when an answer doesn't fit, and
-// the operation host checks the answer against the descriptor again.
+// it acts for, the binding's own caps per request, day and month in
+// model-budgets.ts), and audits it as metadata only. The declaration
+// bounds the answer's tokens, and a structured output is the descriptor's:
+// the model is told its JSON Schema, asked once more when an answer
+// doesn't fit, and the operation host checks the answer against the
+// descriptor again.
 
 /** What every model binding serves: a prompt in, text or the declared value out. */
 const modelContract = {
@@ -114,7 +117,13 @@ const refusalOf = (error: unknown): unknown => {
   ) {
     return operationErrors.create("resource.unavailable");
   }
-  if (code === "model.over_budget" || code === "model.run_limit") {
+  // A budget busy with requests under way has no room for this one now:
+  // used up, as far as App code can act on it.
+  if (
+    code === "model.over_budget" ||
+    code === "model.run_limit" ||
+    code === "model.budget_busy"
+  ) {
     return operationErrors.create("resource.budget_exhausted");
   }
   if (code === "model.invalid_output") {
@@ -141,6 +150,7 @@ const tokensFor = ({
 const generate = async (
   env: Env,
   caller: BindingCaller,
+  record: BindingRecord,
   declaration: DeclarationOf<"model">,
   target: TargetOf<"model">,
   args: readonly Json[],
@@ -164,6 +174,7 @@ const generate = async (
       connections: [...caller.sources.connections()],
       work: { authority: caller.authority, context: caller.context },
       requestId: context.requestId,
+      binding: { app: caller.app, alias: record.alias, budget: record.budget },
       ...(structuredOutput === null
         ? {}
         : { schema: answerSchema(structuredOutput) }),
@@ -180,8 +191,16 @@ export const modelAdapter: ResourceAdapter<"model"> = {
       ? {
           contractId: modelContract.contractId,
           fingerprint: await modelFingerprint,
-          call: async (caller, { args }, context) =>
-            await generate(env, caller, declaration, target, args, context),
+          call: async (caller, { args }, context, _pin, record) =>
+            await generate(
+              env,
+              caller,
+              record,
+              declaration,
+              target,
+              args,
+              context
+            ),
         }
       : undefined,
 };

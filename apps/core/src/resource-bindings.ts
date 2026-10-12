@@ -13,10 +13,12 @@ import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import {
   bindingApprovalSchema,
   bindingTargetSchema,
+  modelBindingBudgetSchema,
   resourceBindingErrors,
 } from "@grasp-os/shared/resource-bindings";
 import type {
   BindingTarget,
+  ModelBindingBudget,
   ResourceBinding,
 } from "@grasp-os/shared/resource-bindings";
 import { isAdmin } from "@grasp-os/shared/roles";
@@ -75,6 +77,11 @@ import { templateAdapter } from "./resource-templates.ts";
 // - A binding of one App serves another: rows are found by the release's
 //   own App, never by anything the caller sends; the adapter acts for the
 //   invocation's authority, the App and the person core resolved.
+// - One App's model binding spends a person's or the deployment's whole
+//   budget: the admin who approves it may cap it per request, day and
+//   month (`budget`), enforced by the model gateway and its ledger on
+//   every provider request (model-budgets.ts). Caps stored damaged serve
+//   nothing.
 // - An approval races a version change: the admin names the version they
 //   reviewed; the batch writes only while it is still current, as a
 //   permission grant does (`app.conflict` otherwise).
@@ -145,6 +152,57 @@ const dropHeldFor = async (
   }
 };
 
+/** `text` as JSON; undefined when it isn't. */
+const jsonOrUndefined = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * A row's own caps: null for none, `unreadable` (logged) for caps stored
+ * damaged. A binding whose caps can't be read serves nothing
+ * (`resourceBindingsFor`), so it never runs uncapped.
+ */
+const storedBudget = (
+  row: Pick<Row, "id" | "budget">
+): ModelBindingBudget | null | "unreadable" => {
+  if (row.budget === null) {
+    return null;
+  }
+  const parsed = modelBindingBudgetSchema.safeParse(
+    jsonOrUndefined(row.budget)
+  );
+  if (!parsed.success) {
+    log.error("resource_binding.budget_unreadable", { binding: row.id });
+    return "unreadable";
+  }
+  return parsed.data;
+};
+
+/** A row's caps as the API shows them: damaged ones as none, as it serves nothing. */
+const shownBudget = (
+  row: Pick<Row, "id" | "budget">
+): ModelBindingBudget | null => {
+  const stored = storedBudget(row);
+  return stored === "unreadable" ? null : stored;
+};
+
+/** What the audit log records of a binding's caps, in US dollars. */
+const budgetDetail = (
+  budget: ModelBindingBudget | undefined
+): Record<string, Json> =>
+  budget === undefined
+    ? {}
+    : {
+        budgetPerRequest: budget.perRequest ?? null,
+        budgetPerDay: budget.perDay ?? null,
+        budgetPerMonth: budget.perMonth ?? null,
+        budgetAlertAt: budget.alertAt,
+      };
+
 /** A row as the API returns it. */
 const toBinding = (row: Row): ResourceBinding => ({
   id: row.id,
@@ -156,6 +214,7 @@ const toBinding = (row: Row): ResourceBinding => ({
   fingerprint: row.fingerprint,
   declarationHash: row.declarationHash,
   reviewedVersion: row.reviewedVersion,
+  budget: shownBudget(row),
   status: row.status,
   approvedBy: row.approvedBy,
   approvedAt: row.approvedAt.toISOString(),
@@ -228,7 +287,7 @@ export const approveResourceBinding = async (
   input: unknown
 ): Promise<ResourceBinding> => {
   requireMemberAdmin(by);
-  const { app, alias, target, reviewed } = resourceBindingErrors.parse(
+  const { app, alias, target, reviewed, budget } = resourceBindingErrors.parse(
     "resource.binding_invalid",
     bindingApprovalSchema,
     input
@@ -265,6 +324,7 @@ export const approveResourceBinding = async (
     approvedAt: now,
     revokedBy: null,
     revokedAt: null,
+    budget: budget === undefined ? null : canonicalJson(budget),
   };
   // Written only while `by` is still an admin and the reviewed version
   // still current, both read by the statements themselves.
@@ -295,7 +355,7 @@ export const approveResourceBinding = async (
       db
         .insert(appResourceBindings)
         .select(
-          sql`SELECT ${row.id}, ${row.appId}, ${row.alias}, ${row.kind}, ${row.target}, ${row.declarationHash}, ${row.contractId}, ${row.fingerprint}, ${row.reviewedVersion}, 'active', ${row.approvedBy}, ${now.getTime()}, NULL, NULL WHERE ${allowed}`
+          sql`SELECT ${row.id}, ${row.appId}, ${row.alias}, ${row.kind}, ${row.target}, ${row.declarationHash}, ${row.contractId}, ${row.fingerprint}, ${row.reviewedVersion}, 'active', ${row.approvedBy}, ${now.getTime()}, NULL, NULL, ${row.budget} WHERE ${allowed}`
         ),
       outboxedIfChanged(
         db,
@@ -305,6 +365,7 @@ export const approveResourceBinding = async (
           fingerprint: row.fingerprint,
           declarationHash: row.declarationHash,
           ...targetDetail(target),
+          ...budgetDetail(budget),
         })
       ),
     ]);
@@ -451,6 +512,10 @@ export const resourceBindingsFor =
       });
       return undefined;
     }
+    const budget = storedBudget(row);
+    if (budget === "unreadable") {
+      return undefined;
+    }
     return {
       kind: declaration["~resource"],
       contract:
@@ -459,11 +524,17 @@ export const resourceBindingsFor =
           ? declaration.contract
           : null,
       call: async (method, args, context) =>
-        await served.call(caller, { method, args }, context, {
-          id: row.id,
-          declarationHash: row.declarationHash,
-          fingerprint: row.fingerprint,
-        }),
+        await served.call(
+          caller,
+          { method, args },
+          context,
+          {
+            id: row.id,
+            declarationHash: row.declarationHash,
+            fingerprint: row.fingerprint,
+          },
+          { alias: row.alias, budget }
+        ),
     };
   };
 

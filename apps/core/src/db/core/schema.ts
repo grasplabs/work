@@ -869,6 +869,11 @@ export const appResourceBindings = sqliteTable(
     approvedAt: timestamp("approved_at").notNull(),
     revokedBy: text("revoked_by"),
     revokedAt: timestamp("revoked_at"),
+    /**
+     * A model binding's own caps, as JSON (`modelBindingBudgetSchema`):
+     * set at approval, null for none (model-budgets.ts).
+     */
+    budget: text(),
   },
   (table) => [
     uniqueIndex("app_resource_bindings_active_idx")
