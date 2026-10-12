@@ -474,7 +474,7 @@ const notesApp = app({
   operationAccess: {
     "notes.blindCount": { tables: { notes: { insert: true } } },
   },
-  screens: {},
+  screens: [],
   uses: [mail, summarizer, help, letter],
 });
 

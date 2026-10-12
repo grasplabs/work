@@ -1,6 +1,14 @@
 import { usesMaxEntries } from "@grasp-os/shared/operation-limits";
 
 import type { DatabaseReader, DatabaseWriter } from "./database.ts";
+import { referenceData } from "./references.ts";
+import type {
+  ArgsOf,
+  Callable,
+  ReferenceKind,
+  ReferenceVisibility,
+  ReturnOf,
+} from "./references.ts";
 import { isResource } from "./resources.ts";
 import type { AnyResource, ResourceClient } from "./resources.ts";
 import { tablesOf } from "./schema.ts";
@@ -51,50 +59,31 @@ import type {
 // Grasp's mandatory returns, strict keys and capability-free actions.
 
 /** The three kinds of server function. */
-export type FunctionKind = "query" | "mutation" | "action";
+export type FunctionKind = ReferenceKind;
 
 /** Who may call a function directly: anyone allowed, or the App's own code. */
-export type Visibility = "public" | "internal";
+export type Visibility = ReferenceVisibility;
 
 /** A schema's tables, by name. */
 type AnyTables = Readonly<Record<string, AnyTable>>;
 
 /**
  * A function as callers type it: its kind, visibility, arguments (as a
- * caller passes them and as the handler gets them) and return. The
- * phantom members carry inference only and are never set.
+ * caller passes them and as the handler gets them) and return. A
+ * definition is one, and so is the reference generated for it (spec 8):
+ * the phantom members carry inference only and are never set.
  */
-export interface FunctionReference<
+export type FunctionReference<
   Kind extends FunctionKind = FunctionKind,
   Vis extends Visibility = Visibility,
   ArgsIn = unknown,
   Return = unknown,
-> {
-  readonly kind: Kind;
-  readonly visibility: Vis;
-  readonly "~argsIn"?: ArgsIn;
-  readonly "~return"?: Return;
-}
+> = Callable<Kind, Vis, ArgsIn, Return>;
 
 /** Any function reference: its phantom members are only ever read. */
 export type AnyReference = FunctionReference;
 
-/** The arguments a caller passes to `Reference`. */
-export type ArgsOf<Reference> =
-  Reference extends FunctionReference<FunctionKind, Visibility, infer ArgsIn>
-    ? ArgsIn
-    : never;
-
-/** What `Reference` returns. */
-export type ReturnOf<Reference> =
-  Reference extends FunctionReference<
-    FunctionKind,
-    Visibility,
-    unknown,
-    infer Return
-  >
-    ? Return
-    : never;
+export type { ArgsOf, ReturnOf } from "./references.ts";
 
 /** What a function's `uses` may list: functions of the App, and resources. */
 export type Use = AnyReference | AnyResource;
@@ -329,12 +318,19 @@ const usesOf = (uses: unknown): readonly Use[] => {
   const list: readonly unknown[] = uses;
   const checked: Use[] = [];
   for (const use of list) {
-    if (!isServerFunction(use) && !isResource(use)) {
+    if (
+      !isServerFunction(use) &&
+      !isResource(use) &&
+      referenceData(use) === undefined
+    ) {
       return refuse(
-        "`uses` lists the App's server functions and `resource` declarations, never IDs or names."
+        "`uses` lists the App's server functions, their generated references and `resource` declarations, never IDs or names."
       );
     }
-    checked.push(use);
+    // SAFETY: one of the three just checked: a definition, a resource
+    // declaration or a function reference read as data.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    checked.push(use as Use);
   }
   return Object.freeze(checked);
 };

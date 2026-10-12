@@ -5,8 +5,13 @@ import {
   operationSegmentPattern,
 } from "@grasp-os/shared/operation-limits";
 
-import { isResource } from "./resources.ts";
-import type { AnyResource, ResourceKind } from "./resources.ts";
+import { referenceData } from "./references.ts";
+import { isBrowserResource, isResource } from "./resources.ts";
+import type {
+  AnyResource,
+  BrowserResource,
+  ResourceKind,
+} from "./resources.ts";
 import { schemaManifest } from "./schema-manifest.ts";
 import type {
   AccessMode,
@@ -18,6 +23,8 @@ import { functionState, isServerFunction } from "./server.ts";
 import type { AnyFunction, FunctionKind, Visibility } from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
+import { descriptorOf } from "./value-schema.ts";
+import type { AnySchema } from "./value-schema.ts";
 
 // `app`: how an App registers itself (spec 7.1, 7.5): its schema, the
 // access its tables need, its public and internal server functions by
@@ -41,7 +48,16 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 // - `access.tables` modes default to `none`, and `operationAccess` only
 //   narrows them: a path, table or verb that doesn't exist, a verb the
 //   App's mode doesn't allow or one a function of its kind can't use (a
-//   query writing, an action touching tables at all) is refused here.
+//   query writing, an action touching tables at all) is refused here;
+// - a function's `uses` may name another by its generated reference
+//   (spec 8), resolved here by its path: one whose visibility or kind
+//   doesn't match what is registered there is refused, so a stale or
+//   forged reference names nothing;
+// - screens (spec 8) are a list of named routes, each a screen file and
+//   the route input its parameters are validated with, and `preferences`
+//   (spec 10.7.7), when declared, is a strict object; the top-level path
+//   segment `preferences` is the platform's, so no function registers
+//   under it and declaring preferences later never collides with one.
 //
 // What the host runs from is `inspectApp`: the registration as data
 // (descriptors, paths, the access each function may use), and the
@@ -72,6 +88,22 @@ export interface OperationTree {
   readonly [name: string]: AnyFunction | OperationTree;
 }
 
+/** One of an App's screens: a named route to a screen file. */
+export interface ScreenDefinition {
+  /** Its name in the generated `screens`: an identifier. */
+  readonly name: string;
+  /** Its route: `/`, or segments, each a lower-case name or a `:parameter`. */
+  readonly path: string;
+  /** Its file, `screens/<file>.tsx`. */
+  readonly source: string;
+  /**
+   * What its route input is: an object with a string field for each of
+   * the route's parameters. A route without parameters may leave it out,
+   * for a strict empty object.
+   */
+  readonly input?: AnySchema;
+}
+
 /** What an App registers. */
 export interface AppDefinition<
   Tables extends Readonly<Record<string, AnyTable>>,
@@ -87,10 +119,15 @@ export interface AppDefinition<
   readonly internalOperations?: OperationTree;
   /** How particular functions narrow `access`, by path. */
   readonly operationAccess?: Readonly<Record<string, OperationAccess>>;
-  /** Its screens (spec 34): kept as declared, checked by their own module. */
-  readonly screens: Readonly<Record<string, unknown>>;
-  /** The resources its functions use, each by a distinct alias. */
-  readonly uses: readonly AnyResource[];
+  /** Its screens (spec 8): named routes, each to a screen file. */
+  readonly screens: readonly ScreenDefinition[];
+  /** Its people's preferences (spec 10.7.7): a strict object, when declared. */
+  readonly preferences?: AnySchema;
+  /**
+   * The resources it needs, each by a distinct alias: those its actions
+   * use, and those its screens use (files, links).
+   */
+  readonly uses: readonly (AnyResource | BrowserResource)[];
 }
 
 /** A registered App, as `app` answers it. */
@@ -128,6 +165,15 @@ export interface OperationManifest {
   readonly tables: Readonly<Record<string, TableVerbs>>;
 }
 
+/** One screen, as data. */
+export interface ScreenManifest {
+  readonly name: string;
+  readonly path: string;
+  readonly source: string;
+  /** The strict object its route input is validated with. */
+  readonly input: ValueDescriptor;
+}
+
 /** A registered App, as data. */
 export interface AppManifest {
   readonly name: string;
@@ -135,8 +181,14 @@ export interface AppManifest {
   readonly schema: SchemaManifest;
   /** Every function, public and internal, by path. */
   readonly operations: Readonly<Record<string, OperationManifest>>;
-  /** The resources it needs, by alias. */
+  /** The resources its actions use, by alias. */
   readonly resources: Readonly<Record<string, AnyResource>>;
+  /** The resources its screens use (files, links), by alias. */
+  readonly browserResources: Readonly<Record<string, BrowserResource>>;
+  /** Its screens, by name, in the order declared. */
+  readonly screens: Readonly<Record<string, ScreenManifest>>;
+  /** Its preferences' strict object, or null when it declares none. */
+  readonly preferences: ValueDescriptor | null;
 }
 
 /** What the host runs an App from: its manifest and its handlers by path. */
@@ -182,7 +234,28 @@ const appKeys: ReadonlySet<string> = new Set([
   "internalOperations",
   "operationAccess",
   "screens",
+  "preferences",
   "uses",
+]);
+
+/**
+ * The top-level path segment the platform keeps for an App's preferences
+ * (spec 10.7.7): no function registers under it, whether or not the App
+ * declares preferences now.
+ */
+export const reservedSegment = "preferences";
+
+/**
+ * Path segments no function registers at, at any depth: the names a
+ * reference answers as data (`contractId`, `visibility`, `kind`), which a
+ * reference tree can't also hold as children, and `then`, which would
+ * make a reference look like a promise to whatever awaits it.
+ */
+export const referenceKeys: ReadonlySet<string> = new Set([
+  "contractId",
+  "visibility",
+  "kind",
+  "then",
 ]);
 
 const requiredKeys = [
@@ -221,6 +294,16 @@ const walk = (
         `\`${what}\` has a path that isn't up to ${operationPathMaxSegments} identifiers: ${operationSegmentPattern.test(name) ? `\`${path}\`` : "a key that isn't an identifier"}.`
       );
     }
+    if (referenceKeys.has(name)) {
+      refuse(
+        `\`${path}\` can't be registered: \`${name}\` is a name a reference itself answers, never a path segment.`
+      );
+    }
+    if (prefix.length === 0 && name === reservedSegment) {
+      refuse(
+        `\`${what}\` can't register \`${reservedSegment}\`: that path is the platform's, for the App's preferences.`
+      );
+    }
     const property = Object.getOwnPropertyDescriptor(tree, name);
     if (property === undefined || !("value" in property)) {
       refuse(`\`${path}\` is a getter; register a module export.`);
@@ -242,23 +325,208 @@ const walk = (
   }
 };
 
-/** The App's resources by alias, each declared once. */
-const resourcesOf = (uses: unknown): Map<string, AnyResource> => {
+/** The App's resources by alias, each declared once, across both kinds. */
+const resourcesOf = (
+  uses: unknown
+): {
+  actions: Map<string, AnyResource>;
+  browser: Map<string, BrowserResource>;
+} => {
   if (!Array.isArray(uses)) {
     return refuse("An App's `uses` lists `resource` declarations.");
   }
-  const byAlias = new Map<string, AnyResource>();
-  for (const use of uses) {
-    if (!isResource(use)) {
+  const actions = new Map<string, AnyResource>();
+  const browser = new Map<string, BrowserResource>();
+  const listed: readonly unknown[] = uses;
+  for (const use of listed) {
+    if (!isResource(use) && !isBrowserResource(use)) {
       refuse("An App's `uses` lists `resource` declarations only.");
       continue;
     }
-    if (byAlias.has(use.alias)) {
+    if (actions.has(use.alias) || browser.has(use.alias)) {
       refuse(`Two of the App's resources have alias \`${use.alias}\`.`);
     }
-    byAlias.set(use.alias, use);
+    if (isResource(use)) {
+      actions.set(use.alias, use);
+    } else {
+      browser.set(use.alias, use);
+    }
   }
-  return byAlias;
+  return { actions, browser };
+};
+
+/** A screen's or a route parameter's name: an identifier. */
+const screenNamePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
+
+/** A screen's file: `screens/<file>.tsx`. */
+const screenSourcePattern = /^screens\/[\w-]{1,64}\.tsx$/u;
+
+/** One literal segment of a route: lower-case letters, digits and dashes. */
+const routeSegmentPattern = /^[a-z0-9][a-z0-9-]{0,63}$/u;
+
+/** One parameter of a route, `:name`. */
+const routeParameterPattern = /^:(?<name>[A-Za-z][A-Za-z0-9_]{0,63})$/u;
+
+/** The most screens an App declares, and the longest route. */
+export const screenLimits = { screens: 64, pathLength: 200, segments: 16 };
+
+/** The descriptor kinds a route parameter's field may be: strings. */
+const parameterKinds: ReadonlySet<string> = new Set(["string", "id", "enum"]);
+
+/** A strict empty object, the input of a route without parameters. */
+const emptyInput: ValueDescriptor = Object.freeze({
+  descriptorVersion: 1,
+  kind: "object",
+  presence: "required",
+  nullable: false,
+  fields: Object.freeze({}),
+});
+
+/** The parameters of route `path`, checked: refuses a route that isn't one. */
+const routeParameters = (path: unknown, name: string): string[] => {
+  if (
+    typeof path !== "string" ||
+    !path.startsWith("/") ||
+    path.length > screenLimits.pathLength
+  ) {
+    return refuse(
+      `Screen \`${name}\`'s \`path\` is a route starting with \`/\`, at most ${screenLimits.pathLength} characters.`
+    );
+  }
+  if (path === "/") {
+    return [];
+  }
+  const segments = path.slice(1).split("/");
+  if (segments.length > screenLimits.segments) {
+    return refuse(
+      `Screen \`${name}\`'s route has more than ${screenLimits.segments} segments.`
+    );
+  }
+  const parameters: string[] = [];
+  for (const segment of segments) {
+    const parameter = routeParameterPattern.exec(segment)?.groups?.name;
+    if (parameter !== undefined) {
+      if (parameters.includes(parameter)) {
+        refuse(`Screen \`${name}\`'s route names \`:${parameter}\` twice.`);
+      }
+      parameters.push(parameter);
+    } else if (!routeSegmentPattern.test(segment)) {
+      refuse(
+        `Screen \`${name}\`'s route has a segment that is neither a lower-case name nor a \`:parameter\`.`
+      );
+    }
+  }
+  return parameters;
+};
+
+/** The input descriptor of a screen whose route has `parameters`. */
+const screenInput = (
+  input: unknown,
+  parameters: readonly string[],
+  name: string
+): ValueDescriptor => {
+  if (input === undefined) {
+    if (parameters.length > 0) {
+      refuse(
+        `Screen \`${name}\`'s route has parameters: declare its \`input\`, with a field for each.`
+      );
+    }
+    return emptyInput;
+  }
+  // Throws for anything but a `v` schema.
+  const descriptor = descriptorOf(input);
+  if (
+    descriptor.kind !== "object" ||
+    descriptor.nullable ||
+    descriptor.presence !== "required"
+  ) {
+    return refuse(`Screen \`${name}\`'s \`input\` is a required \`v.object\`.`);
+  }
+  for (const parameter of parameters) {
+    const field = Object.hasOwn(descriptor.fields, parameter)
+      ? descriptor.fields[parameter]
+      : undefined;
+    if (
+      field === undefined ||
+      !parameterKinds.has(field.kind) ||
+      field.nullable ||
+      field.presence !== "required"
+    ) {
+      refuse(
+        `Screen \`${name}\`'s \`input\` has no required string, ID or enum field \`${parameter}\` for its route parameter.`
+      );
+    }
+  }
+  return descriptor;
+};
+
+/** The App's screens, by name, in the order declared, each checked. */
+const screensOf = (screens: unknown): Record<string, ScreenManifest> => {
+  if (!Array.isArray(screens) || screens.length > screenLimits.screens) {
+    return refuse(
+      `An App's \`screens\` is a list of at most ${screenLimits.screens} routes.`
+    );
+  }
+  const declared: readonly unknown[] = screens;
+  const byName: Record<string, ScreenManifest> = {};
+  const paths = new Set<string>();
+  for (const screen of declared) {
+    if (
+      !isPlainObject(screen) ||
+      !Object.keys(screen).every((key) =>
+        ["name", "path", "source", "input"].includes(key)
+      )
+    ) {
+      refuse("A screen is `{ name, path, source, input? }`.");
+      continue;
+    }
+    const { name, path, source, input } = screen;
+    if (typeof name !== "string" || !screenNamePattern.test(name)) {
+      refuse("A screen's `name` is an identifier, at most 64 characters.");
+      continue;
+    }
+    if (Object.hasOwn(byName, name)) {
+      refuse(`Two screens are named \`${name}\`.`);
+    }
+    const parameters = routeParameters(path, name);
+    // Parameter names don't make two routes different: `/notes/:id` and
+    // `/notes/:noteId` are the same route.
+    const route = String(path).replaceAll(/:[A-Za-z0-9_]+/gu, ":");
+    if (paths.has(route)) {
+      refuse(`Two screens have route \`${String(path)}\`.`);
+    }
+    paths.add(route);
+    if (typeof source !== "string" || !screenSourcePattern.test(source)) {
+      refuse(`Screen \`${name}\`'s \`source\` is \`screens/<file>.tsx\`.`);
+    }
+    Object.defineProperty(byName, name, {
+      enumerable: true,
+      value: {
+        name,
+        path: String(path),
+        source: String(source),
+        input: screenInput(input, parameters, name),
+      },
+    });
+  }
+  return byName;
+};
+
+/** The App's preferences' descriptor, or null: a strict required object. */
+const preferencesOf = (preferences: unknown): ValueDescriptor | null => {
+  if (preferences === undefined) {
+    return null;
+  }
+  // Throws for anything but a `v` schema.
+  const descriptor = descriptorOf(preferences);
+  if (
+    descriptor.kind !== "object" ||
+    descriptor.nullable ||
+    descriptor.presence !== "required"
+  ) {
+    return refuse("An App's `preferences` is a required `v.object`.");
+  }
+  return descriptor;
 };
 
 /** Whether `mode` lets anyone at all use the table. */
@@ -359,11 +627,47 @@ const verbsOf = (
   return verbs;
 };
 
+/**
+ * The registered path and kind `use` names: a definition by the path it is
+ * registered at, a reference by its path, if what is registered there has
+ * its visibility and, for a generated reference, its kind.
+ */
+const usedFunction = (
+  use: unknown,
+  path: string,
+  paths: ReadonlyMap<unknown, string>,
+  functions: ReadonlyMap<string, AnyFunction>
+): { target: string; kind: FunctionKind } => {
+  const registered = paths.get(use);
+  if (registered !== undefined) {
+    const fn = functions.get(registered);
+    if (fn !== undefined) {
+      return { target: registered, kind: fn.kind };
+    }
+  }
+  const reference = referenceData(use);
+  const target =
+    reference === undefined ? undefined : functions.get(reference.path);
+  if (reference === undefined || target === undefined) {
+    return refuse(`\`${path}\` uses a function the App doesn't register.`);
+  }
+  if (
+    target.visibility !== reference.visibility ||
+    (reference.kind !== undefined && target.kind !== reference.kind)
+  ) {
+    return refuse(
+      `\`${path}\` uses a reference to \`${reference.path}\` that doesn't match what is registered there: regenerate the App's references.`
+    );
+  }
+  return { target: reference.path, kind: target.kind };
+};
+
 /** What `fn`, registered at `path`, uses, as data, checked against the App. */
 const usesOf = (
   fn: AnyFunction,
   path: string,
   paths: ReadonlyMap<unknown, string>,
+  functions: ReadonlyMap<string, AnyFunction>,
   resources: ReadonlyMap<string, AnyResource>
 ): UseManifest[] => {
   const seen = new Set<unknown>();
@@ -387,16 +691,13 @@ const usesOf = (
       }
       return { type: "resource", kind: use["~resource"], alias: use.alias };
     }
-    const target = paths.get(use);
-    if (target === undefined) {
-      return refuse(`\`${path}\` uses a function the App doesn't register.`);
-    }
-    if (fn.kind === "mutation" && use.kind !== "query") {
+    const { target, kind } = usedFunction(use, path, paths, functions);
+    if (fn.kind === "mutation" && kind !== "query") {
       refuse(
-        `\`${path}\` is a mutation: it may run the App's queries, never \`${target}\`, a ${use.kind}.`
+        `\`${path}\` is a mutation: it may run the App's queries, never \`${target}\`, a ${kind}.`
       );
     }
-    return { type: "function", path: target, kind: use.kind };
+    return { type: "function", path: target, kind };
   });
 };
 
@@ -416,12 +717,9 @@ const checkRegistration = (definition: unknown): void => {
       refuse(`An App's registration declares \`${key}\`.`);
     }
   }
-  const { name, screens } = definition;
+  const { name } = definition;
   if (typeof name !== "string" || name.length === 0 || name.length > 100) {
     refuse("An App's `name` is 1 to 100 characters.");
-  }
-  if (!isPlainObject(screens)) {
-    refuse("An App's `screens` is a map of names to screens.");
   }
 };
 
@@ -489,7 +787,9 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
   // Throws for a schema `defineSchema` didn't make, and for access that
   // names a table the schema hasn't or a mode that doesn't exist.
   const manifest = schemaManifest(schema, access);
-  const resources = resourcesOf(definition.uses);
+  const { actions: resources, browser } = resourcesOf(definition.uses);
+  const screens = screensOf(definition.screens);
+  const preferences = preferencesOf(definition.preferences);
 
   const publicFound = new Map<string, unknown>();
   const internalFound = new Map<string, unknown>();
@@ -530,7 +830,7 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
         args: fn.args.descriptor,
         returns: fn.returns.descriptor,
         stream: fn.stream === null ? null : fn.stream.descriptor,
-        uses: Object.freeze(usesOf(fn, path, paths, resources)),
+        uses: Object.freeze(usesOf(fn, path, paths, functions, resources)),
         tables: Object.freeze(
           verbsOf(
             manifest,
@@ -550,6 +850,9 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
       schema: manifest,
       operations,
       resources: Object.fromEntries(resources),
+      browserResources: Object.fromEntries(browser),
+      screens,
+      preferences,
     }),
     functions,
   });
