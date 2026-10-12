@@ -4,6 +4,7 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
+import type { Provenance } from "@grasp-os/shared/knowledge";
 import {
   appErrorDetailsMaxBytes,
   appErrorMessageMaxLength,
@@ -509,6 +510,12 @@ const functionRequestSchema = z.strictObject({
 /** What a call answers (spec 32.6). */
 export interface FunctionAnswer {
   readonly result: OperationResult;
+  /**
+   * Where what the call read through its resources comes from, with its
+   * classification (spec 32.3): the Knowledge collections, and whether
+   * any was sensitive or restricted. Null when no function ran.
+   */
+  readonly provenance: Provenance | null;
   /** The fingerprint of the contract that ran, when one did. */
   readonly fingerprint: string | null;
   /** The release that ran, when one did. */
@@ -548,6 +555,7 @@ export const callAppFunction = async (
   const requestId = crypto.randomUUID();
   const refused = (error: unknown): FunctionAnswer => ({
     result: { ok: false, error: refusalOf(error, requestId) },
+    provenance: null,
     fingerprint: null,
     manifestHash: null,
   });
@@ -602,11 +610,13 @@ export const callAppFunction = async (
     return refused(error);
   }
   try {
+    const sources = invocationSources();
     const invocation = await invocationFor(env, release, {
       by,
       requestId,
       deadline,
       ...(stillAllowed === undefined ? {} : { stillAllowed }),
+      sources,
     });
     const result = await callOperation(
       hostedRelease(env, release),
@@ -619,6 +629,7 @@ export const callAppFunction = async (
     );
     return {
       result,
+      provenance: sources.snapshot(),
       fingerprint: call.reference.fingerprint,
       manifestHash: release.manifestHash,
     };

@@ -24,6 +24,7 @@ import {
   appErrorMessageMaxLength,
   invocationMaxReads,
   isAppErrorCode,
+  knowledgeSearchMaxLength,
   mutationResultMaxBytes,
   operationInputMaxBytes,
   operationResultMaxBytes,
@@ -960,7 +961,7 @@ export type ResourceBindings = (
 
 /** A knowledge search's request, as the declaration's client sends it. */
 const knowledgeSearchSchema = z.strictObject({
-  text: z.string().min(1).max(1000),
+  text: z.string().min(1).max(knowledgeSearchMaxLength),
   limit: z.number().int().min(1).max(20).optional(),
 });
 
@@ -1026,8 +1027,12 @@ const allowedRequest = (
     allowed =
       schema !== undefined &&
       declaration.operations.some((operation) => operation === method) &&
-      args.length === 1 &&
-      schema.safeParse(first).success;
+      args.length === 1;
+    // A declared operation asked with a request outside its contract (a
+    // search text past Knowledge's limit, say): arguments that don't fit.
+    if (allowed && schema?.safeParse(first).success !== true) {
+      throw operationErrors.create("contract.invalid_args");
+    }
   } else if (kind === "model") {
     allowed =
       method === "generate" &&
@@ -1095,7 +1100,8 @@ const checkedResourceResult = (
  * effect under a fresh key; a binding whose grant was revoked
  * (`permission.denied`) as `resource.unavailable`; a refusal a binding's
  * adapter made in the host's words (an unavailable resource, a budget used
- * up, an effect held for its person, a broken contract) as that; anything else
+ * up, an effect held for its person, an item it doesn't have, a broken
+ * contract) as that; anything else
  * `internal.unexpected`, its cause logged. Never the provider's own code,
  * message or details (a connection's ID, the provider's status).
  */
@@ -1113,6 +1119,7 @@ const providerFailure = (error: unknown, requestId: string): Error => {
     code === "resource.unavailable" ||
     code === "resource.budget_exhausted" ||
     code === "resource.awaiting_confirmation" ||
+    code === "resource.item_not_found" ||
     code === "contract.invalid_resource_result"
   ) {
     return hostError(operationErrors.create(code));

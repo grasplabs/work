@@ -3,6 +3,7 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { identifierMaxLength } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -38,6 +39,7 @@ import type {
   ResourceAdapter,
   ServedContract,
 } from "./resource-adapter.ts";
+import { knowledgeAdapter } from "./resource-knowledge.ts";
 import { modelAdapter } from "./resource-model.ts";
 
 // Approved resource bindings (spec 12, 16.1, 32.3): what lets an action of
@@ -83,6 +85,7 @@ const adapters: {
   readonly [Kind in BindingTarget["kind"]]?: ResourceAdapter<Kind>;
 } = {
   model: modelAdapter,
+  knowledge: knowledgeAdapter,
 };
 
 /** The SHA-256 of `declaration`, canonical, as a release sealed it. */
@@ -143,7 +146,13 @@ const targetDetail = (target: BindingTarget): Record<string, Json> => {
     return { permissionId: target.permissionId };
   }
   if (target.kind === "knowledge") {
-    return { permissionIds: Object.values(target.collections).toSorted() };
+    // A detail is one identifier-sized value: the permissions, joined,
+    // when they fit; their number otherwise (the row keeps them all).
+    const ids = [...new Set(Object.values(target.collections))].toSorted();
+    const joined = ids.join(" ");
+    return joined.length <= identifierMaxLength
+      ? { permissionIds: joined }
+      : { permissionCount: ids.length };
   }
   return { templateId: target.templateId, templateVersion: target.version };
 };
