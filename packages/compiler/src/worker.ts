@@ -38,6 +38,7 @@ import {
 } from "./imports.ts";
 import type { CodeKind, ImportSite, ModuleImports } from "./imports.ts";
 import {
+  appCodeLimitErrors,
   buildFiles,
   declarationFile,
   limitErrors,
@@ -560,7 +561,7 @@ const compileAppCodeFile = (
  */
 export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
   const code = appCodeFiles(files);
-  const tooMuch = limitErrors(code);
+  const tooMuch = appCodeLimitErrors(code);
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }

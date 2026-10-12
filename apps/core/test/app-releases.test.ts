@@ -1,4 +1,6 @@
+import { sdkModules } from "@grasp-os/compiler";
 import { schemaHash } from "@grasp-os/sdk/host";
+import { appLimits } from "@grasp-os/shared/app-limits";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -178,6 +180,57 @@ const artifactAt = (release: Release, path: string) => {
 };
 
 describe("sealing a release", { timeout: 120_000 }, () => {
+  it("seals the SDK it was inspected with, and loads it back", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    const sdk = await sdkModules(env.ASSETS);
+    const hashed: [string, string][] = await Promise.all(
+      Object.entries(sdk.modules).map(
+        async ([name, code]): Promise<[string, string]> => [
+          `sdk/${name}`,
+          await sha256Hex(code),
+        ]
+      )
+    );
+    const sealed = Object.fromEntries(hashed);
+    const named = Object.fromEntries(
+      release.manifest.artifacts
+        .filter((artifact) => artifact.path.startsWith("sdk/"))
+        .map((artifact) => [artifact.path, artifact.sha256])
+    );
+    const loaded = await loadRelease(env, fixture.app, 1);
+    expect([named, loaded.sdk, release.manifest.sdkVersion]).toStrictEqual([
+      sealed,
+      sdk.modules,
+      sdk.version,
+    ]);
+  });
+
+  it("seals an App at exactly the App's file and size limits", async () => {
+    const base = notesFiles();
+    const padding = appLimits.files - Object.keys(base).length;
+    const used = Object.values(base).reduce(
+      (sum, source) => sum + source.length,
+      0
+    );
+    const files: Record<string, string> = { ...base };
+    let left = appLimits.totalLength - used;
+    for (let index = 0; index < padding; index += 1) {
+      const head = `export const pad${index} = ${index};\n//`;
+      const share = Math.ceil(left / (padding - index));
+      files[`operations/pad${index}.ts`] =
+        `${head}${"x".repeat(share - head.length - 1)}\n`;
+      left -= share;
+    }
+    const sizes = Object.values(files).map((source) => source.length);
+    expect([
+      sizes.length,
+      sizes.reduce((sum, size) => sum + size, 0),
+    ]).toStrictEqual([appLimits.files, appLimits.totalLength]);
+    const release = await seal(await appWith(files));
+    expect(release.manifest.resourceVersion).toBe(1);
+  });
+
   it("pins the source, schema, contracts, runtime, store and every artifact by hash", async () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);

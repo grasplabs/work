@@ -73,7 +73,9 @@ import { buildAppCode } from "./screens.ts";
 // - A release is changed after it was sealed: its manifest is canonical
 //   text stored once with its SHA-256 (a second seal of the version with
 //   another manifest is refused), and every artifact is stored under the
-//   SHA-256 of its bytes. Loading reads it all back and checks every hash,
+//   SHA-256 of its bytes, the SDK modules it was inspected with among
+//   them, so it runs the SDK it was sealed with whatever SDK the host
+//   serves later. Loading reads it all back and checks every hash,
 //   the manifest's, each artifact's and the contracts' (`loadRelease`).
 //   A new version is a new manifest; a sealed one never changes.
 // - A release reaches a store it shouldn't: no App code, request or
@@ -157,14 +159,14 @@ const builtCode = async (
  */
 const inspected = async (
   env: Env,
-  modules: Readonly<Record<string, string>>
+  modules: Readonly<Record<string, string>>,
+  sdk: Readonly<Record<string, string>>
 ): Promise<string> => {
-  const sdk = await sdkModules(env.ASSETS);
   const isolate = env.LOADER.get(null, () => ({
     ...sandbox,
     mainModule: inspectModule,
     // The platform's modules last: no App module takes one's name.
-    modules: { ...modules, ...sdk.modules, [inspectModule]: inspectMain },
+    modules: { ...modules, ...sdk, [inspectModule]: inspectMain },
     env: {},
   })).getEntrypoint<InspectEntrypoint>("Inspect");
   let text: unknown;
@@ -266,6 +268,11 @@ export interface Release {
   readonly fingerprints: Readonly<Record<string, string>>;
   /** The App's code, as modules by flat name. */
   readonly modules: Readonly<Record<string, string>>;
+  /**
+   * The SDK's modules it was inspected with, by flat name, sealed with it
+   * (`sdk/` artifacts): what it runs with, whatever SDK the host has now.
+   */
+  readonly sdk: Readonly<Record<string, string>>;
   /** The store it reads and writes, if it declares tables. */
   readonly store: DataStoreBinding | null;
 }
@@ -309,6 +316,9 @@ const artifactText = async (
     bytes
   );
 };
+
+/** Where a release's sealed SDK modules are among its artifacts. */
+const sdkArtifactDir = "sdk/";
 
 /** A manifest's whole release, every artifact read back and checked. */
 const verifiedRelease = async (
@@ -354,14 +364,17 @@ const verifiedRelease = async (
   }
   const [store = null] = manifest.dataStoreBindings;
   const modules: Record<string, string> = {};
+  const sdk: Record<string, string> = {};
   for (const [path, text] of texts) {
     if (path.startsWith("modules/")) {
       modules[path.slice("modules/".length)] = text;
+    } else if (path.startsWith(sdkArtifactDir)) {
+      sdk[path.slice(sdkArtifactDir.length)] = text;
     }
   }
   // Shared by every load of the release in this isolate: frozen, so no
   // caller changes what another runs.
-  return deepFreeze({ manifest, app, fingerprints, modules, store });
+  return deepFreeze({ manifest, app, fingerprints, modules, sdk, store });
 };
 
 /**
@@ -536,6 +549,10 @@ export const sealRelease = async (
     throw versionErrors.create("version.unsealable");
   }
 
+  // The SDK read once: the modules both inspections run with are the
+  // modules sealed with the release, and what it runs with.
+  const sdk = await sdkModules(env.ASSETS);
+
   // The first inspection: symbolic references, resolved against the
   // registration they come with.
   const symbolic = await builtCode(env, {
@@ -543,7 +560,7 @@ export const sealRelease = async (
     ...symbolicModules(),
     [generatedPaths.server]: serverModuleSource,
   });
-  const firstText = await inspected(env, symbolic);
+  const firstText = await inspected(env, symbolic, sdk.modules);
   const manifest = readManifest(firstText);
 
   // The real modules, then the same code again with them.
@@ -552,7 +569,7 @@ export const sealRelease = async (
     resourceVersion: version,
   });
   const final = await builtCode(env, { ...files, ...generated });
-  const secondText = await inspected(env, final);
+  const secondText = await inspected(env, final, sdk.modules);
   const reread = readManifest(secondText);
   if (canonicalText(reread) !== canonicalText(manifest)) {
     throw versionErrors.create("version.unstable_manifest");
@@ -599,6 +616,9 @@ export const sealRelease = async (
     ...Object.entries(generated).map(
       async ([path, text]) => await artifactOf(path, text)
     ),
+    ...Object.entries(sdk.modules).map(
+      async ([name, code]) => await artifactOf(`${sdkArtifactDir}${name}`, code)
+    ),
     artifactOf(".grasp/verification.json", report),
   ]);
   artifacts.sort((a, b) => (a.entry.path < b.entry.path ? -1 : 1));
@@ -606,10 +626,7 @@ export const sealRelease = async (
     ({ entry }) => entry.path === ".grasp/verification.json"
   );
 
-  const [sdk, kit] = await Promise.all([
-    sdkModules(env.ASSETS),
-    kitModules(env.ASSETS),
-  ]);
+  const kit = await kitModules(env.ASSETS);
   const releaseManifest: ReleaseManifest = releaseManifestSchema.parse({
     formatVersion: releaseFormatVersion,
     resourceId: app,
@@ -709,6 +726,7 @@ export const sealRelease = async (
     app: manifest,
     fingerprints: await contractFingerprints(manifest),
     modules: { ...final },
+    sdk: { ...sdk.modules },
     store,
   });
 };

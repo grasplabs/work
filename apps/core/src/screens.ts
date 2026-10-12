@@ -1,5 +1,6 @@
 import {
   appCodeFiles,
+  appCodeLimitErrors,
   appModuleName,
   buildFiles,
   compilerVersion,
@@ -110,7 +111,10 @@ const cachedBuild = async <Build>(
   ) => Promise<Build>
 ): Promise<Build | FailedBuild> => {
   const files = select(appFiles);
-  const tooMuch = limitErrors(files);
+  // An App's server code carries the host's generated modules, held to
+  // their own allowance, so they never count against the App's limits.
+  const tooMuch =
+    kind === "app" ? appCodeLimitErrors(files) : limitErrors(files);
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }

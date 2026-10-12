@@ -34,6 +34,7 @@ export {
   isAppLayout,
 } from "./app-code.ts";
 export {
+  appCodeLimitErrors,
   buildFiles,
   limitErrors,
   serverFiles,

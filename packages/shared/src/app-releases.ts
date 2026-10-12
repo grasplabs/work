@@ -28,7 +28,12 @@ export const releaseArtifactSchema = z.strictObject({
     .string()
     .min(1)
     .max(512)
-    .regex(/^[\w.~-]+(?:\/[\w.~-]+)*$/u),
+    // Flat module names, `@` included (the SDK's, `sdk/@grasp-os~sdk.js`);
+    // no segment can step out of its folder.
+    .regex(/^[\w.~@-]+(?:\/[\w.~@-]+)*$/u)
+    .refine((path) => !path.split("/").some((part) => /^\.+$/u.test(part)), {
+      message: "A path segment can't be dots alone",
+    }),
   sha256: sha256Schema,
   bytes: z
     .int()
