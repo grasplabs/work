@@ -161,10 +161,13 @@ const jsonOrUndefined = (text: string): unknown => {
   }
 };
 
+/** Bindings whose damaged caps this isolate logged already. */
+const loggedDamaged = new Set<string>();
+
 /**
- * A row's own caps: null for none, `unreadable` (logged) for caps stored
- * damaged. A binding whose caps can't be read serves nothing
- * (`resourceBindingsFor`), so it never runs uncapped.
+ * A row's own caps: null for none, `unreadable` for caps stored damaged,
+ * logged once per binding and isolate. A binding whose caps can't be read
+ * serves nothing (`resourceBindingsFor`), so it never runs uncapped.
  */
 const storedBudget = (
   row: Pick<Row, "id" | "budget">
@@ -176,51 +179,50 @@ const storedBudget = (
     jsonOrUndefined(row.budget)
   );
   if (!parsed.success) {
-    log.error("resource_binding.budget_unreadable", { binding: row.id });
+    if (!loggedDamaged.has(row.id)) {
+      loggedDamaged.add(row.id);
+      log.error("resource_binding.budget_unreadable", { binding: row.id });
+    }
     return "unreadable";
   }
   return parsed.data;
 };
 
-/** A row's caps as the API shows them: damaged ones as none, as it serves nothing. */
-const shownBudget = (
-  row: Pick<Row, "id" | "budget">
-): ModelBindingBudget | null => {
-  const stored = storedBudget(row);
-  return stored === "unreadable" ? null : stored;
-};
-
-/** What the audit log records of a binding's caps, in US dollars. */
+/**
+ * What the audit log records of a binding's caps, in US dollars: each one,
+ * null where none is set, all null for a binding without a budget.
+ */
 const budgetDetail = (
   budget: ModelBindingBudget | undefined
-): Record<string, Json> =>
-  budget === undefined
-    ? {}
-    : {
-        budgetPerRequest: budget.perRequest ?? null,
-        budgetPerDay: budget.perDay ?? null,
-        budgetPerMonth: budget.perMonth ?? null,
-        budgetAlertAt: budget.alertAt,
-      };
+): Record<string, Json> => ({
+  budgetPerRequest: budget?.perRequest ?? null,
+  budgetPerDay: budget?.perDay ?? null,
+  budgetPerMonth: budget?.perMonth ?? null,
+  budgetAlertAt: budget?.alertAt ?? null,
+});
 
 /** A row as the API returns it. */
-const toBinding = (row: Row): ResourceBinding => ({
-  id: row.id,
-  appId: row.appId,
-  alias: row.alias,
-  kind: row.kind,
-  target: bindingTargetSchema.parse(JSON.parse(row.target)),
-  contractId: row.contractId,
-  fingerprint: row.fingerprint,
-  declarationHash: row.declarationHash,
-  reviewedVersion: row.reviewedVersion,
-  budget: shownBudget(row),
-  status: row.status,
-  approvedBy: row.approvedBy,
-  approvedAt: row.approvedAt.toISOString(),
-  revokedBy: row.revokedBy,
-  revokedAt: row.revokedAt?.toISOString() ?? null,
-});
+const toBinding = (row: Row): ResourceBinding => {
+  const budget = storedBudget(row);
+  return {
+    id: row.id,
+    appId: row.appId,
+    alias: row.alias,
+    kind: row.kind,
+    target: bindingTargetSchema.parse(JSON.parse(row.target)),
+    contractId: row.contractId,
+    fingerprint: row.fingerprint,
+    declarationHash: row.declarationHash,
+    reviewedVersion: row.reviewedVersion,
+    budget: budget === "unreadable" ? null : budget,
+    budgetDamaged: budget === "unreadable",
+    status: row.status,
+    approvedBy: row.approvedBy,
+    approvedAt: row.approvedAt.toISOString(),
+    revokedBy: row.revokedBy,
+    revokedAt: row.revokedAt?.toISOString() ?? null,
+  };
+};
 
 /** What the audit log records of a binding's target: IDs only. */
 const targetDetail = (target: BindingTarget): Record<string, Json> => {

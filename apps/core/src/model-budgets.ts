@@ -219,6 +219,18 @@ export const budgetDay = (
     ? env.MODEL_BUDGET_DAY
     : now.toISOString().slice(0, "yyyy-mm-dd".length);
 
+/**
+ * The UTC month and day a request counts in, read off one clock: at a
+ * month's last instant both are that month's.
+ */
+export const budgetPeriods = (
+  env: Pick<Env, "MODEL_BUDGET_MONTH" | "MODEL_BUDGET_DAY">,
+  now = new Date()
+): { month: string; day: string } => ({
+  month: budgetMonth(env, now),
+  day: budgetDay(env, now),
+});
+
 /** A model binding a call is made through, with its own caps (resource-model.ts). */
 export interface BindingBudgetInput {
   app: string;

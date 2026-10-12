@@ -7,6 +7,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { budgetPeriods } from "../src/model-budgets.ts";
 import type { ModelLedger } from "../src/model-ledger.ts";
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
@@ -242,6 +243,21 @@ const requestIds = (fake: ReturnType<typeof fakeGateway>): unknown[] =>
         .parse(JSON.parse(headers.get("cf-aig-metadata") ?? "{}"))
         .providerRequest
   );
+
+/** The month and day a request at `iso` counts in. */
+const periodsAt = (iso: string) => budgetPeriods({}, new Date(iso));
+
+describe("budget periods", () => {
+  it("count a request's day and month by one clock, across a month's end", () => {
+    expect({
+      last: periodsAt("2031-01-31T23:59:59.999Z"),
+      first: periodsAt("2031-02-01T00:00:00.000Z"),
+    }).toStrictEqual({
+      last: { month: "2031-01", day: "2031-01-31" },
+      first: { month: "2031-02", day: "2031-02-01" },
+    });
+  });
+});
 
 describe("model budgets", { timeout: 60_000 }, () => {
   beforeEach(async () => {

@@ -2,6 +2,7 @@ import type { ValueDescriptor } from "@grasp-os/sdk";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { modelErrors } from "@grasp-os/shared/models";
@@ -102,9 +103,10 @@ const answerSchema = (descriptor: ValueDescriptor) => {
 /**
  * What a gateway refusal means to App code, from an allow-list: a model the
  * deployment no longer lets this call use is a binding that can't serve,
- * a budget used up is that, an answer that never fit is a contract the
- * provider broke. Anything else stays the gateway's, for the operation host
- * to redact.
+ * a budget used up is that, a budget held by requests still under way is
+ * busy (worth asking again, after the gateway's suggested wait), an answer
+ * that never fit is a contract the provider broke. Anything else stays the
+ * gateway's, for the operation host to redact.
  */
 const refusalOf = (error: unknown): unknown => {
   const code = modelErrors.codeOf(error);
@@ -117,14 +119,17 @@ const refusalOf = (error: unknown): unknown => {
   ) {
     return operationErrors.create("resource.unavailable");
   }
-  // A budget busy with requests under way has no room for this one now:
-  // used up, as far as App code can act on it.
-  if (
-    code === "model.over_budget" ||
-    code === "model.run_limit" ||
-    code === "model.budget_busy"
-  ) {
+  if (code === "model.over_budget" || code === "model.run_limit") {
     return operationErrors.create("resource.budget_exhausted");
+  }
+  if (code === "model.budget_busy") {
+    const wait = isExpectedError(error)
+      ? error.details?.retryAfterSeconds
+      : undefined;
+    return operationErrors.create(
+      "resource.budget_busy",
+      typeof wait === "number" ? { retryAfterSeconds: wait } : undefined
+    );
   }
   if (code === "model.invalid_output") {
     return operationErrors.create("contract.invalid_resource_result");

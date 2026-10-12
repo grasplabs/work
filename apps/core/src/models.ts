@@ -61,8 +61,7 @@ import { keepAuditEvent } from "./audit-outbox.ts";
 import {
   bindingRequestMicros,
   bindingScopes,
-  budgetDay,
-  budgetMonth,
+  budgetPeriods,
   hasBudget,
   scopesFor,
 } from "./model-budgets.ts";
@@ -854,6 +853,19 @@ const settleAdmitted = async (
   settlement: Settlement
 ): Promise<RequestSettled> => {
   const settled = await settleRequest(route.env, admission.id, settlement);
+  // Charged what it used, never clamped: that is what the provider bills.
+  // Above its reservation it means the bound was wrong, which budgets
+  // rely on.
+  if (
+    settled?.state === "settled" &&
+    settled.chargedMicros > admission.reservedMicros
+  ) {
+    log.warn("model.charge_over_reservation", {
+      model: route.call.model,
+      reservedMicros: admission.reservedMicros,
+      chargedMicros: settled.chargedMicros,
+    });
+  }
   const { perRequest } = route;
   if (perRequest !== undefined && settled?.state === "settled") {
     perRequest.heldMicros -= admission.reservedMicros - settled.chargedMicros;
@@ -1663,7 +1675,7 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   const requestMicros = bindingRequestMicros(binding);
   if (
     price === undefined &&
-    (hasBudget(scopesOn(budgetDay(env))) || requestMicros !== undefined)
+    (hasBudget(scopesOn(budgetPeriods(env).day)) || requestMicros !== undefined)
   ) {
     return await refuse(env, call, { code: "model.unpriced" });
   }
@@ -1674,10 +1686,12 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     model: gatewayModel(config.gateway, ref),
     transport: createAiBindingFetch(env.AI),
     price,
-    scopesNow: () => ({
-      period: budgetMonth(env),
-      scopes: scopesOn(budgetDay(env)),
-    }),
+    scopesNow: () => {
+      // One clock for both, so a request at a month's last instant never
+      // counts its day in one month and its month in the next.
+      const { month, day } = budgetPeriods(env);
+      return { period: month, scopes: scopesOn(day) };
+    },
     perRequest:
       requestMicros === undefined
         ? undefined

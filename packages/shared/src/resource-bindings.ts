@@ -81,6 +81,11 @@ const budgetDollarsSchema = z.number().min(0.01).max(1_000_000_000);
  * approvals, so approving it again changes the cap and keeps what was
  * spent. Admins are alerted at `alertAt` percent of a day's or month's
  * cap, and when it is reached.
+ *
+ * The caps cover only requests made through the binding, from the App's
+ * actions. A workflow's own model steps (`step.model`) don't go through a
+ * binding: they count against the deployment's, the workflow's, the
+ * person's and the run lineage's budgets only.
  */
 export const modelBindingBudgetSchema = z
   .strictObject({
@@ -136,8 +141,13 @@ export interface ResourceBinding {
   declarationHash: string;
   /** The version whose declaration was reviewed. */
   reviewedVersion: number;
-  /** A model binding's own caps; null for none. */
+  /** A model binding's own caps; null for none, or when damaged. */
   budget: ModelBindingBudget | null;
+  /**
+   * Its caps are stored but can't be read: it serves nothing until an
+   * admin approves it again.
+   */
+  budgetDamaged: boolean;
   status: "active" | "revoked";
   approvedBy: string;
   approvedAt: string;

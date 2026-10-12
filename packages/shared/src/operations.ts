@@ -67,6 +67,8 @@ export const operationErrors = defineErrorFamily({
     "This resource isn't bound to the App, or its binding doesn't serve the contract the App declared.",
   "resource.budget_exhausted":
     "The model budget this request counts against is used up, so it wasn't sent.",
+  "resource.budget_busy":
+    "Model requests still under way hold what's left of the budget this request counts against, so it wasn't sent. Try again shortly.",
   "resource.awaiting_confirmation":
     "This request waits for the person it acts for to confirm it. Make the same call again once they have.",
   "resource.declined":
@@ -123,6 +125,7 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "resource.unavailable": "authorization",
   "resource.not_allowed": "contract",
   "resource.budget_exhausted": "operational",
+  "resource.budget_busy": "operational",
   "resource.awaiting_confirmation": "operational",
   "resource.item_not_found": "domain",
   "resource.invalid_args": "contract",
@@ -151,6 +154,8 @@ const retryableCodes: ReadonlySet<string> = new Set([
   "data.reads_changed",
   "submission.superseded",
   "submission.deadline_passed",
+  // Nothing was sent; room comes back as requests under way settle.
+  "resource.budget_busy",
 ]);
 
 /** The category of platform error `code`: its own, or by its family. */
