@@ -6,6 +6,7 @@ import type {
   ClaimInput,
   Commit,
   DefinedTables,
+  SchemaConsumer,
   StagedWrites,
   StoredRecord,
 } from "@grasp-os/shared/stores";
@@ -45,9 +46,10 @@ export class DataStore extends DurableObject<Env> {
   /** `StoreHost.defineTables`. */
   async defineTables(
     storeId: StoreId,
-    manifest: string
+    manifest: string,
+    consumer?: SchemaConsumer
   ): Promise<DefinedTables> {
-    return await this.#host.defineTables(storeId, manifest);
+    return await this.#host.defineTables(storeId, manifest, consumer);
   }
 
   /** `StoreHost.get`. */
