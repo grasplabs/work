@@ -51,6 +51,8 @@ export const operationErrors = defineErrorFamily({
   "operation.no_resources":
     "Only an action uses resources; queries and mutations never reach outside the App.",
   "operation.ended": "This operation's call has ended.",
+  "operation.deadline_exceeded":
+    "The operation ran past its deadline, and was stopped before it changed anything more.",
   "operation.unfinished_call":
     "The operation left a call it started running past its deadline.",
   "operation.unsupported":
@@ -118,6 +120,7 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "contract.invalid_query": "source",
   "mutation.too_large": "contract",
   "effect.outcome_unknown": "uncertain",
+  "operation.deadline_exceeded": "operational",
 };
 
 /** The platform codes worth trying again, unchanged, a little later. */

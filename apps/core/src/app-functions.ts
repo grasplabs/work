@@ -84,7 +84,7 @@ const answerMaxLength = operationResultMaxBytes;
  * all of it again.
  */
 const runMain = `import { WorkerEntrypoint } from "cloudflare:workers";
-import { runFunction } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/runner"))};
+import { jsonAnswer, runFunction } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/runner"))};
 import registered from ${JSON.stringify(appModuleName("app.ts"))};
 
 const rebuilt = (settled) => {
@@ -139,9 +139,11 @@ export class Run extends WorkerEntrypoint {
     } catch (error) {
       return failed(error);
     }
+    // Read as the host reads a value, before it is serialized: JSON alone
+    // would turn NaN or an undefined in an array into a valid null.
     let text;
     try {
-      text = JSON.stringify(value);
+      text = jsonAnswer(value);
     } catch {
       return { ok: true, answer: "unreadable" };
     }

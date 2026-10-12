@@ -193,6 +193,32 @@ export const checkRevision = query({
   },
 });
 
+/** Answers NaN where its contract allows a number or null. */
+export const notANumber = query({
+  args: {},
+  returns: v.number().nullable(),
+  handler: () => Number.NaN,
+});
+
+/** Answers an undefined in an array, which JSON would make a null. */
+export const holey = query({
+  args: {},
+  returns: v.array(v.string().nullable()),
+  handler: () => [undefined],
+});
+
+/** Waits past any deadline a test gives it, then writes. */
+export const lateWrite = action({
+  args: {},
+  returns: v.null(),
+  uses: [create],
+  handler: async (ctx) => {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await ctx.runMutation(create, { title: "Too late", body: "" });
+    return null;
+  },
+});
+
 /** What the SDK module it runs with marked, if it marked anything. */
 export const sdkMark = query({
   args: {},
@@ -265,7 +291,7 @@ export const recover = action({
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
 import {
-  bump, checkRevision, closed, count, create, flood, get, list, peekEnv, reach, recover, remember, remove, sdkMark, sneak, tally, update,
+  bump, checkRevision, closed, count, create, flood, get, list, peekEnv, reach, recover, remember, remove, sdkMark, sneak, tally, update, notANumber, holey, lateWrite,
 } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
@@ -274,7 +300,7 @@ export default app({
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
   operations: {
-    notes: { list, get, create, update, remove, tally, bump, remember, reach, flood, closed, checkRevision, recover, sneak, peekEnv, sdkMark },
+    notes: { list, get, create, update, remove, tally, bump, remember, reach, flood, closed, checkRevision, recover, sneak, peekEnv, sdkMark, notANumber, holey, lateWrite },
   },
   internalOperations: { notes: { count } },
   screens: [],
@@ -654,6 +680,49 @@ describe(
     });
   }
 );
+
+describe("what a function answers", { timeout: 120_000 }, () => {
+  it("is read as it is, never as JSON would quietly make it", async () => {
+    const notes = await sealedNotes();
+    const answers = await Promise.all(
+      ["notes.notANumber", "notes.holey"].map(async (path) =>
+        codeOf(await call(notes, notes.owner, path, {}))
+      )
+    );
+    expect(answers).toStrictEqual([
+      "contract.invalid_return",
+      "contract.invalid_return",
+    ]);
+  });
+});
+
+describe("a call past its deadline", { timeout: 120_000 }, () => {
+  it("is stopped at the deadline, and what it does after never commits", async () => {
+    const notes = await sealedNotes();
+    const started = Date.now();
+    const answer = await callAppFunction(
+      env,
+      notes.owner,
+      notes.app,
+      JSON.stringify({
+        reference: referenceTo(notes.release, "notes.lateWrite"),
+        input: {},
+      }),
+      started + 1000
+    );
+    const took = Date.now() - started;
+    // Long enough for its write, had it gone through.
+    await scheduler.wait(4000);
+    const page = valueOf(
+      await call(notes, notes.owner, "notes.list", { pagination: {} })
+    );
+    expect([codeOf(answer), took < 2500, titlesOn(page)]).toStrictEqual([
+      "operation.deadline_exceeded",
+      true,
+      [],
+    ]);
+  });
+});
 
 describe("the SDK a release runs with", { timeout: 120_000 }, () => {
   it("is the one sealed with it, never the one the host serves now", async () => {

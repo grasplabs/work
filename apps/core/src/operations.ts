@@ -13,6 +13,7 @@ import {
 import type { AppManifest, OperationManifest } from "@grasp-os/sdk/host";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { appCallLimits } from "@grasp-os/shared/apps";
+import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -1366,6 +1367,27 @@ const trackedCalls = (
   };
 };
 
+/**
+ * `work`, or "expired" once `deadline` (ms since the epoch) passes first:
+ * the sandbox limits CPU, not time, so a handler awaiting a long timer
+ * would otherwise hold its call and channel open. Nested calls share their
+ * caller's invocation, so they run to the same deadline.
+ */
+const untilDeadline = async <Answer>(
+  work: Promise<Answer>,
+  at: number
+): Promise<Answer | "expired"> => {
+  const limit = timeLimit(Math.max(0, at - Date.now()));
+  try {
+    return await Promise.race([
+      work,
+      whenAborted(limit.signal).catch(() => "expired" as const),
+    ]);
+  } finally {
+    limit.clear();
+  }
+};
+
 /** Thrown by a run whose failure came from stale reads: run it again. */
 const staleRun = new Error("A run's reads went stale");
 
@@ -1430,9 +1452,16 @@ const runHandler = async (
     refusals: refusalsOf[operation.kind],
   });
   try {
-    const outcome = await settle(
-      run.app.run(operation.path, fresh(args), open.channel)
+    const outcome = await untilDeadline(
+      settle(run.app.run(operation.path, fresh(args), open.channel)),
+      run.invocation.deadline
     );
+    if (outcome === "expired") {
+      // Stopped at its deadline: its channel ends here, so nothing it
+      // still does reaches the store, and what it staged never commits.
+      open.end();
+      throw hostError(operationErrors.create("operation.deadline_exceeded"));
+    }
     // What it started and didn't wait for still runs: the run ends once
     // that has settled, and fails with what failed of it.
     const unfinished = await calls.settle();
