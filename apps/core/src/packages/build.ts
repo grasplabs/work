@@ -52,6 +52,7 @@ import {
 } from "../db/core/schema.ts";
 import { policyGenerationSql } from "../dependencies/policy.ts";
 import { admitDependencies } from "../dependencies/requests.ts";
+import type { Admitted } from "../dependencies/requests.ts";
 import { windowedAccessEnd } from "../screen-frame.ts";
 import { packageArtifactAddress } from "./address.ts";
 import { clearBuildCleanup, recordCleanup } from "./cleanup-records.ts";
@@ -95,9 +96,19 @@ import { verifiedTarball } from "./tarballs.ts";
 //   bytes, so its answer is checked like any input: its shape, every
 //   file's SHA-256 against the bytes, and the artifact's size.
 //
-// Not here yet: taking an approval back, or retiring an artifact. Until
-// GRA-359, an approval holds until the policy generation moves on, and a
-// pin until it is dropped as one too many (`withPin`).
+// - Building with a graph that was retired or revoked (spec 19.3.1):
+//   ending an approval moves the policy generation on, so a build that
+//   read it before is refused, and its pin (whose write checks the
+//   approval is still approved, `stillAdmitted`) landed before the
+//   retirement, and counts among what the graph keeps, or never lands. A
+//   revoked graph admits nothing: no build, and no artifact handed out. A
+//   retired one admits only what was pinned before: the pinned artifact
+//   is handed out, by whichever compiler pinned it (a release that moved
+//   the compiler on still hands out an earlier one's pin), and made again
+//   only to that pin, by this release's compiler, when its kept bytes are
+//   missing or corrupt; a target config with no pin, or an earlier
+//   compiler's pin whose bytes are gone (anything new), is refused with
+//   `dependency.retired`.
 
 /** How the runtime says it stopped an isolate over its limits. */
 const overLimit = /exceeded (?:its )?(?:CPU|memory)/iu;
@@ -331,16 +342,11 @@ export const withPin = (
   };
 };
 
-/** What a build was admitted under: re-checked in the write that pins. */
-interface Admitted {
-  approval: string;
-  policyGeneration: number;
-}
-
 /**
  * Whether `admitted` still holds as a statement runs: under the same
- * policy generation, and its approval still approved (nothing takes one
- * back until GRA-359, so today the generation is what moves).
+ * policy generation, and its approval still approved. Retiring or
+ * revoking an approval moves the generation on too; a retired approval
+ * never pins anything (`dependency.retired`).
  */
 const stillAdmitted = ({ approval, policyGeneration }: Admitted): SQL =>
   sql`EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.id} = ${approval} AND ${dependencyRequests.status} = 'approved') AND ${policyGenerationSql} = ${policyGeneration}`;
@@ -411,7 +417,7 @@ const pin = async (
   pinning: Pinning,
   limits: PackageLimits,
   admitted: Admitted,
-  admit: () => Promise<unknown>
+  admit: (use: "new") => Promise<unknown>
 ): Promise<string> => {
   const db = drizzle(env.DB);
   let current = read;
@@ -509,7 +515,7 @@ const pin = async (
     // The admission no longer holds (this throws), or another write
     // changed the lock first: read it as it is now.
     // oxlint-disable-next-line no-await-in-loop
-    await admit();
+    await admit("new");
     // oxlint-disable-next-line no-await-in-loop
     current = await lockOf(env, app, graphHash);
   }
@@ -532,18 +538,19 @@ const touchPin = async (
   graphHash: string,
   read: { lock: GraspLock; stored: string },
   config: string,
-  pinned: ArtifactPin
+  pinned: ArtifactPin,
+  compiler: string = compilerVersion
 ): Promise<void> => {
   if (Date.now() - Date.parse(pinned.pinnedAt) < touchAfterMs) {
     return;
   }
-  const pins = read.lock.artifacts?.[compilerVersion] ?? {};
+  const pins = read.lock.artifacts?.[compiler] ?? {};
   const stored = canonicalJson(
     graspLockSchema.parse({
       ...read.lock,
       artifacts: {
         ...read.lock.artifacts,
-        [compilerVersion]: {
+        [compiler]: {
           ...pins,
           [config]: { ...pinned, pinnedAt: new Date().toISOString() },
         },
@@ -799,9 +806,36 @@ const leaseFor = async (
 /** What a build of an approved graph read before it builds. */
 interface Asked {
   asked: z.output<typeof packageBuildRequestSchema>;
+  /** Admitted for reuse at least: a retired graph's pinned artifacts. */
   admitted: Admitted;
-  admit: () => Promise<Admitted>;
+  /** Admits again, for reuse (`retained`) or for anything new (`new`). */
+  admit: (use: "new" | "retained") => Promise<Admitted>;
 }
+
+/**
+ * The newest pin of target config `configHash` by another compiler than
+ * this release's, with that compiler: what a retired graph keeps once a
+ * release moved the compiler on.
+ */
+const retainedPin = (
+  lock: GraspLock,
+  configHash: string
+): { compiler: string; pin: ArtifactPin } | undefined => {
+  let newest: { compiler: string; pin: ArtifactPin } | undefined;
+  for (const [compiler, pins] of Object.entries(lock.artifacts ?? {})) {
+    const found = Object.hasOwn(pins, configHash)
+      ? pins[configHash]
+      : undefined;
+    if (
+      compiler !== compilerVersion &&
+      found !== undefined &&
+      (newest === undefined || found.pinnedAt > newest.pin.pinnedAt)
+    ) {
+      newest = { compiler, pin: found };
+    }
+  }
+  return newest;
+};
 
 /**
  * The artifact pinned for the target's config, as the lock is now, if
@@ -831,6 +865,35 @@ const pinnedNow = async (
   }
   const configHash = await targetConfigHash(asked.target, config);
   const pinned = read.lock.artifacts?.[compilerVersion]?.[configHash];
+  if (pinned === undefined && admitted.scope === "retained") {
+    // A retired graph builds nothing new, so a release with another
+    // compiler hands out what an earlier one pinned for this config, as
+    // pinned, and never builds it again: those bytes or nothing.
+    const retained = retainedPin(read.lock, configHash);
+    const kept = retained
+      ? await keptDescription(env, retained.pin.hash)
+      : undefined;
+    if (retained && kept) {
+      await touchPin(
+        env,
+        asked.app,
+        asked.graphHash,
+        read,
+        configHash,
+        retained.pin,
+        retained.compiler
+      );
+      return {
+        kept: {
+          hash: retained.pin.hash,
+          artifact: kept,
+          approval: admitted.approval,
+          stats: null,
+          address: await addressOf(env, asked, retained.pin.hash),
+        },
+      };
+    }
+  }
   const kept = pinned ? await keptDescription(env, pinned.hash) : undefined;
   if (pinned && kept) {
     await touchPin(env, asked.app, asked.graphHash, read, configHash, pinned);
@@ -864,15 +927,22 @@ const buildUnderLease = async (
 ): Promise<PackageBuild> => {
   const { lock } = read;
   const { approval } = admitted;
+  // Made again under its pin, it reproduces what was built before, which a
+  // retired graph keeps; anything else is new, which only an approval in
+  // force admits (this refuses, and records, a retired one's).
+  const use = pinned ? "retained" : "new";
+  if (admitted.scope !== "approved" && use === "new") {
+    await admit("new");
+  }
   const limits = packageLimitsOf(env.PACKAGE_LIMITS);
   const packages = await lockedTarballs(env, lock, limits);
   const { artifact, stats, artifactBytes, builtMs, files } =
     await builtArtifact(env, { limits, lock, target: asked.target, packages });
-  // The policy may have moved on while the build ran (and, once GRA-359
-  // lets an approval be taken back, the approval with it): what decides
-  // now wins, and nothing is kept or pinned for a graph no longer
-  // admitted. The pin's own write checks it again as it lands.
-  await admit();
+  // The policy may have moved on while the build ran (an approval retired
+  // or revoked with it): what decides now wins, and nothing is kept or
+  // pinned for a graph no longer admitted. The pin's own write checks it
+  // again as it lands.
+  await admit(use);
   const hash = await artifactHash(artifact);
   if (pinned && pinned.hash !== hash) {
     log.error("packages.artifact_mismatch", {
@@ -998,17 +1068,33 @@ export const buildDependencies = async (
     throw dependencyErrors.create("dependency.forbidden");
   }
   await appFor(env, by, asked.app, "builder");
-  const admit = async (): Promise<Admitted> =>
-    await admitDependencies(env, by.actor ?? actorOf(by), {
-      app: asked.app,
-      graphHash: asked.graphHash,
-      targets: [asked.target],
-      policyGeneration: asked.policyGeneration,
-    });
-  const building: Asked = { asked, admitted: await admit(), admit };
+  const admit = async (use: "new" | "retained"): Promise<Admitted> =>
+    await admitDependencies(
+      env,
+      by.actor ?? actorOf(by),
+      {
+        app: asked.app,
+        graphHash: asked.graphHash,
+        targets: [asked.target],
+        policyGeneration: asked.policyGeneration,
+      },
+      use
+    );
+  // For reuse first: a retired graph's pinned artifact is still handed out.
+  // Anything new is admitted again as new before it is built.
+  const building: Asked = {
+    asked,
+    admitted: await admit("retained"),
+    admit,
+  };
   const before = await pinnedNow(env, building);
   if (before.kept) {
     return before.kept;
+  }
+  if (before.pinned === undefined && building.admitted.scope !== "approved") {
+    // Nothing pinned to reproduce: a new build, which a retired graph
+    // refuses (this throws, and records it), before waiting on any lease.
+    await admit("new");
   }
   const holder = crypto.randomUUID();
   const leased: Leased = {
@@ -1021,7 +1107,10 @@ export const buildDependencies = async (
   // another build may have pinned it while this one waited, whether or
   // not it gave its lease back (it died, or giving it back failed).
   try {
-    const leasedBuild: Asked = { ...building, admitted: await admit() };
+    const leasedBuild: Asked = {
+      ...building,
+      admitted: await admit("retained"),
+    };
     const now = await pinnedNow(env, leasedBuild);
     if (now.kept) {
       return now.kept;
