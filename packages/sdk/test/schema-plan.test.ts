@@ -198,6 +198,71 @@ describe("safe changes", () => {
     expect(manifestText(contractOf(plan))).toBe(manifestText(contract));
   });
 
+  test("an enum's members in another order are no change; a union's are", () => {
+    const status = (values: [string, ...string[]]) =>
+      notes({ ...noteFields, status: v.enum(values).optional() });
+    const contract = contractOf(
+      planSchemaChange(null, status(["open", "done"]))
+    );
+    const plan = planSchemaChange(contract, status(["done", "open"]));
+    expect(plan).toMatchObject({ accepted: true, changed: false });
+    expect(manifestText(contractOf(plan))).toBe(manifestText(contract));
+    expect(
+      refusedOf(planSchemaChange(contract, status(["done", "open", "late"])))
+    ).toStrictEqual([
+      { table: "notes", field: "status", reason: "field_changed" },
+    ]);
+    const either = (first: "string" | "number") =>
+      notes({
+        ...noteFields,
+        size:
+          first === "string"
+            ? v.union(v.string(), v.number()).optional()
+            : v.union(v.number(), v.string()).optional(),
+      });
+    expect(
+      refusedOf(
+        planSchemaChange(
+          contractOf(planSchemaChange(null, either("string"))),
+          either("number")
+        )
+      )
+    ).toStrictEqual([
+      { table: "notes", field: "size", reason: "field_changed" },
+    ]);
+  });
+
+  test("an enum in a record's values, or in a field named `value`, may reorder too", () => {
+    const nested = (values: [string, ...string[]]) =>
+      notes({
+        ...noteFields,
+        tags: v.record(v.enum(values)).optional(),
+        value: v.enum(values).optional(),
+        detail: v.object({ value: v.enum(values) }).optional(),
+      });
+    const contract = contractOf(planSchemaChange(null, nested(["a", "b"])));
+    expect(planSchemaChange(contract, nested(["b", "a"]))).toMatchObject({
+      accepted: true,
+      changed: false,
+    });
+    expect(
+      refusedOf(planSchemaChange(contract, nested(["a", "c"]))).map(
+        ({ field }) => field
+      )
+    ).toStrictEqual(["detail", "tags", "value"]);
+  });
+
+  test("a default isn't normalized: another default is a change", () => {
+    const status = (fallback: string) =>
+      notes({
+        ...noteFields,
+        status: v.array(v.string()).default([fallback, "z"]),
+      });
+    expect(refusedOf(planSchemaChange(status("a"), status("b")))).toStrictEqual(
+      [{ table: "notes", field: "status", reason: "field_changed" }]
+    );
+  });
+
   test("an older version is compatible with the contract it grew into", () => {
     const v2 = notes({ ...noteFields, category: v.string().optional() });
     const contract = contractOf(planSchemaChange(v1, v2));

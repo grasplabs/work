@@ -49,6 +49,16 @@ export const store = sqliteTable(
      * 32 random bytes in hex, made on first use, never leaving the store.
      */
     cursorKey: text("cursor_key"),
+    /**
+     * The store's data contract (store-host.ts, `defineTables`): every
+     * table and field of every schema the store accepted, as a canonical
+     * schema manifest, and its hash. Every record the store holds, and
+     * every record a version sealed on it may write, fits it. Both null
+     * until the store's first schema, and written together; host-only,
+     * never a caller's.
+     */
+    contractHash: text("contract_hash"),
+    contractManifest: text("contract_manifest"),
   },
   (table) => [check("sdk_store_only", sql`${table.only} = 1`)]
 );
@@ -142,6 +152,29 @@ export const records = sqliteTable(
 export const schemas = sqliteTable("sdk_schemas", {
   schemaHash: text("schema_hash").primaryKey(),
   manifest: text().notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+/**
+ * What applying a schema to the store's contract did, for the consumer
+ * it was applied for (a resource's version, e.g. an App's sealed
+ * release): the contract before and after, the plan's hash and the plan.
+ * One per consumer and schema, written in the transaction that moved the
+ * contract, so it exists exactly when the store committed that consumer's
+ * schema; applying it again answers this receipt and changes nothing.
+ */
+export const schemaActivations = sqliteTable("sdk_schema_activations", {
+  /** The SHA-256 of the consumer and the schema's hash. */
+  receiptId: text("receipt_id").primaryKey(),
+  resourceId: text("resource_id").notNull(),
+  resourceVersion: integer("resource_version").notNull(),
+  schemaHash: text("schema_hash").notNull(),
+  /** The contract's hash before; null for the store's first schema. */
+  baseHash: text("base_hash"),
+  contractHash: text("contract_hash").notNull(),
+  planHash: text("plan_hash").notNull(),
+  /** The plan, as canonical JSON: what it added and retained. */
+  plan: text().notNull(),
   createdAt: integer("created_at").notNull(),
 });
 

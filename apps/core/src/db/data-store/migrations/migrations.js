@@ -5,6 +5,7 @@ import m0002 from './0002_store_deletion.sql';
 import m0003 from './0003_schemas_and_default_order.sql';
 import m0004 from './0004_cursor_key.sql';
 import m0005 from './0005_table_generations.sql';
+import m0006 from './0006_schema_contract.sql';
 
   export default {
     journal,
@@ -14,7 +15,8 @@ m0001,
 m0002,
 m0003,
 m0004,
-m0005
+m0005,
+m0006
     }
   }
   

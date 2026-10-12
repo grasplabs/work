@@ -361,15 +361,44 @@ export const committedSchema = z.strictObject({
 export type Committed = z.infer<typeof committedSchema>;
 
 /**
+ * Whom a store applies a schema for: one version of a resource (an App's
+ * sealed release), named in the receipt the store keeps of it.
+ */
+export const schemaConsumerSchema = z.strictObject({
+  resourceId: identifierSchema,
+  resourceVersion: z.number().int().min(1),
+});
+export type SchemaConsumer = z.infer<typeof schemaConsumerSchema>;
+
+/**
+ * What handing a store a schema did to its data contract: the contract's
+ * hash after it, the hash of the plan that moved it, whether it changed,
+ * and the receipt the store keeps of it for its consumer (null when none
+ * was named). Applying the same schema again answers the first receipt.
+ */
+export interface AppliedContract {
+  /**
+   * The contract's hash after the change: for a receipt answered again,
+   * the one its first application left, so it always matches `planHash`.
+   */
+  hash: string;
+  planHash: string;
+  changed: boolean;
+  receiptId: string | null;
+}
+
+/**
  * What a store answers when handed a schema: the schema's hash, which its
  * host computed from the manifest itself, the ID of each of the schema's
  * tables by name, and of every table the store holds, the schema's among
- * them (tables are never removed, so a store may hold others).
+ * them (tables are never removed, so a store may hold others), and what
+ * it did to the store's contract.
  */
 export interface DefinedTables {
   schemaHash: string;
   tables: Record<string, string>;
   storeTables: Record<string, string>;
+  contract: AppliedContract;
 }
 
 /** One record, as the store holds it: its managed fields and its document. */
@@ -431,6 +460,25 @@ export const dataErrors = defineErrorFamily({
     "This store is already being deleted. Try again in a moment.",
   "data.store_in_use":
     "This store can't be deleted while a mutation's receipt still refers to it. Try again once its receipts have expired.",
+});
+
+/**
+ * Why a store refused a schema it was handed (spec 17): the change needs
+ * a migration (`details.changes` lists each change and why); the store's
+ * record of its contract disagrees with its own recorded schemas, or
+ * can't be rebuilt from them, which blocks every schema change until
+ * repaired, since guessing could lose data; or other schemas kept
+ * changing the contract meanwhile (retryable).
+ */
+export const migrationErrors = defineErrorFamily({
+  "migration.required":
+    "This schema change can't be applied on its own: it needs a migration. Add only new tables, optional fields and indexes, or keep the fields as they were.",
+  "migration.metadata_missing":
+    "This store's schema contract is missing and can't be rebuilt from the schemas it recorded, so no schema change can be applied until it is repaired.",
+  "migration.busy":
+    "This store kept changing while the schema was applied. Try again in a moment.",
+  "migration.metadata_corrupt":
+    "This store's record of its schema contract is damaged, so no schema change can be applied until it is repaired.",
 });
 
 /**

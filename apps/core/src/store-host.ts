@@ -1,11 +1,16 @@
 import { ValueDefinitionError } from "@grasp-os/sdk";
 import {
   manifestText,
+  planSchemaChange,
   readSchemaManifest,
   SchemaDefinitionError,
   schemaHash as hashOf,
 } from "@grasp-os/sdk/host";
-import type { ReadManifest } from "@grasp-os/sdk/host";
+import type {
+  AcceptedPlan,
+  ReadManifest,
+  SchemaManifest,
+} from "@grasp-os/sdk/host";
 import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
@@ -26,18 +31,22 @@ import {
   committedSchema,
   dataErrors,
   documentMaxBytes,
+  migrationErrors,
   recordIdSchema,
+  schemaConsumerSchema,
   stagedWritesSchema,
   storeIntentSchema,
   storedFieldsSchema,
   tableNameSchema,
 } from "@grasp-os/shared/stores";
 import type {
+  AppliedContract,
   ClaimInput,
   Claimed,
   Commit,
   Committed,
   DefinedTables,
+  SchemaConsumer,
   StagedWrites,
   StoreFields,
   StoredRecord,
@@ -68,6 +77,7 @@ import {
   outbox,
   receipts,
   records,
+  schemaActivations,
   schemas,
   store,
   tables,
@@ -348,6 +358,106 @@ const readSchema = (manifest: string): ReadManifest => {
   }
 };
 
+/** The most refused changes a `migration.required` lists. */
+const refusalsListed = 50;
+
+/** The store's contract as its row holds it, read back and checked. */
+interface StoreContract {
+  readonly hash: string;
+  readonly manifest: SchemaManifest;
+}
+
+/**
+ * The contract a store's row holds, checked: its text must read as a
+ * manifest, be that manifest's canonical text and hash to the hash beside
+ * it; otherwise `migration.metadata_corrupt`. Null when the row holds
+ * none.
+ */
+const contractOf = async (row: {
+  contractHash: string | null;
+  contractManifest: string | null;
+}): Promise<StoreContract | null> => {
+  const { contractHash: hash, contractManifest: text } = row;
+  if (hash === null && text === null) {
+    return null;
+  }
+  if (hash === null || text === null) {
+    throw migrationErrors.create("migration.metadata_corrupt");
+  }
+  let manifest: SchemaManifest;
+  try {
+    ({ manifest } = readSchemaManifest(text));
+  } catch (error) {
+    if (
+      error instanceof SchemaDefinitionError ||
+      error instanceof ValueDefinitionError
+    ) {
+      throw migrationErrors.create("migration.metadata_corrupt");
+    }
+    throw error;
+  }
+  if (manifestText(manifest) !== text || (await sha256Hex(text)) !== hash) {
+    throw migrationErrors.create("migration.metadata_corrupt");
+  }
+  return { hash, manifest };
+};
+
+/** What a plan added and kept, as its receipt records it. */
+const planRecord = (
+  plan: AcceptedPlan,
+  identities: { base: string | null; schema: string; contract: string }
+): string =>
+  canonicalJson({
+    ...identities,
+    addedTables: [...plan.addedTables],
+    addedFields: plan.addedFields.map(({ table, field }) => [table, field]),
+    addedIndexes: plan.addedIndexes.map(({ table, index }) => [table, index]),
+    retainedTables: [...plan.retainedTables],
+    retainedFields: plan.retainedFields.map(({ table, field }) => [
+      table,
+      field,
+    ]),
+    retainedIndexes: plan.retainedIndexes.map(({ table, index }) => [
+      table,
+      index,
+    ]),
+  });
+
+/** A schema's change of a store's contract, worked out before it applies. */
+interface ContractChange {
+  /** The contract's hash as the store's row holds it: what the write compares. */
+  readonly stored: string | null;
+  /** The hash of the contract planned from: the row's, or one rebuilt. */
+  readonly base: string | null;
+  readonly hash: string;
+  readonly text: string;
+  readonly changed: boolean;
+  readonly planHash: string;
+  readonly plan: string;
+  readonly consumer: SchemaConsumer | undefined;
+  readonly receiptId: string | null;
+  /** Applied for its consumer already: answer the receipt, write nothing. */
+  readonly replay: boolean;
+}
+
+/** The IDs of the schema's tables, and of every table the store holds. */
+const definedTables = (
+  names: readonly string[],
+  all: readonly { name: string; tableId: string }[]
+): Pick<DefinedTables, "tables" | "storeTables"> => {
+  const schemaTables = new Set(names);
+  return {
+    tables: Object.fromEntries(
+      all
+        .filter(({ name }) => schemaTables.has(name))
+        .map(({ name, tableId }) => [name, tableId])
+    ),
+    storeTables: Object.fromEntries(
+      all.map(({ name, tableId }) => [name, tableId])
+    ),
+  };
+};
+
 const conflict = (table: string, id: string) =>
   dataErrors.create("data.conflict", { table, id });
 
@@ -404,40 +514,70 @@ export class StoreHost {
   }
 
   /**
-   * Makes sure the store has a table for each table of the schema whose
-   * manifest is `manifest` (its JSON text), minting an ID for each new
-   * one, and answers the schema's hash and every table's ID by name. The
-   * manifest is untrusted: it is read as `readSchemaManifest` reads it,
-   * bounded and strict, and declared again through the SDK's checks, and
-   * the hash is computed here, from its canonical text, never taken from
-   * the caller. A schema that fails a check is refused
-   * (`data.invalid_schema`, with the check's code). A table name that
-   * differs from an existing one only in case is refused, and so is one
-   * past `storeMaxTables`. Then it installs a physical index for each of
-   * the schema's declared indexes it doesn't hold yet (store-indexes.ts;
-   * `data.too_many_indexes` past `storeMaxIndexes`) and records the
-   * manifest under its hash, all in one transaction with the new tables,
-   * so a refusal leaves nothing behind and a read pinned to the schema
-   * finds its indexes whenever it finds the schema. Doing it again
-   * changes nothing. Tables and indexes are never renamed or
-   * removed here, and nothing is activated: which schema a store holds
-   * its records to comes with schema activation.
+   * Applies the schema whose manifest is `manifest` (its JSON text) to the
+   * store: its tables, its indexes, and the store's data contract, for
+   * `consumer` when one is named; answers the schema's hash, every
+   * table's ID by name and what it did to the contract. The manifest is
+   * untrusted: it is read as `readSchemaManifest` reads it, bounded and
+   * strict, and declared again through the SDK's checks, and the hash is
+   * computed here, from its canonical text, never taken from the caller.
+   * A schema that fails a check is refused (`data.invalid_schema`, with
+   * the check's code).
+   *
+   * The contract (spec 17.4) is every table and field of every schema
+   * the store accepted: a schema is applied only when the change it makes
+   * to it is safe (`planSchemaChange`: new tables, new optional fields,
+   * new or redefined indexes; tables and optional fields left out are
+   * kept), and refused otherwise (`migration.required`, listing each
+   * change and why), before anything is written. So every record the
+   * store holds fits the contract, and every version sealed on it stays
+   * compatible, a rollback included. The contract is checked against the
+   * store's own recorded schemas on every call: each must fit it
+   * unchanged, or it is `migration.metadata_corrupt`, as is one whose text
+   * doesn't read, isn't canonical or doesn't hash to its hash. A store
+   * whose row holds no contract has it rebuilt from those recorded
+   * schemas, folded oldest first as they were accepted; it refuses
+   * (`migration.metadata_missing`) only when that fold refuses, or holds
+   * records without any recorded schema. Nothing is guessed.
+   *
+   * Everything lands in one transaction, or nothing does: new tables with
+   * the IDs minted for them (a name differing from an existing one only
+   * in case is refused, as is one past `storeMaxTables`), a physical
+   * index for each declared index the store doesn't hold yet
+   * (store-indexes.ts; `data.too_many_indexes` past `storeMaxIndexes`),
+   * the manifest under its hash, the contract, compared and set against
+   * the one the change was planned from, and the consumer's receipt
+   * (`sdk_schema_activations`). That transaction is the store's lease:
+   * two schemas applied at once are applied one after the other, each
+   * against the contract the other left, and a crash or a failed index
+   * leaves the contract as it was. Applying a schema again writes nothing
+   * new and answers its first receipt. Nothing is ever renamed, dropped
+   * or rewritten here: no record changes.
    */
   async defineTables(
     storeId: StoreId,
-    manifest: string
+    manifest: string,
+    consumer?: SchemaConsumer
   ): Promise<DefinedTables> {
     const read = readSchema(manifest);
+    const named =
+      consumer === undefined
+        ? undefined
+        : dataErrors.parse("data.invalid", schemaConsumerSchema, consumer);
     const schemaHash = await hashOf(read.manifest);
     const names = Object.keys(read.manifest.tables);
     const text = manifestText(read.manifest);
-    // Indexes are named by hashes of definitions that name table IDs, and
-    // hashing is asynchronous: so the IDs of new tables are minted and the
-    // indexes planned first, from the tables as they are, then the tables,
-    // indexes and schema land in one transaction, or nothing does. Should
-    // another call change the tables in between, it plans again.
+    // Hashing is asynchronous and a transaction isn't: so the contract is
+    // read and the change planned, and the IDs of new tables minted and
+    // their indexes planned, from the store as it is; then everything
+    // lands in one transaction, which checks first that the tables and
+    // the contract are still what they were planned from. Should another
+    // call change either in between, it plans again.
     for (let attempt = 1; ; attempt += 1) {
       const before = this.#tableRows();
+      // Planned before anything is written.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const change = await this.#planContract(read.manifest, schemaHash, named);
       const known = new Map(before.map(({ name, tableId }) => [name, tableId]));
       const planned = Object.fromEntries(
         names.map((name) => [name, known.get(name) ?? crypto.randomUUID()])
@@ -446,21 +586,237 @@ export class StoreHost {
       // oxlint-disable-next-line no-await-in-loop -- see above
       const plan = await planIndexes(read.manifest, planned);
       const defined = this.ctx.storage.transactionSync(() =>
-        this.#defineIn(storeId, before, planned, plan, schemaHash, text)
+        this.#defineIn(storeId, before, planned, plan, schemaHash, text, change)
       );
       if (defined !== null) {
         return { schemaHash, ...defined };
       }
       if (attempt >= 3) {
-        throw new Error("The store's tables kept changing while defined");
+        // Lost to other schemas applied at once, each time: refused as
+        // retryable, never left to a generic failure.
+        throw migrationErrors.create("migration.busy", { retryable: true });
       }
     }
   }
 
   /**
+   * How `target` changes the store's contract (see `defineTables`), from
+   * the contract its row holds now; refused when it needs a migration or
+   * the contract can't be trusted.
+   */
+  async #planContract(
+    target: SchemaManifest,
+    schemaHash: string,
+    consumer: SchemaConsumer | undefined
+  ): Promise<ContractChange> {
+    const row = this.#db
+      .select({
+        contractHash: store.contractHash,
+        contractManifest: store.contractManifest,
+        deletedAt: store.deletedAt,
+      })
+      .from(store)
+      .get();
+    if (row !== undefined && row.deletedAt !== null) {
+      throw dataErrors.create("data.store_unavailable");
+    }
+    // What the store's tables refuse, refused first with its own code, as
+    // the transaction would: a union holding both would only say it needs
+    // a migration.
+    const held = this.#tableRows();
+    const byKey = new Map(held.map(({ name }) => [name.toLowerCase(), name]));
+    for (const name of Object.keys(target.tables)) {
+      const existing = byKey.get(name.toLowerCase());
+      if (existing !== undefined && existing !== name) {
+        throw dataErrors.create("data.table_conflict", {
+          table: name,
+          existing,
+        });
+      }
+    }
+    const after = new Set([
+      ...held.map(({ name }) => name),
+      ...Object.keys(target.tables),
+    ]);
+    if (after.size > storeMaxTables) {
+      throw dataErrors.create("data.too_many_tables");
+    }
+    const { stored, base } = await this.#currentContract(row);
+    // Applied for this consumer already: its receipt is the answer, after
+    // the checks above, and nothing is planned or written again, so a
+    // retry never moves the contract (nor the indexes it lists) under a
+    // receipt that recorded another change.
+    const { receiptId, kept } = await this.#receiptOf(consumer, schemaHash);
+    if (kept !== undefined) {
+      return {
+        stored,
+        base: base?.hash ?? null,
+        hash: stored ?? base?.hash ?? "",
+        text: "",
+        changed: false,
+        planHash: kept.planHash,
+        plan: "",
+        consumer,
+        receiptId,
+        replay: true,
+      };
+    }
+    const plan = planSchemaChange(base?.manifest ?? null, target);
+    if (!plan.accepted) {
+      throw migrationErrors.create("migration.required", {
+        changes: plan.refused.slice(0, refusalsListed).map((refusal) => ({
+          ...refusal,
+        })),
+      });
+    }
+    const contractText = manifestText(plan.contract);
+    const hash = await sha256Hex(contractText);
+    const record = planRecord(plan, {
+      base: base?.hash ?? null,
+      schema: schemaHash,
+      contract: hash,
+    });
+    return {
+      stored,
+      base: base?.hash ?? null,
+      hash,
+      text: contractText,
+      changed: plan.changed,
+      planHash: await sha256Hex(record),
+      plan: record,
+      consumer,
+      receiptId,
+      replay: false,
+    };
+  }
+
+  /**
+   * The ID of `consumer`'s receipt for the schema `schemaHash` (null when
+   * no consumer is named), and the receipt itself if the store keeps one.
+   */
+  async #receiptOf(
+    consumer: SchemaConsumer | undefined,
+    schemaHash: string
+  ): Promise<{
+    receiptId: string | null;
+    kept: { planHash: string } | undefined;
+  }> {
+    if (consumer === undefined) {
+      return { receiptId: null, kept: undefined };
+    }
+    const receiptId = await sha256Hex(
+      canonicalJson({
+        resourceId: consumer.resourceId,
+        resourceVersion: consumer.resourceVersion,
+        schemaHash,
+      })
+    );
+    const kept = this.#db
+      .select({ planHash: schemaActivations.planHash })
+      .from(schemaActivations)
+      .where(eq(schemaActivations.receiptId, receiptId))
+      .get();
+    return { receiptId, kept };
+  }
+
+  /**
+   * The store's contract (see `defineTables`), checked against what the
+   * store itself recorded: every schema it holds must fit the contract,
+   * adding no table or field to it, or the contract is `migration.metadata_corrupt`, whatever
+   * its hash says. A store whose row holds no contract has it rebuilt from
+   * its own recorded schemas, oldest first, each planned onto the ones
+   * before it, as they were accepted; nothing is guessed, so a fold that
+   * refuses is `migration.metadata_missing`, and so are records without
+   * any recorded schema. Null for a store holding nothing.
+   */
+  async #currentContract(
+    row:
+      | { contractHash: string | null; contractManifest: string | null }
+      | undefined
+  ): Promise<{ stored: string | null; base: StoreContract | null }> {
+    const recorded = this.#recordedSchemas();
+    const kept = row === undefined ? null : await contractOf(row);
+    if (kept !== null) {
+      for (const manifest of recorded) {
+        // Its tables, fields and access all in the contract already; its
+        // indexes are physical, installed whatever the contract lists.
+        const plan = planSchemaChange(kept.manifest, manifest);
+        if (
+          !plan.accepted ||
+          plan.addedTables.length > 0 ||
+          plan.addedFields.length > 0
+        ) {
+          throw migrationErrors.create("migration.metadata_corrupt");
+        }
+      }
+      return { stored: kept.hash, base: kept };
+    }
+    if (recorded.length === 0) {
+      this.#requireNoRecords();
+      return { stored: null, base: null };
+    }
+    let folded: SchemaManifest | null = null;
+    for (const manifest of recorded) {
+      const plan = planSchemaChange(folded, manifest);
+      if (!plan.accepted) {
+        throw migrationErrors.create("migration.metadata_missing");
+      }
+      folded = plan.contract;
+    }
+    if (folded === null) {
+      throw new Error("A fold of recorded schemas left no contract");
+    }
+    return {
+      stored: null,
+      base: { hash: await sha256Hex(manifestText(folded)), manifest: folded },
+    };
+  }
+
+  /**
+   * Every schema the store recorded, oldest first (ties by hash), read
+   * back; one that doesn't read is `migration.metadata_corrupt`.
+   */
+  #recordedSchemas(): SchemaManifest[] {
+    return this.#db
+      .select({ manifest: schemas.manifest })
+      .from(schemas)
+      .orderBy(asc(schemas.createdAt), asc(schemas.schemaHash))
+      .all()
+      .map(({ manifest }) => {
+        try {
+          return readSchemaManifest(manifest).manifest;
+        } catch (error) {
+          if (
+            error instanceof SchemaDefinitionError ||
+            error instanceof ValueDefinitionError
+          ) {
+            throw migrationErrors.create("migration.metadata_corrupt");
+          }
+          throw error;
+        }
+      });
+  }
+
+  /**
+   * Refuses (`migration.metadata_missing`) records in a store that
+   * recorded no schema: there is nothing to rebuild their contract from.
+   */
+  #requireNoRecords(): void {
+    const held = this.#db
+      .select({ id: records.recordId })
+      .from(records)
+      .limit(1)
+      .get();
+    if (held !== undefined) {
+      throw migrationErrors.create("migration.metadata_missing");
+    }
+  }
+
+  /**
    * `defineTables`' one transaction: the schema's new tables with the IDs
-   * its indexes were planned for, the indexes and the schema; null, with
-   * nothing written, if the tables changed since `before` was read.
+   * its indexes were planned for, the indexes, the schema, the contract
+   * and the consumer's receipt; null, with nothing written, if the tables
+   * or the contract changed since they were read.
    */
   #defineIn(
     storeId: StoreId,
@@ -468,12 +824,27 @@ export class StoreHost {
     planned: Readonly<Record<string, string>>,
     plan: Awaited<ReturnType<typeof planIndexes>>,
     schemaHash: string,
-    text: string
+    text: string,
+    change: ContractChange
   ): Omit<DefinedTables, "schemaHash"> | null {
     const names = Object.keys(planned);
     this.#bind(storeId);
     if (canonicalJson(this.#tableRows()) !== canonicalJson(before)) {
       return null;
+    }
+    const current = this.#db
+      .select({ contractHash: store.contractHash })
+      .from(store)
+      .get();
+    if ((current?.contractHash ?? null) !== change.stored) {
+      return null;
+    }
+    if (change.base === null) {
+      // Planned from nothing: still nothing, or plan again.
+      if (this.#recordedSchemas().length > 0) {
+        return null;
+      }
+      this.#requireNoRecords();
     }
     const now = Date.now();
     for (const name of names) {
@@ -505,23 +876,84 @@ export class StoreHost {
     if (all.length > storeMaxTables) {
       throw dataErrors.create("data.too_many_tables");
     }
+    if (change.replay) {
+      return {
+        ...definedTables(names, all),
+        contract: this.#receive(schemaHash, change, now),
+      };
+    }
     installIndexes(this.ctx.storage.sql, plan);
     this.#db
       .insert(schemas)
       .values({ schemaHash, manifest: text, createdAt: now })
       .onConflictDoNothing()
       .run();
-    const schemaTables = new Set(names);
+    if (change.hash !== change.stored) {
+      this.#db
+        .update(store)
+        .set({ contractHash: change.hash, contractManifest: change.text })
+        .run();
+    }
     return {
-      tables: Object.fromEntries(
-        all
-          .filter(({ name }) => schemaTables.has(name))
-          .map(({ name, tableId }) => [name, tableId])
-      ),
-      storeTables: Object.fromEntries(
-        all.map(({ name, tableId }) => [name, tableId])
-      ),
+      ...definedTables(names, all),
+      contract: this.#receive(schemaHash, change, now),
     };
+  }
+
+  /**
+   * The consumer's receipt of the change (see `defineTables`): written
+   * now if it has none for this schema, otherwise the one it has, whose
+   * plan is the one that applied the schema first.
+   */
+  #receive(
+    schemaHash: string,
+    change: ContractChange,
+    now: number
+  ): AppliedContract {
+    const { consumer, receiptId } = change;
+    const applied: AppliedContract = {
+      hash: change.hash,
+      planHash: change.planHash,
+      changed: change.changed,
+      receiptId,
+    };
+    if (consumer === undefined || receiptId === null) {
+      return applied;
+    }
+    const kept = this.#db
+      .select({
+        planHash: schemaActivations.planHash,
+        contractHash: schemaActivations.contractHash,
+        baseHash: schemaActivations.baseHash,
+      })
+      .from(schemaActivations)
+      .where(eq(schemaActivations.receiptId, receiptId))
+      .get();
+    if (kept !== undefined) {
+      // The receipt's own: what its first application left, so its hash
+      // and plan always describe the same change.
+      return {
+        hash: kept.contractHash,
+        planHash: kept.planHash,
+        changed: kept.contractHash !== kept.baseHash,
+        receiptId,
+      };
+    }
+    this.#db
+      .insert(schemaActivations)
+      .values({
+        receiptId,
+        resourceId: consumer.resourceId,
+        resourceVersion: consumer.resourceVersion,
+        schemaHash,
+        baseHash: change.base,
+        contractHash: change.hash,
+        planHash: change.planHash,
+        plan: change.plan,
+        createdAt: now,
+      })
+      .run();
+    return applied;
   }
 
   /** The store's tables, by name and ID, in a stable order. */
@@ -1252,7 +1684,18 @@ export class StoreHost {
       if (write.op === "delete") {
         entry.fields = null;
       } else if (write.op === "replace") {
-        entry.fields = write.fields;
+        // Fields the pinned table doesn't declare are a newer version's,
+        // kept in the contract (`defineTables`): a replacement by an older
+        // version keeps them, as a patch does, and never strips them.
+        const declared = pinned.manifest.tables[write.table]?.fields ?? {};
+        entry.fields = {
+          ...Object.fromEntries(
+            Object.entries(fields).filter(
+              ([name]) => !Object.hasOwn(declared, name)
+            )
+          ),
+          ...write.fields,
+        };
       } else {
         const unset = new Set(write.unset);
         entry.fields = Object.fromEntries(
