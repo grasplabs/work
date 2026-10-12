@@ -19,6 +19,16 @@ export {
 } from "./schema.ts";
 export type { IndexBase, SchemaDefinitionCode } from "./schema.ts";
 
+// An App as the host runs it: its registration as data, and its handlers.
+export { inspectApp } from "./app.ts";
+export type {
+  AppInspection,
+  AppManifest,
+  OperationManifest,
+  UseManifest,
+} from "./app.ts";
+export { appErrorDetailsOf } from "./app-error.ts";
+
 // A schema as a store's host reads, hashes and compares it.
 export { diffSchemaManifests, schemaReferences } from "./schema-diff.ts";
 export type {

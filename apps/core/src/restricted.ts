@@ -74,11 +74,17 @@ const contextInvalid = () =>
  * for a run, a run that isn't one of that App's. Returns the run's
  * workflow, for a run.
  */
+/** A run context's workflow, and the root of its lineage (none for a root). */
+interface RunOf {
+  workflow?: string;
+  rootRunId?: string | null;
+}
+
 const requireOwnApp = async (
   env: RestrictedEnv,
   authority: Authority,
   context: Extract<WorkContext, { appId: AppId }>
-): Promise<{ workflow?: string }> => {
+): Promise<RunOf> => {
   const { subject } = authority;
   const { appId } = context;
   if (subject.type !== "app" || subject.appId !== appId) {
@@ -88,7 +94,10 @@ const requireOwnApp = async (
   const found =
     context.type === "run"
       ? await db
-          .select({ workflow: workflowRuns.workflowId })
+          .select({
+            workflow: workflowRuns.workflowId,
+            rootRunId: workflowRuns.rootRunId,
+          })
           .from(workflowRuns)
           .where(
             and(
@@ -105,7 +114,9 @@ const requireOwnApp = async (
   if (!found) {
     throw contextInvalid();
   }
-  return "workflow" in found ? { workflow: found.workflow } : {};
+  return "workflow" in found
+    ? { workflow: found.workflow, rootRunId: found.rootRunId }
+    : {};
 };
 
 /**
@@ -117,11 +128,11 @@ const restrictedState = async (
   env: RestrictedEnv,
   authority: Authority,
   context: WorkContext
-): Promise<{ restricted: boolean; workflow?: string }> => {
+): Promise<{ restricted: boolean } & RunOf> => {
   if (context.type !== "chat") {
-    const { workflow } = await requireOwnApp(env, authority, context);
+    const run = await requireOwnApp(env, authority, context);
     const restricted = await appHost(env, context.appId).isRestricted();
-    return { restricted, workflow };
+    return { restricted, ...run };
   }
   // A chat is the organization's agent's to work in, as the chat stored it,
   // and no one else's, whichever object holds it (a person's own, say).
@@ -145,7 +156,7 @@ const restrictedState = async (
 const restrictedEntry = (
   authority: Authority,
   context: WorkContext,
-  workflow: string | undefined,
+  { workflow, rootRunId }: RunOf,
   sources: string[]
 ): AuditEntry => {
   const provenance = [...new Set(sources)];
@@ -161,7 +172,12 @@ const restrictedEntry = (
   return {
     actor:
       context.type === "run" && workflow !== undefined
-        ? runActorOf({ runId: context.runId, app: context.appId, workflow })
+        ? runActorOf({
+            runId: context.runId,
+            app: context.appId,
+            workflow,
+            rootRunId,
+          })
         : delegateActorOf(authority),
     action: "context.restricted",
     target: { type: "app", id: context.appId },
@@ -180,17 +196,13 @@ export const restrict = async (
   context: WorkContext,
   sources: string[]
 ): Promise<void> => {
-  const { restricted, workflow } = await restrictedState(
-    env,
-    authority,
-    context
-  );
+  const { restricted, ...run } = await restrictedState(env, authority, context);
   if (restricted) {
     return;
   }
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
-    outboxed(db, restrictedEntry(authority, context, workflow, sources)),
+    outboxed(db, restrictedEntry(authority, context, run, sources)),
   ]);
   if (context.type !== "chat") {
     await appHost(env, context.appId).restrict();

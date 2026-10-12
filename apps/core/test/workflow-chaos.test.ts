@@ -110,6 +110,35 @@ const hangOnFirst = (
       }`;
 
 /**
+ * A step that calls `call`, and on its first attempt `then`, whose
+ * failure it tells the mail server by name and code before throwing it
+ * on: the attempt's code sees it whether or not the engine gave up on
+ * the attempt first, so what it saw doesn't hang on which timer won.
+ */
+const cutOff = (id: string, timeout: string, call: string, then: string) =>
+  workflowFiles(
+    id,
+    `  return await step.do(
+  "count",
+  { description: "Count", timeout: "${timeout}", retries: { limit: 1, delay: 10 } },
+  async () => {
+    try {
+      const attempt = await env.APP.call(${call});
+      if (attempt === 1) {
+        await env.APP.call(${then});
+      }
+      return attempt;
+    } catch (error) {
+      const { name, code } = error as { name?: string; code?: string };
+      await env.MAIL.call("mail.search", { query: "seen ${id} " + name + " " + code });
+      throw error;
+    }
+  }
+);`,
+    { count: 1 }
+  );
+
+/**
  * A side-effect step `name` that mails `subject`, with `before` and
  * `after` around the call, and one retry.
  */
@@ -598,6 +627,128 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       // The step's call gave up with its attempt, before the App was free.
       queued: await hitsOf(app, builder.userId, "queued"),
     }).toStrictEqual({ status: "failed", queued: 0 });
+  });
+
+  it("retry a step whose App call its attempt's time cut off, running or waiting its turn, and stop the run when the App's own time cuts it off", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, {
+      // Its first attempt's second call holds the App, at the mail server,
+      // past the attempt's time.
+      ...cutOff(
+        "running",
+        attemptTimeout,
+        `"hit", "running"`,
+        `"pointAfter", "running"`
+      ),
+      // Its call waits for the App, held by a screen's call, past the
+      // attempt's time.
+      ...cutOff(
+        "waiting",
+        attemptTimeout,
+        `"hit", "waiting"`,
+        `"hit", "after"`
+      ),
+      // Its first attempt's second call holds the App past the App's own
+      // time for a call (`APP_CALL_TIMEOUT_MS`, ten seconds), well within
+      // the attempt's.
+      ...cutOff(
+        "limited",
+        "40 seconds",
+        `"hit", "limited"`,
+        `"pointAfter", "limited"`
+      ),
+    });
+    const mail = await mailConnection([], mailWithSearch);
+    await requestGranted(idp, builder, {
+      subject: { type: "app", appId: app },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.search"],
+      binding: "MAIL",
+    });
+    await serverBuilt(app, 1);
+    const statusOf = async (id: string) => {
+      const { status, output } = await builder.api.workflows.status(id);
+      return { status, output };
+    };
+
+    // Cut off running: the attempt timed out, and the next one completed.
+    const running = await builder.api.workflows.start(app, "running");
+    await finished(running.id);
+    await mail.release();
+    const ranOut = {
+      status: await statusOf(running.id),
+      hits: await hitsOf(app, builder.userId, "running"),
+    };
+
+    // Cut off waiting: the attempt timed out, and the next one, once the
+    // screen's call let go of the App, completed.
+    const holding = callApp(
+      env,
+      appIdSchema.parse(app),
+      { userId: builder.userId, mode: "interactive" },
+      "pointAfter",
+      ["held"]
+    ).catch(() => null);
+    let waited: unknown;
+    let released = false;
+    try {
+      await vi.waitFor(
+        async () => {
+          await expect(mail.holding()).resolves.toBeTruthy();
+        },
+        { timeout: 15_000, interval: 100 }
+      );
+      const waiting = await builder.api.workflows.start(app, "waiting");
+      await vi.waitFor(
+        async () => {
+          await expect(mail.searched()).resolves.toContainEqual(
+            expect.stringMatching(/^seen waiting /u)
+          );
+        },
+        { timeout: 15_000, interval: 100 }
+      );
+      await mail.release();
+      released = true;
+      await holding;
+      await finished(waiting.id);
+      waited = {
+        status: await statusOf(waiting.id),
+        hits: await hitsOf(app, builder.userId, "waiting"),
+      };
+    } finally {
+      if (!released) {
+        await mail.release();
+      }
+      await holding;
+    }
+
+    // Cut off by the App's own time: an outcome nobody knows, which no
+    // retry may repeat.
+    const limited = await builder.api.workflows.start(app, "limited");
+    await finished(limited.id);
+    await mail.release();
+    const { status: limitedStatus } = await statusOf(limited.id);
+    const cutShort = {
+      status: limitedStatus,
+      hits: await hitsOf(app, builder.userId, "limited"),
+    };
+    const searched = await mail.searched();
+
+    expect({
+      seen: searched.filter((query) => query.startsWith("seen ")),
+      ranOut,
+      waited,
+      cutShort,
+    }).toStrictEqual({
+      seen: [
+        "seen running TimeoutError undefined",
+        "seen waiting TimeoutError undefined",
+        "seen limited Error app.timed_out",
+      ],
+      ranOut: { status: { status: "completed", output: 2 }, hits: 2 },
+      waited: { status: { status: "completed", output: 1 }, hits: 1 },
+      cutShort: { status: "failed", hits: 1 },
+    });
   });
 
   it("go on after a crash without running finished steps again, also when resumed at once, and retry a step killed mid-way", async () => {

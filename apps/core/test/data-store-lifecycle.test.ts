@@ -18,7 +18,12 @@ import type { OpenStore } from "../src/data-stores.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { allEvents } from "./audit-events.ts";
 import { outcome } from "./sign-in.ts";
-import { tablesManifest } from "./store-schemas.ts";
+import {
+  manifestHash,
+  memberRoles,
+  newRecordId,
+  tablesManifest,
+} from "./store-schemas.ts";
 
 // A business store's lifecycle (data-stores.ts, store-host.ts), from the
 // threat model in data-stores.ts: who may create, share and delete a
@@ -27,7 +32,7 @@ import { tablesManifest } from "./store-schemas.ts";
 // stores.
 
 const dayMs = 24 * 60 * 60 * 1000;
-const schemaHash = "a".repeat(64);
+const schemaHash = await manifestHash(tablesManifest("notes"));
 
 /** A member of the organization in `role`, as their session has them. */
 const person = async (role: Role, teams: string[] = []): Promise<Acting> => {
@@ -101,9 +106,18 @@ const commitNote = async (
   const { receiptId, fence }: Held = claimed.held;
   const commit: Omit<Commit, "storeId"> = {
     principal: { userId: by.userId },
+    roles: memberRoles,
+    stagedAt: Date.now(),
     schemaHash,
     receipt: { receiptId, fence },
-    writes: [{ op: "insert", table: "notes", fields: { title: "Note" } }],
+    writes: [
+      {
+        op: "insert",
+        id: newRecordId(),
+        table: "notes",
+        fields: { title: "Note" },
+      },
+    ],
   };
   return await store.commit(commit);
 };
