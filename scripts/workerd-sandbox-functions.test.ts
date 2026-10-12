@@ -52,10 +52,10 @@ describe("an App's function on the on-prem sandbox", () => {
 
   const call = async (
     path: string,
-    { within = 60_000, owner = "app-stand-in" } = {}
+    { within = 60_000, owner = "app-stand-in", endLost = false } = {}
   ) => {
     const response = await fetch(
-      `${coreUrl}run?path=${path}&within=${within}&owner=${owner}`
+      `${coreUrl}run?path=${path}&within=${within}&owner=${owner}&endLost=${endLost ? 1 : 0}`
     );
     return outcomeSchema.parse(await response.json());
   };
@@ -77,6 +77,21 @@ describe("an App's function on the on-prem sandbox", () => {
       .poll(() => supervisor.stats(), { timeout: 3000 })
       .toMatchObject({ inFlight: 0 });
   });
+
+  it.each([false, true])(
+    "frees a finished function's process at once, even when core's word that it's over is lost (lost: %s)",
+    async (endLost) => {
+      const outcome = await call("echo", { endLost });
+      expect(outcome.ok).toBeTruthy();
+      // Well before its minute of wall-clock time.
+      await expect
+        .poll(() => supervisor.stats().inFlight, {
+          timeout: 1500,
+          interval: 50,
+        })
+        .toBe(0);
+    }
+  );
 
   it("ends a busy-looping function on its CPU-time budget while core keeps answering", async () => {
     const busy = call("busy");

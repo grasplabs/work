@@ -73,6 +73,18 @@ interface StandInEnv {
   SANDBOX_HOST: Fetcher;
 }
 
+/** `host`, as one that never gets core's `POST /end/<id>`. */
+const endLost = (host: Fetcher): Fetcher => ({
+  fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    if (request.url.includes("/end/")) {
+      return new Response("{}");
+    }
+    return await host.fetch(request);
+  },
+  connect: (address, options) => host.connect(address, options),
+});
+
 /** An action has no database: any use of the store is a fault. */
 const noStore = new Proxy(
   {},
@@ -89,8 +101,13 @@ export default {
     if (pathname !== "/run") {
       return new Response("core answers");
     }
+    // As a supervisor core's `POST /end/<id>` never reaches, if asked.
+    const host =
+      searchParams.get("endLost") === "1"
+        ? endLost(env.SANDBOX_HOST)
+        : env.SANDBOX_HOST;
     const run = releaseRunner(
-      env,
+      { ...env, SANDBOX_HOST: host },
       {
         modules: { [appModuleName("app.ts")]: appModule },
         sdk: { [kitModuleName("@grasp-os/sdk/runner")]: runner },
