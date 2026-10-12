@@ -56,7 +56,8 @@ import {
 } from "./db/core/schema.ts";
 import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { finishDeletion, markArtifact } from "./release-retention.ts";
-import { sandbox } from "./sandbox.ts";
+import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
+import type { SandboxedEnv } from "./sandboxed.ts";
 import { buildAppCode } from "./screens.ts";
 
 // Sealing an App's release (spec 8, 16): turning one version of an App of
@@ -65,10 +66,11 @@ import { buildAppCode } from "./screens.ts";
 // model, and how each is closed:
 //
 // - App code runs while it is inspected: only in Loader isolates with no
-//   network, no env and a CPU limit (`sandbox`), never in core. What they
-//   answer is hostile text, read by declaring the App again through the
-//   SDK's constructors (`readAppManifest`), which refuses anything no
-//   declaration makes.
+//   network, no env and a bound on their time, never in core: the
+//   runtime's CPU limit on Cloudflare, a process of their own killed at
+//   the deadline on-prem (`callSandboxed`). What they answer is hostile
+//   text, read by declaring the App again through the SDK's constructors
+//   (`readAppManifest`), which refuses anything no declaration makes.
 // - The registration depends on references that don't exist yet: the
 //   first inspection lends symbolic ones, which resolve only against the
 //   registration; the host then generates the real modules from what it
@@ -137,10 +139,6 @@ export class Inspect extends WorkerEntrypoint {
 }
 `;
 
-interface InspectEntrypoint extends Rpc.WorkerEntrypointBranded {
-  manifest: () => Promise<string>;
-}
-
 /** The most of why App code failed that a refusal keeps. */
 const maxFailure = 500;
 
@@ -175,24 +173,32 @@ const builtCode = async (
 /**
  * What the App's registration answers when `modules` load in an isolate
  * of their own, with the SDK's: its manifest's text, or
- * `version.inspection_failed` with what the App's code threw.
+ * `version.inspection_failed` with what the App's code threw, or for
+ * running past the sandbox's deadline.
  */
-const inspected = async (
-  env: Env,
+export const inspected = async (
+  env: SandboxedEnv,
   modules: Readonly<Record<string, string>>,
   sdk: Readonly<Record<string, string>>
 ): Promise<string> => {
-  const isolate = env.LOADER.get(null, () => ({
-    ...sandbox,
-    mainModule: inspectModule,
-    // The platform's modules last: no App module takes one's name.
-    modules: { ...modules, ...sdk, [inspectModule]: inspectMain },
-    env: {},
-  })).getEntrypoint<InspectEntrypoint>("Inspect");
   let text: unknown;
   try {
-    text = await isolate.manifest();
+    // In the sandbox, which bounds its time on either profile (sandboxed.ts).
+    text = await callSandboxed(
+      env,
+      {
+        mainModule: inspectModule,
+        // The platform's modules last: no App module takes one's name.
+        modules: { ...modules, ...sdk, [inspectModule]: inspectMain },
+      },
+      "Inspect",
+      "manifest"
+    );
   } catch (error) {
+    // The sandbox host down isn't the App's failure.
+    if (error instanceof SandboxUnavailableError) {
+      throw error;
+    }
     throw versionErrors.create("version.inspection_failed", {
       message: (error instanceof Error ? error.message : "").slice(
         0,
