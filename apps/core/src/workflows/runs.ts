@@ -42,6 +42,7 @@ import {
   outboxed,
   outboxedEventWhere,
   outboxedIfChanged,
+  outboxedWhere,
   storedEvent,
 } from "../audit-outbox.ts";
 import type { Member } from "../auth/identity.ts";
@@ -411,6 +412,70 @@ const repairGivesUpAfterMs = 15 * 60_000;
 const repairsPerRun = 50;
 
 /**
+ * Records that the engine confirmed run `run`'s start. Should D1 fail
+ * here, the start is still pending, and the repair sends it again, which
+ * the engine takes as the start it already has: a failure to record it is
+ * never taken for a failure to start.
+ */
+const confirmStart = async (env: Env, run: string): Promise<void> => {
+  try {
+    await startConfirmed(env, run);
+  } catch (error) {
+    log.warn("workflow.start_not_recorded", {
+      runId: run,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Whether the engine has run `run`, or nothing when it couldn't say: what
+ * the repair asks before it gives a start up, as the answer to a start
+ * that reached the engine may have been lost.
+ */
+const engineHas = async (env: Env, run: string): Promise<boolean | null> => {
+  try {
+    return (await runEngine(env).status(run)) !== undefined;
+  } catch (error) {
+    log.error("workflow.start_check_failed", {
+      runId: run,
+      ...errorFields(error),
+    });
+    return null;
+  }
+};
+
+/**
+ * Sends `row`'s start again (`repairStarts`). A start the engine still
+ * won't take `repairGivesUpAfterMs` after it was written is marked failed,
+ * but only once the engine says it has no record of the run: one it has
+ * is confirmed, and one it can't say of is tried again by the next repair,
+ * so a start whose answer was lost is never given up while it runs.
+ */
+const repairStart = async (env: Env, row: RunRow): Promise<void> => {
+  try {
+    log.warn("workflow.start_resent", { runId: row.id });
+    await resendStart(env, row);
+  } catch (error) {
+    log.error("workflow.start_repair_failed", {
+      runId: row.id,
+      ...errorFields(error),
+    });
+    if (Date.now() - row.createdAt.getTime() <= repairGivesUpAfterMs) {
+      return;
+    }
+    const has = await engineHas(env, row.id);
+    if (has === false) {
+      await failStart(env, row, "no_instance");
+    }
+    if (has !== true) {
+      return;
+    }
+  }
+  await confirmStart(env, row.id);
+};
+
+/**
  * Sends again each start the engine hasn't confirmed `repairAfterMs`
  * after its row was written: what a start leaves when core stops between
  * writing the run's row and the engine's answer. The start is sent as it
@@ -457,19 +522,7 @@ export const repairStarts = async (
   // next cron run, and holds up none of the others.
   await Promise.all(
     rows.map(async (row) => {
-      try {
-        log.warn("workflow.start_resent", { runId: row.id });
-        await resendStart(env, row);
-        await startConfirmed(env, row.id);
-      } catch (error) {
-        log.error("workflow.start_repair_failed", {
-          runId: row.id,
-          ...errorFields(error),
-        });
-        if (Date.now() - row.createdAt.getTime() > repairGivesUpAfterMs) {
-          await failStart(env, row, "no_instance");
-        }
-      }
+      await repairStart(env, row);
     })
   );
 };
@@ -510,12 +563,50 @@ const deliveredBefore = async (
 };
 
 /**
+ * What a start whose call to the engine failed with `error` leaves
+ * (`startRun`): returns when the engine has the run after all, and throws
+ * `error` otherwise.
+ */
+const startFailed = async (
+  env: Env,
+  row: Pick<RunRow, "id" | "appId" | "workflowId" | "version" | "startedBy">,
+  error: unknown
+): Promise<void> => {
+  log.error("workflow.start_failed", {
+    runId: row.id,
+    ...errorFields(error),
+  });
+  // An error is no proof the engine didn't take the start: its answer
+  // may have been lost. Releasing the trigger key on such a start could
+  // start a second run beside it, so the engine is asked first.
+  const has = await engineHas(env, row.id);
+  if (has === null) {
+    // It can't say: the start stays pending, its key held, and the
+    // repair sends it again under the same key, which the engine takes
+    // once (`repairStarts`). A trigger delivered again finds this run.
+    throw error;
+  }
+  if (!has) {
+    // Not taken. Its report says only that it didn't start: the
+    // platform's error stays in the log. It gives up its trigger key,
+    // so the delivery tried again (a schedule stays due, mail and
+    // events are retried) starts the run as a new one. Should the start
+    // still reach the engine after all, the run's ended row is its
+    // tombstone: the dispatcher runs none of it.
+    await failStart(env, row, "start_failed");
+    throw error;
+  }
+};
+
+/**
  * Starts a run on the App's current version, which it keeps until it ends.
  * The row, the start it is to send and its audit event are written before
  * the start is sent, so the dispatcher always finds the row, and a start
  * core stops in the middle of is sent again (`repairStarts`). The row says
- * `starting` until the engine's first notification; a start the engine
- * refuses is marked failed, audited as a failed run. A trigger's key
+ * `starting` until the engine's first notification; a start that failed,
+ * and that the engine then says it has no record of, is marked failed,
+ * audited as a failed run (one it can't say of stays pending, for the
+ * repair). A trigger's key
  * already taken returns the run that took it, whatever became of it
  * since, its start sent again while the engine is still to confirm it (a
  * start sent twice is one run); a run whose start failed gives its key up,
@@ -589,29 +680,9 @@ export const startRun = async (
   try {
     await sendStart(env, row, input);
   } catch (error) {
-    // The engine may have it all the same: once the row is failed the
-    // dispatcher refuses it. Its report says only that it didn't start:
-    // the platform's error stays in the log. It gives up its trigger key,
-    // so the delivery tried again (a schedule stays due, mail and events
-    // are retried) starts the run as a new one, rather than finding this
-    // one.
-    log.error("workflow.start_failed", {
-      runId: row.id,
-      ...errorFields(error),
-    });
-    await failStart(env, row, "start_failed");
-    throw error;
+    await startFailed(env, row, error);
   }
-  try {
-    await startConfirmed(env, row.id);
-  } catch (error) {
-    // The engine has it: the repair sends it again, which the engine
-    // takes as the start it already has.
-    log.warn("workflow.start_not_recorded", {
-      runId: row.id,
-      ...errorFields(error),
-    });
-  }
+  await confirmStart(env, row.id);
   // Only now: a screen told of the run reads it from the engine too.
   await tellScreens(env, row);
   return toRun(env, row);
@@ -906,11 +977,15 @@ export const projectStatus = async (
     ...(failure === null
       ? []
       : await failureRecorded(env, db, row, { error: failure.error.code })),
-    ...(status === "cancelled" && row.cancelRequestedAt === null
+    // Audited by the system only when no cancel was asked for, as the
+    // batch finds the row: a cancel written since `row` was read audited
+    // it already, and its run is audited as cancelled once.
+    ...(status === "cancelled"
       ? [
-          outboxedIfChanged(
+          outboxedWhere(
             db,
-            runEntry({ type: "system" }, "workflow.run.cancelled", row)
+            runEntry({ type: "system" }, "workflow.run.cancelled", row),
+            sql`changes() > 0 AND NOT EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.cancelRequestedAt} IS NOT NULL)`
           ),
         ]
       : []),

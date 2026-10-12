@@ -184,7 +184,10 @@ const createInstance = async (app: string, run: string): Promise<void> => {
   });
 };
 
-/** Runs `run` while the engine can't be reached for the runs `runs`. */
+/**
+ * Runs `run` while the engine can't be reached for the runs `runs`: it
+ * answers nothing for them, not even where they are.
+ */
 const whileUnreachable = async <T>(
   runs: readonly string[],
   run: () => Promise<T>
@@ -193,6 +196,24 @@ const whileUnreachable = async <T>(
   return await aroundEngine(async (_method, call, object) => {
     if (objects.some((id) => id.equals(object))) {
       throw new Error("The engine can't be reached");
+    }
+    return await call();
+  }, run);
+};
+
+/**
+ * Runs `run` while the engine won't take the starts of the runs `runs`
+ * (its storage is down for them, say), and answers where they are: that
+ * it has no record of them.
+ */
+const whileRefusingStarts = async <T>(
+  runs: readonly string[],
+  run: () => Promise<T>
+): Promise<T> => {
+  const objects = runs.map((id) => runObjectId(id));
+  return await aroundEngine(async (method, call, object) => {
+    if (method === "start" && objects.some((id) => id.equals(object))) {
+      throw new Error("The engine is unavailable");
     }
     return await call();
   }, run);
@@ -333,7 +354,7 @@ describe("starts core stopped in the middle of", () => {
     const orphan = await orphanOf(builder, app, 20 * minute);
     const recent = await orphanOf(builder, app, 5 * minute);
 
-    await whileUnreachable([orphan, recent], async () => {
+    await whileRefusingStarts([orphan, recent], async () => {
       await runCron();
       await runCron();
     });
@@ -365,7 +386,7 @@ describe("starts core stopped in the middle of", () => {
     const app = await appWith(builder, waiting);
     const orphan = await orphanOf(builder, app, 20 * minute);
 
-    await whileUnreachable([orphan], async () => {
+    await whileRefusingStarts([orphan], async () => {
       await runCron();
     });
     // The start that stopped goes on after all, and reaches the engine.
@@ -397,7 +418,7 @@ describe("starts core stopped in the middle of", () => {
     const key = `event:${crypto.randomUUID()}`;
     const orphan = await orphanOf(null, app, 20 * minute, key);
 
-    await whileUnreachable([orphan], async () => {
+    await whileRefusingStarts([orphan], async () => {
       await runCron();
     });
     const again = await startRun(env, {
@@ -447,6 +468,79 @@ describe("starts core stopped in the middle of", () => {
       ended: false,
       failed: false,
     });
+  });
+
+  it("keep a start whose answer was lost as the one run, its trigger delivered again finding it", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, waiting);
+    const key = `event:${crypto.randomUUID()}`;
+    const start = async () =>
+      await startRun(env, {
+        app: appIdSchema.parse(app),
+        workflow: workflowIdSchema.parse("waits"),
+        input: undefined,
+        startedBy: null,
+        actor: { type: "system" },
+        trigger: { type: "schedule", key, version: 1 },
+      });
+
+    // The engine takes the start; its answer never reaches core.
+    const first = await aroundEngine(async (method, call) => {
+      const answer = await call();
+      if (method === "start") {
+        throw new Error("The answer was lost");
+      }
+      return answer;
+    }, start);
+    await rowSays(first.id, "running");
+    const again = await start();
+
+    expect({
+      again: again.id,
+      failed: await failedAtAll(first.id),
+      ended: endedStatuses.has(await liveStatus(first.id)),
+      pending: await pending(first.id),
+    }).toStrictEqual({
+      again: first.id,
+      failed: false,
+      ended: false,
+      pending: false,
+    });
+  });
+
+  it("never give up a start the engine can't say it has no record of, however old", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, waiting);
+    const orphan = await orphanOf(builder, app, 20 * minute);
+
+    await whileUnreachable([orphan], async () => {
+      await runCron();
+    });
+    const whileUnreachableRow = await rowStatus(orphan);
+    // Reachable again, the repair sends it, and it runs.
+    await runCron();
+    await rowSays(orphan, "running");
+
+    expect({
+      whileUnreachable: whileUnreachableRow,
+      failed: await failedAtAll(orphan),
+    }).toStrictEqual({ whileUnreachable: "starting", failed: false });
+  });
+
+  it("don't take a confirmation D1 couldn't record for a failed start, a quarter of an hour on", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, waiting);
+    const orphan = await orphanOf(builder, app, 20 * minute);
+    const { db, refused } = refusingConfirmation();
+
+    await repairStarts({ ...env, DB: db }, orphan);
+    await rowSays(orphan, "running");
+
+    expect({
+      refused: refused() > 0,
+      failed: await failedAtAll(orphan),
+      ended: endedStatuses.has(await liveStatus(orphan)),
+    }).toStrictEqual({ refused: true, failed: false, ended: false });
   });
 
   it("reach a later start past ones the engine keeps failing to take", async () => {

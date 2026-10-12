@@ -5,6 +5,7 @@ import { z } from "zod";
 import { projectStatus } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { racingDb } from "./racing-db.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // The one writer of a run's status: the engine's notifications, as the
@@ -123,6 +124,34 @@ describe("a run's status, as the engine's notifications set it", () => {
         message: "The workflow run stopped.",
       },
       audited: ["workflow.run.failed", "workflow.run.notified"],
+    });
+  });
+
+  it("audits a run cancelled while the engine's end is projected once, by its cancel", async () => {
+    const run = await runRow();
+    // The cancel lands after the projection read the row, before it writes.
+    const racing = racingDb(async (db) => {
+      await db
+        .prepare(
+          "UPDATE workflow_runs SET cancel_requested_at = ? WHERE id = ? AND cancel_requested_at IS NULL"
+        )
+        .bind(Date.now(), run)
+        .run();
+    });
+
+    await projectStatus({ ...env, DB: racing }, run, {
+      status: "terminated",
+      at: Date.now(),
+      sequence: 2,
+    });
+
+    expect({
+      row: await rowOf(run),
+      // The cancel audits it when it is asked for; the system never does.
+      audited: await auditedOf(run),
+    }).toStrictEqual({
+      row: { status: "cancelled", sequence: 2, ended: 1, failure: null },
+      audited: [],
     });
   });
 });
