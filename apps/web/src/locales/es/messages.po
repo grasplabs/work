@@ -57,6 +57,10 @@ msgstr "{about} tiene {open, plural, one {# decisión abierta} other {# decision
 msgid "{account} on {provider}"
 msgstr "{account} en {provider}"
 
+#: src/engines/resource-bindings.tsx
+msgid "{alertAt} of a cap"
+msgstr "{alertAt} de un límite"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
 msgstr "{app} no tiene herramientas."
@@ -665,6 +669,10 @@ msgstr "Acuerdos"
 #: src/routes/_shell.settings.tsx
 msgid "AI spend"
 msgstr "Gasto en IA"
+
+#: src/engines/resource-bindings.tsx
+msgid "Alert at"
+msgstr "Avisar al"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
@@ -2218,6 +2226,10 @@ msgstr "Su acceso caducó. El personal de Grasp no puede reconectarla: un admini
 msgid "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
 msgstr "Su acceso ha caducado. Vuelve a iniciar sesión con la misma cuenta: los motores y los agentes conservan sus permisos sobre ella."
 
+#: src/engines/resource-bindings.tsx
+msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
+msgstr "Su presupuesto no se puede leer, así que no sirve nada en lugar de funcionar sin él. Vincúlalo de nuevo para fijar su presupuesto otra vez."
+
 #: src/routes/_shell.engines.index.tsx
 msgid "Its contents couldn't be read."
 msgstr "No se pudo leer su contenido."
@@ -3171,9 +3183,18 @@ msgstr "Personas escuchadas"
 msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "Se rechazaron {rejected} de {answered, plural, one {# respuesta} other {# respuestas}} en el paso {step} de {about} {days, plural, one {en el último día} other {en los últimos # días}}."
 
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.onboarding.log.tsx
 msgid "Per day"
 msgstr "Por día"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per month"
+msgstr "Por mes"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per request"
+msgstr "Por solicitud"
 
 #: src/activity/audit-log.tsx
 msgid "Permission"

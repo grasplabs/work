@@ -5,6 +5,7 @@ import type {
   BindingState,
   BindingTargetInput,
   DeclaredResource,
+  ModelBindingBudget,
   PublishedTemplate,
   ResourceBinding,
   ResourceBindingsReview,
@@ -46,6 +47,7 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
+import { dollars, percent } from "../settings/money.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // What an engine's actions reach through its declared resources (core's
@@ -80,6 +82,7 @@ const stateLabels: Readonly<Record<BindingState, MessageDescriptor>> = {
   contract_changed: msg`Not served`,
   grant_lost: msg`Not served`,
   unchecked: msg`Not checked`,
+  budget_damaged: msg`Not served`,
 };
 
 /** Why a binding no longer serves its resource, by its state. */
@@ -90,7 +93,40 @@ const stateReasons: Readonly<Partial<Record<BindingState, MessageDescriptor>>> =
     contract_changed: msg`What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits.`,
     grant_lost: msg`What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read.`,
     unchecked: msg`The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always.`,
+    budget_damaged: msg`Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh.`,
   };
+
+/** One term of a definition list and what it says. */
+const Term = ({ term, children }: { term: ReactNode; children: ReactNode }) => (
+  <div className="flex flex-wrap gap-x-2">
+    <dt className="text-muted-foreground">{term}</dt>
+    <dd>{children}</dd>
+  </div>
+);
+
+/** A model binding's caps, in US dollars, and when admins are alerted. */
+const Budget = ({ budget }: { budget: ModelBindingBudget }) => {
+  const { perRequest, perDay, perMonth } = budget;
+  const alertAt = percent(budget.alertAt);
+  return (
+    <dl className="flex flex-col gap-0.5">
+      {perRequest === undefined ? null : (
+        <Term term={<Trans>Per request</Trans>}>{dollars(perRequest)}</Term>
+      )}
+      {perDay === undefined ? null : (
+        <Term term={<Trans>Per day</Trans>}>{dollars(perDay)}</Term>
+      )}
+      {perMonth === undefined ? null : (
+        <Term term={<Trans>Per month</Trans>}>{dollars(perMonth)}</Term>
+      )}
+      {perDay === undefined && perMonth === undefined ? null : (
+        <Term term={<Trans>Alert at</Trans>}>
+          <Trans>{alertAt} of a cap</Trans>
+        </Term>
+      )}
+    </dl>
+  );
+};
 
 /** A change to what core holds, then the page read again. */
 type Decide = (change: (session: Session) => Promise<unknown>) => Promise<void>;
@@ -584,14 +620,6 @@ const Revoke = ({
   );
 };
 
-/** One term of a definition list and what it says. */
-const Term = ({ term, children }: { term: ReactNode; children: ReactNode }) => (
-  <div className="flex flex-wrap gap-x-2">
-    <dt className="text-muted-foreground">{term}</dt>
-    <dd>{children}</dd>
-  </div>
-);
-
 /** What `resource` declares, as a list of terms. */
 const Declared = ({ resource }: { resource: DeclaredResource }) => {
   const { contract, actions, operations, collections, usedBy } = resource;
@@ -677,6 +705,9 @@ const ResourceCard = ({
               choices={choices}
               connections={connections}
             />
+            {binding.budget === null ? null : (
+              <Budget budget={binding.budget} />
+            )}
           </div>
           {choices === null ? null : (
             <Revoke

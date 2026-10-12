@@ -57,6 +57,10 @@ msgstr "{about} has {open, plural, one {# decision open} other {# decisions open
 msgid "{account} on {provider}"
 msgstr "{account} on {provider}"
 
+#: src/engines/resource-bindings.tsx
+msgid "{alertAt} of a cap"
+msgstr "{alertAt} of a cap"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
 msgstr "{app} has no tools."
@@ -665,6 +669,10 @@ msgstr "Agreements"
 #: src/routes/_shell.settings.tsx
 msgid "AI spend"
 msgstr "AI spend"
+
+#: src/engines/resource-bindings.tsx
+msgid "Alert at"
+msgstr "Alert at"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
@@ -2218,6 +2226,10 @@ msgstr "Its access ran out. Grasp staff can't reconnect it: an admin of the orga
 msgid "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
 msgstr "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
 
+#: src/engines/resource-bindings.tsx
+msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
+msgstr "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
+
 #: src/routes/_shell.engines.index.tsx
 msgid "Its contents couldn't be read."
 msgstr "Its contents couldn't be read."
@@ -3171,9 +3183,18 @@ msgstr "People heard"
 msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.onboarding.log.tsx
 msgid "Per day"
 msgstr "Per day"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per month"
+msgstr "Per month"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per request"
+msgstr "Per request"
 
 #: src/activity/audit-log.tsx
 msgid "Permission"

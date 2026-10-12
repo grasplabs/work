@@ -57,6 +57,10 @@ msgstr "{about} heeft {open, plural, one {# open beslissing} other {# open besli
 msgid "{account} on {provider}"
 msgstr "{account} bij {provider}"
 
+#: src/engines/resource-bindings.tsx
+msgid "{alertAt} of a cap"
+msgstr "{alertAt} van een limiet"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
 msgstr "{app} heeft geen tools."
@@ -665,6 +669,10 @@ msgstr "Afspraken"
 #: src/routes/_shell.settings.tsx
 msgid "AI spend"
 msgstr "AI-uitgaven"
+
+#: src/engines/resource-bindings.tsx
+msgid "Alert at"
+msgstr "Waarschuwen bij"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
@@ -2218,6 +2226,10 @@ msgstr "De toegang is verlopen. Grasp-medewerkers kunnen hem niet opnieuw koppel
 msgid "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
 msgstr "De toegang is verlopen. Meld je opnieuw aan met hetzelfde account: engines en agents houden hun toestemmingen ervoor."
 
+#: src/engines/resource-bindings.tsx
+msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
+msgstr "Het budget kan niet worden gelezen, dus hij bedient niets in plaats van zonder budget te draaien. Koppel hem opnieuw om het budget opnieuw in te stellen."
+
 #: src/routes/_shell.engines.index.tsx
 msgid "Its contents couldn't be read."
 msgstr "De inhoud kon niet worden gelezen."
@@ -3171,9 +3183,18 @@ msgstr "Gehoorde mensen"
 msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "Mensen wezen {days, plural, one {de afgelopen dag} other {de afgelopen # dagen}} {rejected} van {answered, plural, one {# antwoord} other {# antwoorden}} af bij stap {step} van {about}."
 
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.onboarding.log.tsx
 msgid "Per day"
 msgstr "Per dag"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per month"
+msgstr "Per maand"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per request"
+msgstr "Per verzoek"
 
 #: src/activity/audit-log.tsx
 msgid "Permission"
