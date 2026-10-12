@@ -40,8 +40,10 @@ describe("an App's function on the on-prem sandbox", () => {
     cleanUp();
   });
 
-  const call = async (path: string) => {
-    const response = await fetch(`${coreUrl}run?path=${path}`);
+  const call = async (path: string, stopAfter = 0) => {
+    const response = await fetch(
+      `${coreUrl}run?path=${path}&stopAfter=${stopAfter}`
+    );
     return outcomeSchema.parse(await response.json());
   };
 
@@ -77,4 +79,14 @@ describe("an App's function on the on-prem sandbox", () => {
     expect(outcome.ms).toBeLessThan(15_000);
     expect(Math.max(...answers)).toBeLessThan(ANSWER_MS);
   }, 30_000);
+
+  it("frees a function's process once the host stops waiting for it", async () => {
+    const outcome = await call("waits", 300);
+    expect(outcome.status).toBe("refused");
+    expect(outcome.message).toContain("past its deadline");
+    expect(outcome.ms).toBeLessThan(3000);
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
+      .toBe(0);
+  });
 });

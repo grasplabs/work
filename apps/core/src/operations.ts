@@ -174,7 +174,13 @@ export interface Invocation {
 export type Runner = (
   path: string,
   args: Json,
-  channel: OperationChannel
+  channel: OperationChannel,
+  /**
+   * Aborted once the host stops waiting for the run (its deadline): a
+   * runner that can end the run then does, and frees what it held (an
+   * on-prem sandbox session's process, app-functions.ts).
+   */
+  signal?: AbortSignal
 ) => Promise<unknown>;
 
 /** An App as the host runs it: its inspected manifest and its runner. */
@@ -1531,9 +1537,12 @@ const runHandler = async (
       : { refused: capabilities.onRefused }),
     refusals: refusalsOf[operation.kind],
   });
+  const stopped = new AbortController();
   try {
     const outcome = await untilDeadline(
-      settle(run.app.run(operation.path, fresh(args), open.channel)),
+      settle(
+        run.app.run(operation.path, fresh(args), open.channel, stopped.signal)
+      ),
       run.invocation.deadline
     );
     if (outcome === "expired") {
@@ -1583,6 +1592,9 @@ const runHandler = async (
     }
     throw sealed(error);
   } finally {
+    // Past its deadline or done, the run is over: what still runs of it
+    // ends with its channel.
+    stopped.abort();
     open.end();
   }
 };

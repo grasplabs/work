@@ -333,9 +333,11 @@ export const releaseRunner =
       | "SANDBOX_IN_PROCESS"
       | "APP_CALL_TIMEOUT_MS"
     >,
-    release: Pick<Release, "modules" | "sdk">
+    release: Pick<Release, "modules" | "sdk">,
+    /** Whose release it is: the App, which the sandbox caps per owner. */
+    owner: string
   ): Runner =>
-  async (path, args, channel) => {
+  async (path, args, channel, signal) => {
     // The platform's modules last: no App module takes one's name.
     const modules = {
       ...release.modules,
@@ -359,21 +361,27 @@ export const releaseRunner =
           }))
             .getEntrypoint<RunEntrypoint>("Run")
             .run(path, args, isolateChannel)
-        : await runInSession(host, {
-            mainModule: runModule,
-            modules,
-            entrypoint: "Run",
-            method: "run",
-            args: [
-              { value: path },
-              { value: args },
-              { capability: capability(isolateChannel) },
-            ],
-            cpuMs: sandbox.limits.cpuMs,
-            // The host's own deadline ends the invocation before this
-            // (operations.ts); this only bounds the session.
-            wallMs: callTimeoutMs(env),
-          })
+        : await runInSession(
+            host,
+            {
+              mainModule: runModule,
+              modules,
+              entrypoint: "Run",
+              method: "run",
+              args: [
+                { value: path },
+                { value: args },
+                { capability: capability(isolateChannel) },
+              ],
+              owner,
+              cpuMs: sandbox.limits.cpuMs,
+              // The host's own deadline ends the invocation before this
+              // (operations.ts), and frees the process (`signal`); this only
+              // bounds the session.
+              wallMs: callTimeoutMs(env),
+            },
+            signal === undefined ? {} : { signal }
+          )
     );
     if (!answer.success) {
       throw Object.assign(new Error("The isolate answered something else"), {
@@ -408,7 +416,7 @@ export const releaseRunner =
 /** `release` as the operation host runs it. */
 export const hostedRelease = (env: Env, release: Release): HostedApp => ({
   manifest: release.app,
-  run: releaseRunner(env, release),
+  run: releaseRunner(env, release, release.manifest.resourceId),
 });
 
 /** Every call of a store a release without tables doesn't have. */

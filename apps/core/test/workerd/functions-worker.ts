@@ -22,6 +22,7 @@ const runner = `export const runFunction = async (registered, path, args, channe
 const app = `export default {
   echo: async (channel, args) => ({ args, read: await channel.read({ table: "items" }) }),
   busy: async () => { for (;;) {} },
+  waits: async () => { await scheduler.wait(60000); return "late"; },
 };`;
 
 /** The operation channel the host would open: its reads answer this. */
@@ -45,16 +46,29 @@ export default {
     if (pathname !== "/run") {
       return new Response("core answers");
     }
-    const run = releaseRunner(env, {
-      modules: { [appModuleName("app.ts")]: app },
-      sdk: { [kitModuleName("@grasp-os/sdk/runner")]: runner },
-    });
+    const run = releaseRunner(
+      env,
+      {
+        modules: { [appModuleName("app.ts")]: app },
+        sdk: { [kitModuleName("@grasp-os/sdk/runner")]: runner },
+      },
+      "app-stand-in"
+    );
     const started = Date.now();
+    // As the host stops waiting past the invocation's deadline (operations.ts).
+    const deadline = new AbortController();
+    const stopAfter = Number(searchParams.get("stopAfter") ?? "0");
+    if (stopAfter > 0) {
+      setTimeout(() => {
+        deadline.abort(new Error("past its deadline"));
+      }, stopAfter);
+    }
     try {
       const value = await run(
         searchParams.get("path") ?? "",
         { n: 1 },
-        channel
+        channel,
+        deadline.signal
       );
       return Response.json({ status: "ok", value, ms: Date.now() - started });
     } catch (error) {
