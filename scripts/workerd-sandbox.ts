@@ -155,6 +155,8 @@ export interface MemoryProbe {
   procRoot: string;
   /** macOS: the `ps` binary, by absolute path so no PATH can hide it. */
   ps: string;
+  /** Which of the two to read: this machine's own platform by default. */
+  platform?: NodeJS.Platform;
 }
 
 const defaultProbe: MemoryProbe = { procRoot: "/proc", ps: "/bin/ps" };
@@ -304,28 +306,51 @@ const isAlive = (pid: number): boolean => {
 };
 
 const vmRss = /^VmRSS:\s+(?<kib>\d+)\s+kB$/mu;
+/** A process that has exited, zombie (`Z`) or dead (`X`), not yet reaped. */
+const procExited = /^State:\s+[ZX]\b/mu;
 
-/** `pid`'s resident memory on Linux, from `/proc/<pid>/status`. */
-const procRss = async (
+/** Whether `error` says the process or its procfs entry is gone. */
+const isGoneError = (error: unknown): boolean =>
+  error instanceof Error &&
+  "code" in error &&
+  (error.code === "ENOENT" || error.code === "ESRCH");
+
+/**
+ * `pid`'s resident memory on Linux, from `/proc/<pid>/status`. A process
+ * that has exited is gone, though `kill(pid, 0)` still finds it until it's
+ * reaped: a crash mid-call is the App's, never an unreadable process.
+ */
+const procMemory = async (
   procRoot: string,
   pid: number
-): Promise<number | string> => {
+): Promise<MemoryReading> => {
+  let status: string;
   try {
-    const status = await readFile(
+    status = await readFile(
       path.join(procRoot, String(pid), "status"),
       "utf-8"
     );
-    const kib = vmRss.exec(status)?.groups?.kib;
-    // A zombie has no VmRSS line: it's gone, but for being reaped.
-    return kib === undefined ? "no VmRSS" : Number(kib) * 1024;
   } catch (error) {
-    return String(error);
+    if (isGoneError(error) || !isAlive(pid)) {
+      return { kind: "gone" };
+    }
+    return { kind: "unreadable", why: String(error) };
   }
+  if (procExited.test(status)) {
+    return { kind: "gone" };
+  }
+  const kib = vmRss.exec(status)?.groups?.kib;
+  if (kib !== undefined) {
+    return { kind: "bytes", bytes: Number(kib) * 1024 };
+  }
+  return isAlive(pid)
+    ? { kind: "unreadable", why: "no VmRSS in a running process's status" }
+    : { kind: "gone" };
 };
 
-/** `pid`'s resident memory on macOS, as `ps` says. */
-const psRss = async (ps: string, pid: number): Promise<number | string> => {
-  const child = spawn(ps, ["-o", "rss=", "-p", String(pid)], {
+/** `pid`'s resident memory on macOS, as `ps` says, with its state. */
+const psMemory = async (ps: string, pid: number): Promise<MemoryReading> => {
+  const child = spawn(ps, ["-o", "stat=,rss=", "-p", String(pid)], {
     stdio: ["ignore", "pipe", "ignore"],
   });
   const exited = exitOf(child);
@@ -336,33 +361,46 @@ const psRss = async (ps: string, pid: number): Promise<number | string> => {
     }
   } catch (error) {
     await exited;
-    return String(error);
+    return isAlive(pid)
+      ? { kind: "unreadable", why: String(error) }
+      : { kind: "gone" };
   }
   await exited;
-  const kib = Number(output.trim());
-  return output.trim() !== "" && Number.isFinite(kib)
-    ? kib * 1024
-    : `ps answered ${JSON.stringify(output.trim())} (exit ${child.exitCode})`;
+  const [state = "", rss = ""] = output.trim().split(/\s+/u);
+  // Exited, a zombie until reaped: gone, as on Linux.
+  if (state.startsWith("Z")) {
+    return { kind: "gone" };
+  }
+  const kib = Number(rss);
+  if (rss !== "" && Number.isFinite(kib)) {
+    return { kind: "bytes", bytes: kib * 1024 };
+  }
+  return isAlive(pid)
+    ? {
+        kind: "unreadable",
+        why: `ps answered ${JSON.stringify(output.trim())} (exit ${child.exitCode})`,
+      }
+    : { kind: "gone" };
 };
 
 /**
- * `pid`'s resident memory, or that it's gone. A live process whose memory
- * can't be read is `unreadable`, never skipped: then nothing bounds it.
+ * `pid`'s resident memory, or that it's gone. A running process whose
+ * memory can't be read is `unreadable`, never skipped: then nothing bounds it.
  */
 const residentMemory = async (
   probe: MemoryProbe,
   pid: number
 ): Promise<MemoryReading> => {
-  let read: number | string = `no way to read memory on ${process.platform}`;
-  if (process.platform === "linux") {
-    read = await procRss(probe.procRoot, pid);
-  } else if (process.platform === "darwin") {
-    read = await psRss(probe.ps, pid);
+  const platform = probe.platform ?? process.platform;
+  if (platform === "linux") {
+    return await procMemory(probe.procRoot, pid);
   }
-  if (typeof read === "number") {
-    return { kind: "bytes", bytes: read };
+  if (platform === "darwin") {
+    return await psMemory(probe.ps, pid);
   }
-  return isAlive(pid) ? { kind: "unreadable", why: read } : { kind: "gone" };
+  return isAlive(pid)
+    ? { kind: "unreadable", why: `no way to read memory on ${platform}` }
+    : { kind: "gone" };
 };
 
 /** Whether `pid` passes `limit` bytes before `signal` aborts, or can't be read. */
@@ -707,6 +745,11 @@ class SandboxPool {
       return { kind: "answered", status: answer.statusCode ?? 500, body: text };
     } catch (error) {
       if (reason === "unreadable") {
+        // Unreadable because it just died: a crash, as any death mid-call.
+        await Promise.race([host.exited, sleep(100)]);
+        if (host.gone && !this.#stopping) {
+          return { kind: "crashed" };
+        }
         return { kind: "unreadable", why: unreadable };
       }
       if (reason !== undefined) {

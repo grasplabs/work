@@ -10,6 +10,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
+  mkdirSync,
   readdirSync,
   rmSync,
   statSync,
@@ -646,21 +647,47 @@ describe("the sandbox supervisor", () => {
     });
   });
 
-  it("fails a call loudly, as unavailable, when it can't read its processes' memory", async () => {
+  /**
+   * A supervisor reading memory as Linux does, from a procfs of the test's
+   * own: each test writes its process's `status` once it knows its ID.
+   */
+  const withFakeProc = async (
+    status: string,
+    test: (
+      supervisor: SandboxSupervisor,
+      events: Record<string, unknown>[]
+    ) => Promise<void>
+  ): Promise<void> => {
+    const procRoot = tempDir();
     const events: Record<string, unknown>[] = [];
     await withSupervisor(
       {
-        // Neither /proc nor ps: as with no procfs, or no ps on the PATH.
-        memoryProbe: { procRoot: tempDir(), ps: "/nonexistent/ps" },
+        memoryProbe: { procRoot, ps: "/nonexistent/ps", platform: "linux" },
         log: (event) => {
           events.push(event);
         },
       },
-      async ({ socket }) => {
-        const result = await callSupervisor(socket, {
-          body: "await scheduler.wait(1000); return 'unbounded';",
-          deadlineMs: 5000,
-        });
+      async (supervisor) => {
+        for (const pid of supervisor.pids()) {
+          mkdirSync(path.join(procRoot, String(pid)));
+          writeFileSync(path.join(procRoot, String(pid), "status"), status);
+        }
+        await test(supervisor, events);
+      }
+    );
+  };
+
+  /** A call that runs a while, so its memory is read. */
+  const slowCall = {
+    body: "await scheduler.wait(1000); return 'unbounded';",
+    deadlineMs: 5000,
+  };
+
+  it("fails a call loudly, as unavailable, when a running process's memory can't be read (Linux)", async () => {
+    await withFakeProc(
+      "Name:\tworkerd\nState:\tR (running)\n",
+      async ({ socket }, events) => {
+        const result = await callSupervisor(socket, slowCall);
         expect(result.status).toBe(503);
         expect(events).toContainEqual(
           expect.objectContaining({
@@ -668,6 +695,49 @@ describe("the sandbox supervisor", () => {
             level: "error",
           })
         );
+      }
+    );
+  });
+
+  it("fails a call loudly, as unavailable, when it has no ps to read memory with (macOS)", async () => {
+    const events: Record<string, unknown>[] = [];
+    await withSupervisor(
+      {
+        memoryProbe: {
+          procRoot: tempDir(),
+          ps: "/nonexistent/ps",
+          platform: "darwin",
+        },
+        log: (event) => {
+          events.push(event);
+        },
+      },
+      async ({ socket }) => {
+        const result = await callSupervisor(socket, slowCall);
+        expect(result.status).toBe(503);
+        expect(events).toContainEqual(
+          expect.objectContaining({ event: "sandbox.memory_unreadable" })
+        );
+      }
+    );
+  });
+
+  it("reads an exited process as gone, not unreadable, as Linux shows it until it's reaped", async () => {
+    await withFakeProc(
+      "Name:\tworkerd\nState:\tZ (zombie)\n",
+      async ({ socket }) => {
+        const result = await callSupervisor(socket, slowCall);
+        expect(result.answer).toStrictEqual({ ok: true, value: "unbounded" });
+      }
+    );
+  });
+
+  it("bounds memory from Linux's VmRSS", async () => {
+    await withFakeProc(
+      "Name:\tworkerd\nState:\tS (sleeping)\nVmRSS:\t999999999 kB\n",
+      async ({ socket }) => {
+        const result = await callSupervisor(socket, slowCall);
+        expect(result).toMatchObject({ status: 200, verdict: "memory" });
       }
     );
   });
