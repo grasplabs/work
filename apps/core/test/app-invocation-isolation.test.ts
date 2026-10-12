@@ -17,6 +17,13 @@ import type { Fixture } from "./sealed-apps.ts";
 // held-call reproduction from GRA-383, the channel kept past its call,
 // and state one caller leaves for the next. A call cut short at its
 // deadline is app-functions.test.ts's ("a call past its deadline").
+//
+// Work App code schedules for after its call never runs: the isolate is
+// discarded once the call answers, so a late write through a kept channel
+// can't even be attempted, and its refusal can't be observed from here.
+// That a channel refuses every use once its invocation ended
+// (`operation.ended`) is operations.test.ts's, where the host's channel
+// is reached directly.
 
 const files: Record<string, string> = {
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
@@ -183,7 +190,7 @@ describe("an invocation's authority", { timeout: 120_000 }, () => {
     });
   });
 
-  it("ends with its call: a channel kept for later writes nothing", async () => {
+  it("ends with its call: work scheduled past it never runs, and writes nothing", async () => {
     const isolated = await sealedApp();
     await expect(
       call(isolated, isolated.owner, "notes.keepAfter")
