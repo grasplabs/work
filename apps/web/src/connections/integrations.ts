@@ -259,7 +259,7 @@ const rankOf = ({ id }: Integration): number =>
  */
 export const find = (
   integrations: readonly Integration[],
-  search: string | undefined
+  search?: string
 ): Integration[] => {
   const needle = (search ?? "").trim().toLocaleLowerCase();
   if (needle === "") {
@@ -304,7 +304,7 @@ export interface IntegrationSection {
 export const sectionsOf = (
   integrations: readonly Integration[],
   filter: IntegrationFilter,
-  search: string | undefined
+  search?: string
 ): IntegrationSection[] => {
   const found = find(
     integrations.filter((integration) => keeps(filter, integration)),
@@ -312,7 +312,9 @@ export const sectionsOf = (
   );
   return catalogGroups
     .map((group) => {
-      const ofGroup = found.filter((integration) => integration.group === group);
+      const ofGroup = found.filter(
+        (integration) => integration.group === group
+      );
       return {
         group,
         own: ofGroup.filter(

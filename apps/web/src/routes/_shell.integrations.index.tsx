@@ -40,6 +40,7 @@ import type {
   IntegrationSection,
 } from "../connections/integrations.ts";
 import { ErrorText } from "../error-text.tsx";
+import { formatNumber } from "../format.ts";
 import {
   PageSidebar,
   PageSidebarBody,
@@ -52,7 +53,6 @@ import {
 import { PageLoading } from "../frame/page-states.tsx";
 import { PageHeading } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { formatNumber } from "../format.ts";
 import { NotLoaded } from "../load-from-core.tsx";
 
 // Integrations, as in the prototype (`routes/integrations/index.tsx`):
@@ -339,9 +339,9 @@ const Kinds = ({
   // shows, more is drawn. It is a new mark after every step, so it is
   // looked at again. Measured against the part of the page that scrolls,
   // which is not the window.
-  const watch = (mark: HTMLSpanElement | null) => {
+  const watch = (mark: HTMLSpanElement | null): (() => void) | undefined => {
     if (mark === null) {
-      return;
+      return undefined;
     }
     const watcher = new IntersectionObserver(
       ([entry]) => {
@@ -447,6 +447,10 @@ const emptyTextOf = (
   return emptyTexts.other;
 };
 
+/** A filter as the one control says it: its name and count. */
+const labelOf = (choice: Choice): string =>
+  `${choice.label} · ${formatNumber(choice.count)}`;
+
 /** Without room for the filter column, the filters are one control: a row of them would be several screens wide. */
 const FilterSelect = ({
   choices,
@@ -459,8 +463,6 @@ const FilterSelect = ({
 }) => {
   const { t } = useLingui();
   const navigate = useNavigate({ from: "/integrations/" });
-  const labelOf = (choice: Choice): string =>
-    `${choice.label} · ${formatNumber(choice.count)}`;
   const selected =
     choices.find((choice) => sameFilter(choice.filter, filter)) ?? choices[0];
   return (
@@ -524,7 +526,7 @@ const Integrations = () => {
         <Filters choices={choices} filter={filter} q={q} />
         <div className="min-w-0 flex-1 overflow-y-auto" data-scroller>
           {/* Columns follow the room this area has, not the window: the sidebars take a lot of it. */}
-          <div className="@container pb-chat mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-7 md:px-9">
+          <div className="pb-chat @container mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-7 md:px-9">
             <PageHeading
               description={
                 catalog.state === "ready" &&

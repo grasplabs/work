@@ -176,21 +176,18 @@ describe("filters, search and sections", () => {
     ).toReversed();
     expect(
       find(
-        [zapier, linear].filter((integration) => integration !== undefined),
-        undefined
+        [zapier, linear].filter((integration) => integration !== undefined)
       ).map(({ id }) => id)
     ).toStrictEqual(["linear", "zapier"]);
   });
 
   it("makes a section per kind of app, in Grasp's order, connected apps first", () => {
     expect(
-      sectionsOf(all, { show: "all" }, undefined).map(
-        ({ group, own, others }) => ({
-          group,
-          own: own.map(({ id }) => id),
-          others: others.map(({ id }) => id),
-        })
-      )
+      sectionsOf(all, { show: "all" }).map(({ group, own, others }) => ({
+        group,
+        own: own.map(({ id }) => id),
+        others: others.map(({ id }) => id),
+      }))
     ).toStrictEqual([
       { group: "Email and calendar", own: ["google"], others: ["microsoft"] },
       { group: "CRM", own: [], others: ["hubspot"] },
@@ -199,8 +196,8 @@ describe("filters, search and sections", () => {
 
   it("shows only what is connected under Connected", () => {
     expect(
-      sectionsOf(all, { show: "connected" }, undefined).flatMap(
-        ({ own, others }) => [...own, ...others].map(({ id }) => id)
+      sectionsOf(all, { show: "connected" }).flatMap(({ own, others }) =>
+        [...own, ...others].map(({ id }) => id)
       )
     ).toStrictEqual(["google"]);
   });

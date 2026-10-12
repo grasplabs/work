@@ -26,6 +26,7 @@ export const formatNumber = (value: number): string =>
 
 /** A day and month as the page's language writes it, such as "3 Oct": for what is recent. */
 export const formatDayMonth = (value: string | number | Date): string =>
-  new Intl.DateTimeFormat(i18n.locale, { day: "numeric", month: "short" }).format(
-    new Date(value)
-  );
+  new Intl.DateTimeFormat(i18n.locale, {
+    day: "numeric",
+    month: "short",
+  }).format(new Date(value));

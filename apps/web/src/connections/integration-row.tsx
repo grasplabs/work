@@ -39,8 +39,12 @@ const measureFaces = (element: HTMLElement | null): void => {
       `${Math.max(0, connected.offsetWidth - manage.offsetWidth)}px`
     );
   };
+  const measureOnceFontsAreIn = async (): Promise<void> => {
+    await document.fonts.ready;
+    measure();
+  };
   measure();
-  void document.fonts.ready.then(measure);
+  void measureOnceFontsAreIn();
 };
 
 /**

@@ -490,7 +490,6 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           </output>
         ) : null}
         <Tabs
-          className="gap-6 text-sm"
           onValueChange={(next: Tab) => {
             void navigate({
               replace: true,
@@ -514,20 +513,25 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
             </TabsTrigger>
           </TabsList>
           <TabsContent value="overview">
-            <Overview
-              catalog={catalog}
-              identity={identity}
-              integration={integration}
-              tools={integration.listed ? tools : undefined}
-            />
+            {/* With the tabs' own gap, the prototype's 24 pixels under the tab row. */}
+            <div className="pt-4">
+              <Overview
+                catalog={catalog}
+                identity={identity}
+                integration={integration}
+                tools={integration.listed ? tools : undefined}
+              />
+            </div>
           </TabsContent>
           <TabsContent value="account">
-            <Account
-              held={held}
-              identity={identity}
-              integration={integration}
-              onConnect={connectable ? open : undefined}
-            />
+            <div className="pt-4">
+              <Account
+                held={held}
+                identity={identity}
+                integration={integration}
+                onConnect={connectable ? open : undefined}
+              />
+            </div>
           </TabsContent>
         </Tabs>
       </Page>
