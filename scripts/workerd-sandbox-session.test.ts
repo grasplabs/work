@@ -9,6 +9,7 @@ import { once } from "node:events";
 import { IncomingMessage, request as httpRequest } from "node:http";
 import { Socket, connect, createServer } from "node:net";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -113,6 +114,43 @@ describe("a session on the on-prem sandbox", () => {
     }
     return socket;
   };
+
+  it.each([0, 1, 2, 5, 10])(
+    "frees the process and owner's place of a session core leaves while it starts (%d ms in)",
+    async (afterMs) => {
+      const socket = connect(supervisor.socket);
+      await once(socket, "connect");
+      socket.write(
+        [
+          "GET /session HTTP/1.1",
+          "host: sandbox",
+          "connection: upgrade",
+          "upgrade: websocket",
+          "sec-websocket-version: 13",
+          "sec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==",
+          `${deadlineHeader}: 600000`,
+          `${cpuHeader}: 5000`,
+          `${waitHeader}: 3000`,
+          `${callIdHeader}: ${crypto.randomUUID()}`,
+          `${ownerHeader}: app-gone`,
+          "",
+          "",
+        ].join("\r\n")
+      );
+      await sleep(afterMs);
+      socket.destroy();
+      await expect
+        .poll(() => supervisor.stats().inFlight, {
+          timeout: 1500,
+          interval: 50,
+        })
+        .toBe(0);
+      // Its place is free: one more of its sessions runs at once.
+      const outcome = await run("capabilities", "app-gone");
+      expect(outcome.status).toBe("ok");
+      expect(outcome.ms).toBeLessThan(2000);
+    }
+  );
 
   it("frees a session's process when core says it's over, its socket still open", async () => {
     const id = crypto.randomUUID();
@@ -380,6 +418,72 @@ describe("a session on the on-prem sandbox", () => {
       } finally {
         await small.stop();
       }
+    }
+  );
+
+  /**
+   * A proxy in front of the supervisor that passes a session's upgrade on,
+   * but never its answer, and never either end's close to the other: the
+   * supervisor holds a process for a session core never hears of.
+   */
+  const unansweringProxy = (): string => {
+    const proxy = path.join(tempDir(), "unanswering.sock");
+    createServer((client: Socket) => {
+      const upstream = connect(supervisor.socket);
+      upstream.on("error", () => {});
+      client.on("error", () => {});
+      client.once("data", (first: Buffer) => {
+        upstream.write(first);
+        if (first.toString("latin1").startsWith("GET /session")) {
+          client.on("data", (chunk: Buffer) => {
+            upstream.write(chunk);
+          });
+          return;
+        }
+        client.pipe(upstream);
+        upstream.pipe(client);
+      });
+    }).listen(proxy);
+    return proxy;
+  };
+
+  it(
+    "ends a session whose upgrade is never answered as unavailable, and frees its process",
+    { timeout: 30_000 },
+    async () => {
+      const behindProxy = await serveStandIn(
+        "session-worker.ts",
+        unansweringProxy()
+      );
+      const outcome = await run("waitsLong", "app-unanswered", behindProxy);
+      expect(outcome.status).toBe("unavailable");
+      // Its waits for a process and its owner's room, and a little more.
+      expect(outcome.ms).toBeLessThan(12_000);
+      await expect
+        .poll(() => supervisor.stats().inFlight, {
+          timeout: 1500,
+          interval: 50,
+        })
+        .toBe(0);
+    }
+  );
+
+  it(
+    "frees the process of a session core cancels before its upgrade is answered",
+    { timeout: 30_000 },
+    async () => {
+      const behindProxy = await serveStandIn(
+        "session-worker.ts",
+        unansweringProxy()
+      );
+      const outcome = await run("cancelled", "app-unanswered", behindProxy);
+      expect(outcome.message).toContain("cancelled");
+      await expect
+        .poll(() => supervisor.stats().inFlight, {
+          timeout: 1500,
+          interval: 50,
+        })
+        .toBe(0);
     }
   );
 

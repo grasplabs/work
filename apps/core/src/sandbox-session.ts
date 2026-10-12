@@ -323,6 +323,16 @@ const openSession = async (
   id: string,
   signal: AbortSignal | undefined
 ): Promise<WebSocket> => {
+  // The supervisor answers within its waits for the owner's room and a
+  // process: one that never does is unavailable, never waited on for good.
+  // Only until it answers: the request's signal goes on to end its socket.
+  const unanswered = new AbortController();
+  const answerBy = setTimeout(
+    () => {
+      unanswered.abort(new Error("The sandbox host didn't answer in time."));
+    },
+    2 * sandboxWaitMs + backstopMs
+  );
   let response: Response;
   try {
     response = await host.fetch("http://sandbox/session", {
@@ -334,13 +344,20 @@ const openSession = async (
         [sandboxCallIdHeader]: id,
         [sandboxOwnerHeader]: call.owner,
       },
-      ...(signal === undefined ? {} : { signal }),
+      signal:
+        signal === undefined
+          ? unanswered.signal
+          : AbortSignal.any([signal, unanswered.signal]),
     });
   } catch (error) {
+    // It may have taken the session, and hold a process for it.
+    await endSession(host, id, "cancel");
     signal?.throwIfAborted();
     throw new SandboxUnavailableError("The sandbox host didn't answer.", {
       cause: error,
     });
+  } finally {
+    clearTimeout(answerBy);
   }
   const socket = response.webSocket;
   if (socket === null) {

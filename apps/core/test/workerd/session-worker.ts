@@ -143,6 +143,8 @@ const cases: Record<string, Case> = {
     abortAfterMs: 300,
     lingerMs: 5000,
   },
+  // Waits long, on a long wall-clock cap: its process held all the while.
+  waitsLong: { body: "return await probe.slow(60_000);", wallMs: 120_000 },
   // Longer than a session waits for its owner's room (3 s).
   holds: { body: "return await probe.slow(6000);", wallMs: 20_000 },
 };

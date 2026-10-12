@@ -434,6 +434,13 @@ const answerHead = async (
 };
 
 /** `head` with `name: value` added as its last header, and its blank line. */
+/** Settles once `signal` aborts, at once if it has already. */
+const abortOf = async (signal: AbortSignal): Promise<void> => {
+  if (!signal.aborted) {
+    await once(signal, "abort");
+  }
+};
+
 /** A WebSocket frame's opcode for a close. */
 const closeOpcode = 0x8;
 
@@ -1107,6 +1114,10 @@ class SandboxPool {
     client.on("close", () => {
       caller.abort();
     });
+    // Gone before it was listened for: its close came and went.
+    if (client.destroyed) {
+      caller.abort();
+    }
     client.on("error", ignore);
     const host = await this.#acquire(
       AbortSignal.any([caller.signal, AbortSignal.timeout(waitMs)])
@@ -1154,7 +1165,14 @@ class SandboxPool {
       upstream.write(head);
       // The sandbox host's answer to the upgrade, with the CPU time this
       // supervisor bounds the session to: core runs nothing without it.
-      const answered = await answerHead(upstream, guard.signal);
+      // Core may leave while the host answers: then nothing waits for it.
+      const answered = await answerHead(
+        upstream,
+        AbortSignal.any([guard.signal, caller.signal])
+      );
+      if (caller.signal.aborted && !guard.signal.aborted) {
+        return;
+      }
       if (answered === undefined) {
         throw new Error("The sandbox process didn't answer the session.");
       }
@@ -1171,13 +1189,17 @@ class SandboxPool {
       };
       client.on("data", closeFrameWatcher(coreDone));
       client.once("end", coreDone);
+      if (client.readableEnded) {
+        coreDone();
+      }
       client.pipe(upstream, { end: false });
       upstream.pipe(client, { end: false });
+      // A signal aborted already settles this at once: its event has fired.
       await Promise.race([
         once(upstream, "close"),
-        once(guard.signal, "abort"),
-        once(caller.signal, "abort"),
-        once(finished.signal, "abort"),
+        abortOf(guard.signal),
+        abortOf(caller.signal),
+        abortOf(finished.signal),
       ]);
       const ending = guard.signal.aborted
         ? await this.#cutShort(host, guard)
