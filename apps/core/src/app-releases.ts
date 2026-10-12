@@ -37,8 +37,10 @@ import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { findVersion, versionFiles } from "./apps.ts";
@@ -511,6 +513,13 @@ export const loadRelease = async (
   }
 };
 
+/**
+ * That `column` is one of `values`, bound as one JSON parameter: a
+ * release names more artifacts than D1 binds variables in a statement.
+ */
+const inJson = (column: SQLiteColumn, values: readonly string[]): SQL =>
+  sql`${column} IN (SELECT value FROM json_each(${JSON.stringify(values)}))`;
+
 /** How often, and how long, a seal waits for a deletion in flight. */
 const reserveWait = { attempts: 50, ms: 200 };
 
@@ -555,7 +564,7 @@ const reserveArtifacts = async (
         and(
           eq(sdkReleaseArtifacts.appId, key.app),
           eq(sdkReleaseArtifacts.version, key.version),
-          inArray(sdkReleaseArtifacts.sha256, unique)
+          inJson(sdkReleaseArtifacts.sha256, unique)
         )
       );
     const have = new Set(reserved.map(({ sha256 }) => sha256));
@@ -567,7 +576,7 @@ const reserveArtifacts = async (
     const marked = await drizzle(env.DB)
       .select({ sha256: sdkArtifactDeletions.sha256 })
       .from(sdkArtifactDeletions)
-      .where(inArray(sdkArtifactDeletions.sha256, missing));
+      .where(inJson(sdkArtifactDeletions.sha256, missing));
     if (marked.length === 0) {
       // Unmarked since the batch: reserved on the next try, at once.
       continue;

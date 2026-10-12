@@ -309,6 +309,22 @@ describe("retention", { timeout: 120_000 }, () => {
 });
 
 describe("shared bytes", { timeout: 120_000 }, () => {
+  it("are reserved for every artifact a release names, its sealed SDK included", async () => {
+    const fixture = await appWith(files("one"));
+    const release = await seal(fixture);
+    const rows = await env.DB.prepare(
+      "SELECT sha256 FROM sdk_release_artifacts WHERE app_id = ? AND version = 1"
+    )
+      .bind(fixture.app)
+      .all<{ sha256: string }>();
+    const reserved = new Set(rows.results.map(({ sha256 }) => sha256));
+    const named = release.manifest.artifacts;
+    expect([
+      named.some((artifact) => artifact.path.startsWith("sdk/")),
+      named.filter((artifact) => !reserved.has(artifact.sha256)),
+    ]).toStrictEqual([true, []]);
+  });
+
   it("are never deleted while a release reserves them", async () => {
     const start = new Date();
     const { app, second } = await twoVersions(start);
