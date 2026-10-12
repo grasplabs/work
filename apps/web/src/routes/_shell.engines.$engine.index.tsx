@@ -390,12 +390,36 @@ const Members = ({
 const Packages = ({
   packages,
 }: {
-  packages: OnFirstUse<DependencyApprovals>;
+  packages: Deferred<DependencyApprovals>;
 }) => (
-  <Later promise={packages().read}>
+  <Later promise={packages}>
     {(listed) => <PackageApprovals listed={listed} />}
   </Later>
 );
+
+/**
+ * The Packages tab, for whoever core lets read the engine's approvals:
+ * its builders at once, and anyone else (someone who may approve
+ * packages) once the read says they may.
+ */
+const PackagesTab = ({
+  packages,
+  builds,
+}: {
+  packages: Deferred<DependencyApprovals>;
+  builds: boolean;
+}) => {
+  const trigger = (
+    <TabsTrigger value="packages">
+      <Trans>Packages</Trans>
+    </TabsTrigger>
+  );
+  return (
+    <Await fallback={builds ? trigger : null} promise={packages}>
+      {(loaded) => (builds || loaded.state === "ready" ? trigger : null)}
+    </Await>
+  );
+};
 
 /** How many a tab holds, after its name. */
 const Count = ({ count }: { count: number }) => (
@@ -455,11 +479,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
               <Trans>Resources</Trans>
             </TabsTrigger>
           )}
-          {packages === undefined ? null : (
-            <TabsTrigger value="packages">
-              <Trans>Packages</Trans>
-            </TabsTrigger>
-          )}
+          <PackagesTab builds={canBuild(identity.role)} packages={packages} />
           <TabsTrigger value="members">
             <Trans>Members</Trans>
           </TabsTrigger>
@@ -500,13 +520,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
             </div>
           </TabsContent>
         )}
-        {packages === undefined ? null : (
-          <TabsContent value="packages">
-            <div className="pt-4">
-              <Packages packages={packages} />
-            </div>
-          </TabsContent>
-        )}
+        <TabsContent value="packages">
+          <div className="pt-4">
+            <Packages packages={packages} />
+          </div>
+        </TabsContent>
         <TabsContent value="members">
           <div className="pt-4">
             <Members app={app} identity={identity} members={members} />
@@ -584,18 +602,13 @@ export const Route = createFileRoute("/_shell/engines/$engine/")({
             )
         )
       : undefined,
-    // For its builders, read when the tab opens; ending an approval is
-    // for whoever core lets approve packages (`decides`).
-    packages: canBuild(identity.role)
-      ? onFirstUse(
-          async () =>
-            await loadFromCore(
-              core,
-              async (session) =>
-                await session.dependencies.approvals(params.engine)
-            )
-        )
-      : undefined,
+    // Not awaited. Core answers its builders and whoever may approve
+    // packages (`decides`, who may also end an approval); anyone else
+    // gets no tab.
+    packages: loadFromCore(
+      core,
+      async (session) => await session.dependencies.approvals(params.engine)
+    ),
     integrations: canBuild(identity.role)
       ? loadFromCore(
           core,
