@@ -635,8 +635,8 @@ msgstr "Account"
 msgid "Action"
 msgstr "Action"
 
-#: src/engines/resource-bindings.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Actions"
 msgstr "Actions"
 
@@ -1346,6 +1346,7 @@ msgstr "Clear"
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -3608,6 +3609,10 @@ msgstr "Read"
 msgid "Read a knowledge document"
 msgstr "Read a knowledge document"
 
+#: src/engines/package-approvals.tsx
+msgid "Read again"
+msgstr "Read again"
+
 #: src/activity/audit-words.ts
 msgid "Read an email attachment"
 msgstr "Read an email attachment"
@@ -3894,8 +3899,8 @@ msgid "Review the apps of {name}"
 msgstr "Review the apps of {name}"
 
 #: src/connections/connection-list.tsx
-#: src/engines/resource-bindings.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Revoke"
 msgstr "Revoke"
 
@@ -4813,6 +4818,10 @@ msgstr "The part of the address before the @, on the mail domain set up for Gras
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
 msgstr "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
+
+#: src/engines/package-approvals.tsx
+msgid "The packages couldn't be read again, so this list may be out of date: {unread}"
+msgstr "The packages couldn't be read again, so this list may be out of date: {unread}"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."

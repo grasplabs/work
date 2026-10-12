@@ -635,8 +635,8 @@ msgstr "Cuenta"
 msgid "Action"
 msgstr "Acción"
 
-#: src/engines/resource-bindings.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Actions"
 msgstr "Acciones"
 
@@ -1346,6 +1346,7 @@ msgstr "Borrar"
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -3608,6 +3609,10 @@ msgstr "Lectura"
 msgid "Read a knowledge document"
 msgstr "Leyó un documento de conocimiento"
 
+#: src/engines/package-approvals.tsx
+msgid "Read again"
+msgstr "Leer de nuevo"
+
 #: src/activity/audit-words.ts
 msgid "Read an email attachment"
 msgstr "Leyó un adjunto de correo"
@@ -3894,8 +3899,8 @@ msgid "Review the apps of {name}"
 msgstr "Revisar las aplicaciones de {name}"
 
 #: src/connections/connection-list.tsx
-#: src/engines/resource-bindings.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Revoke"
 msgstr "Revocar"
 
@@ -4813,6 +4818,10 @@ msgstr "La parte de la dirección antes de la @, en el dominio de correo configu
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
 msgstr "Los paquetes aprobados para este motor. Los ves porque puedes aprobar paquetes; el resto del motor es para sus miembros."
+
+#: src/engines/package-approvals.tsx
+msgid "The packages couldn't be read again, so this list may be out of date: {unread}"
+msgstr "No se pudieron leer de nuevo los paquetes, así que esta lista puede estar desactualizada: {unread}"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."

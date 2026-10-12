@@ -22,6 +22,7 @@ import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, createFileRoute, Link } from "@tanstack/react-router";
 import { CogIcon, LayoutGridIcon } from "lucide-react";
+import { useState } from "react";
 import type { ReactElement } from "react";
 
 import { IntegrationRow } from "../connections/integration-row.tsx";
@@ -44,6 +45,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { useCore } from "../use-core.ts";
 import { listRuns, listWorkflows } from "../workflows/reads.ts";
 import { RunsLog } from "../workflows/runs.tsx";
 import { WorkflowsTable } from "../workflows/workflows-table.tsx";
@@ -386,7 +388,7 @@ const Members = ({
   );
 };
 
-/** The engine's approved npm packages, read when the tab opens. */
+/** The engine's approved npm packages, as the tab's last read found them. */
 const Packages = ({
   packages,
 }: {
@@ -404,10 +406,9 @@ const Packages = ({
  */
 const PackagesTab = ({
   packages,
-  builds,
 }: {
-  packages: Deferred<DependencyApprovals>;
-  builds: boolean;
+  /** The early read that says whether a non-builder may; none for a builder. */
+  packages: Deferred<DependencyApprovals> | undefined;
 }) => {
   const trigger = (
     <TabsTrigger value="packages">
@@ -415,7 +416,7 @@ const PackagesTab = ({
     </TabsTrigger>
   );
   // A builder's tab is there from the start, never swapped for another.
-  if (builds) {
+  if (packages === undefined) {
     return trigger;
   }
   return (
@@ -442,6 +443,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
     packages,
   } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
+  const core = useCore();
+  // The packages as they are each time their tab opens, not as they were
+  // when the page loaded.
+  const [packagesRead, setPackagesRead] =
+    useState<Deferred<DependencyApprovals>>();
   const { app, contents } = page;
   const { version } = contents;
   return (
@@ -463,7 +469,19 @@ const EngineView = ({ page }: { page: EnginePage }) => {
         </div>
       </div>
       <StoreChanges changes={storeChanges} engine={app} />
-      <Tabs defaultValue="apps">
+      <Tabs
+        defaultValue="apps"
+        onValueChange={(value) => {
+          if (value === "packages") {
+            setPackagesRead(
+              loadFromCore(
+                core,
+                async (session) => await session.dependencies.approvals(app.id)
+              )
+            );
+          }
+        }}
+      >
         <TabsList variant="line">
           <TabsTrigger value="apps">
             <Trans>Apps</Trans>
@@ -483,7 +501,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
               <Trans>Resources</Trans>
             </TabsTrigger>
           )}
-          <PackagesTab builds={canBuild(identity.role)} packages={packages} />
+          <PackagesTab packages={packages} />
           <TabsTrigger value="members">
             <Trans>Members</Trans>
           </TabsTrigger>
@@ -526,7 +544,9 @@ const EngineView = ({ page }: { page: EnginePage }) => {
         )}
         <TabsContent value="packages">
           <div className="pt-4">
-            <Packages packages={packages} />
+            {packagesRead === undefined ? null : (
+              <Packages packages={packagesRead} />
+            )}
           </div>
         </TabsContent>
         <TabsContent value="members">
@@ -594,7 +614,7 @@ const EnginePageView = () => {
       />
     );
     // Not a member: someone who may approve packages still gets those.
-    return page.state === "missing" ? (
+    return page.state === "missing" && packages !== undefined ? (
       <Await fallback={<PageLoading />} promise={packages}>
         {(listed) =>
           listed.state === "ready" ? (
@@ -662,13 +682,16 @@ export const Route = createFileRoute("/_shell/engines/$engine/")({
             )
         )
       : undefined,
-    // Not awaited. Core answers its builders and whoever may approve
-    // packages (`decides`, who may also end an approval); anyone else
-    // gets no tab.
-    packages: loadFromCore(
-      core,
-      async (session) => await session.dependencies.approvals(params.engine)
-    ),
+    // Not awaited, and only to find out whether someone who doesn't build
+    // the engine may see its packages (who may approve packages): their
+    // tab, or the packages alone when they aren't a member. The tab reads
+    // the packages again each time it opens.
+    packages: canBuild(identity.role)
+      ? undefined
+      : loadFromCore(
+          core,
+          async (session) => await session.dependencies.approvals(params.engine)
+        ),
     integrations: canBuild(identity.role)
       ? loadFromCore(
           core,

@@ -86,7 +86,11 @@ const EndDialog = ({
   refresh: () => Promise<void>;
 }) => {
   const { t } = useLingui();
-  const { busy, failure, run } = useCoreAction();
+  const { busy: calling, failure, run } = useCoreAction();
+  // Busy from the click until the list was read again, not only while the
+  // call runs: a second click in between would send the decision again.
+  const [settling, setSettling] = useState(false);
+  const busy = calling || settling;
   const [reason, setReason] = useState("");
   const reasonId = useId();
   const engine = request.app.name;
@@ -102,6 +106,7 @@ const EndDialog = ({
     )
   );
   const end = async (): Promise<void> => {
+    setSettling(true);
     let done = false;
     // Read again whatever the outcome, keeping why it failed: a failed
     // call may still have landed, or someone may have ended it meanwhile,
@@ -123,6 +128,7 @@ const EndDialog = ({
           return true;
         })) === true;
     }, refresh);
+    setSettling(false);
     if (done) {
       onClose();
     }
@@ -373,7 +379,8 @@ export const PackageApprovals = ({
 }: {
   listed: DependencyApprovals;
 }) => {
-  const { run } = useCoreAction();
+  const { t } = useLingui();
+  const { busy: reading, failure: unread, run } = useCoreAction();
   const [listed, setListed] = useState(loaded);
   // What the page read last: when it reads again (a language switch, say),
   // its answer replaces the list, and an open dialog stays as it is.
@@ -407,6 +414,23 @@ export const PackageApprovals = ({
   // with why it failed, when the list empties.
   return (
     <>
+      {unread === undefined ? null : (
+        <div className="flex flex-col items-start gap-2">
+          <ErrorText>
+            {t`The packages couldn't be read again, so this list may be out of date: ${unread}`}
+          </ErrorText>
+          <Button
+            disabled={reading}
+            onClick={() => {
+              void refresh();
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <Trans>Read again</Trans>
+          </Button>
+        </div>
+      )}
       {listed.approvals.length === 0 ? (
         <p className="text-muted-foreground">
           <Trans>No packages are approved for this engine.</Trans>

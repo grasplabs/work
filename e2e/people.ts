@@ -194,6 +194,9 @@ const cast = {
   dashboardLayout: { user: "user" },
   dependencyApproval: { admin: "admin", builder: "builder", approver: "user" },
   enginePackages: { admin: "admin", builder: "builder", approver: "user" },
+  enginePackagesTab: { admin: "admin", builder: "builder", approver: "user" },
+  enginePackagesBusy: { admin: "admin", builder: "builder", approver: "user" },
+  enginePackagesStale: { admin: "admin", builder: "builder", approver: "user" },
   enginePackagesFresh: { admin: "admin", builder: "builder", approver: "user" },
   enginePackagesRefresh: {
     admin: "admin",

@@ -635,8 +635,8 @@ msgstr "Account"
 msgid "Action"
 msgstr "Actie"
 
-#: src/engines/resource-bindings.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Actions"
 msgstr "Acties"
 
@@ -1346,6 +1346,7 @@ msgstr "Wissen"
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -3608,6 +3609,10 @@ msgstr "Lezen"
 msgid "Read a knowledge document"
 msgstr "Een kennisdocument gelezen"
 
+#: src/engines/package-approvals.tsx
+msgid "Read again"
+msgstr "Opnieuw lezen"
+
 #: src/activity/audit-words.ts
 msgid "Read an email attachment"
 msgstr "Een e-mailbijlage gelezen"
@@ -3894,8 +3899,8 @@ msgid "Review the apps of {name}"
 msgstr "De apps van {name} beoordelen"
 
 #: src/connections/connection-list.tsx
-#: src/engines/resource-bindings.tsx
 #: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Revoke"
 msgstr "Intrekken"
 
@@ -4813,6 +4818,10 @@ msgstr "Het deel van het adres vóór de @, op het maildomein dat voor Grasp is 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
 msgstr "De pakketten die voor deze engine zijn goedgekeurd. Je ziet ze omdat je pakketten mag goedkeuren; de rest van de engine is voor de leden."
+
+#: src/engines/package-approvals.tsx
+msgid "The packages couldn't be read again, so this list may be out of date: {unread}"
+msgstr "De pakketten konden niet opnieuw worden gelezen, dus deze lijst is mogelijk verouderd: {unread}"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."

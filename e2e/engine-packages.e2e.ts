@@ -16,14 +16,20 @@ const pageRead = { timeout: 20_000 };
 
 /** An engine of `builder`'s with one approved package, and `approver` given the permission. */
 const engineWithPackages = async (
-  scene: "enginePackages" | "enginePackagesRefresh" | "enginePackagesFresh",
+  scene:
+    | "enginePackages"
+    | "enginePackagesRefresh"
+    | "enginePackagesFresh"
+    | "enginePackagesTab"
+    | "enginePackagesBusy"
+    | "enginePackagesStale",
   name: string
 ) => {
   const people = peopleIn(scene);
   const asAdmin = apiOf(people.admin);
   const asBuilder = apiOf(people.builder);
   const { id: app } = await asBuilder.api.apps.create({ name });
-  await asAdmin.api.dependencies.grantApprover({
+  const grant = await asAdmin.api.dependencies.grantApprover({
     type: "person",
     userId: people.approver.userId,
   });
@@ -51,7 +57,25 @@ const engineWithPackages = async (
   });
   asAdmin.core[Symbol.dispose]();
   asBuilder.core[Symbol.dispose]();
-  return { ...people, app, request };
+  return { ...people, app, request, grant: grant.id };
+};
+
+/** Retires `request`'s graph as `person` through the API: someone else, for the page. */
+const retireElsewhere = async (
+  person: Parameters<typeof apiOf>[0],
+  request: { id: string }
+) => {
+  const as = apiOf(person);
+  const impact = await as.api.dependencies.impact(request.id);
+  await as.api.dependencies.retire(request.id, {
+    reviewed: {
+      graphHash: impact.graphHash,
+      policyGeneration: impact.policyGeneration,
+      approvalsDigest: impact.endings.retire.digest,
+    },
+    reason: "Replaced.",
+  });
+  as.core[Symbol.dispose]();
 };
 
 test("someone who may approve packages and isn't a member sees only an engine's packages, and retires them", async ({
@@ -181,4 +205,111 @@ test("shows the packages as the page reads them again, when someone else ended t
       .getByRole("row")
       .filter({ hasText: "charts@3.1.0" })
   ).toContainText("Uitgefaseerd", pageRead);
+});
+
+test("reads a builder's packages when the tab opens, not when the page loaded", async ({
+  browser,
+}) => {
+  const { builder, approver, app, request } = await engineWithPackages(
+    "enginePackagesTab",
+    "Forecast"
+  );
+  const page = await pageOf(browser, builder);
+  await page.goto(`/engines/${app}`);
+  await expect(page.getByRole("tab", { name: /^Apps/u })).toBeVisible(pageRead);
+
+  await retireElsewhere(approver, request);
+  await page.getByRole("tab", { name: "Packages" }).click();
+
+  await expect(
+    page
+      .getByRole("table", { name: "Approved packages" })
+      .getByRole("row")
+      .filter({ hasText: "charts@3.1.0" })
+  ).toContainText("Retired", pageRead);
+});
+
+test("stays busy until the list was read again, so a decision is never sent twice", async ({
+  browser,
+}) => {
+  const { approver, app } = await engineWithPackages(
+    "enginePackagesBusy",
+    "Payroll"
+  );
+  const page = await pageOf(browser, approver);
+  await page.goto(`/engines/${app}`);
+  await page
+    .getByRole("button", { name: "Retire the packages for Payroll" })
+    .click(pageRead);
+  const dialog = page.getByRole("dialog", {
+    name: "Retire the packages for Payroll?",
+  });
+  await dialog.getByLabel("Why").fill("Replaced.");
+  const retire = dialog.getByRole("button", { name: "Retire", exact: true });
+  // Every time the button can be clicked again after the first click,
+  // until the dialog is gone.
+  await retire.evaluate((button) => {
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new TypeError("Not a button");
+    }
+    const seen = { clicked: false, clickable: 0 };
+    Reflect.set(window, "seenRetire", seen);
+    button.addEventListener(
+      "click",
+      () => {
+        seen.clicked = true;
+      },
+      { capture: true }
+    );
+    new MutationObserver(() => {
+      if (seen.clicked && button.isConnected && !button.disabled) {
+        seen.clickable += 1;
+      }
+    }).observe(button, { attributes: true });
+  });
+  await retire.click();
+
+  await expect(dialog).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("table", { name: "Approved packages" })
+      .getByRole("row")
+      .filter({ hasText: "charts@3.1.0" })
+  ).toContainText("Retired");
+  const seen: unknown = await page.evaluate((): unknown =>
+    Reflect.get(window, "seenRetire")
+  );
+  expect(seen).toStrictEqual({ clicked: true, clickable: 0 });
+});
+
+test("says the list may be out of date when it can't be read again", async ({
+  browser,
+}) => {
+  const { admin, approver, app, grant } = await engineWithPackages(
+    "enginePackagesStale",
+    "Travel"
+  );
+  const page = await pageOf(browser, approver);
+  await page.goto(`/engines/${app}`);
+  await page
+    .getByRole("button", { name: "Retire the packages for Travel" })
+    .click(pageRead);
+  const dialog = page.getByRole("dialog", {
+    name: "Retire the packages for Travel?",
+  });
+  await dialog.getByLabel("Why").fill("Replaced.");
+
+  // The permission taken away meanwhile: the decision is refused, and the
+  // list, which this approver read only by it, can't be read again.
+  const asAdmin = apiOf(admin);
+  await asAdmin.api.dependencies.revokeApprover(grant);
+  asAdmin.core[Symbol.dispose]();
+  await dialog.getByRole("button", { name: "Retire", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+
+  await expect(
+    page.getByRole("alert").filter({ hasText: "this list may be out of date" })
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Read again" })).toBeVisible();
 });
