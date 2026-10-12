@@ -1415,6 +1415,35 @@ describe("Composio connector resource bindings", { timeout: 120_000 }, () => {
     });
   });
 
+  it("keep a held write waiting while Composio can't be reached to confirm it, and run it once it can", async () => {
+    const app = await contactsApp();
+    const input = { email: "grace@acme.test" };
+    await call(app, "crm.create", input, "create-2");
+    const [held] = await app.builder.api.pendingActions.list();
+    if (held === undefined) {
+      throw new Error("Expected a held action");
+    }
+    await app.crm.unavailable();
+    const whileDown = await failure(
+      async () =>
+        await app.builder.api.pendingActions.confirm(held.id, held.inputHash)
+    );
+    const stillWaiting = await app.builder.api.pendingActions.list();
+    await app.builder.api.pendingActions.confirm(held.id, held.inputHash);
+    const answered = await call(app, "crm.create", input, "create-2");
+    expect({
+      whileDown,
+      stillWaiting: stillWaiting.map(({ id }) => id),
+      answered: outcomeOf(answered),
+      ran: await app.crm.ran(),
+    }).toStrictEqual({
+      whileDown: "resource.unavailable",
+      stillWaiting: [held.id],
+      answered: "Created contact-1",
+      ran: [{ tool: "CRM_CREATE_CONTACT", arguments: input }],
+    });
+  });
+
   it("bind no tool whose answer is open, and no contract while Composio can't be reached", async () => {
     const open = await contactsApp({
       bind: false,

@@ -23,6 +23,7 @@ import { signedCall } from "./bindings.ts";
 import { personOf } from "./connections.ts";
 import { workflowRuns } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
+import { isProviderUnreachable } from "./resource-adapter.ts";
 import { requireHeldBinding } from "./resource-bindings.ts";
 import { isRestricted } from "./restricted.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -196,8 +197,10 @@ export const confirmPendingAction = async (
     });
     // Its binding no longer serves it (revoked, replaced, drifted, a
     // version that changed the declaration): dropped, recorded, its key
-    // left free, so the same call made again is decided afresh.
-    if (staleBinding) {
+    // left free, so the same call made again is decided afresh. One whose
+    // provider couldn't be reached to say isn't known to be stale: it
+    // keeps waiting, for the person to confirm once it can be checked.
+    if (staleBinding && !isProviderUnreachable(error)) {
       await env.CONNECT.dropStaleBinding({ person, id: held.id }).catch(
         (dropError: unknown) => {
           log.error("pending.stale_drop_failed", errorFields(dropError));

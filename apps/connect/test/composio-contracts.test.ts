@@ -1,3 +1,4 @@
+import { composioToolsMax } from "@grasp-os/shared/connect";
 import type { ComposioToolRule } from "@grasp-os/shared/connect";
 import { exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
@@ -30,6 +31,9 @@ const nested = (depth: number): unknown => {
   }
   return schema;
 };
+
+/** How deep `HUBSPOT_ABYSS`'s schema nests: deep enough to overflow a stack. */
+const abyssDepth = 100_000;
 
 /** The tools Composio's servers have, as they list them now. */
 const tools: FakeTool[] = [
@@ -69,13 +73,83 @@ const tools: FakeTool[] = [
     run: () => ({ output: {} }),
   },
   {
-    name: "HUBSPOT_DEEP",
-    inputSchema: nested(40),
+    // 32 schemas deep, as deep as core reads.
+    name: "HUBSPOT_DEEP_32",
+    inputSchema: nested(31),
+    run: () => ({ output: {} }),
+  },
+  {
+    name: "HUBSPOT_DEEP_33",
+    inputSchema: nested(32),
+    run: () => ({ output: {} }),
+  },
+  {
+    // So deep that reading it by recursion would overflow the stack.
+    name: "HUBSPOT_ABYSS",
+    inputSchemaText: `${"[".repeat(abyssDepth)}${"]".repeat(abyssDepth)}`,
     run: () => ({ output: {} }),
   },
   {
     name: "HUBSPOT.DOTTED",
     inputSchema: { type: "object", properties: {} },
+    run: () => ({ output: {} }),
+  },
+  {
+    // A regular expression that backtracks: core would run it.
+    name: "HUBSPOT_PATTERN",
+    inputSchema: {
+      type: "object",
+      properties: { name: { type: "string", pattern: "^(a+)+$" } },
+    },
+    run: () => ({ output: {} }),
+  },
+  {
+    name: "HUBSPOT_DEEP_PATTERN",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filters: {
+          type: "array",
+          items: { anyOf: [{ type: "string", pattern: "^(a|a)*$" }] },
+        },
+      },
+    },
+    run: () => ({ output: {} }),
+  },
+  {
+    name: "HUBSPOT_PATTERN_ANSWER",
+    inputSchema: { type: "object", properties: {} },
+    outputSchema: {
+      type: "object",
+      properties: { id: { type: "string", pattern: "^(a+)+$" } },
+    },
+    run: () => ({ output: {} }),
+  },
+  {
+    // A field named `pattern` is data, not a regular expression.
+    name: "HUBSPOT_SEARCH",
+    inputSchema: {
+      type: "object",
+      properties: { pattern: { type: "string" } },
+    },
+    run: () => ({ output: {} }),
+  },
+  {
+    // Its server lists it twice: which one a call would reach is unknown.
+    name: "HUBSPOT_TWICE",
+    inputSchema: { type: "object", properties: {} },
+    alsoListedAs: ["HUBSPOT_TWICE"],
+    run: () => ({ output: {} }),
+  },
+  {
+    name: "HUBSPOT_PROTO",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ["__proto__"]: { type: "string" },
+        name: { type: "string" },
+      },
+    },
     run: () => ({ output: {} }),
   },
 ];
@@ -87,8 +161,28 @@ const rules: (string | ComposioToolRule)[] = [
   { name: "HUBSPOT_LIST_CONTACTS", read: true },
   "HUBSPOT_CREATE_CONTACT",
   "HUBSPOT_HUGE",
-  "HUBSPOT_DEEP",
+  "HUBSPOT_DEEP_32",
+  "HUBSPOT_DEEP_33",
+  "HUBSPOT_ABYSS",
   "HUBSPOT.DOTTED",
+  "HUBSPOT_PATTERN",
+  "HUBSPOT_DEEP_PATTERN",
+  "HUBSPOT_PATTERN_ANSWER",
+  "HUBSPOT_SEARCH",
+  "HUBSPOT_TWICE",
+  "HUBSPOT_PROTO",
+];
+
+/** The tools above that can't be served. */
+const unservable = [
+  "HUBSPOT_HUGE",
+  "HUBSPOT_DEEP_33",
+  "HUBSPOT_ABYSS",
+  "HUBSPOT.DOTTED",
+  "HUBSPOT_PATTERN",
+  "HUBSPOT_DEEP_PATTERN",
+  "HUBSPOT_PATTERN_ANSWER",
+  "HUBSPOT_TWICE",
 ];
 
 /** A connected account's ID at Composio, and the server URL for it. */
@@ -123,15 +217,21 @@ const parsed = (text: string | undefined): unknown =>
 
 describe("a Composio connection's generated contract", () => {
   beforeEach(() => {
-    // The list tool as its server first lists it: one test changes it.
+    // The list tool as its server first lists it: tests change it.
     const [list] = tools;
     if (list !== undefined) {
       list.inputSchema = listInput;
+      list.alsoListedAs = undefined;
     }
   });
 
   it("serves the tools its admin allowed, read-only only as the admin said, closed to the fields they name", async () => {
-    const served = await contractOf(await hubspot());
+    const served = await contractOf(
+      await hubspot([
+        { name: "HUBSPOT_LIST_CONTACTS", read: true },
+        "HUBSPOT_CREATE_CONTACT",
+      ])
+    );
     const { HUBSPOT_LIST_CONTACTS: list, HUBSPOT_CREATE_CONTACT: create } =
       served.actions;
     expect({
@@ -189,19 +289,60 @@ describe("a Composio connection's generated contract", () => {
     ]);
   });
 
-  it("leaves out a schema too large or too deep, and a tool no App could name; with nothing left, serves nothing", async () => {
+  it("leaves out what can't be served: too large or deep, a pattern anywhere, a name listed twice or no App could name", async () => {
     const served = await contractOf(await hubspot());
-    const onlyUnservable = await hubspot([
-      "HUBSPOT_HUGE",
-      "HUBSPOT_DEEP",
-      "HUBSPOT.DOTTED",
-    ]);
+    const onlyUnservable = await hubspot(unservable);
     expect({
-      left: ["HUBSPOT_HUGE", "HUBSPOT_DEEP", "HUBSPOT.DOTTED"].filter((name) =>
-        Object.hasOwn(served.actions, name)
-      ),
+      served: Object.keys(served.actions).toSorted(),
       nothingLeft: await outcome(contractOf(onlyUnservable)),
-    }).toStrictEqual({ left: [], nothingLeft: "connect.contract_not_found" });
+    }).toStrictEqual({
+      served: [
+        "HUBSPOT_CREATE_CONTACT",
+        "HUBSPOT_DEEP_32",
+        "HUBSPOT_LIST_CONTACTS",
+        "HUBSPOT_PROTO",
+        "HUBSPOT_SEARCH",
+      ],
+      nothingLeft: "connect.contract_not_found",
+    });
+  });
+
+  it("serves a property named `__proto__` as a property, closed like any other", async () => {
+    const served = await contractOf(await hubspot(["HUBSPOT_PROTO"]));
+    // Read as JSON.parse reads it, with no schema that could take
+    // `__proto__` for a prototype on the way.
+    const input = parsed(served.actions.HUBSPOT_PROTO?.input);
+    const shape =
+      typeof input === "object" &&
+      input !== null &&
+      "properties" in input &&
+      typeof input.properties === "object" &&
+      input.properties !== null &&
+      "additionalProperties" in input
+        ? {
+            names: Object.keys(input.properties).toSorted(),
+            closed: input.additionalProperties,
+          }
+        : undefined;
+    expect(shape).toStrictEqual({
+      names: ["__proto__", "name"],
+      closed: false,
+    });
+  });
+
+  it("isn't read from a server that lists more tools than an admin could allow twice over", async () => {
+    const connectionId = await hubspot();
+    const [list] = tools;
+    if (list === undefined) {
+      throw new Error("Expected the list tool");
+    }
+    list.alsoListedAs = Array.from(
+      { length: 2 * composioToolsMax },
+      (_, index) => `HUBSPOT_COPY_${index}`
+    );
+    await expect(outcome(contractOf(connectionId))).resolves.toBe(
+      "connect.server_unavailable"
+    );
   });
 
   it("is served only by a Composio connection of that very toolkit, and never stands in for a native contract", async () => {
@@ -212,6 +353,13 @@ describe("a Composio connection's generated contract", () => {
       server: "microsoft-365",
     });
     const lookalike = await hubspot(rules, { provider: "microsoft-365" });
+    // A native connector named like Composio's contracts
+    // (test/fixtures/composio-named-connector.ts).
+    const composioNamed = await addConnection({
+      provider: "microsoft",
+      serverKind: "native",
+      server: "composio",
+    });
     expect({
       otherToolkit: await outcome(
         contractOf(connectionId, "composio.salesforce@1")
@@ -225,6 +373,9 @@ describe("a Composio connection's generated contract", () => {
       nativeAsComposio: await outcome(
         contractOf(native, "composio.microsoft@1")
       ),
+      composioNamedNative: await outcome(
+        contractOf(composioNamed, "composio.items@1")
+      ),
       toolkitAsNative: await outcome(
         contractOf(lookalike, "microsoft-365.mail@1")
       ),
@@ -234,6 +385,7 @@ describe("a Composio connection's generated contract", () => {
       otherVersion: "connect.contract_not_found",
       nativeContract: "connect.contract_not_found",
       nativeAsComposio: "connect.contract_not_found",
+      composioNamedNative: "connect.contract_not_found",
       toolkitAsNative: "connect.contract_not_found",
       nativeStill: "ok",
     });

@@ -28,8 +28,15 @@ export interface FakeTool {
    * server whose tool changed.
    */
   inputSchema?: unknown;
+  /**
+   * The input schema it lists, as JSON text, for one too deep to be made
+   * with `JSON.stringify`; in place of `inputSchema`.
+   */
+  inputSchemaText?: string;
   /** The output schema it lists, as JSON; by default it lists none. */
   outputSchema?: unknown;
+  /** Other names it is listed under too, its own included for a duplicate. */
+  alsoListedAs?: string[];
   /** What running it with `input` returns. */
   run: (input: Record<string, unknown>) => FakeResult | Promise<FakeResult>;
 }
@@ -124,24 +131,38 @@ const listedAs = async (
   tools: readonly FakeTool[]
 ): Promise<Response> => {
   const message = listMessageSchema.parse(await response.json());
-  const listed = message.result.tools.map((each) => {
+  // Schemas given as text go in by a placeholder, once the rest is text.
+  const raw = new Map<string, string>();
+  const listed = message.result.tools.flatMap((each) => {
     const tool = tools.find(({ name }) => name === each.name);
-    return {
+    let inputSchema: unknown = tool?.inputSchema;
+    if (tool?.inputSchemaText !== undefined) {
+      inputSchema = `raw-schema-${crypto.randomUUID()}`;
+      raw.set(JSON.stringify(inputSchema), tool.inputSchemaText);
+    }
+    const entry = {
       ...each,
-      ...(tool?.inputSchema === undefined
-        ? {}
-        : { inputSchema: tool.inputSchema }),
+      ...(inputSchema === undefined ? {} : { inputSchema }),
       ...(tool?.outputSchema === undefined
         ? {}
         : { outputSchema: tool.outputSchema }),
     };
+    return [
+      entry,
+      ...(tool?.alsoListedAs ?? []).map((name) => ({ ...entry, name })),
+    ];
   });
+  let text = JSON.stringify({
+    ...message,
+    result: { ...message.result, tools: listed },
+  });
+  for (const [placeholder, schema] of raw) {
+    text = text.replace(placeholder, () => schema);
+  }
   const headers = new Headers(response.headers);
   headers.delete("content-length");
-  return Response.json(
-    { ...message, result: { ...message.result, tools: listed } },
-    { headers }
-  );
+  headers.set("content-type", "application/json");
+  return new Response(text, { headers });
 };
 
 interface Ran {
@@ -162,7 +183,7 @@ const serverWith = (tools: readonly FakeTool[], ran: Ran[]): McpServer => {
       tool.name,
       {
         inputSchema: z.looseObject(
-          tool.inputSchema === undefined
+          tool.inputSchema === undefined && tool.inputSchemaText === undefined
             ? Object.fromEntries(
                 (tool.inputs ?? []).map((input) => [
                   input,

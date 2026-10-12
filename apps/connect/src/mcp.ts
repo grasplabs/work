@@ -57,13 +57,15 @@ export type McpServerTool = Pick<McpTool, "name" | "inputProperties">;
 
 /**
  * A tool as a server lists it, with its schemas as it declares them, for a
- * contract to be made of (contracts.ts): untrusted JSON, read as data.
+ * contract to be made of (composio-contracts.ts): untrusted values, not
+ * yet read at all, so nothing here recurses into them however deep they
+ * nest.
  */
 export interface McpListedTool {
   name: string;
-  inputSchema: Json;
+  inputSchema: unknown;
   /** Its output's schema, if it declares one. */
-  outputSchema: Json | undefined;
+  outputSchema: unknown;
 }
 
 /** What a tool call returned. */
@@ -144,11 +146,15 @@ const listedPageSchema = z.object({
   nextCursor: z.string().optional(),
 });
 
-/** A tool with its schemas; one that isn't is left out of the list. */
+/**
+ * A tool with its schemas, which are taken as they are: read with
+ * `z.json()`, a schema nested deep enough would overflow the stack. One
+ * without a name or input schema is left out of the list.
+ */
 const listedToolSchema = z.object({
   name: z.string(),
-  inputSchema: z.json(),
-  outputSchema: z.json().optional(),
+  inputSchema: z.custom<unknown>((schema) => schema !== undefined),
+  outputSchema: z.unknown().optional(),
 });
 
 const callResultSchema = z.object({
@@ -316,11 +322,12 @@ export interface McpServer {
   tool: (name: string) => Promise<McpServerTool | undefined>;
   /**
    * Every tool the server lists with its schemas, as far as `maxToolPages`
-   * goes; a tool listed without them is left out. Throws {@link McpError}
-   * if it didn't answer, or lists more than that: half a list would look
-   * like all of it.
+   * goes and at most `maxTools` of them; a tool listed without them is
+   * left out. Throws {@link McpError} if it didn't answer, lists more than
+   * that (half a list would look like all of it), or anything else goes
+   * wrong reading the list.
    */
-  tools: () => Promise<McpListedTool[]>;
+  tools: (maxTools: number) => Promise<McpListedTool[]>;
   /** Calls the tool once. Throws {@link McpError} if it didn't answer. */
   call: (name: string, input: Record<string, Json>) => Promise<McpToolResult>;
 }
@@ -454,31 +461,46 @@ export const mcpServer = (
       );
       return found;
     },
-    tools: async () => {
-      await started();
-      const listed: McpListedTool[] = [];
-      let cursor: string | undefined;
-      for (let page = 0; page < maxToolPages; page += 1) {
-        const tools = listedPageSchema.safeParse(
-          // oxlint-disable-next-line no-await-in-loop -- pages come one after another
-          await request("tools/list", cursor === undefined ? {} : { cursor })
-        );
-        if (!tools.success) {
-          throw new McpError("The server's tool list isn't readable");
-        }
-        for (const item of tools.data.tools) {
-          const tool = listedToolSchema.safeParse(item);
-          if (tool.success) {
-            const { name, inputSchema, outputSchema } = tool.data;
-            listed.push({ name, inputSchema, outputSchema });
+    tools: async (maxTools) => {
+      try {
+        await started();
+        const listed: McpListedTool[] = [];
+        let count = 0;
+        let cursor: string | undefined;
+        for (let page = 0; page < maxToolPages; page += 1) {
+          const tools = listedPageSchema.safeParse(
+            // oxlint-disable-next-line no-await-in-loop -- pages come one after another
+            await request("tools/list", cursor === undefined ? {} : { cursor })
+          );
+          if (!tools.success) {
+            throw new McpError("The server's tool list isn't readable");
+          }
+          count += tools.data.tools.length;
+          if (count > maxTools) {
+            throw new McpError(
+              "The server lists more tools than connect reads"
+            );
+          }
+          for (const item of tools.data.tools) {
+            const tool = listedToolSchema.safeParse(item);
+            if (tool.success) {
+              const { name, inputSchema, outputSchema } = tool.data;
+              listed.push({ name, inputSchema, outputSchema });
+            }
+          }
+          cursor = tools.data.nextCursor;
+          if (cursor === undefined) {
+            return listed;
           }
         }
-        cursor = tools.data.nextCursor;
-        if (cursor === undefined) {
-          return listed;
-        }
+        throw new McpError("The server lists more pages than connect reads");
+      } catch (error) {
+        // Whatever a crafted list makes go wrong is the server's failure,
+        // never an unexpected one of connect's.
+        throw error instanceof McpError
+          ? error
+          : new McpError("The server's tool list isn't readable", false, error);
       }
-      throw new McpError("The server lists more tools than connect reads");
     },
     call: async (name, input) => {
       await started();

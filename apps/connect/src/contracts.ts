@@ -51,6 +51,7 @@ const nativeContract = (
       : generatedContracts(connector.manifest).get(contract);
   if (
     served === undefined ||
+    connection.serverKind !== "native" ||
     connection.server !== name ||
     connector?.manifest.provider !== connection.provider
   ) {

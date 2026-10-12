@@ -20,7 +20,7 @@ import { readContractSchema } from "./connector-contracts.ts";
 import type { ReadSchema } from "./connector-contracts.ts";
 import { permissions } from "./db/core/schema.ts";
 import type { ResourceContext } from "./operations.ts";
-import { unchecked } from "./resource-adapter.ts";
+import { providerUnreachable, unchecked } from "./resource-adapter.ts";
 import type {
   BindingCaller,
   ContractAsks,
@@ -127,14 +127,14 @@ const contractOf = async (
     return served;
   } catch (error) {
     const code = connectErrors.codeOf(error);
-    // A contract ID connect can't read names no connector of its own; one
-    // whose Composio server can't be reached to list it isn't served now,
-    // so nothing is checked against a contract no one could read.
-    if (
-      code !== "connect.contract_not_found" &&
-      code !== "connect.invalid" &&
-      code !== "connect.server_unavailable"
-    ) {
+    // A Composio server that can't be reached to list the contract:
+    // nothing is checked against a contract no one could read, and nothing
+    // is known to have changed, so this request alone is refused.
+    if (code === "connect.server_unavailable") {
+      throw providerUnreachable();
+    }
+    // A contract ID connect can't read names no connector of its own.
+    if (code !== "connect.contract_not_found" && code !== "connect.invalid") {
       throw error;
     }
   }
