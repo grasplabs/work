@@ -48,22 +48,20 @@ const semanticSchema = (kind: string): JsonSchema => {
   return { type: "string" };
 };
 
-/** Characters of the Basic Multilingual Plane only: one UTF-16 unit each. */
-const basicPlaneOnly = "^[\\u0000-\\uFFFF]*$";
-
 /** A scalar descriptor's value, as JSON Schema; undefined for any other. */
 const scalarSchema = (descriptor: ValueDescriptor): JsonSchema | undefined => {
   if (descriptor.kind === "string") {
     return {
       type: "string",
-      ...(descriptor.min === undefined ? {} : { minLength: descriptor.min }),
       // A descriptor counts UTF-16 code units, JSON Schema characters (code
-      // points); a character past U+FFFF is two units. Under an upper
-      // bound, such characters are left out, so a value that fits the
-      // schema always fits the descriptor: the two counts agree.
-      ...(descriptor.max === undefined
+      // points), and a character is one or two units. The schema describes
+      // the bounds loosely, never stricter than the descriptor, which stays
+      // the final check: at most `max` units is at most `max` characters,
+      // and at least `min` units is at least half as many characters.
+      ...(descriptor.min === undefined
         ? {}
-        : { maxLength: descriptor.max, pattern: basicPlaneOnly }),
+        : { minLength: Math.ceil(descriptor.min / 2) }),
+      ...(descriptor.max === undefined ? {} : { maxLength: descriptor.max }),
       ...(descriptor.email ? { format: "email" } : {}),
     };
   }
