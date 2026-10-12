@@ -2,9 +2,10 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
@@ -64,6 +65,26 @@ export const tag = action({
   handler: async (ctx, args) => await ctx.resources.tagger.generate({ prompt: args.text }),
 });
 
+/** Everything App code can see of its model client, and what it answered. */
+export const probe = action({
+  args: {},
+  returns: v.string(),
+  uses: [writer],
+  handler: async (ctx) => {
+    const client = ctx.resources.writer;
+    const answer = await client.generate({ prompt: "Hi" });
+    const prototype = Object.getPrototypeOf(client) ?? {};
+    return [
+      answer,
+      JSON.stringify(client),
+      Object.getOwnPropertyNames(client).join(","),
+      Object.getOwnPropertyNames(prototype).join(","),
+      String(client.generate),
+      Object.getOwnPropertyNames(globalThis).join(","),
+    ].join("\\n");
+  },
+});
+
 /** Two requests in one call; says how the second ended. */
 export const twice = action({
   args: {},
@@ -82,14 +103,14 @@ export const twice = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { draft, tag, tagger, twice, writer } from "./operations/assist.ts";
+import { draft, probe, tag, tagger, twice, writer } from "./operations/assist.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Assistant",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { assist: { draft, tag, twice } },
+  operations: { assist: { draft, tag, twice, probe } },
   internalOperations: {},
   screens: [],
   uses: [writer, tagger],
@@ -175,6 +196,10 @@ const call = async (
   return answered.result;
 };
 
+/** The code of an error something threw. */
+const codeOfError = (error: unknown): string =>
+  error instanceof Error ? String(Reflect.get(error, "code")) : "?";
+
 /** What a call answered: its value, or its error's code. */
 const outcomeOf = (result: OperationResult): Json =>
   result.ok ? result.value : { failed: result.error.code };
@@ -245,7 +270,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     });
   });
 
-  it("call a bound model through the gateway, accounted, with no key", async () => {
+  it("call a bound model through the gateway, accounted", async () => {
     const sealed = await sealedApp(modelFiles());
     await approveModel(sealed, "writer");
     const { gateway, gatewayEnv: withGateway } = gatewayEnv([
@@ -261,10 +286,6 @@ describe("resource bindings", { timeout: 120_000 }, () => {
         { role: "user", content: "Hi" },
       ],
     });
-    expect({
-      authorization: sent?.headers.get("authorization"),
-      apiKey: sent?.headers.get("x-api-key"),
-    }).toStrictEqual({ authorization: null, apiKey: null });
     // Recorded and settled by the ledger, for the App.
     const [called] = await auditedFor("model.call", sealed.app);
     expect(called).toMatchObject({
@@ -296,6 +317,16 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       // Two answers that never fit: the contract the provider broke.
       neverFitted: { failed: "contract.invalid_resource_result" },
     });
+    // The declared 200 tokens bound the App's request as a whole: each of
+    // its two attempts may take half.
+    const ceilings = gateway.requests
+      .slice(0, 2)
+      .map(
+        ({ body }) =>
+          z.object({ max_completion_tokens: z.number() }).parse(body)
+            .max_completion_tokens
+      );
+    expect(ceilings).toStrictEqual([100, 100]);
     // The model was told the descriptor's JSON Schema, and why its first
     // answer didn't fit: not in its exact form.
     expect([sentText(gateway, 0), sentText(gateway, 1)]).toStrictEqual([
@@ -500,6 +531,93 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       byBuilder: "role.forbidden",
       byDemoted: "role.forbidden",
       still: { status: "active" },
+    });
+  });
+
+  it("hand App code no key, token or gateway detail", async () => {
+    const sealed = await sealedApp(modelFiles());
+    await approveModel(sealed, "writer");
+    const { gatewayEnv: withGateway } = gatewayEnv([answer("Plain text.")]);
+    const result = await call(withGateway, sealed, "assist.probe", {});
+    const seen =
+      result.ok && typeof result.value === "string" ? result.value : "";
+    // Every secret core holds, and what its gateway requests carry.
+    const secrets = [
+      env.CAPABILITY_SIGNING_KEY,
+      env.BETTER_AUTH_SECRET,
+      env.ROUTER_SECRET,
+      "cf-aig",
+      "Bearer",
+      "grasp-os-test",
+      "workers-binding",
+    ];
+    expect({
+      answered: seen.startsWith("Plain text."),
+      leaked: secrets.filter((secret) => seen.includes(secret)),
+    }).toStrictEqual({ answered: true, leaked: [] });
+  });
+
+  it("serve one App's binding to that App only", async () => {
+    const sealed = await sealedApp(modelFiles());
+    const other = await sealedApp(modelFiles());
+    await approveModel(sealed, "writer");
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([answer("Mine.")]);
+    // The same declaration, in another App with no binding of its own.
+    const result = await call(withGateway, other, "assist.draft", {
+      prompt: "Hi",
+    });
+    expect({
+      outcome: outcomeOf(result),
+      sent: gateway.requests.length,
+    }).toStrictEqual({ outcome: { failed: "resource.unavailable" }, sent: 0 });
+  });
+
+  it("keep one active binding when two approvals of an alias race", async () => {
+    const sealed = await sealedApp(modelFiles());
+    const [one, two] = await Promise.allSettled([
+      approveModel(sealed, "writer"),
+      approveModel(sealed, "writer"),
+    ]);
+    const active = await drizzle(env.DB)
+      .select({ id: appResourceBindings.id })
+      .from(appResourceBindings)
+      .where(
+        and(
+          eq(appResourceBindings.appId, sealed.app),
+          eq(appResourceBindings.status, "active")
+        )
+      );
+    const settled = [one, two].map((outcome) =>
+      outcome?.status === "fulfilled"
+        ? "approved"
+        : codeOfError(outcome?.reason)
+    );
+    expect({
+      active: active.length,
+      settled: settled.every(
+        (each) => each === "approved" || each === "app.conflict"
+      ),
+      approved: settled.includes("approved"),
+    }).toStrictEqual({ active: 1, settled: true, approved: true });
+  });
+
+  it("refuse an approval by an admin demoted since their session was checked", async () => {
+    const sealed = await sealedApp(modelFiles());
+    const admin = await person("admin");
+    await env.DB.prepare("UPDATE members SET role = 'member' WHERE user_id = ?")
+      .bind(admin.userId)
+      .run();
+    const refused = await failure(
+      async () =>
+        await approveResourceBinding(env, admin, writerApproval(sealed))
+    );
+    const rows = await drizzle(env.DB)
+      .select({ id: appResourceBindings.id })
+      .from(appResourceBindings)
+      .where(eq(appResourceBindings.appId, sealed.app));
+    expect({ refused, rows: rows.length }).toStrictEqual({
+      refused: "role.forbidden",
+      rows: 0,
     });
   });
 });

@@ -386,6 +386,12 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
    * the model asked once more when it doesn't match.
    */
   schema?: z.ZodType<Output>;
+  /**
+   * Whether an answer that doesn't fit `schema` is asked for once more
+   * (the default). False when the call's token bound must hold for the
+   * call as a whole rather than for each request (resource-model.ts).
+   */
+  askAgain?: boolean;
 };
 
 /** What a call answered. */
@@ -1604,13 +1610,14 @@ const answerCall = async <Output>(
   env: ModelsEnv,
   request: Request,
   schema: z.ZodType<Output> | undefined,
-  limit: Deadline
+  limit: Deadline,
+  askAgain = true
 ): Promise<ModelAnswer<Output>> => {
   const { call } = request;
   const usage = { inputTokens: 0, outputTokens: 0 };
   let cost = 0;
   // A call with a schema asks once more when the answer doesn't fit it.
-  const attempts = schema === undefined ? 1 : 2;
+  const attempts = schema === undefined || !askAgain ? 1 : 2;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     // Each attempt follows up on the answer before it, and each of its
     // provider requests is admitted by the ledger, in the month it is
@@ -1674,7 +1681,7 @@ const answerCall = async <Output>(
 
 const callModel = async <Output>(
   env: ModelsEnv,
-  { schema, ...fields }: ModelCall<Output>
+  { schema, askAgain, ...fields }: ModelCall<Output>
 ): Promise<ModelAnswer<Output>> => {
   const call = parseCall(callSchema, fields);
   const route = await admit(env, call);
@@ -1696,7 +1703,8 @@ const callModel = async <Output>(
         messages: toMessages(call, model),
       },
       schema,
-      limit
+      limit,
+      askAgain
     );
   } finally {
     limit.clear();

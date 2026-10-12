@@ -8,7 +8,7 @@ import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import { z } from "zod";
 
 import { gatewaySettings, models } from "./models.ts";
-import type { ResourceAdapter } from "./resource-adapter.ts";
+import type { DeclarationOf, ResourceAdapter } from "./resource-adapter.ts";
 
 // A model resource (spec 12, 32.3): one answer per request, from the model
 // its binding names, through the model gateway, never straight to a
@@ -112,6 +112,20 @@ const refusalOf = (error: unknown): unknown => {
   return error;
 };
 
+/**
+ * How the declaration's token bound is spent: it bounds the App's request
+ * as a whole, never each provider request. Text takes one request with
+ * all of it; a structured output may be asked for twice, so each attempt
+ * gets half, and a bound too small to halve allows one attempt only.
+ */
+const tokensFor = ({
+  maxOutputTokens,
+  structuredOutput,
+}: DeclarationOf<"model">): { maxTokens: number; askAgain: boolean } =>
+  structuredOutput === null || maxOutputTokens < 2
+    ? { maxTokens: maxOutputTokens, askAgain: false }
+    : { maxTokens: Math.floor(maxOutputTokens / 2), askAgain: true };
+
 export const modelAdapter: ResourceAdapter<"model"> = {
   served: async (env, _app, _declaration, target) =>
     gatewaySettings(env).models.includes(target.model)
@@ -128,7 +142,7 @@ export const modelAdapter: ResourceAdapter<"model"> = {
         model: target.model,
         ...(instructions === undefined ? {} : { system: instructions }),
         input: prompt,
-        maxTokens: declaration.maxOutputTokens,
+        ...tokensFor(declaration),
         timeoutMs: Math.min(
           maxTimeoutMs,
           Math.max(1, Math.floor(context.deadline - Date.now()))
