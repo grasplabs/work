@@ -816,8 +816,8 @@ msgid "{people, plural, one {{sector}, # person.} other {{sector}, # people.}}"
 msgstr "{people, plural, one {{sector}, # persona.} other {{sector}, # personas.}}"
 
 #: src/routes/_shell.settings.members.tsx
-msgid "{people, plural, one {# person has access. Members join by signing in with your organization’s account; there are no invitations to send.} other {# people have access. Members join by signing in with your organization’s account; there are no invitations to send.}}"
-msgstr "{people, plural, one {# persona tiene acceso. Los miembros entran al iniciar sesión con la cuenta de tu organización; no hay invitaciones que enviar.} other {# personas tienen acceso. Los miembros entran al iniciar sesión con la cuenta de tu organización; no hay invitaciones que enviar.}}"
+msgid "{people, plural, one {# person has access. People join by signing in with your organization’s account; invite them to give them a role from the start.} other {# people have access. People join by signing in with your organization’s account; invite them to give them a role from the start.}}"
+msgstr "{people, plural, one {# persona tiene acceso. Las personas se unen iniciando sesión con la cuenta de tu organización; invítalas para darles un rol desde el principio.} other {# personas tienen acceso. Las personas se unen iniciando sesión con la cuenta de tu organización; invítalas para darles un rol desde el principio.}}"
 
 #: src/brain/brain.ts
 msgid "{people, plural, one {# person uses it, seen through {channels}. No team has named it yet.} other {# people use it, seen through {channels}. No team has named it yet.}}"
@@ -2546,6 +2546,7 @@ msgstr "Puede {verbs} datos de la empresa"
 #: src/engines/package-approvals.tsx
 #: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
+#: src/settings/invitations.tsx
 msgid "Cancel"
 msgstr "Cancelar"
 
@@ -2624,10 +2625,6 @@ msgstr "Cambio"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Change plan"
 msgstr "Cambiar plan"
-
-#: src/routes/_shell.settings.members.tsx
-msgid "Change roles, sign people out and remove them"
-msgstr "Cambiar roles, cerrar la sesión de personas y quitarlas"
 
 #: src/chat/builds.tsx
 msgid "Changed"
@@ -3820,6 +3817,7 @@ msgstr "Editar proyecto"
 #: src/routes/_shell.settings.notifications.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.security.tsx
+#: src/settings/invitations.tsx
 msgid "Email"
 msgstr "Correo electrónico"
 
@@ -4876,13 +4874,33 @@ msgctxt "programme stage"
 msgid "Interviews"
 msgstr "Entrevistas"
 
+#: src/settings/invitations.tsx
+msgid "Invite"
+msgstr "Invitar"
+
+#: src/routes/_shell.settings.members.tsx
+msgid "Invite people, change roles, sign them out and remove them"
+msgstr "Invitar a personas, cambiar roles, cerrar su sesión y quitarlas"
+
+#: src/settings/invitations.tsx
+msgid "Invite someone"
+msgstr "Invitar a alguien"
+
 #: src/activity/audit-words.ts
 msgid "Invited a guest"
 msgstr "Invitó a un invitado"
 
+#: src/settings/invitations.tsx
+msgid "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
+msgstr "Invitado como {role} por {inviter} el {date} · aún no ha iniciado sesión"
+
 #: src/brain/brain.ts
 msgid "Invited for step 2"
 msgstr "Invitado al paso 2"
+
+#: src/activity/audit-words.ts
+msgid "Invited someone"
+msgstr "Invitó a alguien"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Invoices"
@@ -5127,6 +5145,10 @@ msgstr "Sus tokens se eliminan, todos los dominios y agentes la pierden y las ac
 #: src/dashboard/standard-widgets.tsx
 msgid "Its work is mapped; nothing is redesigned with AI yet."
 msgstr "Su trabajo está mapeado; aún no hay nada rediseñado con IA."
+
+#: src/activity/audit-words.ts
+msgid "Joined through an invitation"
+msgstr "Se unió mediante una invitación"
 
 #: src/chat/thread.tsx
 msgid "Jump to the newest message"
@@ -7950,6 +7972,7 @@ msgstr "Señales de riesgo"
 
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.profile.tsx
+#: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Rol"
 
@@ -9602,6 +9625,10 @@ msgstr "La solicitud ha fallado."
 msgid "The risk assessment isn't done"
 msgstr "La evaluación de riesgos no está hecha"
 
+#: src/settings/invitations.tsx
+msgid "The roles above say what each may do."
+msgstr "Los roles de arriba indican lo que puede hacer cada uno."
+
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "The rule is paused, so it catches nothing."
 msgstr "La regla está en pausa, así que no detecta nada."
@@ -9749,6 +9776,10 @@ msgstr "Estos requisitos tratan sobre cómo trabaja la gente, no sobre qué apli
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "Se cierran todas sus sesiones, se desconectan sus conexiones personales y no podrá volver a iniciar sesión."
+
+#: src/settings/invitations.tsx
+msgid "They get this role when they first sign in with your organization’s account. Grasp sends no email, so let them know."
+msgstr "Recibe este rol la primera vez que inicie sesión con la cuenta de tu organización. Grasp no envía ningún correo electrónico, así que avísale."
 
 #: src/landscape/data-tab.tsx
 msgid "They show here once Grasp reads your identity provider's grants."
@@ -11043,9 +11074,21 @@ msgstr "Con IA"
 msgid "With the board"
 msgstr "Con la dirección"
 
+#: src/settings/invitations.tsx
+msgid "Withdraw"
+msgstr "Retirar"
+
+#: src/settings/invitations.tsx
+msgid "Withdraw the invitation of {email}"
+msgstr "Retirar la invitación de {email}"
+
 #: src/activity/audit-words.ts
 msgid "Withdrew a request for packages"
 msgstr "Retiró una solicitud de paquetes"
+
+#: src/activity/audit-words.ts
+msgid "Withdrew an invitation"
+msgstr "Retiró una invitación"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Without all three, nobody is invited: the admin's links wait, and go out once all are in place."
