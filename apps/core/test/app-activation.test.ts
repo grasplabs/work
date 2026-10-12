@@ -9,7 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { activateVersion } from "../src/app-activation.ts";
 import { callAppFunction } from "../src/app-functions.ts";
-import { addMember } from "../src/app-members.ts";
+import { addMember, removeMember } from "../src/app-members.ts";
 import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import {
@@ -18,7 +18,13 @@ import {
   findApp,
   setCurrentVersion,
 } from "../src/apps.ts";
-import { deleteStore, openStore } from "../src/data-stores.ts";
+import {
+  deleteStore,
+  openStore,
+  shareStore,
+  storeManagers,
+  unshareStore,
+} from "../src/data-stores.ts";
 import { appDefaultStores, sdkStoreOwners } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { storeClosingMs } from "../src/store-deletion.ts";
@@ -575,3 +581,74 @@ describe(
     });
   }
 );
+
+describe("an App's default store", { timeout: 120_000 }, () => {
+  it("is managed by whoever builds the App, not by the builder who first activated once they leave", async () => {
+    const { owner, app } = await appWith(notesFiles());
+    // A builder the App is shared with activates first, so the store is
+    // theirs as `createStore` records it.
+    const first = await person("builder");
+    await addMember(env, owner, app, {
+      type: "person",
+      id: first.userId,
+      role: "builder",
+    });
+    await activateVersion(env, first, app, 1);
+    const [recorded] = await defaultStores(app);
+    const store = recorded?.storeId ?? "";
+    const whileBuilding = await storeManagers(env, first, store);
+    await removeMember(env, owner, app, { type: "person", id: first.userId });
+    const admin = await person("admin");
+    expect([
+      whileBuilding.map(({ id }) => id),
+      await failure(async () => await storeManagers(env, first, store)),
+      await failure(async () => {
+        await deleteStore(env, first, store);
+      }),
+      await storeManagers(env, owner, store),
+      await storeManagers(env, admin, store),
+    ]).toStrictEqual([
+      [first.userId],
+      "data.store_unavailable",
+      "data.store_unavailable",
+      // The owner and an admin manage it; no builder is left besides.
+      [],
+      [],
+    ]);
+  });
+
+  it("is managed by none of the App's users, and shared or unshared only with the App", async () => {
+    const { owner, app } = await appWith(notesFiles());
+    await activateVersion(env, owner, app, 1);
+    const [recorded] = await defaultStores(app);
+    const store = recorded?.storeId ?? "";
+    const reader = await person("builder");
+    await addMember(env, owner, app, {
+      type: "person",
+      id: reader.userId,
+      role: "user",
+    });
+    const outsider = await person("builder");
+    expect([
+      await failure(async () => await storeManagers(env, reader, store)),
+      await failure(async () => {
+        await shareStore(env, owner, store, {
+          type: "person",
+          id: outsider.userId,
+        });
+      }),
+      await failure(async () => {
+        await unshareStore(env, owner, store, {
+          type: "person",
+          id: outsider.userId,
+        });
+      }),
+      await failure(async () => await storeManagers(env, outsider, store)),
+    ]).toStrictEqual([
+      "data.store_unavailable",
+      "data.store_managed_by_app",
+      "data.store_managed_by_app",
+      "data.store_unavailable",
+    ]);
+  });
+});
