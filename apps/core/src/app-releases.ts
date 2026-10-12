@@ -62,6 +62,7 @@ import { finishDeletion, markArtifact } from "./release-retention.ts";
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv } from "./sandboxed.ts";
 import { buildAppCode } from "./screens.ts";
+import { defineSchemaOnStore } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 
 // Sealing an App's release (spec 8, 16): turning one version of an App of
@@ -757,10 +758,12 @@ const boundStore = async (
   // no claim is ever written for a store that doesn't exist.
   const opened = await openStore(env, request.store);
   await claimStore(env, opened.id, request.app);
-  const defined = await opened.defineTables(manifestText(manifest.schema), {
-    resourceId: request.app,
-    resourceVersion: request.version,
-  });
+  const defined = await defineSchemaOnStore(
+    env,
+    opened,
+    manifestText(manifest.schema),
+    { resourceId: request.app, resourceVersion: request.version }
+  );
   if (defined.schemaHash !== schema) {
     throw new Error("The store defined another schema than the App's");
   }

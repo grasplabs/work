@@ -65,8 +65,11 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /** `StoreHost.restartBackfill`. */
-  restartBackfill(storeId: StoreId, restart: BackfillRestart): number {
-    return this.#host.restartBackfill(storeId, restart);
+  async restartBackfill(
+    storeId: StoreId,
+    restart: BackfillRestart
+  ): Promise<number> {
+    return await this.#host.restartBackfill(storeId, restart);
   }
 
   /** `StoreHost.backfillStatus`. */
@@ -75,8 +78,11 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /** `StoreHost.retryBackfill`. */
-  retryBackfill(storeId: StoreId, target: string): BackfillStatus | null {
-    return this.#host.retryBackfill(storeId, target);
+  async retryBackfill(
+    storeId: StoreId,
+    target: string
+  ): Promise<BackfillStatus | null> {
+    return await this.#host.retryBackfill(storeId, target);
   }
 
   /** `StoreHost.schemaStatus`. */
