@@ -32,6 +32,7 @@ import { z } from "zod";
 import { operationRoles } from "./app-access.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
+import { callTimeoutMs } from "./app.ts";
 import { appFor } from "./apps.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
@@ -45,7 +46,9 @@ import type {
   InvocationSources,
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
+import { capability, runInSession } from "./sandbox-session.ts";
 import { sandbox } from "./sandbox.ts";
+import { sessionHost } from "./sandboxed.ts";
 
 // Running an App's server functions from its sealed release (spec 6, 8,
 // 16, 32.6): the App's code runs in an isolate of its own for every
@@ -316,26 +319,61 @@ const parsed = (text: string | undefined): unknown => {
  * The runner of `release`: each call in a fresh isolate of its own (the
  * loader names none, so none is shared or kept), loaded with the release's
  * verified modules and the SDK modules sealed with it (never the SDK the
- * host serves now), with no network and an empty env.
+ * host serves now), with no network and an empty env. On-prem it runs in a
+ * sandbox session (sandbox-session.ts), its process killed past the CPU
+ * time Cloudflare's runtime would give it.
  */
-const runnerOf =
-  (env: Env, release: Release): Runner =>
+export const releaseRunner =
+  (
+    env: Pick<
+      Env,
+      | "LOADER"
+      | "RUNTIME_PROFILE"
+      | "SANDBOX_HOST"
+      | "SANDBOX_IN_PROCESS"
+      | "APP_CALL_TIMEOUT_MS"
+    >,
+    release: Pick<Release, "modules" | "sdk">
+  ): Runner =>
   async (path, args, channel) => {
-    const isolate = env.LOADER.get(null, () => ({
-      ...sandbox,
-      mainModule: runModule,
-      // The platform's modules last: no App module takes one's name.
-      modules: {
-        ...release.modules,
-        ...release.sdk,
-        // The host's reading of what App code answers (host-json.ts).
-        [hostJsonModule]: hostJsonSource(),
-        [runModule]: runMain,
-      },
-      env: {},
-    })).getEntrypoint<RunEntrypoint>("Run");
+    // The platform's modules last: no App module takes one's name.
+    const modules = {
+      ...release.modules,
+      ...release.sdk,
+      // The host's reading of what App code answers (host-json.ts).
+      [hostJsonModule]: hostJsonSource(),
+      [runModule]: runMain,
+    };
+    const isolateChannel = new IsolateChannel(channel);
+    // On-prem, in a sandbox session, where a busy loop costs only its own
+    // process (sandbox-session.ts); on Cloudflare, whose runtime ends it
+    // at the CPU limit, in a Loader isolate of core's own.
+    const host = sessionHost(env);
     const answer = settledSchema.safeParse(
-      await isolate.run(path, args, new IsolateChannel(channel))
+      host === undefined
+        ? await env.LOADER.get(null, () => ({
+            ...sandbox,
+            mainModule: runModule,
+            modules,
+            env: {},
+          }))
+            .getEntrypoint<RunEntrypoint>("Run")
+            .run(path, args, isolateChannel)
+        : await runInSession(host, {
+            mainModule: runModule,
+            modules,
+            entrypoint: "Run",
+            method: "run",
+            args: [
+              { value: path },
+              { value: args },
+              { capability: capability(isolateChannel) },
+            ],
+            cpuMs: sandbox.limits.cpuMs,
+            // The host's own deadline ends the invocation before this
+            // (operations.ts); this only bounds the session.
+            wallMs: callTimeoutMs(env),
+          })
     );
     if (!answer.success) {
       throw Object.assign(new Error("The isolate answered something else"), {
@@ -370,7 +408,7 @@ const runnerOf =
 /** `release` as the operation host runs it. */
 export const hostedRelease = (env: Env, release: Release): HostedApp => ({
   manifest: release.app,
-  run: runnerOf(env, release),
+  run: releaseRunner(env, release),
 });
 
 /** Every call of a store a release without tables doesn't have. */
