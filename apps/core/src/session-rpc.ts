@@ -16,6 +16,7 @@ import { NotificationsRpc } from "./notifications.ts";
 import { OnboardingGateRpc } from "./onboarding/gate-rpc.ts";
 import { OnboardingRpc } from "./onboarding/rpc.ts";
 import { OnboardingStaffRpc } from "./onboarding/staff-rpc.ts";
+import { OrganizationRpc } from "./organization.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -52,6 +53,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #screens: ScreensRpc;
   readonly #screenTrust: ScreenTrustRpc;
   readonly #members: MembersRpc;
+  readonly #organization: OrganizationRpc;
   readonly #audit: AuditRpc;
   readonly #models: ModelsRpc;
   readonly #pendingActions: PendingActionsRpc;
@@ -80,6 +82,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#screens = new ScreensRpc(env, full);
     this.#screenTrust = new ScreenTrustRpc(env, full);
     this.#members = new MembersRpc(env, full);
+    this.#organization = new OrganizationRpc(env, full);
     this.#audit = new AuditRpc(env, full);
     this.#models = new ModelsRpc(env, full);
     this.#pendingActions = new PendingActionsRpc(env, full);
@@ -161,6 +164,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get members(): MembersRpc {
     return this.#members;
+  }
+
+  get organization(): OrganizationRpc {
+    return this.#organization;
   }
 
   get audit(): AuditRpc {

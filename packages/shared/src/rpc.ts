@@ -12,6 +12,7 @@ import type { ModelsApi } from "./models.ts";
 import type { NotificationsApi } from "./notifications.ts";
 import type { OnboardingGateApi } from "./onboarding-gate.ts";
 import type { OnboardingApi, OnboardingStaffApi } from "./onboarding.ts";
+import type { OrganizationApi } from "./organization.ts";
 import type { PermissionsApi } from "./permissions.ts";
 import type { Role } from "./roles.ts";
 import type { ScreenTrustApi } from "./screen-trust.ts";
@@ -112,6 +113,11 @@ export interface SessionApi {
   readonly screenTrust: ScreenTrustApi;
   /** The organization's members: offboarding. Admins only. */
   readonly members: MembersApi;
+  /**
+   * The organization's name, time zone and where its data lives: everyone
+   * reads them, its own admins change them.
+   */
+  readonly organization: OrganizationApi;
   /** The audit log: search, export and chain verification. Admins only. */
   readonly audit: AuditApi;
   /**
