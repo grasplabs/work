@@ -28,6 +28,7 @@ import type { QueryRequest, ReadRequest } from "@grasp-os/shared/store-reads";
 import {
   claimSchema,
   commitSchema,
+  commitMaxCascade,
   committedSchema,
   dataErrors,
   documentMaxBytes,
@@ -236,6 +237,8 @@ interface Staged {
   base: typeof records.$inferSelect | undefined;
   /** Its fields as staged so far; null once the commit deleted it. */
   fields: StoreFields | null;
+  /** Whether a cascade deleted it (`#cascade`), not one of the commit's writes. */
+  cascaded?: true;
 }
 
 /** Where a staged record is kept: its table and ID, which can't collide. */
@@ -1512,10 +1515,19 @@ export class StoreHost {
       if (counted === undefined) {
         throw new Error("A bound store has no row");
       }
+      // Whom a cascade deleted records of, kept with the receipt: the
+      // deletion is attributable to this commit's principal.
+      const cascaded = staged.flatMap(
+        ({ table, recordId, base, cascaded: by }) =>
+          by === true && base !== undefined
+            ? [{ table, id: recordId, owner: base.ownerId }]
+            : []
+      );
       const outcome: Committed = {
         inserted,
         commit: counted.commits,
         result,
+        ...(cascaded.length === 0 ? {} : { cascaded }),
       };
       this.#db
         .update(receipts)
@@ -1711,7 +1723,74 @@ export class StoreHost {
         );
       }
     }
+    this.#cascade(staged, stage);
     return { staged: [...staged.values()], inserted };
+  }
+
+  /**
+   * Deletes, with the records `staged` deletes, every record that refers to
+   * one of them through fields that all say `onDelete: "cascade"`, and so
+   * on from those, as the schema each was written under declared it
+   * (`sdk_record_refs`). The policy is the schema's, declared by the App's
+   * builders: it deletes a referring record whatever the writer could
+   * write, as the record it refers to is gone. At most `commitMaxCascade`
+   * records in all; past that the commit is refused (`data.cascade_limit`,
+   * naming nothing that would have gone) for a workflow to delete them in
+   * batches. A referring record this commit writes itself is left to its
+   * write: if it still refers to a deleted record, the commit is refused
+   * as restrict refuses it (`#indexReferences`).
+   */
+  #cascade(
+    staged: ReadonlyMap<string, Staged>,
+    stage: (table: string, tableId: string, recordId: string) => Staged
+  ): void {
+    const pending = [...staged.values()].filter(
+      ({ base, fields }) => base !== undefined && fields === null
+    );
+    let cascaded = 0;
+    for (let gone = pending.pop(); gone !== undefined; gone = pending.pop()) {
+      // One more than the bound has room for is enough to refuse: no
+      // more is read. (Records already staged are among them, but are
+      // never more than the commit's own writes and what it cascaded.)
+      const referring = this.#db
+        .select({ tableId: recordRefs.tableId, recordId: recordRefs.recordId })
+        .from(recordRefs)
+        .where(
+          and(
+            eq(recordRefs.toTableId, gone.tableId),
+            eq(recordRefs.toRecordId, gone.recordId),
+            eq(recordRefs.cascade, true)
+          )
+        )
+        .limit(commitMaxCascade - cascaded + staged.size + 1)
+        .all();
+      for (const { tableId, recordId } of referring) {
+        if (staged.has(keyOf(tableId, recordId))) {
+          continue;
+        }
+        cascaded += 1;
+        if (cascaded > commitMaxCascade) {
+          throw dataErrors.create("data.cascade_limit", {
+            limit: commitMaxCascade,
+          });
+        }
+        const entry = stage(this.#tableName(tableId), tableId, recordId);
+        entry.fields = null;
+        entry.cascaded = true;
+        pending.push(entry);
+      }
+    }
+  }
+
+  /** The name of the store's table `tableId`, for what a refusal says. */
+  #tableName(tableId: string): string {
+    return (
+      this.#db
+        .select({ name: tables.name })
+        .from(tables)
+        .where(eq(tables.tableId, tableId))
+        .get()?.name ?? tableId
+    );
   }
 
   /**
@@ -1780,7 +1859,7 @@ export class StoreHost {
         // to, held already or holding a record the writer may read. A
         // union offering several keeps only the one that holds it. Never
         // satisfied by another place holding the same ID.
-        const targets = reference.tables.flatMap((name) => {
+        const targets = reference.tables.flatMap(({ table: name, cascade }) => {
           const toTableId = tableIdOf(name);
           return toTableId !== undefined &&
             (held.has(keyOf(toTableId, reference.id)) ||
@@ -1789,7 +1868,7 @@ export class StoreHost {
                 tableId: toTableId,
                 recordId: reference.id,
               }))
-            ? [toTableId]
+            ? [{ toTableId, cascade }]
             : [];
         });
         if (targets.length === 0) {
@@ -1798,16 +1877,32 @@ export class StoreHost {
             id: recordId,
           });
         }
-        for (const toTableId of targets) {
+        for (const { toTableId, cascade } of targets) {
           this.#db
             .insert(recordRefs)
-            .values({ tableId, recordId, toTableId, toRecordId: reference.id })
-            .onConflictDoNothing()
+            .values({
+              tableId,
+              recordId,
+              toTableId,
+              toRecordId: reference.id,
+              cascade,
+            })
+            // Several places resolving to the same row cascade only if
+            // every one of them says so.
+            .onConflictDoUpdate({
+              target: [
+                recordRefs.tableId,
+                recordRefs.recordId,
+                recordRefs.toTableId,
+                recordRefs.toRecordId,
+              ],
+              set: { cascade: sql`${recordRefs.cascade} AND excluded.cascade` },
+            })
             .run();
         }
       }
     }
-    for (const { table, tableId, recordId, base, fields } of staged) {
+    for (const { table, tableId, recordId, base, fields, cascaded } of staged) {
       if (base === undefined || fields !== null) {
         continue;
       }
@@ -1822,9 +1917,13 @@ export class StoreHost {
         )
         .get();
       if (referred !== undefined) {
-        // The record's own table and ID only: nothing of what refers to
-        // it, which may be another's.
-        throw dataErrors.create("data.referenced", { table, id: recordId });
+        // The record's own table and ID, when the commit's own write
+        // deleted it: nothing of what refers to it, which may be another's.
+        // A record a cascade would have taken may be another's too, and
+        // one the writer can't read: then nothing is named.
+        throw cascaded === true
+          ? dataErrors.create("data.referenced")
+          : dataErrors.create("data.referenced", { table, id: recordId });
       }
     }
   }

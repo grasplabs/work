@@ -147,7 +147,9 @@ export const records = sqliteTable(
  * record ID one of its `v.id` fields holds, as the schema it was written
  * under declares them (store-references.ts). Kept in the transaction that
  * writes the record, so a deletion of a record still referred to is
- * refused in its own transaction (restrict, store-host.ts).
+ * refused in its own transaction (restrict, store-host.ts), or takes the
+ * records that refer to it with it where every field holding it says
+ * `cascade`.
  */
 export const recordRefs = sqliteTable(
   "sdk_record_refs",
@@ -156,6 +158,8 @@ export const recordRefs = sqliteTable(
     recordId: text("record_id").notNull(),
     toTableId: text("to_table_id").notNull(),
     toRecordId: text("to_record_id").notNull(),
+    /** Whether deleting the record referred to deletes this one too. */
+    cascade: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     primaryKey({

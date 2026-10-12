@@ -285,11 +285,23 @@ export const v = Object.freeze({
     schema({ ...required, kind: "enum", values }),
   /** A file, as `{ id }`. Holding the reference grants no access. */
   file: semantic<FileValue>("file"),
-  /** The ID of a record in the named table. */
+  /**
+   * The ID of a record in the named table. In a table's field, deleting the
+   * record it names is refused while this record holds it, unless
+   * `onDelete` is `cascade`: then this record is deleted with it, within
+   * the bound of one commit (a larger deletion is a workflow's, in
+   * batches).
+   */
   id: <const TableName extends string>(
-    tableName: TableName
+    tableName: TableName,
+    options?: { readonly onDelete?: "restrict" | "cascade" }
   ): SimpleSchema<Id<TableName>, Id<TableName>> =>
-    schema({ ...required, kind: "id", tableName }),
+    schema({
+      ...required,
+      kind: "id",
+      tableName,
+      onDelete: options?.onDelete,
+    }),
   literal: <const Value extends null | boolean | number | string>(
     value: Value
   ): SimpleSchema<Value, Value> =>
