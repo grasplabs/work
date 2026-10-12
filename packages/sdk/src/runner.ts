@@ -3,6 +3,7 @@ import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 import { AppError } from "./app-error.ts";
 import { inspectApp } from "./app.ts";
 import { databaseReader, databaseWriter } from "./database.ts";
+import { referenceData } from "./references.ts";
 import { isResource } from "./resources.ts";
 import type { AnyResource } from "./resources.ts";
 import type { AnyFunction, FunctionKind } from "./server.ts";
@@ -79,14 +80,21 @@ const asAppError = (error: unknown): unknown => {
   }
 };
 
-/** The path of `reference` among `fn`'s `uses`, or a refusal. */
+/**
+ * The path of `reference` among `fn`'s `uses`, or a refusal: a definition
+ * by the path it is registered at, a generated reference by its own,
+ * which the App's inspection already matched to what is registered there.
+ */
 const usedPath = (
   paths: ReadonlyMap<unknown, string>,
   fn: AnyFunction,
   reference: unknown
 ): string => {
   const used = fn.uses.find((use) => use === reference);
-  const path = used === undefined ? undefined : paths.get(used);
+  const path =
+    used === undefined
+      ? undefined
+      : (paths.get(used) ?? referenceData(used)?.path);
   if (path === undefined) {
     throw Object.assign(
       new Error("A function calls only what it lists in `uses`."),
