@@ -341,8 +341,20 @@ export const dependencyGraphHash = async (
  * person approved exactly this graph, for this App and these targets.
  * Denied: a person refused it. A pending request another proposal for the
  * App replaces is gone: only the audit log keeps it.
+ *
+ * Once approved, a person may end the approval (spec 19.3.1). Retired: a
+ * lifecycle decision. Nothing new is built with the graph, and what was
+ * built with it before (the artifacts its lock pinned) keeps working.
+ * Revoked: a security decision. Nothing of the graph is built, handed out
+ * or served any more. Neither is ever approved again: a person approves
+ * the graph again as a new request.
  */
-export type DependencyRequestStatus = "pending" | "approved" | "denied";
+export type DependencyRequestStatus =
+  | "pending"
+  | "approved"
+  | "denied"
+  | "retired"
+  | "revoked";
 
 /** Most direct packages, and most findings, a request shows in a list. */
 export const dependencySummaryDirect = 8;
@@ -397,6 +409,14 @@ export interface DependencyRequest {
     /** The policy generation the decision was made under. */
     policyGeneration: number;
   };
+  /** Who retired or revoked the approval, when and why; only once they did. */
+  ended?: {
+    by: { userId: string; name: string };
+    at: string;
+    reason: string;
+    /** The policy generation it moved on to as it ended. */
+    policyGeneration: number;
+  };
 }
 
 /** A request with everything a person reviews before deciding. */
@@ -449,6 +469,49 @@ export const dependencyDecisionSchema = z.strictObject({
 });
 export type DependencyDecision = z.input<typeof dependencyDecisionSchema>;
 
+/**
+ * What a person decides when they retire or revoke an approved graph, and
+ * what they reviewed as they did: the graph, and the policy generation
+ * they read its impact under (`DependencyImpact`). Why is required: it is
+ * what the audit trail and the App's builders are told.
+ */
+export const dependencyEndingSchema = z.strictObject({
+  reviewed: z.strictObject({
+    graphHash: z.string().regex(/^[0-9a-f]{64}$/u),
+    policyGeneration: z.int().nonnegative(),
+  }),
+  reason: z.string().trim().min(1).max(identifierMaxLength),
+});
+export type DependencyEnding = z.input<typeof dependencyEndingSchema>;
+
+/** One artifact built from a graph, as its lock pins it. */
+export interface DependencyImpactArtifact {
+  target: DependencyTarget;
+  /** The compiler release that built it. */
+  compiler: string;
+  /** Its SHA-256, as the lock pins it. */
+  hash: string;
+  /** When it was pinned or last handed out (ISO 8601). */
+  pinnedAt: string;
+}
+
+/**
+ * What retiring or revoking an App's approved graph would touch, for the
+ * person deciding to read first: every approval of the graph that would
+ * end, and the artifacts built from it. Retiring keeps those artifacts
+ * working and builds nothing new; revoking stops them all. No release,
+ * screen or workflow loads packages yet, so these are all there is.
+ */
+export interface DependencyImpact {
+  /** The policy generation now: a decision names the one it was read under. */
+  policyGeneration: number;
+  app: { id: AppId; name: string };
+  graphHash: string;
+  /** The approvals of the graph that are still in force (approved or retired). */
+  approvals: DependencyRequest[];
+  artifacts: DependencyImpactArtifact[];
+}
+
 /** Who may hold `dependencies.approve`: a member, or everyone in a team. */
 export const dependencyApproverSubjectSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -476,6 +539,10 @@ export const dependencyErrors = defineErrorFamily({
     "These packages aren't approved for this App. Someone with the permission to approve dependencies decides.",
   "dependency.policy_changed":
     "Who approves dependencies, or what is approved, changed. Read the status again.",
+  "dependency.retired":
+    "These packages were retired for this App: what was built with them keeps working, but nothing new is built. Someone with the permission to approve dependencies can approve them again.",
+  "dependency.revoked":
+    "These packages were revoked for this App and can't be used. Someone with the permission to approve dependencies can approve them again after a new review.",
 });
 
 /** Someone who holds `dependencies.approve`, as the API returns it. */
@@ -538,6 +605,30 @@ export interface DependenciesApi {
     request: string,
     decision: DependencyDecision
   ) => Promise<DependencyRequest>;
+  /**
+   * What retiring or revoking the graph of approval `request` would touch,
+   * for someone who holds `dependencies.approve` now.
+   */
+  impact: (request: string) => Promise<DependencyImpact>;
+  /**
+   * Retires the graph of approval `request` for its App: nothing new is
+   * built with it, and what was built keeps working. Only a member who
+   * holds `dependencies.approve` as it lands, on the graph and policy
+   * generation they reviewed; audited. Returns the approvals it ended.
+   */
+  retire: (
+    request: string,
+    ending: DependencyEnding
+  ) => Promise<DependencyRequest[]>;
+  /**
+   * Revokes the graph of approval `request` for its App, retired or not:
+   * nothing of it is built, handed out or served any more. As `retire`
+   * for who may and what is checked.
+   */
+  revoke: (
+    request: string,
+    ending: DependencyEnding
+  ) => Promise<DependencyRequest[]>;
   /** Who holds `dependencies.approve`, revoked ones included. Admins only. */
   approvers: () => Promise<DependencyApprover[]>;
   /**

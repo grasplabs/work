@@ -87,7 +87,7 @@ const approvedApp = async (
     approved: true,
     reviewed: { graphHash: request.graphHash, policyGeneration },
   });
-  return { builder, app, graphHash: request.graphHash, request };
+  return { admin, builder, app, graphHash: request.graphHash, request };
 };
 
 type Approved = Awaited<ReturnType<typeof approvedApp>>;
@@ -303,14 +303,14 @@ describe("serving an App's built packages", () => {
   });
 
   it("serves nothing once the graph is no longer approved, and logs each refusal without filling the audit trail", async () => {
-    const { app, request, address, name } = await servedBuild();
-    // An approval taken back: nothing in the product does it until
-    // GRA-359, so the test does what such a decision would leave behind.
-    await env.DB.prepare(
-      "UPDATE dependency_requests SET status = 'denied' WHERE id = ?"
-    )
-      .bind(request.id)
-      .run();
+    const { admin, app, request, address, name } = await servedBuild();
+    const { policyGeneration } = await admin.api.dependencies.impact(
+      request.id
+    );
+    await admin.api.dependencies.revoke(request.id, {
+      reviewed: { graphHash: request.graphHash, policyGeneration },
+      reason: "The package reads more than it says.",
+    });
 
     const warn = vi.spyOn(console, "warn").mockReturnValue();
     let statuses: number[] = [];
@@ -341,7 +341,7 @@ describe("serving an App's built packages", () => {
           fields !== null &&
           Reflect.get(fields, "event") === "packages.serve_refused" &&
           Reflect.get(fields, "app") === app &&
-          Reflect.get(fields, "reason") === "not_approved"
+          Reflect.get(fields, "reason") === "revoked"
       )
     ).toHaveLength(5);
   });

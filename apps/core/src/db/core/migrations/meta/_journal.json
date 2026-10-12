@@ -442,6 +442,13 @@
       "when": 1791808574527,
       "tag": "0062_store_closing",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1791817363841,
+      "tag": "0063_dependency_approval_endings",
+      "breakpoints": true
     }
   ]
 }
