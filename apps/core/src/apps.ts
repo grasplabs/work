@@ -1014,14 +1014,25 @@ export const proposeVersion = async (
   return toApp(proposed);
 };
 
-/** Whether `version` of `app` has a sealed release (app-releases.ts). */
-const isSealed = async (
+/**
+ * Holds while `version` of `app` has a sealed release that isn't revoked
+ * (app-releases.ts, release-retention.ts), as the statement runs.
+ */
+const runnableReleaseSql = (app: AppId, version: number) =>
+  sql`EXISTS (SELECT 1 FROM sdk_release_manifests
+    WHERE app_id = ${app} AND version = ${version} AND revoked_at IS NULL)`;
+
+/**
+ * Refuses `version` of `app` unless it has a sealed release that isn't
+ * revoked: `version.not_sealed`, or `version.revoked`.
+ */
+const requireRunnableRelease = async (
   env: Env,
   app: AppId,
   version: number
-): Promise<boolean> =>
-  (await drizzle(env.DB)
-    .select({ version: sdkReleaseManifests.version })
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select({ revokedAt: sdkReleaseManifests.revokedAt })
     .from(sdkReleaseManifests)
     .where(
       and(
@@ -1029,7 +1040,14 @@ const isSealed = async (
         eq(sdkReleaseManifests.version, version)
       )
     )
-    .get()) !== undefined;
+    .get();
+  if (row === undefined) {
+    throw versionErrors.create("version.not_sealed");
+  }
+  if (row.revokedAt !== null) {
+    throw versionErrors.create("version.revoked");
+  }
+};
 
 /**
  * Makes a version the one that runs: the pending one after review, or any
@@ -1056,9 +1074,12 @@ export const setCurrentVersion = async (
   const files = await versionFiles(env, appId, number);
   // A version of spec 8's layout runs only from its release: activation
   // seals it first (app-activation.ts), and nothing makes one current
-  // unsealed.
-  if (isAppLayout(files) && !(await isSealed(env, appId, number))) {
-    throw versionErrors.create("version.not_sealed");
+  // unsealed or revoked: checked here for a clear refusal, and again as
+  // the version is made current, so neither a revocation nor the
+  // retention sweep's deletion lands in between.
+  const sealedLayout = isAppLayout(files);
+  if (sealedLayout) {
+    await requireRunnableRelease(env, appId, number);
   }
   await requireWorkflowTestsPass(env, number, files);
   const triggers = await triggerRegistration(env, appId, number, files);
@@ -1087,7 +1108,8 @@ export const setCurrentVersion = async (
         and(
           eq(apps.id, appId),
           sql`${apps.currentVersion} IS ${previous}`,
-          registrationHolds(appId, triggers)
+          registrationHolds(appId, triggers),
+          sealedLayout ? runnableReleaseSql(appId, number) : undefined
         )
       )
       .returning(),
@@ -1117,6 +1139,10 @@ export const setCurrentVersion = async (
       ),
   ]);
   if (!changed) {
+    if (sealedLayout) {
+      // Revoked or deleted since it was checked: refused as such.
+      await requireRunnableRelease(env, appId, number);
+    }
     throw appErrors.create("app.conflict");
   }
   // What its screens build to with this release's kit, which may not be

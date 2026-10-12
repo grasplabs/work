@@ -17,6 +17,8 @@ import {
   setCurrentVersion,
 } from "../src/apps.ts";
 import { appDefaultStores, sdkStoreOwners } from "../src/db/core/schema.ts";
+import { revokeRelease } from "../src/release-retention.ts";
+import { racingDb } from "./apps.ts";
 import { failure, person } from "./sealed-apps.ts";
 
 // Making a version of spec 8's layout current seals it on the App's one
@@ -217,9 +219,59 @@ describe(
       const stranger = await person("builder");
       await expect(
         failure(async () => await activateVersion(env, stranger, app, 1))
-      ).resolves.not.toBe("ok");
+      ).resolves.toBe("app.not_found");
       await expect(defaultStores(app)).resolves.toHaveLength(0);
       await expect(currentOf(app)).resolves.toBeNull();
+    });
+
+    it("gives two first activations at once one store, claimed once", async () => {
+      const { owner, app } = await appWith(notesFiles());
+      const outcomes = await Promise.all([
+        failure(async () => await activateVersion(env, owner, app, 1)),
+        failure(async () => await activateVersion(env, owner, app, 1)),
+      ]);
+      expect(outcomes).toContain("ok");
+      const stores = await defaultStores(app);
+      expect(stores).toHaveLength(1);
+      const claims = await drizzle(env.DB)
+        .select()
+        .from(sdkStoreOwners)
+        .where(eq(sdkStoreOwners.appId, app))
+        .all();
+      expect(claims.map(({ storeId }) => storeId)).toStrictEqual([
+        stores[0]?.storeId,
+      ]);
+      await expect(storeOf(app, 1)).resolves.toMatchObject({
+        storeId: stores[0]?.storeId,
+      });
+    });
+
+    it("refuses a revoked version, even one revoked as it is made current", async () => {
+      const { owner, app } = await appWith(notesFiles());
+      await activateVersion(env, owner, app, 1);
+      await commitFiles(env, owner, app, notesFiles("Notes 2"), "Second");
+      await activateVersion(env, owner, app, 2);
+      await commitFiles(env, owner, app, notesFiles("Notes 3"), "Third");
+      await activateVersion(env, owner, app, 3);
+      const admin = await person("admin");
+
+      // Revoked before: refused at the check.
+      await revokeRelease(env, admin, { app, version: 1 }, "Leaks data");
+      await expect(
+        failure(async () => await setCurrentVersion(env, owner, app, 1))
+      ).resolves.toBe("version.revoked");
+
+      // Revoked between the check and the change: refused by the change.
+      const racing = racingDb(async () => {
+        await revokeRelease(env, admin, { app, version: 2 }, "Leaks data");
+      }, /update "apps"/iu);
+      await expect(
+        failure(
+          async () =>
+            await setCurrentVersion({ ...env, DB: racing }, owner, app, 2)
+        )
+      ).resolves.toBe("version.revoked");
+      await expect(currentOf(app)).resolves.toBe(3);
     });
 
     it("never makes such a version current unsealed", async () => {
