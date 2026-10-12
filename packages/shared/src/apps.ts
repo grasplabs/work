@@ -135,6 +135,8 @@ export interface AgentProposer {
   onBehalfOf: string;
   workspaceId: string;
   chatId: string;
+  /** The build job of the chat that proposed it, when a job did. */
+  jobId?: string;
 }
 
 /**

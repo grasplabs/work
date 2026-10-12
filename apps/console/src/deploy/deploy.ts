@@ -373,9 +373,12 @@ const settingValue = (key: string, value: string): unknown => {
 };
 
 /**
- * Core's vars: what every deploy derives for the client, its model
- * gateway and sign-in (`derivedCoreConfig`), each replaced by the
- * client's setting of the same name, if it has one; its other settings,
+ * Core's vars: what every deploy derives for the client
+ * (`derivedCoreConfig`): its model gateway and sign-in, each replaced by
+ * the client's setting of the same name, if it has one, and its runtime
+ * profile, which the deploy fixes: `RUNTIME_PROFILE` is no deployment
+ * config var, so no client setting can name it (`unknown_setting`); its
+ * other settings,
  * each a JSON var named by its deployment config var (and nothing else:
  * `unknown_setting`); and `PLATFORM_CHANGE`, which core records as
  * `platform.updated`: a `release`, or new `secrets` or `settings` on the

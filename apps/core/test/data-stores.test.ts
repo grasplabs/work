@@ -23,7 +23,12 @@ import { describe, expect, it } from "vite-plus/test";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import { tablesManifest } from "./store-schemas.ts";
+import {
+  manifestHash,
+  memberRoles,
+  newRecordId,
+  tablesManifest,
+} from "./store-schemas.ts";
 
 /** Who creates the stores these tests use: a builder of the organization. */
 const builder: Acting = {
@@ -40,8 +45,11 @@ const builder: Acting = {
 
 const ada = { userId: "ada" };
 const grace = { userId: "grace" };
-const schemaHash = "a".repeat(64);
-const laterHash = "b".repeat(64);
+const storeManifest = tablesManifest("notes");
+/** A later schema of the same store: one more table. */
+const laterManifest = tablesManifest("notes", "drafts");
+const schemaHash = await manifestHash(storeManifest);
+const laterHash = await manifestHash(laterManifest);
 
 /** Who commits in these tests: one operation's pinned contract, for Ada. */
 const scope = {
@@ -62,7 +70,8 @@ const inputHash = "c".repeat(64);
  */
 const commitIn = async (
   store: OpenStore,
-  commit: Omit<Commit, "storeId" | "receipt">
+  commit: Omit<Commit, "storeId" | "receipt" | "roles" | "stagedAt"> &
+    Partial<Pick<Commit, "roles" | "stagedAt">>
 ): Promise<Committed> => {
   const claimed = await store.claim({
     scope: { ...scope, principal: commit.principal.userId },
@@ -74,13 +83,19 @@ const commitIn = async (
   if (!("held" in claimed)) {
     throw new Error("A new key found an outcome");
   }
-  return await store.commit({ ...commit, receipt: claimed.held });
+  return await store.commit({
+    roles: memberRoles,
+    stagedAt: Date.now(),
+    ...commit,
+    receipt: claimed.held,
+  });
 };
 
 /** A new store with a `notes` table. */
 const newStore = async (): Promise<OpenStore> => {
   const store = await openStore(env, await createStore(env, builder));
-  await store.defineTables(tablesManifest("notes"));
+  await store.defineTables(storeManifest);
+  await store.defineTables(laterManifest);
   return store;
 };
 
@@ -94,7 +109,12 @@ const insertNote = async (
     principal,
     schemaHash,
     writes: [
-      { op: "insert", table: "notes", fields: fields ?? { title: "Launch" } },
+      {
+        op: "insert",
+        id: newRecordId(),
+        table: "notes",
+        fields: fields ?? { title: "Launch" },
+      },
     ],
   });
   const [id] = inserted;
@@ -117,6 +137,7 @@ const untyped = (fields: unknown): StoreFields =>
 const inserts = (count: number) =>
   Array.from({ length: count }, () => ({
     op: "insert" as const,
+    id: newRecordId(),
     table: "notes",
     fields: { title: "Note" },
   }));
@@ -193,7 +214,9 @@ describe("stores", () => {
       commitIn(store, {
         principal: ada,
         schemaHash,
-        writes: [{ op: "insert", table: "NOTES", fields: {} }],
+        writes: [
+          { op: "insert", id: newRecordId(), table: "NOTES", fields: {} },
+        ],
       })
     ).rejects.toMatchObject({ code: "data.unknown_table" });
   });
@@ -506,7 +529,9 @@ describe("managed fields", () => {
           commitIn(store, {
             principal: ada,
             schemaHash,
-            writes: [{ op: "insert", table: "notes", fields }],
+            writes: [
+              { op: "insert", id: newRecordId(), table: "notes", fields },
+            ],
           })
         ).rejects.toMatchObject({ code: "data.invalid" });
         await expect(
@@ -589,7 +614,12 @@ describe("managed fields", () => {
       principal: ada,
       schemaHash,
       writes: [
-        { op: "insert", table: "notes", fields: { title: "Second" } },
+        {
+          op: "insert",
+          id: newRecordId(),
+          table: "notes",
+          fields: { title: "Second" },
+        },
         {
           op: "patch",
           table: "notes",
@@ -653,7 +683,12 @@ describe("commits", () => {
         principal: ada,
         schemaHash,
         writes: [
-          { op: "insert", table: "notes", fields: { title: "Lost" } },
+          {
+            op: "insert",
+            id: newRecordId(),
+            table: "notes",
+            fields: { title: "Lost" },
+          },
           {
             op: "patch",
             table: "notes",
@@ -727,7 +762,12 @@ describe("commits", () => {
         schemaHash,
         guards: [{ table: "notes", id: read, expectedRevision: 1 }],
         writes: [
-          { op: "insert", table: "notes", fields: { title: "At old rate" } },
+          {
+            op: "insert",
+            id: newRecordId(),
+            table: "notes",
+            fields: { title: "At old rate" },
+          },
         ],
       })
     ).rejects.toMatchObject({ code: "data.conflict" });
@@ -852,7 +892,14 @@ describe("commits", () => {
           commitIn(store, {
             principal: ada,
             schemaHash,
-            writes: [{ op: "insert", table: "notes", fields: untyped(fields) }],
+            writes: [
+              {
+                op: "insert",
+                id: newRecordId(),
+                table: "notes",
+                fields: untyped(fields),
+              },
+            ],
           })
         ).rejects.toMatchObject({ code: "data.invalid" });
       })
@@ -906,6 +953,7 @@ describe("commits", () => {
         schemaHash,
         writes: Array.from({ length: count }, () => ({
           op: "insert" as const,
+          id: newRecordId(),
           table: "notes",
           fields: large,
         })),
@@ -943,6 +991,7 @@ describe("document size", () => {
         writes: [
           {
             op: "insert",
+            id: newRecordId(),
             table: "notes",
             fields: { body: "€".repeat(50_000) },
           },
@@ -1052,7 +1101,12 @@ describe("document size", () => {
         principal: ada,
         schemaHash,
         writes: [
-          { op: "insert", table: "notes", fields: { title: "Lost" } },
+          {
+            op: "insert",
+            id: newRecordId(),
+            table: "notes",
+            fields: { title: "Lost" },
+          },
           {
             op: "patch",
             table: "notes",
@@ -1064,5 +1118,259 @@ describe("document size", () => {
       })
     ).rejects.toMatchObject({ code: "data.invalid" });
     await expect(recordCount(store)).resolves.toBe(1);
+  });
+});
+
+/** An insert of a new record of `table`. */
+const insertInto = (table: string) => ({
+  op: "insert" as const,
+  table,
+  id: newRecordId(),
+  fields: { title: "a" },
+});
+
+describe("writes under the pinned schema's access", () => {
+  /** A store whose tables are written by each mode, read by their owner. */
+  const accessStore = async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const tables = ["owned", "members", "builders", "locked"] as const;
+    const modes: Record<(typeof tables)[number], AccessMode> = {
+      owned: "owner",
+      members: "appMembers",
+      builders: "appBuilders",
+      locked: "none",
+    };
+    const text = manifestText(
+      schemaManifest(
+        defineSchema(
+          Object.fromEntries(
+            tables.map((name) => [name, defineTable({ title: v.string() })])
+          )
+        ),
+        {
+          tables: Object.fromEntries(
+            tables.map((name) => [name, { read: "owner", write: modes[name] }])
+          ),
+        }
+      )
+    );
+    const { schemaHash: hash } = await store.defineTables(text);
+    return { store, hash };
+  };
+
+  /** The code a commit of `write` for `principal` with `roles` fails with, or "ok". */
+  const outcomeOf = async (
+    { store, hash }: { store: OpenStore; hash: string },
+    write: Commit["writes"][number],
+    roles: { appMember: boolean; appBuilder: boolean },
+    principal = ada
+  ): Promise<unknown> => {
+    try {
+      await commitIn(store, {
+        principal,
+        roles,
+        schemaHash: hash,
+        writes: [write],
+      });
+      return "ok";
+    } catch (error) {
+      return error instanceof Error && "code" in error ? error.code : error;
+    }
+  };
+
+  const outsider = { appMember: false, appBuilder: false };
+  const member = { appMember: true, appBuilder: false };
+  const appBuilder = { appMember: false, appBuilder: true };
+
+  it("admits an insert only for the roles each table's write mode admits", async () => {
+    const fixture = await accessStore();
+    expect({
+      ownedByOutsider: await outcomeOf(fixture, insertInto("owned"), outsider),
+      membersByOutsider: await outcomeOf(
+        fixture,
+        insertInto("members"),
+        outsider
+      ),
+      membersByMember: await outcomeOf(fixture, insertInto("members"), member),
+      membersByBuilder: await outcomeOf(
+        fixture,
+        insertInto("members"),
+        appBuilder
+      ),
+      buildersByMember: await outcomeOf(
+        fixture,
+        insertInto("builders"),
+        member
+      ),
+      buildersByBuilder: await outcomeOf(
+        fixture,
+        insertInto("builders"),
+        appBuilder
+      ),
+      lockedByBuilder: await outcomeOf(fixture, insertInto("locked"), {
+        appMember: true,
+        appBuilder: true,
+      }),
+    }).toStrictEqual({
+      ownedByOutsider: "ok",
+      membersByOutsider: "data.write_denied",
+      membersByMember: "ok",
+      membersByBuilder: "ok",
+      buildersByMember: "data.write_denied",
+      buildersByBuilder: "ok",
+      lockedByBuilder: "data.write_denied",
+    });
+  });
+
+  it("lets an owner table's writes change only the principal's own records, as if others' didn't exist", async () => {
+    const fixture = await accessStore();
+    const write = insertInto("owned");
+    await outcomeOf(fixture, write, outsider, ada);
+    const patch = {
+      op: "patch" as const,
+      table: "owned",
+      id: write.id,
+      fields: { title: "b" },
+      expectedRevision: 1,
+    };
+    const remove = {
+      op: "delete" as const,
+      table: "owned",
+      id: write.id,
+      expectedRevision: 1,
+    };
+    const missing = { ...remove, id: newRecordId() };
+    expect({
+      othersPatch: await outcomeOf(fixture, patch, member, grace),
+      othersDelete: await outcomeOf(fixture, remove, member, grace),
+      missingDelete: await outcomeOf(fixture, missing, member, grace),
+      ownPatch: await outcomeOf(fixture, patch, outsider, ada),
+    }).toStrictEqual({
+      othersPatch: "data.conflict",
+      othersDelete: "data.conflict",
+      missingDelete: "data.conflict",
+      ownPatch: "ok",
+    });
+  });
+
+  it("refuses an insert under an ID already in use, and a table the pinned schema hasn't", async () => {
+    const fixture = await accessStore();
+    const write = insertInto("owned");
+    await outcomeOf(fixture, write, outsider);
+    expect({
+      again: await outcomeOf(fixture, write, outsider),
+      unknown: await outcomeOf(fixture, insertInto("other"), member),
+    }).toStrictEqual({ again: "data.conflict", unknown: "data.unknown_table" });
+  });
+});
+
+describe("a commit's read set", () => {
+  it("refuses a commit once a table it read moved on, and takes one that is current", async () => {
+    const store = await newStore();
+    const [{ notes: before = 0 }] = [await store.generations(["notes"])];
+    await insertNote(store);
+    const stale = commitIn(store, {
+      principal: ada,
+      schemaHash,
+      readSet: { notes: before },
+      writes: [],
+    });
+    await expect(stale).rejects.toMatchObject({ code: "data.reads_changed" });
+    const now = await store.generations(["notes"]);
+    await expect(
+      commitIn(store, { principal: ada, schemaHash, readSet: now, writes: [] })
+    ).resolves.toMatchObject({ inserted: [] });
+  });
+});
+
+describe("a commit's staging time", () => {
+  it("stamps its records, and is refused more than a minute ahead of the store's clock", async () => {
+    const store = await newStore();
+    const write = insertInto("notes");
+    const stagedAt = Date.now() - 5000;
+    const ahead = commitIn(store, {
+      principal: ada,
+      schemaHash,
+      stagedAt: Date.now() + 120_000,
+      writes: [insertInto("notes")],
+    });
+    await expect(ahead).rejects.toMatchObject({ code: "data.invalid" });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash,
+      stagedAt,
+      writes: [write],
+    });
+    await expect(store.get("notes", write.id)).resolves.toMatchObject({
+      createdAt: stagedAt,
+      updatedAt: stagedAt,
+    });
+  });
+});
+
+describe("a staged read", () => {
+  it("sees the writes it is handed as their commit would make them, and keeps none", async () => {
+    const store = await newStore();
+    const kept = await insertNote(store, { title: "Kept" });
+    const id = newRecordId();
+    const stagedAt = Date.now() - 1000;
+    const reader = {
+      schemaHash,
+      principal: "ada",
+      appMember: true,
+      appBuilder: false,
+      consumer: { resourceId: "notes-app", resourceVersion: 1 },
+    };
+    const staged = {
+      stagedAt,
+      writes: [
+        { op: "insert" as const, table: "notes", id, fields: { title: "New" } },
+        {
+          op: "delete" as const,
+          table: "notes",
+          id: kept,
+          expectedRevision: 1,
+        },
+      ],
+    };
+    const generations = await store.generations(["notes"]);
+    const { value, generations: seen } = await store.read(
+      reader,
+      {
+        kind: "query",
+        query: {
+          descriptorVersion: 1,
+          table: "notes",
+          index: null,
+          range: [],
+          filter: null,
+          order: "asc",
+          terminal: { kind: "collect" },
+        },
+      },
+      staged
+    );
+    expect({
+      seen: value,
+      generations: seen,
+      kept: await store.get("notes", kept).then((record) => record?.id),
+      inserted: await store.get("notes", id),
+    }).toStrictEqual({
+      seen: [
+        {
+          _id: id,
+          _ownerId: "ada",
+          _rev: 1,
+          _createdAt: stagedAt,
+          _updatedAt: stagedAt,
+          title: "New",
+        },
+      ],
+      // The generation from before the staged writes: what a commit
+      // fenced on this read compares.
+      generations,
+      kept,
+      inserted: null,
+    });
   });
 });

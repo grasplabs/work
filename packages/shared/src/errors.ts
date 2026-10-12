@@ -137,6 +137,8 @@ export const requestErrors = defineErrorFamily({
   "request.too_large": "A value in the request holds more than a request may.",
   "request.unsupported_value":
     "A value in the request is of a kind calls don't take.",
+  "request.too_expensive":
+    "A message would expand to more than this connection may hold.",
 });
 
 /** Why a call needs a person to sign in (again). */
@@ -151,6 +153,13 @@ export const authErrors = defineErrorFamily({
 export const internalErrors = defineErrorFamily({
   "internal.unexpected": "Something went wrong.",
 });
+
+/**
+ * The namespaces (first segments) of every expected code defined so far:
+ * those of every family whose module is loaded.
+ */
+export const expectedNamespaces = (): ReadonlySet<string> =>
+  new Set([...expectedCodes].map((code) => code.slice(0, code.indexOf("."))));
 
 /** Whether `code` is the code of an expected error, of any family. */
 export const isExpectedCode = (code: unknown): code is string =>

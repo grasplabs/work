@@ -394,6 +394,14 @@ export interface Turn {
    * request, so a person who left stops a turn under way.
    */
   whyStop: () => Promise<Error | undefined>;
+  /**
+   * What happened in the chat for this turn since it was last asked, for
+   * the model to read before its next request: how a build job the turn
+   * submitted ended (workspace.ts). Taken between steps, never between a
+   * code step and its result, and once more before the turn would end,
+   * so one that ends while the model answers is still read in this turn.
+   */
+  events?: () => Message[];
 }
 
 const messageRoles = new Set<unknown>([
@@ -660,6 +668,7 @@ export const runTurn = async ({
   keep,
   write,
   whyStop,
+  events,
 }: Turn): Promise<TurnResult> => {
   // Cancelled by the caller, or stopped here (see `whyStop`).
   const stop = new AbortController();
@@ -676,6 +685,8 @@ export const runTurn = async ({
   // would refuse the request, and nothing can be left out to make room
   // for it.
   const asked = measureTurns([...history, ...prompts], room);
+  const taken = async (): Promise<Message[]> =>
+    await Promise.resolve(events?.() ?? []);
   if ((asked.sizes.at(-1) ?? 0) > asked.budget) {
     throw agentErrors.create("agent.question_too_long");
   }
@@ -688,6 +699,8 @@ export const runTurn = async ({
       convertToLlm: (messages) =>
         recentHistory(messages.filter(isMessage), room),
       toolExecution: "sequential",
+      getSteeringMessages: taken,
+      getFollowUpMessages: taken,
       // Checked again before every model request.
       prepareRequest: async () => {
         const reason = await whyStop();

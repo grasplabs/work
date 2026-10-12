@@ -1,6 +1,11 @@
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-reads";
-import { queryErrors } from "@grasp-os/shared/stores";
+import {
+  commitMaxGuards,
+  dataErrors,
+  queryErrors,
+} from "@grasp-os/shared/stores";
+import type { StagedWrites } from "@grasp-os/shared/stores";
 
 import type { OpenStore } from "./data-stores.ts";
 import type { QueryAnswer } from "./store-queries.ts";
@@ -23,7 +28,11 @@ import type { QueryAnswer } from "./store-queries.ts";
 //
 // A `get` that asserted a revision on a record it found is recorded as a
 // guard, for a mutation's commit to check (spec 9.2: even when the
-// handler then changes nothing); GRA-244 hands `guards` to its commit.
+// handler then changes nothing). A mutation's commit gets its guards and
+// its read set (the generation of each table it read, `readSet`), and is
+// refused once any of those tables moved on (operations.ts). A mutation's
+// reads see the writes it staged so far (`staged`), as its commit would
+// make them; the generations they answer are from before those writes.
 
 /** How many times a query operation runs again before it gives up. */
 export const queryMaxReruns = 3;
@@ -37,8 +46,8 @@ export interface ReadGuard {
 
 /**
  * The generations a failed read's error carries (`details.generations`,
- * StoreHost's `#withGenerations`), taken off it, so App code never sees
- * them; none for an error raised before anything was read.
+ * StoreHost's `#readIn`), taken off it, so App code never sees them; none
+ * for an error raised before the read looked at a record.
  */
 const takeGenerations = (error: unknown): Record<string, number> => {
   if (typeof error !== "object" || error === null) {
@@ -64,6 +73,8 @@ const takeGenerations = (error: unknown): Record<string, number> => {
 export class StoreReader {
   readonly #store: OpenStore;
   readonly #scope: ReadScope;
+  /** A mutation's writes so far, which its reads see; none for a query. */
+  readonly #staged: (() => StagedWrites | undefined) | undefined;
   /** The generation of each table read, as first read. */
   readonly #generations = new Map<string, number>();
   readonly #guards: ReadGuard[] = [];
@@ -73,9 +84,14 @@ export class StoreReader {
    */
   #torn = false;
 
-  constructor(store: OpenStore, scope: ReadScope) {
+  constructor(
+    store: OpenStore,
+    scope: ReadScope,
+    staged?: () => StagedWrites | undefined
+  ) {
     this.#store = store;
     this.#scope = scope;
+    this.#staged = staged;
   }
 
   /**
@@ -84,8 +100,9 @@ export class StoreReader {
    */
   async read(request: ReadRequest): Promise<QueryAnswer> {
     let result: Awaited<ReturnType<OpenStore["read"]>>;
+    const staged = this.#staged?.();
     try {
-      result = await this.#store.read(this.#scope, request);
+      result = await this.#store.read(this.#scope, request, staged);
     } catch (error) {
       // A read that failed after it looked at records still depended on
       // them: count what the store says it read, then fail as it did,
@@ -95,6 +112,15 @@ export class StoreReader {
     }
     const { value, generations } = result;
     this.#record(generations);
+    // A record this mutation already changed is checked by its write's
+    // own expected revision (or is new): a guard on it would compare the
+    // commit's base with the revision the staged read showed, and fail.
+    const changing =
+      request.kind === "get" &&
+      (staged?.writes.some(
+        (write) => write.table === request.table && write.id === request.id
+      ) ??
+        false);
     // Once per record: an operation reading a record again and again
     // still hands its commit one guard for it (a later assertion of
     // another revision would have failed its read with a conflict).
@@ -102,10 +128,21 @@ export class StoreReader {
       request.kind === "get" &&
       request.expectedRevision !== null &&
       value !== null &&
+      !changing &&
       !this.#guards.some(
         ({ table, id }) => table === request.table && id === request.id
       )
     ) {
+      // One more than a commit can check would fail only at the commit,
+      // after the whole mutation ran: refused here, at the read. Only a
+      // mutation's reader (it stages writes) has guards a commit checks; a
+      // plain query never commits, so its reads are not capped here.
+      if (
+        this.#staged !== undefined &&
+        this.#guards.length >= commitMaxGuards
+      ) {
+        throw dataErrors.create("data.guard_limit");
+      }
       this.#guards.push({
         table: request.table,
         id: request.id,
@@ -130,6 +167,15 @@ export class StoreReader {
   /** The revisions the invocation's reads asserted, in order. */
   guards(): readonly ReadGuard[] {
     return [...this.#guards];
+  }
+
+  /**
+   * The generation of each table the invocation read, as first read: a
+   * commit fenced on it fails once any of them moved on, a torn read set
+   * (one table seen at two generations) included.
+   */
+  readSet(): Record<string, number> {
+    return Object.fromEntries(this.#generations);
   }
 
   /**
