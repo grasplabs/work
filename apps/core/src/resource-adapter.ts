@@ -4,7 +4,10 @@ import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { Provenance } from "@grasp-os/shared/knowledge";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
-import type { BindingTarget } from "@grasp-os/shared/resource-bindings";
+import type {
+  BindingTarget,
+  ModelBindingBudget,
+} from "@grasp-os/shared/resource-bindings";
 
 import type { ResourceContext } from "./operations.ts";
 
@@ -127,6 +130,15 @@ export interface ServedContract {
   readonly fingerprint: string;
 }
 
+/**
+ * What the binding's row says beyond its pin, as read for this request:
+ * the alias it binds and, for a model, its own caps (model-budgets.ts).
+ */
+export interface BindingRecord {
+  readonly alias: string;
+  readonly budget: ModelBindingBudget | null;
+}
+
 /** A target bound for a request: what it serves now, and how to call it. */
 export interface ServedBinding extends ServedContract {
   /**
@@ -138,7 +150,8 @@ export interface ServedBinding extends ServedContract {
     caller: BindingCaller,
     request: { method: string; args: readonly Json[] },
     context: ResourceContext,
-    pin: HeldBinding
+    pin: HeldBinding,
+    record: BindingRecord
   ) => Promise<unknown>;
   /**
    * For a connector: the connector tools the bound actions name, the only

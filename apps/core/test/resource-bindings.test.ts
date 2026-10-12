@@ -4,6 +4,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import type { ModelBindingBudgetInput } from "@grasp-os/shared/resource-bindings";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -49,7 +50,10 @@ import type { Fixture } from "./sealed-apps.ts";
 const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 /** An App whose actions use a text model and a structured one. */
-const modelFiles = (maxOutputTokens = 300): Record<string, string> => ({
+const modelFiles = (
+  maxOutputTokens = 300,
+  taggerTokens = 200
+): Record<string, string> => ({
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
@@ -63,7 +67,7 @@ export const writer = resource.model("writer", { maxOutputTokens: ${maxOutputTok
 
 export const tagger = resource.model("tagger", {
   structuredOutput: v.object({ tags: v.array(v.string().trim().min(1)).max(5) }),
-  maxOutputTokens: 200,
+  maxOutputTokens: ${taggerTokens},
 });
 
 export const labeler = resource.model("labeler", {
@@ -129,16 +133,34 @@ export const twice = action({
     }
   },
 });
+
+/** One request; what App code sees of a refusal: its code and when to ask again. */
+export const attempt = action({
+  args: { prompt: v.string().min(1) },
+  returns: v.string(),
+  uses: [writer],
+  handler: async (ctx) => {
+    try {
+      return await ctx.resources.writer.generate({ prompt: "Hi" });
+    } catch (error) {
+      const details = Object(Reflect.get(Object(error), "details"));
+      return [
+        Reflect.get(Object(error), "code"),
+        Reflect.get(details, "retryAfterSeconds"),
+      ].map(String).join("|");
+    }
+  },
+});
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { draft, label, labeler, probe, tag, tagger, twice, writer } from "./operations/assist.ts";
+import { attempt, draft, label, labeler, probe, tag, tagger, twice, writer } from "./operations/assist.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Assistant",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { assist: { draft, tag, twice, probe, label } },
+  operations: { assist: { draft, tag, twice, probe, label, attempt } },
   internalOperations: {},
   screens: [],
   uses: [writer, tagger, labeler],
@@ -1459,7 +1481,8 @@ describe("resource bindings", { timeout: 120_000 }, () => {
             id: crypto.randomUUID(),
             declarationHash: "0".repeat(64),
             fingerprint: letter.contentHash,
-          }
+          },
+          { alias: "letter", budget: null }
         )
     );
     expect(read).toBe("resource.unavailable");
@@ -1479,5 +1502,415 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     );
     const read = await call(env, sealed, "letters.read", {});
     expect(outcomeOf(read)).toStrictEqual({ version: 1, greeting: "Deep" });
+  });
+});
+
+/** An admin's approval of the App's `writer`, with its own caps if given. */
+const approveWriter = async (
+  sealed: Sealed,
+  budget?: ModelBindingBudgetInput
+) =>
+  await approveResourceBinding(env, await person("admin"), {
+    ...writerApproval(sealed),
+    ...(budget === undefined ? {} : { budget }),
+  });
+
+/**
+ * The `writer` token bound at which one request reserves some $0.009 for
+ * its longest answer: one fits a cent, two never do.
+ */
+const nearCentBound = 3800;
+
+/**
+ * The `writer` token bound at which one request reserves some $0.0117:
+ * more than a cent, one fits two cents, two never do.
+ */
+const overCentBound = 5000;
+
+/**
+ * An answer that uses most of what a `nearCentBound` request reserves,
+ * some $0.0084, and never more: past 80% of a cent on its own.
+ */
+const longAnswer: GatewayReply = {
+  text: "Long.",
+  inputTokens: 100,
+  outputTokens: 3700,
+};
+
+/** Calls `path` of the App through `callEnv`, counting days as `day`. */
+const callOn = async (
+  callEnv: Env,
+  sealed: Sealed,
+  path: string,
+  day = "2031-01-01"
+): Promise<OperationResult> =>
+  await call({ ...callEnv, MODEL_BUDGET_DAY: day }, sealed, path, {
+    prompt: "Hi",
+  });
+
+/** Calls the App's `draft` through `callEnv`: its outcome. */
+const draftOn = async (
+  callEnv: Env,
+  sealed: Sealed,
+  day?: string
+): Promise<Json> =>
+  outcomeOf(await callOn(callEnv, sealed, "assist.draft", day));
+
+describe("model binding budgets", { timeout: 120_000 }, () => {
+  it("cap a binding's day, alerting admins, until the next day", async () => {
+    const sealed = await sealedApp(modelFiles(nearCentBound));
+    await approveWriter(sealed, { perDay: 0.01 });
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      longAnswer,
+      answer("Next day."),
+    ]);
+    const first = await draftOn(withGateway, sealed);
+    const second = await draftOn(withGateway, sealed);
+    const sentThatDay = gateway.requests.length;
+    const nextDay = await draftOn(withGateway, sealed, "2031-01-02");
+    expect({ first, second, sentThatDay, nextDay }).toStrictEqual({
+      first: "Long.",
+      second: { failed: "resource.budget_exhausted" },
+      sentThatDay: 1,
+      nextDay: "Next day.",
+    });
+    const alerted = await auditedFor("model.budget.alert", sealed.app);
+    const refused = await auditedFor("model.refused", sealed.app);
+    expect({
+      alerted: alerted.map(({ detail }) => detail),
+      refused: refused.map(({ detail }) => detail),
+    }).toStrictEqual({
+      alerted: [
+        expect.objectContaining({
+          scope: "binding_day",
+          app: sealed.app,
+          binding: "writer",
+          day: "2031-01-01",
+          limit: 0.01,
+        }),
+      ],
+      refused: [
+        expect.objectContaining({
+          reason: "model.over_budget",
+          because: "binding_day",
+          binding: "writer",
+        }),
+      ],
+    });
+  });
+
+  it("count a binding's month at what each request used once it settled", async () => {
+    // Two requests' reservations never fit a cent together: the second
+    // fits only once the first settled at what it used.
+    const sealed = await sealedApp(modelFiles(nearCentBound));
+    await approveWriter(sealed, { perMonth: 0.01 });
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      answer("One."),
+      answer("Two."),
+      longAnswer,
+      answer("Never sent."),
+    ]);
+    const outcomes: Json[] = [];
+    for (let made = 0; made < 4; made += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      outcomes.push(await draftOn(withGateway, sealed));
+    }
+    expect({ outcomes, sent: gateway.requests.length }).toStrictEqual({
+      outcomes: [
+        "One.",
+        "Two.",
+        "Long.",
+        { failed: "resource.budget_exhausted" },
+      ],
+      sent: 3,
+    });
+  });
+
+  it("keep each App's spend apart, whatever their aliases", async () => {
+    const one = await sealedApp(modelFiles(nearCentBound));
+    const other = await sealedApp(modelFiles(nearCentBound));
+    await approveWriter(one, { perDay: 0.01 });
+    await approveWriter(other, { perDay: 0.01 });
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      longAnswer,
+      answer("Other App."),
+    ]);
+    expect({
+      outcomes: [
+        await draftOn(withGateway, one),
+        await draftOn(withGateway, one),
+        await draftOn(withGateway, other),
+      ],
+      sent: gateway.requests.length,
+    }).toStrictEqual({
+      outcomes: [
+        "Long.",
+        { failed: "resource.budget_exhausted" },
+        "Other App.",
+      ],
+      sent: 2,
+    });
+  });
+
+  it("hold one App request's provider requests to the cap per request, retries included", async () => {
+    const sealed = await sealedApp(modelFiles(overCentBound));
+    await approveWriter(sealed, { perRequest: 0.01 });
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      { status: 500 },
+      { status: 500 },
+      answer("Retried."),
+    ]);
+    // Its longest answer alone could cost more than the cap.
+    const tooDear = await draftOn(withGateway, sealed);
+    const sentTooDear = gateway.requests.length;
+    // A server error's outcome is unknown: that request keeps all it
+    // reserved, so its retry has no room beside it under $0.02.
+    await approveWriter(sealed, { perRequest: 0.02 });
+    const retryHeld = await draftOn(withGateway, sealed);
+    const sentRetryHeld = gateway.requests.length;
+    await approveWriter(sealed, { perRequest: 0.03 });
+    const retried = await draftOn(withGateway, sealed);
+    const refused = await auditedFor("model.refused", sealed.app);
+    expect({
+      tooDear,
+      sentTooDear,
+      retryHeld,
+      sentRetryHeld,
+      retried,
+      sent: gateway.requests.length,
+      because: refused.map(({ detail }) => detail?.because),
+    }).toStrictEqual({
+      tooDear: { failed: "resource.budget_exhausted" },
+      sentTooDear: 0,
+      retryHeld: { failed: "resource.budget_exhausted" },
+      sentRetryHeld: 1,
+      retried: "Retried.",
+      sent: 3,
+      because: ["binding_request", "binding_request"],
+    });
+  });
+
+  it("give a retry the room a request the provider refused left", async () => {
+    // A 429 is refused before the provider took the request on: it costs
+    // nothing, so its retry fits beside it under two cents.
+    const sealed = await sealedApp(modelFiles(overCentBound));
+    await approveWriter(sealed, { perRequest: 0.02 });
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      { status: 429 },
+      answer("After the refusal."),
+    ]);
+    expect({
+      outcome: await draftOn(withGateway, sealed),
+      sent: gateway.requests.length,
+    }).toStrictEqual({ outcome: "After the refusal.", sent: 2 });
+  });
+
+  it("give a second attempt the room the first left once it settled", async () => {
+    // Each attempt reserves some $0.0117 for its half of the bound: both
+    // fit two cents only because the first settled at what it used.
+    const sealed = await sealedApp(modelFiles(300, overCentBound * 2));
+    await approveResourceBinding(env, await person("admin"), {
+      app: sealed.app,
+      alias: "tagger",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+      budget: { perRequest: 0.02 },
+    });
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      answer("not json"),
+      answer('{"tags": ["launch"]}'),
+    ]);
+    const tagged = await call(withGateway, sealed, "assist.tag", {
+      text: "Notes",
+    });
+    expect({
+      outcome: outcomeOf(tagged),
+      sent: gateway.requests.length,
+    }).toStrictEqual({ outcome: { tags: ["launch"] }, sent: 2 });
+  });
+
+  it("refuse a second attempt the room a first of unknown cost still holds", async () => {
+    // The first answer came with no count of what it used: it keeps all
+    // it reserved, and the second attempt has no room beside it.
+    const sealed = await sealedApp(modelFiles(300, overCentBound * 2));
+    await approveResourceBinding(env, await person("admin"), {
+      app: sealed.app,
+      alias: "tagger",
+      target: { kind: "model", model: allowedModel },
+      reviewed: { version: 1 },
+      budget: { perRequest: 0.02 },
+    });
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      { ...answer("not json"), noUsage: true },
+      answer('{"tags": ["never sent"]}'),
+    ]);
+    const tagged = await call(withGateway, sealed, "assist.tag", {
+      text: "Notes",
+    });
+    expect({
+      outcome: outcomeOf(tagged),
+      sent: gateway.requests.length,
+    }).toStrictEqual({
+      outcome: { failed: "resource.budget_exhausted" },
+      sent: 1,
+    });
+  });
+
+  it("tell a busy binding from one used up, worth trying again later", async () => {
+    const sealed = await sealedApp(modelFiles(nearCentBound));
+    await approveWriter(sealed, { perDay: 0.015 });
+    const gate = Promise.withResolvers<unknown>();
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      { ...answer("First."), pause: { at: 2, until: gate.promise } },
+      answer("Once settled."),
+    ]);
+    const running = draftOn(withGateway, sealed);
+    while (gateway.requests.length === 0) {
+      // oxlint-disable-next-line no-await-in-loop -- until the first request is out
+      await scheduler.wait(10);
+    }
+    // The first still holds what it reserved: no room for a second now.
+    const racing = await callOn(withGateway, sealed, "assist.draft");
+    const seenByApp = await callOn(withGateway, sealed, "assist.attempt");
+    gate.resolve(null);
+    const first = await running;
+    // Once the first settled at what it used, there is room again.
+    const after = await draftOn(withGateway, sealed);
+    expect({
+      first,
+      racing: racing.ok
+        ? racing.value
+        : {
+            code: racing.error.code,
+            retryable: racing.error.retryable,
+            details: racing.error.details,
+          },
+      seenByApp: outcomeOf(seenByApp),
+      after,
+      sent: gateway.requests.length,
+    }).toStrictEqual({
+      first: "First.",
+      // A binding's scopes are shared by everyone the App acts for: a
+      // fixed wait, never one that tells when others' requests were sent.
+      racing: {
+        code: "resource.budget_busy",
+        retryable: true,
+        details: { retryAfterSeconds: 60 },
+      },
+      seenByApp: "resource.budget_busy|60",
+      after: "Once settled.",
+      sent: 2,
+    });
+  });
+
+  it("apply a budget approved again to the next request, keeping what was spent", async () => {
+    const sealed = await sealedApp(modelFiles(nearCentBound));
+    await approveWriter(sealed, { perMonth: 0.01 });
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      longAnswer,
+      answer("Raised."),
+      answer("Never sent."),
+    ]);
+    const first = await draftOn(withGateway, sealed);
+    const spent = await draftOn(withGateway, sealed);
+    await approveWriter(sealed, { perMonth: 0.05 });
+    const raised = await draftOn(withGateway, sealed);
+    // Lowered below what was spent and a request's reservation: one
+    // request alone would fit it, had approving again started afresh.
+    await approveWriter(sealed, { perMonth: 0.012, alertAt: 50 });
+    const lowered = await draftOn(withGateway, sealed);
+    const [listed] = await listResourceBindings(env, sealed.owner, sealed.app);
+    const approved = await auditedFor(
+      "app.resource_binding.approved",
+      sealed.app
+    );
+    const budgetsAudited = approved.map(({ detail }) => [
+      detail?.budgetPerRequest,
+      detail?.budgetPerDay,
+      detail?.budgetPerMonth,
+      detail?.budgetAlertAt,
+    ]);
+    expect({
+      outcomes: [first, spent, raised, lowered],
+      sent: gateway.requests.length,
+      shown: [listed?.budget, listed?.budgetDamaged],
+      audited: budgetsAudited.at(-1),
+    }).toStrictEqual({
+      outcomes: [
+        "Long.",
+        { failed: "resource.budget_exhausted" },
+        "Raised.",
+        { failed: "resource.budget_exhausted" },
+      ],
+      sent: 2,
+      shown: [{ perMonth: 0.012, alertAt: 50 }, false],
+      audited: [null, null, 0.012, 50],
+    });
+  });
+
+  it("record that a binding approved without a budget has none", async () => {
+    const sealed = await sealedApp(modelFiles());
+    const binding = await approveWriter(sealed);
+    const [approved] = await auditedFor(
+      "app.resource_binding.approved",
+      sealed.app
+    );
+    expect({
+      budget: binding.budget,
+      audited: [
+        approved?.detail?.budgetPerRequest,
+        approved?.detail?.budgetPerDay,
+        approved?.detail?.budgetPerMonth,
+        approved?.detail?.budgetAlertAt,
+      ],
+    }).toStrictEqual({ budget: null, audited: [null, null, null, null] });
+  });
+
+  it("are set for a model binding only, with at least one cap", async () => {
+    const sealed = await sealedApp(letterFiles());
+    const admin = await person("admin");
+    const refused = {
+      template: await failure(
+        async () =>
+          await approveResourceBinding(env, admin, {
+            ...letterApproval(sealed, crypto.randomUUID(), 1),
+            budget: { perDay: 1 },
+          })
+      ),
+      noCap: await failure(
+        async () =>
+          await approveResourceBinding(env, admin, {
+            ...writerApproval(sealed),
+            budget: { alertAt: 50 },
+          })
+      ),
+    };
+    expect(refused).toStrictEqual({
+      template: "resource.binding_invalid",
+      noCap: "resource.binding_invalid",
+    });
+  });
+
+  it("serve nothing through a binding whose budget is stored damaged, and say so", async () => {
+    const sealed = await sealedApp(modelFiles());
+    const binding = await approveWriter(sealed, { perDay: 1 });
+    await drizzle(env.DB)
+      .update(appResourceBindings)
+      .set({ budget: JSON.stringify({ perDay: "lots" }) })
+      .where(eq(appResourceBindings.id, binding.id));
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      answer("Uncapped."),
+    ]);
+    const outcome = await draftOn(withGateway, sealed);
+    const [listed] = await listResourceBindings(env, sealed.owner, sealed.app);
+    expect({
+      outcome,
+      sent: gateway.requests.length,
+      shown: [listed?.budget, listed?.budgetDamaged],
+    }).toStrictEqual({
+      outcome: { failed: "resource.unavailable" },
+      sent: 0,
+      shown: [null, true],
+    });
   });
 });

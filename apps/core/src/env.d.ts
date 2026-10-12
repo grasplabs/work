@@ -76,6 +76,11 @@ interface __BaseEnv_Env {
    */
   MODEL_BUDGET_MONTH?: string;
   /**
+   * Tests only: the UTC day a model binding's daily cap counts in, such as
+   * `2031-01-02` (src/model-budgets.ts).
+   */
+  MODEL_BUDGET_DAY?: string;
+  /**
    * Tests only: fewer connector events one cron run delivers
    * (src/workflows/connector-events.ts).
    */

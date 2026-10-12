@@ -1105,6 +1105,16 @@ const checkedResourceResult = (
  * `internal.unexpected`, its cause logged. Never the provider's own code,
  * message or details (a connection's ID, the provider's status).
  */
+const busyDetailsSchema = z.object({
+  retryAfterSeconds: z.int().positive().max(3600),
+});
+
+/** What a busy budget's refusal tells App code: when to ask again, if known. */
+const busyDetails = (
+  details: unknown
+): { retryAfterSeconds: number } | undefined =>
+  busyDetailsSchema.safeParse(details).data;
+
 const providerFailure = (error: unknown, requestId: string): Error => {
   const code = isExpectedError(error) ? error.code : undefined;
   if (code === "effect.outcome_unknown" || code === "connect.outcome_unknown") {
@@ -1126,6 +1136,16 @@ const providerFailure = (error: unknown, requestId: string): Error => {
     code === "contract.invalid_resource_result"
   ) {
     return hostError(operationErrors.create(code));
+  }
+  // A budget busy with requests under way: worth trying again, after the
+  // wait the gateway suggested, the only detail passed on.
+  if (code === "resource.budget_busy") {
+    return hostError(
+      operationErrors.create(
+        code,
+        busyDetails(isExpectedError(error) ? error.details : undefined)
+      )
+    );
   }
   log.error("operation.resource_failed", {
     requestId,
