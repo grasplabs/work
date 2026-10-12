@@ -3,6 +3,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { sha256OfBytes } from "@grasp-os/shared/release";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
@@ -14,7 +15,7 @@ import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, createApp, findVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore } from "../src/data-stores.ts";
+import { createStore, openStore } from "../src/data-stores.ts";
 import {
   sdkReleaseManifests,
   sdkResourceBindings,
@@ -114,6 +115,18 @@ const person = async (role: Role): Promise<Acting & Identity> => {
     expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
   };
 };
+
+/** `files` with one more table, `name`, in its schema. */
+const withTable = (
+  files: Record<string, string>,
+  name: string
+): Record<string, string> => ({
+  ...files,
+  "schema.ts": (files["schema.ts"] ?? "").replace(
+    "export default defineSchema({",
+    `export default defineSchema({\n  ${name}: defineTable({ label: v.string() }),`
+  ),
+});
 
 interface Fixture {
   readonly owner: Acting & Identity;
@@ -383,6 +396,34 @@ const rewrite = async (
 };
 
 describe("a sealed release that changed", { timeout: 120_000 }, () => {
+  it("loads exactly the text it hashed, a leading byte order mark included", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    // App source loses a leading mark when built, so storage adds one.
+    const entry = artifactAt(release, "modules/app~operations~notes.js");
+    const stored = await env.FILES.get(artifactKey(entry.sha256));
+    const code = (await stored?.text()) ?? "";
+    const bytes = new Uint8Array([
+      0xef,
+      0xbb,
+      0xbf,
+      ...new TextEncoder().encode(code),
+    ]);
+    const sha256 = await sha256OfBytes(bytes);
+    await env.FILES.put(artifactKey(sha256), bytes);
+    await rewrite(fixture.app, release, {
+      manifest: (manifest) => {
+        manifest.artifacts = release.manifest.artifacts.map((artifact) =>
+          artifact.path === entry.path
+            ? { path: artifact.path, sha256, bytes: bytes.byteLength }
+            : { ...artifact }
+        );
+      },
+    });
+    const loaded = await loadRelease(env, fixture.app, 1);
+    expect(loaded.modules["app~operations~notes.js"]).toBe(`\uFEFF${code}`);
+  });
+
   it("is refused when one of its artifacts' bytes no longer match their hash", async () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);
@@ -644,10 +685,10 @@ JSON.stringify = (value, ...rest) => {
     await expect(sealedWith(changes)).resolves.toBe("version.build_failed");
   });
 
-  it("can't be bound to a store another App's releases use", async () => {
+  it("can't be bound to a store another App's releases use, and never touches its tables", async () => {
     const first = await appWith(notesFiles());
     await seal(first);
-    const second = await appWith(notesFiles());
+    const second = await appWith(withTable(notesFiles(), "beta"));
     await expect(
       failure(
         async () =>
@@ -659,6 +700,35 @@ JSON.stringify = (value, ...rest) => {
           })
       )
     ).resolves.toBe("version.store_bound_elsewhere");
+    const opened = await openStore(env, first.store);
+    await expect(opened.generations(["beta"])).resolves.toStrictEqual({});
+  });
+
+  it("goes to exactly one of two Apps sealed onto a new store at once, and only its tables", async () => {
+    const alpha = await appWith(withTable(notesFiles(), "alpha"));
+    const beta = await appWith(withTable(notesFiles(), "beta"));
+    const store = await createStore(env, alpha.owner);
+    const outcomes = await Promise.all(
+      [alpha, beta].map(
+        async (fixture) =>
+          await failure(
+            async () =>
+              await sealRelease(env, {
+                app: fixture.app,
+                version: 1,
+                store,
+                by: fixture.owner,
+              })
+          )
+      )
+    );
+    expect(outcomes.toSorted()).toStrictEqual([
+      "ok",
+      "version.store_bound_elsewhere",
+    ]);
+    const loser = outcomes[0] === "ok" ? "beta" : "alpha";
+    const opened = await openStore(env, store);
+    await expect(opened.generations([loser])).resolves.toStrictEqual({});
   });
 
   it("seals server code that imports the App's preferences, and functions at any segment a reference doesn't answer", async () => {

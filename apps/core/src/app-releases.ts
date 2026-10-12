@@ -37,7 +37,7 @@ import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -45,7 +45,11 @@ import { findVersion, versionFiles } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
-import { sdkReleaseManifests, sdkResourceBindings } from "./db/core/schema.ts";
+import {
+  sdkReleaseManifests,
+  sdkResourceBindings,
+  sdkStoreOwners,
+} from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import { sandbox } from "./sandbox.ts";
 import { buildAppCode } from "./screens.ts";
@@ -75,7 +79,10 @@ import { buildAppCode } from "./screens.ts";
 // - A release reaches a store it shouldn't: no App code, request or
 //   manifest field names a store. The host that seals binds one, and
 //   records the binding apart from the manifest
-//   (`sdk_resource_bindings`); loading requires both to agree.
+//   (`sdk_resource_bindings`); loading requires both to agree. A store
+//   serves one App for good: the first seal claims it
+//   (`sdk_store_owners`) before defining its tables, and retention never
+//   deletes the claim.
 // - A release vouches for itself: its trust is always `unreviewed` in the
 //   manifest; approval and revocation are the host's records of its hash.
 
@@ -464,6 +471,32 @@ export const loadRelease = async (
 /** The empty dependency lock: server code imports no packages. */
 const emptyLock = "{}";
 
+/**
+ * Claims `store` for `app` for good (`sdk_store_owners`), or refuses
+ * (`version.store_bound_elsewhere`) a store another App claimed: one
+ * statement claims it only where no claim exists, so of two Apps sealing
+ * onto a new store at once, exactly one gets it.
+ */
+const claimStore = async (
+  env: Env,
+  store: StoreId,
+  app: AppId
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  await db
+    .insert(sdkStoreOwners)
+    .values({ storeId: store, appId: app, claimedAt: new Date() })
+    .onConflictDoNothing();
+  const owner = await db
+    .select({ app: sdkStoreOwners.appId })
+    .from(sdkStoreOwners)
+    .where(eq(sdkStoreOwners.storeId, store))
+    .get();
+  if (owner?.app !== app) {
+    throw versionErrors.create("version.store_bound_elsewhere");
+  }
+};
+
 /** The App's schema has tables, so it needs a store. */
 const hasTables = (app: AppManifest): boolean =>
   Object.keys(app.schema.tables).length > 0;
@@ -531,22 +564,9 @@ export const sealRelease = async (
     if (request.store === undefined) {
       throw versionErrors.create("version.store_unbound");
     }
-    // A store serves one App's releases: refused before its tables are
-    // touched (and again where the binding is written, below).
-    const other = await drizzle(env.DB)
-      .select({ app: sdkResourceBindings.resourceId })
-      .from(sdkResourceBindings)
-      .where(
-        and(
-          eq(sdkResourceBindings.kind, "store"),
-          eq(sdkResourceBindings.targetId, request.store),
-          ne(sdkResourceBindings.resourceId, app)
-        )
-      )
-      .get();
-    if (other !== undefined) {
-      throw versionErrors.create("version.store_bound_elsewhere");
-    }
+    // Claimed before its tables are touched, so a seal that loses the
+    // store never defines its tables there.
+    await claimStore(env, request.store, app);
     const opened = await openStore(env, request.store);
     const defined = await opened.defineTables(manifestText(manifest.schema));
     if (defined.schemaHash !== schema) {
@@ -636,16 +656,15 @@ export const sealRelease = async (
       ...(store === null
         ? []
         : [
-            // The target only while no other App's release is bound to
-            // the store: otherwise NULL, which the column refuses, and the
-            // whole seal with it.
+            // The target only while this App owns the store: otherwise
+            // NULL, which the column refuses, and the whole seal with it.
             db.insert(sdkResourceBindings).values({
               resourceId: app,
               resourceVersion: version,
               alias: store.alias,
               kind: "store" as const,
-              targetId: sql`(SELECT ${store.storeId} WHERE NOT EXISTS (SELECT 1 FROM sdk_resource_bindings
-                WHERE kind = 'store' AND target_id = ${store.storeId} AND resource_id <> ${app}))`,
+              targetId: sql`(SELECT ${store.storeId} WHERE EXISTS (SELECT 1 FROM sdk_store_owners
+                WHERE store_id = ${store.storeId} AND app_id = ${app}))`,
               schemaHash: store.schemaHash,
               manifestHash: hash,
             }),

@@ -653,6 +653,18 @@ export const sdkResourceBindings = sqliteTable(
 );
 
 /**
+ * The App a store serves, claimed by the first seal that binds it and kept
+ * for good: retention deletes releases and their bindings, never this. So
+ * a store an App stopped using never comes to serve another App, which
+ * would read what the first left behind.
+ */
+export const sdkStoreOwners = sqliteTable("sdk_store_owners", {
+  storeId: text("store_id").primaryKey(),
+  appId: text("app_id").notNull(),
+  claimedAt: timestamp("claimed_at").notNull(),
+});
+
+/**
  * Which App a record type in a collection (a Knowledge collection, by ID)
  * belongs to: the first whose declaration took effect there
  * (knowledge/record-types.ts). Claimed when an App's write permission on

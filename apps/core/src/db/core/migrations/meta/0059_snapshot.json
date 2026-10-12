@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a49bfd91-4824-40aa-8d34-b064dae941a8",
+  "id": "66bbc70a-e217-4f4c-9d36-a0d002c2d10c",
   "prevId": "243b95ae-909f-4039-bb2a-4d64a41f665f",
   "tables": {
     "accounts": {
@@ -3023,6 +3023,37 @@
           "name": "sdk_resource_bindings_resource_id_resource_version_alias_pk"
         }
       },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "sdk_store_owners": {
+      "name": "sdk_store_owners",
+      "columns": {
+        "store_id": {
+          "name": "store_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "app_id": {
+          "name": "app_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "claimed_at": {
+          "name": "claimed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

@@ -19,4 +19,9 @@ CREATE TABLE `sdk_resource_bindings` (
 	PRIMARY KEY(`resource_id`, `resource_version`, `alias`)
 );
 --> statement-breakpoint
-CREATE INDEX `sdk_resource_bindings_target` ON `sdk_resource_bindings` (`kind`,`target_id`);
+CREATE INDEX `sdk_resource_bindings_target` ON `sdk_resource_bindings` (`kind`,`target_id`);--> statement-breakpoint
+CREATE TABLE `sdk_store_owners` (
+	`store_id` text PRIMARY KEY NOT NULL,
+	`app_id` text NOT NULL,
+	`claimed_at` integer NOT NULL
+);
