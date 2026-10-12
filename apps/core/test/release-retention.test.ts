@@ -365,12 +365,96 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     );
   });
 
+  it("skipped by a seal for a mark finished just after are reserved by it all the same", async () => {
+    const sha256 = await sha256Hex(serverModuleSource);
+    await env.DB.prepare("DELETE FROM sdk_release_artifacts WHERE sha256 = ?")
+      .bind(sha256)
+      .run();
+    const owner = (await markArtifact(env, sha256)) ?? "";
+    const fixture = await appWith(files("one"));
+    const batch = env.DB.batch.bind(env.DB);
+    let finished = false;
+    // The deleter finishes right after the seal's reservation batch
+    // skipped these bytes for its mark, before the seal looks again.
+    const finishing = async <T>(
+      statements: D1PreparedStatement[]
+    ): Promise<D1Result<T>[]> => {
+      const results = await batch<T>(statements);
+      if (!finished) {
+        const [skipped, others] = await Promise.all([
+          env.DB.prepare(
+            "SELECT 1 FROM sdk_release_artifacts WHERE sha256 = ? AND app_id = ?"
+          )
+            .bind(sha256, fixture.app)
+            .first(),
+          env.DB.prepare(
+            "SELECT 1 FROM sdk_release_artifacts WHERE app_id = ? LIMIT 1"
+          )
+            .bind(fixture.app)
+            .first(),
+        ]);
+        if (skipped === null && others !== null) {
+          finished = true;
+          await finishDeletion(env, sha256, owner);
+        }
+      }
+      return results;
+    };
+    Reflect.set(env.DB, "batch", finishing);
+    let release: Release;
+    try {
+      release = await seal(fixture);
+    } finally {
+      Reflect.set(env.DB, "batch", batch);
+    }
+    const reserved = await env.DB.prepare(
+      "SELECT 1 AS reserved FROM sdk_release_artifacts WHERE sha256 = ? AND app_id = ?"
+    )
+      .bind(sha256, fixture.app)
+      .first<{ reserved: number }>();
+    expect([finished, reserved?.reserved]).toStrictEqual([true, 1]);
+    await expect(stored(release, ".grasp/server.ts")).resolves.toBeTruthy();
+  });
+
+  it("a seal named and lost the reservation of keep it from sealing", async () => {
+    const fixture = await appWith(files("one"));
+    const sha256 = await sha256Hex(serverModuleSource);
+    const put = env.FILES.put.bind(env.FILES);
+    // A reservation gone between the seal reserving and recording it.
+    const losing = async (
+      ...args: Parameters<typeof put>
+    ): ReturnType<typeof put> => {
+      await env.DB.prepare(
+        "DELETE FROM sdk_release_artifacts WHERE sha256 = ? AND app_id = ?"
+      )
+        .bind(sha256, fixture.app)
+        .run();
+      return await put(...args);
+    };
+    Reflect.set(env.FILES, "put", losing);
+    let outcome: string;
+    try {
+      outcome = await failure(async () => await seal(fixture));
+    } finally {
+      Reflect.set(env.FILES, "put", put);
+    }
+    expect(outcome).toBe("version.seal_busy");
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.not_sealed");
+  });
+
   it("being deleted by a deleter that stopped are taken over by a seal", async () => {
     const sha256 = await sha256Hex(serverModuleSource);
     await env.DB.prepare("DELETE FROM sdk_release_artifacts WHERE sha256 = ?")
       .bind(sha256)
       .run();
-    await markArtifact(env, sha256, new Date(Date.now() - 2 * markTakeoverMs));
+    // A mark its deleter placed long ago, and never finished.
+    await env.DB.prepare(
+      "INSERT INTO sdk_artifact_deletions (sha256, owner, started_at) VALUES (?, 'stopped', ?)"
+    )
+      .bind(sha256, Date.now() - 2 * markTakeoverMs)
+      .run();
     const fixture = await appWith(files("one"));
     const release = await seal(fixture);
     const marks = await env.DB.prepare(
@@ -466,6 +550,55 @@ describe("bytes left without a reservation", { timeout: 120_000 }, () => {
       hashes.map(async (sha256) => await env.FILES.head(artifactKey(sha256)))
     );
     expect(left.filter((object) => object !== null)).toHaveLength(0);
+  });
+
+  it("queued again while a sweep deletes them stay queued for the next", async () => {
+    const sha256 = await sha256Hex(crypto.randomUUID());
+    await env.FILES.put(artifactKey(sha256), "queued");
+    await env.DB.prepare(
+      "INSERT INTO sdk_artifact_candidates (sha256, queued_at) VALUES (?, ?)"
+    )
+      .bind(sha256, Date.now())
+      .run();
+    const remove = env.FILES.delete.bind(env.FILES);
+    // Another reservation of them goes, and queues them again, mid-delete.
+    const requeueing = async (
+      ...args: Parameters<typeof remove>
+    ): ReturnType<typeof remove> => {
+      if (args[0] === artifactKey(sha256)) {
+        await env.DB.prepare(
+          "UPDATE sdk_artifact_candidates SET queued_at = queued_at + 1 WHERE sha256 = ?"
+        )
+          .bind(sha256)
+          .run();
+      }
+      await remove(...args);
+    };
+    Reflect.set(env.FILES, "delete", requeueing);
+    try {
+      await sweepsAt(new Date());
+    } finally {
+      Reflect.set(env.FILES, "delete", remove);
+    }
+    const queued = await env.DB.prepare(
+      "SELECT sha256 FROM sdk_artifact_candidates WHERE sha256 = ?"
+    )
+      .bind(sha256)
+      .all();
+    expect(queued.results).toStrictEqual([{ sha256 }]);
+  });
+
+  it("are deleted by a sweep that starts late, its marks placed at the real time", async () => {
+    const sha256 = await sha256Hex(crypto.randomUUID());
+    await env.FILES.put(artifactKey(sha256), "queued");
+    await env.DB.prepare(
+      "INSERT INTO sdk_artifact_candidates (sha256, queued_at) VALUES (?, ?)"
+    )
+      .bind(sha256, Date.now())
+      .run();
+    // Scheduled 20 minutes ago: a mark placed then would be past its deadline.
+    await sweepsAt(new Date(Date.now() - 20 * 60_000));
+    await expect(env.FILES.head(artifactKey(sha256))).resolves.toBeNull();
   });
 
   it("a sweep queued and didn't get to are dealt with by the next", async () => {

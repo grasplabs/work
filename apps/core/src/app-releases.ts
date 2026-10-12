@@ -47,6 +47,7 @@ import type { Acting } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
 import {
   sdkArtifactDeletions,
+  sdkReleaseArtifacts,
   sdkReleaseManifests,
   sdkReleaseTombstones,
   sdkResourceBindings,
@@ -543,19 +544,39 @@ const reserveArtifacts = async (
         ).bind(sha256, key.app, key.version, now)
       )
     );
+    // Done only once every hash is reserved for this release: a hash the
+    // batch skipped for a mark whose owner finished it just after is
+    // simply tried again.
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const reserved = await drizzle(env.DB)
+      .select({ sha256: sdkReleaseArtifacts.sha256 })
+      .from(sdkReleaseArtifacts)
+      .where(
+        and(
+          eq(sdkReleaseArtifacts.appId, key.app),
+          eq(sdkReleaseArtifacts.version, key.version),
+          inArray(sdkReleaseArtifacts.sha256, unique)
+        )
+      );
+    const have = new Set(reserved.map(({ sha256 }) => sha256));
+    const missing = unique.filter((sha256) => !have.has(sha256));
+    if (missing.length === 0) {
+      return;
+    }
     // oxlint-disable-next-line no-await-in-loop -- see above
     const marked = await drizzle(env.DB)
       .select({ sha256: sdkArtifactDeletions.sha256 })
       .from(sdkArtifactDeletions)
-      .where(inArray(sdkArtifactDeletions.sha256, unique));
+      .where(inArray(sdkArtifactDeletions.sha256, missing));
     if (marked.length === 0) {
-      return;
+      // Unmarked since the batch: reserved on the next try, at once.
+      continue;
     }
     for (const { sha256 } of marked) {
       // Only a mark whose owner stopped is taken over; a live one is
       // its owner's to finish.
       // oxlint-disable-next-line no-await-in-loop -- see above
-      const owner = await markArtifact(env, sha256, new Date(now));
+      const owner = await markArtifact(env, sha256);
       if (owner !== undefined) {
         // oxlint-disable-next-line no-await-in-loop -- see above
         await finishDeletion(env, sha256, owner);
@@ -785,7 +806,15 @@ export const sealRelease = async (
       db.insert(sdkReleaseManifests).values({
         appId: app,
         version,
-        manifestHash: hash,
+        // The hash only while every artifact the manifest names is
+        // reserved for this release: otherwise NULL, which the column
+        // refuses, and the whole seal with it. Reservations go only with
+        // the manifest, so no sweep deletes bytes a sealed release names.
+        manifestHash: sql`(SELECT ${hash} WHERE NOT EXISTS (
+          SELECT 1 FROM json_each(${text}, '$.artifacts') AS named
+          WHERE NOT EXISTS (SELECT 1 FROM sdk_release_artifacts AS reserved
+            WHERE reserved.app_id = ${app} AND reserved.version = ${version}
+              AND reserved.sha256 = json_extract(named.value, '$.sha256'))))`,
         manifest: text,
         sealedAt: new Date(),
       }),
@@ -826,6 +855,14 @@ export const sealRelease = async (
       )
     ) {
       throw versionErrors.create("version.store_bound_elsewhere");
+    }
+    if (
+      error instanceof Error &&
+      error.message.includes(
+        "NOT NULL constraint failed: sdk_release_manifests.manifest_hash"
+      )
+    ) {
+      throw versionErrors.create("version.seal_busy");
     }
     if (!isUniqueViolation(error)) {
       throw error;

@@ -392,15 +392,17 @@ export const revokeRelease = async (
 /**
  * Marks `sha256` for deletion, for a new owner, where no reservation
  * names it: a new mark, or one older than `markTakeoverMs`, taken over.
+ * Placed at the real time, never a sweep's scheduled one, so its deadline
+ * is truly 15 minutes off.
  * The owner, when this caller now owns the mark; undefined otherwise (the
  * bytes are reserved, or another live deleter owns the mark).
  */
 export const markArtifact = async (
   env: Env,
-  sha256: string,
-  now = new Date()
+  sha256: string
 ): Promise<string | undefined> => {
   const owner = crypto.randomUUID();
+  const now = Date.now();
   const marked = await env.DB.prepare(
     `INSERT INTO sdk_artifact_deletions (sha256, owner, started_at)
      SELECT ?1, ?2, ?3 WHERE NOT EXISTS (SELECT 1 FROM sdk_release_artifacts WHERE sha256 = ?1)
@@ -408,7 +410,7 @@ export const markArtifact = async (
        WHERE sdk_artifact_deletions.started_at < ?4
      RETURNING owner`
   )
-    .bind(sha256, owner, now.getTime(), now.getTime() - markTakeoverMs)
+    .bind(sha256, owner, now, now - markTakeoverMs)
     .all<{ owner: string }>();
   return marked.results[0]?.owner === owner ? owner : undefined;
 };
@@ -476,16 +478,23 @@ export const finishDeletion = async (
  */
 export const deleteUnreservedArtifacts = async (
   env: Env,
-  hashes: readonly string[],
-  now = new Date()
+  hashes: readonly string[]
 ): Promise<void> => {
   for (const sha256 of hashes) {
-    // One after the other: each is a mark, a delete and an unmark.
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    const owner = await markArtifact(env, sha256, now);
-    if (owner !== undefined) {
+    // One after the other: each is a mark, a delete and an unmark; one
+    // that fails leaves the rest to go on.
+    try {
       // oxlint-disable-next-line no-await-in-loop -- see above
-      await finishDeletion(env, sha256, owner);
+      const owner = await markArtifact(env, sha256);
+      if (owner !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await finishDeletion(env, sha256, owner);
+      }
+    } catch (error) {
+      log.error("release.artifact_delete_failed", {
+        sha256,
+        ...errorFields(error),
+      });
     }
   }
 };
@@ -497,31 +506,40 @@ export const deleteUnreservedArtifacts = async (
  * finish, or a takeover's). Bytes whose deletion failed or was abandoned
  * stay queued for the next sweep.
  */
-const drainCandidates = async (env: Env, now: Date): Promise<void> => {
+const drainCandidates = async (env: Env): Promise<void> => {
   const db = drizzle(env.DB);
   let after = "";
   for (let page = 0; page < candidatePages; page += 1) {
     // Pages one after the other, by hash, so none is skipped.
     // oxlint-disable-next-line no-await-in-loop -- see above
     const queued = await db
-      .select({ sha256: sdkArtifactCandidates.sha256 })
+      .select({
+        sha256: sdkArtifactCandidates.sha256,
+        queuedAt: sdkArtifactCandidates.queuedAt,
+      })
       .from(sdkArtifactCandidates)
       .where(sql`${sdkArtifactCandidates.sha256} > ${after}`)
       .orderBy(sdkArtifactCandidates.sha256)
       .limit(candidatePage);
-    for (const { sha256 } of queued) {
+    for (const { sha256, queuedAt } of queued) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- see above
-        const owner = await markArtifact(env, sha256, now);
+        const owner = await markArtifact(env, sha256);
         const dealt =
           owner === undefined ||
           // oxlint-disable-next-line no-await-in-loop -- see above
           (await finishDeletion(env, sha256, owner));
         if (dealt) {
+          // Only as read: queued again since, it is the next sweep's.
           // oxlint-disable-next-line no-await-in-loop -- see above
           await db
             .delete(sdkArtifactCandidates)
-            .where(eq(sdkArtifactCandidates.sha256, sha256));
+            .where(
+              and(
+                eq(sdkArtifactCandidates.sha256, sha256),
+                eq(sdkArtifactCandidates.queuedAt, queuedAt)
+              )
+            );
         }
       } catch (error) {
         log.error("release.artifact_delete_failed", {
@@ -538,11 +556,14 @@ const drainCandidates = async (env: Env, now: Date): Promise<void> => {
   }
 };
 
-/** Queues the bytes of the reservations `where` selects, to be dealt with. */
+/**
+ * Queues the bytes of the reservations `where` selects, to be dealt with,
+ * at the real time: queued again, an entry's time is renewed, so a drain
+ * that read it before dequeues it no more.
+ */
 const queueReserved = (
   db: ReturnType<typeof drizzle>,
-  where: SQL | undefined,
-  now: Date
+  where: SQL | undefined
 ) =>
   db
     .insert(sdkArtifactCandidates)
@@ -550,12 +571,15 @@ const queueReserved = (
       db
         .selectDistinct({
           sha256: sdkReleaseArtifacts.sha256,
-          queuedAt: sql<Date>`${now.getTime()}`.as("queued_at"),
+          queuedAt: sql<Date>`${Date.now()}`.as("queued_at"),
         })
         .from(sdkReleaseArtifacts)
         .where(where)
     )
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: sdkArtifactCandidates.sha256,
+      set: { queuedAt: sql`excluded.queued_at` },
+    });
 
 /** Deletes one release found unreferenced a grace ago, if it still is. */
 const deleteRelease = async (
@@ -624,8 +648,7 @@ const deleteRelease = async (
         eq(sdkReleaseArtifacts.appId, key.app),
         eq(sdkReleaseArtifacts.version, key.version),
         gone
-      ),
-      now
+      )
     ),
     db
       .delete(sdkReleaseArtifacts)
@@ -724,16 +747,13 @@ export const sweepReleases = async (env: Env, now: Date): Promise<void> => {
     .select({ sha256: sdkArtifactDeletions.sha256 })
     .from(sdkArtifactDeletions)
     .where(
-      lt(
-        sdkArtifactDeletions.startedAt,
-        new Date(now.getTime() - markTakeoverMs)
-      )
+      // By the real time, as marks are placed by it.
+      lt(sdkArtifactDeletions.startedAt, new Date(Date.now() - markTakeoverMs))
     )
     .limit(sweepBatch);
   await deleteUnreservedArtifacts(
     env,
-    stale.map(({ sha256 }) => sha256),
-    now
+    stale.map(({ sha256 }) => sha256)
   );
   // Reservations of seals that never finished, a grace ago: their bytes
   // queued as they go, in one transaction.
@@ -747,8 +767,8 @@ export const sweepReleases = async (env: Env, now: Date): Promise<void> => {
         AND manifests.version = ${sdkReleaseArtifacts.version})`
   );
   await db.batch([
-    queueReserved(db, orphaned, now),
+    queueReserved(db, orphaned),
     db.delete(sdkReleaseArtifacts).where(orphaned),
   ]);
-  await drainCandidates(env, now);
+  await drainCandidates(env);
 };
