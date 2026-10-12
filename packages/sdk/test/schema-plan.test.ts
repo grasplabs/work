@@ -198,6 +198,40 @@ describe("safe changes", () => {
     expect(manifestText(contractOf(plan))).toBe(manifestText(contract));
   });
 
+  test("an enum's members in another order are no change; a union's are", () => {
+    const status = (values: [string, ...string[]]) =>
+      notes({ ...noteFields, status: v.enum(values).optional() });
+    const contract = contractOf(
+      planSchemaChange(null, status(["open", "done"]))
+    );
+    const plan = planSchemaChange(contract, status(["done", "open"]));
+    expect(plan).toMatchObject({ accepted: true, changed: false });
+    expect(manifestText(contractOf(plan))).toBe(manifestText(contract));
+    expect(
+      refusedOf(planSchemaChange(contract, status(["done", "open", "late"])))
+    ).toStrictEqual([
+      { table: "notes", field: "status", reason: "field_changed" },
+    ]);
+    const either = (first: "string" | "number") =>
+      notes({
+        ...noteFields,
+        size:
+          first === "string"
+            ? v.union(v.string(), v.number()).optional()
+            : v.union(v.number(), v.string()).optional(),
+      });
+    expect(
+      refusedOf(
+        planSchemaChange(
+          contractOf(planSchemaChange(null, either("string"))),
+          either("number")
+        )
+      )
+    ).toStrictEqual([
+      { table: "notes", field: "size", reason: "field_changed" },
+    ]);
+  });
+
   test("an older version is compatible with the contract it grew into", () => {
     const v2 = notes({ ...noteFields, category: v.string().optional() });
     const contract = contractOf(planSchemaChange(v1, v2));

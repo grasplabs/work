@@ -1,4 +1,8 @@
+import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
+
 import { diffSchemaManifests } from "./schema-diff.ts";
+import type { FieldChange } from "./schema-diff.ts";
 import {
   manifestText,
   manifestVersion,
@@ -97,6 +101,52 @@ export interface RefusedPlan extends PlannedChanges {
 
 export type SchemaPlan = AcceptedPlan | RefusedPlan;
 
+/** `value` read as JSON, as a manifest's descriptors always are. */
+const toJson = (value: unknown): Json =>
+  // SAFETY: descriptors are JSON (they are read from and written to
+  // manifest text); a round trip through JSON text gives a JSON value.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, unicorn/prefer-structured-clone -- see SAFETY; not a clone, a reading as JSON
+  JSON.parse(JSON.stringify(value)) as Json;
+
+/** Keys whose values are data, not descriptors: never normalized. */
+const dataKeys: ReadonlySet<string> = new Set(["defaultValue", "value"]);
+
+/**
+ * `value`, a descriptor as JSON, with every enum's members sorted: an
+ * enum is a set of strings, so declaring its members in another order
+ * permits exactly the same values. A union's members keep their order,
+ * which can decide how a value is read; data (defaults, literals) is
+ * left as it is.
+ */
+const enumsSorted = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((item: unknown) => enumsSorted(item));
+  }
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+  const normalized = new Map<string, unknown>();
+  for (const [key, part] of Object.entries(value)) {
+    normalized.set(key, dataKeys.has(key) ? part : enumsSorted(part));
+  }
+  const values = normalized.get("values");
+  if (normalized.get("kind") === "enum" && Array.isArray(values)) {
+    normalized.set("values", values.map(String).toSorted());
+  }
+  return Object.fromEntries(normalized);
+};
+
+/**
+ * Whether two descriptors of a field permit the same values, enum
+ * members in any order (`enumsSorted`): such a change is no change to the
+ * data a store holds.
+ */
+const sameUpToEnumOrder = (before: unknown, after: unknown): boolean =>
+  before !== undefined &&
+  after !== undefined &&
+  canonicalJson(toJson(enumsSorted(before))) ===
+    canonicalJson(toJson(enumsSorted(after)));
+
 /** The contract of a store that holds nothing yet. */
 const emptyContract: SchemaManifest = {
   manifestVersion,
@@ -162,6 +212,44 @@ const unionOf = (
   }
 };
 
+/** Where a field's change goes: refused, added or retained. */
+interface FieldOutcomes {
+  readonly refused: PlanRefusal[];
+  readonly addedFields: PlannedField[];
+  readonly retainedFields: PlannedField[];
+}
+
+/** Classifies one change of a field of a table on both sides (see the header). */
+const classifyField = (
+  change: FieldChange,
+  { refused, addedFields, retainedFields }: FieldOutcomes
+): void => {
+  const { table, field } = change;
+  if (change.change === "changed") {
+    if (!sameUpToEnumOrder(change.before, change.after)) {
+      refused.push({ table, field, reason: "field_changed" });
+    }
+  } else if (change.change === "added") {
+    const presence = change.after?.presence;
+    if (presence === "optional") {
+      addedFields.push({ table, field });
+    } else {
+      refused.push({
+        table,
+        field,
+        reason:
+          presence === "default"
+            ? "defaulted_field_added"
+            : "required_field_added",
+      });
+    }
+  } else if (change.before?.presence === "optional") {
+    retainedFields.push({ table, field });
+  } else {
+    refused.push({ table, field, reason: "required_field_removed" });
+  }
+};
+
 /**
  * How `contract`, a store's data contract (null for a store holding
  * nothing yet), changes when the store is handed `target` (see the
@@ -187,30 +275,8 @@ export const planSchemaChange = (
   const addedFields: PlannedField[] = [];
   const retainedFields: PlannedField[] = [];
   for (const change of diff.fields) {
-    const { table, field } = change;
-    if (!onBothSides(table)) {
-      continue;
-    }
-    if (change.change === "changed") {
-      refused.push({ table, field, reason: "field_changed" });
-    } else if (change.change === "added") {
-      const presence = change.after?.presence;
-      if (presence === "optional") {
-        addedFields.push({ table, field });
-      } else {
-        refused.push({
-          table,
-          field,
-          reason:
-            presence === "default"
-              ? "defaulted_field_added"
-              : "required_field_added",
-        });
-      }
-    } else if (change.before?.presence === "optional") {
-      retainedFields.push({ table, field });
-    } else {
-      refused.push({ table, field, reason: "required_field_removed" });
+    if (onBothSides(change.table)) {
+      classifyField(change, { refused, addedFields, retainedFields });
     }
   }
   for (const { table } of diff.access) {
