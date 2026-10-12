@@ -425,6 +425,9 @@ const planRecord = (
 
 /** A schema's change of a store's contract, worked out before it applies. */
 interface ContractChange {
+  /** The contract's hash as the store's row holds it: what the write compares. */
+  readonly stored: string | null;
+  /** The hash of the contract planned from: the row's, or one rebuilt. */
   readonly base: string | null;
   readonly hash: string;
   readonly text: string;
@@ -508,10 +511,14 @@ export class StoreHost {
    * kept), and refused otherwise (`migration.required`, listing each
    * change and why), before anything is written. So every record the
    * store holds fits the contract, and every version sealed on it stays
-   * compatible, a rollback included. A store with records or schemas but
-   * no contract, or a contract that doesn't check out, refuses every
-   * schema (`migration.metadata_missing`, `migration.metadata_corrupt`):
-   * guessing could lose data.
+   * compatible, a rollback included. The contract is checked against the
+   * store's own recorded schemas on every call: each must fit it
+   * unchanged, or it is `migration.metadata_corrupt`, as is one whose text
+   * doesn't read, isn't canonical or doesn't hash to its hash. A store
+   * whose row holds no contract has it rebuilt from those recorded
+   * schemas, folded oldest first as they were accepted; it refuses
+   * (`migration.metadata_missing`) only when that fold refuses, or holds
+   * records without any recorded schema. Nothing is guessed.
    *
    * Everything lands in one transaction, or nothing does: new tables with
    * the IDs minted for them (a name differing from an existing one only
@@ -565,7 +572,9 @@ export class StoreHost {
         return { schemaHash, ...defined };
       }
       if (attempt >= 3) {
-        throw new Error("The store's tables kept changing while defined");
+        // Lost to other schemas applied at once, each time: refused as
+        // retryable, never left to a generic failure.
+        throw migrationErrors.create("migration.busy", { retryable: true });
       }
     }
   }
@@ -612,10 +621,7 @@ export class StoreHost {
     if (after.size > storeMaxTables) {
       throw dataErrors.create("data.too_many_tables");
     }
-    const base = row === undefined ? null : await contractOf(row);
-    if (base === null) {
-      this.#requireEmpty();
-    }
+    const { stored, base } = await this.#currentContract(row);
     const plan = planSchemaChange(base?.manifest ?? null, target);
     if (!plan.accepted) {
       throw migrationErrors.create("migration.required", {
@@ -632,6 +638,7 @@ export class StoreHost {
       contract: hash,
     });
     return {
+      stored,
       base: base?.hash ?? null,
       hash,
       text: contractText,
@@ -653,18 +660,93 @@ export class StoreHost {
   }
 
   /**
-   * Refuses (`migration.metadata_missing`) a store without a contract
-   * that holds records or schemas: a missing contract is an empty
-   * baseline only for a store holding nothing.
+   * The store's contract (see `defineTables`), checked against what the
+   * store itself recorded: every schema it holds must fit the contract,
+   * adding no table or field to it, or the contract is `migration.metadata_corrupt`, whatever
+   * its hash says. A store whose row holds no contract has it rebuilt from
+   * its own recorded schemas, oldest first, each planned onto the ones
+   * before it, as they were accepted; nothing is guessed, so a fold that
+   * refuses is `migration.metadata_missing`, and so are records without
+   * any recorded schema. Null for a store holding nothing.
    */
-  #requireEmpty(): void {
-    const held =
-      this.#db.select({ id: records.recordId }).from(records).limit(1).get() ??
-      this.#db
-        .select({ hash: schemas.schemaHash })
-        .from(schemas)
-        .limit(1)
-        .get();
+  async #currentContract(
+    row:
+      | { contractHash: string | null; contractManifest: string | null }
+      | undefined
+  ): Promise<{ stored: string | null; base: StoreContract | null }> {
+    const recorded = this.#recordedSchemas();
+    const kept = row === undefined ? null : await contractOf(row);
+    if (kept !== null) {
+      for (const manifest of recorded) {
+        // Its tables, fields and access all in the contract already; its
+        // indexes are physical, installed whatever the contract lists.
+        const plan = planSchemaChange(kept.manifest, manifest);
+        if (
+          !plan.accepted ||
+          plan.addedTables.length > 0 ||
+          plan.addedFields.length > 0
+        ) {
+          throw migrationErrors.create("migration.metadata_corrupt");
+        }
+      }
+      return { stored: kept.hash, base: kept };
+    }
+    if (recorded.length === 0) {
+      this.#requireNoRecords();
+      return { stored: null, base: null };
+    }
+    let folded: SchemaManifest | null = null;
+    for (const manifest of recorded) {
+      const plan = planSchemaChange(folded, manifest);
+      if (!plan.accepted) {
+        throw migrationErrors.create("migration.metadata_missing");
+      }
+      folded = plan.contract;
+    }
+    if (folded === null) {
+      throw new Error("A fold of recorded schemas left no contract");
+    }
+    return {
+      stored: null,
+      base: { hash: await sha256Hex(manifestText(folded)), manifest: folded },
+    };
+  }
+
+  /**
+   * Every schema the store recorded, oldest first (ties by hash), read
+   * back; one that doesn't read is `migration.metadata_corrupt`.
+   */
+  #recordedSchemas(): SchemaManifest[] {
+    return this.#db
+      .select({ manifest: schemas.manifest })
+      .from(schemas)
+      .orderBy(asc(schemas.createdAt), asc(schemas.schemaHash))
+      .all()
+      .map(({ manifest }) => {
+        try {
+          return readSchemaManifest(manifest).manifest;
+        } catch (error) {
+          if (
+            error instanceof SchemaDefinitionError ||
+            error instanceof ValueDefinitionError
+          ) {
+            throw migrationErrors.create("migration.metadata_corrupt");
+          }
+          throw error;
+        }
+      });
+  }
+
+  /**
+   * Refuses (`migration.metadata_missing`) records in a store that
+   * recorded no schema: there is nothing to rebuild their contract from.
+   */
+  #requireNoRecords(): void {
+    const held = this.#db
+      .select({ id: records.recordId })
+      .from(records)
+      .limit(1)
+      .get();
     if (held !== undefined) {
       throw migrationErrors.create("migration.metadata_missing");
     }
@@ -694,11 +776,15 @@ export class StoreHost {
       .select({ contractHash: store.contractHash })
       .from(store)
       .get();
-    if ((current?.contractHash ?? null) !== change.base) {
+    if ((current?.contractHash ?? null) !== change.stored) {
       return null;
     }
     if (change.base === null) {
-      this.#requireEmpty();
+      // Planned from nothing: still nothing, or plan again.
+      if (this.#recordedSchemas().length > 0) {
+        return null;
+      }
+      this.#requireNoRecords();
     }
     const now = Date.now();
     for (const name of names) {
@@ -736,7 +822,7 @@ export class StoreHost {
       .values({ schemaHash, manifest: text, createdAt: now })
       .onConflictDoNothing()
       .run();
-    if (change.hash !== change.base) {
+    if (change.hash !== change.stored) {
       this.#db
         .update(store)
         .set({ contractHash: change.hash, contractManifest: change.text })
@@ -786,8 +872,10 @@ export class StoreHost {
       .where(eq(schemaActivations.receiptId, receiptId))
       .get();
     if (kept !== undefined) {
+      // The receipt's own: what its first application left, so its hash
+      // and plan always describe the same change.
       return {
-        hash: change.hash,
+        hash: kept.contractHash,
         planHash: kept.planHash,
         changed: kept.contractHash !== kept.baseHash,
         receiptId,

@@ -377,6 +377,10 @@ export type SchemaConsumer = z.infer<typeof schemaConsumerSchema>;
  * was named). Applying the same schema again answers the first receipt.
  */
 export interface AppliedContract {
+  /**
+   * The contract's hash after the change: for a receipt answered again,
+   * the one its first application left, so it always matches `planHash`.
+   */
   hash: string;
   planHash: string;
   changed: boolean;
@@ -460,15 +464,19 @@ export const dataErrors = defineErrorFamily({
 
 /**
  * Why a store refused a schema it was handed (spec 17): the change needs
- * a migration (`details.changes` lists each change and why), or the
- * store's record of its contract is missing or damaged, which blocks
- * every schema change until repaired, since guessing could lose data.
+ * a migration (`details.changes` lists each change and why); the store's
+ * record of its contract disagrees with its own recorded schemas, or
+ * can't be rebuilt from them, which blocks every schema change until
+ * repaired, since guessing could lose data; or other schemas kept
+ * changing the contract meanwhile (retryable).
  */
 export const migrationErrors = defineErrorFamily({
   "migration.required":
     "This schema change can't be applied on its own: it needs a migration. Add only new tables, optional fields and indexes, or keep the fields as they were.",
   "migration.metadata_missing":
-    "This store holds data but no record of its schema contract, so no schema change can be applied until it is repaired.",
+    "This store's schema contract is missing and can't be rebuilt from the schemas it recorded, so no schema change can be applied until it is repaired.",
+  "migration.busy":
+    "This store kept changing while the schema was applied. Try again in a moment.",
   "migration.metadata_corrupt":
     "This store's record of its schema contract is damaged, so no schema change can be applied until it is repaired.",
 });

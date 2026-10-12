@@ -6,6 +6,7 @@ import {
   schemaManifest,
 } from "@grasp-os/sdk/host";
 import type { AccessMode } from "@grasp-os/sdk/host";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import type {
   Commit,
   Committed,
@@ -156,6 +157,14 @@ const atOnce = async (
             await instance.defineTables(store.id, manifest, by)
         )
       )
+  );
+
+/** JSON text of `value` with every object's keys in reverse order. */
+const reversedText = (value: unknown): string =>
+  JSON.stringify(value, (_key, part: unknown) =>
+    typeof part === "object" && part !== null && !Array.isArray(part)
+      ? Object.fromEntries(Object.entries(part).toReversed())
+      : part
   );
 
 /** The code of an error a call was refused with. */
@@ -337,16 +346,7 @@ describe("changes that need a migration", () => {
     await expect(snapshot(store)).resolves.toStrictEqual(before);
   });
 
-  it("refuse a store holding records but no contract, or a damaged one", async () => {
-    const missing = await newStore();
-    const defined = await missing.defineTables(v1);
-    await insert(missing, defined.schemaHash, { title: "Launch" });
-    await inStore(missing, (sql) => {
-      sql.exec(
-        "UPDATE sdk_store SET contract_hash = NULL, contract_manifest = NULL"
-      );
-    });
-
+  it("refuse a damaged contract, or one its own recorded schemas don't fit", async () => {
     const edited = await newStore();
     await edited.defineTables(v1);
     await inStore(edited, (sql) => {
@@ -367,15 +367,98 @@ describe("changes that need a migration", () => {
       sql.exec("UPDATE sdk_store SET contract_manifest = NULL");
     });
 
-    // Even the very schema it holds: nothing is guessed.
-    await expect(missing.defineTables(v1)).rejects.toMatchObject({
-      code: "migration.metadata_missing",
+    // The same manifest in other text, its hash rewritten to match: only
+    // the canonical text is the contract.
+    const respelled = await newStore();
+    await respelled.defineTables(v1);
+    const reordered = reversedText(JSON.parse(v1));
+    const reorderedHash = await sha256Hex(reordered);
+    await inStore(respelled, (sql) => {
+      sql.exec(
+        "UPDATE sdk_store SET contract_manifest = ?, contract_hash = ?",
+        reordered,
+        reorderedHash
+      );
     });
-    for (const store of [edited, unreadable, halved]) {
+
+    // Consistent in itself, but narrower than what the store recorded.
+    const narrowed = await newStore();
+    const older = await narrowed.defineTables(v1);
+    await narrowed.defineTables(v2);
+    await inStore(narrowed, (sql) => {
+      sql.exec(
+        "UPDATE sdk_store SET contract_manifest = ?, contract_hash = ?",
+        v1,
+        older.schemaHash
+      );
+    });
+
+    for (const store of [edited, unreadable, halved, respelled, narrowed]) {
       // One at a time, so a failure names its store.
       // oxlint-disable-next-line no-await-in-loop -- see above
       await expect(store.defineTables(v2)).rejects.toMatchObject({
         code: "migration.metadata_corrupt",
+      });
+    }
+  });
+
+  it("rebuild a missing contract from the schemas the store recorded", async () => {
+    const store = await newStore();
+    await store.defineTables(v1);
+    const second = await store.defineTables(v2);
+    await insert(store, second.schemaHash, {
+      title: "Launch",
+      category: "news",
+    });
+    await inStore(store, (sql) => {
+      sql.exec(
+        "UPDATE sdk_store SET contract_hash = NULL, contract_manifest = NULL"
+      );
+    });
+
+    const again = await store.defineTables(v1);
+
+    // The fold of both recorded schemas, so the second's field is kept.
+    expect(again.contract).toMatchObject({ hash: second.schemaHash });
+    await expect(
+      store.defineTables(
+        notes({ ...noteFields, category: v.number().optional() })
+      )
+    ).rejects.toMatchObject({ code: "migration.required" });
+  });
+
+  it("refuse a missing contract its recorded schemas can't rebuild, or records with no schema", async () => {
+    const conflicting = await newStore();
+    await conflicting.defineTables(v2);
+    const retyped = notes({ ...noteFields, category: v.number().optional() });
+    const retypedHash = await manifestHash(retyped);
+    await inStore(conflicting, (sql) => {
+      sql.exec(
+        "UPDATE sdk_store SET contract_hash = NULL, contract_manifest = NULL"
+      );
+      sql.exec(
+        "INSERT INTO sdk_schemas (schema_hash, manifest, created_at) VALUES (?, ?, ?)",
+        retypedHash,
+        retyped,
+        Date.now() + 1000
+      );
+    });
+
+    const orphaned = await newStore();
+    const defined = await orphaned.defineTables(v1);
+    await insert(orphaned, defined.schemaHash, { title: "Launch" });
+    await inStore(orphaned, (sql) => {
+      sql.exec("DELETE FROM sdk_schemas");
+      sql.exec(
+        "UPDATE sdk_store SET contract_hash = NULL, contract_manifest = NULL"
+      );
+    });
+
+    for (const store of [conflicting, orphaned]) {
+      // One at a time, so a failure names its store.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await expect(store.defineTables(v1)).rejects.toMatchObject({
+        code: "migration.metadata_missing",
       });
     }
   });
@@ -426,6 +509,57 @@ describe("failures and races", () => {
     await expect(
       store.defineTables(indexed, consumer(2))
     ).resolves.toMatchObject({ contract: { changed: true } });
+  });
+
+  it("answer a schema applied again with its receipt's own contract and plan", async () => {
+    const store = await newStore();
+    await store.defineTables(v1);
+    const first = await store.defineTables(v2, consumer(2));
+    await store.defineTables(
+      notes({
+        ...noteFields,
+        category: v.string().optional(),
+        size: v.number().optional(),
+      }),
+      consumer(3)
+    );
+
+    const again = await store.defineTables(v2, consumer(2));
+
+    expect(again.contract).toStrictEqual(first.contract);
+  });
+
+  it("refuse as busy, and retryable, a schema that keeps losing to others applied at once", async () => {
+    const store = await newStore();
+    await store.defineTables(v1);
+    const fields = ["a", "b", "c", "d", "e", "f"];
+
+    const outcomes = await atOnce(
+      store,
+      fields.map(
+        (field, index) =>
+          [
+            notes({ ...noteFields, [field]: v.string().optional() }),
+            consumer(index + 2),
+          ] as const
+      )
+    );
+
+    const applied = fields.filter(
+      (_field, index) => outcomes[index]?.status === "fulfilled"
+    );
+    const refused = outcomes.flatMap((outcome) =>
+      outcome.status === "rejected" ? [codeOf(outcome.reason)] : []
+    );
+    expect({
+      someRefused: refused.length > 0,
+      refused: [...new Set(refused)],
+      contract: await contractFields(store),
+    }).toStrictEqual({
+      someRefused: true,
+      refused: ["migration.busy"],
+      contract: [...applied, "title"],
+    });
   });
 
   it("give one winner of two conflicting schemas applied at once", async () => {
