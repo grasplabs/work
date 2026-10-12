@@ -140,6 +140,18 @@ export interface RunEngine {
    */
   terminate: (id: string) => Promise<void>;
   /**
+   * Pauses the run at its next safe boundary: a run asleep or waiting at
+   * once, a running one once the steps it has out end. One that is queued,
+   * paused or ended, or that the engine has no record of, stays as it is.
+   */
+  pause: (id: string) => Promise<void>;
+  /**
+   * Resumes a paused run, its deadlines where they were: paused time
+   * counts, so a sleep or a wait that came due meanwhile is taken at once.
+   * Any other run stays as it is.
+   */
+  resume: (id: string) => Promise<void>;
+  /**
    * Delivers the run an event of `type`, which ends a wait on that type: it
    * carries nothing (`RunHost.waitForDecision`). `key` names the delivery:
    * the same key again is the same event, taken once. A run that has
@@ -269,6 +281,12 @@ export const runEngine = (env: Env): RunEngine => ({
     // Ended, rolling back or missing: nothing to terminate, and nothing
     // to fail over (a cancel racing a run's own end finds it ended).
     await runStub(env, id).terminate({ rollback: false });
+  },
+  pause: async (id) => {
+    await runStub(env, id).pause();
+  },
+  resume: async (id) => {
+    await runStub(env, id).resume({ keepDeadlines: true });
   },
   sendEvent: async (id, type, key) => {
     const outcome = await runStub(env, id).sendEvent({

@@ -985,6 +985,13 @@ export const workflowRuns = sqliteTable(
      * once the engine has.
      */
     cancelRequestedAt: timestamp("cancel_requested_at"),
+    /**
+     * The generation of the run's controls (src/workflows/controls.ts):
+     * one more with each pause or resume admitted, and with a cancel,
+     * which supersedes them. A control applies to the engine only while
+     * its own generation is the run's, so a late one can't undo a newer.
+     */
+    controlGeneration: integer("control_generation").notNull().default(0),
   },
   (table) => [
     index("workflow_runs_app_idx").on(table.appId, table.createdAt),
@@ -1024,6 +1031,41 @@ export const workflowRuns = sqliteTable(
     index("workflow_runs_details_kept_idx")
       .on(table.endedAt, table.id)
       .where(sql`ended_at IS NOT NULL AND details_removed_at IS NULL`),
+  ]
+);
+
+/**
+ * Each pause, resume or cancel of a run that the host admitted
+ * (src/workflows/controls.ts): its durable receipt. `admitted` until the
+ * engine confirms it (`applied`), or a cancel supersedes a pause or resume
+ * still unresolved (`superseded`). At most one unresolved receipt of each
+ * kind a run: the same request again joins it. `generation` is the run's
+ * control generation it was admitted under.
+ */
+export const workflowRunControls = sqliteTable(
+  "workflow_run_controls",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    kind: text({ enum: ["pause", "resume", "cancel"] }).notNull(),
+    state: text({ enum: ["admitted", "applied", "superseded"] }).notNull(),
+    generation: integer().notNull(),
+    /** Who asked for it: a person, by their user ID. */
+    requestedBy: text("requested_by").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    settledAt: timestamp("settled_at"),
+  },
+  (table) => [
+    uniqueIndex("workflow_run_controls_unresolved_idx")
+      .on(table.runId, table.kind)
+      .where(sql`state = 'admitted'`),
+    // The repair (src/workflows/controls.ts): receipts the engine is
+    // still to confirm, oldest first.
+    index("workflow_run_controls_admitted_idx")
+      .on(table.createdAt, table.id)
+      .where(sql`state = 'admitted'`),
   ]
 );
 

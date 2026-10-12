@@ -46,11 +46,11 @@ import {
   storedEvent,
 } from "../audit-outbox.ts";
 import type { Member } from "../auth/identity.ts";
-import { apps, workflowRuns } from "../db/core/schema.ts";
+import { apps, workflowRunControls, workflowRuns } from "../db/core/schema.ts";
 import { failureNoticed } from "../notifications.ts";
 import { stepStatisticsForgotten } from "../statistic-steps.ts";
 import { hasWorkflow } from "./code.ts";
-import { markRunCancelled, runEngine, settleRunCancel } from "./engine.ts";
+import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellScreens } from "./run-changes.ts";
@@ -143,7 +143,7 @@ type RunFields = Pick<
  * A run as its row has it; `status` names what the row last saw. It says
  * so once its details are removed (`detailsRemoved`, retention.ts).
  */
-const toRun = (env: Env, row: RunFields): WorkflowRun => ({
+export const toRun = (env: Env, row: RunFields): WorkflowRun => ({
   id: runIdSchema.parse(row.id),
   app: appIdSchema.parse(row.appId),
   workflow: workflowIdSchema.parse(row.workflowId),
@@ -893,7 +893,7 @@ export const recordFailure = async (
 };
 
 /** The engine's statuses of a run that has ended. */
-const endedLive: ReadonlySet<InstanceStatus["status"]> = new Set([
+export const endedLive: ReadonlySet<InstanceStatus["status"]> = new Set([
   "complete",
   "errored",
   "terminated",
@@ -930,6 +930,68 @@ const stoppedReport = (row: RunRow, at: Date): RunFailure => ({
   },
   failedAt: at.toISOString(),
 });
+
+/** The pause or resume each status of a run that hasn't ended confirms. */
+const confirmedControl: Partial<
+  Record<InstanceStatus["status"], "pause" | "resume">
+> = { paused: "pause", running: "resume", waiting: "resume" };
+
+/**
+ * The statements that settle the run's control receipts (controls.ts) the
+ * engine's status confirms, in the projection's batch, after the write of
+ * the status: a pause once it is paused, a resume once it runs or waits
+ * again, a cancel once it has ended, and a pause or resume still
+ * unresolved then, superseded. Only once the row took the notification: a
+ * late one settles nothing.
+ */
+const controlsSettledBy = (
+  db: DrizzleD1Database,
+  run: string,
+  { status, sequence }: EngineStatus,
+  at: Date
+) => {
+  const took =
+    sequence === undefined
+      ? undefined
+      : sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run} AND ${workflowRuns.engineSequence} = ${sequence})`;
+  const settled = (kinds: ("pause" | "resume" | "cancel")[]) =>
+    and(
+      eq(workflowRunControls.runId, run),
+      eq(workflowRunControls.state, "admitted"),
+      inArray(workflowRunControls.kind, kinds),
+      took
+    );
+  if (endedLive.has(status)) {
+    // A cancel is done once the run ended other than completed (its next
+    // activation refused to run on, or the engine terminated it); a run
+    // that completed first overtook it, as it did a pause or a resume.
+    const cancelled =
+      status === "complete"
+        ? []
+        : [
+            db
+              .update(workflowRunControls)
+              .set({ state: "applied", settledAt: at })
+              .where(settled(["cancel"])),
+          ];
+    return [
+      ...cancelled,
+      db
+        .update(workflowRunControls)
+        .set({ state: "superseded", settledAt: at })
+        .where(settled(["pause", "resume", "cancel"])),
+    ];
+  }
+  const confirmed = confirmedControl[status];
+  return confirmed === undefined
+    ? []
+    : [
+        db
+          .update(workflowRunControls)
+          .set({ state: "applied", settledAt: at })
+          .where(settled([confirmed])),
+      ];
+};
 
 /** Where the engine says a run is, as its notification has it. */
 export interface EngineStatus {
@@ -1035,6 +1097,7 @@ export const projectStatus = async (
           ),
         ]
       : []),
+    ...controlsSettledBy(db, row.id, engine, at),
     // Its end and the cleanup of the statistics points its steps never
     // added up are written together: a retried notification finds the
     // row ended, so nothing would be left to clean up after it.
@@ -1081,49 +1144,6 @@ export const completeCancel = async (
 };
 
 /**
- * Stops a run for good, and records who did; a run that ended otherwise
- * stays as it is. Its tombstone is written first, with the audit event,
- * so the dispatcher runs nothing more of it whatever the engine still
- * does; then the engine is told to terminate it, and once it says it has
- * (or has no run to terminate: one whose start never reached it), the row
- * says so. A cancel whose termination failed is done again by cancelling
- * again. A run that ended on its own before the engine heard the cancel
- * stays as it ended.
- */
-export const cancelRun = async (
-  env: Env,
-  by: Identity,
-  run: unknown
-): Promise<WorkflowRun> => {
-  const row = await foundRun(env, run);
-  await appFor(env, by, row.appId, "builder");
-  if (!unended.includes(row.status)) {
-    return toRun(env, row);
-  }
-  // First, in the run's object, the cancel's record: from then on no
-  // attempt of it holds, so nothing more of it is handed back or acts,
-  // even should the rest of this never happen. With it, the App calls its
-  // attempts started are revoked in those Apps (run-object.ts,
-  // `revokeCalls`). Should the mark fail, nothing of the cancel happened.
-  // Should an App not hear of the revoke, the cancel goes on, and the
-  // object revokes again on its alarm; should anything after the mark
-  // fail, the object finishes the cancel. A run cancelled before keeps
-  // its first cancel.
-  const mark = await markRunCancelled(env, row.id, actorOf(by));
-  await completeCancel(env, mark);
-  const engine = runEngine(env);
-  await engine.terminate(row.id);
-  await settleRunCancel(env, row.id);
-  const live = await engine.status(row.id);
-  if (live === undefined || endedLive.has(live.status)) {
-    await projectStatus(env, row.id, {
-      status: live?.status ?? "terminated",
-      at: Date.now(),
-    });
-  }
-  return toRun(env, await foundRun(env, row.id));
-};
-
 /**
  * Records that a run waits (host.ts) while a side effect of a step waits
  * for the person it acts for, until they decided. The wait is recorded in

@@ -57,6 +57,7 @@ const coreStandIn = () => {
     runs: async () => await Promise.resolve([]),
     run: async () => await Promise.resolve("a run"),
     decide: async () => await Promise.resolve("decided"),
+    control: async () => await Promise.resolve("controlled"),
     watchRuns: async () => {
       const subscription = new Subscription();
       subscriptions.push(subscription);

@@ -204,6 +204,17 @@ export type RunStatus =
   | "failed"
   | "cancelled";
 
+/**
+ * The receipt of a pause, resume or cancel the platform admitted:
+ * `admitted` until the run has got there, then `applied`; `superseded`
+ * when a cancel overtook it first.
+ */
+export interface RunControl {
+  id: string;
+  kind: "pause" | "resume" | "cancel";
+  state: "admitted" | "applied" | "superseded";
+}
+
 /** A decision a run waits for. */
 export interface WaitingDecision {
   /** Its name in the workflow (`step.decision(name, …)`): what `decide` takes. */
@@ -521,6 +532,17 @@ export const useRun = (
   return followed.key === `${workflow}/${run}` ? followed.run : undefined;
 };
 
+/** Pauses, resumes or cancels `run`, and answers the platform's receipt. */
+const controlled = async (
+  run: string,
+  kind: RunControl["kind"]
+): Promise<RunControl> => {
+  const receipt: unknown = await bridge().control(run, kind);
+  // SAFETY: core's `screens.control` answers a `RunControl`.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return receipt as RunControl;
+};
+
 /**
  * One of the App's workflows, in a component, for the person using the
  * screen: its runs, live (`followRuns`), and what they can do with them.
@@ -559,6 +581,19 @@ export const useWorkflow = (
     decision: string,
     answer: DecisionAnswer
   ) => Promise<void>;
+  /**
+   * Pauses a run at its next safe point, if the person builds the App;
+   * resolves once the platform admitted it, with its receipt: the run's
+   * status says when it is paused. A paused run's deadlines still pass.
+   */
+  pause: (run: string) => Promise<RunControl>;
+  /** Resumes a paused run, as `pause` does. */
+  resume: (run: string) => Promise<RunControl>;
+  /**
+   * Cancels a run, as `pause` does: it takes priority over a pause or a
+   * resume still being applied, and doesn't undo what the run already did.
+   */
+  cancel: (run: string) => Promise<RunControl>;
 } => {
   // Kept with the workflow they are of, so a screen that switches to
   // another workflow never shows the last one's runs meanwhile.
@@ -590,5 +625,8 @@ export const useWorkflow = (
     decide: async (run, decision, answer) => {
       await bridge().decide(run, decision, answer);
     },
+    pause: async (run) => await controlled(run, "pause"),
+    resume: async (run) => await controlled(run, "resume"),
+    cancel: async (run) => await controlled(run, "cancel"),
   };
 };

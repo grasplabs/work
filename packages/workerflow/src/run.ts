@@ -288,6 +288,15 @@ export type PauseOutcome = "pausing" | "paused" | "ignored" | "missing";
 export type ResumeOutcome = "resumed" | "ignored" | "missing";
 
 /**
+ * Whether a resume leaves the run's pending deadlines where they were (a
+ * host whose paused time counts, as Grasp's does), or moves them on by
+ * the time it was paused, as the reference engine does: the default.
+ */
+export interface ResumeCommand {
+  keepDeadlines: boolean;
+}
+
+/**
  * `ended`: the run has ended already, and can't be terminated.
  * `rolling_back`: it is rolling back, which a command doesn't cut short.
  */
@@ -502,22 +511,29 @@ const pauseIn = (sql: SqlStorage, now: number): void => {
 
 /**
  * Moves each of the run's pending deadlines on by `ms`, the time it was
- * paused: a sleep's or a wait's, a retry's, and that of an attempt cut
- * off, its step's latest with no outcome journaled: one still open (its
- * activation died before the pause) or one whose answer came back
- * superseded, which the next activation ends as cut off by its deadline
- * (activation.ts). Paused time doesn't count against them, as on the
- * reference engine.
+ * paused: a sleep's or a wait's, a retry's (unless the resume keeps them,
+ * `waits` false), and that of an attempt cut off, its step's latest with
+ * no outcome journaled: one still open (its activation died before the
+ * pause) or one whose answer came back superseded, which the next
+ * activation ends as cut off by its deadline (activation.ts). Paused time
+ * doesn't count against them, as on the reference engine; an attempt's
+ * always moves, so paused time never makes it one that timed out.
  */
-const shiftDeadlinesIn = (sql: SqlStorage, ms: number): void => {
-  sql.exec(
-    "UPDATE steps SET deadline = deadline + ? WHERE state = 'waiting' AND deadline IS NOT NULL",
-    ms
-  );
-  sql.exec(
-    "UPDATE attempts SET retry_at = retry_at + ? WHERE retry_at IS NOT NULL AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'retrying')",
-    ms
-  );
+const shiftDeadlinesIn = (
+  sql: SqlStorage,
+  ms: number,
+  waits: boolean
+): void => {
+  if (waits) {
+    sql.exec(
+      "UPDATE steps SET deadline = deadline + ? WHERE state = 'waiting' AND deadline IS NOT NULL",
+      ms
+    );
+    sql.exec(
+      "UPDATE attempts SET retry_at = retry_at + ? WHERE retry_at IS NOT NULL AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'retrying')",
+      ms
+    );
+  }
   sql.exec(
     "UPDATE attempts SET deadline = deadline + ? WHERE ended_at IS NULL OR (ended = 'superseded' AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'running'))",
     ms
@@ -2010,9 +2026,12 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
 
   /**
    * Resumes a paused run, its deadlines moved on by the time it was
-   * paused, or lets a run still pausing go on as it was.
+   * paused (unless `keepDeadlines`: a sleep, a wait or a retry then comes
+   * due as it would have, at once if its time has passed), or lets a run
+   * still pausing go on as it was.
    */
-  async resume(): Promise<ResumeOutcome> {
+  async resume(command?: ResumeCommand): Promise<ResumeOutcome> {
+    const keepDeadlines = command?.keepDeadlines === true;
     const { sql } = this.ctx.storage;
     const outcome = await this.#command(
       (run, now): CommandDecision<ResumeOutcome> => {
@@ -2028,7 +2047,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         if (run.paused_at === null) {
           throw new Error("The journal holds a paused run with no pause time");
         }
-        shiftDeadlinesIn(sql, Math.max(0, now - run.paused_at));
+        shiftDeadlinesIn(sql, Math.max(0, now - run.paused_at), !keepDeadlines);
         sql.exec(
           "UPDATE run SET status = 'running', paused_at = NULL, wake_at = ?",
           now
