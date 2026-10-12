@@ -559,11 +559,38 @@ const ownerPattern = /^[A-Za-z0-9:_.-]{1,200}$/u;
 const callIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
+/** The least, and the most, a process whose call broke off gets to go. */
+const minExitWaitMs = 1000;
+const maxExitWaitMs = 10_000;
+
 /**
- * How long a session the host closed waits for its process's exit, before
- * it's taken as closed by a host still running.
+ * How long a process whose call broke off, or whose session its host
+ * closed, gets to exit before it's taken as still running: what's left of
+ * the call's deadline, which its caller waits for anyway, within
+ * `minExitWaitMs` and `maxExitWaitMs`. A process V8 aborted at its heap
+ * limit can take seconds to go (writing a core of gigabytes, on a loaded
+ * machine): it's the App's crash all the same, never the sandbox failing.
+ * Only a process still running past that, its connection broken, is.
  */
-const sessionExitWaitMs = 1000;
+const exitWaitMs = (endsAt: number): number =>
+  Math.min(Math.max(endsAt - Date.now(), minExitWaitMs), maxExitWaitMs);
+
+/**
+ * Waits for `host` to exit, `ms` at most, or until `until` aborts (a bound
+ * of its call that ends it first). Its timer never keeps the supervisor's
+ * own process running once it's stopped.
+ */
+const waitForExit = async (
+  host: HostProcess,
+  ms: number,
+  until?: AbortSignal
+): Promise<void> => {
+  await Promise.race([
+    host.exited,
+    sleep(ms, undefined, { ref: false }),
+    ...(until === undefined ? [] : [abortOf(until)]),
+  ]);
+};
 
 /** The pool of sandbox processes, and the calls it serves. */
 class SandboxPool {
@@ -782,6 +809,7 @@ class SandboxPool {
     deadlineMs: number,
     caller: AbortSignal
   ): Promise<Ending> {
+    const endsAt = Date.now() + deadlineMs;
     const guard = this.#guard(host, { deadlineMs }, caller);
     try {
       const forwarded = httpRequest({
@@ -809,7 +837,7 @@ class SandboxPool {
       }
       return { kind: "answered", status: answer.statusCode ?? 500, body: text };
     } catch (error) {
-      return await this.#cutShort(host, guard, error);
+      return await this.#cutShort(host, guard, endsAt, error);
     } finally {
       guard.stop();
     }
@@ -824,13 +852,25 @@ class SandboxPool {
   async #cutShort(
     host: HostProcess,
     guard: Guard,
+    endsAt: number,
     error?: unknown
   ): Promise<Ending> {
+    const first = guard.reason();
+    if (first !== undefined && first !== "unreadable") {
+      return { kind: first };
+    }
+    // Unreadable, the process still runs as far as anyone can tell: no
+    // longer a wait for it to go than the least. Otherwise its bounds still
+    // hold while it may go: its caller leaving, its memory, its deadline.
+    await waitForExit(
+      host,
+      first === "unreadable" ? minExitWaitMs : exitWaitMs(endsAt),
+      first === undefined ? guard.signal : undefined
+    );
     const reason = guard.reason();
     if (reason !== undefined && reason !== "unreadable") {
       return { kind: reason };
     }
-    await Promise.race([host.exited, sleep(100)]);
     if (host.gone && !this.#stopping) {
       return { kind: "crashed" };
     }
@@ -1148,6 +1188,7 @@ class SandboxPool {
         finished.abort();
       },
     });
+    const endsAt = Date.now() + deadlineMs;
     const guard = this.#guard(
       host,
       { deadlineMs, cpuLimitMs },
@@ -1202,10 +1243,11 @@ class SandboxPool {
         abortOf(finished.signal),
       ]);
       const ending = guard.signal.aborted
-        ? await this.#cutShort(host, guard)
+        ? await this.#cutShort(host, guard, endsAt)
         : await this.#sessionEnded(
             host,
-            AbortSignal.any([caller.signal, finished.signal])
+            AbortSignal.any([caller.signal, finished.signal]),
+            endsAt
           );
       this.#judge(host, callId, ending, deadlineMs);
     } finally {
@@ -1227,15 +1269,18 @@ class SandboxPool {
    * How a session ended once the sandbox host closed it: a crash if its
    * process died (the App's), otherwise as the host closed it.
    */
-  async #sessionEnded(host: HostProcess, caller: AbortSignal): Promise<Ending> {
+  async #sessionEnded(
+    host: HostProcess,
+    caller: AbortSignal,
+    endsAt: number
+  ): Promise<Ending> {
     if (caller.aborted) {
       // Core closed it: the call is over, however it went.
       return { kind: "answered", status: 101, body: Buffer.alloc(0) };
     }
     // The host closes a session itself only as its process dies, mostly:
-    // waited for long enough that a process reaped slowly under load is
-    // still the crash it is, not an unavailable sandbox.
-    await Promise.race([host.exited, sleep(sessionExitWaitMs)]);
+    // a process slow to go is still the crash it is (`exitWaitMs`).
+    await waitForExit(host, exitWaitMs(endsAt));
     if (host.gone && !this.#stopping) {
       return { kind: "crashed" };
     }
