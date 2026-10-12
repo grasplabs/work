@@ -38,6 +38,7 @@ import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { dataErrors } from "@grasp-os/shared/stores";
+import type { AppliedContract } from "@grasp-os/shared/stores";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -726,16 +727,22 @@ const operationManifestHash = async (app: AppManifest): Promise<string> =>
   await sha256Hex(canonicalText(app.operations));
 
 /**
- * The store release `request` binds, with its tables defined for the App's
- * schema (`schema`, its hash), or null for an App without tables;
- * `version.store_unbound` for one with tables and no store.
+ * The store release `request` binds, with the App's schema (`schema`, its
+ * hash) applied to it for this version, and what that did to the store's
+ * contract; or null for an App without tables; `version.store_unbound`
+ * for one with tables and no store. The store applies the schema only
+ * when the change to its contract is safe (store-host.ts,
+ * `defineTables`), and refuses one that needs a migration
+ * (`migration.required`), so no release is sealed on a store whose data
+ * its schema doesn't fit. A seal that fails after the store applied the
+ * schema leaves it applied: a retry finds it so, and its receipt.
  */
 const boundStore = async (
   env: Env,
   request: SealRequest,
   manifest: AppManifest,
   schema: string
-): Promise<DataStoreBinding | null> => {
+): Promise<{ binding: DataStoreBinding; contract: AppliedContract } | null> => {
   if (!hasTables(manifest)) {
     return null;
   }
@@ -747,16 +754,22 @@ const boundStore = async (
   // no claim is ever written for a store that doesn't exist.
   const opened = await openStore(env, request.store);
   await claimStore(env, opened.id, request.app);
-  const defined = await opened.defineTables(manifestText(manifest.schema));
+  const defined = await opened.defineTables(manifestText(manifest.schema), {
+    resourceId: request.app,
+    resourceVersion: request.version,
+  });
   if (defined.schemaHash !== schema) {
     throw new Error("The store defined another schema than the App's");
   }
   return {
-    alias: "default",
-    storeId: opened.id,
-    schemaVersion: manifestVersion,
-    schemaHash: schema,
-    operationManifestHash: await operationManifestHash(manifest),
+    binding: {
+      alias: "default",
+      storeId: opened.id,
+      schemaVersion: manifestVersion,
+      schemaHash: schema,
+      operationManifestHash: await operationManifestHash(manifest),
+    },
+    contract: defined.contract,
   };
 };
 
@@ -814,6 +827,24 @@ const restoreDefinition = async (
       ),
   ]);
 };
+
+/**
+ * What the store recorded of applying a release's schema, its receipt
+ * included, for the seal's audit entry: evidence from the store itself,
+ * beside the release. Nothing for a release without a store.
+ */
+const storeEvidence = (
+  bound: Awaited<ReturnType<typeof boundStore>>
+): Record<string, string | boolean | null> =>
+  bound === null
+    ? {}
+    : {
+        store: bound.binding.storeId,
+        storeContractHash: bound.contract.hash,
+        storePlanHash: bound.contract.planHash,
+        storeContractChanged: bound.contract.changed,
+        storeReceipt: bound.contract.receiptId,
+      };
 
 /**
  * Seals the release of `request.app`'s `request.version` (see the header)
@@ -902,7 +933,8 @@ export const sealRelease = async (
   }
 
   const schema = await schemaHash(manifest.schema);
-  const store = await boundStore(env, request, manifest, schema);
+  const bound = await boundStore(env, request, manifest, schema);
+  const store = bound?.binding ?? null;
 
   const contracts = generated[generatedPaths.contracts] ?? "";
   const report = canonicalText({
@@ -1043,7 +1075,7 @@ export const sealRelease = async (
           manifestHash: hash,
           contractHash: releaseManifest.contractHash,
           schemaHash: schema,
-          ...(store === null ? {} : { store: store.storeId }),
+          ...storeEvidence(bound),
         },
       }),
     ]);
