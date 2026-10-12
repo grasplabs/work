@@ -46,7 +46,7 @@ import { z } from "zod";
 import { findVersion, versionFiles } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
-import { openStore } from "./data-stores.ts";
+import { openStore, requireStoreManager } from "./data-stores.ts";
 import {
   sdkArtifactDeletions,
   sdkReleaseArtifacts,
@@ -91,6 +91,11 @@ import { buildAppCode } from "./screens.ts";
 //   serves one App for good: the first seal claims it
 //   (`sdk_store_owners`) before defining its tables, and retention never
 //   deletes the claim.
+// - Someone binds a store they don't manage, or one that doesn't exist:
+//   the sealer must manage the store and not be Grasp staff, as for
+//   sharing it (data-stores.ts), checked before any App code is
+//   inspected; and the store must be listed and live before it is
+//   claimed, so no claim is ever written for a store that isn't.
 // - A release vouches for itself: its trust is always `unreviewed` in the
 //   manifest; approval and revocation are the host's records of its hash.
 
@@ -261,7 +266,8 @@ export interface SealRequest {
    * when the App declares tables, and never anything App code names.
    */
   readonly store?: StoreId;
-  readonly by: Pick<Acting, "userId" | "staff" | "actor">;
+  /** Who seals it: they must manage `store`, if one is given. */
+  readonly by: Acting;
 }
 
 /** A release as the host runs it: verified, every hash checked. */
@@ -676,6 +682,41 @@ const operationManifestHash = async (app: AppManifest): Promise<string> =>
   await sha256Hex(canonicalText(app.operations));
 
 /**
+ * The store release `request` binds, with its tables defined for the App's
+ * schema (`schema`, its hash), or null for an App without tables;
+ * `version.store_unbound` for one with tables and no store.
+ */
+const boundStore = async (
+  env: Env,
+  request: SealRequest,
+  manifest: AppManifest,
+  schema: string
+): Promise<DataStoreBinding | null> => {
+  if (!hasTables(manifest)) {
+    return null;
+  }
+  if (request.store === undefined) {
+    throw versionErrors.create("version.store_unbound");
+  }
+  // Listed and live first, then claimed before its tables are touched,
+  // so a seal that loses the store never defines its tables there, and
+  // no claim is ever written for a store that doesn't exist.
+  const opened = await openStore(env, request.store);
+  await claimStore(env, opened.id, request.app);
+  const defined = await opened.defineTables(manifestText(manifest.schema));
+  if (defined.schemaHash !== schema) {
+    throw new Error("The store defined another schema than the App's");
+  }
+  return {
+    alias: "default",
+    storeId: opened.id,
+    schemaVersion: manifestVersion,
+    schemaHash: schema,
+    operationManifestHash: await operationManifestHash(manifest),
+  };
+};
+
+/**
  * Seals the release of `request.app`'s `request.version` (see the header)
  * and answers it. A version sealed
  * already answers its release as sealed, whatever store is asked for now;
@@ -708,6 +749,11 @@ export const sealRelease = async (
       named.artifacts.map(({ sha256 }) => sha256)
     );
     return await loadRelease(env, app, version);
+  }
+  // Only someone who manages the store binds it, and before any App code
+  // is inspected: a binding hands the App's callers its records.
+  if (request.store !== undefined) {
+    await requireStoreManager(env, request.by, request.store);
   }
   const row = await findVersion(env, app, version);
   const files = await versionFiles(env, app, version);
@@ -742,27 +788,7 @@ export const sealRelease = async (
   }
 
   const schema = await schemaHash(manifest.schema);
-  let store: DataStoreBinding | null = null;
-  if (hasTables(manifest)) {
-    if (request.store === undefined) {
-      throw versionErrors.create("version.store_unbound");
-    }
-    // Claimed before its tables are touched, so a seal that loses the
-    // store never defines its tables there.
-    await claimStore(env, request.store, app);
-    const opened = await openStore(env, request.store);
-    const defined = await opened.defineTables(manifestText(manifest.schema));
-    if (defined.schemaHash !== schema) {
-      throw new Error("The store defined another schema than the App's");
-    }
-    store = {
-      alias: "default",
-      storeId: opened.id,
-      schemaVersion: manifestVersion,
-      schemaHash: schema,
-      operationManifestHash: await operationManifestHash(manifest),
-    };
-  }
+  const store = await boundStore(env, request, manifest, schema);
 
   const contracts = generated[generatedPaths.contracts] ?? "";
   const report = canonicalText({

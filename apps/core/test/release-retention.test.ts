@@ -32,7 +32,14 @@ import {
   unpinRelease,
 } from "../src/release-retention.ts";
 import { allEvents } from "./audit-events.ts";
-import { appWith, artifactKey, failure, person, seal } from "./sealed-apps.ts";
+import {
+  appWith,
+  artifactKey,
+  failure,
+  person,
+  seal,
+  shareStoreWith,
+} from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
 // How long sealed releases stay, and how one is revoked (spec 16.3),
@@ -869,7 +876,8 @@ describe("a deleted release", { timeout: 120_000 }, () => {
 
   it("leaves its store serving its App alone, even with every binding gone", async () => {
     const start = new Date();
-    const { app, store } = await twoVersions(start);
+    const fixture = await twoVersions(start);
+    const { app, store } = fixture;
     // As retention leaves the store once every release of the App went.
     await env.DB.prepare(
       "DELETE FROM sdk_resource_bindings WHERE resource_id = ?"
@@ -877,6 +885,8 @@ describe("a deleted release", { timeout: 120_000 }, () => {
       .bind(app)
       .run();
     const other = await appWith(files("other"));
+    // Its owner manages the store too: only the claim refuses.
+    await shareStoreWith(fixture, other);
     await expect(
       failure(async () => await seal({ ...other, store }))
     ).resolves.toBe("version.store_bound_elsewhere");

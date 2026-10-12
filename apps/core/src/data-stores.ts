@@ -234,6 +234,23 @@ const managedBy = async (
 };
 
 /**
+ * Requires that `by` may bind store `id` to an App's release: they manage
+ * it and aren't Grasp staff, as for sharing it, since a binding hands the
+ * App's callers its records as sharing hands its managers them. Otherwise
+ * `data.store_unavailable`, as for a store that doesn't exist, or
+ * `role.forbidden` for staff.
+ */
+export const requireStoreManager = async (
+  env: Env,
+  by: Acting,
+  id: string
+): Promise<StoreId> => {
+  requireNotStaff(by);
+  const store = await managedBy(env, by, id);
+  return store.id;
+};
+
+/**
  * Deletes store `id` for `by`, who must manage it and isn't Grasp staff:
  * refused with `data.store_in_use`, and audited, while a receipt not yet
  * expired refers to it (the store's object decides, store-host.ts). The
