@@ -8,12 +8,14 @@ import { authoritySchema } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import type { AttemptHost } from "../src/workflows/attempt-host.ts";
 import type { Settled } from "../src/workflows/code.ts";
 import { RunHost } from "../src/workflows/host.ts";
-import type { HostHooks, RunStep } from "../src/workflows/host.ts";
+import type { HostHooks } from "../src/workflows/host.ts";
 import { keepMessage } from "../src/workflows/kept-email.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { engineOfTest } from "./run-host.ts";
 import { signedInWithRole } from "./sign-in.ts";
 
 // A run's reads of a kept message's attachments where the outside systems
@@ -46,18 +48,12 @@ const mail = [
   "",
 ].join("\r\n");
 
-/** The engine's `step`, running each step's function once. */
-const step: RunStep = {
-  do: async (_name, _config, fn) => await fn(),
-  sleep: async () => {
-    await Promise.resolve();
-  },
-  waitForEvent: async () => await Promise.reject(new Error("No waits here")),
-};
+const { step, leaseOf } = engineOfTest();
 
 const hooks: HostHooks = {
   stepFailed: () => {},
   busyRefusals: new Map(),
+  leaseOf,
   tampered: () => {},
   waiting: async () => {
     await Promise.resolve();
@@ -102,15 +98,19 @@ const runReading = async (changes: Partial<Env> = {}) => {
   return { host, stored, runId };
 };
 
-/** Runs `reads` as the function of one step, and returns what it read. */
+/**
+ * Runs `reads` as the function of one step, with the host of its attempt,
+ * and returns what it read.
+ */
 const inStep = async (
   host: RunHost,
-  reads: () => Promise<unknown>
+  reads: (attempt: AttemptHost) => Promise<unknown>
 ): Promise<unknown> => {
-  const done = await host.do("read", { description: "Read" }, async () => ({
-    ok: true,
-    value: await reads(),
-  }));
+  const done = await host.do(
+    "read",
+    { description: "Read" },
+    async (attempt) => ({ ok: true, value: await reads(attempt) })
+  );
   if (!done.ok) {
     throw new Error(`The step failed: ${done.error.message}`);
   }
@@ -153,9 +153,9 @@ describe("reads of a kept message's attachments", () => {
     });
     const { host, stored } = await runReading({ FILES: files });
 
-    const read = await inStep(host, async () => [
-      outcome(await host.readAttachment(stored, 0)),
-      outcome(await host.readAttachment(stored, 0)),
+    const read = await inStep(host, async (attempt) => [
+      outcome(await attempt.readAttachment(stored, 0)),
+      outcome(await attempt.readAttachment(stored, 0)),
     ]);
 
     expect(read).toStrictEqual(["internal.unexpected", "%PDF-"]);
@@ -178,8 +178,8 @@ describe("reads of a kept message's attachments", () => {
       }),
     });
 
-    const read = await inStep(host, async () =>
-      outcome(await host.readAttachment("2026-09-29/../x", 0))
+    const read = await inStep(host, async (attempt) =>
+      outcome(await attempt.readAttachment("2026-09-29/../x", 0))
     );
 
     expect({ read, audited: await auditedReads(runId) }).toStrictEqual({
@@ -188,28 +188,33 @@ describe("reads of a kept message's attachments", () => {
     });
   });
 
-  it("are refused and recorded outside a step, and for a message that isn't kept", async () => {
+  it("are refused and recorded for a message that isn't kept, and once their attempt is over", async () => {
     const { host, runId } = await runReading();
+    let kept: AttemptHost | undefined;
 
-    const outside = outcome(await host.readAttachment(null, 0));
-    const unkept = await inStep(host, async () =>
-      outcome(await host.readAttachment(null, 0))
-    );
+    const unkept = await inStep(host, async (attempt) => {
+      kept = attempt;
+      return outcome(await attempt.readAttachment(null, 0));
+    });
+    const late =
+      kept === undefined
+        ? "no attempt"
+        : outcome(await kept.readAttachment(null, 0));
 
     expect({
-      outside,
       unkept,
+      late,
       audited: await auditedReads(runId),
     }).toMatchObject({
-      outside: "workflow.outside_step",
       unkept: "workflow.attachment_not_found",
+      late: "workflow.stale_attempt",
       audited: [
-        { step: null, message: null, errorCode: "workflow.outside_step" },
         {
           step: "read",
           message: null,
           errorCode: "workflow.attachment_not_found",
         },
+        { step: "read", message: null, errorCode: "workflow.stale_attempt" },
       ],
     });
   });

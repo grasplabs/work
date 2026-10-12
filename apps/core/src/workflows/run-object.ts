@@ -117,6 +117,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         await runPinned(this.env, pin, event, step, {
           busyRefusals: busyRefusalsIn(this.ctx.storage.sql),
           aiCalls: this.#aiCalls,
+          leaseOf: (key, attempt) => this.attemptLease(key, attempt),
         }),
     };
   }

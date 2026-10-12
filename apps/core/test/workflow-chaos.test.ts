@@ -97,6 +97,17 @@ const eventsOf = async (action: string, target: string) => {
 };
 
 /**
+ * The calls of `run` refused as stale, as the audit log has them: made by
+ * an attempt the engine had given up on (host.ts, `#requireCurrent`).
+ */
+const staleCalls = async (run: string) => {
+  const refused = await eventsOf("workflow.call.refused", run);
+  return refused
+    .filter(({ detail }) => detail.errorCode === "workflow.stale_attempt")
+    .map(({ detail }) => `${String(detail.step)} ${String(detail.call)}`);
+};
+
+/**
  * How long each attempt of a step that hangs gets before the engine gives
  * up on it: well past what a good attempt takes, a round trip through
  * connect included.
@@ -679,6 +690,9 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     const ranOut = {
       status: await statusOf(running.id),
       hits: await hitsOf(app, builder.userId, "running"),
+      // The first attempt's code went on past its time, and what it then
+      // called was refused, as an attempt the engine had given up on.
+      stale: await staleCalls(running.id),
     };
 
     // Cut off waiting: the attempt timed out, and the next one, once the
@@ -700,11 +714,12 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
         { timeout: 15_000, interval: 100 }
       );
       const waiting = await builder.api.workflows.start(app, "waiting");
+      // Once the first attempt was cut off: its code's late call refused.
       await vi.waitFor(
         async () => {
-          await expect(mail.searched()).resolves.toContainEqual(
-            expect.stringMatching(/^seen waiting /u)
-          );
+          await expect(staleCalls(waiting.id)).resolves.toStrictEqual([
+            "count MAIL",
+          ]);
         },
         { timeout: 15_000, interval: 100 }
       );
@@ -715,6 +730,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       waited = {
         status: await statusOf(waiting.id),
         hits: await hitsOf(app, builder.userId, "waiting"),
+        stale: await staleCalls(waiting.id),
       };
     } finally {
       if (!released) {
@@ -741,13 +757,19 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       waited,
       cutShort,
     }).toStrictEqual({
-      seen: [
-        "seen running TimeoutError undefined",
-        "seen waiting TimeoutError undefined",
-        "seen limited Error app.timed_out",
-      ],
-      ranOut: { status: { status: "completed", output: 2 }, hits: 2 },
-      waited: { status: { status: "completed", output: 1 }, hits: 1 },
+      // Only the attempt cut off by the App's own time, within its own,
+      // still reached the mail server once it was cut off.
+      seen: ["seen limited Error app.timed_out"],
+      ranOut: {
+        status: { status: "completed", output: 2 },
+        hits: 2,
+        stale: ["count MAIL"],
+      },
+      waited: {
+        status: { status: "completed", output: 1 },
+        hits: 1,
+        stale: ["count MAIL"],
+      },
       cutShort: { status: "failed", hits: 1 },
     });
   });

@@ -215,12 +215,16 @@ const settled = async (run) => {
  * audited on core's side of the RPC, whatever code makes it.
  *
  * It also keeps which attempt of a step the code running belongs to
- * (`inAttempt`), as the host names it: every binding call says which
- * attempt it comes from, so the host can tell a call of an attempt the
- * engine gave up on, or of another step's. Its storage's methods are kept
- * here too, bound as the runtime made them.
+ * (`inAttempt`): the host core minted for that attempt (host.ts,
+ * `AttemptHost`), which every binding call goes through, so each call acts
+ * as the attempt whose code makes it, and only while it may. Code outside
+ * any step has none, and its binding calls fail. Its storage's methods are
+ * kept here too, bound as the runtime made them.
  */
 const runBindingsModule = "grasp-run-bindings.js";
+
+/** What a binding called outside any step fails with, in the isolate. */
+const outsideStep = workflowErrors.create("workflow.outside_step");
 const runBindings = `import { AsyncLocalStorage } from "node:async_hooks";
 
 const ProxyOf = Proxy;
@@ -230,6 +234,17 @@ const attempts = new AsyncLocalStorage();
 const attemptOf = attempts.getStore.bind(attempts);
 
 export const inAttempt = attempts.run.bind(attempts);
+
+/** The host of the attempt whose code runs now; none outside a step. */
+export const currentAttempt = () => {
+  const attempt = attemptOf();
+  if (attempt === undefined) {
+    const error = new ErrorOf(${JSON.stringify(outsideStep.message)});
+    error.code = "workflow.outside_step";
+    throw error;
+  }
+  return attempt;
+};
 
 export const unwrapped = (result) => {
   if (result.ok) {
@@ -258,11 +273,11 @@ const guarded = (env) =>
 
 const collectionMethods = ${JSON.stringify(collectionMethods)};
 
-export const bindings = (host, { connections, apps, collections }) => {
+export const bindings = ({ connections, apps, collections }) => {
   const all = {
     __proto__: null,
     APP: {
-      call: async (method, ...args) => unwrapped(await host.callApp(method, args, attemptOf())),
+      call: async (method, ...args) => unwrapped(await currentAttempt().callApp(method, args)),
     },
   };
   for (let index = 0; index < collections.length; index += 1) {
@@ -271,7 +286,7 @@ export const bindings = (host, { connections, apps, collections }) => {
     for (let at = 0; at < collectionMethods.length; at += 1) {
       const method = collectionMethods[at];
       methods[method] = async (...args) =>
-        unwrapped(await host.callCollection(name, method, args, attemptOf()));
+        unwrapped(await currentAttempt().callCollection(name, method, args));
     }
     all[name] = methods;
   }
@@ -279,13 +294,13 @@ export const bindings = (host, { connections, apps, collections }) => {
     const name = connections[index];
     all[name] = {
       call: async (action, input, options) =>
-        unwrapped(await host.callConnection(name, [action, input, options], attemptOf())),
+        unwrapped(await currentAttempt().callConnection(name, [action, input, options])),
     };
   }
   for (let index = 0; index < apps.length; index += 1) {
     const name = apps[index];
     all[name] = {
-      call: async (method, input) => unwrapped(await host.callExport(name, method, input, attemptOf())),
+      call: async (method, input) => unwrapped(await currentAttempt().callExport(name, method, input)),
     };
   }
   return guarded(all);
@@ -296,9 +311,9 @@ export const bindings = (host, { connections, apps, collections }) => {
  * The main module of a run of workflow `id`: the engine the SDK runs on,
  * each of its calls sent to core's host (host.ts), and each error in plain
  * data both ways. Every binding (its App, its collections, connections
- * and other Apps' exports) goes through the host too, which knows the
- * step running; each call says which attempt of the step its code runs
- * in. A binding the run doesn't have (a permission revoked since, or
+ * and other Apps' exports), and what the SDK does inside a step (a model
+ * call, a decision), goes through the host of the attempt whose code makes
+ * it, which core hands each attempt's function. A binding the run doesn't have (a permission revoked since, or
  * never granted) fails with a permission error, not `undefined`. It
  * imports what builds the bindings (`runBindings`), then the SDK's
  * `workflow`, before the workflow's module: the bindings are built from
@@ -308,7 +323,7 @@ export const bindings = (host, { connections, apps, collections }) => {
 const runMain = (
   id: WorkflowId
 ): string => `import { WorkerEntrypoint } from "cloudflare:workers";
-import { bindings, inAttempt, unwrapped } from ${JSON.stringify(runBindingsModule)};
+import { bindings, currentAttempt, inAttempt, unwrapped } from ${JSON.stringify(runBindingsModule)};
 import ${JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"))};
 import definition from ${JSON.stringify(appModuleName(workflowPaths(id).workflow))};
 ${settling}
@@ -322,14 +337,14 @@ export class Run extends WorkerEntrypoint {
       const engine = {
         runId,
         params,
-        env: bindings(host, { connections, apps, collections }),
+        env: bindings({ connections, apps, collections }),
         do: async (name, options, fn) => unwrapped(await host.do(name, options, async (attempt) => await inAttempt(attempt, async () => await settled(fn)))),
         sleep: async (name, milliseconds) => unwrapped(await host.sleep(name, milliseconds)),
-        callModel: async (request) => unwrapped(await host.callModel(request)),
-        openDecision: async (request) => unwrapped(await host.openDecision(request)),
-        decisionRecipients: async (decision, reminder) => unwrapped(await host.decisionRecipients(decision, reminder)),
+        callModel: async (request) => unwrapped(await currentAttempt().callModel(request)),
+        openDecision: async (request) => unwrapped(await currentAttempt().openDecision(request)),
+        decisionRecipients: async (decision, reminder) => unwrapped(await currentAttempt().decisionRecipients(decision, reminder)),
         waitForDecision: async (name, options) => unwrapped(await host.waitForDecision(name, options)),
-        readAttachment: async (stored, index) => unwrapped(await host.readAttachment(stored, index)),
+        readAttachment: async (stored, index) => unwrapped(await currentAttempt().readAttachment(stored, index)),
       };
       return await definition.run(engine, input);
     });

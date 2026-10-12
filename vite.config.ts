@@ -158,9 +158,13 @@ export default defineConfig({
         },
       },
       {
-        // A run's host is served over workerd's own RPC to the run's
-        // isolate, never over Cap'n Web, and extends workerd's RpcTarget.
-        files: ["apps/core/src/workflows/host.ts"],
+        // A run's host, and the host of each of its steps' attempts, are
+        // served over workerd's own RPC to the run's isolate, never over
+        // Cap'n Web, and extend workerd's RpcTarget.
+        files: [
+          "apps/core/src/workflows/host.ts",
+          "apps/core/src/workflows/attempt-host.ts",
+        ],
         rules: {
           "no-restricted-imports": [
             "error",

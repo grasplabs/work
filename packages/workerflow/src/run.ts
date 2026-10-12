@@ -146,6 +146,7 @@ import {
   isTombstoned,
   JournalSchemaError,
   journalSchemaVersion,
+  readAttemptLease,
   readJournal,
   readRollbackWorklist,
   maxEventPayloadBytes,
@@ -159,7 +160,7 @@ import {
   expireTombstones,
   startRetentionIn,
 } from "./journal.ts";
-import type { Journal, RunRow, StepType } from "./journal.ts";
+import type { AttemptLease, Journal, RunRow, StepType } from "./journal.ts";
 import { warnRecovered } from "./log.ts";
 import {
   failedIn,
@@ -182,6 +183,9 @@ export type { RunNotification } from "./notifications.ts";
 
 /** What `WorkflowRun.journal()` returns. */
 export type { Journal } from "./journal.ts";
+
+/** What `WorkflowRun.attemptLease` returns. */
+export type { AttemptLease } from "./journal.ts";
 
 /** How long an activation may go without journaling before it's recovered. */
 export const defaultLeaseMs = 60_000;
@@ -1130,6 +1134,24 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   #run(): RunRow | undefined {
     const { sql } = this.ctx.storage;
     return hasJournal(sql) ? readRun(sql) : undefined;
+  }
+
+  /**
+   * The lease of a step's attempt, as the step's callback was told it
+   * (`ctx.idempotencyKey`, `ctx.attempt`), while it still holds: for the
+   * host, which hands an attempt's code capabilities of its own, to check
+   * before each of them acts that the attempt may still act (journal.ts,
+   * `readAttemptLease`). An attempt past its deadline whose timeout the
+   * journal hasn't caught up with still has one: the host checks the
+   * deadline too. Read from the journal, in this object only: no caller
+   * outside it reaches it.
+   */
+  protected attemptLease(
+    key: string,
+    attempt: number
+  ): AttemptLease | undefined {
+    const { sql } = this.ctx.storage;
+    return hasJournal(sql) ? readAttemptLease(sql, key, attempt) : undefined;
   }
 
   /**

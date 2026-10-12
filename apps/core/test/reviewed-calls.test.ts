@@ -11,12 +11,14 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
+import type { AttemptHost } from "../src/workflows/attempt-host.ts";
 import type { Settled } from "../src/workflows/code.ts";
 import { RunHost } from "../src/workflows/host.ts";
-import type { HostHooks, RunStep } from "../src/workflows/host.ts";
+import type { HostHooks } from "../src/workflows/host.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
+import { engineOfTest } from "./run-host.ts";
 import { endLiveRuns, finished } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 import {
@@ -110,15 +112,6 @@ const outcomeOf = async (
   };
 };
 
-/** The engine's `step`, running each step's function once. */
-const step: RunStep = {
-  do: async (_name, _config, fn) => await fn(),
-  sleep: async () => {
-    await Promise.resolve();
-  },
-  waitForEvent: async () => await Promise.reject(new Error("No waits here")),
-};
-
 /**
  * A host for a run of a new App held to `calls`, whose App method calls
  * are counted in `appCalls`, with a permission on another App's exports
@@ -130,9 +123,11 @@ const hostHeldTo = async (calls: WorkflowCalls) => {
   const runId = runIdSchema.parse(crypto.randomUUID());
   const appCalls: string[] = [];
   const tampered: string[] = [];
+  const { step, leaseOf, leases } = engineOfTest();
   const hooks: HostHooks = {
     stepFailed: () => {},
     busyRefusals: new Map(),
+    leaseOf,
     tampered: (error) => {
       tampered.push(error.code ?? error.message);
     },
@@ -170,7 +165,7 @@ const hostHeldTo = async (calls: WorkflowCalls) => {
     },
     hooks
   );
-  return { host, runId, appCalls, tampered, userId };
+  return { host, runId, appCalls, tampered, userId, leases };
 };
 
 /** A settled call's error code, or `ok`. */
@@ -416,20 +411,22 @@ queueMicrotask(() => {
     });
   });
 
-  it("refuse a call from one step's code made while another runs, and a step whose name the review doesn't show", async () => {
-    const { host } = await hostHeldTo({
+  it("refuse a call made through a step attempt's host once that attempt is over, while another step runs, and a step whose name the review doesn't show", async () => {
+    const { host, runId, appCalls } = await hostHeldTo({
       steps: { arm: [], send: ["APP"] },
       all: ["APP"],
     });
-    let armed = "";
+    let armed: AttemptHost | undefined;
     await host.do("arm", {}, async (attempt) => {
       armed = attempt;
       return await Promise.resolve({ ok: true, value: null });
     });
     let leftBehind: Settled<unknown> = { ok: true, value: null };
     const sent = await host.do("send", {}, async () => {
-      // As code `arm` left behind would, calling with its attempt.
-      leftBehind = await host.callApp("hit", ["armed"], armed);
+      // As code `arm` left behind would, through the host `arm` was handed.
+      if (armed !== undefined) {
+        leftBehind = await armed.callApp("hit", ["armed"]);
+      }
       return { ok: true, value: null };
     });
     // Last: a step the review doesn't show ends the run.
@@ -441,12 +438,76 @@ queueMicrotask(() => {
 
     expect({
       leftBehind: codeOf(leftBehind),
+      // Its own code made no call it may not: `arm`'s call was `arm`'s.
       sent: codeOf(sent),
       unnamed: codeOf(unnamed),
+      appCalls,
+      audited: await refusals(runId),
     }).toStrictEqual({
-      leftBehind: "workflow.call_not_reviewed",
-      sent: "workflow.call_not_reviewed",
+      leftBehind: "workflow.stale_attempt",
+      sent: "ok",
       unnamed: "workflow.step_not_reviewed",
+      appCalls: [],
+      audited: [
+        { step: "arm", call: "APP", errorCode: "workflow.stale_attempt" },
+        { step: "evil", call: null, errorCode: "workflow.step_not_reviewed" },
+      ],
+    });
+  });
+
+  it("hold a call to the step whose attempt's host it came through, while another step runs beside it", async () => {
+    const { host, runId, appCalls } = await hostHeldTo({
+      steps: { arm: [], send: ["APP"] },
+      all: ["APP"],
+    });
+    let passed: Settled<unknown> = { ok: true, value: null };
+    // `arm`'s code hands its host to `send`'s, running inside it, which
+    // calls APP with it: as `arm`, whose review doesn't show it.
+    const armed = await host.do("arm", {}, async (arm) => {
+      const sent = await host.do("send", {}, async () => {
+        passed = await arm.callApp("hit", ["passed"]);
+        return { ok: true, value: null };
+      });
+      return { ok: true, value: codeOf(sent) };
+    });
+
+    expect({
+      passed: codeOf(passed),
+      armed: codeOf(armed),
+      appCalls,
+      audited: await refusals(runId),
+    }).toStrictEqual({
+      passed: "workflow.call_not_reviewed",
+      armed: "workflow.call_not_reviewed",
+      appCalls: [],
+      audited: [
+        { step: "arm", call: "APP", errorCode: "workflow.call_not_reviewed" },
+      ],
+    });
+  });
+
+  it("refuse, as stale, every call of an attempt the engine gave up on while its code ran on, and audit the first", async () => {
+    const { host, runId, appCalls, leases } = await hostHeldTo({
+      steps: { tidy: ["APP"] },
+      all: ["APP"],
+    });
+    const codes: string[] = [];
+    await host.do("tidy", {}, async (attempt) => {
+      // The engine gives up on it: it timed out, or its activation is over.
+      leases.delete("key:tidy");
+      for (let tries = 0; tries < 2; tries += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one call at a time
+        codes.push(codeOf(await attempt.callApp("hit", ["late"])));
+      }
+      return { ok: true, value: "tidied" };
+    });
+
+    expect({ codes, appCalls, audited: await refusals(runId) }).toStrictEqual({
+      codes: ["workflow.stale_attempt", "workflow.stale_attempt"],
+      appCalls: [],
+      audited: [
+        { step: "tidy", call: "APP", errorCode: "workflow.stale_attempt" },
+      ],
     });
   });
 
@@ -456,12 +517,12 @@ queueMicrotask(() => {
       all: ["APP"],
     });
     const codes: string[] = [];
-    const done = await host.do("tidy", {}, async () => {
+    const done = await host.do("tidy", {}, async (attempt) => {
       for (let tries = 0; tries < 3; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one call at a time
-        codes.push(codeOf(await host.callExport("CRM", "find", {})));
+        codes.push(codeOf(await attempt.callExport("CRM", "find", {})));
       }
-      codes.push(codeOf(await host.callApp("hit", ["tidied"])));
+      codes.push(codeOf(await attempt.callApp("hit", ["tidied"])));
       // The code carries on as if nothing was refused.
       return { ok: true, value: "tidied" };
     });
@@ -668,59 +729,20 @@ queueMicrotask(() => {
     });
   });
 
-  it("fail a run whose code catches the refusal of an attempt ID the host never gave, audit it once, and refuse every later call and step", async () => {
-    const { host, runId, appCalls, tampered } = await hostHeldTo({
-      steps: { tidy: ["APP"], after: ["APP"] },
-      all: ["APP"],
-    });
-    const codes: string[] = [];
-    const done = await host.do("tidy", {}, async () => {
-      // Never given: an ID of its own making, and one that's no ID at all.
-      const forged = await host.callApp("hit", ["forged"], crypto.randomUUID());
-      const malformed = await host.callApp("hit", ["forged"], "not-an-id");
-      const own = await host.callApp("hit", ["tidied"]);
-      codes.push(codeOf(forged), codeOf(malformed), codeOf(own));
-      // The code carries on as if nothing was refused.
-      return { ok: true, value: "tidied" };
-    });
-    const after = await host.do(
-      "after",
-      {},
-      async () => await Promise.resolve({ ok: true, value: null })
-    );
-
-    expect({
-      codes,
-      done: codeOf(done),
-      after: codeOf(after),
-      appCalls,
-      tampered,
-      audited: await refusals(runId),
-    }).toStrictEqual({
-      codes: ["workflow.invalid", "workflow.invalid", "workflow.invalid"],
-      done: "workflow.invalid",
-      after: "workflow.invalid",
-      appCalls: [],
-      // What fails the run, whatever its code returns.
-      tampered: ["workflow.invalid"],
-      audited: [{ step: "tidy", call: "APP", errorCode: "workflow.invalid" }],
-    });
-  });
-
   it("refuse an attempt's model, attachment and decision calls once it had a call refused", async () => {
     const { host, userId } = await hostHeldTo({ steps: { tidy: [] }, all: [] });
     const codes: string[] = [];
-    const done = await host.do("tidy", {}, async () => {
-      const refused = await host.callApp("hit", ["tidied"]);
-      const model = await host.callModel({
+    const done = await host.do("tidy", {}, async (attempt) => {
+      const refused = await attempt.callApp("hit", ["tidied"]);
+      const model = await attempt.callModel({
         step: "tidy",
         model: "default",
         instructions: "Summarise the invoice",
         input: "Invoice INV-7",
         outputSchema: { type: "string" },
       });
-      const attachment = await host.readAttachment(crypto.randomUUID(), 0);
-      const decision = await host.openDecision({
+      const attachment = await attempt.readAttachment(crypto.randomUUID(), 0);
+      const decision = await attempt.openDecision({
         step: "tidy",
         from: `person:${userId}`,
         description: "Approve the invoice",
