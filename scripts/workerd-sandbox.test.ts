@@ -79,6 +79,18 @@ const tcpSockets = (pid: number): string => {
   }
 };
 
+/** The workerd processes still running from a supervisor's directory. */
+const workerdIn = (dir: string): string[] => {
+  try {
+    return execFileSync("pgrep", ["-f", dir], { encoding: "utf-8" })
+      .split("\n")
+      .filter(Boolean);
+  } catch {
+    // pgrep exits 1 when nothing matches.
+    return [];
+  }
+};
+
 /** A module whose `E.go()` runs `body`. */
 const moduleOf = (body: string): string =>
   `import { WorkerEntrypoint } from "cloudflare:workers";
@@ -633,6 +645,112 @@ describe("the sandbox supervisor", () => {
       expect(isRunning(process.pid)).toBeTruthy();
     });
   });
+
+  it("fails a call loudly, as unavailable, when it can't read its processes' memory", async () => {
+    const events: Record<string, unknown>[] = [];
+    await withSupervisor(
+      {
+        // Neither /proc nor ps: as with no procfs, or no ps on the PATH.
+        memoryProbe: { procRoot: tempDir(), ps: "/nonexistent/ps" },
+        log: (event) => {
+          events.push(event);
+        },
+      },
+      async ({ socket }) => {
+        const result = await callSupervisor(socket, {
+          body: "await scheduler.wait(1000); return 'unbounded';",
+          deadlineMs: 5000,
+        });
+        expect(result.status).toBe(503);
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            event: "sandbox.memory_unreadable",
+            level: "error",
+          })
+        );
+      }
+    );
+  });
+
+  it("answers a call cut short by its own stop as failed, blaming no App", async () => {
+    const supervisor = await startSandboxSupervisor({
+      workerd: nativeWorkerd,
+      processes: 1,
+      log: quiet,
+    });
+    const call = callSupervisor(supervisor.socket, {
+      body: "await scheduler.wait(10_000); return 1;",
+      deadlineMs: 20_000,
+    });
+    await sleep(300);
+    await supervisor.stop();
+    const result = await call;
+    expect(result.status).toBe(503);
+    expect(supervisor.stats().crashed).toBe(0);
+  });
+
+  it("leaves no workerd behind when it stops while starting a replacement", async () => {
+    const supervisor = await startSandboxSupervisor({
+      workerd: nativeWorkerd,
+      processes: 1,
+      log: quiet,
+    });
+    // Its process dies idle, so a replacement starts at once; stopped while
+    // that one is still starting (workerd takes a few hundred ms).
+    process.kill(supervisor.pids()[0] ?? 0, "SIGKILL");
+    await sleep(50);
+    await supervisor.stop();
+    expect(workerdIn(supervisor.dir)).toStrictEqual([]);
+  });
+
+  it("refuses up front a socket path longer than a Unix socket allows", async () => {
+    await expect(
+      startSandboxSupervisor({
+        workerd: nativeWorkerd,
+        parent: path.join(tempDir(), "x".repeat(120)),
+        log: quiet,
+      })
+    ).rejects.toThrow("socket path is too long");
+  });
+
+  it.each([
+    ["SIGINT", false],
+    ["SIGTERM", false],
+    ["SIGHUP", false],
+    ["SIGTERM", true],
+  ] as const)(
+    "leaves no workerd behind when its host process gets %s (its own handler: %s)",
+    async (signal, ownHandler) => {
+      const parent = path.join(tempDir(), "parent.mjs");
+      writeFileSync(
+        parent,
+        `import { nativeWorkerd, startSandboxSupervisor } from ${JSON.stringify(path.join(import.meta.dirname, "workerd-sandbox.ts"))};
+${ownHandler ? `process.on(${JSON.stringify(signal)}, () => { setTimeout(() => process.exit(7), 100); });` : ""}
+const supervisor = await startSandboxSupervisor({ workerd: nativeWorkerd, processes: 1, log: () => undefined });
+process.stdout.write(JSON.stringify({ pids: supervisor.pids() }) + "\\n");
+setInterval(() => undefined, 1000);
+`
+      );
+      const host = spawn(process.execPath, [parent], {
+        stdio: ["ignore", "pipe", "inherit"],
+      });
+      const first: unknown[] = await once(
+        createInterface({ input: host.stdout }),
+        "line"
+      );
+      const [line] = first;
+      const { pids } = z
+        .object({ pids: z.array(z.number()) })
+        .parse(JSON.parse(String(line)));
+      expect(pids.every(isRunning)).toBeTruthy();
+      host.kill(signal);
+      const exit: unknown[] = await once(host, "exit");
+      const [code, killedBy] = exit;
+      // Its own handler decides how it ends; without one, the signal does.
+      expect(ownHandler ? code : killedBy).toBe(ownHandler ? 7 : signal);
+      await expect.poll(() => pids.some(isRunning)).toBe(false);
+    }
+  );
 
   it("stops its processes on SIGTERM when run on its own", async () => {
     const supervisor = spawn(

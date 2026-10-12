@@ -51,6 +51,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { readFile } from "node:fs/promises";
 import {
   createServer,
   IncomingMessage,
@@ -108,6 +109,8 @@ export interface SandboxSupervisorOptions {
   memoryLimitBytes?: number;
   /** How often a busy process's memory is read. */
   memoryPollMs?: number;
+  /** Where processes' memory is read: `/proc` on Linux, `/bin/ps` on macOS. */
+  memoryProbe?: MemoryProbe;
   /** How long a process may take to start. */
   startupMs?: number;
   /** Where the supervisor says what it did: one JSON line each, by default to stderr. */
@@ -146,6 +149,16 @@ const MIB = 1024 * 1024;
  */
 const manifestMaxBytes = 4 * MIB;
 
+/** Where a process's memory is read: Linux's procfs, or macOS's `ps`. */
+export interface MemoryProbe {
+  /** Linux: the procfs root, `/proc`. */
+  procRoot: string;
+  /** macOS: the `ps` binary, by absolute path so no PATH can hide it. */
+  ps: string;
+}
+
+const defaultProbe: MemoryProbe = { procRoot: "/proc", ps: "/bin/ps" };
+
 const defaults = {
   processes: 2,
   maxDeadlineMs: 30_000,
@@ -158,6 +171,7 @@ const defaults = {
   // A Cloudflare isolate may use 128 MB; workerd itself takes about 40.
   memoryLimitBytes: 256 * MIB,
   memoryPollMs: 100,
+  memoryProbe: defaultProbe,
   startupMs: 10_000,
 };
 
@@ -273,42 +287,111 @@ const exitOf = async (child: ChildProcess): Promise<void> => {
   }
 };
 
-/** `pid`'s resident memory in bytes, as `ps` says, or undefined once it's gone. */
-const residentBytes = async (pid: number): Promise<number | undefined> => {
-  const ps = spawn("ps", ["-o", "rss=", "-p", String(pid)], {
+/** What reading a process's memory came to. */
+type MemoryReading =
+  | { kind: "bytes"; bytes: number }
+  | { kind: "gone" }
+  | { kind: "unreadable"; why: string };
+
+/** Whether a process with this ID is still running. */
+const isAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const vmRss = /^VmRSS:\s+(?<kib>\d+)\s+kB$/mu;
+
+/** `pid`'s resident memory on Linux, from `/proc/<pid>/status`. */
+const procRss = async (
+  procRoot: string,
+  pid: number
+): Promise<number | string> => {
+  try {
+    const status = await readFile(
+      path.join(procRoot, String(pid), "status"),
+      "utf-8"
+    );
+    const kib = vmRss.exec(status)?.groups?.kib;
+    // A zombie has no VmRSS line: it's gone, but for being reaped.
+    return kib === undefined ? "no VmRSS" : Number(kib) * 1024;
+  } catch (error) {
+    return String(error);
+  }
+};
+
+/** `pid`'s resident memory on macOS, as `ps` says. */
+const psRss = async (ps: string, pid: number): Promise<number | string> => {
+  const child = spawn(ps, ["-o", "rss=", "-p", String(pid)], {
     stdio: ["ignore", "pipe", "ignore"],
   });
-  const exited = exitOf(ps);
+  const exited = exitOf(child);
   let output = "";
-  for await (const chunk of ps.stdout) {
-    output += String(chunk);
+  try {
+    for await (const chunk of child.stdout) {
+      output += String(chunk);
+    }
+  } catch (error) {
+    await exited;
+    return String(error);
   }
   await exited;
   const kib = Number(output.trim());
-  return output.trim() !== "" && Number.isFinite(kib) ? kib * 1024 : undefined;
+  return output.trim() !== "" && Number.isFinite(kib)
+    ? kib * 1024
+    : `ps answered ${JSON.stringify(output.trim())} (exit ${child.exitCode})`;
 };
 
-/** Whether `pid` passes `limit` bytes before `signal` aborts. */
-const passesMemory = async (
+/**
+ * `pid`'s resident memory, or that it's gone. A live process whose memory
+ * can't be read is `unreadable`, never skipped: then nothing bounds it.
+ */
+const residentMemory = async (
+  probe: MemoryProbe,
+  pid: number
+): Promise<MemoryReading> => {
+  let read: number | string = `no way to read memory on ${process.platform}`;
+  if (process.platform === "linux") {
+    read = await procRss(probe.procRoot, pid);
+  } else if (process.platform === "darwin") {
+    read = await psRss(probe.ps, pid);
+  }
+  if (typeof read === "number") {
+    return { kind: "bytes", bytes: read };
+  }
+  return isAlive(pid) ? { kind: "unreadable", why: read } : { kind: "gone" };
+};
+
+/** Whether `pid` passes `limit` bytes before `signal` aborts, or can't be read. */
+const watchMemory = async (
+  probe: MemoryProbe,
   pid: number,
   limit: number,
   pollMs: number,
   signal: AbortSignal
-): Promise<boolean> => {
+): Promise<
+  { kind: "over" } | { kind: "unreadable"; why: string } | { kind: "ended" }
+> => {
   while (!signal.aborted) {
     // oxlint-disable-next-line no-await-in-loop -- read once per poll
-    const bytes = await residentBytes(pid);
-    if (bytes !== undefined && bytes > limit) {
-      return true;
+    const reading = await residentMemory(probe, pid);
+    if (reading.kind === "unreadable") {
+      return reading;
+    }
+    if (reading.kind === "bytes" && reading.bytes > limit) {
+      return { kind: "over" };
     }
     try {
       // oxlint-disable-next-line no-await-in-loop -- one poll at a time
       await sleep(pollMs, undefined, { signal });
     } catch {
-      return false;
+      return { kind: "ended" };
     }
   }
-  return false;
+  return { kind: "ended" };
 };
 
 /** For errors already handled where they're awaited. */
@@ -373,10 +456,11 @@ type Ending =
   | { kind: "answered"; status: number; body: Buffer }
   | { kind: "too_large" }
   | { kind: "deadline" | "memory" | "abandoned" | "crashed" }
-  | { kind: "failed"; error: unknown };
+  | { kind: "failed"; error: unknown }
+  | { kind: "unreadable"; why: string };
 
 /** Why a call's run was aborted, set before it is. */
-type AbortReason = "deadline" | "memory" | "abandoned";
+type AbortReason = "deadline" | "memory" | "abandoned" | "unreadable";
 
 /** The pool of sandbox processes, and the calls it serves. */
 class SandboxPool {
@@ -391,6 +475,10 @@ class SandboxPool {
   #waiting = 0;
   #inFlight = 0;
   #stopping = false;
+  /** Every workerd started and not yet gone, serving or still starting. */
+  readonly #spawned = new Set<number>();
+  /** Starts under way, which `stop` waits for. */
+  readonly #starts = new Set<Promise<HostProcess>>();
   readonly #counts = { deadlines: 0, memory: 0, crashed: 0, abandoned: 0 };
 
   constructor(settings: Settings, dir: string) {
@@ -455,9 +543,12 @@ class SandboxPool {
     this.#live.clear();
     this.#idle.length = 0;
     this.#released.dispatchEvent(new Event("released"));
+    // Serving or still starting: every one is killed, and a start under
+    // way kills its own once it sees the pool stopping.
+    this.killAll();
+    await Promise.allSettled(this.#starts);
     await Promise.all(
       live.map(async (host) => {
-        killGroup(host.pid);
         await host.exited;
       })
     );
@@ -465,7 +556,7 @@ class SandboxPool {
 
   /** Kills every process at once, without waiting: for the process's exit. */
   killAll(): void {
-    for (const { pid } of this.#live) {
+    for (const pid of this.#spawned) {
       killGroup(pid);
     }
   }
@@ -530,6 +621,12 @@ class SandboxPool {
       send(response, 503, refusal("No sandbox process came free in time."));
       return;
     }
+    // Gone while a process came free: its call never starts.
+    if (caller.signal.aborted) {
+      this.#counts.abandoned += 1;
+      this.#release(host);
+      return;
+    }
     const ending = await this.#run(host, body, deadlineMs, caller.signal);
     this.#answer(response, host, ending, deadlineMs);
     if (ending.kind === "answered" || ending.kind === "too_large") {
@@ -550,6 +647,7 @@ class SandboxPool {
   ): Promise<Ending> {
     const run = new AbortController();
     let reason: AbortReason | undefined;
+    let unreadable = "";
     const end = (why: AbortReason): void => {
       reason ??= why;
       run.abort();
@@ -561,8 +659,13 @@ class SandboxPool {
       end("abandoned");
     };
     caller.addEventListener("abort", onCaller);
-    void this.#watchMemory(host, run.signal, () => {
-      end("memory");
+    void this.#watchMemory(host, run.signal, (why) => {
+      if (why === undefined) {
+        end("memory");
+      } else {
+        unreadable = why;
+        end("unreadable");
+      }
     });
     try {
       const forwarded = httpRequest({
@@ -590,13 +693,19 @@ class SandboxPool {
       }
       return { kind: "answered", status: answer.statusCode ?? 500, body: text };
     } catch (error) {
+      if (reason === "unreadable") {
+        return { kind: "unreadable", why: unreadable };
+      }
       if (reason !== undefined) {
         return { kind: reason };
       }
       // Its one call is all that ran in it: a process gone mid-call is
-      // that call's doing (V8 aborts at its heap limit), not an outage.
+      // that call's doing (V8 aborts at its heap limit), not an outage;
+      // unless the supervisor is stopping, which kills it.
       await Promise.race([host.exited, sleep(100)]);
-      return host.gone ? { kind: "crashed" } : { kind: "failed", error };
+      return host.gone && !this.#stopping
+        ? { kind: "crashed" }
+        : { kind: "failed", error };
     } finally {
       clearTimeout(timer);
       caller.removeEventListener("abort", onCaller);
@@ -604,15 +713,27 @@ class SandboxPool {
     }
   }
 
-  /** Calls `over` if `host` passes the memory limit before `signal` aborts. */
+  /**
+   * Calls `over` if `host` passes the memory limit before `signal` aborts,
+   * or `over(why)` if its memory can't be read: never left unbounded.
+   */
   async #watchMemory(
     host: HostProcess,
     signal: AbortSignal,
-    over: () => void
+    over: (unreadable?: string) => void
   ): Promise<void> {
-    const { memoryLimitBytes, memoryPollMs } = this.#settings;
-    if (await passesMemory(host.pid, memoryLimitBytes, memoryPollMs, signal)) {
+    const { memoryLimitBytes, memoryPollMs, memoryProbe } = this.#settings;
+    const watched = await watchMemory(
+      memoryProbe,
+      host.pid,
+      memoryLimitBytes,
+      memoryPollMs,
+      signal
+    );
+    if (watched.kind === "over") {
       over();
+    } else if (watched.kind === "unreadable") {
+      over(watched.why);
     }
   }
 
@@ -673,6 +794,21 @@ class SandboxPool {
         log({ event: "sandbox.abandoned", pid: host.pid });
         return;
       }
+      case "unreadable": {
+        // Loud: every call fails until the supervisor can read memory.
+        log({
+          event: "sandbox.memory_unreadable",
+          level: "error",
+          pid: host.pid,
+          why: ending.why,
+        });
+        send(
+          response,
+          503,
+          refusal("The sandbox can't read its processes' memory.")
+        );
+        return;
+      }
       case "failed": {
         log({
           event: "sandbox.call_failed",
@@ -690,6 +826,22 @@ class SandboxPool {
 
   /** A new workerd process, once it listens; throws if it can't start. */
   async #startProcess(): Promise<HostProcess> {
+    const start = this.#spawnProcess();
+    this.#starts.add(start);
+    try {
+      return await start;
+    } finally {
+      this.#starts.delete(start);
+    }
+  }
+
+  /** Forgets `pid` once it's gone. */
+  async #reap(pid: number, exited: Promise<void>): Promise<void> {
+    await exited;
+    this.#spawned.delete(pid);
+  }
+
+  async #spawnProcess(): Promise<HostProcess> {
     this.#next += 1;
     const socket = path.join(this.#dir, `p${this.#next}.sock`);
     rmSync(socket, { force: true });
@@ -724,6 +876,10 @@ class SandboxPool {
     }
     const { pid } = child;
     const { 3: control } = child.stdio;
+    if (pid !== undefined && pid > 0) {
+      this.#spawned.add(pid);
+      void this.#reap(pid, exited);
+    }
     if (pid === undefined || pid <= 0 || !(control instanceof Readable)) {
       if (pid !== undefined) {
         killGroup(pid);
@@ -743,6 +899,12 @@ class SandboxPool {
       throw new Error(
         `workerd didn't listen within ${this.#settings.startupMs} ms`
       );
+    }
+    // Stopped while it started: never served, never left behind.
+    if (this.#stopping) {
+      killGroup(pid);
+      await exited;
+      throw new Error("The supervisor stopped while workerd started.");
     }
     const host: HostProcess = { child, pid, socket, exited, gone: false };
     this.#live.add(host);
@@ -781,6 +943,10 @@ class SandboxPool {
 
   /** An idle process for one call, or undefined once `signal` aborts first. */
   async #acquire(signal: AbortSignal): Promise<HostProcess | undefined> {
+    // Gone already: nothing to wait for, no process to take.
+    if (signal.aborted) {
+      return undefined;
+    }
     this.#waiting += 1;
     try {
       let host = this.#idle.shift();
@@ -816,6 +982,9 @@ class SandboxPool {
         this.#release(await this.#startProcess());
         return;
       } catch (error) {
+        if (this.#stopping) {
+          return;
+        }
         this.#settings.log({
           event: "sandbox.process_failed",
           error: String(error),
@@ -857,6 +1026,68 @@ const answerRequest = async (
   }
 };
 
+/** The supervisor's directory's prefix, and its socket's name in it. */
+const dirPrefix = "grasp-sandbox-";
+const supervisorSocket = "supervisor.sock";
+
+/**
+ * The longest path a Unix socket may have, in bytes: `sun_path` less its
+ * NUL, 108 on Linux and 104 on macOS and the BSDs. Every process's socket
+ * (`pN.sock`) is shorter than the supervisor's.
+ */
+const maxSocketPathBytes = process.platform === "linux" ? 107 : 103;
+
+/** The pools running in this process, whose workerd dies with it. */
+const runningPools = new Set<SandboxPool>();
+const fatalSignals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+
+const killRunning = (): void => {
+  for (const pool of runningPools) {
+    pool.killAll();
+  }
+};
+
+/**
+ * On a signal that would end this process: kill every pool's workerd (they
+ * are detached, so nothing else would). Handlers this process set itself
+ * still run, ours beside them, and decide what follows; with none, the
+ * signal is raised again to end the process as it would have.
+ */
+const onFatalSignal = (signal: NodeJS.Signals): void => {
+  killRunning();
+  const others = process
+    .listeners(signal)
+    .filter((listener) => listener !== onFatalSignal);
+  if (others.length === 0) {
+    for (const fatal of fatalSignals) {
+      process.off(fatal, onFatalSignal);
+    }
+    process.off("exit", killRunning);
+    process.kill(process.pid, signal);
+  }
+};
+
+/** Kills `pool`'s workerd when this process exits or is signalled to end. */
+const watchProcess = (pool: SandboxPool): void => {
+  if (runningPools.size === 0) {
+    process.on("exit", killRunning);
+    for (const signal of fatalSignals) {
+      process.on(signal, onFatalSignal);
+    }
+  }
+  runningPools.add(pool);
+};
+
+const unwatchProcess = (pool: SandboxPool): void => {
+  runningPools.delete(pool);
+  if (runningPools.size === 0) {
+    process.off("exit", killRunning);
+    for (const signal of fatalSignals) {
+      process.off(signal, onFatalSignal);
+    }
+  }
+};
+
 /** Starts the supervisor, once its processes all serve. */
 export const startSandboxSupervisor = async (
   options: SandboxSupervisorOptions
@@ -871,11 +1102,23 @@ export const startSandboxSupervisor = async (
         process.stderr.write(`${JSON.stringify(event)}\n`);
       }),
   };
+  // Checked before anything starts: past the limit, workerd would only say
+  // it didn't listen.
+  const longest = path.join(
+    settings.parent,
+    `${dirPrefix}XXXXXX`,
+    supervisorSocket
+  );
+  if (Buffer.byteLength(longest) > maxSocketPathBytes) {
+    throw new Error(
+      `The sandbox's socket path is too long: ${longest} is ${Buffer.byteLength(longest)} bytes, and a Unix socket's path may be at most ${maxSocketPathBytes} on ${process.platform}. Give it a shorter parent directory.`
+    );
+  }
   // Its own directory, for its sockets and the host's files: no other user
   // may reach a socket in it.
-  const dir = mkdtempSync(path.join(settings.parent, "grasp-sandbox-"));
+  const dir = mkdtempSync(path.join(settings.parent, dirPrefix));
   chmodSync(dir, 0o700);
-  const socket = path.join(dir, "supervisor.sock");
+  const socket = path.join(dir, supervisorSocket);
   const pool = new SandboxPool(settings, dir);
   const server: Server = createServer((request, response) => {
     void answerRequest(pool, request, response);
@@ -883,17 +1126,14 @@ export const startSandboxSupervisor = async (
   server.maxConnections = 2 * (settings.processes + settings.maxWaiting) + 4;
   server.headersTimeout = HEADERS_TIMEOUT_MS;
   server.requestTimeout = REQUEST_TIMEOUT_MS;
-  const killAll = (): void => {
-    pool.killAll();
-  };
-  process.on("exit", killAll);
+  watchProcess(pool);
   let stopped = false;
   const stop = async (): Promise<void> => {
     if (stopped) {
       return;
     }
     stopped = true;
-    process.off("exit", killAll);
+    unwatchProcess(pool);
     if (server.listening) {
       server.close();
     }
