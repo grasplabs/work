@@ -19,3 +19,7 @@ export const formatDate = (value: string | number | Date): string =>
   new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(
     new Date(value)
   );
+
+/** A number as the page's language writes it, such as "1,500" or "1.500". */
+export const formatNumber = (value: number): string =>
+  new Intl.NumberFormat(i18n.locale).format(value);

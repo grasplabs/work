@@ -1,4 +1,6 @@
+import { catalogGroups } from "@grasp-os/shared/connect";
 import type {
+  CatalogGroup,
   CatalogSource,
   ListedConnection,
   OfferedCatalog,
@@ -21,6 +23,12 @@ export interface Integration {
   id: string;
   name: string;
   categories: string[];
+  /** Which of Grasp's kinds of app it is; `Other` where the catalog doesn't list it. */
+  group: CatalogGroup;
+  /** What it is for, in a sentence, where the catalog says. */
+  description: string | null;
+  /** Where core serves its logo, or `null`: its first letter stands in. */
+  logo: string | null;
   /** How many tools it has; unknown where the catalog doesn't list it. */
   toolCount: number | undefined;
   /** Whether people are offered it; an entry the catalog doesn't list counts as not. */
@@ -84,6 +92,9 @@ export const integrationsOf = (
     id: entry.id,
     name: entry.name,
     categories: entry.categories,
+    group: entry.group,
+    description: entry.description,
+    logo: entry.logo,
     toolCount: entry.toolCount,
     offered: entry.offered,
     listed: true,
@@ -101,6 +112,9 @@ export const integrationsOf = (
         // The catalog alone has its name: its ID stands in.
         name: connection.provider,
         categories: [],
+        group: "Other",
+        description: null,
+        logo: null,
         toolCount: undefined,
         offered: false,
         listed: false,
@@ -125,50 +139,211 @@ export const stateOf = ({ connections }: Integration): IntegrationState => {
   return connections.length > 0 ? "personal" : "not_connected";
 };
 
-/** What the list shows: everything, what is connected, what needs attention, or one category. */
+/** What the list shows, as in the prototype: everything, what is connected, or one kind of app. */
 export type IntegrationFilter =
   | { show: "all" }
   | { show: "connected" }
-  | { show: "attention" }
-  | { show: "category"; category: string };
+  | { show: "group"; group: CatalogGroup };
 
 /** Whether `integration` is one `filter` keeps. */
 export const keeps = (
   filter: IntegrationFilter,
   integration: Integration
 ): boolean => {
-  if (filter.show === "category") {
-    return integration.categories.includes(filter.category);
+  if (filter.show === "group") {
+    return integration.group === filter.group;
   }
-  const state = stateOf(integration);
-  if (filter.show === "connected") {
-    return state !== "not_connected";
-  }
-  return filter.show === "attention" ? state === "needs_reauth" : true;
+  return filter.show === "all" || stateOf(integration) !== "not_connected";
 };
 
-/** Whether `integration` is what the search names: by name or kind (category), or its ID. */
-export const matches = (integration: Integration, search: string): boolean => {
-  const wanted = search.trim().toLocaleLowerCase();
-  return [integration.name, integration.id, ...integration.categories].some(
-    (text) => text.toLocaleLowerCase().includes(wanted)
-  );
-};
+/** What kind of app it is, in the catalog's own words: its first category. */
+export const kindOf = (integration: Integration): string | undefined =>
+  integration.categories[0];
 
-/** The catalog's categories, each with how many integrations it holds, by name. */
-export const categoriesOf = (
+/**
+ * The apps most companies look for first, in the order they are shown
+ * before the rest of the alphabet, as the prototype has them
+ * (`lib/integration-catalog.ts`): a list of 1,500 that opens on "0CodeKit"
+ * says little about what is in it. Composio's slugs.
+ */
+const knownFirst = [
+  "github",
+  "googledocs",
+  "outlook",
+  "linear",
+  "figma",
+  "shopify",
+  "calendly",
+  "typeform",
+  "canva",
+  "pipedrive",
+  "clickup",
+  "discord",
+  "linkedin",
+  "youtube",
+  "instagram",
+  "facebook",
+  "telegram",
+  "twitter",
+  "zoho",
+  "box",
+  "miro",
+  "gitlab",
+  "bitbucket",
+  "supabase",
+  "snowflake",
+  "posthog",
+  "mixpanel",
+  "amplitude",
+  "segment",
+  "sendgrid",
+  "klaviyo",
+  "webflow",
+  "freshdesk",
+  "servicenow",
+  "workday",
+  "bamboohr",
+  "personio",
+  "gusto",
+  "greenhouse",
+  "lever",
+  "ashby",
+  "gong",
+  "apollo",
+  "attio",
+  "close",
+  "copper",
+  "pandadoc",
+  "dropbox_sign",
+  "netsuite",
+  "paypal",
+  "square",
+  "ramp",
+  "brex",
+  "wise",
+  "tableau",
+  "google_analytics",
+  "googleads",
+  "metaads",
+  "tiktok",
+  "reddit",
+  "spotify",
+  "todoist",
+  "coda",
+  "basecamp",
+  "wrike",
+  "harvest",
+  "toggl",
+  "sentry",
+  "datadog",
+  "pagerduty",
+  "vercel",
+  "cloudflare",
+  "digital_ocean",
+  "openai",
+  "perplexityai",
+  "elevenlabs",
+  "brevo",
+  "lemlist",
+  "instantly",
+] as const;
+const knownAt = new Map<string, number>(knownFirst.map((id, at) => [id, at]));
+const rankOf = ({ id }: Integration): number =>
+  knownAt.get(id) ?? knownFirst.length;
+
+/**
+ * The integrations a search finds, as the prototype's `findApps`: by name
+ * first, one that starts with what was typed before one that only holds it,
+ * then by what they are for. Nothing typed: the well-known apps first, then
+ * the rest in the catalog's order.
+ */
+export const find = (
   integrations: readonly Integration[],
-  locale: string
-): { category: string; count: number }[] => {
-  const counts = new Map<string, number>();
-  for (const { categories } of integrations) {
-    for (const category of new Set(categories)) {
-      counts.set(category, (counts.get(category) ?? 0) + 1);
-    }
+  search: string | undefined
+): Integration[] => {
+  const needle = (search ?? "").trim().toLocaleLowerCase();
+  if (needle === "") {
+    return integrations.toSorted((one, other) => rankOf(one) - rankOf(other));
   }
-  return [...counts]
-    .map(([category, count]) => ({ category, count }))
-    .toSorted((one, other) =>
-      one.category.localeCompare(other.category, locale)
-    );
+  const byName = integrations.filter(
+    ({ name, id }) =>
+      name.toLocaleLowerCase().includes(needle) ||
+      id.toLocaleLowerCase().includes(needle)
+  );
+  const named = new Set(byName);
+  const byUse = integrations.filter(
+    (integration) =>
+      !named.has(integration) &&
+      [...integration.categories, integration.description ?? ""].some((text) =>
+        text.toLocaleLowerCase().includes(needle)
+      )
+  );
+  const starts = (integration: Integration): number =>
+    Number(integration.name.toLocaleLowerCase().startsWith(needle));
+  return [
+    ...byName.toSorted((one, other) => starts(other) - starts(one)),
+    ...byUse,
+  ];
+};
+
+/**
+ * One kind of app on the page: the company's own (connected) apps of it,
+ * then the catalog's others.
+ */
+export interface IntegrationSection {
+  group: CatalogGroup;
+  own: Integration[];
+  others: Integration[];
+}
+
+/**
+ * The page's sections, as the prototype's: one per kind of app, in Grasp's
+ * order, the connected apps first in each and the catalog's others after
+ * them. Connected shows only what is connected; a kind shows only itself.
+ */
+export const sectionsOf = (
+  integrations: readonly Integration[],
+  filter: IntegrationFilter,
+  search: string | undefined
+): IntegrationSection[] => {
+  const found = find(
+    integrations.filter((integration) => keeps(filter, integration)),
+    search
+  );
+  return catalogGroups
+    .map((group) => {
+      const ofGroup = found.filter((integration) => integration.group === group);
+      return {
+        group,
+        own: ofGroup.filter(
+          (integration) => stateOf(integration) !== "not_connected"
+        ),
+        others: ofGroup.filter(
+          (integration) => stateOf(integration) === "not_connected"
+        ),
+      };
+    })
+    .filter(({ own, others }) => own.length + others.length > 0);
+};
+
+/** How many integrations each kind of app holds. */
+export const countByGroup = (
+  integrations: readonly Integration[]
+): ReadonlyMap<CatalogGroup, number> => {
+  const counts = new Map<CatalogGroup, number>();
+  for (const { group } of integrations) {
+    counts.set(group, (counts.get(group) ?? 0) + 1);
+  }
+  return counts;
+};
+
+/** A count rounded down to a round number, to say "more than" it: 1,487 is more than 1,400. */
+export const roundedDown = (count: number): number => {
+  let step = 10;
+  if (count >= 1000) {
+    step = 100;
+  } else if (count >= 100) {
+    step = 50;
+  }
+  return Math.floor(count / step) * step;
 };

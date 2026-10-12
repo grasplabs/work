@@ -5,11 +5,12 @@ import type {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  categoriesOf,
+  find,
   integrationsOf,
   keeps,
-  matches,
   parseIntegrationKey,
+  roundedDown,
+  sectionsOf,
   stateOf,
 } from "./integrations.ts";
 
@@ -22,14 +23,21 @@ type Entry = OfferedCatalog["entries"][number];
 const entry = (
   id: string,
   categories: string[],
-  source: Entry["source"] = "native"
+  {
+    source = "native",
+    group = "Other",
+    description = null,
+    name = id.toUpperCase(),
+  }: Partial<Pick<Entry, "source" | "group" | "description" | "name">> = {}
 ): Entry => ({
   source,
   id,
-  name: id.toUpperCase(),
+  name,
   categories,
   toolCount: 3,
   logo: null,
+  description,
+  group,
   offered: true,
 });
 
@@ -121,42 +129,86 @@ describe(stateOf, () => {
   });
 });
 
-describe("filters and search", () => {
-  const [microsoft, google] = integrationsOf(
-    [entry("microsoft", ["Email", "Files"]), entry("google", ["Email"])],
-    [connection("microsoft", "personal", "needs_reauth")]
+describe("filters, search and sections", () => {
+  const [microsoft, google, hubspot] = integrationsOf(
+    [
+      entry("microsoft", ["Email"], { group: "Email and calendar" }),
+      entry("google", ["Email"], {
+        group: "Email and calendar",
+        description: "Mail and files from Google.",
+      }),
+      entry("hubspot", ["CRM"], { group: "CRM" }),
+    ],
+    [connection("google", "personal", "needs_reauth")]
+  );
+  const all = [microsoft, google, hubspot].filter(
+    (integration) => integration !== undefined
   );
 
-  it("keeps what each filter names", () => {
+  it("keeps what each filter names: everything, what is connected, or one kind", () => {
     const kept = (filter: Parameters<typeof keeps>[0]) =>
-      [microsoft, google]
-        .filter((integration) => integration !== undefined)
+      all
         .filter((integration) => keeps(filter, integration))
         .map(({ id }) => id);
-    expect(kept({ show: "all" })).toStrictEqual(["microsoft", "google"]);
-    expect(kept({ show: "connected" })).toStrictEqual(["microsoft"]);
-    expect(kept({ show: "attention" })).toStrictEqual(["microsoft"]);
-    expect(kept({ show: "category", category: "Files" })).toStrictEqual([
+    expect(kept({ show: "all" })).toStrictEqual([
       "microsoft",
+      "google",
+      "hubspot",
+    ]);
+    expect(kept({ show: "connected" })).toStrictEqual(["google"]);
+    expect(kept({ show: "group", group: "CRM" })).toStrictEqual(["hubspot"]);
+  });
+
+  it("finds by name before what an app is for, whatever the case", () => {
+    expect(find(all, "GOO").map(({ id }) => id)).toStrictEqual(["google"]);
+    expect(find(all, "files").map(({ id }) => id)).toStrictEqual(["google"]);
+    expect(find(all, "e").map(({ id }) => id)).toStrictEqual([
+      "microsoft",
+      "google",
+      "hubspot",
     ]);
   });
 
-  it("searches by name or kind, whatever the case", () => {
-    expect(microsoft !== undefined && matches(microsoft, "files")).toBeTruthy();
-    expect(google !== undefined && matches(google, "GOO")).toBeTruthy();
-    expect(google !== undefined && matches(google, "files")).toBeFalsy();
+  it("puts the apps most companies look for first when nothing is typed", () => {
+    const [linear, zapier] = integrationsOf(
+      [entry("zapier", []), entry("linear", [])],
+      []
+    ).toReversed();
+    expect(
+      find(
+        [zapier, linear].filter((integration) => integration !== undefined),
+        undefined
+      ).map(({ id }) => id)
+    ).toStrictEqual(["linear", "zapier"]);
   });
 
-  it("counts each category once per integration, by name", () => {
+  it("makes a section per kind of app, in Grasp's order, connected apps first", () => {
     expect(
-      categoriesOf(
-        [microsoft, google].filter((integration) => integration !== undefined),
-        "en"
+      sectionsOf(all, { show: "all" }, undefined).map(
+        ({ group, own, others }) => ({
+          group,
+          own: own.map(({ id }) => id),
+          others: others.map(({ id }) => id),
+        })
       )
     ).toStrictEqual([
-      { category: "Email", count: 2 },
-      { category: "Files", count: 1 },
+      { group: "Email and calendar", own: ["google"], others: ["microsoft"] },
+      { group: "CRM", own: [], others: ["hubspot"] },
     ]);
+  });
+
+  it("shows only what is connected under Connected", () => {
+    expect(
+      sectionsOf(all, { show: "connected" }, undefined).flatMap(
+        ({ own, others }) => [...own, ...others].map(({ id }) => id)
+      )
+    ).toStrictEqual(["google"]);
+  });
+
+  it("rounds a count down to say more than it", () => {
+    expect(roundedDown(1487)).toBe(1400);
+    expect(roundedDown(187)).toBe(150);
+    expect(roundedDown(47)).toBe(40);
   });
 });
 
