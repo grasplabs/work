@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { requireAppRole } from "../app-access.ts";
 import { findApp } from "../apps.ts";
+import { removedText } from "./retention.ts";
 
 // A run's summary, as an App's screens observe it (spec 10.4.1, 10.4.5,
 // 10.4.7, 10.7.3): its status, who it is, its times, the decisions it
@@ -44,6 +45,8 @@ const rowSchema = z.object({
   ended_at: z.number().nullable(),
   cancel_requested_at: z.number().nullable(),
   failure: z.string().nullable(),
+  started_by: z.string().nullable(),
+  details_removed_at: z.number().nullable(),
   summary_revision: z.number(),
   waits: z.string(),
   pending: z.enum(["pause", "resume", "cancel"]).nullable(),
@@ -144,7 +147,8 @@ const engineStatusSchema = z.enum([
 
 /**
  * The summary of `app`'s run `run`, as `by` (anyone with a role in the
- * App) may see it; another App's run is `workflow.run_not_found`.
+ * App) may see it: a failed run's error only for its person and admins;
+ * another App's run is `workflow.run_not_found`.
  */
 export const runSummary = async (
   env: Env,
@@ -164,7 +168,7 @@ export const runSummary = async (
   const read = await env.DB.prepare(
     `SELECT r.id, r.workflow_id, r.version, r.status, r.engine_status,
        r.created_at, r.started_at, r.ended_at, r.cancel_requested_at,
-       r.failure, r.summary_revision,
+       r.failure, r.started_by, r.details_removed_at, r.summary_revision,
        (SELECT json_group_array(json_object('name', d.step, 'expiresAt', d.expires_at))
           FROM workflow_decisions d
           WHERE d.run_id = r.id AND d.status = 'open') AS waits,
@@ -186,7 +190,17 @@ export const runSummary = async (
     engineStatusSchema.safeParse(row.engine_status).data
   );
   const live = !ended.has(status);
-  const error = status === "failed" ? errorOf(row.failure) : undefined;
+  // What it failed with can hold what the run read for its person: only
+  // they and admins see it, as on the run's status (runs.ts,
+  // `seesDetails`), its message gone once its details are removed.
+  const sees =
+    by.role === "admin" || by.userId === (row.started_by ?? found.owner);
+  const reported =
+    status === "failed" && sees ? errorOf(row.failure) : undefined;
+  const error =
+    reported === undefined || row.details_removed_at === null
+      ? reported
+      : { ...reported, message: removedText(env) };
   return {
     revision: row.summary_revision,
     runId: row.id,

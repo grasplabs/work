@@ -276,4 +276,60 @@ describe("a run's summary", { timeout: 60_000 }, () => {
       },
     });
   });
+
+  it("show a failed run's error to its person and admins only, its message gone once its details are removed", async () => {
+    const builder = await personApi("builder");
+    const user = await personApi("user");
+    const admin = await personApi("admin");
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "failing",
+        `  return await step.do("fail", { description: "Fail", retries: { limit: 0 } }, async () => {
+    throw Object.assign(new Error("Invoice INV-7 of Acme is missing"), { code: "invoice.missing" });
+  });`,
+        { fail: null }
+      )
+    );
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const { id: run } = await builder.api.screens.startRun(app, "failing");
+    const own = await summaryWhen(
+      builder,
+      app,
+      run,
+      ({ status }) => status === "failed"
+    );
+    const other = await user.api.screens.summary(app, run);
+    const byAdmin = await admin.api.screens.summary(app, run);
+    await env.DB.prepare(
+      "UPDATE workflow_runs SET details_removed_at = ? WHERE id = ?"
+    )
+      .bind(Date.now(), run)
+      .run();
+    const removed = await builder.api.screens.summary(app, run);
+    const { failure } = await builder.api.workflows.status(run);
+
+    expect({
+      own: own.error,
+      other: other.error,
+      byAdmin: byAdmin.error,
+      removed: removed.error,
+    }).toStrictEqual({
+      own: {
+        code: "invoice.missing",
+        message: "Invoice INV-7 of Acme is missing",
+      },
+      other: undefined,
+      byAdmin: {
+        code: "invoice.missing",
+        message: "Invoice INV-7 of Acme is missing",
+      },
+      // As the run's status says it.
+      removed: { code: "invoice.missing", message: failure?.error.message },
+    });
+  });
 });
