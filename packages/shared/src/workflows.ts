@@ -38,8 +38,6 @@ export const workflowErrors = defineErrorFamily({
     "The App's current version changed while the value was set. Try again.",
   "workflow.trigger_gone":
     "The trigger belongs to a version of the App that is no longer current.",
-  "workflow.start_pending":
-    "The run this was delivered for is still starting. Try again shortly.",
   "workflow.email_taken":
     "Another App's workflow already receives mail at this address.",
   "workflow.attachment_not_found":

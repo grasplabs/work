@@ -525,7 +525,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       worked: await hitsOf(app, builder, "work"),
     }).toStrictEqual({
       waiting: null,
-      whileStopped: { removed: null, status: "running", engine: true },
+      whileStopped: { removed: null, status: "paused", engine: true },
       ended: {
         status: "completed",
         output: { read: transcript },

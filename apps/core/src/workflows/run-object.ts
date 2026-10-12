@@ -4,10 +4,12 @@ import type {
   WorkflowDefinition,
 } from "@grasp-os/workerflow/contracts";
 import { WorkflowRun } from "@grasp-os/workerflow/run";
+import type { RunNotification } from "@grasp-os/workerflow/run";
 
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
 import type { BusyRefusals } from "./host.ts";
+import { projectStatus } from "./runs.ts";
 
 /**
  * Where a run keeps each step's last busy-budget refusal (host.ts): a
@@ -82,6 +84,10 @@ export const busyRefusalsIn = (sql: SqlStorage): BusyRefusals => ({
 // created with (engine.ts, `pinOf`): the dispatcher loads the run's row,
 // its authority and its code at the pinned version (dispatcher.ts).
 //
+// It tells core of each status a run takes, through its durable outbox, in
+// order and at least once (`notify`): core's record of the run follows the
+// engine, and only the engine (runs.ts, `projectStatus`).
+//
 // No route reaches it: it is registered privately, its namespace bound to
 // core alone.
 
@@ -103,5 +109,33 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           busyRefusals: busyRefusalsIn(this.ctx.storage.sql),
         }),
     };
+  }
+
+  /**
+   * Takes the run's status changes: the newest of each batch is all core's
+   * record needs, as a later status replaces an earlier one. A run of
+   * core's own (an upload's extraction, a build) has no row to follow it.
+   * A failure is thrown, so the engine hands the batch over again.
+   */
+  // oxlint-disable-next-line grasp/no-unbounded-rpc-target -- the engine's hook, as `definition`
+  protected override async notify(
+    notifications: readonly RunNotification[]
+  ): Promise<void> {
+    const latest = notifications.at(-1);
+    if (latest === undefined) {
+      return;
+    }
+    const pin = pinOf({
+      definition: latest.workflow,
+      version: latest.version,
+    });
+    if (pin?.type !== "app") {
+      return;
+    }
+    await projectStatus(this.env, latest.instanceId, {
+      status: latest.status,
+      at: latest.timestamp,
+      sequence: latest.sequence,
+    });
   }
 }

@@ -24,10 +24,10 @@ import {
   eq,
   gte,
   inArray,
+  isNotNull,
   isNull,
   like,
   lt,
-  ne,
   or,
   sql,
 } from "drizzle-orm";
@@ -56,17 +56,26 @@ import { tellScreens } from "./run-changes.ts";
 import type { TriggerType } from "./trigger-registry.ts";
 
 // Runs of Apps' workflows, as core keeps them: one row each (the App
-// version it is pinned to, who started it, where it was last seen), next
-// to the run itself in the engine (engine.ts), under the same ID. The
-// dispatcher (dispatcher.ts) loads a run from its row on every start and
-// resume.
+// version it is pinned to, who started it, where the engine last said it
+// is), next to the run itself in the engine (engine.ts), under the same ID.
+// The dispatcher (dispatcher.ts) loads a run from its row on every
+// activation.
+//
+// One writer: the engine alone decides where a run is. The row's status
+// follows the engine's notifications, each applied only if it is newer
+// than the last one the row took (`projectStatus`), and an ended run's
+// row never changes status again. Core writes only what is its own: the
+// start it is to send (`pending_start`, until the engine confirms it), a
+// start that failed before the engine had it (`failStart`), a run's
+// failure report, and the cancel tombstone (`cancel_requested_at`), after
+// which the dispatcher runs nothing more of the run.
 
 export type RunRow = typeof workflowRuns.$inferSelect;
 
 /**
  * The statuses of a run that hasn't ended. A run is `starting` from its
- * row until its engine instance is known to exist (`startRun`); then
- * `running`.
+ * row until the engine's first notification of it; then where the engine
+ * says it is.
  */
 export const unended: RunRow["status"][] = ["starting", "running", "paused"];
 
@@ -276,80 +285,40 @@ export interface RunRequest {
   parent?: RunId;
 }
 
-/**
- * How long a run's row may go without its engine instance before a
- * trigger delivered again creates it: longer than a start takes between
- * writing the row and creating the instance, so a start still under way
- * is left to finish.
- */
-const orphanAfterMs = 60_000;
-
-/**
- * Marks a starting run running, now that its engine instance exists
- * (`startRun`, `restartOrphan`, `failOrphans`, and the dispatcher, which
- * may run it first). Only a starting row changes: a run that ended
- * meanwhile stays as it ended.
- */
-export const markRunning = async (env: Env, run: string): Promise<void> => {
-  await drizzle(env.DB)
-    .update(workflowRuns)
-    .set({ status: "running" })
-    .where(and(eq(workflowRuns.id, run), eq(workflowRuns.status, "starting")));
+/** What core sends the engine to start `row`'s run (engine.ts). */
+const sendStart = async (
+  env: Env,
+  row: Pick<RunRow, "id" | "appId" | "workflowId" | "version">,
+  input: Json | undefined
+): Promise<void> => {
+  await runEngine(env).create({
+    id: row.id,
+    pinned: {
+      app: appIdSchema.parse(row.appId),
+      workflow: workflowIdSchema.parse(row.workflowId),
+      version: row.version,
+    },
+    input,
+  });
 };
 
 /**
- * Makes sure a triggered run found by its key has its engine instance.
- * A row still `starting` is a start under way, or one that stopped after
- * its row was written (core stopped in between):
- * - with its instance, it only hadn't recorded it: it is marked running;
- * - younger than `orphanAfterMs`, it may still be under way, so this
- *   refuses for now (`workflow.start_pending`): the delivery is tried
- *   again (a schedule stays due, mail and events are retried), and a
- *   start that stopped is caught once it's old enough;
- * - older, it creates the instance under the run's own ID and pinned
- *   version, so it is the same run, started once: two deliveries doing
- *   this at once both try, and the engine keeps one.
- * Manual starts have no key to be delivered again by, so this covers
- * only triggered runs; `failOrphans` ends the rest.
+ * Sends `row`'s start again, the same, while the engine is still to
+ * confirm it: the engine takes it as the start it already has, if it has
+ * it, so the run is started once however often this runs.
  */
-const restartOrphan = async (
-  env: Env,
-  row: RunRow,
-  input: Json | undefined
-): Promise<void> => {
-  if (row.status !== "starting") {
+const resendStart = async (env: Env, row: RunRow): Promise<void> => {
+  if (row.pendingStart === null || row.status !== "starting") {
     return;
   }
-  if ((await runEngine(env).status(row.id)) === undefined) {
-    if (Date.now() - row.createdAt.getTime() <= orphanAfterMs) {
-      throw workflowErrors.create("workflow.start_pending");
-    }
-    log.warn("workflow.run_restarted", { runId: row.id });
-    try {
-      await runEngine(env).create({
-        id: row.id,
-        pinned: {
-          app: appIdSchema.parse(row.appId),
-          workflow: workflowIdSchema.parse(row.workflowId),
-          version: row.version,
-        },
-        input,
-      });
-    } catch (error) {
-      // Another delivery created it first: that is the run.
-      if ((await runEngine(env).status(row.id)) === undefined) {
-        throw error;
-      }
-    }
-  }
-  await markRunning(env, row.id);
+  await sendStart(env, row, row.pendingStart.input);
 };
 
 /**
  * Why a run is marked failed without having run: its engine instance
  * couldn't be created (`start_failed`, `startRun`), or it was never
- * created and the row was found alone (`no_instance`, `failOrphans`).
- * Each with the message its report says it with.
+ * confirmed however often it was sent again (`no_instance`,
+ * `repairStarts`). Each with the message its report says it with.
  */
 const unstarted = {
   start_failed: "The workflow run couldn't be started.",
@@ -357,12 +326,14 @@ const unstarted = {
 } as const;
 
 /**
- * Marks a run that didn't start as failed, for `reason`, audited and
- * notified as a failed run (`failureRecorded`), once. Only a starting
- * run: one the dispatcher has run meanwhile (`markRunning`), or that was
- * cancelled, stays as it is. Its
- * report, which its owner sees as they see any failed run's, says only
- * that it didn't start. It gives up its trigger key, so its trigger
+ * Marks a run whose start the engine never confirmed as failed, for
+ * `reason`, audited and notified as a failed run (`failureRecorded`),
+ * once: core's own decision that the run didn't start, and its tombstone.
+ * Only a starting run: one the engine has told of meanwhile stays as the
+ * engine says. Should the engine have it after all (the answer to its
+ * start was lost), the dispatcher runs none of it, as the row has ended.
+ * Its report, which its owner sees as they see any failed run's, says
+ * only that it didn't start. It gives up its trigger key, so its trigger
  * delivered again starts a new run. Whether this marked it.
  */
 const failStart = async (
@@ -385,7 +356,13 @@ const failStart = async (
   const [[failed]] = await auditedBatch(env, db, [
     db
       .update(workflowRuns)
-      .set({ status: "failed", endedAt: failedAt, failure, triggerKey: null })
+      .set({
+        status: "failed",
+        endedAt: failedAt,
+        failure,
+        triggerKey: null,
+        pendingStart: null,
+      })
       .where(
         and(eq(workflowRuns.id, row.id), eq(workflowRuns.status, "starting"))
       )
@@ -403,75 +380,76 @@ const failStart = async (
 };
 
 /**
- * How long a run may stay starting before `failOrphans` ends it: well
- * past `orphanAfterMs`, so a triggered run's next delivery (a schedule's
- * is a minute on) restarts it first, with the input it was delivered
- * with.
+ * Forgets the start the engine has now confirmed: nothing sends it again.
+ * Its status is the engine's to set (`projectStatus`).
  */
-const orphanFailsAfterMs = 15 * 60_000;
+const startConfirmed = async (env: Env, run: string): Promise<void> => {
+  await drizzle(env.DB)
+    .update(workflowRuns)
+    .set({ pendingStart: null })
+    .where(and(eq(workflowRuns.id, run), isNotNull(workflowRuns.pendingStart)));
+};
 
 /**
- * Most starting runs one `failOrphans` asks the engine about: a budget
- * for one cron run. Each one it handles stops starting, so the next cron
- * run takes the next ones.
+ * How long a start the engine hasn't confirmed is left to the start under
+ * way before the repair sends it again: longer than a start takes between
+ * writing the row and the engine's answer.
  */
-const orphansPerRun = 50;
+const repairAfterMs = 60_000;
 
 /**
- * Ends runs still `starting` `orphanFailsAfterMs` after their row was
- * written. A start that stopped between writing the row and creating
- * the engine instance (core stopped in between) leaves one; live runs
- * are never starting, so none is looked at, however old.
- * - With its instance, the start only didn't record it: it is marked
- *   running.
- * - Without, it is marked failed (`no_instance`). It isn't restarted:
- *   its row doesn't keep its input, which only the engine does, so a
- *   person's start can't be made again as they made it; they see it
- *   failed and start it again. A triggered run gets here only if nothing
- *   delivered its trigger again in that time (triggers were off, or its
- *   version was replaced); it gives up its key, so a delivery after this
- *   starts a new run.
- *
- * Each cron run takes at most `orphansPerRun` of them, in ID order from
- * a random ID (`from`), wrapping round: rows the engine keeps failing to
- * answer for can't hold every run's budget, and every row is reached in
- * time.
- *
- * An instance created after the check (its start, or a delivery racing
- * this) finds its row failed, and the dispatcher refuses it before any
- * step (dispatcher.ts); or its first execution marked the row running
- * first, and this changes nothing. So nothing needs terminating. Rarely,
- * a delivery that `restartOrphan` answered with the run just before is
- * left with a run that failed: accepted, and audited.
+ * How long the repair sends a start again before it gives up on it: a
+ * start the engine still hasn't taken by then (it kept failing) is marked
+ * failed, and gives up its trigger key.
  */
-export const failOrphans = async (
+const repairGivesUpAfterMs = 15 * 60_000;
+
+/**
+ * Most starts one repair sends again: a budget for one cron run. Each one
+ * the engine confirms leaves the set, so the next cron run takes the next.
+ */
+const repairsPerRun = 50;
+
+/**
+ * Sends again each start the engine hasn't confirmed `repairAfterMs`
+ * after its row was written: what a start leaves when core stops between
+ * writing the run's row and the engine's answer. The start is sent as it
+ * was first (`pending_start`), under the run's ID, so the engine takes it
+ * as the start it already has if it got it, and creates the run once if
+ * it didn't. A start still unconfirmed `repairGivesUpAfterMs` on is marked
+ * failed (`no_instance`).
+ *
+ * Each cron run takes at most `repairsPerRun` of them, in ID order from a
+ * random ID (`from`), wrapping round: starts the engine keeps failing on
+ * can't hold every run's budget, and every one is reached in time.
+ */
+export const repairStarts = async (
   env: Env,
   from: string = crypto.randomUUID()
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  const cutoff = new Date(Date.now() - orphanFailsAfterMs);
+  const cutoff = new Date(Date.now() - repairAfterMs);
   const slice = async (side: SQL, limit: number): Promise<RunRow[]> =>
     await db
       .select()
       .from(workflowRuns)
       .where(
         and(
-          eq(workflowRuns.status, "starting"),
-          isNull(workflowRuns.endedAt),
+          isNotNull(workflowRuns.pendingStart),
           lt(workflowRuns.createdAt, cutoff),
           side
         )
       )
       .orderBy(asc(workflowRuns.id))
       .limit(limit);
-  const onward = await slice(gte(workflowRuns.id, from), orphansPerRun);
+  const onward = await slice(gte(workflowRuns.id, from), repairsPerRun);
   const rows =
-    onward.length < orphansPerRun
+    onward.length < repairsPerRun
       ? [
           ...onward,
           ...(await slice(
             lt(workflowRuns.id, from),
-            orphansPerRun - onward.length
+            repairsPerRun - onward.length
           )),
         ]
       : onward;
@@ -480,17 +458,17 @@ export const failOrphans = async (
   await Promise.all(
     rows.map(async (row) => {
       try {
-        if ((await runEngine(env).status(row.id)) !== undefined) {
-          await markRunning(env, row.id);
-          return;
-        }
-        log.warn("workflow.run_orphaned", { runId: row.id });
-        await failStart(env, row, "no_instance");
+        log.warn("workflow.start_resent", { runId: row.id });
+        await resendStart(env, row);
+        await startConfirmed(env, row.id);
       } catch (error) {
-        log.error("workflow.orphan_check_failed", {
+        log.error("workflow.start_repair_failed", {
           runId: row.id,
           ...errorFields(error),
         });
+        if (Date.now() - row.createdAt.getTime() > repairGivesUpAfterMs) {
+          await failStart(env, row, "no_instance");
+        }
       }
     })
   );
@@ -510,15 +488,38 @@ const rootOf = async (env: Env, parent: RunId): Promise<string> => {
 };
 
 /**
+ * The run a trigger's key `key` already started, its start sent again
+ * while the engine is still to confirm it: the engine takes it as the
+ * start it has, so a key delivered twice is one run.
+ */
+const deliveredBefore = async (
+  env: Env,
+  key: string,
+  run: string
+): Promise<WorkflowRun> => {
+  const started = await drizzle(env.DB)
+    .select()
+    .from(workflowRuns)
+    .where(eq(workflowRuns.triggerKey, key))
+    .get();
+  if (!started) {
+    throw new Error(`No run has the trigger key of run ${run}`);
+  }
+  await resendStart(env, started);
+  return toRun(env, started);
+};
+
+/**
  * Starts a run on the App's current version, which it keeps until it ends.
- * The row and its audit event are written before the run is created, so
- * the dispatcher always finds the row. The row says `starting` until the
- * run is created, then `running`; a run that can't be created is marked
- * failed, audited as a failed run. A trigger's key already taken
- * returns the run that took it, whatever became of it since, once it has
- * its engine instance (`restartOrphan`; `workflow.start_pending` until
- * then); a run whose start failed gives its key up, so the delivery
- * tried again starts it anew. A trigger of a
+ * The row, the start it is to send and its audit event are written before
+ * the start is sent, so the dispatcher always finds the row, and a start
+ * core stops in the middle of is sent again (`repairStarts`). The row says
+ * `starting` until the engine's first notification; a start the engine
+ * refuses is marked failed, audited as a failed run. A trigger's key
+ * already taken returns the run that took it, whatever became of it
+ * since, its start sent again while the engine is still to confirm it (a
+ * start sent twice is one run); a run whose start failed gives its key up,
+ * so the delivery tried again starts it anew. A trigger of a
  * version that is no longer current starts nothing
  * (`workflow.trigger_gone`): the version that replaced it may not declare
  * it. The run is pinned to the version checked, so at worst a trigger
@@ -558,6 +559,7 @@ export const startRun = async (
     triggerKey: trigger?.key ?? null,
     detailsRemovedAt: null,
     rootRunId,
+    pendingStart: input === undefined ? {} : { input },
   } satisfies RunFields & typeof workflowRuns.$inferInsert;
   // Nothing is written, audit event included, for a key a run has.
   const [inserted] = await auditedBatch(env, db, [
@@ -582,27 +584,13 @@ export const startRun = async (
     ),
   ]);
   if (inserted.length === 0) {
-    const started = await db
-      .select()
-      .from(workflowRuns)
-      .where(eq(workflowRuns.triggerKey, row.triggerKey ?? ""))
-      .get();
-    if (!started) {
-      throw new Error(`No run has the trigger key of run ${row.id}`);
-    }
-    await restartOrphan(env, started, input);
-    return toRun(env, started);
+    return await deliveredBefore(env, row.triggerKey ?? "", row.id);
   }
   try {
-    await runEngine(env).create({
-      id: row.id,
-      pinned: { app, workflow, version },
-      input,
-    });
+    await sendStart(env, row, input);
   } catch (error) {
-    // The instance may exist all the same: once the row is failed the
-    // dispatcher refuses it, and one it ran first is running, which
-    // `failStart` leaves be. Its report says only that it didn't start:
+    // The engine may have it all the same: once the row is failed the
+    // dispatcher refuses it. Its report says only that it didn't start:
     // the platform's error stays in the log. It gives up its trigger key,
     // so the delivery tried again (a schedule stays due, mail and events
     // are retried) starts the run as a new one, rather than finding this
@@ -615,12 +603,11 @@ export const startRun = async (
     throw error;
   }
   try {
-    await markRunning(env, row.id);
+    await startConfirmed(env, row.id);
   } catch (error) {
-    // The run exists: failing now would have it started again, twice.
-    // Its row stays starting until its first execution, or the sweep
-    // (`failOrphans`), finds the instance and marks it running.
-    log.warn("workflow.running_not_recorded", {
+    // The engine has it: the repair sends it again, which the engine
+    // takes as the start it already has.
+    log.warn("workflow.start_not_recorded", {
       runId: row.id,
       ...errorFields(error),
     });
@@ -774,11 +761,180 @@ export const listRuns = async (
   return rows.map((row) => runFor(env, by, row, ownerId));
 };
 
+/** What a run that stopped reports: where it stopped, and why. */
+export type Stopped = Pick<RunFailure, "step" | "input" | "error">;
+
+/**
+ * Keeps a failed run's report (`failed`), for its owner to see, before
+ * the run ends: written by the run itself, in its last step, once. Its
+ * status, and the failure's audit event and notice, follow when the
+ * engine says the run has ended (`projectStatus`).
+ */
+export const recordFailure = async (
+  env: Env,
+  row: RunRow,
+  failed: Stopped
+): Promise<void> => {
+  const failure: RunFailure = {
+    run: runIdSchema.parse(row.id),
+    app: appIdSchema.parse(row.appId),
+    workflow: workflowIdSchema.parse(row.workflowId),
+    version: row.version,
+    ...failed,
+    failedAt: new Date().toISOString(),
+  };
+  await drizzle(env.DB)
+    .update(workflowRuns)
+    .set({ failure })
+    .where(and(eq(workflowRuns.id, row.id), isNull(workflowRuns.failure)));
+};
+
+/** The engine's statuses of a run that has ended. */
+const endedLive: ReadonlySet<InstanceStatus["status"]> = new Set([
+  "complete",
+  "errored",
+  "terminated",
+]);
+
+/** Where the engine says a run is, as its row keeps it. */
+const projected: Record<InstanceStatus["status"], RunRow["status"]> = {
+  queued: "running",
+  running: "running",
+  waiting: "running",
+  waitingForPause: "running",
+  rollingBack: "running",
+  paused: "paused",
+  complete: "completed",
+  errored: "failed",
+  terminated: "cancelled",
+};
+
+/**
+ * The report of a run that ended failed without one of its own: the
+ * engine ended it before its last step could write one (its definition
+ * couldn't be replayed, say).
+ */
+const stoppedReport = (row: RunRow, at: Date): RunFailure => ({
+  run: runIdSchema.parse(row.id),
+  app: appIdSchema.parse(row.appId),
+  workflow: workflowIdSchema.parse(row.workflowId),
+  version: row.version,
+  step: null,
+  input: null,
+  error: {
+    code: "workflow.run_failed",
+    message: "The workflow run stopped.",
+  },
+  failedAt: at.toISOString(),
+});
+
+/** Where the engine says a run is, as its notification has it. */
+export interface EngineStatus {
+  status: InstanceStatus["status"];
+  /** When the run took the status, in ms since the epoch. */
+  at: number;
+  /**
+   * The notification's sequence: applied only if newer than the last the
+   * row took. Absent only for an end the engine confirmed just now, in
+   * answer to core's own command (`cancelRun`): an ended run never
+   * changes again, so nothing later can be newer.
+   */
+  sequence?: number;
+}
+
+/**
+ * Makes the run's row say where the engine says it is: the one writer of
+ * a run's status. A notification no newer than the last the row took is
+ * late and changes nothing; an ended run's row never changes again. The
+ * first one confirms the run's start, which nothing sends again. A run's
+ * end is audited with its row, once: completed; failed, with its report
+ * (its own, or one saying it stopped) and its owner notified; cancelled,
+ * which a cancel has audited already, unless the engine ended it without
+ * one. Screens are told of every change of status, and a run that ended
+ * forgets the statistics points of its steps that never completed.
+ */
+export const projectStatus = async (
+  env: Env,
+  run: string,
+  engine: EngineStatus
+): Promise<void> => {
+  const id = runIdSchema.safeParse(run);
+  const row = id.success ? await findRun(env, id.data) : undefined;
+  if (row === undefined || !unended.includes(row.status)) {
+    return;
+  }
+  // A cancelled run the engine ended otherwise than by terminating it
+  // ended for its cancel: its next activation refused to run on.
+  const status =
+    row.cancelRequestedAt !== null && engine.status === "errored"
+      ? "cancelled"
+      : projected[engine.status];
+  const at = new Date(engine.at);
+  const db = drizzle(env.DB);
+  const fenced = and(
+    eq(workflowRuns.id, row.id),
+    inArray(workflowRuns.status, unended),
+    engine.sequence === undefined
+      ? undefined
+      : lt(workflowRuns.engineSequence, engine.sequence)
+  );
+  const sequence =
+    engine.sequence === undefined ? {} : { engineSequence: engine.sequence };
+  const ended = endedLive.has(engine.status);
+  const failure =
+    status === "failed" ? (row.failure ?? stoppedReport(row, at)) : null;
+  const [[changed]] = await auditedBatch(env, db, [
+    db
+      .update(workflowRuns)
+      .set({
+        status,
+        pendingStart: null,
+        ...sequence,
+        ...(ended ? { endedAt: at } : {}),
+        ...(failure === null ? {} : { failure }),
+      })
+      .where(fenced)
+      .returning({ id: workflowRuns.id }),
+    ...(status === "completed"
+      ? [
+          outboxedIfChanged(
+            db,
+            runEntry(runActor(row), "workflow.run.completed", row)
+          ),
+        ]
+      : []),
+    ...(failure === null
+      ? []
+      : await failureRecorded(env, db, row, { error: failure.error.code })),
+    ...(status === "cancelled" && row.cancelRequestedAt === null
+      ? [
+          outboxedIfChanged(
+            db,
+            runEntry({ type: "system" }, "workflow.run.cancelled", row)
+          ),
+        ]
+      : []),
+  ]);
+  if (!changed) {
+    return;
+  }
+  if (shownStatus(row.status) !== status) {
+    await tellScreens(env, row);
+  }
+  if (ended) {
+    await forgetStepStatistics(env, row.id);
+  }
+};
+
 /**
  * Stops a run for good, and records who did; a run that ended otherwise
- * stays as it is. The row is marked first, so a run that ends meanwhile
- * can't mark itself otherwise and the dispatcher runs it no more; a cancel
- * whose termination failed is done again by cancelling again.
+ * stays as it is. Its tombstone is written first, with the audit event,
+ * so the dispatcher runs nothing more of it whatever the engine still
+ * does; then the engine is told to terminate it, and once it says it has
+ * (or has no run to terminate: one whose start never reached it), the row
+ * says so. A cancel whose termination failed is done again by cancelling
+ * again. A run that ended on its own before the engine heard the cancel
+ * stays as it ended.
  */
 export const cancelRun = async (
   env: Env,
@@ -787,89 +943,33 @@ export const cancelRun = async (
 ): Promise<WorkflowRun> => {
   const row = await foundRun(env, run);
   await appFor(env, by, row.appId, "builder");
-  if (row.status === "cancelled") {
-    await runEngine(env).terminate(row.id);
-    await forgetStepStatistics(env, row.id);
-    return toRun(env, row);
-  }
   if (!unended.includes(row.status)) {
     return toRun(env, row);
   }
   const db = drizzle(env.DB);
-  const [[cancelled]] = await auditedBatch(env, db, [
+  await auditedBatch(env, db, [
     db
       .update(workflowRuns)
-      .set({ status: "cancelled", endedAt: new Date() })
+      .set({ cancelRequestedAt: new Date(), pendingStart: null })
       .where(
-        and(eq(workflowRuns.id, row.id), inArray(workflowRuns.status, unended))
-      )
-      .returning(),
+        and(
+          eq(workflowRuns.id, row.id),
+          inArray(workflowRuns.status, unended),
+          isNull(workflowRuns.cancelRequestedAt)
+        )
+      ),
     outboxedIfChanged(db, runEntry(actorOf(by), "workflow.run.cancelled", row)),
   ]);
-  // Told first: a termination that fails leaves the row cancelled, and a
-  // cancel tried again finds it so, and tells no one.
-  if (cancelled) {
-    await tellScreens(env, cancelled);
+  const engine = runEngine(env);
+  await engine.terminate(row.id);
+  const live = await engine.status(row.id);
+  if (live === undefined || endedLive.has(live.status)) {
+    await projectStatus(env, row.id, {
+      status: live?.status ?? "terminated",
+      at: Date.now(),
+    });
   }
-  const now = cancelled ?? (await foundRun(env, row.id));
-  if (now.status === "cancelled") {
-    await runEngine(env).terminate(row.id);
-    await forgetStepStatistics(env, row.id);
-  }
-  return toRun(env, now);
-};
-
-/** What a run that stopped reports: where it stopped, and why. */
-export type Stopped = Pick<RunFailure, "step" | "input" | "error">;
-
-/**
- * Marks a run as it ended, once, with its audit event; a failed run keeps
- * its report (`failed`), for its owner to see, and notifies them
- * (`failureRecorded`). The audit event names only the error's code (one
- * the audit log can take, or a fixed one), never its message, which
- * workflow code writes.
- */
-export const endRun = async (
-  env: Env,
-  row: RunRow,
-  failed: Stopped | undefined
-): Promise<void> => {
-  const db = drizzle(env.DB);
-  const endedAt = new Date();
-  const status = failed === undefined ? "completed" : "failed";
-  const failure: RunFailure | null =
-    failed === undefined
-      ? null
-      : {
-          run: runIdSchema.parse(row.id),
-          app: appIdSchema.parse(row.appId),
-          workflow: workflowIdSchema.parse(row.workflowId),
-          version: row.version,
-          ...failed,
-          failedAt: endedAt.toISOString(),
-        };
-  const [[ended]] = await auditedBatch(env, db, [
-    db
-      .update(workflowRuns)
-      .set({ status, endedAt, failure })
-      .where(
-        and(eq(workflowRuns.id, row.id), inArray(workflowRuns.status, unended))
-      )
-      .returning({ id: workflowRuns.id }),
-    ...(failed === undefined
-      ? [
-          outboxedIfChanged(
-            db,
-            runEntry(runActor(row), "workflow.run.completed", row)
-          ),
-        ]
-      : await failureRecorded(env, db, row, { error: failed.error.code })),
-  ]);
-  // Only when this ended it: not again for a run a cancel ended first.
-  if (ended) {
-    await tellScreens(env, row);
-  }
-  await forgetStepStatistics(env, row.id);
+  return toRun(env, await foundRun(env, row.id));
 };
 
 /**
@@ -901,7 +1001,7 @@ const hourMs = 60 * 60 * 1000;
 /**
  * Where a message or event stands for a workflow it would start a run of:
  * `capped` while the workflow is at its hourly limit, `started` when the
- * workflow has its run already, past `starting`, and `new` otherwise.
+ * workflow has its run already, its start confirmed, and `new` otherwise.
  */
 export type DeliveryRoom = "capped" | "started" | "new";
 
@@ -912,9 +1012,9 @@ export type DeliveryRoom = "capped" | "started" | "new";
  * (counted on its index by App, workflow and time), and none of them is
  * this one's. A workflow that has this one's run already is never capped
  * for it, so a delivery tried again because another workflow was capped
- * isn't refused by the run it started itself: it is `started` once that
- * run is past `starting`, and `new` while it is still starting, as the
- * delivery's input may yet start it (`restartOrphan`). Checked before the
+ * isn't refused by the run it started itself: it is `started` once the
+ * engine has confirmed that run's start, and `new` while it hasn't, as the
+ * delivery goes on to send the start again (`startRun`). Checked before the
  * starts, not with them, so what's delivered at the same moment can go a
  * few over.
  */
@@ -930,7 +1030,7 @@ export const deliveryRoom = async (
     like(workflowRuns.triggerKey, `${type}:%`)
   );
   const mine = eq(workflowRuns.triggerKey, key);
-  const past = and(mine, ne(workflowRuns.status, "starting"));
+  const past = and(mine, isNull(workflowRuns.pendingStart));
   const counted = await drizzle(env.DB)
     .select({
       runs: sql<number | null>`sum(case when ${recent} then 1 else 0 end)`,

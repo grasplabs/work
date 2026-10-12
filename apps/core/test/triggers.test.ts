@@ -1,6 +1,5 @@
 import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
-import { workflowErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -601,29 +600,17 @@ describe("trigger deliveries", () => {
       },
     } as const;
 
-    // Two at once: the one that finds the other's run still starting is
-    // told to try again, rather than handed a run with no instance yet.
+    // Two at once: the one that finds the other's run still starting
+    // sends its start again, which the engine takes as the start it has.
     const atOnce = await Promise.all(
       [1, 2].map(async () => {
-        try {
-          const { id } = await startRun(env, delivery);
-          return id;
-        } catch (error) {
-          return workflowErrors.codeOf(error) ?? String(error);
-        }
+        const { id } = await startRun(env, delivery);
+        return id;
       })
     );
     const again = await startRun(env, delivery);
 
-    expect(
-      atOnce.map((got) => (got === again.id ? "the run" : got)).toSorted()
-    ).toSatisfy(
-      (got: string[]) =>
-        got.includes("the run") &&
-        got.every(
-          (one) => one === "the run" || one === "workflow.start_pending"
-        )
-    );
+    expect(atOnce).toStrictEqual([again.id, again.id]);
     await expect(runCount(builder, app)).resolves.toBe(1);
     const events = await allEvents();
 
@@ -640,10 +627,10 @@ describe("trigger deliveries", () => {
     const app = await appWith(builder, weekly());
     const key = `schedule:${crypto.randomUUID()}`;
     // What a start leaves when core stops between writing the run's row
-    // and creating its instance, two minutes ago.
+    // and sending its start, two minutes ago.
     const orphan = crypto.randomUUID();
     await env.DB.prepare(
-      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, trigger_key) VALUES (?, ?, 'weekly', 1, NULL, 'starting', ?, ?)"
+      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, trigger_key, pending_start) VALUES (?, ?, 'weekly', 1, NULL, 'starting', ?, ?, '{}')"
     )
       .bind(orphan, app, Date.now() - 2 * minute, key)
       .run();
@@ -667,16 +654,16 @@ describe("trigger deliveries", () => {
     await expect(liveStatus(orphan)).resolves.toBe("complete");
   });
 
-  it("keep a schedule due while its run is left without an instance, and start that run once it's old enough", async () => {
+  it("start the run a crash left without its engine run as soon as its schedule is delivered again, and move the schedule on", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, weekly());
     const due = await nextRunOf(app);
     const [schedule] = await schedulesOf(app);
-    // A start for this time stopped between the run's row and its
-    // instance, just now: the next minute comes before it counts as stopped.
+    // A start for this time stopped between the run's row and its start,
+    // just now.
     const orphan = crypto.randomUUID();
     await env.DB.prepare(
-      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, trigger_key) VALUES (?, ?, 'weekly', 1, NULL, 'starting', ?, ?)"
+      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, trigger_key, pending_start) VALUES (?, ?, 'weekly', 1, NULL, 'starting', ?, ?, '{}')"
     )
       .bind(
         orphan,
@@ -687,17 +674,6 @@ describe("trigger deliveries", () => {
       .run();
 
     await runCron({}, due);
-
-    await expect(nextRunOf(app)).resolves.toStrictEqual(due);
-    await expect(outcome(liveStatus(orphan))).resolves.toContain(
-      "instance.not_found"
-    );
-
-    // Two minutes on, as a stopped start would be by the next tries.
-    await env.DB.prepare("UPDATE workflow_runs SET created_at = ? WHERE id = ?")
-      .bind(Date.now() - 2 * minute, orphan)
-      .run();
-    await runCron({}, new Date(due.getTime() + minute));
     await finished(orphan);
 
     await expect(runCount(builder, app)).resolves.toBe(1);

@@ -26,13 +26,7 @@ import {
 } from "./host.ts";
 import type { BusyRefusals, FailedStep, HostedRun, RunStep } from "./host.ts";
 import { paramValues } from "./param-values.ts";
-import {
-  appRecord,
-  endRun,
-  findRun,
-  markRunning,
-  recordWaiting,
-} from "./runs.ts";
+import { appRecord, findRun, recordFailure, recordWaiting } from "./runs.ts";
 import type { RunRow, Stopped } from "./runs.ts";
 
 // What every run executes (run-object.ts): each time the engine activates
@@ -176,14 +170,7 @@ const runWorkflow = async (
   memory: RunMemory
 ): Promise<unknown> => {
   const runId = runIdSchema.parse(event.instanceId);
-  let row = await findRun(env, runId);
-  // Its start hasn't recorded that the run exists, which it does: this
-  // activation is it. Read again, as it may have ended meanwhile
-  // (`failOrphans` found it without its run a moment before).
-  if (row?.status === "starting") {
-    await markRunning(env, runId);
-    row = await findRun(env, runId);
-  }
+  const row = await findRun(env, runId);
   if (
     !row ||
     row.appId !== pinned.app ||
@@ -192,9 +179,13 @@ const runWorkflow = async (
   ) {
     throw new Error(`Run ${runId} doesn't match its record`);
   }
-  // Cancelled (the engine maybe not yet told) or failed to start: it does
-  // nothing more. Every activation, its first and every later one, comes
-  // here before any step, so such a run takes no step.
+  // Cancelled (its tombstone written, the engine maybe not yet told) or
+  // ended otherwise in core's record (its start failed): it does nothing
+  // more. Every activation, its first and every later one, comes here
+  // before any step, so such a run takes no step.
+  if (row.cancelRequestedAt !== null) {
+    throw new Error(`Run ${runId} has been cancelled`);
+  }
   if (row.status === "cancelled" || row.status === "failed") {
     throw new Error(`Run ${runId} has ended: ${row.status}`);
   }
@@ -270,15 +261,16 @@ const runWorkflow = async (
     });
   });
   const failed = tampered ?? (result.ok ? undefined : result.error);
-  // A step, so a run that ended is recorded and audited once. A failed
-  // run stops here, whatever failed: the step's retries (only for failures
-  // trying again may fix, host.ts) are behind it.
-  const stopped = failed && stoppedWith(failed, lastFailed);
-  await step.do(`${coreStepPrefix}end`, {}, async () => {
-    await endRun(env, row, stopped);
-    return null;
-  });
   if (failed) {
+    // A failed run stops here, whatever failed: the step's retries (only
+    // for failures trying again may fix, host.ts) are behind it. Its
+    // report is kept in a step, once, before the run ends; its end, and
+    // that it failed, are the engine's to say (runs.ts, `projectStatus`).
+    const stopped = stoppedWith(failed, lastFailed);
+    await step.do(`${coreStepPrefix}end`, {}, async () => {
+      await recordFailure(env, row, stopped);
+      return null;
+    });
     throw runError(failed);
   }
   return result.ok ? result.value : undefined;
