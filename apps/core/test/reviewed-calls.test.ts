@@ -6,11 +6,13 @@ import {
 } from "@grasp-os/shared/ids";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
+import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
+import { runBindingsFor } from "../src/bindings.ts";
 import type { AttemptHost } from "../src/workflows/attempt-host.ts";
 import type { Settled } from "../src/workflows/code.ts";
 import { RunHost } from "../src/workflows/host.ts";
@@ -20,7 +22,7 @@ import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { engineOfTest } from "./run-host.ts";
 import { endLiveRuns, finished } from "./runs.ts";
-import { signedInApi } from "./sign-in.ts";
+import { outcome, signedInApi } from "./sign-in.ts";
 import {
   server,
   appWith,
@@ -119,11 +121,41 @@ const outcomeOf = async (
  */
 const hostHeldTo = async (
   calls: WorkflowCalls,
-  { db = env.DB }: { db?: D1Database } = {}
+  {
+    db = env.DB,
+    of,
+  }: {
+    db?: D1Database;
+    /** A real App and the person the run acts for, with its connections. */
+    of?: { app: string; userId: string };
+  } = {}
 ) => {
-  const { userId } = await personApi("builder");
-  const app = appIdSchema.parse(crypto.randomUUID());
+  const builder = of === undefined ? await personApi("builder") : undefined;
+  const userId = of?.userId ?? builder?.userId ?? "";
+  const app = appIdSchema.parse(of?.app ?? crypto.randomUUID());
   const runId = runIdSchema.parse(crypto.randomUUID());
+  const authority = authoritySchema.parse({
+    subject: { type: "app", appId: app },
+    onBehalfOf: userId,
+    mode: "workflow",
+    appVersion: 1,
+  });
+  if (of !== undefined) {
+    // The run's row, which its work context names.
+    await env.DB.prepare(
+      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at) VALUES (?, ?, 'tidy', 1, ?, 'running', ?)"
+    )
+      .bind(runId, app, userId, Date.now())
+      .run();
+  }
+  const { connections } =
+    of === undefined
+      ? { connections: {} }
+      : await runBindingsFor(env, authority, {
+          type: "run",
+          appId: app,
+          runId,
+        });
   const appCalls: string[] = [];
   const tampered: string[] = [];
   const { step, leaseOf, leases } = engineOfTest();
@@ -150,14 +182,9 @@ const hostHeldTo = async (
       workflow: workflowIdSchema.parse("tidy"),
       version: 1,
       runId,
-      authority: authoritySchema.parse({
-        subject: { type: "app", appId: app },
-        onBehalfOf: userId,
-        mode: "workflow",
-        appVersion: 1,
-      }),
+      authority,
       collections: {},
-      connections: {},
+      connections,
       apps: {
         CRM: {
           permissionId: permissionIdSchema.parse(crypto.randomUUID()),
@@ -455,6 +482,89 @@ queueMicrotask(() => {
         { step: "arm", call: "APP", errorCode: "execution.stale_attempt" },
         { step: "evil", call: null, errorCode: "workflow.step_not_reviewed" },
       ],
+    });
+  });
+
+  it("start no App method, nor an export, for a step attempt that no longer holds by the time the App would start it", async () => {
+    const admin = await personApi("admin");
+    const app = await appWith(admin, {});
+    // An attempt the engine let go of (or never had): its run holds no
+    // lease for it, as when it was let go during the App's reads.
+    const fence = {
+      run: crypto.randomUUID(),
+      key: "key:tidy",
+      number: 1,
+      generation: 1,
+    };
+    const refused = await outcome(
+      callApp(
+        env,
+        appIdSchema.parse(app),
+        { userId: admin.userId, mode: "workflow", fence },
+        "hit",
+        ["late"]
+      )
+    );
+
+    expect({
+      refused,
+      ran: await hitsOf(app, admin.userId, "late"),
+    }).toStrictEqual({ refused: "execution.stale_attempt", ran: 0 });
+  });
+
+  it("send no connection call whose attempt the engine gave up on while it was authorized and signed", async () => {
+    const admin = await personApi("admin");
+    const mail = await mailConnection();
+    const app = await appWith(admin, {});
+    await grantMail(idp, admin, app, mail.id);
+    let giveUp: (() => void) | undefined;
+    // Core's database, giving the attempt up once the call is checked
+    // against the run's permissions.
+    const db = new Proxy(env.DB, {
+      get: (target, key) => {
+        const value: unknown = Reflect.get(target, key);
+        if (key === "prepare" && typeof value === "function") {
+          return (query: string) => {
+            if (query.includes("permission")) {
+              giveUp?.();
+            }
+            return target.prepare(query);
+          };
+        }
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+    const { host, leases, runId } = await hostHeldTo(
+      { steps: { tidy: ["MAIL"] }, all: ["MAIL"] },
+      { db, of: { app, userId: admin.userId } }
+    );
+    let sent = "";
+    await host.do(
+      "tidy",
+      { sideEffect: true, input: null },
+      async (attempt) => {
+        giveUp = () => {
+          leases.delete("key:tidy");
+        };
+        sent = codeOf(
+          await attempt.callConnection("MAIL", [
+            "mail.send",
+            invoiceMail,
+            { idempotencyKey: stepIdempotencyKey(runId, "tidy") },
+          ])
+        );
+        return { ok: true, value: null };
+      }
+    );
+
+    const { calls } = await mail.did();
+    expect({ sent, server: calls }).toStrictEqual({
+      sent: "execution.stale_attempt",
+      server: 0,
     });
   });
 

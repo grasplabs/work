@@ -46,6 +46,7 @@ import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { appHost } from "./durable-objects.ts";
 import { sandbox } from "./sandbox.ts";
 import { buildFailed, buildServer } from "./screens.ts";
+import { requireAttemptHolds } from "./workflows/attempt-fence.ts";
 import type { AttemptFence } from "./workflows/attempt-fence.ts";
 
 // An App's server code runs as a facet of the App's own Durable Object:
@@ -997,6 +998,10 @@ export class App extends DurableObject<Env> {
       if (via !== undefined) {
         await this.#pinned(running.server, via);
       }
+      // Last before the method starts, after every read: a workflow step's
+      // attempt the engine let go of meanwhile starts nothing, its App's
+      // own SQLite included (attempt-fence.ts).
+      await requireAttemptHolds(this.env, caller.fence);
       // Timed out while the code started: its caller already has the
       // answer, so the method mustn't run (and write) after all.
       if (!this.#calls.has(token)) {

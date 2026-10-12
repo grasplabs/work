@@ -1625,7 +1625,16 @@ export class RunHost extends RpcTarget {
             this.#env,
             async (key) => {
               requireStepKey(key, stepKey);
-              return await Promise.resolve({ authority });
+              return await Promise.resolve({
+                authority,
+                // The capability expires with the attempt, and the call
+                // goes to connect only if the attempt still holds then,
+                // after the permission check and the signing.
+                notAfter: attempt.deadline,
+                stillAllowed: async () => {
+                  await this.#requireCurrent(attempt, name);
+                },
+              });
             },
             grant,
             checked(z.array(z.unknown()), call)
