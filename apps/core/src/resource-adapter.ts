@@ -23,11 +23,16 @@ import type { ResourceContext } from "./operations.ts";
 export interface InvocationSources {
   readonly note: (provenance: Provenance) => void;
   readonly snapshot: () => Provenance;
+  /** Notes that data of connection `id` reached the invocation. */
+  readonly noteConnection: (id: string) => void;
+  /** The connections whose data reached it, for the model gateway's rules. */
+  readonly connections: () => readonly string[];
 }
 
 /** A new invocation's sources: nothing read yet. */
 export const invocationSources = (): InvocationSources => {
   const collectionIds = new Set<Provenance["collectionIds"][number]>();
+  const connectionIds = new Set<string>();
   let sensitive = false;
   let restricted = false;
   return {
@@ -43,6 +48,10 @@ export const invocationSources = (): InvocationSources => {
       sensitive,
       restricted,
     }),
+    noteConnection: (id) => {
+      connectionIds.add(id);
+    },
+    connections: () => [...connectionIds].toSorted(),
   };
 };
 
@@ -73,32 +82,34 @@ export interface ServedContract {
   readonly fingerprint: string;
 }
 
+/** A target bound for a request: what it serves now, and how to call it. */
+export interface ServedBinding extends ServedContract {
+  /**
+   * One request through the target, for `caller`. The operation host
+   * checked the method and arguments against the declaration already
+   * (`allowedRequest`), and checks the answer after.
+   */
+  readonly call: (
+    caller: BindingCaller,
+    request: { method: string; args: readonly Json[] },
+    context: ResourceContext
+  ) => Promise<unknown>;
+}
+
 /** One kind's adapter. */
 export interface ResourceAdapter<Kind extends BindingTarget["kind"]> {
   /**
-   * What `target` serves for `declaration` now, if `app` may bind it: the
-   * App's own active grant, a model the deployment allows, a published
-   * template version of the declared contract. Undefined otherwise. Asked
-   * as an admin approves the binding, and again on every request, so a
-   * drifted contract or a lost grant stops it.
+   * `target` for `declaration`, if `app` may bind it now: the App's own
+   * active grant, a model the deployment allows, a published template
+   * version of the declared contract; with the contract it serves now.
+   * Undefined otherwise. Asked as an admin approves the binding, and
+   * again for every request, so a drifted contract or a lost grant stops
+   * it.
    */
-  readonly served: (
+  readonly bind: (
     env: Env,
     app: AppId,
     declaration: DeclarationOf<Kind>,
     target: TargetOf<Kind>
-  ) => Promise<ServedContract | undefined>;
-  /**
-   * One request of `declaration` through `target`, for `caller`. The
-   * operation host checked the method and arguments against the
-   * declaration already (`allowedRequest`), and checks the answer after.
-   */
-  readonly call: (
-    env: Env,
-    caller: BindingCaller,
-    declaration: DeclarationOf<Kind>,
-    target: TargetOf<Kind>,
-    request: { method: string; args: readonly Json[] },
-    context: ResourceContext
-  ) => Promise<unknown>;
+  ) => Promise<ServedBinding | undefined>;
 }

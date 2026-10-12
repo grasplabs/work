@@ -777,6 +777,17 @@ export interface ConnectApi extends PackageRegistryApi {
    */
   catalogTools: (request: CatalogToolsRequest) => Promise<CatalogTool[]>;
   /**
+   * The generated contract `contract` names (`<connector>.<family>@1`) as
+   * the connection `connectionId` serves it now: the connector's actions
+   * of that family, each with the JSON Schemas of its input and output.
+   * `connect.contract_not_found` unless the connection is a native one of
+   * that very connector and the family has actions. Data only, read from
+   * the release's manifests: nothing is loaded and no token is read.
+   */
+  connectorContract: (
+    request: ConnectorContractRequest
+  ) => Promise<ConnectorContract>;
+  /**
    * The held actions waiting for `person`, newest first (at most 200):
    * none for Grasp staff.
    */
@@ -891,6 +902,49 @@ export const connectionErrors = defineErrorFamily({
     "Your organization doesn't offer this connection. An admin can offer it.",
 });
 
+// Generated connector contracts (spec 12): what an App's connector
+// resource is bound to. A native connector's actions of one family (its
+// tools named `<family>.<action>`, such as `mail.send`) make the contract
+// `<connector>.<family>@1`, whose shape is the tools' own input and output
+// schemas. Core fingerprints what it gets, so a connector release that
+// changes any of it is a drifted contract an admin approves again.
+
+/** A generated contract's ID: `<connector>.<family>@<major>`. */
+export const connectorContractIdSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{0,62}\.[a-z][a-z0-9_-]{0,62}@[1-9]\d{0,5}$/u);
+
+/** Which contract to read, and the connection that must serve it. */
+export const connectorContractRequestSchema = z.strictObject({
+  contract: connectorContractIdSchema,
+  connectionId: connectionIdSchema,
+});
+export type ConnectorContractRequest = z.input<
+  typeof connectorContractRequestSchema
+>;
+
+/** One action of a generated contract. */
+export interface ConnectorContractAction {
+  /** The connector's tool a call of it names, e.g. `mail.send`. */
+  tool: string;
+  /** Whether the connector declares that it only reads. */
+  readOnly: boolean;
+  /**
+   * The JSON Schemas of its input and output, as the connector makes them,
+   * each as JSON text: a type for any JSON value is too deep for the RPC
+   * types to follow.
+   */
+  input: string;
+  output: string;
+}
+
+/** A generated contract, as connect reads it from the release's manifests. */
+export interface ConnectorContract {
+  contract: string;
+  /** Each action, by its name in the contract (`send`, not `mail.send`). */
+  actions: Record<string, ConnectorContractAction>;
+}
+
 /** Why connect refused or couldn't finish a call, other than its capability. */
 export const connectErrors = defineErrorFamily({
   "connect.invalid":
@@ -901,6 +955,8 @@ export const connectErrors = defineErrorFamily({
   "connect.not_owner":
     "This is someone's personal connection: only calls for its owner can use it.",
   "connect.action_not_found": "This connection has no such action.",
+  "connect.contract_not_found":
+    "This connection doesn't serve that contract: it isn't a native connection of that connector, or the connector has no such family of actions.",
   "connect.input_too_large": "This call's input is too large.",
   "connect.resource_out_of_scope":
     "This call reaches beyond the one resource it may use.",

@@ -15,6 +15,7 @@ import {
 import type {
   Catalog,
   CatalogTool,
+  ConnectorContract,
   ConnectApi,
   ConnectCall,
   ConnectionOwner,
@@ -48,6 +49,7 @@ import {
   startToolkitConnection,
 } from "./composio-connections.ts";
 import { connectionOwners } from "./connections.ts";
+import { connectorContract } from "./contracts.ts";
 import {
   ackConnectorEvents,
   syncEventSources,
@@ -293,6 +295,13 @@ export default class Connect
 
   async catalogTools(request: unknown): Promise<CatalogTool[]> {
     return await catalogTools(this.env, request);
+  }
+
+  // Generated connector contracts (src/contracts.ts): what an App's
+  // connector resource is bound to and checked against.
+
+  async connectorContract(request: unknown): Promise<ConnectorContract> {
+    return await connectorContract(this.env, request);
   }
 
   // Held actions (src/pending.ts). Core names the person from their

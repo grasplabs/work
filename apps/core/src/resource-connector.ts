@@ -1,0 +1,298 @@
+import type { ValueSchema } from "@grasp-os/sdk";
+import { connectErrors } from "@grasp-os/shared/connect";
+import type {
+  ConnectorContract,
+  ConnectorContractAction,
+} from "@grasp-os/shared/connect";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
+import type { PermissionId } from "@grasp-os/shared/ids";
+import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
+import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
+import type { PermissionObject } from "@grasp-os/shared/permissions";
+import { and, eq, isNull } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
+
+import { signedCall } from "./bindings.ts";
+import { readContractSchema } from "./connector-contracts.ts";
+import { permissions } from "./db/core/schema.ts";
+import type { ResourceContext } from "./operations.ts";
+import type {
+  BindingCaller,
+  DeclarationOf,
+  ResourceAdapter,
+} from "./resource-adapter.ts";
+
+// A connector resource (spec 12, 32.3): the declared actions of a
+// generated connector contract, on one of the App's own connection
+// permissions, through connect. Every request:
+//
+// - is checked against the contract's argument descriptor before connect
+//   sees it, and sends the normalized arguments;
+// - goes through `signedCall`, so the permission is checked again (active,
+//   allowing exactly this tool, and for an action that changes things, a
+//   version an admin approved) and connect gets a capability for this one
+//   call, carrying the App's restricted mode and the invocation's
+//   deadline; the person's own connection stays theirs alone (connect);
+// - carries the host's derived idempotency key, so the same call made
+//   again replays connect's stored answer instead of a second effect, and
+//   an outcome connect couldn't confirm stays `effect.outcome_unknown`;
+// - is held by connect for the person when it has a side effect and the
+//   person is there (or the App read restricted data): App code gets
+//   `resource.awaiting_confirmation`, and the same call made again finds
+//   the same held action, or its answer once the person confirmed it;
+// - has its answer checked against the contract's return descriptor, and
+//   must already be in its normalized form.
+//
+// No token, capability or connection detail ever reaches App code.
+
+type ConnectionObject = Extract<PermissionObject, { type: "connection" }>;
+
+/** One of the App's connection permissions, as a binding reads it. */
+interface ConnectionGrant {
+  readonly permissionId: PermissionId;
+  readonly connection: ConnectionObject;
+  readonly actions: readonly string[];
+}
+
+const actionsSchema = z.array(z.string());
+
+/**
+ * The App's own active permission `permissionId` on a connection, not a
+ * chat's; undefined for any other.
+ */
+const connectionGrant = async (
+  env: Env,
+  app: string,
+  permissionId: PermissionId
+): Promise<ConnectionGrant | undefined> => {
+  const row = await drizzle(env.DB)
+    .select({
+      connectionId: permissions.objectId,
+      resource: permissions.resource,
+      actions: permissions.actions,
+    })
+    .from(permissions)
+    .where(
+      and(
+        eq(permissions.id, permissionId),
+        eq(permissions.subjectType, "app"),
+        eq(permissions.subjectId, app),
+        eq(permissions.objectType, "connection"),
+        eq(permissions.status, "active"),
+        isNull(permissions.chatId)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    return undefined;
+  }
+  const actions = actionsSchema.safeParse(JSON.parse(row.actions));
+  return actions.success
+    ? {
+        permissionId: permissionIdSchema.parse(permissionId),
+        connection: {
+          type: "connection",
+          connectionId: connectionIdSchema.parse(row.connectionId),
+          ...(row.resource === null ? {} : { resource: row.resource }),
+        },
+        actions: actions.data,
+      }
+    : undefined;
+};
+
+/** One declared action, as its contract describes it now. */
+interface BoundAction {
+  readonly raw: ConnectorContractAction;
+  readonly args: ValueSchema<unknown, unknown>;
+  readonly returns: ValueSchema<unknown, unknown>;
+}
+
+/** What connect says a connection serves of `contract`, if it serves it. */
+const contractOf = async (
+  env: Env,
+  contract: string,
+  grant: ConnectionGrant
+): Promise<ConnectorContract | undefined> => {
+  try {
+    const served: ConnectorContract = await env.CONNECT.connectorContract({
+      contract,
+      connectionId: grant.connection.connectionId,
+    });
+    return served;
+  } catch (error) {
+    const code = connectErrors.codeOf(error);
+    // A contract ID connect can't read names no connector of its own.
+    if (code !== "connect.contract_not_found" && code !== "connect.invalid") {
+      throw error;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Each action `declaration` lists, as the contract describes it now, if
+ * the contract has it, its schemas can be read, and the grant allows its
+ * tool; undefined if any of them can't be bound.
+ */
+const boundActions = (
+  declaration: DeclarationOf<"connector">,
+  served: Readonly<Record<string, ConnectorContractAction>>,
+  grant: ConnectionGrant
+): Map<string, BoundAction> | undefined => {
+  const bound = new Map<string, BoundAction>();
+  for (const name of declaration.actions) {
+    const raw = Object.hasOwn(served, name) ? served[name] : undefined;
+    const args = raw === undefined ? undefined : readContractSchema(raw.input);
+    const returns =
+      raw === undefined ? undefined : readContractSchema(raw.output);
+    if (
+      raw === undefined ||
+      args === undefined ||
+      returns === undefined ||
+      !grant.actions.includes(raw.tool)
+    ) {
+      return undefined;
+    }
+    bound.set(name, { raw, args: args.schema, returns: returns.schema });
+  }
+  return bound;
+};
+
+/**
+ * `value` as `schema` normalizes it, if it is valid and, when `exact`,
+ * already in that form; undefined otherwise.
+ */
+const checked = (
+  schema: ValueSchema<unknown, unknown>,
+  value: unknown,
+  exact: boolean
+): Json | undefined => {
+  const result = schema["~standard"].validate(value);
+  if ("then" in result || result.issues !== undefined) {
+    return undefined;
+  }
+  const normalized = jsonOf(result.value);
+  const given = jsonOf(value);
+  if (
+    normalized === undefined ||
+    (exact &&
+      (given === undefined ||
+        canonicalJson(normalized) !== canonicalJson(given)))
+  ) {
+    return undefined;
+  }
+  return normalized;
+};
+
+/** What a refusal of connect's means to App code, from an allow-list. */
+const refusalOf = (error: unknown): unknown => {
+  const code = connectErrors.codeOf(error);
+  if (
+    code === "connect.connection_not_found" ||
+    code === "connect.connection_inactive" ||
+    code === "connect.not_owner" ||
+    code === "connect.action_not_found"
+  ) {
+    return operationErrors.create("resource.unavailable");
+  }
+  return error;
+};
+
+/** One request of a connector resource, through connect. */
+const callAction = async (
+  env: Env,
+  caller: BindingCaller,
+  grant: ConnectionGrant,
+  actions: ReadonlyMap<string, BoundAction>,
+  args: readonly Json[],
+  context: ResourceContext
+): Promise<Json> => {
+  const [name, input] = args;
+  const action = typeof name === "string" ? actions.get(name) : undefined;
+  if (action === undefined) {
+    throw operationErrors.create("resource.not_allowed");
+  }
+  const sent = checked(action.args, input, false);
+  if (sent === undefined) {
+    throw operationErrors.create("resource.invalid_args");
+  }
+  let answered: Awaited<ReturnType<Env["CONNECT"]["call"]>>;
+  try {
+    const { capability, scope } = await signedCall(
+      env,
+      {
+        authority: caller.authority,
+        context: caller.context,
+        connection: grant.connection,
+        permissionId: grant.permissionId,
+        notAfter: context.deadline,
+      },
+      { action: action.raw.tool, idempotencyKey: context.idempotencyKey }
+    );
+    answered = await env.CONNECT.call({ capability, ...scope, input: sent });
+  } catch (error) {
+    throw refusalOf(error);
+  }
+  if (answered.pending !== undefined) {
+    throw operationErrors.create("resource.awaiting_confirmation");
+  }
+  caller.sources.noteConnection(grant.connection.connectionId);
+  let output: unknown;
+  try {
+    output = JSON.parse(answered.output);
+  } catch {
+    throw operationErrors.create("contract.invalid_resource_result");
+  }
+  const answer = checked(action.returns, output, true);
+  if (answer === undefined) {
+    throw operationErrors.create("contract.invalid_resource_result");
+  }
+  return answer;
+};
+
+/** The fingerprint of the declared actions only, as served now. */
+const fingerprintOf = async (
+  contract: string,
+  actions: ReadonlyMap<string, BoundAction>
+): Promise<string> =>
+  await sha256Hex(
+    canonicalJson({
+      contract,
+      // A change to another action of the family is no drift of this
+      // binding's contract.
+      actions: Object.fromEntries(
+        [...actions].map(([name, { raw }]) => [name, { ...raw }])
+      ),
+    })
+  );
+
+export const connectorAdapter: ResourceAdapter<"connector"> = {
+  bind: async (env, app, declaration, target) => {
+    const grant = await connectionGrant(env, app, target.permissionId);
+    const served =
+      grant === undefined
+        ? undefined
+        : await contractOf(env, declaration.contract, grant);
+    const actions =
+      grant === undefined || served === undefined
+        ? undefined
+        : boundActions(declaration, served.actions, grant);
+    const fingerprint =
+      actions === undefined
+        ? undefined
+        : await fingerprintOf(declaration.contract, actions);
+    return grant === undefined ||
+      actions === undefined ||
+      fingerprint === undefined
+      ? undefined
+      : {
+          contractId: declaration.contract,
+          fingerprint,
+          call: async (caller, { args }, context) =>
+            await callAction(env, caller, grant, actions, args, context),
+        };
+  },
+};

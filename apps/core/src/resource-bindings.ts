@@ -37,8 +37,9 @@ import {
 import type {
   BindingCaller,
   ResourceAdapter,
-  ServedContract,
+  ServedBinding,
 } from "./resource-adapter.ts";
+import { connectorAdapter } from "./resource-connector.ts";
 import { knowledgeAdapter } from "./resource-knowledge.ts";
 import { modelAdapter } from "./resource-model.ts";
 
@@ -86,6 +87,7 @@ const adapters: {
 } = {
   model: modelAdapter,
   knowledge: knowledgeAdapter,
+  connector: connectorAdapter,
 };
 
 /** The SHA-256 of `declaration`, canonical, as a release sealed it. */
@@ -99,13 +101,13 @@ export const declarationHash = async (
   return await sha256Hex(canonicalJson(json));
 };
 
-/** What `target` serves for `declaration`, by its kind's adapter. */
-const servedBy = async (
+/** `target` bound for `declaration`, by its kind's adapter. */
+const boundBy = async (
   env: Env,
   app: AppId,
   declaration: AnyResource,
   target: BindingTarget
-): Promise<ServedContract | undefined> => {
+): Promise<ServedBinding | undefined> => {
   if (declaration["~resource"] !== target.kind) {
     return undefined;
   }
@@ -114,7 +116,7 @@ const servedBy = async (
   // `adapters` holds each kind's own adapter.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const loose = adapter as ResourceAdapter<BindingTarget["kind"]> | undefined;
-  return await loose?.served(env, app, declaration, target);
+  return await loose?.bind(env, app, declaration, target);
 };
 
 type Row = typeof appResourceBindings.$inferSelect;
@@ -218,7 +220,7 @@ export const approveResourceBinding = async (
   if (declaration === undefined || declaration["~resource"] !== target.kind) {
     throw resourceBindingErrors.create("resource.undeclared");
   }
-  const served = await servedBy(env, found.id, declaration, target);
+  const served = await boundBy(env, found.id, declaration, target);
   if (served === undefined) {
     throw resourceBindingErrors.create("resource.target_invalid");
   }
@@ -409,7 +411,7 @@ export const resourceBindingsFor =
     if ((await declarationHash(declaration)) !== row.declarationHash) {
       return undefined;
     }
-    const served = await servedBy(env, caller.app, declaration, target.data);
+    const served = await boundBy(env, caller.app, declaration, target.data);
     if (
       served?.contractId !== row.contractId ||
       served.fingerprint !== row.fingerprint
@@ -421,15 +423,6 @@ export const resourceBindingsFor =
       });
       return undefined;
     }
-    const adapter = adapters[target.data.kind];
-    // SAFETY: as in `servedBy`: the row's kind is the declaration's and
-    // the target's, and each kind has its own adapter.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    const loose = adapter as ResourceAdapter<BindingTarget["kind"]> | undefined;
-    if (loose === undefined) {
-      return undefined;
-    }
-    const bound = target.data;
     return {
       kind: declaration["~resource"],
       contract:
@@ -438,13 +431,6 @@ export const resourceBindingsFor =
           ? declaration.contract
           : null,
       call: async (method, args, context) =>
-        await loose.call(
-          env,
-          caller,
-          declaration,
-          bound,
-          { method, args },
-          context
-        ),
+        await served.call(caller, { method, args }, context),
     };
   };
