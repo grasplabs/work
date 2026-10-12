@@ -51,7 +51,6 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { readFile } from "node:fs/promises";
 import {
   createServer,
   IncomingMessage,
@@ -59,6 +58,8 @@ import {
 } from "node:http";
 import type { Server, ServerResponse } from "node:http";
 import { stripTypeScriptTypes } from "node:module";
+import { connect } from "node:net";
+import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -68,8 +69,32 @@ import { parseArgs } from "node:util";
 
 import { z } from "zod";
 
+import {
+  checkUsageProbe,
+  defaultUsageProbe,
+  watchUsage,
+} from "./workerd-sandbox-usage.ts";
+import type { UsageProbe } from "./workerd-sandbox-usage.ts";
+
 const repo = path.join(import.meta.dirname, "..");
 const hostSource = path.join(repo, "apps/core/src/on-prem/sandbox-host.ts");
+const sessionSource = path.join(
+  repo,
+  "apps/core/src/on-prem/sandbox-session.ts"
+);
+const settingsSource = path.join(
+  repo,
+  "apps/core/src/on-prem/sandbox-settings.ts"
+);
+const capabilitySource = path.join(
+  repo,
+  "apps/core/src/on-prem/sandbox-capability.ts"
+);
+/** capnweb, as workerd loads it: one module importing only the runtime's. */
+const capnwebSource = path.join(
+  repo,
+  "node_modules/capnweb/dist/index-workers.js"
+);
 
 /**
  * The workerd binary itself, not the npm shim in front of it, so killing a
@@ -83,6 +108,9 @@ export const nativeWorkerd = path.join(
 /** The headers core gives a call's deadline and wait in (apps/core/src/sandboxed.ts). */
 export const deadlineHeader = "x-grasp-sandbox-deadline-ms";
 export const waitHeader = "x-grasp-sandbox-wait-ms";
+/** A session's CPU-time budget, and the ID core asks its verdict by. */
+export const cpuHeader = "x-grasp-sandbox-cpu-ms";
+export const callIdHeader = "x-grasp-sandbox-call";
 
 /** The header that marks an answer as the supervisor's verdict on the App's code. */
 export const verdictHeader = "x-grasp-sandbox-verdict";
@@ -109,8 +137,8 @@ export interface SandboxSupervisorOptions {
   memoryLimitBytes?: number;
   /** How often a busy process's memory is read. */
   memoryPollMs?: number;
-  /** Where processes' memory is read: `/proc` on Linux, `/bin/ps` on macOS. */
-  memoryProbe?: MemoryProbe;
+  /** Where processes' memory and CPU time are read: `/proc` on Linux, `/bin/ps` on macOS. */
+  usageProbe?: UsageProbe;
   /** How long a process may take to start. */
   startupMs?: number;
   /** Where the supervisor says what it did: one JSON line each, by default to stderr. */
@@ -121,6 +149,7 @@ export interface SandboxSupervisorOptions {
 export interface SandboxStats {
   deadlines: number;
   memory: number;
+  cpu: number;
   crashed: number;
   abandoned: number;
   waiting: number;
@@ -149,21 +178,17 @@ const MIB = 1024 * 1024;
  */
 const manifestMaxBytes = 4 * MIB;
 
-/** Where a process's memory is read: Linux's procfs, or macOS's `ps`. */
-export interface MemoryProbe {
-  /** Linux: the procfs root, `/proc`. */
-  procRoot: string;
-  /** macOS: the `ps` binary, by absolute path so no PATH can hide it. */
-  ps: string;
-  /** Which of the two to read: this machine's own platform by default. */
-  platform?: NodeJS.Platform;
-}
-
-const defaultProbe: MemoryProbe = { procRoot: "/proc", ps: "/bin/ps" };
-
 const defaults = {
   processes: 2,
   maxDeadlineMs: 30_000,
+  /**
+   * The longest a session may last in wall-clock time, whatever it asks
+   * for: a workflow activation waits on model and connector calls, which
+   * cost the App no CPU time.
+   */
+  maxSessionMs: 15 * 60_000,
+  /** The most CPU time a session may ask for: a workflow step's 30 s. */
+  maxCpuMs: 30_000,
   maxWaitMs: 5000,
   maxWaiting: 32,
   // An App's source is at most a million characters (`appLimits`), built
@@ -173,7 +198,7 @@ const defaults = {
   // A Cloudflare isolate may use 128 MB; workerd itself takes about 40.
   memoryLimitBytes: 256 * MIB,
   memoryPollMs: 100,
-  memoryProbe: defaultProbe,
+  usageProbe: defaultUsageProbe,
   startupMs: 10_000,
 };
 
@@ -201,7 +226,13 @@ const config :Workerd.Config = (
 );
 
 const sandbox :Workerd.Worker = (
-  modules = [(name = "sandbox-host.js", esModule = embed "sandbox-host.js")],
+  modules = [
+    (name = "sandbox-host.js", esModule = embed "sandbox-host.js"),
+    (name = "sandbox-session.ts", esModule = embed "sandbox-session.js"),
+    (name = "sandbox-capability.ts", esModule = embed "sandbox-capability.js"),
+    (name = "sandbox-settings.ts", esModule = embed "sandbox-settings.js"),
+    (name = "capnweb", esModule = embed "capnweb.js"),
+  ],
   compatibilityDate = "2026-09-15",
   # Its only binding: no storage, no secrets, nothing for escaped code.
   bindings = [(name = "LOADER", workerLoader = ())],
@@ -209,15 +240,28 @@ const sandbox :Workerd.Worker = (
 `;
 
 /**
- * Writes the sandbox host's module and config into `dir` and answers the
- * config's path. The module imports nothing, so stripping its types is all
- * the build it needs.
+ * Writes the sandbox host's modules and config into `dir` and answers the
+ * config's path. Its modules import only each other, capnweb and the
+ * runtime's own, so stripping their types is all the build they need.
  */
 const writeSandboxHost = (dir: string): string => {
   writeFileSync(
     path.join(dir, "sandbox-host.js"),
     stripTypeScriptTypes(readFileSync(hostSource, "utf-8"))
   );
+  writeFileSync(
+    path.join(dir, "sandbox-session.js"),
+    stripTypeScriptTypes(readFileSync(sessionSource, "utf-8"))
+  );
+  writeFileSync(
+    path.join(dir, "sandbox-capability.js"),
+    stripTypeScriptTypes(readFileSync(capabilitySource, "utf-8"))
+  );
+  writeFileSync(
+    path.join(dir, "sandbox-settings.js"),
+    stripTypeScriptTypes(readFileSync(settingsSource, "utf-8"))
+  );
+  writeFileSync(path.join(dir, "capnweb.js"), readFileSync(capnwebSource));
   const config = path.join(dir, "sandbox-host.capnp");
   writeFileSync(config, hostConfig);
   return config;
@@ -289,180 +333,6 @@ const exitOf = async (child: ChildProcess): Promise<void> => {
   }
 };
 
-/** What reading a process's memory came to. */
-type MemoryReading =
-  | { kind: "bytes"; bytes: number }
-  | { kind: "gone" }
-  | { kind: "unreadable"; why: string };
-
-/**
- * Whether `pid` is confirmed gone: the supervisor saw it exit (`exited`),
- * or the system has no such process at all (`ESRCH`; a zombie we still
- * hold isn't that). Nothing else counts: a reading that fails for any
- * other reason leaves the process unbounded, so it's `unreadable`.
- */
-const confirmedGone = (pid: number, exited: () => boolean): boolean => {
-  if (exited()) {
-    return true;
-  }
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return error instanceof Error && "code" in error && error.code === "ESRCH";
-  }
-};
-
-const vmRss = /^VmRSS:\s+(?<kib>\d+)\s+kB$/mu;
-/** A process that has exited, zombie (`Z`) or dead (`X`), not yet reaped. */
-const procExited = /^State:\s+[ZX]\b/mu;
-
-/** Gone if confirmed, otherwise unreadable for `why`. */
-const goneOr = (
-  pid: number,
-  exited: () => boolean,
-  why: string
-): MemoryReading =>
-  confirmedGone(pid, exited) ? { kind: "gone" } : { kind: "unreadable", why };
-
-/**
- * `pid`'s resident memory on Linux, from `<procRoot>/<pid>/status`. Its
- * own `State: Z` or `X` says it exited, though `kill(pid, 0)` still finds
- * it until it's reaped: a crash mid-call is the App's, not an outage.
- */
-const procMemory = async (
-  procRoot: string,
-  pid: number,
-  exited: () => boolean
-): Promise<MemoryReading> => {
-  let status: string;
-  try {
-    status = await readFile(
-      path.join(procRoot, String(pid), "status"),
-      "utf-8"
-    );
-  } catch (error) {
-    return goneOr(pid, exited, String(error));
-  }
-  if (procExited.test(status)) {
-    return { kind: "gone" };
-  }
-  const kib = vmRss.exec(status)?.groups?.kib;
-  return kib === undefined
-    ? goneOr(pid, exited, "no VmRSS in its status")
-    : { kind: "bytes", bytes: Number(kib) * 1024 };
-};
-
-const psOutput = /^(?<state>\S+)\s+(?<kib>\d+)$/u;
-
-/** `pid`'s resident memory on macOS, as `ps` says, with its state. */
-const psMemory = async (
-  ps: string,
-  pid: number,
-  exited: () => boolean
-): Promise<MemoryReading> => {
-  const child = spawn(ps, ["-o", "stat=,rss=", "-p", String(pid)], {
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-  const done = exitOf(child);
-  let output = "";
-  try {
-    for await (const chunk of child.stdout) {
-      output += String(chunk);
-    }
-  } catch (error) {
-    await done;
-    return goneOr(pid, exited, String(error));
-  }
-  await done;
-  const parsed = psOutput.exec(output.trim())?.groups;
-  if (parsed?.state?.startsWith("Z") === true) {
-    // Exited, a zombie until reaped: gone, as on Linux.
-    return { kind: "gone" };
-  }
-  return parsed?.kib === undefined
-    ? goneOr(
-        pid,
-        exited,
-        `ps answered ${JSON.stringify(output.trim())} (exit ${child.exitCode})`
-      )
-    : { kind: "bytes", bytes: Number(parsed.kib) * 1024 };
-};
-
-/**
- * `pid`'s resident memory, or that it's confirmed gone. Anything else is
- * `unreadable`, never skipped: then nothing would bound it.
- */
-const residentMemory = async (
-  probe: MemoryProbe,
-  pid: number,
-  exited: () => boolean
-): Promise<MemoryReading> => {
-  const platform = probe.platform ?? process.platform;
-  try {
-    if (platform === "linux") {
-      return await procMemory(probe.procRoot, pid, exited);
-    }
-    if (platform === "darwin") {
-      return await psMemory(probe.ps, pid, exited);
-    }
-    return goneOr(pid, exited, `no way to read memory on ${platform}`);
-  } catch (error) {
-    // A reader that throws (`spawn` refused, say) reads nothing.
-    return goneOr(pid, exited, String(error));
-  }
-};
-
-/**
- * Refuses a memory source that doesn't work here, before any App code
- * runs: reading this process's own memory as a child's would be read
- * (`<procRoot>/<pid>/status` on Linux, `ps` on macOS). Without one, nothing would bound memory.
- */
-const checkMemoryProbe = async (probe: MemoryProbe): Promise<void> => {
-  const platform = probe.platform ?? process.platform;
-  const reading = await residentMemory(probe, process.pid, () => false);
-  if (reading.kind !== "bytes") {
-    const sources: Partial<Record<NodeJS.Platform, string>> = {
-      linux: path.join(probe.procRoot, String(process.pid), "status"),
-      darwin: probe.ps,
-    };
-    const source = sources[platform] ?? "nothing";
-    throw new Error(
-      `The sandbox can't read processes' memory on ${platform} (from ${source}), so it would run App code without a memory bound: ${reading.kind === "unreadable" ? reading.why : "no reading"}.`
-    );
-  }
-};
-
-/** Whether `pid` passes `limit` bytes before `signal` aborts, or can't be read. */
-const watchMemory = async (
-  probe: MemoryProbe,
-  pid: number,
-  exited: () => boolean,
-  limit: number,
-  pollMs: number,
-  signal: AbortSignal
-): Promise<
-  { kind: "over" } | { kind: "unreadable"; why: string } | { kind: "ended" }
-> => {
-  while (!signal.aborted) {
-    // oxlint-disable-next-line no-await-in-loop -- read once per poll
-    const reading = await residentMemory(probe, pid, exited);
-    if (reading.kind === "unreadable") {
-      return reading;
-    }
-    if (reading.kind === "bytes" && reading.bytes > limit) {
-      return { kind: "over" };
-    }
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- one poll at a time
-      await sleep(pollMs, undefined, { signal });
-    } catch {
-      return { kind: "ended" };
-    }
-  }
-  return { kind: "ended" };
-};
-
 /** For errors already handled where they're awaited. */
 const ignore = (): undefined => undefined;
 
@@ -524,12 +394,37 @@ const millisOf = (
 type Ending =
   | { kind: "answered"; status: number; body: Buffer }
   | { kind: "too_large" }
-  | { kind: "deadline" | "memory" | "abandoned" | "crashed" }
+  | { kind: "deadline" | "memory" | "cpu" | "abandoned" | "crashed" }
   | { kind: "failed"; error: unknown }
   | { kind: "unreadable"; why: string };
 
 /** Why a call's run was aborted, set before it is. */
-type AbortReason = "deadline" | "memory" | "abandoned" | "unreadable";
+type AbortReason = "deadline" | "memory" | "cpu" | "abandoned" | "unreadable";
+
+/** A call's watch: aborted once a bound is passed or its caller left. */
+interface Guard {
+  signal: AbortSignal;
+  /** Why it was aborted, if it was. */
+  reason: () => AbortReason | undefined;
+  /** What couldn't be read, when the reason is `unreadable`. */
+  unreadable: () => string;
+  stop: () => void;
+}
+
+/** A session's ending the App is blamed for, kept for core to ask. */
+interface Verdict {
+  verdict: "deadline" | "memory" | "cpu" | "crashed";
+  message: string;
+  at: number;
+}
+
+/** How long a verdict is kept, and how many at most. */
+const VERDICT_TTL_MS = 60_000;
+const MAX_VERDICTS = 1024;
+
+/** A call ID as core makes them: a random UUID. */
+const callIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
 /** The pool of sandbox processes, and the calls it serves. */
 class SandboxPool {
@@ -555,7 +450,15 @@ class SandboxPool {
   readonly #spawned = new Set<number>();
   /** Starts under way, which `stop` waits for. */
   readonly #starts = new Set<Promise<HostProcess>>();
-  readonly #counts = { deadlines: 0, memory: 0, crashed: 0, abandoned: 0 };
+  readonly #counts = {
+    deadlines: 0,
+    memory: 0,
+    cpu: 0,
+    crashed: 0,
+    abandoned: 0,
+  };
+  /** Verdicts on sessions, by call ID, oldest first. */
+  readonly #verdicts = new Map<string, Verdict>();
 
   constructor(settings: Settings, dir: string) {
     this.#settings = settings;
@@ -727,28 +630,7 @@ class SandboxPool {
     deadlineMs: number,
     caller: AbortSignal
   ): Promise<Ending> {
-    const run = new AbortController();
-    let reason: AbortReason | undefined;
-    let unreadable = "";
-    const end = (why: AbortReason): void => {
-      reason ??= why;
-      run.abort();
-    };
-    const timer = setTimeout(() => {
-      end("deadline");
-    }, deadlineMs);
-    const onCaller = (): void => {
-      end("abandoned");
-    };
-    caller.addEventListener("abort", onCaller);
-    void this.#watchMemory(host, run.signal, (why) => {
-      if (why === undefined) {
-        end("memory");
-      } else {
-        unreadable = why;
-        end("unreadable");
-      }
-    });
+    const guard = this.#guard(host, { deadlineMs }, caller);
     try {
       const forwarded = httpRequest({
         socketPath: host.socket,
@@ -758,7 +640,7 @@ class SandboxPool {
           "content-type": "application/json",
           "content-length": String(body.length),
         },
-        signal: run.signal,
+        signal: guard.signal,
       });
       // Once aborted after its answer, the request still says so: heard here.
       forwarded.on("error", ignore);
@@ -775,53 +657,106 @@ class SandboxPool {
       }
       return { kind: "answered", status: answer.statusCode ?? 500, body: text };
     } catch (error) {
-      if (reason === "unreadable") {
-        // Unreadable because it just died: a crash, as any death mid-call.
-        await Promise.race([host.exited, sleep(100)]);
-        if (host.gone && !this.#stopping) {
-          return { kind: "crashed" };
-        }
-        return { kind: "unreadable", why: unreadable };
-      }
-      if (reason !== undefined) {
-        return { kind: reason };
-      }
-      // Its one call is all that ran in it: a process gone mid-call is
-      // that call's doing (V8 aborts at its heap limit), not an outage;
-      // unless the supervisor is stopping, which kills it.
-      await Promise.race([host.exited, sleep(100)]);
-      return host.gone && !this.#stopping
-        ? { kind: "crashed" }
-        : { kind: "failed", error };
+      return await this.#cutShort(host, guard, error);
     } finally {
-      clearTimeout(timer);
-      caller.removeEventListener("abort", onCaller);
-      run.abort();
+      guard.stop();
     }
   }
 
   /**
-   * Calls `over` if `host` passes the memory limit before `signal` aborts,
-   * or `over(why)` if its memory can't be read: never left unbounded.
+   * How a call cut short ended: the bound it passed, its caller leaving, or
+   * its process dying. Its one call is all that ran in it, so a process
+   * gone mid-call is that call's doing (V8 aborts at its heap limit), not
+   * an outage; unless the supervisor is stopping, which kills it.
    */
-  async #watchMemory(
+  async #cutShort(
+    host: HostProcess,
+    guard: Guard,
+    error?: unknown
+  ): Promise<Ending> {
+    const reason = guard.reason();
+    if (reason !== undefined && reason !== "unreadable") {
+      return { kind: reason };
+    }
+    await Promise.race([host.exited, sleep(100)]);
+    if (host.gone && !this.#stopping) {
+      return { kind: "crashed" };
+    }
+    if (reason === "unreadable") {
+      return { kind: "unreadable", why: guard.unreadable() };
+    }
+    return { kind: "failed", error };
+  }
+
+  /**
+   * Watches a call on `host`: its wall-clock deadline, its memory and,
+   * when given, its CPU time, and its caller. The returned signal aborts
+   * at the first of them, with the reason kept.
+   */
+  #guard(
+    host: HostProcess,
+    { deadlineMs, cpuLimitMs }: { deadlineMs: number; cpuLimitMs?: number },
+    caller: AbortSignal
+  ): Guard {
+    const run = new AbortController();
+    let reason: AbortReason | undefined;
+    let unreadable = "";
+    const end = (why: AbortReason): void => {
+      reason ??= why;
+      run.abort();
+    };
+    const timer = setTimeout(() => {
+      end("deadline");
+    }, deadlineMs);
+    const onCaller = (): void => {
+      end("abandoned");
+    };
+    if (caller.aborted) {
+      onCaller();
+    }
+    caller.addEventListener("abort", onCaller);
+    void this.#watchUsage(host, run.signal, cpuLimitMs, (why, detail) => {
+      unreadable = detail;
+      end(why);
+    });
+    return {
+      signal: run.signal,
+      reason: () => reason,
+      unreadable: () => unreadable,
+      stop: () => {
+        clearTimeout(timer);
+        caller.removeEventListener("abort", onCaller);
+        run.abort();
+      },
+    };
+  }
+
+  /**
+   * Calls `over` once `host` passes its memory limit or CPU-time budget, or
+   * its usage can't be read: never left unbounded.
+   */
+  async #watchUsage(
     host: HostProcess,
     signal: AbortSignal,
-    over: (unreadable?: string) => void
+    cpuLimitMs: number | undefined,
+    over: (why: "memory" | "cpu" | "unreadable", detail: string) => void
   ): Promise<void> {
-    const { memoryLimitBytes, memoryPollMs, memoryProbe } = this.#settings;
-    const watched = await watchMemory(
-      memoryProbe,
+    const { memoryLimitBytes, memoryPollMs, usageProbe } = this.#settings;
+    const watched = await watchUsage(
+      usageProbe,
       host.pid,
       () => host.gone,
-      memoryLimitBytes,
-      memoryPollMs,
+      {
+        memoryLimitBytes,
+        ...(cpuLimitMs === undefined ? {} : { cpuLimitMs }),
+        pollMs: memoryPollMs,
+      },
       signal
     );
-    if (watched.kind === "over") {
-      over();
-    } else if (watched.kind === "unreadable") {
-      over(watched.why);
+    if (watched.kind === "unreadable") {
+      over("unreadable", watched.why);
+    } else if (watched.kind !== "ended") {
+      over(watched.kind, "");
     }
   }
 
@@ -872,6 +807,11 @@ class SandboxPool {
         );
         return;
       }
+      case "cpu": {
+        this.#counts.cpu += 1;
+        verdict("cpu", "The App's code used more than its CPU time.");
+        return;
+      }
       case "crashed": {
         this.#counts.crashed += 1;
         verdict("crashed", "The App's code crashed its sandbox.");
@@ -893,7 +833,7 @@ class SandboxPool {
         send(
           response,
           503,
-          refusal("The sandbox can't read its processes' memory.")
+          refusal("The sandbox can't read its processes' memory or CPU time.")
         );
         return;
       }
@@ -910,6 +850,246 @@ class SandboxPool {
         send(response, 500, refusal("The supervisor failed."));
       }
     }
+  }
+
+  /**
+   * One session, on a process of its own: core's WebSocket to the sandbox
+   * host, for a call whose isolate reaches back into core through the
+   * capabilities core passes in it (apps/core/src/sandboxed.ts). The
+   * supervisor relays its bytes and watches it as any call: its deadline,
+   * memory and CPU-time budget. A session the App is blamed for leaves a
+   * verdict under its call ID for core to ask.
+   */
+  async session(
+    request: IncomingMessage,
+    client: Socket,
+    head: Buffer
+  ): Promise<void> {
+    const settings = this.#settings;
+    const refuse = (status: number, message: string): void => {
+      if (!client.destroyed) {
+        client.end(
+          `HTTP/1.1 ${status} Refused\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n${refusal(message)}`
+        );
+      }
+    };
+    if (this.#inFlight >= settings.processes + settings.maxWaiting) {
+      refuse(503, "The sandbox is full.");
+      return;
+    }
+    const deadlineMs = millisOf(request, deadlineHeader, settings.maxSessionMs);
+    const cpuLimitMs = millisOf(request, cpuHeader, settings.maxCpuMs);
+    const waitMs =
+      millisOf(request, waitHeader, settings.maxWaitMs) ?? settings.maxWaitMs;
+    const callId = request.headers[callIdHeader];
+    if (
+      deadlineMs === undefined ||
+      cpuLimitMs === undefined ||
+      typeof callId !== "string" ||
+      !callIdPattern.test(callId)
+    ) {
+      refuse(
+        400,
+        `A session needs ${deadlineHeader}, ${cpuHeader} and ${callIdHeader}.`
+      );
+      return;
+    }
+    this.#inFlight += 1;
+    try {
+      await this.#relay(request, client, head, {
+        deadlineMs,
+        cpuLimitMs,
+        waitMs,
+        callId,
+        refuse,
+      });
+    } finally {
+      this.#inFlight -= 1;
+    }
+  }
+
+  async #relay(
+    request: IncomingMessage,
+    client: Socket,
+    head: Buffer,
+    session: {
+      deadlineMs: number;
+      cpuLimitMs: number;
+      waitMs: number;
+      callId: string;
+      refuse: (status: number, message: string) => void;
+    }
+  ): Promise<void> {
+    const { deadlineMs, cpuLimitMs, waitMs, callId, refuse } = session;
+    // Gone: core closed its end, done or giving up.
+    const caller = new AbortController();
+    client.on("close", () => {
+      caller.abort();
+    });
+    client.on("error", ignore);
+    const host = await this.#acquire(
+      AbortSignal.any([caller.signal, AbortSignal.timeout(waitMs)])
+    );
+    if (host === undefined) {
+      if (!caller.signal.aborted) {
+        refuse(503, "No sandbox process came free in time.");
+      }
+      return;
+    }
+    if (caller.signal.aborted) {
+      this.#busy -= 1;
+      this.#release(host);
+      return;
+    }
+    this.#topUp();
+    // Core closing its end is how a session ends, not an abandoned call:
+    // the guard watches only the bounds, and the session ends either way.
+    const guard = this.#guard(
+      host,
+      { deadlineMs, cpuLimitMs },
+      new AbortController().signal
+    );
+    const upstream = connect(host.socket);
+    upstream.on("error", ignore);
+    try {
+      // The upgrade as core sent it, then the bytes both ways.
+      let raw = `${request.method} ${request.url} HTTP/1.1\r\n`;
+      for (let i = 0; i < request.rawHeaders.length; i += 2) {
+        raw += `${request.rawHeaders[i]}: ${request.rawHeaders[i + 1]}\r\n`;
+      }
+      upstream.write(`${raw}\r\n`);
+      upstream.write(head);
+      // Neither end is closed for the other: core's end stays open until
+      // the session's verdict is kept, so core finds it when it asks.
+      client.pipe(upstream, { end: false });
+      upstream.pipe(client, { end: false });
+      await Promise.race([
+        once(upstream, "close"),
+        once(guard.signal, "abort"),
+        once(caller.signal, "abort"),
+      ]);
+      const ending = guard.signal.aborted
+        ? await this.#cutShort(host, guard)
+        : await this.#sessionEnded(host, caller.signal);
+      this.#judge(host, callId, ending, deadlineMs);
+    } finally {
+      guard.stop();
+      upstream.destroy();
+      client.destroy();
+      try {
+        await this.#retire(host);
+      } finally {
+        this.#busy -= 1;
+        this.#released.dispatchEvent(new Event("released"));
+      }
+    }
+  }
+
+  /**
+   * How a session ended once the sandbox host closed it: a crash if its
+   * process died (the App's), otherwise as the host closed it.
+   */
+  async #sessionEnded(host: HostProcess, caller: AbortSignal): Promise<Ending> {
+    if (caller.aborted) {
+      // Core closed it: the call is over, however it went.
+      return { kind: "answered", status: 101, body: Buffer.alloc(0) };
+    }
+    await Promise.race([host.exited, sleep(100)]);
+    if (host.gone && !this.#stopping) {
+      return { kind: "crashed" };
+    }
+    return { kind: "answered", status: 101, body: Buffer.alloc(0) };
+  }
+
+  /** Records how a session ended: a verdict when the App is to blame. */
+  #judge(
+    host: HostProcess,
+    callId: string,
+    ending: Ending,
+    deadlineMs: number
+  ): void {
+    const { log } = this.#settings;
+    const blame = (verdict: Verdict["verdict"], message: string): void => {
+      log({ event: `sandbox.${verdict}`, pid: host.pid, callId });
+      this.#keepVerdict(callId, { verdict, message, at: Date.now() });
+    };
+    switch (ending.kind) {
+      case "deadline": {
+        this.#counts.deadlines += 1;
+        blame(
+          "deadline",
+          `The App's code ran past its time (${deadlineMs} ms).`
+        );
+        return;
+      }
+      case "cpu": {
+        this.#counts.cpu += 1;
+        blame("cpu", "The App's code used more than its CPU time.");
+        return;
+      }
+      case "memory": {
+        this.#counts.memory += 1;
+        blame(
+          "memory",
+          `The App's code used more than ${Math.round(this.#settings.memoryLimitBytes / MIB)} MiB of memory.`
+        );
+        return;
+      }
+      case "crashed": {
+        this.#counts.crashed += 1;
+        blame("crashed", "The App's code crashed its sandbox.");
+        return;
+      }
+      case "abandoned": {
+        this.#counts.abandoned += 1;
+        return;
+      }
+      case "unreadable": {
+        log({
+          event: "sandbox.memory_unreadable",
+          level: "error",
+          pid: host.pid,
+          callId,
+          why: ending.why,
+        });
+        return;
+      }
+      case "failed": {
+        log({ event: "sandbox.call_failed", pid: host.pid, callId });
+        break;
+      }
+      case "answered":
+      case "too_large": {
+        // Closed by the sandbox host as a session ends: nothing to blame.
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+  }
+
+  /** Keeps `verdict` for `callId`, dropping expired and the oldest past the bound. */
+  #keepVerdict(callId: string, verdict: Verdict): void {
+    const now = Date.now();
+    for (const [id, kept] of this.#verdicts) {
+      if (
+        now - kept.at <= VERDICT_TTL_MS &&
+        this.#verdicts.size < MAX_VERDICTS
+      ) {
+        break;
+      }
+      this.#verdicts.delete(id);
+    }
+    this.#verdicts.set(callId, verdict);
+  }
+
+  /** The verdict on session `callId`, if the App was blamed for it lately. */
+  verdict(callId: string): Verdict | undefined {
+    const kept = this.#verdicts.get(callId);
+    return kept !== undefined && Date.now() - kept.at <= VERDICT_TTL_MS
+      ? kept
+      : undefined;
   }
 
   /** A new workerd process, once it listens; throws if it can't start. */
@@ -1106,6 +1286,20 @@ class SandboxPool {
   }
 }
 
+/** Relays one session; a failure of the supervisor closes it. */
+const relaySession = async (
+  pool: SandboxPool,
+  request: IncomingMessage,
+  client: Socket,
+  head: Buffer
+): Promise<void> => {
+  try {
+    await pool.session(request, client, head);
+  } catch {
+    client.destroy();
+  }
+};
+
 /** Answers one request to the supervisor. */
 const answerRequest = async (
   pool: SandboxPool,
@@ -1119,6 +1313,20 @@ const answerRequest = async (
       response,
       health.status === "down" ? 503 : 200,
       JSON.stringify(health)
+    );
+    return;
+  }
+  const verdictOf = /^\/verdict\/(?<id>[^/]+)$/u.exec(pathname)?.groups?.id;
+  if (verdictOf !== undefined && request.method === "GET") {
+    const kept = pool.verdict(verdictOf);
+    send(
+      response,
+      kept === undefined ? 404 : 200,
+      JSON.stringify(
+        kept === undefined
+          ? { verdict: null }
+          : { verdict: kept.verdict, message: kept.message }
+      )
     );
     return;
   }
@@ -1243,7 +1451,7 @@ export const startSandboxSupervisor = async (
     }
   }
   // No App code runs where memory can't be bounded.
-  await checkMemoryProbe(settings.memoryProbe);
+  await checkUsageProbe(settings.usageProbe);
   // Checked before anything starts: past the limit, workerd would only say
   // it didn't listen.
   const longest = path.join(
@@ -1265,6 +1473,18 @@ export const startSandboxSupervisor = async (
   const server: Server = createServer((request, response) => {
     void answerRequest(pool, request, response);
   });
+  // A session is a WebSocket, upgraded at `/session`.
+  server.on(
+    "upgrade",
+    (request: IncomingMessage, client: Socket, head: Buffer) => {
+      const { pathname } = new URL(request.url ?? "/", "http://sandbox");
+      if (pathname !== "/session") {
+        client.destroy();
+        return;
+      }
+      void relaySession(pool, request, client, head);
+    }
+  );
   server.maxConnections = 2 * (settings.processes + settings.maxWaiting) + 4;
   server.headersTimeout = HEADERS_TIMEOUT_MS;
   server.requestTimeout = REQUEST_TIMEOUT_MS;

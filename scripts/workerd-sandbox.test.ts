@@ -25,7 +25,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { isolateSettings } from "../apps/core/src/on-prem/sandbox-host.ts";
+import { isolateSettings } from "../apps/core/src/on-prem/sandbox-settings.ts";
 import { isolateBase } from "../packages/shared/src/runtime.ts";
 import {
   deadlineHeader,
@@ -661,9 +661,15 @@ describe("the sandbox supervisor", () => {
     ) => Promise<void>
   ): Promise<void> => {
     const procRoot = tempDir();
+    // Its `stat` as Linux writes it, in the state its status says.
     const statusOf = (pid: number, text: string): void => {
+      const state = /^State:\s+(?<state>\S)/mu.exec(text)?.groups?.state ?? "R";
       mkdirSync(path.join(procRoot, String(pid)), { recursive: true });
       writeFileSync(path.join(procRoot, String(pid), "status"), text);
+      writeFileSync(
+        path.join(procRoot, String(pid), "stat"),
+        `${pid} (work erd) ${state} 1 1 1 0 -1 4194560 0 0 0 0 5 3 0 0 20 0 1 0 100 0 0\n`
+      );
     };
     statusOf(
       process.pid,
@@ -672,7 +678,7 @@ describe("the sandbox supervisor", () => {
     const events: Record<string, unknown>[] = [];
     await withSupervisor(
       {
-        memoryProbe: { procRoot, ps: "/nonexistent/ps", platform: "linux" },
+        usageProbe: { procRoot, ps: "/nonexistent/ps", platform: "linux" },
         log: (event) => {
           events.push(event);
         },
@@ -722,11 +728,11 @@ describe("the sandbox supervisor", () => {
     ["no reader at all", { procRoot: "/proc", ps: "/bin/ps", platform: "aix" }],
   ] as const)(
     "refuses to start where it can't read memory (%s)",
-    async (_, memoryProbe) => {
+    async (_, usageProbe) => {
       await expect(
         startSandboxSupervisor({
           workerd: nativeWorkerd,
-          memoryProbe,
+          usageProbe,
           log: quiet,
         })
       ).rejects.toThrow("can't read processes' memory");
