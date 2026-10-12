@@ -3,7 +3,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, StoreId } from "@grasp-os/shared/ids";
+import type { StoreId } from "@grasp-os/shared/ids";
 import { canBuild, isAdmin, requireBuilder } from "@grasp-os/shared/roles";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-reads";
@@ -28,6 +28,7 @@ import { z } from "zod";
 
 import { requireAppRole } from "./app-access.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import { activeMember } from "./auth/auth.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
   appDefaultStores,
@@ -203,23 +204,41 @@ export const createStore = async (env: Env, by: Acting): Promise<StoreId> => {
   return id;
 };
 
+/** The App a default store serves: whose roles decide who manages it. */
+type DefaultStoreApp = Pick<App, "id" | "owner"> & { createdAt: Date };
+
 /**
  * The App whose default store `id` is (`app_default_stores`,
- * app-activation.ts), if it is one.
+ * app-activation.ts), if it is one. Whether it is one is that table's
+ * alone: a default store whose App row is gone is refused
+ * (`data.store_unavailable`), never managed as a plain store by whoever
+ * created it.
  */
 const defaultStoreApp = async (
   env: Env,
   id: StoreId
-): Promise<Pick<App, "id" | "owner"> | undefined> => {
+): Promise<DefaultStoreApp | undefined> => {
   const row = await drizzle(env.DB)
-    .select({ id: apps.id, owner: apps.ownerId })
+    .select({
+      id: apps.id,
+      owner: apps.ownerId,
+      createdAt: apps.createdAt,
+    })
     .from(appDefaultStores)
-    .innerJoin(apps, eq(apps.id, appDefaultStores.appId))
+    .leftJoin(apps, eq(apps.id, appDefaultStores.appId))
     .where(eq(appDefaultStores.storeId, id))
     .get();
-  return row === undefined
-    ? undefined
-    : { id: appIdSchema.parse(row.id), owner: row.owner };
+  if (row === undefined) {
+    return undefined;
+  }
+  if (row.id === null || row.owner === null || row.createdAt === null) {
+    throw dataErrors.create("data.store_unavailable");
+  }
+  return {
+    id: appIdSchema.parse(row.id),
+    owner: row.owner,
+    createdAt: row.createdAt,
+  };
 };
 
 /**
@@ -238,7 +257,7 @@ const managedBy = async (
   env: Env,
   by: Acting,
   id: string
-): Promise<{ id: StoreId; owner: string; defaultOf?: AppId }> => {
+): Promise<{ id: StoreId; owner: string; defaultOf?: DefaultStoreApp }> => {
   const parsed = storeIdSchema.safeParse(id);
   if (!parsed.success || !canBuild(by.role)) {
     throw dataErrors.create("data.store_unavailable");
@@ -285,7 +304,7 @@ const managedBy = async (
   return {
     id: parsed.data,
     owner: row.owner,
-    ...(app === undefined ? {} : { defaultOf: app.id }),
+    ...(app === undefined ? {} : { defaultOf: app }),
   };
 };
 
@@ -293,7 +312,7 @@ const managedBy = async (
  * Refuses (`data.store_managed_by_app`) to share or unshare an App's
  * default store as a store: whom it serves follows the App's membership.
  */
-const requireSharableStore = (store: { defaultOf?: AppId }): void => {
+const requireSharableStore = (store: { defaultOf?: DefaultStoreApp }): void => {
   if (store.defaultOf !== undefined) {
     throw dataErrors.create("data.store_managed_by_app");
   }
@@ -376,20 +395,53 @@ const boundToCurrentRelease = async (
   return row !== undefined;
 };
 
+/** The organization roles that build, and so may manage a store. */
+const buildingRoles = ["admin", "builder"] as const;
+
 /**
- * Whom an App is shared with as builders, still in the organization: who
- * manages its default store besides the organization's admins and the
- * App's owner, in the shape of a store's managers.
+ * Who manages an App's default store besides the organization's admins,
+ * in the shape of a store's managers: the App's owner, then whom the App
+ * is shared with as builders, as App roles decide it (app-access.ts). A
+ * person is listed only while still in the organization in a role that
+ * builds, which caps their role in the App; a team while it exists, its
+ * people each capped by their own role.
  */
-const appBuilders = async (env: Env, app: AppId): Promise<StoreManager[]> => {
-  const rows = await drizzle(env.DB)
+const appBuilders = async (
+  env: Env,
+  app: DefaultStoreApp
+): Promise<StoreManager[]> => {
+  const db = drizzle(env.DB);
+  const ownerBuilds = await db
+    .select({ one: sql`1` })
+    .from(apps)
+    .where(and(eq(apps.id, app.id), activeMember(apps.ownerId, buildingRoles)))
+    .get();
+  const owner: StoreManager[] =
+    ownerBuilds === undefined
+      ? []
+      : [
+          {
+            type: "person",
+            id: app.owner,
+            role: "manage",
+            addedBy: app.owner,
+            addedAt: app.createdAt.toISOString(),
+          },
+        ];
+  const rows = await db
     .select()
     .from(appMembers)
     .where(
       and(
-        eq(appMembers.appId, app),
+        eq(appMembers.appId, app.id),
         eq(appMembers.role, "builder"),
-        stillMembers(appMembers)
+        or(
+          and(
+            eq(appMembers.memberType, "person"),
+            activeMember(appMembers.memberId, buildingRoles)
+          ),
+          and(eq(appMembers.memberType, "team"), stillMembers(appMembers))
+        )
       )
     )
     .orderBy(
@@ -397,13 +449,16 @@ const appBuilders = async (env: Env, app: AppId): Promise<StoreManager[]> => {
       asc(appMembers.memberType),
       asc(appMembers.memberId)
     );
-  return rows.map((row) => ({
-    type: row.memberType,
-    id: row.memberId,
-    role: "manage",
-    addedBy: row.addedBy,
-    addedAt: row.addedAt.toISOString(),
-  }));
+  return [
+    ...owner,
+    ...rows.map((row): StoreManager => ({
+      type: row.memberType,
+      id: row.memberId,
+      role: "manage",
+      addedBy: row.addedBy,
+      addedAt: row.addedAt.toISOString(),
+    })),
+  ];
 };
 
 /**
