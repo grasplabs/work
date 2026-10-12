@@ -232,6 +232,37 @@ describe("safe changes", () => {
     ]);
   });
 
+  test("an enum in a record's values, or in a field named `value`, may reorder too", () => {
+    const nested = (values: [string, ...string[]]) =>
+      notes({
+        ...noteFields,
+        tags: v.record(v.enum(values)).optional(),
+        value: v.enum(values).optional(),
+        detail: v.object({ value: v.enum(values) }).optional(),
+      });
+    const contract = contractOf(planSchemaChange(null, nested(["a", "b"])));
+    expect(planSchemaChange(contract, nested(["b", "a"]))).toMatchObject({
+      accepted: true,
+      changed: false,
+    });
+    expect(
+      refusedOf(planSchemaChange(contract, nested(["a", "c"]))).map(
+        ({ field }) => field
+      )
+    ).toStrictEqual(["detail", "tags", "value"]);
+  });
+
+  test("a default isn't normalized: another default is a change", () => {
+    const status = (fallback: string) =>
+      notes({
+        ...noteFields,
+        status: v.array(v.string()).default([fallback, "z"]),
+      });
+    expect(refusedOf(planSchemaChange(status("a"), status("b")))).toStrictEqual(
+      [{ table: "notes", field: "status", reason: "field_changed" }]
+    );
+  });
+
   test("an older version is compatible with the contract it grew into", () => {
     const v2 = notes({ ...noteFields, category: v.string().optional() });
     const contract = contractOf(planSchemaChange(v1, v2));

@@ -1,6 +1,3 @@
-import { canonicalJson } from "@grasp-os/shared/json";
-import type { Json } from "@grasp-os/shared/json";
-
 import { diffSchemaManifests } from "./schema-diff.ts";
 import type { FieldChange } from "./schema-diff.ts";
 import {
@@ -11,6 +8,7 @@ import {
 import type { ManifestTable, SchemaManifest } from "./schema-manifest.ts";
 import { managedFields, SchemaDefinitionError } from "./schema.ts";
 import { descriptorVersion, ValueDefinitionError } from "./value-descriptor.ts";
+import type { ValueDescriptor } from "./value-descriptor.ts";
 
 // How a store's data contract changes when it is handed a new schema
 // (spec 17.1, 17.4): which changes are safe to apply on their own, and
@@ -101,52 +99,6 @@ export interface RefusedPlan extends PlannedChanges {
 
 export type SchemaPlan = AcceptedPlan | RefusedPlan;
 
-/** `value` read as JSON, as a manifest's descriptors always are. */
-const toJson = (value: unknown): Json =>
-  // SAFETY: descriptors are JSON (they are read from and written to
-  // manifest text); a round trip through JSON text gives a JSON value.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, unicorn/prefer-structured-clone -- see SAFETY; not a clone, a reading as JSON
-  JSON.parse(JSON.stringify(value)) as Json;
-
-/** Keys whose values are data, not descriptors: never normalized. */
-const dataKeys: ReadonlySet<string> = new Set(["defaultValue", "value"]);
-
-/**
- * `value`, a descriptor as JSON, with every enum's members sorted: an
- * enum is a set of strings, so declaring its members in another order
- * permits exactly the same values. A union's members keep their order,
- * which can decide how a value is read; data (defaults, literals) is
- * left as it is.
- */
-const enumsSorted = (value: unknown): unknown => {
-  if (Array.isArray(value)) {
-    return value.map((item: unknown) => enumsSorted(item));
-  }
-  if (typeof value !== "object" || value === null) {
-    return value;
-  }
-  const normalized = new Map<string, unknown>();
-  for (const [key, part] of Object.entries(value)) {
-    normalized.set(key, dataKeys.has(key) ? part : enumsSorted(part));
-  }
-  const values = normalized.get("values");
-  if (normalized.get("kind") === "enum" && Array.isArray(values)) {
-    normalized.set("values", values.map(String).toSorted());
-  }
-  return Object.fromEntries(normalized);
-};
-
-/**
- * Whether two descriptors of a field permit the same values, enum
- * members in any order (`enumsSorted`): such a change is no change to the
- * data a store holds.
- */
-const sameUpToEnumOrder = (before: unknown, after: unknown): boolean =>
-  before !== undefined &&
-  after !== undefined &&
-  canonicalJson(toJson(enumsSorted(before))) ===
-    canonicalJson(toJson(enumsSorted(after)));
-
 /** The contract of a store that holds nothing yet. */
 const emptyContract: SchemaManifest = {
   manifestVersion,
@@ -154,6 +106,71 @@ const emptyContract: SchemaManifest = {
   managedFields,
   tables: {},
 };
+
+/**
+ * `descriptor` with every enum's members sorted, at every depth: an enum
+ * is a set of strings, so declaring its members in another order permits
+ * exactly the same values. Walked by kind, through object fields, array
+ * items, union members and record values; a union's members keep their
+ * order, which can decide how a value is read, and data (defaults,
+ * literals) is never touched.
+ */
+const enumsSorted = (descriptor: ValueDescriptor): ValueDescriptor => {
+  if (descriptor.kind === "enum") {
+    return { ...descriptor, values: descriptor.values.toSorted() };
+  }
+  if (descriptor.kind === "object") {
+    return {
+      ...descriptor,
+      fields: Object.fromEntries(
+        Object.entries(descriptor.fields).map(([name, field]) => [
+          name,
+          enumsSorted(field),
+        ])
+      ),
+    };
+  }
+  if (descriptor.kind === "array") {
+    return { ...descriptor, item: enumsSorted(descriptor.item) };
+  }
+  if (descriptor.kind === "union") {
+    return {
+      ...descriptor,
+      members: descriptor.members.map((member) => enumsSorted(member)),
+    };
+  }
+  if (descriptor.kind === "record") {
+    return { ...descriptor, value: enumsSorted(descriptor.value) };
+  }
+  // Every other kind holds no descriptor and no enum.
+  return descriptor;
+};
+
+/** A descriptor's canonical text, its enums sorted (`enumsSorted`). */
+const sortedText = (descriptor: ValueDescriptor): string =>
+  manifestText({
+    ...emptyContract,
+    tables: {
+      t: {
+        fields: { f: enumsSorted(descriptor) },
+        indexes: {},
+        access: { read: "none", write: "none" },
+      },
+    },
+  });
+
+/**
+ * Whether two descriptors of a field permit the same values, enum
+ * members in any order: such a change is no change to the data a store
+ * holds.
+ */
+const sameUpToEnumOrder = (
+  before: ValueDescriptor | undefined,
+  after: ValueDescriptor | undefined
+): boolean =>
+  before !== undefined &&
+  after !== undefined &&
+  sortedText(before) === sortedText(after);
 
 const own = <Value>(
   map: Readonly<Record<string, Value>>,
