@@ -1100,8 +1100,8 @@ const checkedResourceResult = (
  * effect under a fresh key; a binding whose grant was revoked
  * (`permission.denied`) as `resource.unavailable`; a refusal a binding's
  * adapter made in the host's words (an unavailable resource, a budget used
- * up, an effect held for its person, an item it doesn't have, a broken
- * contract) as that; anything else
+ * up, an effect held for its person, an item it doesn't have, arguments or
+ * an answer its contract doesn't allow) as that; anything else
  * `internal.unexpected`, its cause logged. Never the provider's own code,
  * message or details (a connection's ID, the provider's status).
  */
@@ -1120,6 +1120,9 @@ const providerFailure = (error: unknown, requestId: string): Error => {
     code === "resource.budget_exhausted" ||
     code === "resource.awaiting_confirmation" ||
     code === "resource.item_not_found" ||
+    code === "resource.invalid_args" ||
+    code === "resource.declined" ||
+    code === "resource.idempotency_conflict" ||
     code === "contract.invalid_resource_result"
   ) {
     return hostError(operationErrors.create(code));

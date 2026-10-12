@@ -3,12 +3,19 @@ import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
 import { modelErrors } from "@grasp-os/shared/models";
 import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import { z } from "zod";
 
 import { gatewaySettings, models } from "./models.ts";
-import type { DeclarationOf, ResourceAdapter } from "./resource-adapter.ts";
+import type { ResourceContext } from "./operations.ts";
+import type {
+  BindingCaller,
+  DeclarationOf,
+  ResourceAdapter,
+  TargetOf,
+} from "./resource-adapter.ts";
 
 // A model resource (spec 12, 32.3): one answer per request, from the model
 // its binding names, through the model gateway, never straight to a
@@ -130,39 +137,51 @@ const tokensFor = ({
     ? { maxTokens: maxOutputTokens, askAgain: false }
     : { maxTokens: Math.floor(maxOutputTokens / 2), askAgain: true };
 
+/** One request of a model resource, through the gateway. */
+const generate = async (
+  env: Env,
+  caller: BindingCaller,
+  declaration: DeclarationOf<"model">,
+  target: TargetOf<"model">,
+  args: readonly Json[],
+  context: ResourceContext
+): Promise<unknown> => {
+  const { prompt, instructions } = requestSchema.parse(args[0]);
+  const { structuredOutput } = declaration;
+  try {
+    const answer = await models(env).call({
+      model: target.model,
+      ...(instructions === undefined ? {} : { system: instructions }),
+      input: prompt,
+      ...tokensFor(declaration),
+      timeoutMs: Math.min(
+        maxTimeoutMs,
+        Math.max(1, Math.floor(context.deadline - Date.now()))
+      ),
+      purpose: "app.resource",
+      trigger: delegateActorOf(caller.authority),
+      provenance: [...caller.sources.snapshot().collectionIds],
+      connections: [...caller.sources.connections()],
+      work: { authority: caller.authority, context: caller.context },
+      requestId: context.requestId,
+      ...(structuredOutput === null
+        ? {}
+        : { schema: answerSchema(structuredOutput) }),
+    });
+    return structuredOutput === null ? answer.text : answer.output;
+  } catch (error) {
+    throw refusalOf(error);
+  }
+};
+
 export const modelAdapter: ResourceAdapter<"model"> = {
-  served: async (env, _app, _declaration, target) =>
+  bind: async (env, _app, declaration, target) =>
     gatewaySettings(env).models.includes(target.model)
       ? {
           contractId: modelContract.contractId,
           fingerprint: await modelFingerprint,
+          call: async (caller, { args }, context) =>
+            await generate(env, caller, declaration, target, args, context),
         }
       : undefined,
-  call: async (env, caller, declaration, target, { args }, context) => {
-    const { prompt, instructions } = requestSchema.parse(args[0]);
-    const { structuredOutput } = declaration;
-    try {
-      const answer = await models(env).call({
-        model: target.model,
-        ...(instructions === undefined ? {} : { system: instructions }),
-        input: prompt,
-        ...tokensFor(declaration),
-        timeoutMs: Math.min(
-          maxTimeoutMs,
-          Math.max(1, Math.floor(context.deadline - Date.now()))
-        ),
-        purpose: "app.resource",
-        trigger: delegateActorOf(caller.authority),
-        provenance: [...caller.sources.snapshot().collectionIds],
-        work: { authority: caller.authority, context: caller.context },
-        requestId: context.requestId,
-        ...(structuredOutput === null
-          ? {}
-          : { schema: answerSchema(structuredOutput) }),
-      });
-      return structuredOutput === null ? answer.text : answer.output;
-    } catch (error) {
-      throw refusalOf(error);
-    }
-  },
 };

@@ -122,20 +122,6 @@ const boundCollections = async (
   return [...bound.values()];
 };
 
-/** The collections bound now, or `resource.unavailable` for a lost grant. */
-const requireBound = async (
-  env: Env,
-  caller: BindingCaller,
-  declaration: DeclarationOf<"knowledge">,
-  target: TargetOf<"knowledge">
-): Promise<BoundCollection[]> => {
-  const bound = await boundCollections(env, caller.app, declaration, target);
-  if (bound === undefined) {
-    throw operationErrors.create("resource.unavailable");
-  }
-  return bound;
-};
-
 /**
  * `lists` merged, best first: each list's first, then each one's second,
  * and so on, so no collection's hits crowd out another's best.
@@ -255,18 +241,23 @@ const readBound = async (
 };
 
 export const knowledgeAdapter: ResourceAdapter<"knowledge"> = {
-  served: async (env, app, declaration, target) =>
-    (await boundCollections(env, app, declaration, target)) === undefined
+  bind: async (env, app, declaration, target) => {
+    const bound = await boundCollections(env, app, declaration, target);
+    const fingerprint = await knowledgeFingerprint;
+    return bound === undefined
       ? undefined
       : {
           contractId: knowledgeContract.contractId,
-          fingerprint: await knowledgeFingerprint,
-        },
-  call: async (env, caller, declaration, target, { method, args }) => {
-    const bound = await requireBound(env, caller, declaration, target);
-    if (method === "search") {
-      return await searchBound(env, caller, bound, searchSchema.parse(args[0]));
-    }
-    return await readBound(env, caller, bound, readSchema.parse(args[0]));
+          fingerprint,
+          call: async (caller, { method, args }) =>
+            method === "search"
+              ? await searchBound(
+                  env,
+                  caller,
+                  bound,
+                  searchSchema.parse(args[0])
+                )
+              : await readBound(env, caller, bound, readSchema.parse(args[0])),
+        };
   },
 };

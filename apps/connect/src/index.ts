@@ -15,6 +15,7 @@ import {
 import type {
   Catalog,
   CatalogTool,
+  ConnectorContract,
   ConnectApi,
   ConnectCall,
   ConnectionOwner,
@@ -48,6 +49,7 @@ import {
   startToolkitConnection,
 } from "./composio-connections.ts";
 import { connectionOwners } from "./connections.ts";
+import { connectorContract } from "./contracts.ts";
 import {
   ackConnectorEvents,
   syncEventSources,
@@ -69,7 +71,9 @@ import {
   auditRefusedDecision,
   callOf,
   dropForEndedRun,
+  dropForBinding,
   dropForEndedRuns,
+  dropStaleBinding,
   heldFor,
   declineChatActions,
   heldCall,
@@ -295,6 +299,13 @@ export default class Connect
     return await catalogTools(this.env, request);
   }
 
+  // Generated connector contracts (src/contracts.ts): what an App's
+  // connector resource is bound to and checked against.
+
+  async connectorContract(request: unknown): Promise<ConnectorContract> {
+    return await connectorContract(this.env, request);
+  }
+
   // Held actions (src/pending.ts). Core names the person from their
   // session; only they see and decide what waits for them.
 
@@ -381,6 +392,14 @@ export default class Connect
 
   async dropForEndedRuns(request: unknown): Promise<void> {
     await dropForEndedRuns(this.env, request);
+  }
+
+  async dropForBinding(request: unknown): Promise<void> {
+    await dropForBinding(this.env, request);
+  }
+
+  async dropStaleBinding(request: unknown): Promise<void> {
+    await dropStaleBinding(this.env, request);
   }
 
   async anyPending(request: unknown): Promise<boolean> {

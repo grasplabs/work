@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
+import type { HeldBinding } from "./capability.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
 import type { CodedError } from "./errors.ts";
 import {
@@ -504,6 +505,12 @@ export interface PendingAction {
   inputHash: string;
   /** ISO 8601. */
   requestedAt: string;
+  /**
+   * The App's approved resource binding it came through, as it served then
+   * (`HeldBinding`); null for any other call; `unreadable` when what connect
+   * stored no longer reads as one, which core never confirms.
+   */
+  binding: HeldBinding | "unreadable" | null;
 }
 
 const inputHashSchema = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -777,6 +784,17 @@ export interface ConnectApi extends PackageRegistryApi {
    */
   catalogTools: (request: CatalogToolsRequest) => Promise<CatalogTool[]>;
   /**
+   * The generated contract `contract` names (`<connector>.<family>@1`) as
+   * the connection `connectionId` serves it now: the connector's actions
+   * of that family, each with the JSON Schemas of its input and output.
+   * `connect.contract_not_found` unless the connection is a native one of
+   * that very connector and the family has actions. Data only, read from
+   * the release's manifests: nothing is loaded and no token is read.
+   */
+  connectorContract: (
+    request: ConnectorContractRequest
+  ) => Promise<ConnectorContract>;
+  /**
    * The held actions waiting for `person`, newest first (at most 200):
    * none for Grasp staff.
    */
@@ -807,6 +825,18 @@ export interface ConnectApi extends PackageRegistryApi {
    * keep their inputs past it. Dropping again drops nothing.
    */
   dropForEndedRuns: (request: EndedRuns) => Promise<void>;
+  /**
+   * Drops every held action an App's calls made through resource binding
+   * `bindingId`, once core revoked or replaced it: none of them could run.
+   * Recorded as `connection.action.dropped`, reason `binding.revoked`.
+   */
+  dropForBinding: (request: BindingDropRequest) => Promise<void>;
+  /**
+   * Drops one held action of `person`'s that came through a resource
+   * binding core refused to confirm because the binding no longer serves
+   * it. Its key stays free. Recorded, reason `binding.stale`.
+   */
+  dropStaleBinding: (request: HeldRequest) => Promise<void>;
   /**
    * Runs a held action its person confirmed: only with the capability core
    * signed for confirming it, and only for that person.
@@ -891,6 +921,56 @@ export const connectionErrors = defineErrorFamily({
     "Your organization doesn't offer this connection. An admin can offer it.",
 });
 
+/** Which App's held actions of which binding to drop. */
+export const bindingDropRequestSchema = z.strictObject({
+  appId: identifierSchema,
+  bindingId: identifierSchema,
+});
+export type BindingDropRequest = z.input<typeof bindingDropRequestSchema>;
+
+// Generated connector contracts (spec 12): what an App's connector
+// resource is bound to. A native connector's actions of one family (its
+// tools named `<family>.<action>`, such as `mail.send`) make the contract
+// `<connector>.<family>@1`, whose shape is the tools' own input and output
+// schemas. Core fingerprints what it gets, so a connector release that
+// changes any of it is a drifted contract an admin approves again.
+
+/** A generated contract's ID: `<connector>.<family>@<major>`. */
+export const connectorContractIdSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{0,62}\.[a-z][a-z0-9_-]{0,62}@[1-9]\d{0,5}$/u);
+
+/** Which contract to read, and the connection that must serve it. */
+export const connectorContractRequestSchema = z.strictObject({
+  contract: connectorContractIdSchema,
+  connectionId: connectionIdSchema,
+});
+export type ConnectorContractRequest = z.input<
+  typeof connectorContractRequestSchema
+>;
+
+/** One action of a generated contract. */
+export interface ConnectorContractAction {
+  /** The connector's tool a call of it names, e.g. `mail.send`. */
+  tool: string;
+  /** Whether the connector declares that it only reads. */
+  readOnly: boolean;
+  /**
+   * The JSON Schemas of its input and output, as the connector makes them,
+   * each as JSON text: a type for any JSON value is too deep for the RPC
+   * types to follow.
+   */
+  input: string;
+  output: string;
+}
+
+/** A generated contract, as connect reads it from the release's manifests. */
+export interface ConnectorContract {
+  contract: string;
+  /** Each action, by its name in the contract (`send`, not `mail.send`). */
+  actions: Record<string, ConnectorContractAction>;
+}
+
 /** Why connect refused or couldn't finish a call, other than its capability. */
 export const connectErrors = defineErrorFamily({
   "connect.invalid":
@@ -901,6 +981,8 @@ export const connectErrors = defineErrorFamily({
   "connect.not_owner":
     "This is someone's personal connection: only calls for its owner can use it.",
   "connect.action_not_found": "This connection has no such action.",
+  "connect.contract_not_found":
+    "This connection doesn't serve that contract: it isn't a native connection of that connector, or the connector has no such family of actions.",
   "connect.input_too_large": "This call's input is too large.",
   "connect.resource_out_of_scope":
     "This call reaches beyond the one resource it may use.",

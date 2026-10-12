@@ -239,6 +239,8 @@ describe("a side effect from chat", () => {
         action: "mail.send",
         idempotencyKey: call.idempotencyKey,
         input: JSON.stringify(call.input),
+        // A chat's call came through no App resource binding.
+        binding: null,
       },
     });
     expect({

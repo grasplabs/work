@@ -1,7 +1,12 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditDetailValue, AuditEntry } from "@grasp-os/shared/audit";
-import type { CapabilityClaims } from "@grasp-os/shared/capability";
+import { heldBindingSchema } from "@grasp-os/shared/capability";
+import type {
+  CapabilityClaims,
+  HeldBinding,
+} from "@grasp-os/shared/capability";
 import {
+  bindingDropRequestSchema,
   connectCallSchema,
   connectErrors,
   connectionPersonSchema,
@@ -27,7 +32,7 @@ import {
   workContextSchema,
 } from "@grasp-os/shared/permissions";
 import type { WorkContext } from "@grasp-os/shared/permissions";
-import { and, asc, desc, eq, notExists, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, notExists, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -180,6 +185,25 @@ const descriptionOf = (
   };
 };
 
+/**
+ * The binding a held action pins, as stored: null when it came through
+ * none, `unreadable` when what is stored doesn't read as one, which core
+ * refuses to confirm.
+ */
+const bindingOf = (row: Row): HeldBinding | "unreadable" | null => {
+  if (row.binding === null) {
+    return null;
+  }
+  let stored: unknown;
+  try {
+    stored = JSON.parse(row.binding);
+  } catch {
+    return "unreadable";
+  }
+  const parsed = heldBindingSchema.safeParse(stored);
+  return parsed.success ? parsed.data : "unreadable";
+};
+
 /** The connection's name for people: what it reaches, and its account. */
 const nameOf = (connection: ShownConnection): string | null => {
   if (connection === null) {
@@ -216,6 +240,7 @@ const summaryOf = ({
     input: row.input,
     inputHash: row.inputHash,
     requestedAt: row.createdAt.toISOString(),
+    binding: bindingOf(row),
   };
 };
 
@@ -245,7 +270,10 @@ const detailOf = (
  * spends its key in the same batch, so its step's retry fails
  * (`connect.declined`) rather than asking again. So does a chat's under a
  * key connect made (`madeKey`), so its chat can be told it was declined
- * (`heldCall`, `heldOutcome`): the key, never the input.
+ * (`heldCall`, `heldOutcome`): the key, never the input. And so does an
+ * App action's call through a resource binding, whose key core derived
+ * from the action's call, but only when its person declined it: the same
+ * call made again fails as declined. A dropped one leaves its key free.
  */
 const deletion = (
   env: Env,
@@ -279,7 +307,17 @@ const deletion = (
             still,
             or(
               eq(pendingActions.mode, "workflow"),
-              sql`${pendingActions.idempotencyKey} = json_extract(${pendingActions.context}, '$.chatId') || ':' || ${pendingActions.id}`
+              sql`${pendingActions.idempotencyKey} = json_extract(${pendingActions.context}, '$.chatId') || ':' || ${pendingActions.id}`,
+              // An App action's call through a resource binding, only when
+              // its person declined it: its key is core's, derived from the
+              // action's call, so the same call made again is told it was
+              // declined, not asked again. A drop (its binding revoked or
+              // stale, its connection gone, its person removed) leaves the
+              // key free: the person declined nothing, and the same call
+              // made again is decided afresh.
+              spentAs === "declined"
+                ? isNotNull(pendingActions.binding)
+                : sql`0`
             )
           )
         )
@@ -455,6 +493,12 @@ export const hold = async (
           context: value(context, "context"),
           restricted: value(claims.restricted ? 1 : 0, "restricted"),
           createdAt: value(Date.now(), "created_at"),
+          binding: value(
+            origin.binding === undefined
+              ? null
+              : JSON.stringify(origin.binding),
+            "binding"
+          ),
         })
         .from(connections)
         .where(
@@ -889,6 +933,52 @@ export const dropForEndedRuns = async (
       null
     );
   }
+};
+
+/**
+ * Drops every held action App `appId` made through resource binding
+ * `bindingId`, which core revoked or replaced: recorded, by core itself,
+ * with reason `binding.revoked`.
+ */
+export const dropForBinding = async (
+  env: Env,
+  request: unknown
+): Promise<void> => {
+  const parsed = bindingDropRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const { appId, bindingId } = parsed.data;
+  await dropPendingActions(
+    env,
+    sql`${pendingActions.subjectType} = 'app' AND ${pendingActions.subjectId} = ${appId} AND json_extract(${pendingActions.binding}, '$.id') = ${bindingId}`,
+    "binding.revoked",
+    null
+  );
+};
+
+/**
+ * Drops one held action of an App's call through a resource binding that
+ * core refused to confirm because the binding no longer serves it (a
+ * drifted contract, a widened declaration): it could never be confirmed,
+ * so it leaves its person's list, by core, recorded with reason
+ * `binding.stale`. Its key stays free (`deletion`).
+ */
+export const dropStaleBinding = async (
+  env: Env,
+  request: unknown
+): Promise<void> => {
+  const parsed = heldRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const { person, id } = parsed.data;
+  await dropPendingActions(
+    env,
+    sql`${pendingActions.id} = ${id} AND ${pendingActions.onBehalfOf} = ${person.userId} AND ${pendingActions.binding} IS NOT NULL`,
+    "binding.stale",
+    null
+  );
 };
 
 /**
