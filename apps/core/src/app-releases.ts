@@ -37,6 +37,7 @@ import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { dataErrors } from "@grasp-os/shared/stores";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -59,6 +60,7 @@ import { finishDeletion, markArtifact } from "./release-retention.ts";
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv } from "./sandboxed.ts";
 import { buildAppCode } from "./screens.ts";
+import { liveStoreSql } from "./store-deletion.ts";
 
 // Sealing an App's release (spec 8, 16): turning one version of an App of
 // spec 8's layout into an immutable manifest and the content-addressed
@@ -671,6 +673,23 @@ const isDefaultStore = async (
   return row !== undefined;
 };
 
+/** Whether `store` is claimed for `app` (`sdk_store_owners`). */
+const claimedBy = async (
+  env: Env,
+  store: string | undefined,
+  app: AppId
+): Promise<boolean> => {
+  if (store === undefined) {
+    return false;
+  }
+  const row = await drizzle(env.DB)
+    .select({ app: sdkStoreOwners.appId })
+    .from(sdkStoreOwners)
+    .where(eq(sdkStoreOwners.storeId, store))
+    .get();
+  return row?.app === app;
+};
+
 /**
  * Claims `store` for `app` for good (`sdk_store_owners`), or refuses
  * (`version.store_bound_elsewhere`) a store another App claimed: one
@@ -912,15 +931,18 @@ export const sealRelease = async (
       ...(store === null
         ? []
         : [
-            // The target only while this App owns the store: otherwise
-            // NULL, which the column refuses, and the whole seal with it.
+            // The target only while this App owns the store and it is live
+            // and not being deleted: otherwise NULL, which the column
+            // refuses, and the whole seal with it. So of a seal binding the
+            // store and its deletion's closing mark, one wins.
             db.insert(sdkResourceBindings).values({
               resourceId: app,
               resourceVersion: version,
               alias: store.alias,
               kind: "store" as const,
               targetId: sql`(SELECT ${store.storeId} WHERE EXISTS (SELECT 1 FROM sdk_store_owners
-                WHERE store_id = ${store.storeId} AND app_id = ${app}))`,
+                WHERE store_id = ${store.storeId} AND app_id = ${app})
+                AND ${liveStoreSql(sql`${store.storeId}`, Date.now())})`,
               schemaHash: store.schemaHash,
               manifestHash: hash,
             }),
@@ -940,7 +962,10 @@ export const sealRelease = async (
     ]);
   } catch (error) {
     if (notNullFailed(error, "sdk_resource_bindings.target_id")) {
-      throw versionErrors.create("version.store_bound_elsewhere");
+      // Another App's, or being deleted (or gone) as the batch ran.
+      throw (await claimedBy(env, store?.storeId, app))
+        ? dataErrors.create("data.store_unavailable")
+        : versionErrors.create("version.store_bound_elsewhere");
     }
     if (notNullFailed(error, "sdk_release_manifests.manifest_hash")) {
       throw versionErrors.create("version.seal_busy");

@@ -424,7 +424,7 @@ export const dataErrors = defineErrorFamily({
   "data.index_required":
     "This query needs an index this store doesn't hold for its schema.",
   "data.store_bound":
-    "This store can't be deleted while an App's current version reads and writes it.",
+    "This store can't be deleted while an App's kept versions read and write it.",
   "data.store_managed_by_app":
     "This store is an App's default store: the App's builders and the organization's admins manage it. Share the App instead.",
   "data.store_closing":

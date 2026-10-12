@@ -1,5 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { Role } from "@grasp-os/shared/roles";
+import { dataErrors } from "@grasp-os/shared/stores";
 import type { Commit, Committed, Held } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -15,6 +16,7 @@ import {
   unshareStore,
 } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { storeClosingMs } from "../src/store-deletion.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { allEvents } from "./audit-events.ts";
 import { outcome } from "./sign-in.ts";
@@ -134,6 +136,26 @@ const expireReceipts = async (id: string): Promise<void> => {
   await inHost(id, async (host) => {
     await host.sweepReceipts(new Date(Date.now() + 31 * dayMs));
   });
+};
+
+/** How `by`'s deletion of store `id` ends: "ok", or its error's code. */
+const deletionOutcome = async (by: Acting, id: string): Promise<string> => {
+  try {
+    await deleteStore(env, by, id);
+    return "ok";
+  } catch (error) {
+    return dataErrors.codeOf(error) ?? "unexpected";
+  }
+};
+
+/** The deletion holding store `id`'s closing mark, if one does. */
+const closingOwner = async (id: string): Promise<string | null> => {
+  const row = await env.DB.prepare(
+    "SELECT closing_owner AS owner FROM business_stores WHERE id = ?"
+  )
+    .bind(id)
+    .first<{ owner: string | null }>();
+  return row?.owner ?? null;
 };
 
 /** All a caller can see of what it was refused with. */
@@ -405,6 +427,104 @@ describe("deleting stores", () => {
     await expect(openStore(env, store.id)).rejects.toMatchObject({
       code: "data.store_unavailable",
     });
+  });
+
+  it("closes a store only for the deletion holding its mark, whose refusal clears its own mark alone", async () => {
+    const owner = await person("builder");
+    const store = await storeOf(owner);
+    // A receipt: the first deletion's close is refused.
+    await commitNote(store, owner);
+    // A second deletion starts while the first holds the mark, just as
+    // the first is about to close the store.
+    const getByName = env.DATA_STORES.getByName.bind(env.DATA_STORES);
+    let closes = 0;
+    let second: string | undefined;
+    const overlapping = (name: string) => {
+      const stub = getByName(name);
+      return new Proxy(stub, {
+        get: (target, property): unknown =>
+          property === "close"
+            ? async (...args: Parameters<typeof stub.close>) => {
+                closes += 1;
+                second ??= await deletionOutcome(owner, store.id);
+                return await target.close(...args);
+              }
+            : Reflect.get(target, property),
+      });
+    };
+    Reflect.set(env.DATA_STORES, "getByName", overlapping);
+    let first: string;
+    try {
+      first = await deletionOutcome(owner, store.id);
+    } finally {
+      Reflect.set(env.DATA_STORES, "getByName", getByName);
+    }
+    expect([first, second, closes, await closingOwner(store.id)]).toStrictEqual(
+      ["data.store_in_use", "data.store_closing", 1, null]
+    );
+    // Not deleted: it still serves.
+    await expect(commitNote(store, owner)).resolves.toHaveProperty("inserted");
+  });
+
+  it("never clears a mark another deletion took over after its own lapsed", async () => {
+    const owner = await person("builder");
+    const store = await storeOf(owner);
+    await commitNote(store, owner);
+    // The first deletion stalls past its mark's lapse; a second takes the
+    // mark over and is held just before its own close.
+    const getByName = env.DATA_STORES.getByName.bind(env.DATA_STORES);
+    const secondAtClose = Promise.withResolvers<null>();
+    const letSecondClose = Promise.withResolvers<null>();
+    let secondOutcome: Promise<string> | undefined;
+    let closes = 0;
+    const stalling = (name: string) => {
+      const stub = getByName(name);
+      return new Proxy(stub, {
+        get: (target, property): unknown =>
+          property === "close"
+            ? async (...args: Parameters<typeof stub.close>) => {
+                closes += 1;
+                if (closes === 1) {
+                  await env.DB.prepare(
+                    "UPDATE business_stores SET closing_at = ? WHERE id = ?"
+                  )
+                    .bind(Date.now() - 2 * storeClosingMs, store.id)
+                    .run();
+                  secondOutcome = deletionOutcome(owner, store.id);
+                  await secondAtClose.promise;
+                } else {
+                  secondAtClose.resolve(null);
+                  await letSecondClose.promise;
+                }
+                return await target.close(...args);
+              }
+            : Reflect.get(target, property),
+      });
+    };
+    Reflect.set(env.DATA_STORES, "getByName", stalling);
+    let first: string;
+    let duringSecond: string | null;
+    try {
+      first = await deletionOutcome(owner, store.id);
+      // The first was refused and cleared nothing of the second's.
+      duringSecond = await closingOwner(store.id);
+      letSecondClose.resolve(null);
+    } finally {
+      Reflect.set(env.DATA_STORES, "getByName", getByName);
+    }
+    expect([
+      first,
+      duringSecond === null,
+      await secondOutcome,
+      closes,
+      await closingOwner(store.id),
+    ]).toStrictEqual([
+      "data.store_in_use",
+      false,
+      "data.store_in_use",
+      2,
+      null,
+    ]);
   });
 
   it("is refused while an attempt holds a claim, and while a live run keeps a receipt", async () => {
