@@ -4,13 +4,22 @@ import type {
   AppFiles,
   AppVersion,
 } from "@grasp-os/shared/apps";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { operationErrors } from "@grasp-os/shared/operations";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
+import { z } from "zod";
 
 import { asPerson } from "./agent-person.ts";
+import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
+import { callAppFunction } from "./app-functions.ts";
+import type { FunctionAnswer } from "./app-functions.ts";
 import { appExports, listApps, listVersions, readFiles } from "./apps.ts";
+import { appHost } from "./durable-objects.ts";
 import { appsCollectionId } from "./knowledge/app-entries.ts";
+import { restrict } from "./restricted.ts";
 
 // Apps for a chat's code: `await env.apps.list()`. What the chat's person
 // sees of Apps themselves (agent-person.ts), once the agent may read the
@@ -27,6 +36,70 @@ const readsApps = (permissions: Permission[]): boolean =>
       object.collectionId === appsCollectionId &&
       actions.includes("read")
   );
+
+/**
+ * How long a chat's code waits for one of an App's functions: as long as a
+ * screen does.
+ */
+const functionCallMs = 30_000;
+
+/** What a call's kind needs of the agent's permission on the App. */
+const actionFor = (kind: string): "read" | "write" =>
+  kind === "query" ? "read" : "write";
+
+/** Whether the agent holds `action` on App `app` (an `app` permission). */
+const callsApp =
+  (app: string, action: "read" | "write") =>
+  (permissions: Permission[]): boolean =>
+    permissions.some(
+      ({ object, actions }) =>
+        object.type === "app" &&
+        object.appId === app &&
+        actions.includes(action)
+    );
+
+/** The kind a request names, read only for the permission it needs. */
+const requestKindSchema = z.looseObject({
+  reference: z.looseObject({ kind: z.enum(["query", "mutation", "action"]) }),
+});
+
+/**
+ * The request a chat's code sent, as text: a stream, read no further than
+ * a request may be (`functionRequestMaxBytes`) before anything parses it,
+ * so the bound holds before deserialization. Anything else, or more, is
+ * refused.
+ */
+const requestText = async (request: unknown): Promise<string> => {
+  if (!(request instanceof ReadableStream)) {
+    throw operationErrors.create("contract.invalid_request");
+  }
+  const reader: ReadableStreamDefaultReader<unknown> = request.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let length = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a stream reads in order
+    const { done, value } = await reader.read();
+    if (done) {
+      return text + decoder.decode();
+    }
+    // Bytes only: a chunk of anything else has no length to count.
+    if (!(value instanceof Uint8Array)) {
+      // oxlint-disable-next-line no-await-in-loop -- once, then out
+      await reader.cancel();
+      throw operationErrors.create("contract.invalid_request");
+    }
+    length += value.byteLength;
+    if (length > functionRequestMaxBytes) {
+      // oxlint-disable-next-line no-await-in-loop -- once, then out
+      await reader.cancel();
+      throw operationErrors.create("contract.input_too_large", {
+        maxBytes: functionRequestMaxBytes,
+      });
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+};
 
 /** Apps, as a chat's code reads them. */
 export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
@@ -70,6 +143,62 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
         app: typeof app === "string" ? app : null,
         version: found.version,
         exports: Object.keys(found.exports).length,
+      }),
+    });
+  }
+
+  /**
+   * Calls a public function of App `app` for the chat's person (spec 32.6):
+   * `request` is the call as JSON text, as a stream, bounded before it is
+   * read. Needs the agent's permission on the App: `read` for a query,
+   * `write` for a mutation or an action; the person's role in the App is
+   * checked by the call itself, against the version that runs now. A
+   * restricted App restricts the chat before its answer is handed over.
+   */
+  async call(app: unknown, request: unknown): Promise<FunctionAnswer> {
+    const id = appIdSchema.safeParse(app);
+    const text = await requestText(request);
+    let kind: string;
+    try {
+      ({
+        reference: { kind },
+      } = requestKindSchema.parse(JSON.parse(text)));
+    } catch {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    const action = actionFor(kind);
+    const scope = this.ctx.props;
+    return await asPerson(this.env, scope, {
+      allowed: id.success ? callsApp(id.data, action) : () => false,
+      action,
+      method: "apps.call",
+      read: async (person) => {
+        const answer = await callAppFunction(
+          this.env,
+          person,
+          app,
+          text,
+          Date.now() + functionCallMs
+        );
+        if (
+          id.success &&
+          answer.manifestHash !== null &&
+          (await appHost(this.env, id.data).isRestricted())
+        ) {
+          await restrict(
+            this.env,
+            chatAuthority(scope),
+            chatContext(scope),
+            []
+          );
+        }
+        return answer;
+      },
+      detail: (answer) => ({
+        app: id.success ? id.data : null,
+        kind,
+        ok: answer.result.ok,
+        ...(answer.result.ok ? {} : { code: answer.result.error.code }),
       }),
     });
   }
@@ -124,6 +253,22 @@ apps: {
       input: Record<string, unknown>;
       output: Record<string, unknown>;
     }>;
+  }>;
+  /**
+   * Calls a public function (query, mutation or action) of an App's current
+   * version for the person, through a sealed reference: \`request\` is the
+   * call as JSON text, \`{ reference, input, idempotencyKey? }\`, sent as a
+   * stream: \`env.apps.call(app, new Blob([JSON.stringify(call)]).stream())\`.
+   * At most 132 KiB. Needs a permission on the App (\`read\` for a query,
+   * \`write\` otherwise), granted by an admin. Answers the result as data:
+   * \`{ result: { ok: true, value } | { ok: false, error }, fingerprint, manifestHash }\`.
+   */
+  call(app: string, request: ReadableStream<Uint8Array>): Promise<{
+    result:
+      | { ok: true; value: unknown }
+      | { ok: false; error: { code: string; message: string; category: string; retryable: boolean; requestId: string; details?: unknown } };
+    fingerprint: string | null;
+    manifestHash: string | null;
   }>;
   /** An App's versions, newest first, at most 100 before \`before\`. Only for Apps the person builds. */
   versions(app: string, before?: number): Promise<{
