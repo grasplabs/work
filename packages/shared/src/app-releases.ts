@@ -17,7 +17,15 @@ import { defineErrorFamily } from "./errors.ts";
 /** The format of `ReleaseManifest`. */
 export const releaseFormatVersion = 1;
 
-/** The version of the protocol between the host and an App's isolate. */
+/**
+ * The version of the protocol between the host and an App's isolate. The
+ * host's half (its run module, app-functions.ts) imports from a release's
+ * sealed SDK only what this version pins: version 1 pins the runner's
+ * `runFunction` (and `manifestOfApp`, for inspection). Anything else the
+ * host's half needs in the isolate is a host module it loads itself. A new
+ * import from the sealed SDK requires a new version, since releases sealed
+ * before it don't have it.
+ */
 export const sdkProtocolVersion = 1;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
