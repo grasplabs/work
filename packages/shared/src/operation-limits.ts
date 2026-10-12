@@ -112,3 +112,11 @@ export const usesMaxEntries = 64;
  * letters, digits or underscores, at most 64 code units.
  */
 export const resourceAliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
+
+/**
+ * The most UTF-16 code units of a knowledge search's text: Knowledge's own
+ * limit (`searchQuerySchema`), which an App's knowledge resource is held
+ * to as well, so a longer one is refused up front as arguments that don't
+ * fit, never deep in Knowledge.
+ */
+export const knowledgeSearchMaxLength = 500;

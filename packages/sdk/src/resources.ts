@@ -183,7 +183,11 @@ export interface ConnectorClient<Actions extends readonly string[]> {
 export type KnowledgeClient<Operations extends readonly KnowledgeOperation[]> =
   ("search" extends Operations[number]
     ? {
-        /** The best matches for `text` in the declared collections. */
+        /**
+         * The best matches for `text` in the declared collections: 1 to
+         * `knowledgeSearchMaxLength` (500) code units, Knowledge's own
+         * limit; a longer text is refused as `contract.invalid_args`.
+         */
         readonly search: (request: {
           readonly text: string;
           readonly limit?: number;

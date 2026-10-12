@@ -28,30 +28,53 @@ const fitsString = (schema: Record<string, unknown>, text: string): boolean => {
   );
 };
 
+/** Whether `text` passes `schema`'s own check, the descriptor's. */
+const passes = (schema: ReturnType<typeof v.string>, text: string): boolean => {
+  const result = schema["~standard"].validate(text);
+  return !("then" in result) && result.issues === undefined;
+};
+
 describe("a descriptor as JSON Schema", () => {
-  it("bounds strings so what fits the schema fits the descriptor", () => {
-    const short = v.string().max(1);
-    const schema = jsonSchemaOf(short.descriptor);
-    const passes = (text: string): boolean => {
-      const result = short["~standard"].validate(text);
-      return !("then" in result) && result.issues === undefined;
-    };
+  it("describes string bounds never stricter than the descriptor", () => {
+    // "😀" is one character but two UTF-16 units.
+    const upTo2 = v.string().max(2);
+    const atLeast2 = v.string().min(2);
+    const both = (schema: ReturnType<typeof v.string>, text: string) => [
+      fitsString(jsonSchemaOf(schema.descriptor), text),
+      passes(schema, text),
+    ];
     expect({
-      // "😀" is one character but two UTF-16 units.
-      emoji: [fitsString(schema, "😀"), passes("😀")],
-      letter: [fitsString(schema, "a"), passes("a")],
-      accented: [fitsString(schema, "é"), passes("é")],
+      maxEmoji: both(upTo2, "😀"),
+      maxLetters: both(upTo2, "ab"),
+      maxTooLong: both(upTo2, "abc"),
+      minEmoji: both(atLeast2, "😀"),
+      minLetter: both(atLeast2, "a"),
+      minLetters: both(atLeast2, "ab"),
     }).toStrictEqual({
-      emoji: [false, false],
-      letter: [true, true],
-      accented: [true, true],
+      maxEmoji: [true, true],
+      maxLetters: [true, true],
+      maxTooLong: [false, false],
+      minEmoji: [true, true],
+      minLetter: [true, false],
+      minLetters: [true, true],
     });
   });
 
-  it("leaves strings without an upper bound unconstrained", () => {
-    expect(jsonSchemaOf(v.string().min(1).descriptor)).toStrictEqual({
+  it("leaves the final word to the descriptor where the schema is looser", () => {
+    const upTo1 = v.string().max(1);
+    // Fits the schema (one character) but not the descriptor (two units):
+    // the answer is checked, and asked for again.
+    expect([
+      fitsString(jsonSchemaOf(upTo1.descriptor), "😀"),
+      passes(upTo1, "😀"),
+    ]).toStrictEqual([true, false]);
+  });
+
+  it("puts no pattern on a bounded string", () => {
+    expect(jsonSchemaOf(v.string().min(3).max(10).descriptor)).toStrictEqual({
       type: "string",
-      minLength: 1,
+      minLength: 2,
+      maxLength: 10,
     });
   });
 });
