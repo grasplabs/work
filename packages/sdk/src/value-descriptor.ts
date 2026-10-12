@@ -1,3 +1,4 @@
+import { valueDepth } from "@grasp-os/shared/value-depth";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 // What a value schema is, as data. A descriptor is plain frozen JSON: it has
@@ -116,19 +117,26 @@ export type ValueDescriptor = DescriptorBase & ValueKindDescriptor;
  */
 export const valueLimits = {
   /**
-   * How deep a descriptor nests, and so how deep a value is read: the same
-   * depth the wire allows an untrusted connection.
+   * How deep a descriptor nests, and so how deep a value is read, its leaf
+   * included. Cap'n Web's limit on an untrusted connection
+   * (`screenLimits.rpc.maxDepth`) is this plus the levels a screen's call
+   * wraps a value in, so a value this deep crosses the wire.
    */
-  depth: 32,
+  depth: valueDepth,
   /** Descriptors in one schema, counting each enum value as one. */
   descriptorNodes: 10_000,
   /** Members of one union. */
   unionMembers: 64,
   /**
-   * Code units in a name a descriptor or a record states: a field, a table,
-   * an enum value, a literal, a record key.
+   * Code units in a name a descriptor or a record states: an enum value, a
+   * literal, a record key.
    */
   nameLength: 256,
+  /**
+   * Code units in an object's field name, at any depth: the same limit as
+   * a table's, a field's or an index's name in a schema.
+   */
+  fieldNameLength: 64,
   /** Issues one check reports. */
   issues: 50,
   /**

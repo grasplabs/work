@@ -1,0 +1,1376 @@
+import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+import {
+  manifestMaxBytes,
+  manifestText,
+  schemaHash as hashOf,
+  schemaManifest,
+} from "@grasp-os/sdk/host";
+import type { AccessMode } from "@grasp-os/sdk/host";
+import { canonicalJson } from "@grasp-os/shared/json";
+import { storeMaxTables } from "@grasp-os/shared/store-limits";
+import {
+  commitMaxGuards,
+  commitMaxInputBytes,
+  commitMaxWrites,
+  documentMaxBytes,
+  documentMaxDepth,
+} from "@grasp-os/shared/stores";
+import type { Commit, Committed, StoreFields } from "@grasp-os/shared/stores";
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import type { Acting } from "../src/auth/identity.ts";
+import { createStore, openStore } from "../src/data-stores.ts";
+import type { OpenStore } from "../src/data-stores.ts";
+import {
+  manifestHash,
+  memberRoles,
+  newRecordId,
+  tablesManifest,
+} from "./store-schemas.ts";
+
+/** Who creates the stores these tests use: a builder of the organization. */
+const builder: Acting = {
+  userId: "ada",
+  role: "builder",
+  teams: [],
+  staff: false,
+};
+
+// Business stores through core's own way in (data-stores.ts) and each
+// store's Durable Object (data-store.ts): what the operations to come
+// rely on when they read and commit records. Each test makes stores of
+// its own.
+
+const ada = { userId: "ada" };
+const grace = { userId: "grace" };
+const storeManifest = tablesManifest("notes");
+/** A later schema of the same store: one more table. */
+const laterManifest = tablesManifest("notes", "drafts");
+const schemaHash = await manifestHash(storeManifest);
+const laterHash = await manifestHash(laterManifest);
+
+/** Who commits in these tests: one operation's pinned contract, for Ada. */
+const scope = {
+  principal: "ada",
+  resource: "notes-app",
+  binding: null,
+  contractId: "notes.update",
+  contractVersion: 1,
+  operationKind: "mutation",
+} as const;
+
+/** Some input's hash: these commits each claim a key of their own. */
+const inputHash = "c".repeat(64);
+
+/**
+ * Commits `commit` under a new receipt of its own, as a mutation's first
+ * attempt does: claimed, then committed.
+ */
+const commitIn = async (
+  store: OpenStore,
+  commit: Omit<Commit, "storeId" | "receipt" | "roles" | "stagedAt"> &
+    Partial<Pick<Commit, "roles" | "stagedAt">>
+): Promise<Committed> => {
+  const claimed = await store.claim({
+    scope: { ...scope, principal: commit.principal.userId },
+    key: [crypto.randomUUID()],
+    inputHash,
+    runId: null,
+    deadline: Date.now() + 60_000,
+  });
+  if (!("held" in claimed)) {
+    throw new Error("A new key found an outcome");
+  }
+  return await store.commit({
+    roles: memberRoles,
+    stagedAt: Date.now(),
+    ...commit,
+    receipt: claimed.held,
+  });
+};
+
+/** A new store with a `notes` table. */
+const newStore = async (): Promise<OpenStore> => {
+  const store = await openStore(env, await createStore(env, builder));
+  await store.defineTables(storeManifest);
+  await store.defineTables(laterManifest);
+  return store;
+};
+
+/** Inserts one note for `principal` and answers its ID. */
+const insertNote = async (
+  store: OpenStore,
+  fields?: StoreFields,
+  principal = ada
+): Promise<string> => {
+  const { inserted } = await commitIn(store, {
+    principal,
+    schemaHash,
+    writes: [
+      {
+        op: "insert",
+        id: newRecordId(),
+        table: "notes",
+        fields: fields ?? { title: "Launch" },
+      },
+    ],
+  });
+  const [id] = inserted;
+  if (id === undefined) {
+    throw new Error("Nothing was inserted");
+  }
+  return id;
+};
+
+/**
+ * Fields a caller's types wouldn't let through, sent as a confused or
+ * hostile caller would: the store checks them itself.
+ */
+const untyped = (fields: unknown): StoreFields =>
+  // SAFETY: none, on purpose: the store must refuse what isn't fields.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- deliberately ill-typed input
+  fields as StoreFields;
+
+/** `count` inserts of a small note. */
+const inserts = (count: number) =>
+  Array.from({ length: count }, () => ({
+    op: "insert" as const,
+    id: newRecordId(),
+    table: "notes",
+    fields: { title: "Note" },
+  }));
+
+/** The store's object, addressed directly. */
+const objectOf = (id: string) => env.DATA_STORES.getByName(id);
+
+/** How many records the store's database holds, of every table. */
+const recordCount = async (store: OpenStore): Promise<number> =>
+  await runInDurableObject(objectOf(store.id), (_instance, state) => {
+    const [row] = state.storage.sql
+      .exec<{ count: number }>("SELECT count(*) AS count FROM sdk_records")
+      .toArray();
+    return row?.count ?? 0;
+  });
+
+describe("stores", () => {
+  it("keeps each store's records apart, whatever their tables are called", async () => {
+    const first = await newStore();
+    const second = await newStore();
+    expect(first.id).not.toBe(second.id);
+
+    const id = await insertNote(first);
+    await expect(first.get("notes", id)).resolves.toMatchObject({
+      fields: { title: "Launch" },
+    });
+    await expect(second.get("notes", id)).resolves.toBeNull();
+    await expect(
+      commitIn(second, {
+        principal: ada,
+        schemaHash,
+        writes: [
+          {
+            op: "patch",
+            table: "notes",
+            id,
+            fields: { title: "Taken" },
+            expectedRevision: 1,
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.conflict" });
+    await expect(first.get("notes", id)).resolves.toMatchObject({
+      revision: 1,
+      fields: { title: "Launch" },
+    });
+  });
+
+  it("mints table IDs, so two stores' tables of one name differ", async () => {
+    const first = await openStore(env, await createStore(env, builder));
+    const second = await openStore(env, await createStore(env, builder));
+    const firstTables = await first.defineTables(
+      tablesManifest("notes", "people")
+    );
+    const secondTables = await second.defineTables(tablesManifest("notes"));
+
+    expect(firstTables.tables.notes).not.toBe("notes");
+    expect(firstTables.tables.notes).not.toBe(secondTables.tables.notes);
+    // Defining tables again keeps their IDs.
+    await expect(
+      first.defineTables(tablesManifest("notes"))
+    ).resolves.toMatchObject({ storeTables: firstTables.tables });
+  });
+
+  it("refuses a table whose name differs only in case from one it holds", async () => {
+    const store = await newStore();
+    await expect(
+      store.defineTables(tablesManifest("Notes"))
+    ).rejects.toMatchObject({ code: "data.table_conflict" });
+    await expect(store.get("people", "x")).rejects.toMatchObject({
+      code: "data.unknown_table",
+    });
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash,
+        writes: [
+          { op: "insert", id: newRecordId(), table: "NOTES", fields: {} },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.unknown_table" });
+  });
+
+  it(`holds at most ${storeMaxTables} tables`, async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const names = Array.from({ length: storeMaxTables }, (_, n) => `t${n}`);
+    await expect(
+      store.defineTables(tablesManifest(...names))
+    ).resolves.toBeDefined();
+    await expect(
+      store.defineTables(tablesManifest("oneMore"))
+    ).rejects.toMatchObject({ code: "data.too_many_tables" });
+    // Nothing of the refused definition stays.
+    const { storeTables } = await store.defineTables(tablesManifest("t0"));
+    expect(Object.keys(storeTables)).toHaveLength(storeMaxTables);
+  });
+
+  it("refuses a store it doesn't list, or one deleted, alike", async () => {
+    await expect(openStore(env, crypto.randomUUID())).rejects.toMatchObject({
+      code: "data.store_unavailable",
+    });
+    const store = await newStore();
+    await env.DB.prepare(
+      "UPDATE business_stores SET deleted_at = ? WHERE id = ?"
+    )
+      .bind(Date.now(), store.id)
+      .run();
+    await expect(openStore(env, store.id)).rejects.toMatchObject({
+      code: "data.store_unavailable",
+    });
+  });
+
+  it("serves one store per object, never another addressed at it", async () => {
+    const store = await newStore();
+    const id = await insertNote(store);
+    const other = await createStore(env, builder);
+    const misaddressed = async () =>
+      await objectOf(store.id).get(other, "notes", id);
+    await expect(misaddressed()).rejects.toThrow(
+      "This object holds another store"
+    );
+    // Nor does an object reached by another name take the store's ID.
+    const stray = async () => await objectOf(other).get(store.id, "notes", id);
+    await expect(stray()).rejects.toThrow("This object holds another store");
+  });
+
+  it("reads its records back from storage after its object is reset", async () => {
+    const store = await newStore();
+    const id = await insertNote(store);
+    await runInDurableObject(objectOf(store.id), (_instance, state) => {
+      state.abort("reset");
+    }).catch(() => {});
+    // The next request reaches the object anew, from its storage.
+    const reopened = await openStore(env, store.id);
+    await expect(reopened.get("notes", id)).resolves.toMatchObject({
+      revision: 1,
+      fields: { title: "Launch" },
+    });
+  });
+});
+
+/** Something that isn't text, passed as text, as a hostile caller would. */
+const asText = (manifest: unknown): string =>
+  // SAFETY: none, on purpose: the store must refuse what isn't text.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- deliberately ill-typed input
+  manifest as string;
+
+/** The Notes schema of the specification, with its access. */
+const notesSchema = (order: "declared" | "reordered") => {
+  const title = v.string().trim().min(1).max(200);
+  const body = v.string().max(100_000).default("");
+  const fields =
+    order === "declared"
+      ? { title, body }
+      : { body, title: v.string().max(200).min(1).trim() };
+  const notes = defineTable(fields)
+    .index("by_updated", ["_updatedAt"])
+    .index("by_title", ["title"]);
+  return schemaManifest(
+    defineSchema(
+      order === "declared"
+        ? { notes, people: defineTable({ name: v.string() }) }
+        : { people: defineTable({ name: v.string() }), notes }
+    ),
+    { tables: { notes: { read: "owner", write: "owner" } } }
+  );
+};
+
+/**
+ * The Notes schema with one thing chosen: who reads notes, or the order its
+ * indexes are declared in.
+ */
+const notesManifest = ({
+  read = "owner",
+  indexes = "declared",
+}: {
+  read?: AccessMode;
+  indexes?: "declared" | "reversed";
+} = {}) => {
+  const table = defineTable({ title: v.string(), body: v.string() });
+  const notes =
+    indexes === "declared"
+      ? table.index("by_updated", ["_updatedAt"]).index("by_title", ["title"])
+      : table.index("by_title", ["title"]).index("by_updated", ["_updatedAt"]);
+  return schemaManifest(defineSchema({ notes }), {
+    tables: { notes: { read, write: "owner" } },
+  });
+};
+
+/** The Notes manifest's JSON, changed by `change`, as text. */
+const changed = (change: (json: Record<string, unknown>) => void): string => {
+  // SAFETY: a manifest's text is a JSON object.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const json = JSON.parse(manifestText(notesSchema("declared"))) as Record<
+    string,
+    unknown
+  >;
+  change(json);
+  return JSON.stringify(json);
+};
+/** The tables of a manifest's JSON. */
+const tablesOf = (
+  json: Record<string, unknown>
+): Record<string, Record<string, unknown>> =>
+  // SAFETY: the Notes manifest's JSON, as made above.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  json.tables as Record<string, Record<string, unknown>>;
+const notesOf = (json: Record<string, unknown>) => tablesOf(json).notes ?? {};
+const fieldsOf = (json: Record<string, unknown>): Record<string, unknown> =>
+  // SAFETY: as above.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  notesOf(json).fields as Record<string, unknown>;
+
+describe("schemas", () => {
+  it("defines a schema's tables from its manifest and answers its hash, as the SDK computes it", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const manifest = notesSchema("declared");
+    const defined = await store.defineTables(manifestText(manifest));
+
+    expect(defined.schemaHash).toBe(await hashOf(manifest));
+    expect(Object.keys(defined.tables).toSorted()).toStrictEqual([
+      "notes",
+      "people",
+    ]);
+    // A later schema of fewer tables gets its own; the store keeps them all.
+    const fewer = await store.defineTables(tablesManifest("notes"));
+    expect(fewer.tables).toStrictEqual({ notes: defined.tables.notes });
+    expect(fewer.storeTables).toStrictEqual(defined.tables);
+    // The same schema declared in another order, its text's keys in yet
+    // another, is the same schema: the same hash, the same tables.
+    const reordered = manifestText(notesSchema("reordered"));
+    const reversed = JSON.stringify(
+      JSON.parse(reordered),
+      (_key, part: unknown) =>
+        typeof part === "object" && part !== null && !Array.isArray(part)
+          ? Object.fromEntries(Object.entries(part).toReversed())
+          : part
+    );
+    await expect(store.defineTables(reversed)).resolves.toStrictEqual(defined);
+  });
+
+  it("a changed access mode alone is another schema, of the same tables", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const owned = await store.defineTables(manifestText(notesManifest()));
+    const shared = await store.defineTables(
+      manifestText(notesManifest({ read: "appMembers" }))
+    );
+    expect(shared.schemaHash).not.toBe(owned.schemaHash);
+    expect(shared.tables).toStrictEqual(owned.tables);
+  });
+
+  it("indexes declared in another order alone are the same schema", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const declared = await store.defineTables(manifestText(notesManifest()));
+    const reversed = await store.defineTables(
+      manifestText(notesManifest({ indexes: "reversed" }))
+    );
+    expect(reversed).toStrictEqual(declared);
+  });
+
+  it.each([
+    ["text that isn't JSON", "{", "schema.invalid_manifest"],
+    [
+      "a table name that isn't an identifier",
+      changed((json) => {
+        json.tables = { "notes; DROP TABLE sdk_records": notesOf(json) };
+      }),
+      "schema.invalid_name",
+    ],
+    [
+      "a table name with letters that aren't ASCII",
+      changed((json) => {
+        json.tables = { notités: notesOf(json) };
+      }),
+      "schema.invalid_name",
+    ],
+    [
+      "two tables that differ only in case",
+      changed((json) => {
+        tablesOf(json).Notes = notesOf(json);
+      }),
+      "schema.name_conflict",
+    ],
+    [
+      "a managed field declared",
+      changed((json) => {
+        fieldsOf(json)._ownerId = fieldsOf(json).title;
+      }),
+      "schema.invalid_name",
+    ],
+    [
+      "an index on a field that isn't a scalar",
+      changed((json) => {
+        fieldsOf(json).tags = {
+          descriptorVersion: 1,
+          kind: "array",
+          item: fieldsOf(json).title,
+          nullable: false,
+          presence: "required",
+        };
+        notesOf(json).indexes = { by_tags: { fields: ["tags"] } };
+      }),
+      "schema.invalid_index",
+    ],
+    [
+      "a record ID naming a table it hasn't",
+      changed((json) => {
+        fieldsOf(json).project = {
+          descriptorVersion: 1,
+          kind: "id",
+          tableName: "projects",
+          nullable: false,
+          presence: "required",
+        };
+      }),
+      "schema.unknown_table",
+    ],
+    [
+      "a key a manifest doesn't have",
+      changed((json) => {
+        notesOf(json).ddl = "CREATE INDEX x ON sdk_records(value_json)";
+      }),
+      "schema.invalid_manifest",
+    ],
+    [
+      "a version this host doesn't know",
+      changed((json) => {
+        json.manifestVersion = 2;
+      }),
+      "schema.invalid_manifest",
+    ],
+    ["too much text", " ".repeat(manifestMaxBytes + 1), "schema.too_large"],
+  ])(
+    "refuses a schema with %s, and defines nothing of it",
+    async (_, text, code) => {
+      const store = await openStore(env, await createStore(env, builder));
+      await expect(store.defineTables(text)).rejects.toMatchObject({
+        code: "data.invalid_schema",
+        details: { code },
+      });
+      await expect(store.get("notes", "x")).rejects.toMatchObject({
+        code: "data.unknown_table",
+      });
+    }
+  );
+
+  it("refuses anything but a manifest's text", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    await expect(
+      store.defineTables(asText(notesSchema("declared")))
+    ).rejects.toMatchObject({
+      code: "data.invalid_schema",
+      details: { code: "schema.invalid_manifest" },
+    });
+  });
+});
+
+describe("managed fields", () => {
+  it("sets them itself: the owner, revision 1 and the commit's time", async () => {
+    const store = await newStore();
+    const before = Date.now();
+    const id = await insertNote(store, { title: "Launch" }, grace);
+    const record = await store.get("notes", id);
+
+    expect(record).toMatchObject({
+      id,
+      ownerId: "grace",
+      revision: 1,
+      schemaHash,
+      fields: { title: "Launch" },
+    });
+    expect(record?.createdAt).toBeGreaterThanOrEqual(before);
+    expect(record?.updatedAt).toBe(record?.createdAt);
+  });
+
+  it("refuses any write that names one", async () => {
+    const store = await newStore();
+    const id = await insertNote(store);
+    const managed = [
+      { _id: "mine" },
+      { _ownerId: "mallory" },
+      { _rev: 9 },
+      { _createdAt: 0 },
+      { _updatedAt: 0 },
+    ].map((fields) => untyped(fields));
+    await Promise.all(
+      managed.map(async (fields) => {
+        await expect(
+          commitIn(store, {
+            principal: ada,
+            schemaHash,
+            writes: [
+              { op: "insert", id: newRecordId(), table: "notes", fields },
+            ],
+          })
+        ).rejects.toMatchObject({ code: "data.invalid" });
+        await expect(
+          commitIn(store, {
+            principal: ada,
+            schemaHash,
+            writes: [
+              { op: "patch", table: "notes", id, fields, expectedRevision: 1 },
+            ],
+          })
+        ).rejects.toMatchObject({ code: "data.invalid" });
+      })
+    );
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash,
+        writes: [
+          {
+            op: "patch",
+            table: "notes",
+            id,
+            fields: {},
+            unset: ["_ownerId"],
+            expectedRevision: 1,
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+    await expect(store.get("notes", id)).resolves.toMatchObject({
+      ownerId: "ada",
+      revision: 1,
+    });
+  });
+
+  it("moves the revision on once per commit, however many writes change the record", async () => {
+    const store = await newStore();
+    const id = await insertNote(store, { title: "Launch", body: "" });
+    const created = await store.get("notes", id);
+
+    await commitIn(store, {
+      principal: grace,
+      schemaHash: laterHash,
+      writes: [
+        {
+          op: "patch",
+          table: "notes",
+          id,
+          fields: { title: "Launch day" },
+          expectedRevision: 1,
+        },
+        {
+          op: "patch",
+          table: "notes",
+          id,
+          fields: { body: "Agenda" },
+          expectedRevision: 1,
+        },
+      ],
+    });
+
+    const updated = await store.get("notes", id);
+    expect(updated).toMatchObject({
+      revision: 2,
+      // Changing a record doesn't make it someone else's.
+      ownerId: "ada",
+      schemaHash: laterHash,
+      createdAt: created?.createdAt,
+      fields: { title: "Launch day", body: "Agenda" },
+    });
+    expect(updated?.updatedAt).toBeGreaterThanOrEqual(created?.updatedAt ?? 0);
+  });
+
+  it("keeps a record inserted and changed in one commit at revision 1", async () => {
+    const store = await newStore();
+    const first = await insertNote(store);
+    // A commit inserts another note and, in the same commit, can only
+    // change the first one: it doesn't know the new ID until it commits.
+    const { inserted } = await commitIn(store, {
+      principal: ada,
+      schemaHash,
+      writes: [
+        {
+          op: "insert",
+          id: newRecordId(),
+          table: "notes",
+          fields: { title: "Second" },
+        },
+        {
+          op: "patch",
+          table: "notes",
+          id: first,
+          fields: { title: "First" },
+          expectedRevision: 1,
+        },
+      ],
+    });
+    await expect(store.get("notes", inserted[0] ?? "")).resolves.toMatchObject({
+      revision: 1,
+    });
+    await expect(store.get("notes", first)).resolves.toMatchObject({
+      revision: 2,
+    });
+  });
+
+  it("leaves the revision and time alone when nothing changes", async () => {
+    const store = await newStore();
+    const id = await insertNote(store, { title: "Launch", tags: ["a", "b"] });
+    const created = await store.get("notes", id);
+
+    // The same fields in another order are the same record.
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: laterHash,
+      writes: [
+        {
+          op: "replace",
+          table: "notes",
+          id,
+          fields: { tags: ["a", "b"], title: "Launch" },
+          expectedRevision: 1,
+        },
+      ],
+    });
+    await expect(store.get("notes", id)).resolves.toStrictEqual(created);
+  });
+});
+
+describe("commits", () => {
+  it("refuses a write at a stale revision, and writes nothing of its commit", async () => {
+    const store = await newStore();
+    const id = await insertNote(store);
+    await commitIn(store, {
+      principal: ada,
+      schemaHash,
+      writes: [
+        {
+          op: "patch",
+          table: "notes",
+          id,
+          fields: { title: "Edited" },
+          expectedRevision: 1,
+        },
+      ],
+    });
+
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash,
+        writes: [
+          {
+            op: "insert",
+            id: newRecordId(),
+            table: "notes",
+            fields: { title: "Lost" },
+          },
+          {
+            op: "patch",
+            table: "notes",
+            id,
+            fields: { title: "Stale" },
+            expectedRevision: 1,
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.conflict" });
+    await expect(store.get("notes", id)).resolves.toMatchObject({
+      revision: 2,
+      fields: { title: "Edited" },
+    });
+    await expect(recordCount(store)).resolves.toBe(1);
+  });
+
+  it("lets one of two edits from the same revision in", async () => {
+    const store = await newStore();
+    const id = await insertNote(store);
+    const edit = async (title: string) =>
+      await commitIn(store, {
+        principal: ada,
+        schemaHash,
+        writes: [
+          {
+            op: "patch",
+            table: "notes",
+            id,
+            fields: { title },
+            expectedRevision: 1,
+          },
+        ],
+      });
+
+    const results = await Promise.allSettled([edit("One"), edit("Other")]);
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(
+      1
+    );
+    expect(
+      results.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected"
+      )?.reason
+    ).toMatchObject({ code: "data.conflict" });
+    await expect(store.get("notes", id)).resolves.toMatchObject({
+      revision: 2,
+    });
+  });
+
+  it("refuses a commit whose read went stale, though it writes elsewhere", async () => {
+    const store = await newStore();
+    const read = await insertNote(store, { title: "Rate" });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash,
+      writes: [
+        {
+          op: "patch",
+          table: "notes",
+          id: read,
+          fields: { title: "New rate" },
+          expectedRevision: 1,
+        },
+      ],
+    });
+
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash,
+        guards: [{ table: "notes", id: read, expectedRevision: 1 }],
+        writes: [
+          {
+            op: "insert",
+            id: newRecordId(),
+            table: "notes",
+            fields: { title: "At old rate" },
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.conflict" });
+    await expect(recordCount(store)).resolves.toBe(1);
+  });
+
+  it("refuses to change or delete a record that is gone", async () => {
+    const store = await newStore();
+    const id = await insertNote(store);
+    await commitIn(store, {
+      principal: ada,
+      schemaHash,
+      writes: [{ op: "delete", table: "notes", id, expectedRevision: 1 }],
+    });
+    await expect(store.get("notes", id)).resolves.toBeNull();
+
+    await Promise.all(
+      (
+        [
+          { op: "delete", table: "notes", id, expectedRevision: 1 },
+          {
+            op: "replace",
+            table: "notes",
+            id,
+            fields: { title: "Back" },
+            expectedRevision: 1,
+          },
+        ] as const
+      ).map(async (write) => {
+        await expect(
+          commitIn(store, { principal: ada, schemaHash, writes: [write] })
+        ).rejects.toMatchObject({ code: "data.conflict" });
+      })
+    );
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+
+  it("patches field by field, removes what it unsets, and replaces whole", async () => {
+    const store = await newStore();
+    const id = await insertNote(store, {
+      title: "Launch",
+      body: "Agenda",
+      summary: null,
+    });
+
+    await commitIn(store, {
+      principal: ada,
+      schemaHash,
+      writes: [
+        {
+          op: "patch",
+          table: "notes",
+          id,
+          fields: { title: "Launch day" },
+          unset: ["summary"],
+          expectedRevision: 1,
+        },
+      ],
+    });
+    const patched = await store.get("notes", id);
+    expect(patched?.fields).toStrictEqual({
+      title: "Launch day",
+      body: "Agenda",
+    });
+
+    await commitIn(store, {
+      principal: ada,
+      schemaHash,
+      writes: [
+        {
+          op: "replace",
+          table: "notes",
+          id,
+          fields: { title: "Only" },
+          expectedRevision: 2,
+        },
+      ],
+    });
+    await expect(store.get("notes", id)).resolves.toMatchObject({
+      revision: 3,
+      fields: { title: "Only" },
+    });
+
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash,
+        writes: [
+          {
+            op: "patch",
+            table: "notes",
+            id,
+            fields: { title: "Both" },
+            unset: ["title"],
+            expectedRevision: 3,
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+  });
+
+  it("keeps only JSON, within its size and depth", async () => {
+    const store = await newStore();
+    let deep: unknown = "leaf";
+    for (let level = 0; level <= documentMaxDepth; level += 1) {
+      deep = { deeper: deep };
+    }
+    // A sparse array has a hole that no JSON value fills.
+    const sparse: unknown[] = [];
+    sparse[2] = "x";
+    await Promise.all(
+      [
+        { count: Number.NaN },
+        { count: Number.POSITIVE_INFINITY },
+        { when: new Date(0) },
+        { title: undefined },
+        { list: sparse },
+        { deep },
+        { body: "x".repeat(documentMaxBytes) },
+      ].map(async (fields) => {
+        await expect(
+          commitIn(store, {
+            principal: ada,
+            schemaHash,
+            writes: [
+              {
+                op: "insert",
+                id: newRecordId(),
+                table: "notes",
+                fields: untyped(fields),
+              },
+            ],
+          })
+        ).rejects.toMatchObject({ code: "data.invalid" });
+      })
+    );
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+
+  it(`carries at most ${commitMaxWrites} writes and ${commitMaxGuards} guards`, async () => {
+    const store = await newStore();
+    const { inserted } = await commitIn(store, {
+      principal: ada,
+      schemaHash,
+      writes: inserts(commitMaxWrites),
+    });
+    expect(inserted).toHaveLength(commitMaxWrites);
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash,
+        writes: inserts(commitMaxWrites + 1),
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+
+    const guards = inserted.map((id) => ({
+      table: "notes",
+      id,
+      expectedRevision: 1,
+    }));
+    await expect(
+      commitIn(store, { principal: ada, schemaHash, guards, writes: [] })
+    ).resolves.toMatchObject({ inserted: [] });
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash,
+        guards: [...guards, ...guards.slice(0, 1)],
+        writes: [],
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+    await expect(recordCount(store)).resolves.toBe(commitMaxWrites);
+  });
+
+  it(`takes at most ${commitMaxInputBytes} bytes of writes in one commit`, async () => {
+    const store = await newStore();
+    // Each document fits; together they are more than one commit takes.
+    const large = { body: "x".repeat(120_000) };
+    const count = Math.floor(commitMaxInputBytes / 120_000) + 1;
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash,
+        writes: Array.from({ length: count }, () => ({
+          op: "insert" as const,
+          id: newRecordId(),
+          table: "notes",
+          fields: large,
+        })),
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+});
+
+/** How many bytes a document's stored text takes besides its strings. */
+const overheadOf = (empty: Record<string, string>): number =>
+  new TextEncoder().encode(canonicalJson(empty)).byteLength;
+
+describe("document size", () => {
+  const overhead = overheadOf({ a: "", b: "" });
+  const firstPart = 65_000;
+
+  it("takes a document of exactly the limit in one write", async () => {
+    const store = await newStore();
+    const id = await insertNote(store, {
+      body: "x".repeat(documentMaxBytes - overheadOf({ body: "" })),
+    });
+    await expect(store.get("notes", id)).resolves.toMatchObject({
+      revision: 1,
+    });
+  });
+
+  it("counts bytes, not characters", async () => {
+    const store = await newStore();
+    // Fewer characters than the limit, but three bytes each.
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash,
+        writes: [
+          {
+            op: "insert",
+            id: newRecordId(),
+            table: "notes",
+            fields: { body: "€".repeat(50_000) },
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+
+  /** A note of `a` characters, patched with `b` more in field `b`. */
+  const patchedNote = async (store: OpenStore, b: number): Promise<string> => {
+    const id = await insertNote(store, { a: "x".repeat(firstPart) });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash,
+      writes: [
+        {
+          op: "patch",
+          table: "notes",
+          id,
+          fields: { b: "y".repeat(b) },
+          expectedRevision: 1,
+        },
+      ],
+    });
+    return id;
+  };
+
+  it("keeps a record of exactly the limit", async () => {
+    const store = await newStore();
+    const id = await patchedNote(
+      store,
+      documentMaxBytes - overhead - firstPart
+    );
+    await expect(store.get("notes", id)).resolves.toMatchObject({
+      revision: 2,
+    });
+  });
+
+  it("refuses a patch that takes the stored record past the limit", async () => {
+    const store = await newStore();
+    const id = await patchedNote(
+      store,
+      documentMaxBytes - overhead - firstPart
+    );
+    // One byte more, though the patch itself is small.
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash,
+        writes: [
+          {
+            op: "patch",
+            table: "notes",
+            id,
+            fields: { c: "" },
+            expectedRevision: 2,
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+    const kept = await store.get("notes", id);
+    expect(kept?.revision).toBe(2);
+    expect(Object.keys(kept?.fields ?? {})).toStrictEqual(["a", "b"]);
+  });
+
+  it("refuses patches in one commit that together take a record past the limit", async () => {
+    const store = await newStore();
+    const id = await insertNote(store, { a: "x".repeat(firstPart) });
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash,
+        writes: [
+          {
+            op: "patch",
+            table: "notes",
+            id,
+            fields: { b: "y".repeat(40_000) },
+            expectedRevision: 1,
+          },
+          {
+            op: "patch",
+            table: "notes",
+            id,
+            fields: { c: "z".repeat(40_000) },
+            expectedRevision: 1,
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+    await expect(store.get("notes", id)).resolves.toMatchObject({
+      revision: 1,
+    });
+  });
+
+  it("rolls back what the commit already wrote when a later record can't be stored", async () => {
+    const store = await newStore();
+    const full = await patchedNote(
+      store,
+      documentMaxBytes - overhead - firstPart
+    );
+    // The insert is written first; the patch then fails as its record is
+    // stored, and the transaction takes the insert back.
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash,
+        writes: [
+          {
+            op: "insert",
+            id: newRecordId(),
+            table: "notes",
+            fields: { title: "Lost" },
+          },
+          {
+            op: "patch",
+            table: "notes",
+            id: full,
+            fields: { c: "over" },
+            expectedRevision: 2,
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.invalid" });
+    await expect(recordCount(store)).resolves.toBe(1);
+  });
+});
+
+/** An insert of a new record of `table`. */
+const insertInto = (table: string) => ({
+  op: "insert" as const,
+  table,
+  id: newRecordId(),
+  fields: { title: "a" },
+});
+
+describe("writes under the pinned schema's access", () => {
+  /** A store whose tables are written by each mode, read by their owner. */
+  const accessStore = async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const tables = ["owned", "members", "builders", "locked"] as const;
+    const modes: Record<(typeof tables)[number], AccessMode> = {
+      owned: "owner",
+      members: "appMembers",
+      builders: "appBuilders",
+      locked: "none",
+    };
+    const text = manifestText(
+      schemaManifest(
+        defineSchema(
+          Object.fromEntries(
+            tables.map((name) => [name, defineTable({ title: v.string() })])
+          )
+        ),
+        {
+          tables: Object.fromEntries(
+            tables.map((name) => [name, { read: "owner", write: modes[name] }])
+          ),
+        }
+      )
+    );
+    const { schemaHash: hash } = await store.defineTables(text);
+    return { store, hash };
+  };
+
+  /** The code a commit of `write` for `principal` with `roles` fails with, or "ok". */
+  const outcomeOf = async (
+    { store, hash }: { store: OpenStore; hash: string },
+    write: Commit["writes"][number],
+    roles: { appMember: boolean; appBuilder: boolean },
+    principal = ada
+  ): Promise<unknown> => {
+    try {
+      await commitIn(store, {
+        principal,
+        roles,
+        schemaHash: hash,
+        writes: [write],
+      });
+      return "ok";
+    } catch (error) {
+      return error instanceof Error && "code" in error ? error.code : error;
+    }
+  };
+
+  const outsider = { appMember: false, appBuilder: false };
+  const member = { appMember: true, appBuilder: false };
+  const appBuilder = { appMember: false, appBuilder: true };
+
+  it("admits an insert only for the roles each table's write mode admits", async () => {
+    const fixture = await accessStore();
+    expect({
+      ownedByOutsider: await outcomeOf(fixture, insertInto("owned"), outsider),
+      membersByOutsider: await outcomeOf(
+        fixture,
+        insertInto("members"),
+        outsider
+      ),
+      membersByMember: await outcomeOf(fixture, insertInto("members"), member),
+      membersByBuilder: await outcomeOf(
+        fixture,
+        insertInto("members"),
+        appBuilder
+      ),
+      buildersByMember: await outcomeOf(
+        fixture,
+        insertInto("builders"),
+        member
+      ),
+      buildersByBuilder: await outcomeOf(
+        fixture,
+        insertInto("builders"),
+        appBuilder
+      ),
+      lockedByBuilder: await outcomeOf(fixture, insertInto("locked"), {
+        appMember: true,
+        appBuilder: true,
+      }),
+    }).toStrictEqual({
+      ownedByOutsider: "ok",
+      membersByOutsider: "data.write_denied",
+      membersByMember: "ok",
+      membersByBuilder: "ok",
+      buildersByMember: "data.write_denied",
+      buildersByBuilder: "ok",
+      lockedByBuilder: "data.write_denied",
+    });
+  });
+
+  it("lets an owner table's writes change only the principal's own records, as if others' didn't exist", async () => {
+    const fixture = await accessStore();
+    const write = insertInto("owned");
+    await outcomeOf(fixture, write, outsider, ada);
+    const patch = {
+      op: "patch" as const,
+      table: "owned",
+      id: write.id,
+      fields: { title: "b" },
+      expectedRevision: 1,
+    };
+    const remove = {
+      op: "delete" as const,
+      table: "owned",
+      id: write.id,
+      expectedRevision: 1,
+    };
+    const missing = { ...remove, id: newRecordId() };
+    expect({
+      othersPatch: await outcomeOf(fixture, patch, member, grace),
+      othersDelete: await outcomeOf(fixture, remove, member, grace),
+      missingDelete: await outcomeOf(fixture, missing, member, grace),
+      ownPatch: await outcomeOf(fixture, patch, outsider, ada),
+    }).toStrictEqual({
+      othersPatch: "data.conflict",
+      othersDelete: "data.conflict",
+      missingDelete: "data.conflict",
+      ownPatch: "ok",
+    });
+  });
+
+  it("refuses an insert under an ID already in use, and a table the pinned schema hasn't", async () => {
+    const fixture = await accessStore();
+    const write = insertInto("owned");
+    await outcomeOf(fixture, write, outsider);
+    expect({
+      again: await outcomeOf(fixture, write, outsider),
+      unknown: await outcomeOf(fixture, insertInto("other"), member),
+    }).toStrictEqual({ again: "data.conflict", unknown: "data.unknown_table" });
+  });
+});
+
+describe("a commit's read set", () => {
+  it("refuses a commit once a table it read moved on, and takes one that is current", async () => {
+    const store = await newStore();
+    const [{ notes: before = 0 }] = [await store.generations(["notes"])];
+    await insertNote(store);
+    const stale = commitIn(store, {
+      principal: ada,
+      schemaHash,
+      readSet: { notes: before },
+      writes: [],
+    });
+    await expect(stale).rejects.toMatchObject({ code: "data.reads_changed" });
+    const now = await store.generations(["notes"]);
+    await expect(
+      commitIn(store, { principal: ada, schemaHash, readSet: now, writes: [] })
+    ).resolves.toMatchObject({ inserted: [] });
+  });
+});
+
+describe("a commit's staging time", () => {
+  it("stamps its records, and is refused more than a minute ahead of the store's clock", async () => {
+    const store = await newStore();
+    const write = insertInto("notes");
+    const stagedAt = Date.now() - 5000;
+    const ahead = commitIn(store, {
+      principal: ada,
+      schemaHash,
+      stagedAt: Date.now() + 120_000,
+      writes: [insertInto("notes")],
+    });
+    await expect(ahead).rejects.toMatchObject({ code: "data.invalid" });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash,
+      stagedAt,
+      writes: [write],
+    });
+    await expect(store.get("notes", write.id)).resolves.toMatchObject({
+      createdAt: stagedAt,
+      updatedAt: stagedAt,
+    });
+  });
+});
+
+describe("a staged read", () => {
+  it("sees the writes it is handed as their commit would make them, and keeps none", async () => {
+    const store = await newStore();
+    const kept = await insertNote(store, { title: "Kept" });
+    const id = newRecordId();
+    const stagedAt = Date.now() - 1000;
+    const reader = {
+      schemaHash,
+      principal: "ada",
+      appMember: true,
+      appBuilder: false,
+      consumer: { resourceId: "notes-app", resourceVersion: 1 },
+    };
+    const staged = {
+      stagedAt,
+      writes: [
+        { op: "insert" as const, table: "notes", id, fields: { title: "New" } },
+        {
+          op: "delete" as const,
+          table: "notes",
+          id: kept,
+          expectedRevision: 1,
+        },
+      ],
+    };
+    const generations = await store.generations(["notes"]);
+    const { value, generations: seen } = await store.read(
+      reader,
+      {
+        kind: "query",
+        query: {
+          descriptorVersion: 1,
+          table: "notes",
+          index: null,
+          range: [],
+          filter: null,
+          order: "asc",
+          terminal: { kind: "collect" },
+        },
+      },
+      staged
+    );
+    expect({
+      seen: value,
+      generations: seen,
+      kept: await store.get("notes", kept).then((record) => record?.id),
+      inserted: await store.get("notes", id),
+    }).toStrictEqual({
+      seen: [
+        {
+          _id: id,
+          _ownerId: "ada",
+          _rev: 1,
+          _createdAt: stagedAt,
+          _updatedAt: stagedAt,
+          title: "New",
+        },
+      ],
+      // The generation from before the staged writes: what a commit
+      // fenced on this read compares.
+      generations,
+      kept,
+      inserted: null,
+    });
+  });
+});

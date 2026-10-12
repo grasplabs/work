@@ -1,0 +1,1 @@
+ALTER TABLE `requests` ADD `deadline` integer DEFAULT 0 NOT NULL;

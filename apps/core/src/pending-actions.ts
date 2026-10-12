@@ -14,7 +14,6 @@ import {
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { runOfStepKey } from "@grasp-os/shared/workflows";
-import { RpcTarget } from "capnweb";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -24,6 +23,7 @@ import { personOf } from "./connections.ts";
 import { workflowRuns } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
 import { isRestricted } from "./restricted.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import type { HeldOutcome } from "./workspace.ts";
@@ -272,7 +272,10 @@ const withRestricted = async (
 };
 
 /** A signed-in person's held actions, over `/rpc`. */
-export class PendingActionsRpc extends RpcTarget implements PendingActionsApi {
+export class PendingActionsRpc
+  extends CoreRpcTarget
+  implements PendingActionsApi
+{
   readonly #env: Env;
   readonly #check: SessionCheck;
 

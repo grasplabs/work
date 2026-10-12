@@ -27,7 +27,7 @@ const returned = (text: string | undefined): unknown =>
 
 /** Code that makes each call in turn: what it returned, or its message. */
 const tryEach = (calls: Record<string, string>): string =>
-  `export default async (env) => {
+  `export default async (self, env) => {
     const tried = async (call) => { try { return await call(); } catch (error) { return error.message; } };
     const results = {};
     ${Object.entries(calls)
@@ -102,7 +102,7 @@ describe(
   () => {
     it("creates one as its person may, asking for what the blueprint declares, as the agent", async () => {
       const { person, chat, ledgerBlueprint } = await setUp(() => [
-        codeStep(`export default async (env) => {
+        codeStep(`export default async (self, env) => {
         const listed = await env.build.blueprints();
         const { id } = listed.find(({ name }) => name === "Ledger");
         const created = await env.build.createFromBlueprint(id, { name: "My ledger" });

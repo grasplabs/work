@@ -45,6 +45,8 @@ export const submissionErrors = defineErrorFamily({
     "This idempotency key's receipt has expired, so whether the change was made can't be told. Check, then use a new key.",
   "submission.superseded":
     "A newer attempt of this change took over, so this one wrote nothing.",
+  "submission.deadline_passed":
+    "The call ran out of time before its change committed, so nothing was written.",
   "submission.intent_unsupported":
     "Nothing takes this kind of notification yet, so the change wasn't made.",
 });

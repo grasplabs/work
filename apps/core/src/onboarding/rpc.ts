@@ -21,9 +21,9 @@ import type {
 } from "@grasp-os/shared/onboarding-documents";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import { uploadMaxBytes } from "@grasp-os/shared/uploads";
-import { RpcTarget } from "capnweb";
 import { z } from "zod";
 
+import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { shareDocument } from "./documents.ts";
@@ -44,7 +44,7 @@ const answerSchema = z.strictObject({
 });
 
 /** The onboarding, for the client's admin. */
-export class OnboardingRpc extends RpcTarget implements OnboardingApi {
+export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

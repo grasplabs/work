@@ -201,6 +201,14 @@ msgstr "{limit} al mes para cada uno; se avisa a los administradores al {alertAt
 msgid "{limit} a month, admins alerted at {alertAt}. Calls stop once it's used up."
 msgstr "{limit} al mes; se avisa a los administradores al {alertAt}. Las llamadas se detienen cuando se agota."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{limit} for each run, with the runs it starts, over its whole life, admins alerted at {alertAt}. What each spent so far, this month or before."
+msgstr "{limit} para cada ejecución, con las ejecuciones que inicia, durante toda su vida; se avisa a los administradores al {alertAt}. Lo que cada una ha gastado hasta ahora, este mes o antes."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "{limit} for the run's whole life, admins alerted at {alertAt}. Its calls stop once it's used up or held by calls whose cost isn't settled yet."
+msgstr "{limit} durante toda la vida de la ejecución; se avisa a los administradores al {alertAt}. Sus llamadas se detienen cuando se agota o lo retienen llamadas cuyo coste aún no se ha liquidado."
+
 #: src/dashboard/failed-workflows.tsx
 msgid "{link} in {appName} failed"
 msgstr "{link} en {appName} ha fallado"
@@ -370,6 +378,10 @@ msgstr "{total, plural, one {En {withPerson} de # ejecución hizo falta la decis
 #: src/routes/_shell.integrations.index.tsx
 msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
 msgstr "{total, plural, one {# integración mostrada} other {# integraciones mostradas}}"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "{total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full."
+msgstr "{total} queda retenido para estas llamadas al modelo hasta que decidas: lo que cada una podría haber costado. Libéralo o cóbralo por completo."
 
 #: src/dashboard/nav-item.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
@@ -639,6 +651,10 @@ msgstr "Todas las pruebas de los flujos de trabajo pasan."
 #: src/routes/_shell.settings.models.tsx
 msgid "Allowed models"
 msgstr "Modelos permitidos"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Already decided: {model}"
+msgstr "Ya decidido: {model}"
 
 #: src/connections/connection-list.tsx
 msgid "An admin"
@@ -922,6 +938,10 @@ msgstr "A final de mes"
 msgid "By workflow"
 msgstr "Por flujo de trabajo"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "By workflow run"
+msgstr "Por ejecución de flujo de trabajo"
+
 #: src/activity/audit-words.ts
 msgid "Called a model"
 msgstr "Llamó a un modelo"
@@ -1045,6 +1065,14 @@ msgstr "cambia los datos del motor"
 #: src/chat/builds.tsx
 msgid "Changes the engine's data"
 msgstr "Cambia los datos del motor"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Charge"
+msgstr "Cobrar"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Charge {amount} for this model call?"
+msgstr "¿Cobrar {amount} por esta llamada al modelo?"
 
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.index.tsx
@@ -1493,6 +1521,14 @@ msgstr "Cada persona"
 msgid "Each workflow"
 msgstr "Cada flujo de trabajo"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "Each workflow run, with the runs it starts"
+msgstr "Cada ejecución de flujo de trabajo, con las ejecuciones que inicia"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Each workflow run, with the runs it starts, may make at most 100 model requests, retries included."
+msgstr "Cada ejecución de flujo de trabajo, con las ejecuciones que inicia, puede hacer como máximo 100 solicitudes al modelo, reintentos incluidos."
+
 #: src/chat/chat-list.tsx
 msgctxt "older chats"
 msgid "Earlier"
@@ -1879,6 +1915,10 @@ msgstr "Hash"
 msgid "He doesn't ask about it, and moves on when somebody brings it up."
 msgstr "No pregunta por ello, y sigue adelante cuando alguien lo saca."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "Held for review"
+msgstr "Retenido para revisión"
+
 #: src/routes/guest.tsx
 msgid "Hi {name}"
 msgstr "Hola, {name}"
@@ -1961,6 +2001,10 @@ msgstr "Entrevistas"
 msgid "Invited a guest"
 msgstr "Invitó a un invitado"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
+msgstr "Cuenta como gastado en los presupuestos: lo máximo que podría haber costado. No se puede deshacer."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
 msgstr "No tiene parámetros."
@@ -1968,6 +2012,10 @@ msgstr "No tiene parámetros."
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no steps."
 msgstr "No tiene pasos."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "It is no longer held."
+msgstr "Ya no está retenido."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "It isn't offered to your organization: offer it on its Overview before connecting it."
@@ -1985,6 +2033,10 @@ msgstr "No está compartida con nadie."
 msgid "It may have been renamed or removed."
 msgstr "Puede que se haya renombrado o eliminado."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "It no longer counts against the budgets, as if it cost nothing. This can't be undone."
+msgstr "Deja de contar en los presupuestos, como si no hubiera costado nada. No se puede deshacer."
+
 #: src/chat/builds.tsx
 msgid "It no longer runs (it could change things)."
 msgstr "Ya no se ejecuta (podía cambiar cosas)."
@@ -1992,6 +2044,14 @@ msgstr "Ya no se ejecuta (podía cambiar cosas)."
 #: src/chat/builds.tsx
 msgid "It no longer runs."
 msgstr "Ya no se ejecuta."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "It was charged {amount} on {when}."
+msgstr "Se cobraron {amount} el {when}."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "It was released on {when}, charging nothing."
+msgstr "Se liberó el {when}, sin cobrar nada."
 
 #: src/knowledge/uploads.tsx
 msgid "It's past the first {pageMaxLimit} files listed: open it from here."
@@ -2392,6 +2452,10 @@ msgstr "Todavía no hay archivos."
 msgid "No integrations match your search."
 msgstr "Ninguna integración coincide con tu búsqueda."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "No longer held: {model}"
+msgstr "Ya no retenido: {model}"
+
 #: src/chat/builds-state.ts
 msgid "No longer runs {how}"
 msgstr "Ya no se ejecuta {how}"
@@ -2596,6 +2660,10 @@ msgstr "Todavía no se ha ejecutado nada."
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
 msgstr "Aquí aún no hay nada."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Nothing is held for review now."
+msgstr "Ahora no hay nada retenido para revisión."
 
 #: src/dashboard/pile-cards.tsx
 msgid "Nothing is sent or changed on {connection}."
@@ -2813,6 +2881,10 @@ msgstr "Otros motores ahora pueden llamar a {name}, que {does}"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Otherwise:"
 msgstr "Si no:"
+
+#: src/chat/thread.tsx
+msgid "Output"
+msgstr "Salida"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Overview"
@@ -3105,6 +3177,14 @@ msgstr "Rechazado por {name} el {date}."
 msgid "Rejected: {who}."
 msgstr "Rechazado: {who}."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "Release"
+msgstr "Liberar"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Release the {amount} held for this model call?"
+msgstr "¿Liberar los {amount} retenidos para esta llamada al modelo?"
+
 #: src/screens/screen-frame.tsx
 msgid "Reload"
 msgstr "Volver a cargar"
@@ -3252,6 +3332,14 @@ msgstr "Reglas"
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
 msgstr "Ejecución"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Run {runId}"
+msgstr "Ejecución {runId}"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Run {shortId} of {workflowId} in {engine}, started {started}"
+msgstr "Ejecución {shortId} de {workflowId} en {engine}, iniciada el {started}"
 
 #: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -4106,6 +4194,10 @@ msgstr "Este enlace ha caducado. Pide uno nuevo a quien te lo envió."
 msgid "This month so far"
 msgstr "Este mes hasta ahora"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "This one can only be released: a budget record it counts against is damaged, so charging it would count against a wrong total. Contact Grasp."
+msgstr "Este solo se puede liberar: un registro de presupuesto en el que cuenta está dañado, así que cobrarlo contaría sobre un total erróneo. Contacta con Grasp."
+
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Esta página no se ha cargado"
@@ -4640,6 +4732,10 @@ msgstr "Tu cuenta"
 #: src/chat/chat-list.tsx
 msgid "Your chats show up here."
 msgstr "Tus chats aparecen aquí."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Your decision changed nothing."
+msgstr "Tu decisión no cambió nada."
 
 #: src/routes/guest.tsx
 msgid "Your message"

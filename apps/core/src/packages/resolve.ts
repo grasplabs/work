@@ -804,7 +804,12 @@ export interface Resolved {
 export const resolveDependencies = async (
   env: Env,
   by: Acting,
-  input: unknown
+  input: unknown,
+  /**
+   * Admits the proposal, called once the graph is fetched and checked,
+   * right before it is stored: throws to refuse it.
+   */
+  admit?: () => Promise<void>
 ): Promise<Resolved> => {
   const intent = dependencyErrors.parse(
     "dependency.invalid",
@@ -870,6 +875,8 @@ export const resolveDependencies = async (
   const graph = graphOfLock(lock);
   // The lock is stored in the batch that stores the request: a request is
   // never without the lock its graph names, nor a lock without a request.
+  // Admitted after the slow fetch and checks, right before it is stored.
+  await admit?.();
   const { request, lock: kept } = await proposeResolved(
     env,
     by,

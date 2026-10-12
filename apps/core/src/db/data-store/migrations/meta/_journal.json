@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1791655735337,
+      "tag": "0000_data_store",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791660110895,
+      "tag": "0001_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791662271327,
+      "tag": "0002_store_deletion",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791682581465,
+      "tag": "0003_schemas_and_default_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791685292838,
+      "tag": "0004_cursor_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791686888864,
+      "tag": "0005_table_generations",
+      "breakpoints": true
+    }
+  ]
+}

@@ -217,6 +217,31 @@ export const latestVersion = async (
   return row?.version ?? null;
 };
 
+/**
+ * The version of `app` over `parent` whose files are `tree` and that build
+ * job `job` of chat `chatId` proposed, if there is one: what the job
+ * recorded it was about to commit, found committed (build-jobs.ts). Never
+ * another commit of the same files, from the same chat or not.
+ */
+export const proposedByJob = async (
+  env: Env,
+  app: string,
+  { parent, tree }: { parent: number | null; tree: string },
+  { chatId, jobId }: { chatId: string; jobId: string }
+): Promise<number | undefined> => {
+  const version = (parent ?? 0) + 1;
+  const row = await drizzle(env.DB)
+    .select({ tree: appVersions.tree, proposedBy: appVersions.proposedBy })
+    .from(appVersions)
+    .where(and(eq(appVersions.appId, app), eq(appVersions.version, version)))
+    .get();
+  return row?.tree === tree &&
+    row.proposedBy?.chatId === chatId &&
+    row.proposedBy.jobId === jobId
+    ? version
+    : undefined;
+};
+
 /** One of an App's versions, which must exist. */
 export const findVersion = async (
   env: Env,
@@ -442,7 +467,9 @@ export const versionFiles = async (
 export const createApp = async (
   env: Env,
   by: Acting,
-  input: unknown
+  input: unknown,
+  /** Admits the write, called right before it is committed: throws to refuse it. */
+  admit?: () => Promise<void>
 ): Promise<App> => {
   requireBuilder(by);
   const { name, description, blueprint } = appErrors.parse(
@@ -462,6 +489,8 @@ export const createApp = async (
   };
   const app = toApp(row);
   const db = drizzle(env.DB);
+  // Admitted last, with nothing slow left before the write.
+  await admit?.();
   await auditedBatch(env, db, [
     db.insert(apps).values(row),
     outboxed(
@@ -814,7 +843,9 @@ export const proposeDraft = async (
   by: Acting,
   app: unknown,
   { parent, files }: DraftOverLatest,
-  message: unknown
+  message: unknown,
+  /** Admits the write, called right before it is committed: throws to refuse it. */
+  admit?: () => Promise<void>
 ): Promise<AppVersion> => {
   const { id: appId } = await appFor(env, by, app, "builder");
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
@@ -848,6 +879,8 @@ export const proposeDraft = async (
   };
   const db = drizzle(env.DB);
   try {
+    // Admitted last, with nothing slow left before the write.
+    await admit?.();
     await auditedBatch(env, db, [
       db.insert(appVersions).values(row),
       outboxed(

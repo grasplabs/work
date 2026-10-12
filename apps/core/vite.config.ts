@@ -47,6 +47,7 @@ export const screenTests = [
   "test/app-sandbox.test.ts",
   "test/agent-apps.test.ts",
   "test/agent-builds.test.ts",
+  "test/build-jobs.test.ts",
   "test/app-preview.test.ts",
   "test/preview-repairs.test.ts",
   "test/workflows.test.ts",
@@ -64,6 +65,7 @@ export const screenTests = [
   "test/event-sources.test.ts",
   "test/orphaned-runs.test.ts",
   "test/run-retention.test.ts",
+  "test/rpc-targets.test.ts",
 ];
 
 /** Core's Worker test setup, shared by both of core's test projects. */
@@ -146,6 +148,8 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
             },
             // workerd doesn't implement Durable Object jurisdictions.
             DURABLE_OBJECT_JURISDICTION: "none",
+            // Plain workerd: no CPU limit on Code Mode's isolates.
+            RUNTIME_PROFILE: "workerd",
             // So the test of a call that never ends doesn't wait a minute.
             APP_CALL_TIMEOUT_MS: "10000",
             // The engine's step limit, lowered below (`workflows`) so a test

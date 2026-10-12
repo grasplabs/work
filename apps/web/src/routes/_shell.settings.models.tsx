@@ -166,6 +166,7 @@ const scopeTitles: Record<ModelBudgetScope, MessageDescriptor> = {
   deployment: msg`All calls together`,
   workflow: msg`Each workflow`,
   user: msg`Each person`,
+  run: msg`Each workflow run, with the runs it starts`,
 };
 
 /** One budget's rule: its limit, and when admins are alerted. */
@@ -176,23 +177,44 @@ const BudgetRule = ({ budget }: { budget: ModelBudget }) => {
     <div className="flex flex-col gap-1">
       <h3 className="font-medium">{i18n._(scopeTitles[budget.scope])}</h3>
       <p className="text-muted-foreground text-sm">
-        <Trans>
-          {limit} a month, admins alerted at {alertAt}. Calls stop once
-          it&apos;s used up.
-        </Trans>
+        {budget.scope === "run" ? (
+          <Trans>
+            {limit} for the run&apos;s whole life, admins alerted at {alertAt}.
+            Its calls stop once it&apos;s used up or held by calls whose cost
+            isn&apos;t settled yet.
+          </Trans>
+        ) : (
+          <Trans>
+            {limit} a month, admins alerted at {alertAt}. Calls stop once
+            it&apos;s used up.
+          </Trans>
+        )}
       </p>
     </div>
   );
 };
 
+/** The limit on requests every run has, whatever the budgets. */
+const RunRequests = () => (
+  <p className="text-muted-foreground text-sm">
+    <Trans>
+      Each workflow run, with the runs it starts, may make at most 100 model
+      requests, retries included.
+    </Trans>
+  </p>
+);
+
 const Budgets = ({ budgets }: { budgets: ModelBudget[] }) => {
   if (budgets.length === 0) {
     return (
-      <p className="text-muted-foreground text-sm">
-        <Trans>
-          No budget is set: model calls aren&apos;t limited by cost.
-        </Trans>
-      </p>
+      <div className="flex flex-col gap-4">
+        <p className="text-muted-foreground text-sm">
+          <Trans>
+            No budget is set: model calls aren&apos;t limited by cost.
+          </Trans>
+        </p>
+        <RunRequests />
+      </div>
     );
   }
   return (
@@ -200,6 +222,7 @@ const Budgets = ({ budgets }: { budgets: ModelBudget[] }) => {
       {budgets.map((budget) => (
         <BudgetRule budget={budget} key={budget.scope} />
       ))}
+      <RunRequests />
       <p className="text-sm">
         <Trans>
           What was spent this month is under{" "}

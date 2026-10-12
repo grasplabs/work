@@ -213,6 +213,7 @@ const OpenChat = ({
                 void ask(lastQuestion.text);
               }
             }}
+            output={view.output}
             partial={view.partial}
             running={view.running}
           >

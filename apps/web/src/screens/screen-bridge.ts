@@ -1,6 +1,13 @@
 import type { ScreenBridge, Theme } from "@grasp-os/sdk/screen-runtime";
+import { requestErrors } from "@grasp-os/shared/errors";
+import {
+  accountedTransport,
+  rpcCopyNodeBounds,
+} from "@grasp-os/shared/rpc-accounting";
+import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { portTransport } from "@grasp-os/shared/screen-port";
 import {
+  rpcArgumentDepth,
   screenErrors,
   screenLimits,
   screenProblemSchema,
@@ -8,15 +15,19 @@ import {
 import type { ScreenProblem } from "@grasp-os/shared/screens";
 import { takeToken } from "@grasp-os/shared/token-bucket";
 import type { TokenBucket } from "@grasp-os/shared/token-bucket";
-import { RpcSession, RpcStub, RpcTarget } from "capnweb";
+import { RpcSession, RpcStub } from "capnweb";
 
 // What a screen's frame reaches through its port, and nothing else: its
 // target (its own App's server and workflow runs, and where its problems
 // go) and the page's theme. Everything the frame sends is untrusted.
 //
 // The frame's traffic is bounded before it reaches core: each message in
-// size and depth (`screenLimits.rpc`, by Cap'n Web, which ends the session
-// over one that is too much), its requests and reports by rate. That
+// size and nodes (`screenLimits.rpc`, by the accountant on the port, which
+// ends the session over one that is too much) and in depth (by Cap'n Web),
+// what each call of the bridge's gets to the same depth and size however
+// many messages built it (a value one message refers to from another's:
+// `FrameRpcTarget`), its requests and reports by rate. A value too deep for core's connection would otherwise end the
+// person's whole connection to core, not only this screen's call. That
 // spares the person's connection a screen that floods; it is not what
 // holds a screen to its limits. Core counts the same per person and App
 // (core's screens-rpc.ts), also for a browser that skips this page.
@@ -72,7 +83,17 @@ const text = (value: unknown): string => {
   return value;
 };
 
-class Bridge extends RpcTarget implements ScreenBridge {
+/**
+ * What the bridge extends: each call's arguments arrive within what one
+ * message of the frame's may hold (`request.too_deep`,
+ * `request.too_large`), before any of the bridge's code sees them.
+ */
+export const FrameRpcTarget = boundedRpcTarget({
+  depth: rpcArgumentDepth,
+  size: screenLimits.rpc.maxMessageSize,
+});
+
+class Bridge extends FrameRpcTarget implements ScreenBridge {
   readonly #target: FrameTarget;
   readonly #cleanups: (() => void)[];
   #requests: TokenBucket | undefined;
@@ -187,6 +208,16 @@ class Bridge extends RpcTarget implements ScreenBridge {
 }
 
 /**
+ * What a frame reaches through its port: the one object `openBridge`
+ * serves, a {@link FrameRpcTarget}.
+ */
+export const frameBridge = (
+  target: FrameTarget,
+  cleanups: (() => void)[]
+): ScreenBridge & InstanceType<typeof FrameRpcTarget> =>
+  new Bridge(target, cleanups);
+
+/**
  * Serves the bridge to `target` on `port`, the page's end of the frame's
  * channel. Returns what closes it: the session ends, the port closes, and
  * what the bridge kept for the frame (its theme observer, the stubs the
@@ -203,10 +234,33 @@ export const openBridge = (
   onBroken: () => void
 ): (() => void) => {
   const cleanups: (() => void)[] = [];
+  // Cap'n Web copies in full every value one message refers to from an
+  // earlier one, and keeps every value pushed until it is released, before
+  // any of the bridge's code runs, so a screen could crash its tab the way
+  // an unbounded connection could crash core. The accountant wraps the
+  // port: it refuses a message longer than the port's or of too many nodes
+  // before parsing it, parses it once and hands the value to Cap'n Web
+  // (which then checks only depth and digits), and ends the session once
+  // what the messages copy or hold would outgrow one message's budget or
+  // the session's (`screenLimits.rpcHeldBytes`); `onBroken` then tells the
+  // page, as for any other way the session ends.
   const session = new RpcSession(
-    portTransport(port),
-    new Bridge(target, cleanups),
-    { limits: screenLimits.rpc }
+    accountedTransport(
+      portTransport(port),
+      {
+        ...rpcCopyNodeBounds,
+        maxMessageBytes: screenLimits.rpc.maxMessageSize,
+        maxSessionBytes: screenLimits.rpcHeldBytes,
+      },
+      () => requestErrors.create("request.too_expensive")
+    ),
+    frameBridge(target, cleanups),
+    {
+      limits: {
+        maxDepth: screenLimits.rpc.maxDepth,
+        maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
+      },
+    }
   );
   const frame = session.getRemoteMain();
   let open = true;

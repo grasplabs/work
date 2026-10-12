@@ -19,13 +19,13 @@ import type {
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { RpcTarget } from "capnweb";
 
 import { actorIdsOf, auditLog } from "./audit-log.ts";
 import type { SearchRange } from "./audit-log.ts";
 import { appendAuditEvent } from "./audit-outbox.ts";
 import { identify, identifyFull } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
@@ -382,7 +382,7 @@ export const auditExportResponse = async (
  * The audit log over `/rpc`, for admins. Built once per session with core's
  * env and a session check; every method checks the session first.
  */
-export class AuditRpc extends RpcTarget implements AuditApi {
+export class AuditRpc extends CoreRpcTarget implements AuditApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 
