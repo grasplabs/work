@@ -14,12 +14,13 @@ import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
 import { asPerson, readDenied } from "./agent-person.ts";
-import { chatAuthority, chatContext } from "./agent-scope.ts";
+import { admitEffect, chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { callAppFunction } from "./app-functions.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import {
   appExports,
+  appFor,
   findApp,
   listApps,
   listVersions,
@@ -219,8 +220,10 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
         if (!callsApp(appId, action)(permissions)) {
           throw readDenied(action);
         }
-        const writes = action === "write";
-        if (writes) {
+        if (action === "write") {
+          // Only someone with a role in the App reaches it at all, so a
+          // restricted chat can't restrict an App its person can't use.
+          await appFor(this.env, person, appId, "user");
           await this.#carryChatRestricted(appId);
         }
         const answer = await callAppFunction(
@@ -230,6 +233,9 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
           text,
           Date.now() + functionCallMs,
           async () => {
+            // The code run still open (not ended, cancelled or closed by a
+            // revocation), and the grant for the call's kind still held.
+            await admitEffect(this.env, scope);
             const now = await grantedPermissions(
               this.env,
               chatAuthority(scope)
@@ -249,12 +255,20 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
         }
         return answer;
       },
-      detail: (answer) => ({
+      detail: () => ({
         app: id.success ? id.data : null,
         kind,
-        ok: answer.result.ok,
-        ...(answer.result.ok ? {} : { code: answer.result.error.code }),
       }),
+      ended: ({ result }) =>
+        result.ok
+          ? undefined
+          : {
+              outcome:
+                result.error.code === "internal.unexpected"
+                  ? "failed"
+                  : "refused",
+              reason: result.error.code,
+            },
     });
   }
 

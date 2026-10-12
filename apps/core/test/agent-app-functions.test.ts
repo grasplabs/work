@@ -1,7 +1,7 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
@@ -38,33 +38,43 @@ export const create = mutation({
   handler: async (ctx, args) => await ctx.db.insert("notes", args),
 });
 
-/** Waits, then writes: long enough for a grant to be revoked meanwhile. */
-export const slowCreate = action({
-  args: { title: v.string().min(1).max(200) },
-  returns: v.null(),
-  uses: [create],
-  handler: async (ctx, args) => {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    await ctx.runMutation(create, args);
-    return null;
-  },
-});
-
 export const titles = query({
   args: {},
   returns: v.array(v.string()),
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title),
 });
+
+/**
+ * Says it has started (a "started" note, committed at once), waits until
+ * a "go" note appears, then writes: the test acts between the two.
+ */
+export const holdThenCreate = action({
+  args: { title: v.string().min(1).max(200) },
+  returns: v.null(),
+  uses: [create, titles],
+  handler: async (ctx, args) => {
+    await ctx.runMutation(create, { title: "started" });
+    for (let polls = 0; polls < 50; polls += 1) {
+      const seen = await ctx.runQuery(titles, {});
+      if (seen.includes("go")) {
+        await ctx.runMutation(create, args);
+        return null;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return null;
+  },
+});
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { create, slowCreate, titles } from "./operations/notes.ts";
+import { create, holdThenCreate, titles } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, slowCreate, titles } },
+  operations: { notes: { create, holdThenCreate, titles } },
   internalOperations: {},
   screens: [],
   uses: [],
@@ -101,8 +111,8 @@ const tryEach = (calls: Record<string, string>): string =>
   };`;
 
 /** A builder's Notes App, activated, and the release that runs. */
-const notesApp = async () => {
-  const builder = await signedInApi(idp, "builder");
+const notesApp = async (existing?: Awaited<ReturnType<typeof signedInApi>>) => {
+  const builder = existing ?? (await signedInApi(idp, "builder"));
   const { id } = await builder.api.apps.create({ name: "Notes" });
   const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
@@ -123,10 +133,18 @@ const returned = async (chat: Awaited<ReturnType<typeof chatOf>>) => {
 type Chat = Awaited<ReturnType<typeof chatOf>>;
 
 interface RunOptions {
-  /** Before the chat asks, once the grant is made. */
+  /** Before the chat asks, once the grants are made. */
   before?: (chat: Chat) => Promise<void>;
-  /** While the chat's turn runs, given the grant's ID. */
-  during?: (chat: Chat, grant: string | undefined) => Promise<void>;
+  /** While the chat's turn runs, given the grants' IDs, the App's first. */
+  during?: (chat: Chat, grants: string[]) => Promise<void>;
+  /** Whose chat it is: the builder's unless another is given. */
+  personId?: string;
+  /** More of the agent's grants, each made by the builder. */
+  alsoGrant?: {
+    object: { type: "app"; appId: string };
+    actions: ("read" | "write")[];
+    binding: string;
+  }[];
 }
 
 /** Asks a chat of the builder's to run `code`, with the agent granted `actions` on the App. */
@@ -134,20 +152,33 @@ const runIn = async (
   { builder, app }: Awaited<ReturnType<typeof notesApp>>,
   code: string,
   actions: ("read" | "write")[],
-  { before, during }: RunOptions = {}
+  { before, during, personId, alsoGrant = [] }: RunOptions = {}
 ) => {
-  const chat = await chatOf(builder.userId, codeStep(code), says("Done."));
-  const grant =
-    actions.length > 0
-      ? await requestGranted(idp, builder, {
-          subject: chat.agent,
-          object: { type: "app", appId: app },
-          actions,
-          binding: "NOTES",
-        })
-      : undefined;
+  const chat = await chatOf(
+    personId ?? builder.userId,
+    codeStep(code),
+    says("Done.")
+  );
+  const requests = [
+    ...(actions.length > 0
+      ? [
+          {
+            object: { type: "app" as const, appId: app },
+            actions,
+            binding: "NOTES",
+          },
+        ]
+      : []),
+    ...alsoGrant,
+  ];
+  const grants = await Promise.all(
+    requests.map(
+      async (request) =>
+        await requestGranted(idp, builder, { subject: chat.agent, ...request })
+    )
+  );
   await before?.(chat);
-  await Promise.all([chat.ask("Use the Notes App."), during?.(chat, grant)]);
+  await Promise.all([chat.ask("Use the Notes App."), during?.(chat, grants)]);
   return { chat, returned: async () => await returned(chat) };
 };
 
@@ -173,6 +204,45 @@ const titlesOf = async ({
     callOf(release, "notes.titles", {})
   );
   return result;
+};
+
+/** Writes a note as the App's builder, from outside the chat. */
+const noteAs = async (
+  { builder, app, release }: Awaited<ReturnType<typeof notesApp>>,
+  title: string
+): Promise<void> => {
+  await callAppFunction(
+    env,
+    { userId: builder.userId, role: "builder", teams: [] },
+    app,
+    callOf(release, "notes.create", { title })
+  );
+};
+
+/** Waits until the App holds a note titled `title`. */
+const untilNoted = async (
+  notes: Awaited<ReturnType<typeof notesApp>>,
+  title: string
+): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      const result = await titlesOf(notes);
+      const titles = z.object({ value: z.array(z.string()) }).safeParse(result);
+      expect(titles.success && titles.data.value.includes(title)).toBeTruthy();
+    },
+    { timeout: 10_000, interval: 100 }
+  );
+};
+
+/** Waits until the chat's one App call has been recorded: it has ended. */
+const settled = async (chat: Chat): Promise<void> => {
+  await vi.waitFor(
+    async () => {
+      // oxlint-disable-next-line no-use-before-define -- defined below, called later
+      await expect(appCalls(chat)).resolves.toHaveLength(1);
+    },
+    { timeout: 20_000, interval: 100 }
+  );
 };
 
 /** Puts the chat in restricted mode, as a restricted read does. */
@@ -273,48 +343,148 @@ describe(
 
     it("restricts the chat before a restricted App's answer reaches it", async () => {
       const notes = await notesApp();
+      const other = await notesApp(notes.builder);
       await appHost(env, appIdSchema.parse(notes.app)).restrict();
       const app = JSON.stringify(notes.app);
       const titles = JSON.stringify(callOf(notes.release, "notes.titles", {}));
-      // The code asks, inside its own call, whether its chat is restricted
-      // once the answer is in hand: it must already be.
-      const { chat, returned: result } = await runIn(
+      const write = JSON.stringify(
+        callOf(other.release, "notes.create", { title: "After" })
+      );
+      // Right after the answer, the code writes to another App: a write
+      // from a restricted chat restricts that App, so it is restricted
+      // only if the chat already was when the answer came back.
+      const { returned: result } = await runIn(
         notes,
-        tryEach({ titles: `env.apps.call(${app}, stream(${titles}))` }),
-        ["read"]
+        tryEach({
+          titles: `env.apps.call(${app}, stream(${titles}))`,
+          write: `env.apps.call(${JSON.stringify(other.app)}, stream(${write}))`,
+        }),
+        ["read"],
+        {
+          alsoGrant: [
+            {
+              object: { type: "app", appId: other.app },
+              actions: ["read", "write"],
+              binding: "OTHER",
+            },
+          ],
+        }
       );
       await expect(result()).resolves.toMatchObject({
         titles: { ok: true, value: [] },
+        write: { ok: true },
       });
       await expect(
-        chat.stub.isChatRestricted(chat.chat.id)
+        appHost(env, appIdSchema.parse(other.app)).isRestricted()
       ).resolves.toBeTruthy();
     });
 
     it("stops a running call's commit once its write grant is revoked", async () => {
       const notes = await notesApp();
       const app = JSON.stringify(notes.app);
-      const slow = JSON.stringify(
-        callOf(notes.release, "notes.slowCreate", { title: "Too late" })
+      const held = JSON.stringify(
+        callOf(notes.release, "notes.holdThenCreate", { title: "Too late" })
       );
       const admin = await signedInApi(idp, "admin");
-      await runIn(
+      const { chat } = await runIn(
         notes,
-        tryEach({ slow: `env.apps.call(${app}, stream(${slow}))` }),
+        tryEach({ held: `env.apps.call(${app}, stream(${held}))` }),
         ["read", "write"],
         {
-          during: async (_chat, grant) => {
-            await scheduler.wait(800);
+          during: async (_chat, [grant]) => {
+            await untilNoted(notes, "started");
             await admin.api.permissions.revoke(grant ?? "");
+            await noteAs(notes, "go");
           },
         }
       );
-      // The revocation also closes the code run (agent-scope.ts), so its
-      // step ends refused: what counts is that the commit never landed.
+      // Once the call is recorded, the action's write was tried and
+      // settled: it never committed.
+      await settled(chat);
+      await expect(titlesOf(notes)).resolves.toStrictEqual({
+        ok: true,
+        value: ["started", "go"],
+      });
+    });
+
+    it("stops a running call's commit once its code run closes, its grant still held", async () => {
+      const notes = await notesApp();
+      const other = await notesApp(notes.builder);
+      const app = JSON.stringify(notes.app);
+      const held = JSON.stringify(
+        callOf(notes.release, "notes.holdThenCreate", { title: "Too late" })
+      );
+      const admin = await signedInApi(idp, "admin");
+      const { chat } = await runIn(
+        notes,
+        tryEach({ held: `env.apps.call(${app}, stream(${held}))` }),
+        ["read", "write"],
+        {
+          alsoGrant: [
+            {
+              object: { type: "app", appId: other.app },
+              actions: ["read"],
+              binding: "OTHER",
+            },
+          ],
+          // Another of the agent's grants revoked closes the run (agent-
+          // scope.ts); the App's write grant stays.
+          during: async (_chat, [, otherGrant]) => {
+            await untilNoted(notes, "started");
+            await admin.api.permissions.revoke(otherGrant ?? "");
+            await noteAs(notes, "go");
+          },
+        }
+      );
+      await settled(chat);
+      await expect(titlesOf(notes)).resolves.toStrictEqual({
+        ok: true,
+        value: ["started", "go"],
+      });
+    });
+
+    it("lets a restricted chat restrict only an App its person has a role in", async () => {
+      const notes = await notesApp();
+      const stranger = await signedInApi(idp, "builder");
+      const app = JSON.stringify(notes.app);
+      const create = JSON.stringify(
+        callOf(notes.release, "notes.create", { title: "Stranger" })
+      );
+      const { returned: result } = await runIn(
+        notes,
+        tryEach({ create: `env.apps.call(${app}, stream(${create}))` }),
+        ["read", "write"],
+        { personId: stranger.userId, before: restricted }
+      );
+      await expect(result()).resolves.toMatchObject({
+        create: "app.not_found",
+      });
+      await expect(
+        appHost(env, appIdSchema.parse(notes.app)).isRestricted()
+      ).resolves.toBeFalsy();
       await expect(titlesOf(notes)).resolves.toStrictEqual({
         ok: true,
         value: [],
       });
+    });
+
+    it("audits a call refused as data as refused, with its code", async () => {
+      const notes = await notesApp();
+      const app = JSON.stringify(notes.app);
+      const invalid = JSON.stringify(
+        callOf(notes.release, "notes.create", { title: "" })
+      );
+      const { chat, returned: result } = await runIn(
+        notes,
+        tryEach({ invalid: `env.apps.call(${app}, stream(${invalid}))` }),
+        ["read", "write"]
+      );
+      await expect(result()).resolves.toMatchObject({
+        invalid: { ok: false, error: { code: "contract.invalid_args" } },
+      });
+      await expect(appCalls(chat)).resolves.toStrictEqual([
+        { outcome: "refused", reason: "contract.invalid_args" },
+      ]);
     });
 
     it("refuses a stream that never ends within its time, and audits every refusal", async () => {
