@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0b4884b0-3b91-4cf1-8924-b7a583fa0fee",
+  "id": "466f84e9-c5f6-4c87-8060-cdd7751e9ec0",
   "prevId": "e053b944-fa2c-4dd8-9340-35dad4a82d53",
   "tables": {
     "accounts": {
@@ -3518,73 +3518,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "workflow_owners": {
-      "name": "workflow_owners",
-      "columns": {
-        "app_id": {
-          "name": "app_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "workflow_id": {
-          "name": "workflow_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "set_by": {
-          "name": "set_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "set_at": {
-          "name": "set_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "workflow_owners_app_id_apps_id_fk": {
-          "name": "workflow_owners_app_id_apps_id_fk",
-          "tableFrom": "workflow_owners",
-          "tableTo": "apps",
-          "columnsFrom": [
-            "app_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "workflow_owners_app_id_workflow_id_pk": {
-          "columns": [
-            "app_id",
-            "workflow_id"
-          ],
-          "name": "workflow_owners_app_id_workflow_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "workflow_param_values": {
       "name": "workflow_param_values",
       "columns": {
@@ -3736,6 +3669,13 @@
         "details_removed_at": {
           "name": "details_removed_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "root_run_id": {
+          "name": "root_run_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

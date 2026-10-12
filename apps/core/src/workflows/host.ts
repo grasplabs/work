@@ -90,6 +90,12 @@ export interface HostedRun {
   workflow: WorkflowId;
   version: number;
   runId: RunId;
+  /**
+   * The root of its lineage, for a run another run started: from its
+   * row, read on every load, so a restart or replay keeps it. None for a
+   * run that is its own root.
+   */
+  rootRunId?: RunId;
   /** Who the run acts for in this execution. */
   authority: Authority;
   /** Its collections' stubs, by binding name (`runBindingsFor`). */
@@ -474,6 +480,30 @@ const isLastAttempt = (
   const retries =
     told?.config?.retries?.limit ?? configured ?? defaultRetryLimit;
   return (told?.attempt ?? tries) > retries;
+};
+
+/**
+ * Whether an App call failed only because the attempt it came from ran out
+ * of time (`StepAttempt.ends`, its deadline): it timed out, or gave up
+ * waiting for its turn, once that time had come. The engine gives up on the
+ * attempt at that same moment, by a timer of its own, and whichever lands
+ * first must not decide the step's fate: the attempt timed out either way.
+ */
+const cutOffByAttempt = (attempt: StepAttempt, error: unknown): boolean =>
+  attempt.ends !== undefined &&
+  Date.now() >= attempt.ends &&
+  isExpectedError(error) &&
+  (error.code === "app.timed_out" || error.code === "app.busy");
+
+/**
+ * The attempt's own timeout, as the engine ends an attempt that ran out of
+ * time (`isTimeout`): a step tried again as far as its retries allow,
+ * rather than one that stops the run.
+ */
+const attemptTimedOut = (): Error => {
+  const error = new Error("Execution timed out: the step's attempt ran out");
+  error.name = "WorkflowTimeoutError";
+  return error;
 };
 
 /** Waits `ms`, or until `attempt`'s timeout ends, if that comes first. */
@@ -1556,7 +1586,8 @@ export class RunHost extends RpcTarget {
    * data (`callApp`), and whatever it holds of the App's data is covered by
    * the run's restricted mode, which is the App's (restricted.ts). The call
    * waits for its turn in the App, and its answer, no longer than the
-   * attempt it comes from runs (`StepAttempt.ends`).
+   * attempt it comes from runs (`StepAttempt.ends`); cut off then, it fails
+   * as that attempt's timeout (`cutOffByAttempt`).
    */
   async callApp(
     method: unknown,
@@ -1580,16 +1611,20 @@ export class RunHost extends RpcTarget {
       await requireApprovedVersion(this.#env, this.#run.app, this.#run.version);
       // The App's own connection calls take the step's key: held, they
       // hold the step as the run's own do (`do` asks connect too).
-      return await heldNoted(
-        attempt,
-        async () =>
-          await this.#hooks.callApp(
-            caller,
-            String(method),
-            checked(z.array(z.unknown()), args),
-            calling.ends
-          )
-      );
+      try {
+        return await heldNoted(
+          attempt,
+          async () =>
+            await this.#hooks.callApp(
+              caller,
+              String(method),
+              checked(z.array(z.unknown()), args),
+              calling.ends
+            )
+        );
+      } catch (error) {
+        throw cutOffByAttempt(calling, error) ? attemptTimedOut() : error;
+      }
     });
   }
 

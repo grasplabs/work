@@ -12,7 +12,7 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { openBridge } from "./screen-bridge.ts";
+import { frameBridge, FrameRpcTarget, openBridge } from "./screen-bridge.ts";
 import type { FrameTarget } from "./screen-bridge.ts";
 
 // The page's bridge, from the frame's end of a real `MessagePort`: a
@@ -179,6 +179,17 @@ describe("the page's bridge to a screen", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("serves the frame only an object that holds each call to the frame's bounds", () => {
+    // What `openBridge` serves, and what every call of a frame's lands on
+    // first. Its answers are its target's: `watchRuns` passes on core's
+    // stub of the subscription, whose calls go back to core over the
+    // page's own connection, to a target core bounds (RunSubscription, a
+    // CoreRpcTarget: core's rpc-targets.test.ts).
+    expect(frameBridge(coreStandIn().target, [])).toBeInstanceOf(
+      FrameRpcTarget
+    );
   });
 
   it("passes a call on to the screen's own target, named by a string", async () => {
@@ -505,6 +516,71 @@ describe("the page's bridge to a screen", () => {
       before: [false, false],
       after: "refused",
       reached: [],
+      broken: 0,
+    });
+  });
+
+  it("ends the session over references that would copy without end, and a fresh screen still works", async () => {
+    const frame = rawFramed();
+    // Push "x", then each message an array of two references to the one
+    // before: a copy that doubles each step, as GRA-424's probe does.
+    frame.push("x");
+    for (let level = 1; level <= 16; level += 1) {
+      frame.push([
+        [
+          ["pipeline", level],
+          ["pipeline", level],
+        ],
+      ]);
+    }
+    await vi.waitFor(() => {
+      expect(frame.broken.times).toBe(1);
+    });
+    frame.close();
+
+    // The tab lives: a fresh bridge still answers a call.
+    const fresh = framed();
+    const answered = await outcome(fresh.page.call("notes", []));
+    fresh.close();
+    expect(answered).toBe("answered");
+  });
+
+  it("ends the session when what the frame never releases holds too much, and a fresh screen still works", async () => {
+    const frame = rawFramed();
+    // Forty values of four thousand small numbers each, never released:
+    // little text (well within what the port holds unread), but a lot of
+    // heap once parsed and kept, which the session's bytes don't allow.
+    const dense = [Array.from({ length: 4000 }, (_value, index) => index % 10)];
+    for (let count = 0; count < 40; count += 1) {
+      frame.push(dense);
+    }
+    await vi.waitFor(() => {
+      expect(frame.broken.times).toBe(1);
+    });
+    frame.close();
+
+    const fresh = framed();
+    const answered = await outcome(fresh.page.call("notes", []));
+    fresh.close();
+    expect(answered).toBe("answered");
+  });
+
+  it("passes a call with the largest input a screen may send, again and again", async () => {
+    const frame = framed();
+    // About 128 KiB of small numbers, each call answered and let go.
+    const largest = Array.from(
+      { length: 40_000 },
+      (_value, index) => index % 10
+    );
+    // One after another: each answered, and let go, before the next.
+    const answers: unknown[] = [];
+    for (let count = 0; count < 5; count += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in turn on purpose: each call must be answered before the next is sent
+      answers.push(await outcome(frame.page.call("notes", [largest])));
+    }
+    frame.close();
+    expect({ answers, broken: frame.broken.times }).toStrictEqual({
+      answers: ["answered", "answered", "answered", "answered", "answered"],
       broken: 0,
     });
   });

@@ -267,3 +267,33 @@ export const stillOpenTo = (by: Person, app: AppId): SQL => {
   }
   return sql`(EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${by.userId}) OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${app} AND ((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${by.userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${by.userId})))))`;
 };
+
+/**
+ * What `by` may do through the functions of App `app`, read now, as
+ * `requireStillOpen` reads it: a member of the App with any role in it, a
+ * builder with that role (what `appMembers` and `appBuilders` tables
+ * require). Refuses as `requireAppRole` does, `app.not_found` when they
+ * have no role. For the operation host, which asks again just before a
+ * mutation commits (operations.ts).
+ */
+export const operationRoles = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role">,
+  app: AppId
+): Promise<{ appMember: boolean; appBuilder: boolean }> => {
+  const row = await drizzle(env.DB)
+    .select({ id: apps.id, owner: apps.ownerId })
+    .from(apps)
+    .where(eq(apps.id, app))
+    .get();
+  if (row === undefined) {
+    throw appErrors.create("app.not_found");
+  }
+  const role = await requireAppRole(
+    env,
+    { ...by, teams: await teamsOf(env.DB, by.userId) },
+    { id: appIdSchema.parse(row.id), owner: row.owner },
+    "user"
+  );
+  return { appMember: true, appBuilder: role === "builder" };
+};
