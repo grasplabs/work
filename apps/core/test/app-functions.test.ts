@@ -724,43 +724,93 @@ describe("a call past its deadline", { timeout: 120_000 }, () => {
   });
 });
 
+/**
+ * Rewrites the fixture's sealed SDK module at `path` as `change` makes
+ * it, every hash rewritten to match: a release as another SDK sealed it.
+ */
+const rewriteSdk = async (
+  notes: Sealed,
+  path: string,
+  change: (text: string) => string
+): Promise<void> => {
+  const entry = notes.release.manifest.artifacts.find(
+    (artifact) => artifact.path === path
+  );
+  if (entry === undefined) {
+    throw new Error(`No ${path} in the release`);
+  }
+  const stored = await env.FILES.get(artifactKey(entry.sha256));
+  const text = change((await stored?.text()) ?? "");
+  const sha256 = await sha256Hex(text);
+  await env.FILES.put(artifactKey(sha256), text);
+  const manifest = canonicalJson({
+    ...notes.release.manifest,
+    artifacts: notes.release.manifest.artifacts.map((artifact) =>
+      artifact.path === path
+        ? { path, sha256, bytes: new TextEncoder().encode(text).byteLength }
+        : artifact
+    ),
+  });
+  const hash = await sha256Hex(manifest);
+  await drizzle(env.DB)
+    .update(sdkReleaseManifests)
+    .set({ manifest, manifestHash: hash })
+    .where(eq(sdkReleaseManifests.appId, notes.app));
+  await drizzle(env.DB)
+    .update(sdkResourceBindings)
+    .set({ manifestHash: hash })
+    .where(eq(sdkResourceBindings.resourceId, notes.app));
+};
+
+/** A bundled module's final export list. */
+const finalExports = /export\s*\{(?<names>[^}]*)\};?\s*$/u;
+
+/** A module's final export list, keeping only the names in `kept`. */
+const exportsOnly = (text: string, kept: readonly string[]): string =>
+  text.replace(finalExports, (_list, names: string) => {
+    const entries = names
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => kept.includes(entry.split(/\s+as\s+/u).at(-1) ?? ""));
+    return `export{${entries.join(",")}};`;
+  });
+
 describe("the SDK a release runs with", { timeout: 120_000 }, () => {
   it("is the one sealed with it, never the one the host serves now", async () => {
     const notes = await sealedNotes();
     const before = valueOf(await call(notes, notes.owner, "notes.sdkMark", {}));
     // The sealed SDK differs from the host's from here on: its root
-    // module marks the isolate, every hash rewritten to match.
-    const path = "sdk/@grasp-os~sdk.js";
-    const entry = notes.release.manifest.artifacts.find(
-      (artifact) => artifact.path === path
+    // module marks the isolate.
+    await rewriteSdk(
+      notes,
+      "sdk/@grasp-os~sdk.js",
+      (text) => `globalThis.sealedSdkMark = "sealed";\n${text}`
     );
-    const stored = await env.FILES.get(artifactKey(entry?.sha256 ?? ""));
-    const text = `globalThis.sealedSdkMark = "sealed";\n${(await stored?.text()) ?? ""}`;
-    const sha256 = await sha256Hex(text);
-    await env.FILES.put(artifactKey(sha256), text);
-    const manifest = canonicalJson({
-      ...notes.release.manifest,
-      artifacts: notes.release.manifest.artifacts.map((artifact) =>
-        artifact.path === path
-          ? { path, sha256, bytes: new TextEncoder().encode(text).byteLength }
-          : artifact
-      ),
-    });
-    const hash = await sha256Hex(manifest);
-    await drizzle(env.DB)
-      .update(sdkReleaseManifests)
-      .set({ manifest, manifestHash: hash })
-      .where(eq(sdkReleaseManifests.appId, notes.app));
-    await drizzle(env.DB)
-      .update(sdkResourceBindings)
-      .set({ manifestHash: hash })
-      .where(eq(sdkResourceBindings.resourceId, notes.app));
     const after = valueOf(await call(notes, notes.owner, "notes.sdkMark", {}));
-    expect([entry === undefined, before, after]).toStrictEqual([
-      false,
-      "unmarked",
-      "sealed",
-    ]);
+    expect([before, after]).toStrictEqual(["unmarked", "sealed"]);
+  });
+
+  it("needs nothing of its runner but what protocol 1 pins", async () => {
+    const notes = await sealedNotes();
+    // A runner exporting only runFunction and manifestOfApp, as any SDK
+    // sealed under protocol 1 does: the host brings the rest itself.
+    await rewriteSdk(notes, "sdk/@grasp-os~sdk~runner.js", (text) => {
+      const pinned = exportsOnly(text, ["runFunction", "manifestOfApp"]);
+      if (!finalExports.test(pinned)) {
+        throw new Error("The runner has no export list to rewrite");
+      }
+      return pinned;
+    });
+    const created = valueOf(
+      await call(notes, notes.owner, "notes.create", {
+        title: "Pinned",
+        body: "",
+      })
+    );
+    expect([
+      typeof created,
+      codeOf(await call(notes, notes.owner, "notes.notANumber", {})),
+    ]).toStrictEqual(["string", "contract.invalid_return"]);
   });
 });
 

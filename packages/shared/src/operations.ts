@@ -178,13 +178,18 @@ export const isPlatformCode = (code: unknown): code is string => {
 };
 
 /**
- * A JSON copy of `value` (null, strings, booleans, finite numbers, dense
- * arrays and plain objects of those, without prototype keys, at most
- * `valueDepth` deep), or undefined when it is anything else: what crosses
- * from App code is only ever read as JSON.
+ * `jsonOf`'s reading, to `maxDepth`: self-contained, naming nothing from
+ * outside it but the language's own globals, so the host loads this very
+ * function into an App's isolate to read what App code answers there
+ * (app-functions.ts), and the two never drift.
  */
-export const jsonOf = (value: unknown, depth = 1): Json | undefined => {
-  if (depth > valueDepth) {
+// oxlint-disable-next-line func-style -- a declaration keeps its own name for its source
+export function readJsonValue(
+  value: unknown,
+  depth: number,
+  maxDepth: number
+): Json | undefined {
+  if (depth > maxDepth) {
     return undefined;
   }
   if (
@@ -206,7 +211,7 @@ export const jsonOf = (value: unknown, depth = 1): Json | undefined => {
       if (!Object.hasOwn(value, index)) {
         return undefined;
       }
-      const item = jsonOf(value[index], depth + 1);
+      const item = readJsonValue(value[index], depth + 1, maxDepth);
       if (item === undefined) {
         return undefined;
       }
@@ -220,14 +225,23 @@ export const jsonOf = (value: unknown, depth = 1): Json | undefined => {
   }
   const copy: Record<string, Json> = {};
   for (const [key, entry] of Object.entries(value)) {
-    const item = jsonOf(entry, depth + 1);
+    const item = readJsonValue(entry, depth + 1, maxDepth);
     if (item === undefined || key === "__proto__") {
       return undefined;
     }
     Object.defineProperty(copy, key, { enumerable: true, value: item });
   }
   return copy;
-};
+}
+
+/**
+ * A JSON copy of `value` (null, strings, booleans, finite numbers, dense
+ * arrays and plain objects of those, without prototype keys, at most
+ * `valueDepth` deep), or undefined when it is anything else: what crosses
+ * from App code is only ever read as JSON.
+ */
+export const jsonOf = (value: unknown, depth = 1): Json | undefined =>
+  readJsonValue(value, depth, valueDepth);
 
 const encoder = new TextEncoder();
 

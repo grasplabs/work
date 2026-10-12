@@ -1,4 +1,3 @@
-import { jsonOf } from "@grasp-os/shared/operations";
 import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 
 import { AppError } from "./app-error.ts";
@@ -209,15 +208,3 @@ export const runFunction = async (
  */
 export const manifestOfApp = (registered: unknown): string =>
   JSON.stringify(inspectApp(registered).manifest);
-
-/**
- * A function's return value as the JSON text it answers, or undefined for
- * anything JSON can't carry as it is: the host's own reading (`jsonOf`),
- * applied to the value itself before it is serialized, so `NaN`, an
- * `undefined` in an array, a function, a symbol, a bigint or a cycle
- * never becomes JSON that merely looks valid.
- */
-export const jsonAnswer = (value: unknown): string | undefined => {
-  const json = jsonOf(value);
-  return json === undefined ? undefined : JSON.stringify(json);
-};
