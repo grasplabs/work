@@ -680,6 +680,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       waiting.reply,
       says("Checking."),
     ]);
+    const exhausted = agentErrors.create("agent.jobs_exhausted").message;
     const checking = holdFiles(screenBuilds);
     let submitted: unknown;
     let fifth: unknown;
@@ -694,20 +695,23 @@ describe("build jobs", { timeout: 180_000 }, () => {
         },
         { timeout: 60_000, interval: 50 }
       );
-      const jobs = z.array(z.string()).parse(submitted);
-      const [first] = jobs;
+      // Whichever submission lost the race is refused, the first as well
+      // as the last: one that started is any other.
+      const started = z
+        .array(z.string())
+        .parse(submitted)
+        .find((job) => job !== exhausted);
       // Its instance ends behind the record's back: the record still runs.
-      const instance = await env.WORKFLOWS.get(first ?? "");
+      const instance = await env.WORKFLOWS.get(started ?? "");
       await instance.terminate();
       waiting.release();
       await answering;
       const results = await codeResults(chat.stub, chat.chat.id);
       fifth = results[1]?.text;
-      ended = await endedJob(chat.stub, chat.chat.id, first ?? "");
+      ended = await endedJob(chat.stub, chat.chat.id, started ?? "");
     } finally {
       checking.restore();
     }
-    const exhausted = agentErrors.create("agent.jobs_exhausted").message;
     const all = z.array(z.string()).parse(submitted);
     expect({
       refused: all.filter((job) => job === exhausted).length,
