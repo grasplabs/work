@@ -27,16 +27,25 @@ interface SandboxHostEnv {
   LOADER: WorkerLoader;
 }
 
-/** The isolate a call runs in, as core describes it. */
+/**
+ * How every isolate here runs, whatever a call says: this Worker sets it,
+ * not its caller. The same as core's `sandbox` (apps/core/src/sandbox.ts:
+ * `isolateBase` and its CPU limit), which a test holds them to; plain
+ * workerd ignores `cpuMs`, which is why the supervisor bounds the time.
+ */
+export const isolateSettings = {
+  compatibilityDate: "2026-09-15",
+  compatibilityFlags: ["disallow_importable_env"],
+  limits: { cpuMs: 10_000 },
+};
+
+/** The isolate's code: its modules, and which is its main one. */
 interface IsolateCode {
-  compatibilityDate: string;
-  compatibilityFlags: string[];
-  limits?: { cpuMs?: number; subRequests?: number };
   mainModule: string;
   modules: Record<string, string>;
 }
 
-/** One call: the isolate, and which entrypoint method to call with what. */
+/** One call: the isolate's code, and which entrypoint method to call with what. */
 interface SandboxCall {
   worker: IsolateCode;
   entrypoint: string;
@@ -59,26 +68,18 @@ const isStringRecord = (value: unknown): value is Record<string, string> =>
   isRecord(value) &&
   Object.values(value).every((entry) => typeof entry === "string");
 
-const isStringList = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every((entry) => typeof entry === "string");
-
-const isLimits = (value: unknown): value is IsolateCode["limits"] =>
-  value === undefined ||
-  (isRecord(value) &&
-    Object.values(value).every((entry) => typeof entry === "number"));
-
-/** `body` as a call, or undefined for anything else. */
+/**
+ * `body` as a call, or undefined for anything else. Only the code is read
+ * from it: anything else it carries (an env, an outbound, flags, limits)
+ * is ignored.
+ */
 const callOf = (body: unknown): SandboxCall | undefined => {
   if (!isRecord(body) || !isRecord(body.worker)) {
     return undefined;
   }
   const { worker, entrypoint, method, args } = body;
-  const { compatibilityDate, compatibilityFlags, limits, mainModule, modules } =
-    worker;
+  const { mainModule, modules } = worker;
   if (
-    typeof compatibilityDate !== "string" ||
-    !isStringList(compatibilityFlags) ||
-    !isLimits(limits) ||
     typeof mainModule !== "string" ||
     !isStringRecord(modules) ||
     typeof entrypoint !== "string" ||
@@ -87,18 +88,7 @@ const callOf = (body: unknown): SandboxCall | undefined => {
   ) {
     return undefined;
   }
-  return {
-    worker: {
-      compatibilityDate,
-      compatibilityFlags,
-      limits,
-      mainModule,
-      modules,
-    },
-    entrypoint,
-    method,
-    args,
-  };
+  return { worker: { mainModule, modules }, entrypoint, method, args };
 };
 
 /** Runs `call` in an isolate of its own: no env, no network, no cache. */
@@ -108,7 +98,9 @@ const run = async (
 ): Promise<SandboxAnswer> => {
   try {
     const stub: unknown = env.LOADER.get(null, () => ({
-      ...worker,
+      ...isolateSettings,
+      mainModule: worker.mainModule,
+      modules: worker.modules,
       env: {},
       globalOutbound: null,
     })).getEntrypoint(entrypoint);
@@ -121,7 +113,10 @@ const run = async (
       return { ok: false, message: "The entrypoint has no such method." };
     }
     const value: unknown = await Reflect.apply(fn, stub, args);
-    return { ok: true, value };
+    // Never undefined, which JSON drops: an answer always carries its value,
+    // so whatever the App's code returns reads as its answer, never as an
+    // outage (apps/core/src/sandboxed.ts).
+    return { ok: true, value: value ?? null };
   } catch (error) {
     return {
       ok: false,

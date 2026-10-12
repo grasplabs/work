@@ -10,12 +10,21 @@ import { sandbox } from "./sandbox.ts";
 //   core: on-prem binds `SANDBOX_HOST`, a supervisor
 //   (scripts/workerd-sandbox.ts) serving the sandbox host
 //   (on-prem/sandbox-host.ts) in a pool of workerd processes of its own. It
-//   kills the process whose call runs past {@link sandboxDeadlineMs} and
-//   answers 504: a refusal of the App's code, as if it had thrown.
+//   kills the process whose call runs past {@link sandboxDeadlineMs}, uses
+//   too much memory or crashes, and answers so: a refusal of the App's code.
+// - A deployment off Cloudflare forgets `SANDBOX_HOST`, and App code runs in
+//   core unbounded again. Refused: without it, only `RUNTIME_PROFILE`
+//   `cloudflare` runs App code in core, or an explicit
+//   `SANDBOX_IN_PROCESS=unbounded` (tests and local development, which
+//   accept that a busy loop holds them).
+// - App code makes its failure look like an outage (an answer of nothing,
+//   or of something else than text). Every well-formed answer the
+//   supervisor gives is the App's: only a failed transport, another status
+//   than 200 (a proxy's 504 too) or a body that isn't one makes the sandbox
+//   unavailable (`SandboxUnavailableError`).
 // - The supervisor itself is gone or stuck. Core gives up a little past the
-//   deadline on its own clock, which nothing in the sandbox can hold, and
-//   says the sandbox is unavailable (`SandboxUnavailableError`), which
-//   isn't the App's fault.
+//   longest the supervisor may take (the wait for a process, then the
+//   deadline) on its own clock, which nothing in the sandbox can hold.
 // - App code answers more than core should read. The supervisor bounds the
 //   answer; the caller bounds what it takes from it.
 // Only isolates with no env go to the sandbox host: a stub can't cross a
@@ -28,16 +37,24 @@ import { sandbox } from "./sandbox.ts";
  */
 export const sandboxDeadlineMs = sandbox.limits.cpuMs;
 
-/** How much longer than the deadline core waits for the supervisor's answer. */
+/** How long a call may wait for a free sandbox process before it's refused. */
+export const sandboxWaitMs = 3000;
+
+/** How much longer than the supervisor may take core waits for its answer. */
 const backstopMs = 2000;
 
-/** The header core gives a call's deadline in, in milliseconds. */
+/** The headers core gives a call's deadline and wait in, in milliseconds. */
 export const sandboxDeadlineHeader = "x-grasp-sandbox-deadline-ms";
+export const sandboxWaitHeader = "x-grasp-sandbox-wait-ms";
 
 /** What a sandboxed call reads from core's env (src/env.d.ts). */
 export type SandboxedEnv = Pick<
   Env,
-  "LOADER" | "SANDBOX_HOST" | "SANDBOX_DEADLINE_MS"
+  | "LOADER"
+  | "RUNTIME_PROFILE"
+  | "SANDBOX_HOST"
+  | "SANDBOX_DEADLINE_MS"
+  | "SANDBOX_IN_PROCESS"
 >;
 
 /** The isolate a call runs in: no env and no network, whatever runs it. */
@@ -46,7 +63,7 @@ export interface SandboxedWorker {
   modules: Record<string, string>;
 }
 
-/** The sandbox host didn't answer: nothing the App's code did. */
+/** The sandbox didn't answer, or can't run here: nothing the App's code did. */
 export class SandboxUnavailableError extends Error {
   override name = "SandboxUnavailableError";
 }
@@ -74,9 +91,14 @@ const callStub = async (stub: unknown, method: string): Promise<unknown> => {
   return await Reflect.apply(fn, stub, []);
 };
 
-/** What the sandbox host answers a call: its result, or why it threw. */
+/**
+ * What the supervisor answered for the App's code: its result, or an error
+ * with why it failed (it threw, ran past its time, used too much memory,
+ * crashed its process). Any well-formed answer is the App's, `ok: true`
+ * with no value too: the caller refuses what isn't the result it wants.
+ */
 const answerOf = (body: unknown): unknown => {
-  if (isRecord(body) && body.ok === true && "value" in body) {
+  if (isRecord(body) && body.ok === true) {
     return body.value;
   }
   if (isRecord(body) && body.ok === false && typeof body.message === "string") {
@@ -102,32 +124,25 @@ const onHost = async (
       headers: {
         "content-type": "application/json",
         [sandboxDeadlineHeader]: String(deadlineMs),
+        [sandboxWaitHeader]: String(sandboxWaitMs),
       },
+      // Only the code: the sandbox host sets everything else itself.
       body: JSON.stringify({
-        worker: {
-          compatibilityDate: sandbox.compatibilityDate,
-          compatibilityFlags: sandbox.compatibilityFlags,
-          limits: sandbox.limits,
-          mainModule: worker.mainModule,
-          modules: worker.modules,
-        },
+        worker: { mainModule: worker.mainModule, modules: worker.modules },
         entrypoint,
         method,
         args: [],
       }),
-      signal: AbortSignal.timeout(deadlineMs + backstopMs),
+      signal: AbortSignal.timeout(sandboxWaitMs + deadlineMs + backstopMs),
     });
   } catch (error) {
     throw new SandboxUnavailableError("The sandbox host didn't answer.", {
       cause: error,
     });
   }
-  if (response.status === 504) {
-    await response.body?.cancel();
-    // The App's code, refused as anything else it threw.
-    throw new Error(`The App's code ran past its time (${deadlineMs} ms).`);
-  }
-  if (!response.ok) {
+  // Only the supervisor's own answer speaks for the App's code: anything
+  // else (its refusals, a proxy's 504) is the sandbox being unavailable.
+  if (response.status !== 200) {
     await response.body?.cancel();
     throw new SandboxUnavailableError(
       `The sandbox host answered ${response.status}.`
@@ -146,11 +161,13 @@ const onHost = async (
 
 /**
  * What `method` of `entrypoint` answers in an isolate of `worker`'s code,
- * with no env and no network: in a Loader isolate of core's own where the
- * runtime bounds its CPU (Cloudflare, or wherever `SANDBOX_HOST` isn't
- * bound), or on the sandbox host within {@link sandboxDeadlineMs}. Throws
- * what the App's code threw, an error saying it ran past its time past the
- * deadline, or {@link SandboxUnavailableError} if the sandbox host didn't answer.
+ * with no env and no network: on the sandbox host where `SANDBOX_HOST` is
+ * bound, within {@link sandboxDeadlineMs}; otherwise in a Loader isolate of
+ * core's own, only where the runtime bounds its CPU (`RUNTIME_PROFILE`
+ * `cloudflare`) or the deployment accepts that nothing does
+ * (`SANDBOX_IN_PROCESS=unbounded`). Throws what the App's code threw, an
+ * error saying why the sandbox ended it, or {@link SandboxUnavailableError}
+ * if the sandbox didn't answer or can't run here.
  */
 export const callSandboxed = async (
   env: SandboxedEnv,
@@ -159,13 +176,21 @@ export const callSandboxed = async (
   method: string
 ): Promise<unknown> => {
   const host = env.SANDBOX_HOST;
-  if (host === undefined) {
-    const stub = env.LOADER.get(null, () => ({
-      ...sandbox,
-      ...worker,
-      env: {},
-    })).getEntrypoint(entrypoint);
-    return await callStub(stub, method);
+  if (host !== undefined) {
+    return await onHost(host, deadlineOf(env), worker, entrypoint, method);
   }
-  return await onHost(host, deadlineOf(env), worker, entrypoint, method);
+  if (
+    env.RUNTIME_PROFILE !== "cloudflare" &&
+    env.SANDBOX_IN_PROCESS !== "unbounded"
+  ) {
+    throw new SandboxUnavailableError(
+      "No sandbox bounds App code here: bind SANDBOX_HOST to the sandbox supervisor."
+    );
+  }
+  const stub = env.LOADER.get(null, () => ({
+    ...sandbox,
+    ...worker,
+    env: {},
+  })).getEntrypoint(entrypoint);
+  return await callStub(stub, method);
 };

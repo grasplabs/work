@@ -27,6 +27,11 @@ const apps: Record<string, string> = {
   busyStartup: "for (;;) {} export default { name: 'busy' };",
   throws:
     "export default { get name() { throw new Error('a broken registration'); } };",
+  // Its inspection answers nothing: the App's code replaces the method it's
+  // asked through, reaching the inspection module by its name.
+  notText: `import * as inspection from "grasp-inspect.js";
+queueMicrotask(() => { inspection.Inspect.prototype.manifest = () => undefined; });
+export default { name: "nothing" };`,
 };
 
 /** How an inspection ended. */
@@ -64,7 +69,12 @@ export default {
     const { pathname, searchParams } = new URL(request.url);
     if (pathname === "/inspect") {
       const started = Date.now();
-      const outcome = await inspect(env, searchParams.get("app") ?? "");
+      // As a deployment off Cloudflare that forgot its sandbox.
+      const unbound = searchParams.has("unbound");
+      const outcome = await inspect(
+        unbound ? { ...env, SANDBOX_HOST: undefined } : env,
+        searchParams.get("app") ?? ""
+      );
       return Response.json({ ...outcome, ms: Date.now() - started });
     }
     return new Response("core answers");

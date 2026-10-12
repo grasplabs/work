@@ -155,6 +155,11 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
             DURABLE_OBJECT_JURISDICTION: "none",
             // Plain workerd: no CPU limit on Code Mode's isolates.
             RUNTIME_PROFILE: "workerd",
+            // No sandbox supervisor in tests: App code is inspected in the
+            // test's own workerd, where a busy loop would hold it
+            // (src/sandboxed.ts). scripts/workerd-sandbox.test.ts tests the
+            // supervisor on plain workerd.
+            SANDBOX_IN_PROCESS: "unbounded",
             // So the test of a call that never ends doesn't wait a minute.
             APP_CALL_TIMEOUT_MS: "10000",
             // The engine's step limit, lowered below (`workflows`) so a test
