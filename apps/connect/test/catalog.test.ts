@@ -18,6 +18,8 @@ const toolkits: FakeToolkit[] = [
     slug: "hubspot",
     name: "HubSpot",
     categories: ["CRM", "Marketing"],
+    description:
+      "HubSpot is a  CRM platform\nfor marketing, sales and service. It brings teams together.",
     tools: [
       {
         slug: "HUBSPOT_LIST_CONTACTS",
@@ -37,6 +39,9 @@ const toolkits: FakeToolkit[] = [
   {
     slug: "linear",
     name: "Linear",
+    // Its main category fits no group; the next one does.
+    categories: ["News & lifestyle", "Project management"],
+    description: null,
     tools: [{ slug: "LINEAR_LIST_ISSUES" }],
   },
   // Composio holds no app for it: an admin would need one of their own.
@@ -51,6 +56,10 @@ const toolkits: FakeToolkit[] = [
   {
     slug: "notion",
     name: "Notion",
+    // A category none of Grasp's groups fits.
+    categories: ["Fitness"],
+    // A description connect can't read leaves it listed, with none.
+    description: 42,
     tools: [
       { slug: "NOTION_SEARCH", tags: ["readOnlyHint"] },
       // Tags connect can't read, each beside the read-only tag.
@@ -102,7 +111,35 @@ describe("the catalog", () => {
       // Served from the deployment's origin: a browser showing Composio's
       // would tell it who looks (catalog-logos.test.ts).
       logo: "/api/catalog/logos/composio/hubspot",
+      description:
+        "HubSpot is a CRM platform for marketing, sales and service.",
+      group: "CRM",
     });
+  });
+
+  it("describes each entry in one sentence and places it in one of Grasp's groups", async () => {
+    const { entries } = await exports.default.catalog();
+    expect(
+      entries.map(({ id, description, group }) => [id, description, group])
+    ).toStrictEqual([
+      [
+        "microsoft",
+        "Outlook mail and calendars, and files in OneDrive and SharePoint.",
+        "Email and calendar",
+      ],
+      [
+        "google",
+        "Gmail, Google Calendar, and files in Google Drive.",
+        "Email and calendar",
+      ],
+      [
+        "hubspot",
+        "HubSpot is a CRM platform for marketing, sales and service.",
+        "CRM",
+      ],
+      ["linear", null, "Projects and tasks"],
+      ["notion", null, "Other"],
+    ]);
   });
 
   it("reads every page of Composio's list, with connect's key, following no redirect", async () => {

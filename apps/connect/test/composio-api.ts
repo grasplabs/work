@@ -35,6 +35,12 @@ export interface FakeToolkit {
   /** Whether Composio holds an app for it (managed auth); by default yes. */
   managed?: boolean;
   categories?: string[];
+  /**
+   * What its list says it is: `<name> toolkit` by default, `null` for no
+   * description at all. Anything but a string stands for an answer of
+   * Composio's that connect can't read.
+   */
+  description?: unknown;
   tools: FakeComposioTool[];
   /**
    * Where its list says its logo is: on Composio's logo host by default,
@@ -169,6 +175,7 @@ const toolkitItem = ({
   name,
   managed,
   categories,
+  description = `${name} toolkit`,
   tools,
   logo = `https://${logoHost}/api/${slug}`,
 }: FakeToolkit) => ({
@@ -179,7 +186,7 @@ const toolkitItem = ({
   composio_managed_auth_schemes: managed === false ? [] : ["OAUTH2"],
   no_auth: false,
   meta: {
-    description: `${name} toolkit`,
+    ...(description === null ? {} : { description }),
     ...(logo === null ? {} : { logo }),
     categories: (categories ?? []).map((category) => ({
       id: category.toLowerCase(),
