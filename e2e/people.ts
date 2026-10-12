@@ -165,6 +165,7 @@ const cast = {
   decisionUnreachable: { decider: "user" },
   memberActions: { admin: "admin", one: "user", two: "user" },
   memberRemoval: { admin: "admin", leaving: "user" },
+  workspaceSettings: { admin: "admin", member: "user" },
   roleChange: { admin: "admin", one: "user" },
   membersUnreachable: { admin: "admin" },
   membersRecover: { admin: "admin" },

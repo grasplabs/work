@@ -656,6 +656,11 @@ msgstr "Allowed models"
 msgid "Already decided: {model}"
 msgstr "Already decided: {model}"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Amsterdam"
+msgstr "Amsterdam"
+
 #: src/connections/connection-list.tsx
 msgid "An admin"
 msgstr "An admin"
@@ -875,6 +880,11 @@ msgstr "At {step}: {error}"
 msgid "At work"
 msgstr "At work"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Athens"
+msgstr "Athens"
+
 #: src/routes/_shell.settings.audit.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Audit trail"
@@ -900,6 +910,11 @@ msgstr "Back to the small chat"
 msgid "Being built"
 msgstr "Being built"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Berlin"
+msgstr "Berlin"
+
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
 msgstr "Breadcrumb"
@@ -912,6 +927,11 @@ msgstr "Browse"
 msgctxt "where a package runs"
 msgid "Browser"
 msgstr "Browser"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Brussels"
+msgstr "Brussels"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Budgets"
@@ -1278,6 +1298,11 @@ msgstr "Consent and connect"
 msgid "Consent and sign in"
 msgstr "Consent and sign in"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Copenhagen"
+msgstr "Copenhagen"
+
 #: src/chat/thread.tsx
 msgid "Copied"
 msgstr "Copied"
@@ -1323,6 +1348,10 @@ msgstr "Critical"
 #: src/routes/_shell.dashboard.tsx
 msgid "Dashboard"
 msgstr "Dashboard"
+
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Data location"
+msgstr "Data location"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Data processing agreement"
@@ -1509,6 +1538,11 @@ msgstr "Dropped a kept build of approved packages"
 msgid "Dropped an event no workflow could take"
 msgstr "Dropped an event no workflow could take"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Dublin"
+msgstr "Dublin"
+
 #: src/routes/_shell.engines.index.tsx
 msgid "Each engine runs one part of the business: its workflows, apps and connections."
 msgstr "Each engine runs one part of the business: its workflows, apps and connections."
@@ -1608,6 +1642,10 @@ msgstr "Error"
 msgid "EU routing"
 msgstr "EU routing"
 
+#: src/routes/_shell.settings.workspace.tsx
+msgid "European Union"
+msgstr "European Union"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Every call stays in the EU: no."
 msgstr "Every call stays in the EU: no."
@@ -1635,6 +1673,10 @@ msgstr "Everything done in Grasp, by whom and when, kept in a chain nobody can c
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it, and always have the memory files in mind."
 msgstr "Everything Grasp and its agents may read, in collections: your own, your teams' and your organization's. Agents read a document when they need it, and always have the memory files in mind."
+
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Everything Grasp stores for your organization stays here."
+msgstr "Everything Grasp stores for your organization stays here."
 
 #: src/dashboard/widget-block.tsx
 msgid "Everything this widget shows, in full."
@@ -1771,6 +1813,10 @@ msgstr "For everyone"
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "For Grasp's staff on this onboarding alone; the company doesn't see them."
 msgstr "For Grasp's staff on this onboarding alone; the company doesn't see them."
+
+#: src/routes/_shell.settings.workspace.tsx
+msgid "For schedules and the times Grasp shows."
+msgstr "For schedules and the times Grasp shows."
 
 #: src/activity/audit-log.tsx
 msgid "From"
@@ -1919,6 +1965,11 @@ msgstr "He doesn't ask about it, and moves on when somebody brings it up."
 msgid "Held for review"
 msgstr "Held for review"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Helsinki"
+msgstr "Helsinki"
+
 #: src/routes/guest.tsx
 msgid "Hi {name}"
 msgstr "Hi {name}"
@@ -1955,6 +2006,10 @@ msgstr "How Stephen is set up here"
 #: src/routes/_shell.settings.profile.tsx
 msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
 msgstr "How you appear in Grasp: on workflows you own, and in the audit trail."
+
+#: src/routes/_shell.settings.workspace.tsx
+msgid "How your organization is named in Grasp."
+msgstr "How your organization is named in Grasp."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "If {condition}:"
@@ -2221,6 +2276,11 @@ msgstr "Links out: {count} of {of}"
 msgid "Links to"
 msgstr "Links to"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Lisbon"
+msgstr "Lisbon"
+
 #: src/activity/audit-log.tsx
 msgid "Load older"
 msgstr "Load older"
@@ -2249,10 +2309,20 @@ msgctxt "onboarding area section"
 msgid "Log"
 msgstr "Log"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "London"
+msgstr "London"
+
 #: src/dashboard/dependency-requests.tsx
 msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Low"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Madrid"
+msgstr "Madrid"
 
 #: src/frame/app-sidebar.tsx
 msgid "Main"
@@ -2356,6 +2426,7 @@ msgid "Moved old entries out of the audit trail"
 msgstr "Moved old entries out of the audit trail"
 
 #: src/routes/_shell.settings.profile.tsx
+#: src/routes/_shell.settings.workspace.tsx
 msgid "Name"
 msgstr "Name"
 
@@ -2866,6 +2937,11 @@ msgstr "Opens at {threshold}%"
 msgid "or choose them from your computer"
 msgstr "or choose them from your computer"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Oslo"
+msgstr "Oslo"
+
 #: src/chat/builds-state.ts
 msgid "Other engines may no longer call {name}"
 msgstr "Other engines may no longer call {name}"
@@ -2916,6 +2992,11 @@ msgctxt "tab of a workflow"
 msgid "Parameters"
 msgstr "Parameters"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Paris"
+msgstr "Paris"
+
 #: src/chat/held-writes.tsx
 msgid "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 msgstr "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
@@ -2961,6 +3042,10 @@ msgstr "People"
 msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 
+#: src/routes/_shell.settings.workspace.tsx
+msgid "People sign in with an address in these domains, through your organization’s account."
+msgstr "People sign in with an address in these domains, through your organization’s account."
+
 #: src/routes/_shell.onboarding.log.tsx
 msgid "Per day"
 msgstr "Per day"
@@ -2989,6 +3074,11 @@ msgstr "Platform update"
 #: src/activity/audit-log.tsx
 msgid "Position"
 msgstr "Position"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Prague"
+msgstr "Prague"
 
 #: src/chat/studio.tsx
 msgid "Preview of {name}"
@@ -3132,6 +3222,10 @@ msgstr "Ready"
 #: src/routes/_shell.index.tsx
 msgid "Recent chats"
 msgstr "Recent chats"
+
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Region"
+msgstr "Region"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Registry and hash"
@@ -3323,6 +3417,11 @@ msgstr "Role"
 #: src/routes/_shell.settings.members.tsx
 msgid "Role of {who}"
 msgstr "Role of {who}"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Rome"
+msgstr "Rome"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Rules"
@@ -3608,6 +3707,10 @@ msgstr "Sign out everywhere"
 msgid "Sign-in didn't work. Try again, or ask an admin."
 msgstr "Sign-in didn't work. Try again, or ask an admin."
 
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Sign-in domains"
+msgstr "Sign-in domains"
+
 #: src/sign-in-errors.ts
 msgid "Sign-in timed out or was started elsewhere. Try again."
 msgstr "Sign-in timed out or was started elsewhere. Try again."
@@ -3736,6 +3839,11 @@ msgstr "Still being read. It shows in the file list once it's ready."
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Still deciding"
 msgstr "Still deciding"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Stockholm"
+msgstr "Stockholm"
 
 #: src/chat/composer.tsx
 msgctxt "stop the answer"
@@ -4210,6 +4318,10 @@ msgstr "Through Composio, which keeps the access in its own cloud. Your workflow
 msgid "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
 msgstr "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
 
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Time zone"
+msgstr "Time zone"
+
 #: src/dashboard/runs-widget.tsx
 msgid "Timed out"
 msgstr "Timed out"
@@ -4323,6 +4435,11 @@ msgstr "Used by"
 msgid "User"
 msgstr "User"
 
+#. A time zone
+#: src/routes/_shell.settings.workspace.tsx
+msgid "UTC"
+msgstr "UTC"
+
 #: src/activity/audit-log.tsx
 msgid "Verified"
 msgstr "Verified"
@@ -4361,6 +4478,11 @@ msgstr "Versions"
 msgid "Via Composio"
 msgstr "Via Composio"
 
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Vienna"
+msgstr "Vienna"
+
 #: src/chat/studio.tsx
 msgid "View app"
 msgstr "View app"
@@ -4395,6 +4517,11 @@ msgstr "Waiting on a person"
 #: src/dashboard/pile-card.tsx
 msgid "Waiting on you"
 msgstr "Waiting on you"
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Warsaw"
+msgstr "Warsaw"
 
 #: src/activity/audit-words.ts
 msgid "Was called by another engine"
@@ -4523,6 +4650,10 @@ msgstr "Where the documents live"
 #: src/routes/_shell.onboarding.index.tsx
 msgid "Where the onboarding stands, stage by stage."
 msgstr "Where the onboarding stands, stage by stage."
+
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Where your data lives, and the time Grasp uses."
+msgstr "Where your data lives, and the time Grasp uses."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which engines and agents hold permissions: {why}"
@@ -4662,6 +4793,12 @@ msgctxt "settings group"
 msgid "Workspace"
 msgstr "Workspace"
 
+#: src/routes/_shell.settings.tsx
+#: src/routes/_shell.settings.workspace.tsx
+msgctxt "settings section"
+msgid "Workspace"
+msgstr "Workspace"
+
 #: src/activity/pending.tsx
 msgid "Would keep {claimed} records here"
 msgstr "Would keep {claimed} records here"
@@ -4733,6 +4870,14 @@ msgstr "Your account"
 msgid "Your chats show up here."
 msgstr "Your chats show up here."
 
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Your company’s name in Grasp."
+msgstr "Your company’s name in Grasp."
+
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Your company’s name in Grasp. An admin changes it."
+msgstr "Your company’s name in Grasp. An admin changes it."
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "Your decision changed nothing."
 msgstr "Your decision changed nothing."
@@ -4760,3 +4905,8 @@ msgstr "Your session has ended. Sign in again to go on."
 #: src/routes/_shell.settings.tsx
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Your workspace, who may do what in it, and your own account."
+
+#. A time zone, by its city
+#: src/routes/_shell.settings.workspace.tsx
+msgid "Zurich"
+msgstr "Zurich"

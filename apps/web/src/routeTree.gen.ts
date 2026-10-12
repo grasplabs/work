@@ -45,6 +45,7 @@ import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settin
 import { Route as ShellSettingsModelsRouteImport } from './routes/_shell.settings.models'
 import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settings.profile'
 import { Route as ShellSettingsSpendRouteImport } from './routes/_shell.settings.spend'
+import { Route as ShellSettingsWorkspaceRouteImport } from './routes/_shell.settings.workspace'
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell.workflows.index'
 import { Route as KitComponentsNameRouteImport } from './routes/kit_.components.$name'
 import { Route as KitExamplesNameRouteImport } from './routes/kit_.examples.$name'
@@ -236,6 +237,11 @@ const ShellSettingsSpendRoute = ShellSettingsSpendRouteImport.update({
   path: '/spend',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
+const ShellSettingsWorkspaceRoute = ShellSettingsWorkspaceRouteImport.update({
+  id: '/workspace',
+  path: '/workspace',
+  getParentRoute: () => ShellSettingsRoute,
+} as any)
 const ShellWorkflowsIndexRoute = ShellWorkflowsIndexRouteImport.update({
   id: '/workflows/',
   path: '/workflows/',
@@ -310,6 +316,7 @@ export interface FileRoutesByFullPath {
   '/settings/models': typeof ShellSettingsModelsRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
+  '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
   '/kit/examples/$name': typeof KitExamplesNameRoute
   '/apps/': typeof ShellAppsIndexRoute
@@ -353,6 +360,7 @@ export interface FileRoutesByTo {
   '/settings/models': typeof ShellSettingsModelsRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
+  '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
   '/kit/examples/$name': typeof KitExamplesNameRoute
   '/apps': typeof ShellAppsIndexRoute
@@ -400,6 +408,7 @@ export interface FileRoutesById {
   '/_shell/settings/models': typeof ShellSettingsModelsRoute
   '/_shell/settings/profile': typeof ShellSettingsProfileRoute
   '/_shell/settings/spend': typeof ShellSettingsSpendRoute
+  '/_shell/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/kit_/components/$name': typeof KitComponentsNameRoute
   '/kit_/examples/$name': typeof KitExamplesNameRoute
   '/_shell/apps/': typeof ShellAppsIndexRoute
@@ -447,6 +456,7 @@ export interface FileRouteTypes {
     | '/settings/models'
     | '/settings/profile'
     | '/settings/spend'
+    | '/settings/workspace'
     | '/kit/components/$name'
     | '/kit/examples/$name'
     | '/apps/'
@@ -490,6 +500,7 @@ export interface FileRouteTypes {
     | '/settings/models'
     | '/settings/profile'
     | '/settings/spend'
+    | '/settings/workspace'
     | '/kit/components/$name'
     | '/kit/examples/$name'
     | '/apps'
@@ -536,6 +547,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/models'
     | '/_shell/settings/profile'
     | '/_shell/settings/spend'
+    | '/_shell/settings/workspace'
     | '/kit_/components/$name'
     | '/kit_/examples/$name'
     | '/_shell/apps/'
@@ -818,6 +830,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsSpendRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
+    '/_shell/settings/workspace': {
+      id: '/_shell/settings/workspace'
+      path: '/workspace'
+      fullPath: '/settings/workspace'
+      preLoaderRoute: typeof ShellSettingsWorkspaceRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
     '/_shell/workflows/': {
       id: '/_shell/workflows/'
       path: '/workflows'
@@ -908,6 +927,7 @@ interface ShellSettingsRouteChildren {
   ShellSettingsModelsRoute: typeof ShellSettingsModelsRoute
   ShellSettingsProfileRoute: typeof ShellSettingsProfileRoute
   ShellSettingsSpendRoute: typeof ShellSettingsSpendRoute
+  ShellSettingsWorkspaceRoute: typeof ShellSettingsWorkspaceRoute
   ShellSettingsIndexRoute: typeof ShellSettingsIndexRoute
 }
 
@@ -918,6 +938,7 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsModelsRoute: ShellSettingsModelsRoute,
   ShellSettingsProfileRoute: ShellSettingsProfileRoute,
   ShellSettingsSpendRoute: ShellSettingsSpendRoute,
+  ShellSettingsWorkspaceRoute: ShellSettingsWorkspaceRoute,
   ShellSettingsIndexRoute: ShellSettingsIndexRoute,
 }
 

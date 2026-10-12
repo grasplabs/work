@@ -9,6 +9,7 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 import {
+  Building2Icon,
   CoinsIcon,
   HistoryIcon,
   SparklesIcon,
@@ -22,12 +23,13 @@ import { SiteHeader } from "../frame/site-header.tsx";
 // Settings, as in the prototype (`routes/settings.tsx`): the workspace and
 // who may do what in it, then one's own account, one section at a time.
 // Only the sections core has something behind are here, and only those
-// the person may open are listed: Profile for everyone; Members and roles,
+// the person may open are listed: Workspace and Profile for everyone; Members and roles,
 // Models, AI spend and the audit trail for admins (Members and
 // roles never for Grasp staff). Core checks the role on every call
 // whatever is listed.
 
 type SettingsPath =
+  | "/settings/workspace"
   | "/settings/profile"
   | "/settings/members"
   | "/settings/models"
@@ -48,32 +50,34 @@ const groupsFor = ({
   admin: boolean;
   staff: boolean;
 }): { id: string; title: MessageDescriptor; items: SettingsItem[] }[] => {
-  const workspace: SettingsItem[] = admin
-    ? [
-        ...(staff
-          ? []
-          : [
-              {
-                label: msg`Members and roles`,
-                to: "/settings/members" as const,
-                icon: UsersIcon,
-              },
-            ]),
-        { label: msg`Models`, to: "/settings/models", icon: SparklesIcon },
-        { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
-        { label: msg`Audit trail`, to: "/settings/audit", icon: HistoryIcon },
-      ]
-    : [];
-  return [
-    ...(workspace.length === 0
+  const adminOnly: SettingsItem[] = [
+    ...(staff
       ? []
       : [
           {
-            id: "workspace",
-            title: msg({ message: "Workspace", context: "settings group" }),
-            items: workspace,
+            label: msg`Members and roles`,
+            to: "/settings/members" as const,
+            icon: UsersIcon,
           },
         ]),
+    { label: msg`Models`, to: "/settings/models", icon: SparklesIcon },
+    { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
+    { label: msg`Audit trail`, to: "/settings/audit", icon: HistoryIcon },
+  ];
+  const workspace: SettingsItem[] = [
+    {
+      label: msg({ message: "Workspace", context: "settings section" }),
+      to: "/settings/workspace",
+      icon: Building2Icon,
+    },
+    ...(admin ? adminOnly : []),
+  ];
+  return [
+    {
+      id: "workspace",
+      title: msg({ message: "Workspace", context: "settings group" }),
+      items: workspace,
+    },
     {
       id: "account",
       title: msg`Your account`,
