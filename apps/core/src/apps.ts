@@ -1,5 +1,6 @@
-import { workflowIdOf } from "@grasp-os/compiler";
+import { isAppLayout, workflowIdOf } from "@grasp-os/compiler";
 import { appLimits } from "@grasp-os/shared/app-limits";
+import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
   appErrors,
   appVersionSchema,
@@ -1013,6 +1014,23 @@ export const proposeVersion = async (
   return toApp(proposed);
 };
 
+/** Whether `version` of `app` has a sealed release (app-releases.ts). */
+const isSealed = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<boolean> =>
+  (await drizzle(env.DB)
+    .select({ version: sdkReleaseManifests.version })
+    .from(sdkReleaseManifests)
+    .where(
+      and(
+        eq(sdkReleaseManifests.appId, app),
+        eq(sdkReleaseManifests.version, version)
+      )
+    )
+    .get()) !== undefined;
+
 /**
  * Makes a version the one that runs: the pending one after review, or any
  * other, such as an earlier one to roll back. The pending version is
@@ -1036,6 +1054,12 @@ export const setCurrentVersion = async (
     return found;
   }
   const files = await versionFiles(env, appId, number);
+  // A version of spec 8's layout runs only from its release: activation
+  // seals it first (app-activation.ts), and nothing makes one current
+  // unsealed.
+  if (isAppLayout(files) && !(await isSealed(env, appId, number))) {
+    throw versionErrors.create("version.not_sealed");
+  }
   await requireWorkflowTestsPass(env, number, files);
   const triggers = await triggerRegistration(env, appId, number, files);
   const previous = found.currentVersion;
