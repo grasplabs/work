@@ -1501,7 +1501,7 @@ export class StoreHost {
         }
       );
       this.#flush(staged, principal.userId, schemaHash, stagedAt);
-      this.#indexReferences(pinned, staged);
+      this.#indexReferences(pinned, staged, principal.userId, roles);
       const counted = this.#db
         .update(store)
         .set({ commits: sql`${store.commits} + 1` })
@@ -1720,28 +1720,62 @@ export class StoreHost {
    * commit's transaction, after its writes, so the refusal undoes them all.
    * A record referring to itself, or to another this commit deletes too,
    * doesn't keep it.
+   *
+   * A reference a record didn't hold before must name a record that
+   * exists, after this commit, and that `principal` with `roles` may read
+   * under the pinned schema (`#referable`); otherwise the commit is
+   * refused (`data.reference_invalid`, the same whether the record is
+   * missing or unreadable, so it learns nothing of others' records). So
+   * nobody can keep a record they may not see from being deleted by
+   * referring to it. A reference the record already held is kept as it
+   * is, whoever may read its record now.
    */
-  #indexReferences(pinned: PinnedSchema, staged: readonly Staged[]): void {
+  #indexReferences(
+    pinned: PinnedSchema,
+    staged: readonly Staged[],
+    principal: string,
+    roles: WriterRoles
+  ): void {
+    const byKey = new Map(
+      staged.map((entry) => [keyOf(entry.tableId, entry.recordId), entry])
+    );
     for (const { table, tableId, recordId, base, fields } of staged) {
+      const held = new Set<string>();
       if (base !== undefined) {
-        this.#db
-          .delete(recordRefs)
-          .where(
-            and(
-              eq(recordRefs.tableId, tableId),
-              eq(recordRefs.recordId, recordId)
-            )
-          )
-          .run();
+        const where = and(
+          eq(recordRefs.tableId, tableId),
+          eq(recordRefs.recordId, recordId)
+        );
+        for (const row of this.#db
+          .select({ to: recordRefs.toTableId, id: recordRefs.toRecordId })
+          .from(recordRefs)
+          .where(where)
+          .all()) {
+          held.add(keyOf(row.to, row.id));
+        }
+        this.#db.delete(recordRefs).where(where).run();
       }
       const declared = pinned.manifest.tables[table]?.fields;
       if (fields === null || declared === undefined) {
         continue;
       }
       for (const reference of recordReferences(declared, fields)) {
-        const toTableId = pinned.tableIds[reference.table];
-        if (toTableId === undefined) {
-          continue;
+        const toTableId = Object.hasOwn(pinned.tableIds, reference.table)
+          ? pinned.tableIds[reference.table]
+          : undefined;
+        if (
+          toTableId === undefined ||
+          (!held.has(keyOf(toTableId, reference.id)) &&
+            !this.#referable(pinned, byKey, principal, roles, {
+              table: reference.table,
+              tableId: toTableId,
+              recordId: reference.id,
+            }))
+        ) {
+          throw dataErrors.create("data.reference_invalid", {
+            table,
+            id: recordId,
+          });
         }
         this.#db
           .insert(recordRefs)
@@ -1770,6 +1804,48 @@ export class StoreHost {
         throw dataErrors.create("data.referenced", { table, id: recordId });
       }
     }
+  }
+
+  /**
+   * Whether record `target` exists once the commit's `staged` records are
+   * written, and `principal` with `roles` may read it under the pinned
+   * schema's access: its table's read mode admits them, and for an
+   * `owner` table, the record is theirs (one this commit inserts is).
+   */
+  #referable(
+    pinned: PinnedSchema,
+    staged: ReadonlyMap<string, Staged>,
+    principal: string,
+    roles: WriterRoles,
+    target: { table: string; tableId: string; recordId: string }
+  ): boolean {
+    const mode = Object.hasOwn(pinned.manifest.tables, target.table)
+      ? pinned.manifest.tables[target.table]?.access.read
+      : undefined;
+    const admitted =
+      mode === "owner" ||
+      (mode === "appMembers" && (roles.appMember || roles.appBuilder)) ||
+      (mode === "appBuilders" && roles.appBuilder);
+    if (!admitted) {
+      return false;
+    }
+    const entry = staged.get(keyOf(target.tableId, target.recordId));
+    let owner: string | undefined;
+    if (entry === undefined) {
+      owner = this.#db
+        .select({ owner: records.ownerId })
+        .from(records)
+        .where(
+          and(
+            eq(records.tableId, target.tableId),
+            eq(records.recordId, target.recordId)
+          )
+        )
+        .get()?.owner;
+    } else if (entry.fields !== null) {
+      owner = entry.base?.ownerId ?? principal;
+    }
+    return owner !== undefined && (mode !== "owner" || owner === principal);
   }
 
   /**

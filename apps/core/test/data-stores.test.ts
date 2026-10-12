@@ -13,9 +13,15 @@ import {
   commitMaxInputBytes,
   commitMaxWrites,
   documentMaxBytes,
+  dataErrors,
   documentMaxDepth,
 } from "@grasp-os/shared/stores";
-import type { Commit, Committed, StoreFields } from "@grasp-os/shared/stores";
+import type {
+  Commit,
+  Committed,
+  StoreFields,
+  WriterRoles,
+} from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -1396,7 +1402,8 @@ describe("a staged read", () => {
 
 /**
  * A schema whose `links` refer to `notes`, and to each other, in every way
- * a field can hold a reference.
+ * a field can hold a reference; and to `secrets`, each read by its owner
+ * alone, and `drafts`, read by the App's builders alone.
  */
 const linksManifest = manifestText(
   schemaManifest(
@@ -1409,12 +1416,19 @@ const linksManifest = manifestText(
         byName: v.record(v.id("notes")).optional(),
         either: v.union(v.id("notes"), v.number()).optional(),
         parent: v.id("links").optional(),
+        secret: v.id("secrets").optional(),
+        draft: v.id("drafts").optional(),
+        label: v.string().optional(),
       }),
+      secrets: defineTable({ title: v.string() }),
+      drafts: defineTable({ title: v.string() }),
     }),
     {
       tables: {
         notes: { read: "appMembers", write: "appMembers" },
         links: { read: "appMembers", write: "appMembers" },
+        secrets: { read: "owner", write: "owner" },
+        drafts: { read: "appBuilders", write: "appBuilders" },
       },
     }
   )
@@ -1428,32 +1442,62 @@ const newLinkedStore = async (): Promise<OpenStore> => {
   return store;
 };
 
-/** Inserts one record of `table` with `fields` and answers its ID. */
+/** The tables of the links schema. */
+type LinkedTable = "notes" | "links" | "secrets" | "drafts";
+
+/** Who writes: Ada, a member and builder of the App, unless changed. */
+interface Writer {
+  principal: { userId: string };
+  roles: WriterRoles;
+}
+
+const adaWrites: Writer = { principal: ada, roles: memberRoles };
+
+/** Grace, a member of the App and not a builder. */
+const graceWrites: Writer = {
+  principal: grace,
+  roles: { appMember: true, appBuilder: false },
+};
+
+/** Inserts one record of `table` with `fields`, by `writer`, and answers its ID. */
 const insertLinked = async (
   store: OpenStore,
-  table: "notes" | "links",
-  fields: StoreFields
+  table: LinkedTable,
+  fields: StoreFields,
+  writer: Writer = adaWrites
 ): Promise<string> => {
   const id = newRecordId();
   await commitIn(store, {
-    principal: ada,
+    ...writer,
     schemaHash: linksHash,
     writes: [{ op: "insert", id, table, fields }],
   });
   return id;
 };
 
+/** The details of the data error `run` is refused with. */
+const refusalOf = async (run: () => Promise<unknown>): Promise<unknown> => {
+  try {
+    await run();
+  } catch (error) {
+    const details: unknown =
+      error instanceof Error ? Reflect.get(error, "details") : undefined;
+    return { code: dataErrors.codeOf(error), details };
+  }
+  throw new Error("It was accepted");
+};
+
 /** Deletes the record `id` of `table`, at revision `revision`. */
 const deleteFrom = async (
   store: OpenStore,
-  table: "notes" | "links",
+  table: LinkedTable,
   id: string,
-  revision = 1
+  writer: Writer = adaWrites
 ): Promise<Committed> =>
   await commitIn(store, {
-    principal: ada,
+    ...writer,
     schemaHash: linksHash,
-    writes: [{ op: "delete", table, id, expectedRevision: revision }],
+    writes: [{ op: "delete", table, id, expectedRevision: 1 }],
   });
 
 describe("a store's references", () => {
@@ -1461,7 +1505,7 @@ describe("a store's references", () => {
     const holders = [
       (id: string) => ({ note: id }),
       (id: string) => ({ nested: { to: id } }),
-      (id: string) => ({ many: [newRecordId(), id] }),
+      (id: string) => ({ many: [id, id] }),
       (id: string) => ({ byName: { first: id } }),
       (id: string) => ({ either: id }),
     ];
@@ -1523,6 +1567,165 @@ describe("a store's references", () => {
     await expect(deleteFrom(store, "notes", second)).rejects.toMatchObject({
       code: "data.referenced",
     });
+  });
+
+  it("names only the record the refused deletion asked for", async () => {
+    const store = await newLinkedStore();
+    const note = await insertLinked(store, "notes", { title: "Kept" });
+    await insertLinked(store, "links", { note }, graceWrites);
+    await expect(
+      refusalOf(async () => await deleteFrom(store, "notes", note))
+    ).resolves.toStrictEqual({
+      code: "data.referenced",
+      details: { table: "notes", id: note },
+    });
+  });
+
+  it("refuses a reference to a record that doesn't exist or that the writer can't read, alike", async () => {
+    const store = await newLinkedStore();
+    const secret = await insertLinked(store, "secrets", { title: "Ada's" });
+    const draft = await insertLinked(store, "drafts", { title: "Builders'" });
+    const gone = await insertLinked(store, "notes", { title: "Gone" });
+    await deleteFrom(store, "notes", gone);
+    const forged: StoreFields[] = [
+      { note: newRecordId() },
+      { note: gone },
+      { secret },
+      { draft },
+      // An ID of one table, named as another's.
+      { note: secret },
+    ];
+    const refusals = await Promise.all(
+      forged.map(
+        async (fields) =>
+          await refusalOf(
+            async () => await insertLinked(store, "links", fields, graceWrites)
+          )
+      )
+    );
+    // Each names the link it would have written, never what it named.
+    expect(refusals).toMatchObject(
+      refusals.map(() => ({
+        code: "data.reference_invalid",
+        details: { table: "links" },
+      }))
+    );
+    // Nothing Grace tried holds Ada's records: she deletes them.
+    await deleteFrom(store, "secrets", secret);
+    await deleteFrom(store, "drafts", draft);
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+
+  it("lets a writer refer to what they may read, a record their commit inserts included", async () => {
+    const store = await newLinkedStore();
+    const secret = await insertLinked(store, "secrets", { title: "Ada's" });
+    const draft = await insertLinked(store, "drafts", { title: "Builders'" });
+    await insertLinked(store, "links", { secret, draft });
+    const own = newRecordId();
+    const link = newRecordId();
+    await commitIn(store, {
+      ...graceWrites,
+      schemaHash: linksHash,
+      writes: [
+        {
+          op: "insert",
+          id: own,
+          table: "secrets",
+          fields: { title: "Grace's" },
+        },
+        { op: "insert", id: link, table: "links", fields: { secret: own } },
+      ],
+    });
+    await expect(
+      deleteFrom(store, "secrets", own, graceWrites)
+    ).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+  });
+
+  it("keeps a reference a record held before, whoever may read its record now", async () => {
+    const store = await newLinkedStore();
+    const draft = await insertLinked(store, "drafts", { title: "Builders'" });
+    const link = await insertLinked(store, "links", { draft });
+    // A member who can't read drafts changes another field of the link.
+    await commitIn(store, {
+      ...graceWrites,
+      schemaHash: linksHash,
+      writes: [
+        {
+          op: "patch",
+          table: "links",
+          id: link,
+          fields: { label: "Seen" },
+          expectedRevision: 1,
+        },
+      ],
+    });
+    await expect(deleteFrom(store, "drafts", draft)).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+  });
+
+  it("restricts or lets go as the commit that deletes a record rewrites what refers to it", async () => {
+    const store = await newLinkedStore();
+    const kept = await insertLinked(store, "notes", { title: "Kept" });
+    const freed = await insertLinked(store, "notes", { title: "Freed" });
+    const link = await insertLinked(store, "links", { note: kept });
+    const rewrite = async (note: string, fields: StoreFields) =>
+      await commitIn(store, {
+        principal: ada,
+        schemaHash: linksHash,
+        writes: [
+          {
+            op: "patch",
+            table: "links",
+            id: link,
+            fields,
+            expectedRevision: 1,
+          },
+          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+        ],
+      });
+    // Still referring after the rewrite: refused.
+    await expect(rewrite(kept, { label: "Still" })).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+    // Moved away in the same commit: the note goes.
+    await rewrite(kept, { note: freed });
+    await expect(store.get("notes", kept)).resolves.toBeNull();
+  });
+
+  it("indexes a write under an older schema the store still holds", async () => {
+    const store = await newLinkedStore();
+    const later = manifestText(
+      schemaManifest(
+        defineSchema({
+          notes: defineTable({ title: v.string() }),
+          links: defineTable({ note: v.id("notes").optional() }),
+          more: defineTable({ title: v.string() }),
+        }),
+        {
+          tables: {
+            notes: { read: "appMembers", write: "appMembers" },
+            links: { read: "appMembers", write: "appMembers" },
+            more: { read: "appMembers", write: "appMembers" },
+          },
+        }
+      )
+    );
+    await store.defineTables(later);
+    const note = await insertLinked(store, "notes", { title: "Kept" });
+    // Written under the first schema, after the later one.
+    await insertLinked(store, "links", { note });
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash: await manifestHash(later),
+        writes: [
+          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.referenced" });
   });
 
   it("lets a record that refers only to itself be deleted", async () => {

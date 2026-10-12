@@ -454,6 +454,8 @@ export const dataErrors = defineErrorFamily({
     "This query needs an index this store doesn't hold for its schema.",
   "data.referenced":
     "This record can't be deleted while another record refers to it. Remove those references first.",
+  "data.reference_invalid":
+    "This record refers to a record that doesn't exist or that you can't read.",
   "data.store_bound":
     "This store can't be deleted while an App's kept versions read and write it.",
   "data.store_managed_by_app":
