@@ -23,6 +23,7 @@ import {
   markTakeoverMs,
   pinRelease,
   placeHold,
+  queueOrphanedReservations,
   releaseGraceMs,
   releaseHold,
   releaseRetentionMs,
@@ -541,6 +542,39 @@ describe("bytes left without a reservation", { timeout: 120_000 }, () => {
     await expect(env.FILES.head(artifactKey(sha256))).resolves.toBeNull();
   });
 
+  it("one of which fails to delete leave the others deleted", async () => {
+    const hashes = await Promise.all(
+      [1, 2, 3].map(async () => await sha256Hex(crypto.randomUUID()))
+    );
+    await Promise.all(
+      hashes.map(async (sha256) => {
+        await env.FILES.put(artifactKey(sha256), "unreserved");
+      })
+    );
+    const failing = artifactKey(hashes[1] ?? "");
+    const remove = env.FILES.delete.bind(env.FILES);
+    const failingOne = async (
+      ...args: Parameters<typeof remove>
+    ): ReturnType<typeof remove> => {
+      if (args[0] === failing) {
+        throw new Error("R2 is unavailable for this one");
+      }
+      await remove(...args);
+    };
+    Reflect.set(env.FILES, "delete", failingOne);
+    try {
+      await deleteUnreservedArtifacts(env, hashes);
+    } finally {
+      Reflect.set(env.FILES, "delete", remove);
+    }
+    const left = await Promise.all(
+      hashes.map(
+        async (sha256) => (await env.FILES.head(artifactKey(sha256))) !== null
+      )
+    );
+    expect(left).toStrictEqual([false, true, false]);
+  });
+
   it("of more seals than one page holds are all deleted", async () => {
     const start = new Date();
     const hashes = await Promise.all(
@@ -574,19 +608,21 @@ describe("bytes left without a reservation", { timeout: 120_000 }, () => {
     await env.DB.prepare(
       "INSERT INTO sdk_artifact_candidates (sha256, queued_at) VALUES (?, ?)"
     )
-      .bind(sha256, Date.now())
+      .bind(sha256, Date.now() - 60_000)
       .run();
     const remove = env.FILES.delete.bind(env.FILES);
-    // Another reservation of them goes, and queues them again, mid-delete.
+    // Mid-delete, an unfinished seal's reservation of them is swept, which
+    // queues them again: another sweep's step, run for real.
     const requeueing = async (
       ...args: Parameters<typeof remove>
     ): ReturnType<typeof remove> => {
       if (args[0] === artifactKey(sha256)) {
         await env.DB.prepare(
-          "UPDATE sdk_artifact_candidates SET queued_at = queued_at + 1 WHERE sha256 = ?"
+          "INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at) VALUES (?, 'app_gone', 1, ?)"
         )
-          .bind(sha256)
+          .bind(sha256, Date.now() - 2 * releaseGraceMs)
           .run();
+        await queueOrphanedReservations(env, new Date());
       }
       await remove(...args);
     };

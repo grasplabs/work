@@ -114,6 +114,8 @@ export const versionErrors = defineErrorFamily({
   "version.seal_conflict":
     "This version was already sealed with a different manifest.",
   "version.not_sealed": "This version hasn't been sealed.",
+  "version.protocol_unsupported":
+    "This version was sealed for a protocol between the platform and App code that this platform doesn't run. Seal it again.",
   "version.manifest_corrupt":
     "This version's sealed manifest no longer matches its hash.",
   "version.artifact_corrupt":

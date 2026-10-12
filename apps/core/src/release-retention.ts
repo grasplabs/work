@@ -664,6 +664,31 @@ const deleteRelease = async (
 };
 
 /**
+ * Removes the reservations of seals that never finished, a grace before
+ * `now`, and queues their bytes, in one transaction: the sweep's step
+ * before it deals with the queue.
+ */
+export const queueOrphanedReservations = async (
+  env: Env,
+  now: Date
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const orphaned = and(
+    lt(
+      sdkReleaseArtifacts.reservedAt,
+      new Date(now.getTime() - releaseGraceMs)
+    ),
+    sql`NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS manifests
+      WHERE manifests.app_id = ${sdkReleaseArtifacts.appId}
+        AND manifests.version = ${sdkReleaseArtifacts.version})`
+  );
+  await db.batch([
+    queueReserved(db, orphaned),
+    db.delete(sdkReleaseArtifacts).where(orphaned),
+  ]);
+};
+
+/**
  * The retention sweep (see the header), from the cron: notes which
  * releases are current, deletes lapsed leases, marks releases nothing
  * keeps, unmarks those something keeps again, deletes those marked a
@@ -755,20 +780,6 @@ export const sweepReleases = async (env: Env, now: Date): Promise<void> => {
     env,
     stale.map(({ sha256 }) => sha256)
   );
-  // Reservations of seals that never finished, a grace ago: their bytes
-  // queued as they go, in one transaction.
-  const orphaned = and(
-    lt(
-      sdkReleaseArtifacts.reservedAt,
-      new Date(now.getTime() - releaseGraceMs)
-    ),
-    sql`NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS manifests
-      WHERE manifests.app_id = ${sdkReleaseArtifacts.appId}
-        AND manifests.version = ${sdkReleaseArtifacts.version})`
-  );
-  await db.batch([
-    queueReserved(db, orphaned),
-    db.delete(sdkReleaseArtifacts).where(orphaned),
-  ]);
+  await queueOrphanedReservations(env, now);
   await drainCandidates(env);
 };

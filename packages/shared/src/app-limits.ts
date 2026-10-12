@@ -17,3 +17,11 @@ export const appLimits = {
   descriptionLength: 1000,
   messageLength: 1000,
 } as const;
+
+/**
+ * The most bytes of an App's manifest's text, as UTF-8, checked before it
+ * is parsed: room for the schema's own megabyte and every function's
+ * descriptors. Whatever the size of its source, an App's manifest is
+ * never more (the SDK's `readAppManifest`).
+ */
+export const appManifestMaxBytes = 4 * 1024 * 1024;

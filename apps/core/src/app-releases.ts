@@ -385,15 +385,31 @@ const verifiedRelease = async (
 
 /**
  * The manifest in `text`, the release of `key`'s: canonical, of the known
- * shape, and naming that release; `version.manifest_corrupt` otherwise.
+ * shape, and naming that release; `version.protocol_unsupported` for one
+ * sealed for another protocol, `version.manifest_corrupt` otherwise.
  */
 const manifestOf = (
   text: string,
   key: { app: AppId; version: number }
 ): ReleaseManifest => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw versionErrors.create("version.manifest_corrupt");
+  }
+  // Its hash checked already: a protocol this platform doesn't run is a
+  // release of another platform version, not tampering.
+  const protocol: unknown =
+    typeof parsed === "object" && parsed !== null
+      ? Reflect.get(parsed, "sdkProtocolVersion")
+      : undefined;
+  if (typeof protocol === "number" && protocol !== sdkProtocolVersion) {
+    throw versionErrors.create("version.protocol_unsupported");
+  }
   let manifest: ReleaseManifest;
   try {
-    manifest = releaseManifestSchema.parse(JSON.parse(text));
+    manifest = releaseManifestSchema.parse(parsed);
   } catch {
     throw versionErrors.create("version.manifest_corrupt");
   }
