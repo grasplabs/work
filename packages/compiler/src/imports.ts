@@ -1,3 +1,4 @@
+import { appCodeImport, screenImportError } from "./app-code.ts";
 import { appModuleName, kitModuleName, ownEntry } from "./kit.ts";
 import type { Kit } from "./kit.ts";
 
@@ -223,6 +224,10 @@ export const importError = (
   if (specifier === undefined) {
     return "import() must name a module in quotes.";
   }
+  const server = screenImportError(file, specifier);
+  if (server !== undefined) {
+    return server;
+  }
   if (isRelative(specifier)) {
     return resolveRelative(file, specifier, files) === undefined
       ? `"${specifier}" is not a file in this App.`
@@ -444,25 +449,13 @@ const isRequireCall = ({ callee }: Call): boolean =>
   callee.type === "Identifier" && callee.name === "require";
 
 /**
- * A Babel plugin that points a module's imports at the flat names of the
- * App's files and the platform's modules. Like `rewriteImports`, it runs
- * on compiled code, so it also sees imports the source check can't, and
- * throws on anything `kind` can't import, `require()` included.
+ * A Babel plugin that points a module's imports at the flat names
+ * `moduleFor` gives them, which throws for one that isn't allowed:
+ * `require()` included, which is never available in `what`.
  */
-export const rewriteCodeImports =
-  (kind: CodeKind, file: string, files: ReadonlySet<string>) => () => {
-    const moduleFor = (specifier: string | undefined): string => {
-      const error = codeImportError(kind, specifier, file, files);
-      if (error !== undefined || specifier === undefined) {
-        throw new Error(error);
-      }
-      const target = isRelative(specifier)
-        ? resolveCodeFile(file, specifier, files)
-        : undefined;
-      return target === undefined
-        ? (kind.imports.get(specifier) ?? specifier)
-        : appModuleName(target);
-    };
+const rewriteWith =
+  (moduleFor: (specifier: string | undefined) => string, what: string) =>
+  () => {
     const rewriteCall = (call: Call): void => {
       if (isImportCall(call)) {
         const module = moduleFor(stringArgument(call));
@@ -484,7 +477,7 @@ export const rewriteCodeImports =
         CallExpression: (path: { node: Call }) => {
           if (isRequireCall(path.node)) {
             throw new Error(
-              `require() isn't available in ${kind.name.toLowerCase()} code: use import.`
+              `require() isn't available in ${what}: use import.`
             );
           }
           rewriteCall(path.node);
@@ -495,3 +488,44 @@ export const rewriteCodeImports =
       },
     };
   };
+
+/**
+ * A Babel plugin that points a module's imports at the flat names of the
+ * App's files and the platform's modules. Like `rewriteImports`, it runs
+ * on compiled code, so it also sees imports the source check can't, and
+ * throws on anything `kind` can't import, `require()` included.
+ */
+export const rewriteCodeImports = (
+  kind: CodeKind,
+  file: string,
+  files: ReadonlySet<string>
+) =>
+  rewriteWith((specifier) => {
+    const error = codeImportError(kind, specifier, file, files);
+    if (error !== undefined || specifier === undefined) {
+      throw new Error(error);
+    }
+    const target = isRelative(specifier)
+      ? resolveCodeFile(file, specifier, files)
+      : undefined;
+    return target === undefined
+      ? (kind.imports.get(specifier) ?? specifier)
+      : appModuleName(target);
+  }, `${kind.name.toLowerCase()} code`);
+
+/**
+ * A Babel plugin that points the imports of a file of an App's server code
+ * of spec 8's layout (app-code.ts) at flat module names, throwing on any
+ * its kind can't import.
+ */
+export const rewriteAppCodeImports = (
+  file: string,
+  files: ReadonlySet<string>
+) =>
+  rewriteWith((specifier) => {
+    const resolved = appCodeImport(file, specifier, files);
+    if ("error" in resolved) {
+      throw new Error(resolved.error);
+    }
+    return resolved.module;
+  }, "server code");
