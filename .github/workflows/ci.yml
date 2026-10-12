@@ -58,9 +58,12 @@ jobs:
       # again over the slowest pass. A minute before that, the reporter
       # prints the files and tests still running, and each finished test is
       # in the test-progress artifact. "0 files, 0 tests" there means the
-      # hang is in teardown or in shutting the pool down. Reporters given
-      # here replace Vitest's defaults, so github-actions is listed for the
-      # inline failure annotations.
+      # hang is in teardown or in shutting the pool down. A run that doesn't
+      # pass says why in the step summary and as an annotation: the
+      # reporter's verdict, or Vitest's failed files and unhandled errors
+      # (a worker that exits shows as one), with the runner's memory.
+      # Reporters given here replace Vitest's defaults, so github-actions is
+      # listed for the inline failure annotations.
       - run: vp test --maxWorkers=100% --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts
         timeout-minutes: 16
         env:
@@ -81,6 +84,15 @@ jobs:
           path: ${{ runner.temp }}/test-progress.log
           if-no-files-found: ignore
           retention-days: 14
+      # What the runner looked like when the job failed: its memory, the
+      # processes holding the most (workerd left running shows here), and
+      # any process the kernel killed for memory, which ends a step with
+      # nothing of its own to say.
+      - if: failure()
+        run: |
+          free -m
+          ps -eo pid,ppid,rss,etime,args --sort=-rss | head -n 15 | cut -c 1-200
+          sudo dmesg --ctime | grep -iE 'out of memory|oom-kill|killed process' || echo "The kernel killed no process for memory."
       - run: vp run -r build
       # The console isn't deployed from here (see deploy-staging): check that
       # its build is a Worker wrangler would deploy. No credentials needed.
