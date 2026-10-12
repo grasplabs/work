@@ -2,12 +2,14 @@ import { actorOf } from "@grasp-os/shared/audit";
 import {
   onboardingErrors,
   planSchema,
+  programmeWeeks,
   rosterSchema,
 } from "@grasp-os/shared/onboarding";
 import type {
   OnboardingApi,
   OnboardingView,
   PlanInput,
+  Programme,
   RosterInput,
 } from "@grasp-os/shared/onboarding";
 import {
@@ -27,15 +29,20 @@ import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { shareDocument } from "./documents.ts";
-import { dayOf } from "./rules.ts";
+import { gateView } from "./gate.ts";
+import { dayOf, mondayOf } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
+import { summaryOf } from "./summary.ts";
 
 // The onboarding over `/rpc`. The company's admin (and Grasp's staff,
 // whose access is the admin role) gives the store who works where and the
 // plan, and reads back numbers per team, never anyone's words. What only
 // Grasp's staff do is in staff-rpc.ts. The admin also shares documents,
 // each read at once (documents.ts). Everything that comes in is checked
-// against the shared schemas before the store sees it.
+// against the shared schemas before the store sees it. Its programme
+// (when it began, and where it stands) is for everyone signed in, for the
+// dashboard: the plan's first week and the stage, and nothing of the plan
+// or the roster past them.
 
 /** The admin's answer to a document's question. */
 const answerSchema = z.strictObject({
@@ -52,6 +59,26 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
     super();
     this.#env = env;
     this.#check = check;
+  }
+
+  async programme(): Promise<Programme | null> {
+    return await withPerson(this.#check, async () => {
+      const now = new Date().toISOString();
+      const view = await onboardingStore(this.#env).view(now);
+      if (view.plan === null) {
+        return null;
+      }
+      const { stage } = summaryOf(
+        view,
+        await gateView(this.#env, view, now),
+        now
+      );
+      return {
+        start: mondayOf(view.plan.start),
+        weeks: programmeWeeks,
+        stage: stage === "none" ? null : stage,
+      };
+    });
   }
 
   async view(): Promise<OnboardingView> {

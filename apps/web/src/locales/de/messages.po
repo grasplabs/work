@@ -185,6 +185,14 @@ msgstr "{holder}: {actions} auf {resource}"
 msgid "{hours, plural, one {# hour} other {# hours}}"
 msgstr "{hours, plural, one {# Stunde} other {# Stunden}}"
 
+#: src/dashboard/report.ts
+msgid "{idle, plural, one {# more workflow didn't run in this time.} other {# more workflows didn't run in this time.}}"
+msgstr "{idle, plural, one {# weiterer Workflow lief in dieser Zeit nicht.} other {# weitere Workflows liefen in dieser Zeit nicht.}}"
+
+#: src/dashboard/report-bar.tsx
+msgid "{inDays, plural, one {Report on week {week} ready in # day} other {Report on week {week} ready in # days}}"
+msgstr "{inDays, plural, one {Bericht zu Woche {week} ist in # Tag fertig} other {Bericht zu Woche {week} ist in # Tagen fertig}}"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "{kind}, {severity}, {about}: {summary}"
 msgstr "{kind}, {severity}, {about}: {summary}"
@@ -250,6 +258,10 @@ msgstr "{name} hat keine App zum Anzeigen."
 msgid "{name} in {engine}"
 msgstr "{name} in {engine}"
 
+#: src/dashboard/report.ts
+msgid "{name} in {engine}: {started} started, {completed} completed, {failed} failed"
+msgstr "{name} in {engine}: {started} gestartet, {completed} abgeschlossen, {failed} fehlgeschlagen"
+
 #: src/connections/connect-dialog.tsx
 msgid "{name} is read-only"
 msgstr "{name} liest nur"
@@ -273,6 +285,10 @@ msgstr "{name} ändert jetzt die Daten der Engine (lesen → schreiben)"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{name}, per {key}"
 msgstr "{name}, je {key}"
+
+#: src/dashboard/report.ts
+msgid "{name}: {count}"
+msgstr "{name}: {count}"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "{name}: {shown} of the limit"
@@ -772,6 +788,10 @@ msgstr "Genehmigt von {name} am {date}."
 msgid "Approved packages"
 msgstr "Pakete genehmigt"
 
+#: src/dashboard/report.ts
+msgid "Approved: {approved}"
+msgstr "Genehmigt: {approved}"
+
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
 msgid "Approved: {who}."
@@ -792,6 +812,10 @@ msgstr "Zu genehmigende Apps"
 #: src/dashboard/pile-cards.tsx
 msgid "as {binding}"
 msgstr "als {binding}"
+
+#: src/dashboard/report.ts
+msgid "As of {date}."
+msgstr "Stand: {date}."
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "As the company named them, until the staff list is in."
@@ -1095,6 +1119,7 @@ msgstr "Zurücksetzen"
 
 #: src/connections/connect-dialog.tsx
 #: src/connections/connection-list.tsx
+#: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
@@ -1162,6 +1187,10 @@ msgstr "Verglichen mit Version {current}, die jetzt läuft."
 #: src/workflows/runs.tsx
 msgid "Completed"
 msgstr "Abgeschlossen"
+
+#: src/dashboard/report.ts
+msgid "Completed: {completed}"
+msgstr "Abgeschlossen: {completed}"
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Composio's toolkits can't be listed right now. Try again shortly."
@@ -1364,6 +1393,7 @@ msgstr "Entscheidung"
 msgid "Decision not found"
 msgstr "Entscheidung nicht gefunden"
 
+#: src/dashboard/report.ts
 #: src/dashboard/runs-widget.tsx
 msgid "Decisions"
 msgstr "Entscheidungen"
@@ -1480,6 +1510,10 @@ msgstr "Fertig"
 #: src/knowledge/uploads.tsx
 msgid "Download {name}"
 msgstr "{name} herunterladen"
+
+#: src/dashboard/report-dialog.tsx
+msgid "Download Markdown"
+msgstr "Markdown herunterladen"
 
 #: src/knowledge/uploads.tsx
 msgid "Drop files here"
@@ -1608,6 +1642,10 @@ msgstr "Jedes Team hat seine Leitung"
 msgid "Everyone"
 msgstr "Alle"
 
+#: src/dashboard/report.ts
+msgid "Everyone else: {talked} of {asked}"
+msgstr "Alle anderen: {talked} von {asked}"
+
 #: src/routes/_shell.settings.audit.tsx
 msgid "Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen."
 msgstr "Alles, was in Grasp getan wurde, von wem und wann, in einer Kette, die niemand unbemerkt ändern kann."
@@ -1649,6 +1687,10 @@ msgstr "CSV exportieren"
 msgid "Export JSON"
 msgstr "JSON exportieren"
 
+#: src/dashboard/report-bar.tsx
+msgid "Export report"
+msgstr "Bericht exportieren"
+
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Audit-Trail exportieren"
@@ -1684,6 +1726,10 @@ msgstr "Fehlgeschlagen"
 #: src/dashboard/failed-workflows.tsx
 msgid "Failed while acting for you"
 msgstr "Fehlgeschlagen, als in Ihrem Namen gehandelt wurde"
+
+#: src/dashboard/report.ts
+msgid "Failed: {failed}"
+msgstr "Fehlgeschlagen: {failed}"
 
 #: src/labels.ts
 msgid "File"
@@ -1768,6 +1814,11 @@ msgstr "Aus dem Kickoff mit dem Sponsor. Was hier geändert wird, gilt ab dem n�
 #: src/activity/audit-words.ts
 msgid "Gave consent for a connection"
 msgstr "Einer Verbindung zugestimmt"
+
+#: src/dashboard/report.ts
+msgctxt "programme stage"
+msgid "Getting ready"
+msgstr "In Vorbereitung"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Give the go"
@@ -1974,6 +2025,11 @@ msgstr "Interviews"
 
 #: src/onboarding/staff-words.ts
 msgctxt "onboarding stage"
+msgid "Interviews"
+msgstr "Interviews"
+
+#: src/dashboard/report.ts
+msgctxt "programme stage"
 msgid "Interviews"
 msgstr "Interviews"
 
@@ -2234,6 +2290,10 @@ msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Niedrig"
 
+#: src/dashboard/report.ts
+msgid "Made with Grasp on {date}"
+msgstr "Erstellt mit Grasp am {date}"
+
 #: src/frame/app-sidebar.tsx
 msgid "Main"
 msgstr "Hauptmenü"
@@ -2461,6 +2521,10 @@ msgstr "Für diese Engine wurden bisher keine Pakete genehmigt."
 msgid "No permissions."
 msgstr "Keine Berechtigungen."
 
+#: src/dashboard/report.ts
+msgid "No run asked anyone for a decision."
+msgstr "Kein Lauf hat jemanden um eine Entscheidung gebeten."
+
 #: src/routes/_shell.workflows.index.tsx
 msgid "No runs match these filters."
 msgstr "Keine Läufe passen zu diesen Filtern."
@@ -2469,6 +2533,7 @@ msgstr "Keine Läufe passen zu diesen Filtern."
 msgid "No runs this week."
 msgstr "Diese Woche keine Läufe."
 
+#: src/dashboard/report.ts
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "No runs yet."
 msgstr "Noch keine Läufe."
@@ -2484,6 +2549,10 @@ msgstr "In dieser Engine gibt es noch keinen Workflow."
 #: src/routes/_shell.workflows.index.tsx
 msgid "No workflow needs attention: nothing waits for a decision, nothing failed lately."
 msgstr "Kein Workflow braucht Aufmerksamkeit: Nichts wartet auf eine Entscheidung, nichts ist zuletzt fehlgeschlagen."
+
+#: src/dashboard/report.ts
+msgid "No workflow ran in this time."
+msgstr "In dieser Zeit lief kein Workflow."
 
 #: src/chat/builds.tsx
 msgid "No workflows to test."
@@ -2669,6 +2738,7 @@ msgstr "Noch läuft nichts: Dies wäre die erste aktuelle Version der Engine."
 msgid "Nothing spent yet."
 msgstr "Noch nichts ausgegeben."
 
+#: src/dashboard/report.ts
 #: src/dashboard/signals.tsx
 msgid "Nothing to make better right now."
 msgstr "Gerade gibt es nichts zu verbessern."
@@ -2834,6 +2904,10 @@ msgctxt "until when a decision can be answered"
 msgid "Open until"
 msgstr "Offen bis"
 
+#: src/dashboard/report.ts
+msgid "Open: {open}"
+msgstr "Offen: {open}"
+
 #: src/routes/guest.tsx
 msgid "Opening the chat…"
 msgstr "Chat wird geöffnet…"
@@ -2937,6 +3011,10 @@ msgctxt "onboarding stage"
 msgid "People"
 msgstr "Personen"
 
+#: src/dashboard/report.ts
+msgid "People heard"
+msgstr "Gehörte Personen"
+
 #: src/dashboard/signals.tsx
 msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "Bei Schritt {step} von {about} wurden {days, plural, one {am letzten Tag} other {in den letzten # Tagen}} {rejected} von {answered, plural, one {# Antwort} other {# Antworten}} abgelehnt."
@@ -3026,6 +3104,10 @@ msgstr "Einen Schritt eines Workflows ausgeführt"
 #: src/activity/audit-words.ts
 msgid "Ran a workflow"
 msgstr "Einen Workflow ausgeführt"
+
+#: src/dashboard/report.ts
+msgid "Ran without a person: {share}"
+msgstr "Ohne eine Person gelaufen: {share}"
 
 #: src/activity/audit-log.tsx
 msgid "Read"
@@ -3152,6 +3234,10 @@ msgstr "Abgelehnt"
 msgid "Rejected by {name} on {date}."
 msgstr "Abgelehnt von {name} am {date}."
 
+#: src/dashboard/report.ts
+msgid "Rejected: {rejected}"
+msgstr "Abgelehnt: {rejected}"
+
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
 msgid "Rejected: {who}."
@@ -3224,6 +3310,10 @@ msgstr "Version {newerVersion} durch meine ersetzen"
 #: src/activity/audit-words.ts
 msgid "Replaced a request for packages"
 msgstr "Eine Paketanfrage ersetzt"
+
+#: src/dashboard/report-dialog.tsx
+msgid "Report"
+msgstr "Bericht"
 
 #: src/knowledge/timeline.tsx
 msgid "Restore"
@@ -3353,6 +3443,10 @@ msgstr "Läuft jetzt"
 msgid "Runs over the last {fullDays} days, by the day they started and how they stand now."
 msgstr "Läufe der letzten {fullDays} Tage, nach dem Tag, an dem sie starteten, und wie sie jetzt stehen."
 
+#: src/dashboard/report.ts
+msgid "Runs started from {from} to {to}."
+msgstr "Läufe, gestartet vom {from} bis zum {to}."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Runs the workflow's own test cases with the values set now. Nothing is changed: what it would change is listed instead."
 msgstr "Führt die eigenen Testfälle des Workflows mit den aktuell gesetzten Werten aus. Es wird nichts geändert: Was er ändern würde, wird stattdessen aufgelistet."
@@ -3361,6 +3455,10 @@ msgstr "Führt die eigenen Testfälle des Workflows mit den aktuell gesetzten We
 #: src/dashboard/widget-board.tsx
 msgid "Runs this week"
 msgstr "Läufe diese Woche"
+
+#: src/dashboard/report.ts
+msgid "Runs: {total}"
+msgstr "Läufe: {total}"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Said yes"
@@ -3374,6 +3472,10 @@ msgstr "Gleiche Version, anderer Inhalt: {changed}"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Save"
 msgstr "Speichern"
+
+#: src/dashboard/report-dialog.tsx
+msgid "Save as PDF"
+msgstr "Als PDF speichern"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Save the agreements"
@@ -3760,6 +3862,10 @@ msgctxt "log filter"
 msgid "Team"
 msgstr "Team"
 
+#: src/dashboard/report.ts
+msgid "Team leads: {leadsTalked} of {leads}"
+msgstr "Teamleitungen: {leadsTalked} von {leads}"
+
 #: src/knowledge/collection-markers.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Teams"
@@ -3916,6 +4022,7 @@ msgstr "Standard, {each}"
 msgid "The engines this chat builds didn't load."
 msgstr "Die Engines, die dieser Chat erstellt, wurden nicht geladen."
 
+#: src/dashboard/report-dialog.tsx
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
 msgstr "Der Export hat nicht funktioniert. Versuchen Sie es erneut."
@@ -4004,6 +4111,10 @@ msgstr "Die vorherige"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."
 msgstr "Die Plattform ist für alle im Unternehmen offen: Sie wurde für das Onboarding nie geschlossen."
+
+#: src/dashboard/report.ts
+msgid "The report as it stands today"
+msgstr "Der Bericht, wie er heute steht"
 
 #: src/onboarding/staff-words.ts
 msgid "The risk assessment isn't done"
@@ -4117,6 +4228,10 @@ msgstr "Dieser Chat hat eingeschränkte Daten gelesen: Dies kann sie nach außen
 msgid "This collection has no files yet."
 msgstr "Diese Sammlung hat noch keine Dateien."
 
+#: src/dashboard/report.ts
+msgid "This couldn't be read when the report was made."
+msgstr "Das konnte beim Erstellen des Berichts nicht gelesen werden."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "this currency"
 msgstr "dieser Währung"
@@ -4186,6 +4301,10 @@ msgstr "Über den eigenen Connector von Grasp, der den Zugriff in Ihrer Installa
 msgid "Timed out"
 msgstr "Abgelaufen"
 
+#: src/dashboard/report.ts
+msgid "Timed out: {timedOut}"
+msgstr "Abgelaufen: {timedOut}"
+
 #: src/activity/audit-log.tsx
 msgid "To"
 msgstr "Bis"
@@ -4249,6 +4368,11 @@ msgstr "Typ"
 #: src/dashboard/signals.tsx
 msgid "Unanswered question"
 msgstr "Unbeantwortete Frage"
+
+#: src/dashboard/report.ts
+msgctxt "programme stage"
+msgid "Under way"
+msgstr "Im Gange"
 
 #: src/activity/pending.tsx
 msgid "Unknown"
@@ -4347,9 +4471,18 @@ msgstr "Wartet anderswo"
 msgid "Waiting for a decision"
 msgstr "Wartet auf eine Entscheidung"
 
+#: src/dashboard/report.ts
+msgid "Waiting for a decision: {waiting}"
+msgstr "Warten auf eine Entscheidung: {waiting}"
+
 #: src/dashboard/signals.tsx
 msgid "Waiting for a person"
 msgstr "Wartet auf eine Person"
+
+#: src/dashboard/report.ts
+msgctxt "programme stage"
+msgid "Waiting for the go"
+msgstr "Warten auf das Go"
 
 #: src/chat/held-writes.tsx
 msgid "Waiting for you"
@@ -4380,6 +4513,22 @@ msgstr "Durfte kein Mitglied zu einer Engine hinzufügen"
 msgid "Was refused packages nobody approved"
 msgstr "Pakete verweigert, die niemand genehmigt hat"
 
+#: src/dashboard/report.ts
+msgid "Week {week}"
+msgstr "Woche {week}"
+
+#: src/dashboard/report.ts
+msgid "Week {week} · {stage}"
+msgstr "Woche {week} · {stage}"
+
+#: src/dashboard/report.ts
+msgid "Week {week} of {weeks}"
+msgstr "Woche {week} von {weeks}"
+
+#: src/dashboard/report.ts
+msgid "Week {week} of {weeks} · {stage}"
+msgstr "Woche {week} von {weeks} · {stage}"
+
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
 msgid "What"
@@ -4389,6 +4538,10 @@ msgstr "Was"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
 msgstr "Was sich geändert hat"
+
+#: src/dashboard/report.ts
+msgid "What could be better"
+msgstr "Was besser sein könnte"
 
 #: src/onboarding/staff-words.ts
 msgctxt "kickoff field"
@@ -4440,6 +4593,14 @@ msgstr "Was Grasp braucht"
 #: src/chat/builds.tsx
 msgid "What other engines may call"
 msgstr "Was andere Engines aufrufen dürfen"
+
+#: src/dashboard/report.ts
+msgid "What ran"
+msgstr "Was lief"
+
+#: src/dashboard/report-dialog.tsx
+msgid "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
+msgstr "Was lief, die Entscheidungen, um die es bat, jeder Workflow und was besser sein könnte. Behalten Sie ihn als Markdown oder speichern Sie ihn im Druckfenster als PDF."
 
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "What should the next person at Grasp know?"
@@ -4581,6 +4742,7 @@ msgid "Workflow tests fail:"
 msgstr "Workflow-Tests schlagen fehl:"
 
 #: src/chat/builds.tsx
+#: src/dashboard/report.ts
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
@@ -4724,6 +4886,11 @@ msgstr "Ihre Organisation nutzt es über die Berechtigungen, die Sie erteilen."
 #: src/chat/composer.tsx
 msgid "Your question"
 msgstr "Ihre Frage"
+
+#: src/dashboard/report-bar.tsx
+#: src/dashboard/report.ts
+msgid "Your report on week {week} is ready"
+msgstr "Ihr Bericht zu Woche {week} ist fertig"
 
 #: src/screens/screen-frame.tsx
 msgid "Your session has ended. Sign in again to go on."

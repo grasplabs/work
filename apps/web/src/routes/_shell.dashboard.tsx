@@ -1,8 +1,13 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { Activity } from "../dashboard/activity.tsx";
+import { nextReport } from "../dashboard/programme.ts";
 import { readDashboard } from "../dashboard/read-dashboard.ts";
+import { ReportBar } from "../dashboard/report-bar.tsx";
+import { ReportDialog } from "../dashboard/report-dialog.tsx";
+import { programmeLine } from "../dashboard/report.ts";
 import { ToDo } from "../dashboard/to-do.tsx";
 import { WidgetBoard } from "../dashboard/widget-board.tsx";
 import { LoadingLines, PageLoading } from "../frame/page-states.tsx";
@@ -13,14 +18,24 @@ import { NotLoaded } from "../load-from-core.tsx";
 // on the person, each with its next step; under it the widget board,
 // where the workflows and engines stand, the runs this week, and what
 // could be better, from the daily signals; and, for admins, the latest of what Grasp and people
-// did. The prototype's weekly board report is left out: every number
-// there comes from hours core doesn't have. It replaces the Notifications
-// page and Settings' pending approvals, which lead here.
+// did. With a plan for the interviews, the heading says the programme's
+// week and stage, and the weekly report's bar is under what waits: when
+// the next report is ready, and its export (report-dialog.tsx), made of
+// what core has; the prototype's hours and euros aren't in it. It
+// replaces the Notifications page and Settings' pending approvals, which
+// lead here.
 
 const DashboardPage = () => {
-  const { waiting, board, activity } = Route.useLoaderData();
+  const { waiting, board, programme, today, report, activity } =
+    Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const { t } = useLingui();
+  const { i18n, t } = useLingui();
+  const [exporting, setExporting] = useState(false);
+  // A programme only with a plan; none read, no line and no report.
+  const planned = programme.state === "ready" ? programme.data : null;
+  const line =
+    planned === null ? undefined : programmeLine(planned, today, i18n);
+  const next = planned === null ? undefined : nextReport(planned.start, today);
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Dashboard` }]} />
@@ -30,13 +45,33 @@ const DashboardPage = () => {
             <Trans>Dashboard</Trans>
           </h1>
           <p className="text-muted-foreground">
-            <Trans>
-              What waits on you, each with its next step, and what could be
-              better.
-            </Trans>
+            {line ?? (
+              <Trans>
+                What waits on you, each with its next step, and what could be
+                better.
+              </Trans>
+            )}
           </p>
         </div>
         <ToDo identity={identity} waiting={waiting} />
+        {next === undefined || line === undefined ? null : (
+          <>
+            <ReportBar
+              next={next}
+              onExport={() => {
+                setExporting(true);
+              }}
+            />
+            <ReportDialog
+              line={line}
+              next={next}
+              onOpenChange={setExporting}
+              open={exporting}
+              reads={report}
+              today={today}
+            />
+          </>
+        )}
         {/* Each comes as it is read: a slow one holds back nothing else. */}
         <WidgetBoard board={board} />
         {activity === undefined ? null : (
