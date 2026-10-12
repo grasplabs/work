@@ -45,6 +45,11 @@ msgstr "{0, plural, one {# persoon} other {# personen}}"
 msgid "{0, plural, one {Needs # thing Grasp refuses to run} other {Needs # things Grasp refuses to run}}"
 msgstr "{0, plural, one {Heeft # ding nodig dat Grasp weigert uit te voeren} other {Heeft # dingen nodig die Grasp weigert uit te voeren}}"
 
+#. {about} is what the app is for, as the app list writes it, e.g. “Accounting”. {date} is a day and month.
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "{about} · connected {date}"
+msgstr "{about} · gekoppeld op {date}"
+
 #: src/dashboard/signals.tsx
 msgid "{about} cost {cost} a run in model calls, over {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "{about} kostte {days, plural, one {de afgelopen dag} other {de afgelopen # dagen}} {cost} per run aan modelaanroepen, over {runs, plural, one {# run} other {# runs}}."
@@ -190,8 +195,8 @@ msgid "{kind}, {severity}, {about}: {summary}"
 msgstr "{kind}, {severity}, {about}: {summary}"
 
 #: src/routes/_shell.integrations.index.tsx
-msgid "{label}: {count}"
-msgstr "{label}: {count}"
+msgid "{label} · {count}"
+msgstr "{label} · {count}"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "{limit} a month for each, admins alerted at {alertAt}."
@@ -270,6 +275,10 @@ msgstr "{name} is verwijderd. {count, plural, one {# persoonlijke verbinding is 
 msgid "{name} is signed out everywhere."
 msgstr "{name} is overal afgemeld."
 
+#: src/connections/app-logo.tsx
+msgid "{name} logo"
+msgstr "Logo van {name}"
+
 #: src/chat/builds-state.ts
 msgid "{name} no longer changes the engine's data (write → read)"
 msgstr "{name} wijzigt de gegevens van de engine niet meer (schrijven → lezen)"
@@ -305,6 +314,11 @@ msgstr "{path}, dat niet meer zou draaien"
 #: src/routes/_shell.settings.members.tsx
 msgid "{people, plural, one {# person has access. Members join by signing in with your organization’s account; there are no invitations to send.} other {# people have access. Members join by signing in with your organization’s account; there are no invitations to send.}}"
 msgstr "{people, plural, one {# persoon heeft toegang. Leden komen erbij door in te loggen met het account van je organisatie; er zijn geen uitnodigingen te versturen.} other {# personen hebben toegang. Leden komen erbij door in te loggen met het account van je organisatie; er zijn geen uitnodigingen te versturen.}}"
+
+#. Who connected the app, then the day they did.
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "{person}, {date}"
+msgstr "{person}, {date}"
 
 #: src/dashboard/todo-pile.tsx
 msgid "{place} of {count}"
@@ -347,6 +361,10 @@ msgstr "App {screen}"
 msgid "{share} of the {limit} budget"
 msgstr "{share} van het budget van {limit}"
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
+msgstr "{shown, plural, one {# integratie getoond} other {# integraties getoond}}"
+
 #: src/dashboard/pile-cards.tsx
 msgid "{subject} gets this permission from now on."
 msgstr "{subject} krijgt deze machtiging vanaf nu."
@@ -379,17 +397,9 @@ msgstr "{title} op {connection}"
 msgid "{title} removed from the dashboard."
 msgstr "{title} is van het dashboard verwijderd."
 
-#: src/connections/integration-row.tsx
-msgid "{toolCount, plural, one {# tool} other {# tools}}"
-msgstr "{toolCount, plural, one {# tool} other {# tools}}"
-
 #: src/dashboard/runs-widget.tsx
 msgid "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 msgstr "{total, plural, one {Bij {withPerson} van # run was een beslissing van een persoon nodig.} other {Bij {withPerson} van # runs was een beslissing van een persoon nodig.}}"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
-msgstr "{total, plural, one {# integratie getoond} other {# integraties getoond}}"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "{total} is held for these model calls until you decide: what each could have cost. Release it, or charge it in full."
@@ -628,6 +638,11 @@ msgstr "Afspraken"
 msgctxt "onboarding stage"
 msgid "Agreements"
 msgstr "Afspraken"
+
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "AI"
+msgstr "AI"
 
 #: src/routes/_shell.settings.spend.tsx
 #: src/routes/_shell.settings.tsx
@@ -900,10 +915,6 @@ msgstr "Audittrail"
 msgid "Automatically"
 msgstr "Automatisch"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "Available"
-msgstr "Beschikbaar"
-
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
 msgstr "Terug naar hoe het begon"
@@ -1099,6 +1110,11 @@ msgstr "{amount} in rekening brengen voor deze modelaanroep?"
 msgid "Chat"
 msgstr "Chat"
 
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Chat"
+msgstr "Chat"
+
 #: src/chat/studio.tsx
 msgctxt "the chat beside an App being built"
 msgid "Chat"
@@ -1178,6 +1194,11 @@ msgstr "Collecties bevatten de documenten die Grasp en zijn agents mogen lezen. 
 msgid "Comment (optional)"
 msgstr "Opmerking (optioneel)"
 
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Commerce"
+msgstr "Verkoop"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Committed"
 msgstr "Vastgelegd"
@@ -1231,10 +1252,6 @@ msgid "Connect another account"
 msgstr "Nog een account koppelen"
 
 #: src/routes/_shell.integrations.index.tsx
-msgid "Connected"
-msgstr "Gekoppeld"
-
-#: src/routes/_shell.integrations.index.tsx
 msgctxt "filter: the integrations that are connected"
 msgid "Connected"
 msgstr "Gekoppeld"
@@ -1244,11 +1261,16 @@ msgctxt "state of one app"
 msgid "Connected"
 msgstr "Gekoppeld"
 
+#: src/routes/_shell.integrations.$integration.tsx
+msgid "Connected {date}"
+msgstr "Verbonden op {date}"
+
 #: src/activity/audit-words.ts
 msgid "Connected an account"
 msgstr "Een account gekoppeld"
 
 #: src/connections/connection-list.tsx
+#: src/routes/_shell.integrations.$integration.tsx
 msgid "Connected by"
 msgstr "Gekoppeld door"
 
@@ -1340,6 +1362,11 @@ msgctxt "severity of a finding"
 msgid "Critical"
 msgstr "Kritiek"
 
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "CRM"
+msgstr "CRM"
+
 #: src/frame/person-menu.tsx
 msgid "Dark"
 msgstr "Donker"
@@ -1348,6 +1375,11 @@ msgstr "Donker"
 #: src/routes/_shell.dashboard.tsx
 msgid "Dashboard"
 msgstr "Dashboard"
+
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Data and analytics"
+msgstr "Data en analyse"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Data processing agreement"
@@ -1437,6 +1469,11 @@ msgstr "Hangt af van"
 msgid "Describe what you want. The agent answers from what it can read, and holds every change to an outside system until you confirm it."
 msgstr "Beschrijf wat je wilt. De agent antwoordt op basis van wat hij kan lezen en houdt elke wijziging aan een extern systeem vast tot jij die bevestigt."
 
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Design and media"
+msgstr "Ontwerp en media"
+
 #: src/activity/audit-log.tsx
 #: src/knowledge/document.tsx
 msgid "Details"
@@ -1449,6 +1486,11 @@ msgstr "Details van gebeurtenis {seq}"
 #: src/workflows/runs.tsx
 msgid "Details removed"
 msgstr "Details verwijderd"
+
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Developer tools"
+msgstr "Ontwikkeltools"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -1574,6 +1616,11 @@ msgstr "Bewerken"
 #: src/routes/_shell.settings.profile.tsx
 msgid "Email"
 msgstr "E-mail"
+
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Email and calendar"
+msgstr "E-mail en agenda"
 
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
@@ -1743,6 +1790,11 @@ msgstr "Bestand"
 msgid "Files"
 msgstr "Bestanden"
 
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Files and documents"
+msgstr "Bestanden en documenten"
+
 #: src/activity/audit-log.tsx
 msgid "Filter"
 msgstr "Filter"
@@ -1759,6 +1811,11 @@ msgstr "Filters"
 msgctxt "heading of the column that filters the integrations"
 msgid "Filters"
 msgstr "Filters"
+
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Finance and accounting"
+msgstr "Financiën en boekhouding"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Findings"
@@ -1793,13 +1850,17 @@ msgid "Fold the sections"
 msgstr "Onderdelen inklappen"
 
 #: src/connections/connect-dialog.tsx
-#: src/connections/integration-row.tsx
 msgid "For everyone"
 msgstr "Voor iedereen"
 
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "For Grasp's staff on this onboarding alone; the company doesn't see them."
 msgstr "Alleen voor Grasp-medewerkers bij deze onboarding; het bedrijf ziet ze niet."
+
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Forms and surveys"
+msgstr "Formulieren en enquêtes"
 
 #: src/activity/audit-log.tsx
 msgid "From"
@@ -1984,6 +2045,11 @@ msgstr "Hoe Stephen hier is ingesteld"
 #: src/routes/_shell.settings.profile.tsx
 msgid "How you appear in Grasp: on workflows you own, and in the audit trail."
 msgstr "Hoe je in Grasp verschijnt: bij workflows waarvan je eigenaar bent, en in de audittrail."
+
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "HR"
+msgstr "HR"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "If {condition}:"
@@ -2319,6 +2385,11 @@ msgstr "{app} beheren, gekoppeld voor jou"
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
 
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Marketing"
+msgstr "Marketing"
+
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
 msgstr "Kan iets buiten Grasp wijzigen"
@@ -2380,6 +2451,10 @@ msgstr "Gemiddeld"
 msgid "More for {title}"
 msgstr "Meer voor {title}"
 
+#: src/routes/_shell.integrations.index.tsx
+msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
+msgstr "Meer dan {about} apps waarin je workflows kunnen werken. Grasp doet per app alleen wat jij toestaat."
+
 #: src/chat/held-writes.tsx
 msgid "More will be sent than is shown above. Read exactly what will be sent before you confirm."
 msgstr "Er wordt meer verstuurd dan hierboven staat. Lees precies wat er wordt verstuurd voordat je bevestigt."
@@ -2405,7 +2480,6 @@ msgid "Needs alongside it"
 msgstr "Heeft daarnaast nodig"
 
 #: src/dashboard/widget-board.tsx
-#: src/routes/_shell.integrations.index.tsx
 msgid "Needs attention"
 msgstr "Vraagt aandacht"
 
@@ -2710,10 +2784,6 @@ msgstr "Er wordt niets verzonden of gewijzigd in {connection}."
 msgid "Nothing matched."
 msgstr "Niets gevonden."
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "Nothing needs attention."
-msgstr "Niets vraagt aandacht."
-
 #: src/routes/_shell.onboarding.index.tsx
 msgid "Nothing needs Grasp right now."
 msgstr "Er is nu niets dat Grasp nodig heeft."
@@ -2820,10 +2890,6 @@ msgstr "Alleen de ondernemingsraad kan hiermee instemmen, niet de sponsor. Dat d
 msgid "Only when a condition holds:"
 msgstr "Alleen als aan een voorwaarde is voldaan:"
 
-#: src/connections/integration-row.tsx
-msgid "Only you"
-msgstr "Alleen jij"
-
 #: src/connections/connect-dialog.tsx
 msgid "Only you can use it."
 msgstr "Alleen jij kunt het gebruiken."
@@ -2902,6 +2968,11 @@ msgstr "Gaat open bij {threshold}%"
 #: src/knowledge/uploads.tsx
 msgid "or choose them from your computer"
 msgstr "of kies ze op je computer"
+
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Other"
+msgstr "Overig"
 
 #: src/chat/builds-state.ts
 msgid "Other engines may no longer call {name}"
@@ -3047,6 +3118,11 @@ msgstr "Voorbeeld: wijzigt niets, leest geen echte gegevens"
 #: src/routes/_shell.settings.tsx
 msgid "Profile"
 msgstr "Profiel"
+
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Projects and tasks"
+msgstr "Projecten en taken"
 
 #: src/chat/builds.tsx
 msgid "Proposed by the agent in chat \"{chatTitle}\"."
@@ -3577,10 +3653,6 @@ msgstr "Zijbalk tonen of verbergen"
 msgid "Show the packages for {engine}"
 msgstr "De pakketten voor {engine} tonen"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "Showing the first {count} of {total}. Refine your search to find others."
-msgstr "De eerste {count} van {total} worden getoond. Verfijn je zoekopdracht om andere te vinden."
-
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Showing the first {pageMaxLimit} files."
 msgstr "De eerste {pageMaxLimit} bestanden worden getoond."
@@ -3669,6 +3741,11 @@ msgstr "Opnieuw aangemeld bij een verbinding"
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Signed off"
 msgstr "Goedgekeurd"
+
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Signing"
+msgstr "Digitaal ondertekenen"
 
 #: src/connections/connect-dialog.tsx
 msgid "Signing in happens at {app}. It takes about a minute."
@@ -3799,6 +3876,11 @@ msgstr "Gestopt met volgen wat er bij een verbinding verandert"
 #: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Gestopt."
+
+#: src/connections/groups.ts
+msgctxt "kind of app"
+msgid "Support"
+msgstr "Klantenservice"
 
 #: src/frame/person-menu.tsx
 msgid "System"
