@@ -6,7 +6,12 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
 import {
@@ -15,19 +20,38 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
-import { EllipsisVerticalIcon, LogOutIcon, SettingsIcon } from "lucide-react";
+import {
+  EllipsisVerticalIcon,
+  LogOutIcon,
+  MonitorIcon,
+  MoonIcon,
+  SettingsIcon,
+  SunIcon,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { roleLabel } from "../labels.ts";
 import { LanguageMenu } from "../language-picker.tsx";
+import {
+  applyTheme,
+  chooseTheme,
+  isTheme,
+  readTheme,
+  themes,
+} from "./theme.ts";
+import type { Theme } from "./theme.ts";
 
 // The person signed in, at the foot of the sidebar, as in the prototype
 // (`components/nav-user.tsx`): a menu with Settings, where their profile
-// and, for admins, the workspace's settings are, the language and signing
-// out.
+// and, for admins, the workspace's settings are, the language, the theme
+// and signing out.
 
 /** Up to two letters of `name`, for the avatar. */
 export const initials = (name: string): string =>
@@ -54,6 +78,61 @@ const Who = ({ identity }: { identity: Identity }) => {
         </span>
       </span>
     </>
+  );
+};
+
+const themeNames: Record<Theme, MessageDescriptor> = {
+  light: msg`Light`,
+  dark: msg`Dark`,
+  system: msg`System`,
+};
+
+const themeIcons: Record<Theme, LucideIcon> = {
+  light: SunIcon,
+  dark: MoonIcon,
+  system: MonitorIcon,
+};
+
+/**
+ * Light, dark or the system's, as a submenu of the person menu: the
+ * person's own choice in this browser (theme.ts), applied as soon as they
+ * are signed in.
+ */
+const ThemeMenu = ({ userId }: { userId: string }) => {
+  const { t, i18n } = useLingui();
+  const [theme, setTheme] = useState(() => readTheme(userId));
+  // What theme.js painted first was whoever was here last; this is theirs.
+  useEffect(() => {
+    applyTheme(readTheme(userId));
+  }, [userId]);
+  const Icon = themeIcons[theme];
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <Icon />
+        {t`Theme`}
+        <span className="text-muted-foreground ml-auto">
+          {i18n._(themeNames[theme])}
+        </span>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
+        <DropdownMenuRadioGroup
+          value={theme}
+          onValueChange={(value: unknown) => {
+            if (isTheme(value)) {
+              setTheme(value);
+              chooseTheme(userId, value);
+            }
+          }}
+        >
+          {themes.map((each) => (
+            <DropdownMenuRadioItem key={each} value={each}>
+              {i18n._(themeNames[each])}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   );
 };
 
@@ -90,6 +169,7 @@ export const PersonMenu = ({
                 {t`Settings`}
               </DropdownMenuItem>
               <LanguageMenu />
+              <ThemeMenu userId={identity.userId} />
               <DropdownMenuItem
                 onClick={() => {
                   void signOut(core);

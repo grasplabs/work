@@ -1319,6 +1319,10 @@ msgctxt "severity of a finding"
 msgid "Critical"
 msgstr "Kritisch"
 
+#: src/frame/person-menu.tsx
+msgid "Dark"
+msgstr "Dunkel"
+
 #: src/dashboard/nav-item.tsx
 #: src/routes/_shell.dashboard.tsx
 msgid "Dashboard"
@@ -2212,6 +2216,10 @@ msgstr "Lizenz"
 msgctxt "kind of finding"
 msgid "Licence"
 msgstr "Lizenz"
+
+#: src/frame/person-menu.tsx
+msgid "Light"
+msgstr "Hell"
 
 #: src/onboarding/staff-words.ts
 msgid "Links out: {count} of {of}"
@@ -3759,6 +3767,10 @@ msgstr "Aufgehört zu verfolgen, was sich bei einer Verbindung ändert"
 msgid "Stopped."
 msgstr "Gestoppt."
 
+#: src/frame/person-menu.tsx
+msgid "System"
+msgstr "System"
+
 #: src/engines/screen-approval.tsx
 msgid "Take back"
 msgstr "Zurücknehmen"
@@ -4084,6 +4096,10 @@ msgstr "Der Betriebsrat wurde nicht angehört"
 msgctxt "kickoff field"
 msgid "Their tools"
 msgstr "Ihre Tools"
+
+#: src/frame/person-menu.tsx
+msgid "Theme"
+msgstr "Design"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "There are no collections you can read yet."
