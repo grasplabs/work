@@ -3,7 +3,7 @@ import { collectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, CollectionId, PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
-import type { SearchHit } from "@grasp-os/shared/knowledge";
+import type { SearchHit, SearchResults } from "@grasp-os/shared/knowledge";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -150,7 +150,43 @@ const interleaved = <Item>(lists: readonly (readonly Item[])[]): Item[] => {
   return merged;
 };
 
-/** The best hits for `text` in every bound collection. */
+/**
+ * One bound collection's best hits for the person the call acts for; none
+ * from a collection they may not read (Knowledge refuses it as one that
+ * doesn't exist, `knowledge.not_found`), so a search answers what the
+ * person may read of the bound collections, and says nothing of the rest.
+ */
+const searchOne = async (
+  env: Env,
+  caller: BindingCaller,
+  permissionId: PermissionId,
+  {
+    text,
+    limit,
+    collectionId,
+  }: {
+    text: string;
+    limit: number;
+    collectionId: CollectionId;
+  }
+): Promise<SearchResults | undefined> => {
+  try {
+    return await readAsDelegate(
+      env,
+      caller.authority,
+      caller.context,
+      permissionId,
+      async (reader) => await search(env, reader, text, { limit }, collectionId)
+    );
+  } catch (error) {
+    if (knowledgeErrors.codeOf(error) === "knowledge.not_found") {
+      return undefined;
+    }
+    throw error;
+  }
+};
+
+/** The best hits for `text` in every bound collection the person may read. */
 const searchBound = async (
   env: Env,
   caller: BindingCaller,
@@ -163,16 +199,15 @@ const searchBound = async (
   // read notes its provenance (and restricts the App) before it returns.
   for (const { permissionId, collectionId } of bound) {
     // oxlint-disable-next-line no-await-in-loop -- one collection at a time
-    const results = await readAsDelegate(
-      env,
-      caller.authority,
-      caller.context,
-      permissionId,
-      async (reader) =>
-        await search(env, reader, request.text, { limit }, collectionId)
-    );
-    caller.sources.note(results.provenance);
-    found.push(results.hits);
+    const results = await searchOne(env, caller, permissionId, {
+      text: request.text,
+      limit,
+      collectionId,
+    });
+    if (results !== undefined) {
+      caller.sources.note(results.provenance);
+      found.push(results.hits);
+    }
   }
   return interleaved(found)
     .slice(0, limit)

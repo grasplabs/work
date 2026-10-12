@@ -416,6 +416,7 @@ const knowledgeApp = async () => {
   return {
     sealed,
     admin,
+    team,
     binding,
     permissions,
     collections: { handbook: handbook.id, salaries: salaries.id },
@@ -994,6 +995,35 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       collectionIds: [collections.handbook],
       sensitive: false,
       restricted: false,
+    });
+  });
+
+  it("search what the person may read of the bound collections, and nothing else", async () => {
+    const { sealed, documents, collections, team } = await knowledgeApp();
+    // The App's owner leaves the payroll team: its salaries collection is
+    // still bound, but no longer theirs to read.
+    await env.DB.prepare(
+      "DELETE FROM team_members WHERE team_id = ? AND user_id = ?"
+    )
+      .bind(team, sealed.owner.userId)
+      .run();
+    const found = await answerOf(sealed, "help.find", { text: "leave" });
+    const opened = await answerOf(sealed, "help.open", { id: documents.pay });
+    expect({
+      found: hitsSchema
+        .parse(outcomeOf(found.result))
+        .map(({ title }) => title),
+      provenance: found.provenance,
+      opened: outcomeOf(opened.result),
+    }).toStrictEqual({
+      found: ["Leave"],
+      provenance: {
+        collectionIds: [collections.handbook],
+        sensitive: false,
+        restricted: false,
+      },
+      // As a document that doesn't exist.
+      opened: { failed: "resource.item_not_found" },
     });
   });
 
