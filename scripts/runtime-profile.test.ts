@@ -87,6 +87,30 @@ describe("the runtime profile each deployment says", () => {
     expect(profiles).toStrictEqual(["workerd"]);
   });
 
+  it("lets only local dev and tests run App code in core without a sandbox", () => {
+    const { dev = "", deploy = "" } = coreScripts();
+    const { vars } = z
+      .object({ vars: z.record(z.string(), z.unknown()).default({}) })
+      .parse(parseJsonc(read("apps/core/wrangler.jsonc")));
+    expect({
+      dev: wranglerVars(dev, "dev")?.SANDBOX_IN_PROCESS,
+      deploy: wranglerVars(deploy, "deploy")?.SANDBOX_IN_PROCESS,
+      wrangler: vars.SANDBOX_IN_PROCESS,
+      console: read("apps/console/src/deploy/core-config.ts").includes(
+        "SANDBOX_IN_PROCESS"
+      ),
+      tests: read("apps/core/vite.config.ts").includes(
+        'SANDBOX_IN_PROCESS: "unbounded"'
+      ),
+    }).toStrictEqual({
+      dev: "unbounded",
+      deploy: undefined,
+      wrangler: undefined,
+      console: false,
+      tests: true,
+    });
+  });
+
   it("is never set in core's wrangler.jsonc, which dev and tests read", () => {
     const { vars } = z
       .object({ vars: z.record(z.string(), z.unknown()).default({}) })

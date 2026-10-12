@@ -177,6 +177,10 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "RUN_RETENTION_DAYS",
   // Whether Code Mode's CPU limit is enforced (core's src/code-mode.ts).
   "RUNTIME_PROFILE",
+  // The on-prem sandbox for untrusted isolates (core's src/sandboxed.ts).
+  "SANDBOX_DEADLINE_MS",
+  "SANDBOX_HOST",
+  "SANDBOX_IN_PROCESS",
   "SIGN_IN",
   // An App's statistics (core's src/statistics.ts), next to its permissions.
   "STATISTICS",
