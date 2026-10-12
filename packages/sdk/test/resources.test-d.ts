@@ -146,3 +146,29 @@ expectTypeOf(sent.threadId).toBeString();
 // The answer isn't any value: it can't be used as one it isn't.
 // @ts-expect-error -- `sent` is `true`, not a string
 expectTypeOf(sent.sent).toBeString();
+
+// An action known only as one of several: its arguments must fit
+// whichever it is, so arguments that fit only `list` are refused.
+declare const either: "send" | "list";
+// @ts-expect-error -- fits `list`, but not `send`
+await ctx.resources.mail.call(either, { mailbox: "team@acme.test" });
+// Narrowed, each branch is typed by its own action, and so is its answer.
+const answer =
+  either === "send"
+    ? await ctx.resources.mail.call(either, {
+        mailbox: "team@acme.test",
+        subject: "Hello",
+        body: "Hi.",
+        to: ["ada@acme.test"],
+      })
+    : await ctx.resources.mail.call(either, { mailbox: "team@acme.test" });
+expectTypeOf(answer).toExtend<
+  { mailbox: string; sent: true } | { nextPage: string | null }
+>();
+// A literal action still infers that action alone, answer included.
+expectTypeOf(
+  ctx.resources.mail.call("list", { mailbox: "team@acme.test" })
+).resolves.toHaveProperty("messages");
+expectTypeOf(
+  ctx.resources.mail.call("list", { mailbox: "team@acme.test" })
+).resolves.not.toHaveProperty("sent");

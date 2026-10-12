@@ -201,6 +201,20 @@ export interface ModelClient<Output> {
   }) => Promise<Output>;
 }
 
+/** A catalog action's arguments. */
+type InputOf<Entry> = Entry extends { readonly input: infer Input }
+  ? Input
+  : never;
+
+/**
+ * A call's arguments: each action of `Action` paired with its own
+ * arguments, so an action that may be either of two needs arguments that
+ * fit whichever it is, never just one of them.
+ */
+type CallArgs<Contract, Action> = Action extends string
+  ? [action: Action, args: InputOf<ContractAction<Contract, Action>>]
+  : never;
+
 /**
  * What `ctx.resources.<alias>` is for a connector: its calls typed by the
  * contract's catalog entry (`ConnectorCatalog`).
@@ -211,11 +225,11 @@ export interface ConnectorClient<
 > {
   /**
    * One of the declared actions, with its arguments, through connect: its
-   * answer. Both are checked against the contract the binding serves.
+   * answer, or any of theirs when the action may be several. Both are
+   * checked against the contract the binding serves.
    */
   readonly call: <Action extends Actions[number]>(
-    action: Action,
-    args: ContractAction<Contract, Action>["input"]
+    ...call: CallArgs<Contract, Action>
   ) => Promise<ContractAction<Contract, Action>["output"]>;
 }
 
