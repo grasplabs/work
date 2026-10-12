@@ -445,6 +445,17 @@ export const invocationFor = async (
   // SAFETY: a release's resource ID is the App it was sealed for.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const app = release.manifest.resourceId as AppId;
+  const bindings = resourceBindingsFor(env, {
+    app,
+    authority: {
+      subject: { type: "app", appId: app },
+      onBehalfOf: by.userId,
+      mode: "interactive",
+      appVersion: release.manifest.resourceVersion,
+    },
+    context: { type: "app", appId: app },
+    sources,
+  });
   return {
     principal: by.userId,
     consumer: {
@@ -466,18 +477,13 @@ export const invocationFor = async (
       return await operationRoles(env, by, app);
     },
     // The App's approved bindings, read again on every request, acting
-    // for the App and the person calling, with the person there.
-    resources: resourceBindingsFor(env, {
-      app,
-      authority: {
-        subject: { type: "app", appId: app },
-        onBehalfOf: by.userId,
-        mode: "interactive",
-        appVersion: release.manifest.resourceVersion,
-      },
-      context: { type: "app", appId: app },
-      sources,
-    }),
+    // for the App and the person calling, with the person there; each
+    // request first checks the release wasn't revoked meanwhile, as each
+    // mutation's commit does, so a revoked release reaches nothing more.
+    resources: async (declaration) => {
+      await requireNotRevoked(env, app, release.manifest.resourceVersion);
+      return await bindings(declaration);
+    },
   };
 };
 

@@ -340,8 +340,15 @@ export const revokeResourceBinding = async (
   const [row] = revoked;
   if (row === undefined) {
     // Revoked already, or `by` is no longer an admin: only that refuses.
+    // Answered as it stands now: another revoke, or a replacing approval,
+    // may have revoked it since it was read.
     await requireStillAdmin(env, by);
-    return toBinding(found);
+    const now = await drizzle(env.DB)
+      .select()
+      .from(appResourceBindings)
+      .where(eq(appResourceBindings.id, found.id))
+      .get();
+    return toBinding(now ?? found);
   }
   return toBinding(row);
 };

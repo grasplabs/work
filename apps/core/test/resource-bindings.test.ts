@@ -11,6 +11,7 @@ import { callAppFunction } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { appResourceBindings } from "../src/db/core/schema.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import {
   approveResourceBinding,
   listResourceBindings,
@@ -48,6 +49,18 @@ export const writer = resource.model("writer", { maxOutputTokens: ${maxOutputTok
 export const tagger = resource.model("tagger", {
   structuredOutput: v.object({ tags: v.array(v.string().trim().min(1)).max(5) }),
   maxOutputTokens: 200,
+});
+
+export const labeler = resource.model("labeler", {
+  structuredOutput: v.object({ label: v.string(), status: v.string().default("draft") }),
+  maxOutputTokens: 200,
+});
+
+export const label = action({
+  args: { text: v.string().min(1) },
+  returns: v.object({ label: v.string(), status: v.string() }),
+  uses: [labeler],
+  handler: async (ctx, args) => await ctx.resources.labeler.generate({ prompt: args.text }),
 });
 
 export const draft = action({
@@ -103,17 +116,17 @@ export const twice = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { draft, probe, tag, tagger, twice, writer } from "./operations/assist.ts";
+import { draft, label, labeler, probe, tag, tagger, twice, writer } from "./operations/assist.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Assistant",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { assist: { draft, tag, twice, probe } },
+  operations: { assist: { draft, tag, twice, probe, label } },
   internalOperations: {},
   screens: [],
-  uses: [writer, tagger],
+  uses: [writer, tagger, labeler],
 });
 `,
 });
@@ -619,5 +632,76 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       refused: "role.forbidden",
       rows: 0,
     });
+  });
+
+  it("tell the model a defaulted field must be given, as the exact form is checked", async () => {
+    const sealed = await sealedApp(modelFiles());
+    await approveModel(sealed, "labeler");
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      answer('{"label": "Launch", "status": "draft"}'),
+    ]);
+    const result = await call(withGateway, sealed, "assist.label", {
+      text: "Notes",
+    });
+    expect({
+      outcome: outcomeOf(result),
+      sent: gateway.requests.length,
+      told: sentText(gateway, 0).includes(
+        String.raw`\"required\":[\"label\",\"status\"]`
+      ),
+    }).toStrictEqual({
+      outcome: { label: "Launch", status: "draft" },
+      sent: 1,
+      told: true,
+    });
+  });
+
+  it("stop a release revoked between two requests of one call", async () => {
+    const sealed = await sealedApp(modelFiles());
+    await approveModel(sealed, "writer");
+    const gate = Promise.withResolvers<unknown>();
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      { ...answer("first"), pause: { at: 2, until: gate.promise } },
+      answer("never sent"),
+    ]);
+    const running = call(withGateway, sealed, "assist.twice", {});
+    while (gateway.requests.length === 0) {
+      // oxlint-disable-next-line no-await-in-loop -- until the first request is out
+      await scheduler.wait(10);
+    }
+    await revokeRelease(
+      env,
+      await person("admin"),
+      { app: sealed.app, version: 1 },
+      "Compromised"
+    );
+    gate.resolve(null);
+    const result = await running;
+    expect({
+      outcome: outcomeOf(result),
+      sent: gateway.requests.length,
+    }).toStrictEqual({ outcome: "first|version.revoked", sent: 1 });
+  });
+
+  it("answer two racing revocations with the binding as it is", async () => {
+    const sealed = await sealedApp(modelFiles());
+    const binding = await approveModel(sealed, "writer");
+    const admins = [await person("admin"), await person("admin")];
+    // Both read it active before either writes.
+    const [one, two] = await Promise.all(
+      admins.map(
+        async (admin) => await revokeResourceBinding(env, admin, binding.id)
+      )
+    );
+    // Revoking it twice records it once: the loser reads it again.
+    const revoked = await auditedFor(
+      "app.resource_binding.revoked",
+      sealed.app
+    );
+    expect({
+      one: one?.status,
+      two: two?.status,
+      recorded: revoked.length,
+    }).toStrictEqual({ one: "revoked", two: "revoked", recorded: 1 });
   });
 });

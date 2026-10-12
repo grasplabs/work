@@ -50,39 +50,43 @@ const requestSchema = z.strictObject({
  */
 const answerSchema = (descriptor: ValueDescriptor) => {
   const schema = schemaFromDescriptor(JSON.stringify(descriptor));
-  return z
-    .unknown()
-    .superRefine((value, context) => {
-      const checked = schema["~standard"].validate(value);
-      if ("then" in checked) {
-        context.addIssue({ code: "custom", message: "Not checkable." });
-        return;
-      }
-      if (checked.issues !== undefined) {
-        for (const issue of checked.issues) {
-          const at = (issue.path ?? []).map(String).join(".");
+  return (
+    z
+      .unknown()
+      .superRefine((value, context) => {
+        const checked = schema["~standard"].validate(value);
+        if ("then" in checked) {
+          context.addIssue({ code: "custom", message: "Not checkable." });
+          return;
+        }
+        if (checked.issues !== undefined) {
+          for (const issue of checked.issues) {
+            const at = (issue.path ?? []).map(String).join(".");
+            context.addIssue({
+              code: "custom",
+              message: at === "" ? issue.message : `${at}: ${issue.message}`,
+            });
+          }
+          return;
+        }
+        const normalized = jsonOf(checked.value);
+        const given = jsonOf(value);
+        if (
+          normalized === undefined ||
+          given === undefined ||
+          canonicalJson(normalized) !== canonicalJson(given)
+        ) {
           context.addIssue({
             code: "custom",
-            message: at === "" ? issue.message : `${at}: ${issue.message}`,
+            message:
+              "It isn't in its exact form: trim strings and leave nothing to fill in.",
           });
         }
-        return;
-      }
-      const normalized = jsonOf(checked.value);
-      const given = jsonOf(value);
-      if (
-        normalized === undefined ||
-        given === undefined ||
-        canonicalJson(normalized) !== canonicalJson(given)
-      ) {
-        context.addIssue({
-          code: "custom",
-          message:
-            "It isn't in its exact form: trim strings and leave nothing to fill in.",
-        });
-      }
-    })
-    .meta(jsonSchemaOf(descriptor));
+      })
+      // The exact form: a defaulted field must be given, as the
+      // check below requires it.
+      .meta(jsonSchemaOf(descriptor, { exact: true }))
+  );
 };
 
 /**

@@ -83,14 +83,18 @@ const scalarSchema = (descriptor: ValueDescriptor): JsonSchema | undefined => {
  */
 const compositeSchema = (
   descriptor: ValueDescriptor,
-  of: (inner: ValueDescriptor) => JsonSchema
+  of: (inner: ValueDescriptor) => JsonSchema,
+  exact: boolean
 ): JsonSchema | undefined => {
   if (descriptor.kind === "object") {
     const properties: JsonSchema = {};
     const required: string[] = [];
     for (const [name, field] of Object.entries(descriptor.fields)) {
       properties[name] = of(field);
-      if (field.presence === "required") {
+      if (
+        field.presence === "required" ||
+        (exact && field.presence === "default")
+      ) {
         required.push(name);
       }
     }
@@ -117,15 +121,31 @@ const compositeSchema = (
     : undefined;
 };
 
+/** How a descriptor is told as JSON Schema. */
+export interface JsonSchemaOptions {
+  /**
+   * The exact form, as every return is checked: a field with a default
+   * must be given, filled in, so a value the descriptor would complete is
+   * never offered as one that fits.
+   */
+  readonly exact?: boolean;
+}
+
 /**
  * `descriptor` as JSON Schema: its kind and bounds, and `null` too when it
- * is nullable. Whether a field may be left out is its object's `required`;
- * a default is the descriptor's to fill in, so the schema doesn't say it.
+ * is nullable. Whether a field may be left out is its object's `required`,
+ * where a field with a default counts as required in the exact form; a
+ * default is the descriptor's to fill in, so the schema doesn't say it.
  */
-export const jsonSchemaOf = (descriptor: ValueDescriptor): JsonSchema => {
+export const jsonSchemaOf = (
+  descriptor: ValueDescriptor,
+  { exact = false }: JsonSchemaOptions = {}
+): JsonSchema => {
+  const of = (inner: ValueDescriptor): JsonSchema =>
+    jsonSchemaOf(inner, { exact });
   const value =
     scalarSchema(descriptor) ??
-    compositeSchema(descriptor, jsonSchemaOf) ??
+    compositeSchema(descriptor, of, exact) ??
     semanticSchema(descriptor.kind);
   return descriptor.nullable ? { anyOf: [value, { type: "null" }] } : value;
 };
