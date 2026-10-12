@@ -1,3 +1,4 @@
+import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -152,6 +153,129 @@ describe("a run's status, as the engine's notifications set it", () => {
     }).toStrictEqual({
       row: { status: "cancelled", sequence: 2, ended: 1, failure: null },
       audited: [],
+    });
+  });
+
+  it("records a run cancelled while the engine's error is projected as cancelled, with no failure report or notice", async () => {
+    const run = await runRow();
+    // The cancel lands after the projection read the row, before it writes.
+    const racing = racingDb(async (db) => {
+      await db
+        .prepare(
+          "UPDATE workflow_runs SET cancel_requested_at = ? WHERE id = ? AND cancel_requested_at IS NULL"
+        )
+        .bind(Date.now(), run)
+        .run();
+    });
+
+    await projectStatus({ ...env, DB: racing }, run, {
+      status: "errored",
+      at: Date.now(),
+      sequence: 2,
+    });
+
+    expect({
+      row: await rowOf(run),
+      audited: await auditedOf(run),
+    }).toStrictEqual({
+      row: { status: "cancelled", sequence: 2, ended: 1, failure: null },
+      audited: [],
+    });
+  });
+
+  it("forgets the statistics points of an ended run's steps with its end, even when the first write of it fails", async () => {
+    const run = await runRow();
+    await env.DB.prepare(
+      "INSERT INTO app_statistic_steps (step_key, attempt, app_id, measure, day, dimensions, count, sum, min, max, committed) VALUES (?, 'attempt', 'app', 'mails', '2026-10-12', '{}', 1, 1, 1, 1, 0)"
+    )
+      .bind(stepIdempotencyKey(run, "send"))
+      .run();
+    const kept = async () =>
+      await env.DB.prepare(
+        "SELECT count(*) AS kept FROM app_statistic_steps WHERE step_key = ?"
+      )
+        .bind(stepIdempotencyKey(run, "send"))
+        .first<number>("kept");
+    // D1 fails the cleanup once, as it can (overloaded, timed out).
+    let failing = true;
+    const marked = new WeakSet<object>();
+    const refuse = () => {
+      if (failing) {
+        failing = false;
+        throw new Error("D1_ERROR: broken for the test");
+      }
+    };
+    const flaky = new Proxy(env.DB, {
+      get: (target, key) => {
+        if (key === "prepare") {
+          return (query: string) => {
+            const statement = target.prepare(query);
+            if (!/delete from "?app_statistic_steps"?/iu.test(query)) {
+              return statement;
+            }
+            const proxied = new Proxy(statement, {
+              get: (inner, name) => {
+                const value: unknown = Reflect.get(inner, name);
+                if (name === "run" && typeof value === "function") {
+                  return async (...args: unknown[]) => {
+                    refuse();
+                    const result: unknown = await Reflect.apply(
+                      value,
+                      inner,
+                      args
+                    );
+                    return result;
+                  };
+                }
+                if (name === "bind" && typeof value === "function") {
+                  return (...args: unknown[]) => {
+                    const bound: unknown = Reflect.apply(value, inner, args);
+                    if (typeof bound === "object" && bound !== null) {
+                      marked.add(bound);
+                    }
+                    return bound;
+                  };
+                }
+                if (typeof value !== "function") {
+                  return value;
+                }
+                const own: unknown = value.bind(inner);
+                return own;
+              },
+            });
+            marked.add(proxied);
+            return proxied;
+          };
+        }
+        if (key === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (statements.some((statement) => marked.has(statement))) {
+              refuse();
+            }
+            return await target.batch(statements);
+          };
+        }
+        const value: unknown = Reflect.get(target, key);
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+    const ending = { status: "complete", at: Date.now(), sequence: 4 } as const;
+
+    const first = await projectStatus({ ...env, DB: flaky }, run, ending).then(
+      () => "ok",
+      () => "failed"
+    );
+    // The notification is delivered again.
+    await projectStatus(env, run, ending);
+
+    expect({ first, row: await rowOf(run), kept: await kept() }).toStrictEqual({
+      first: "failed",
+      row: { status: "completed", sequence: 4, ended: 1, failure: null },
+      kept: 0,
     });
   });
 });

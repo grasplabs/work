@@ -1,5 +1,9 @@
 import { statisticRowsPerDay } from "@grasp-os/shared/statistics";
 import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
+import { and, gte, lt } from "drizzle-orm";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+
+import { appStatisticSteps } from "./db/core/schema.ts";
 
 // The statistics points of a workflow run's steps (`app_statistic_steps`):
 // each attempt's are kept as they are recorded (`recordStatistic`,
@@ -71,22 +75,27 @@ export const commitStepStatistics = async (
 };
 
 /**
- * Forgets the points the steps of run `runId` recorded, once it has ended:
- * an ended run is never replayed, so none of them is added up any more.
- * None is kept after either: a point is kept only while its run hasn't
- * ended (`recordStatistic`), and the run is marked ended before this.
+ * Forgets the points the steps of run `runId` recorded, in the batch that
+ * ends it (runs.ts, `projectStatus`): an ended run is never replayed, so
+ * none of them is added up any more, and its end and the cleanup are
+ * written together, or neither. None is kept after either: a point is
+ * kept only while its run hasn't ended (`recordStatistic`). Deleting what
+ * is already gone deletes nothing.
  */
-export const forgetStepStatistics = async (
-  env: Env,
+export const stepStatisticsForgotten = (
+  db: DrizzleD1Database,
   runId: string
-): Promise<void> => {
+) => {
   // Every key of the run's steps starts with its ID and a colon
   // (`stepIdempotencyKey`), and no other run's does: a range of the
   // primary key, up to the character after the colon.
   const first = stepIdempotencyKey(runId, "");
-  await env.DB.prepare(
-    "DELETE FROM app_statistic_steps WHERE step_key >= ? AND step_key < ?"
-  )
-    .bind(first, `${first.slice(0, -1)};`)
-    .run();
+  return db
+    .delete(appStatisticSteps)
+    .where(
+      and(
+        gte(appStatisticSteps.stepKey, first),
+        lt(appStatisticSteps.stepKey, `${first.slice(0, -1)};`)
+      )
+    );
 };

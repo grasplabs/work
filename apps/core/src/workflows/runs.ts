@@ -48,7 +48,7 @@ import {
 import type { Member } from "../auth/identity.ts";
 import { apps, workflowRuns } from "../db/core/schema.ts";
 import { failureNoticed } from "../notifications.ts";
-import { forgetStepStatistics } from "../statistic-steps.ts";
+import { stepStatisticsForgotten } from "../statistic-steps.ts";
 import { hasWorkflow } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
@@ -228,13 +228,14 @@ const failureRecorded = async (
   env: Env,
   db: DrizzleD1Database,
   row: Pick<RunRow, "id" | "appId" | "workflowId" | "version" | "startedBy">,
-  detail: Record<string, string | number | boolean | null>
+  detail: Record<string, string | number | boolean | null>,
+  also: SQL = sql`1`
 ) => {
   const failed = createAuditEvent(
     runEntry(runActor(row), "workflow.run.failed", row, detail),
     "core"
   );
-  const stored = outboxedEventWhere(db, failed, sql`changes() > 0`);
+  const stored = outboxedEventWhere(db, failed, sql`changes() > 0 AND ${also}`);
   let personId = row.startedBy;
   if (personId === null) {
     const app = await appRecord(env, appIdSchema.parse(row.appId));
@@ -948,9 +949,12 @@ export const projectStatus = async (
     return;
   }
   // A cancelled run the engine ended otherwise than by terminating it
-  // ended for its cancel: its next activation refused to run on.
+  // ended for its cancel: its next activation refused to run on. Whether
+  // a cancel was asked for is decided in the write, as the row is then:
+  // a cancel written since `row` was read makes it cancelled, not failed.
+  const errored = engine.status === "errored";
   const status =
-    row.cancelRequestedAt !== null && engine.status === "errored"
+    row.cancelRequestedAt !== null && errored
       ? "cancelled"
       : projected[engine.status];
   const at = new Date(engine.at);
@@ -965,20 +969,24 @@ export const projectStatus = async (
   const sequence =
     engine.sequence === undefined ? {} : { engineSequence: engine.sequence };
   const ended = endedLive.has(engine.status);
-  const failure =
-    status === "failed" ? (row.failure ?? stoppedReport(row, at)) : null;
+  const report = errored ? (row.failure ?? stoppedReport(row, at)) : null;
+  const endedFailed = sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.status} = 'failed')`;
   const [[changed]] = await auditedBatch(env, db, [
     db
       .update(workflowRuns)
       .set({
-        status,
+        ...(report === null
+          ? { status }
+          : {
+              status: sql`CASE WHEN ${workflowRuns.cancelRequestedAt} IS NULL THEN 'failed' ELSE 'cancelled' END`,
+              failure: sql`CASE WHEN ${workflowRuns.cancelRequestedAt} IS NULL THEN ${JSON.stringify(report)} ELSE ${workflowRuns.failure} END`,
+            }),
         pendingStart: null,
         ...sequence,
         ...(ended ? { endedAt: at } : {}),
-        ...(failure === null ? {} : { failure }),
       })
       .where(fenced)
-      .returning({ id: workflowRuns.id }),
+      .returning({ id: workflowRuns.id, status: workflowRuns.status }),
     ...(status === "completed"
       ? [
           outboxedIfChanged(
@@ -987,9 +995,16 @@ export const projectStatus = async (
           ),
         ]
       : []),
-    ...(failure === null
+    // Audited and noticed only when the write made it failed.
+    ...(report === null
       ? []
-      : await failureRecorded(env, db, row, { error: failure.error.code })),
+      : await failureRecorded(
+          env,
+          db,
+          row,
+          { error: report.error.code },
+          endedFailed
+        )),
     // Audited by the system only when no cancel was asked for, as the
     // batch finds the row: a cancel written since `row` was read audited
     // it already, and its run is audited as cancelled once.
@@ -1002,15 +1017,16 @@ export const projectStatus = async (
           ),
         ]
       : []),
+    // Its end and the cleanup of the statistics points its steps never
+    // added up are written together: a retried notification finds the
+    // row ended, so nothing would be left to clean up after it.
+    ...(ended ? [stepStatisticsForgotten(db, row.id)] : []),
   ]);
   if (!changed) {
     return;
   }
-  if (shownStatus(row.status) !== status) {
+  if (shownStatus(row.status) !== changed.status) {
     await tellScreens(env, row);
-  }
-  if (ended) {
-    await forgetStepStatistics(env, row.id);
   }
 };
 
