@@ -7,6 +7,7 @@ import m0004 from './0004_cursor_key.sql';
 import m0005 from './0005_table_generations.sql';
 import m0006 from './0006_schema_contract.sql';
 import m0007 from './0007_record_refs.sql';
+import m0008 from './0008_record_ref_cascade.sql';
 
   export default {
     journal,
@@ -18,7 +19,8 @@ m0003,
 m0004,
 m0005,
 m0006,
-m0007
+m0007,
+m0008
     }
   }
   

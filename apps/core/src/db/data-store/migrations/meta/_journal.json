@@ -57,6 +57,13 @@
       "when": 1791824090389,
       "tag": "0007_record_refs",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791824187827,
+      "tag": "0008_record_ref_cascade",
+      "breakpoints": true
     }
   ]
 }
