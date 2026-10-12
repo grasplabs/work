@@ -1,6 +1,8 @@
+import type { App } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { storeIdSchema } from "@grasp-os/shared/ids";
+import { isExpectedError } from "@grasp-os/shared/errors";
+import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
 import { canBuild, isAdmin, requireBuilder } from "@grasp-os/shared/roles";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
@@ -24,9 +26,17 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { requireAppRole } from "./app-access.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import { activeMember } from "./auth/auth.ts";
 import type { Acting } from "./auth/identity.ts";
-import { businessStoreMembers, businessStores } from "./db/core/schema.ts";
+import {
+  appDefaultStores,
+  appMembers,
+  apps,
+  businessStoreMembers,
+  businessStores,
+} from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import {
   memberEntry,
@@ -51,7 +61,9 @@ import type { ReadResult } from "./store-host.ts";
 // A store's lifecycle: the organization's builders create stores; its
 // admins, its creator and the people and teams it is shared with in role
 // `manage` manage it (share it, delete it), as long as their own role in
-// the organization builds. Threat model, and how each is closed:
+// the organization builds. An App's default store (app-activation.ts) is
+// managed instead by whoever builds the App, the organization's admins
+// included. Threat model, and how each is closed:
 //
 // - Someone creates stores who shouldn't: only admins and builders can
 //   (`role.forbidden` otherwise), and the creation is audited in the same
@@ -69,6 +81,12 @@ import type { ReadResult } from "./store-host.ts";
 //   so they learn nothing of it. Grasp staff never share, unshare or
 //   delete a store: whom a client's data reaches, and whether it is
 //   destroyed, is the client's decision. A refused deletion is audited.
+// - Someone keeps power over an App's data after leaving the App, or hands
+//   it to an outsider: an App's default store is managed by the App's
+//   builders as its App roles decide them on each call (requireAppRole),
+//   never by its creator as such, and it can't be shared or unshared as a
+//   store (`data.store_managed_by_app`): whom it serves follows the App's
+//   own membership.
 // - A store is deleted while something still relies on it: the store's
 //   own object refuses (`data.store_in_use`) while any receipt not yet
 //   expired refers to it, which an attempt in flight, a retry to come, a
@@ -186,11 +204,52 @@ export const createStore = async (env: Env, by: Acting): Promise<StoreId> => {
   return id;
 };
 
+/** The App a default store serves: whose roles decide who manages it. */
+type DefaultStoreApp = Pick<App, "id" | "owner"> & { createdAt: Date };
+
 /**
- * The live store `id` if `by` manages it: an admin, its creator, or a
- * person or team still in the organization it is shared with in role
- * `manage`, and only while their role in the organization builds.
- * Otherwise `data.store_unavailable`, as for a store that doesn't exist.
+ * The App whose default store `id` is (`app_default_stores`,
+ * app-activation.ts), if it is one. Whether it is one is that table's
+ * alone: a default store whose App row is gone is refused
+ * (`data.store_unavailable`), never managed as a plain store by whoever
+ * created it.
+ */
+const defaultStoreApp = async (
+  env: Env,
+  id: StoreId
+): Promise<DefaultStoreApp | undefined> => {
+  const row = await drizzle(env.DB)
+    .select({
+      id: apps.id,
+      owner: apps.ownerId,
+      createdAt: apps.createdAt,
+    })
+    .from(appDefaultStores)
+    .leftJoin(apps, eq(apps.id, appDefaultStores.appId))
+    .where(eq(appDefaultStores.storeId, id))
+    .get();
+  if (row === undefined) {
+    return undefined;
+  }
+  if (row.id === null || row.owner === null || row.createdAt === null) {
+    throw dataErrors.create("data.store_unavailable");
+  }
+  return {
+    id: appIdSchema.parse(row.id),
+    owner: row.owner,
+    createdAt: row.createdAt,
+  };
+};
+
+/**
+ * The live store `id` if `by` manages it; otherwise `data.store_unavailable`,
+ * as for a store that doesn't exist. An App's default store is managed by
+ * whoever builds the App, as its App roles decide it on this call
+ * (`requireAppRole`): the organization's admins and the App's builders,
+ * never its creator as such, nor anyone it is shared with as a store
+ * (`defaultOf` names the App). Any other store is managed by an admin, its
+ * creator, or a person or team still in the organization it is shared with
+ * in role `manage`, and only while their role in the organization builds.
  * `by`'s role and teams are taken as given: an identity read for this
  * call, as for App roles (see the threat model above).
  */
@@ -198,12 +257,23 @@ const managedBy = async (
   env: Env,
   by: Acting,
   id: string
-): Promise<{ id: StoreId; owner: string }> => {
+): Promise<{ id: StoreId; owner: string; defaultOf?: DefaultStoreApp }> => {
   const parsed = storeIdSchema.safeParse(id);
   if (!parsed.success || !canBuild(by.role)) {
     throw dataErrors.create("data.store_unavailable");
   }
   const db = drizzle(env.DB);
+  const app = await defaultStoreApp(env, parsed.data);
+  if (app !== undefined) {
+    try {
+      await requireAppRole(env, by, app, "builder");
+    } catch (error) {
+      if (isExpectedError(error)) {
+        throw dataErrors.create("data.store_unavailable");
+      }
+      throw error;
+    }
+  }
   const shared = db
     .select({ one: sql`1` })
     .from(businessStoreMembers)
@@ -222,7 +292,7 @@ const managedBy = async (
       and(
         eq(businessStores.id, parsed.data),
         isNull(businessStores.deletedAt),
-        isAdmin(by.role)
+        app !== undefined || isAdmin(by.role)
           ? undefined
           : or(eq(businessStores.ownerId, by.userId), exists(shared))
       )
@@ -231,7 +301,21 @@ const managedBy = async (
   if (row === undefined) {
     throw dataErrors.create("data.store_unavailable");
   }
-  return { id: parsed.data, owner: row.owner };
+  return {
+    id: parsed.data,
+    owner: row.owner,
+    ...(app === undefined ? {} : { defaultOf: app }),
+  };
+};
+
+/**
+ * Refuses (`data.store_managed_by_app`) to share or unshare an App's
+ * default store as a store: whom it serves follows the App's membership.
+ */
+const requireSharableStore = (store: { defaultOf?: DefaultStoreApp }): void => {
+  if (store.defaultOf !== undefined) {
+    throw dataErrors.create("data.store_managed_by_app");
+  }
 };
 
 /**
@@ -309,6 +393,72 @@ const boundToCurrentRelease = async (
     .where(and(eq(businessStores.id, id), boundToCurrentSql(id)))
     .get();
   return row !== undefined;
+};
+
+/** The organization roles that build, and so may manage a store. */
+const buildingRoles = ["admin", "builder"] as const;
+
+/**
+ * Who manages an App's default store besides the organization's admins,
+ * in the shape of a store's managers: the App's owner, then whom the App
+ * is shared with as builders, as App roles decide it (app-access.ts). A
+ * person is listed only while still in the organization in a role that
+ * builds, which caps their role in the App; a team while it exists, its
+ * people each capped by their own role.
+ */
+const appBuilders = async (
+  env: Env,
+  app: DefaultStoreApp
+): Promise<StoreManager[]> => {
+  const db = drizzle(env.DB);
+  const ownerBuilds = await db
+    .select({ one: sql`1` })
+    .from(apps)
+    .where(and(eq(apps.id, app.id), activeMember(apps.ownerId, buildingRoles)))
+    .get();
+  const owner: StoreManager[] =
+    ownerBuilds === undefined
+      ? []
+      : [
+          {
+            type: "person",
+            id: app.owner,
+            role: "manage",
+            addedBy: app.owner,
+            addedAt: app.createdAt.toISOString(),
+          },
+        ];
+  const rows = await db
+    .select()
+    .from(appMembers)
+    .where(
+      and(
+        eq(appMembers.appId, app.id),
+        eq(appMembers.role, "builder"),
+        or(
+          and(
+            eq(appMembers.memberType, "person"),
+            activeMember(appMembers.memberId, buildingRoles)
+          ),
+          and(eq(appMembers.memberType, "team"), stillMembers(appMembers))
+        )
+      )
+    )
+    .orderBy(
+      asc(appMembers.addedAt),
+      asc(appMembers.memberType),
+      asc(appMembers.memberId)
+    );
+  return [
+    ...owner,
+    ...rows.map((row): StoreManager => ({
+      type: row.memberType,
+      id: row.memberId,
+      role: "manage",
+      addedBy: row.addedBy,
+      addedAt: row.addedAt.toISOString(),
+    })),
+  ];
 };
 
 /**
@@ -420,6 +570,7 @@ export const shareStore = async (
 ): Promise<void> => {
   requireNotStaff(by);
   const store = await managedBy(env, by, id);
+  requireSharableStore(store);
   const member: MemberRef = dataErrors.parse(
     "data.invalid",
     storeMemberSchema,
@@ -467,6 +618,7 @@ export const unshareStore = async (
 ): Promise<void> => {
   requireNotStaff(by);
   const store = await managedBy(env, by, id);
+  requireSharableStore(store);
   const member: MemberRef = dataErrors.parse(
     "data.invalid",
     storeMemberSchema,
@@ -509,6 +661,9 @@ export const storeManagers = async (
   id: string
 ): Promise<StoreManager[]> => {
   const store = await managedBy(env, by, id);
+  if (store.defaultOf !== undefined) {
+    return await appBuilders(env, store.defaultOf);
+  }
   const rows = await drizzle(env.DB)
     .select()
     .from(businessStoreMembers)
