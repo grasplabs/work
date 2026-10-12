@@ -4,6 +4,7 @@ import { databaseWriter } from "../src/database.ts";
 import { inspectApp } from "../src/host.ts";
 import { AppError, app, resource } from "../src/index.ts";
 import type { AppDefinition } from "../src/index.ts";
+import { readResourceDeclaration } from "../src/resources.ts";
 import { runFunction } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
@@ -86,6 +87,19 @@ const notes = (changes: Partial<Registration> = {}) =>
 /** Registers Notes with `changes` the types refuse. */
 const looseNotes = (changes: object) =>
   looseApp({ ...registration, ...changes });
+
+/**
+ * A connector declaration of `contract`, read back as the host reads a
+ * manifest's: in code a contract is one of the catalog's, so any other
+ * string arrives only as data.
+ */
+const connectorOf = (contract: string) =>
+  readResourceDeclaration({
+    "~resource": "connector",
+    alias: "mail",
+    contract,
+    actions: ["send"],
+  });
 
 const refusal = (register: () => unknown): string => {
   try {
@@ -226,7 +240,7 @@ describe("resources", () => {
       collections: ["handbook"],
     });
     const connector = resource.connector("mail", {
-      contract: "grasp.mail@1",
+      contract: "microsoft-365.mail@1",
       actions: ["send"],
     });
     const template = resource.template("letter", {
@@ -372,7 +386,7 @@ describe("paths", () => {
 
 describe("uses", () => {
   const mail = resource.connector("mail", {
-    contract: "grasp.mail@1",
+    contract: "microsoft-365.mail@1",
     actions: ["send"],
   });
 
@@ -433,7 +447,7 @@ describe("uses", () => {
     );
     // The same alias declared again is another requirement, not this one.
     const lookalike = resource.connector("mail", {
-      contract: "grasp.mail@1",
+      contract: "microsoft-365.mail@1",
       actions: ["send"],
     });
     expect(
@@ -448,19 +462,15 @@ describe("uses", () => {
     // 256 characters, the most an identifier may be, then one more.
     const longest = `${"a".repeat(254)}@1`;
     const tooLong = `${"a".repeat(255)}@1`;
+    const read = connectorOf(longest);
     expect({
       template: resource.template("letter", { contract: longest }).contract,
-      connector: resource.connector("mail", {
-        contract: longest,
-        actions: ["send"],
-      }).contract,
+      connector: "contract" in read ? read.contract : null,
     }).toStrictEqual({ template: longest, connector: longest });
     expect(
       [
         refusal(() => resource.template("letter", { contract: tooLong })),
-        refusal(() =>
-          resource.connector("mail", { contract: tooLong, actions: ["send"] })
-        ),
+        refusal(() => connectorOf(tooLong)),
       ].map((message) => message.includes("at most 256 characters"))
     ).toStrictEqual([true, true]);
   });

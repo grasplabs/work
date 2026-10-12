@@ -4,6 +4,7 @@ import { z } from "zod";
 import { defineConnector, defineTool, ToolError } from "../src/connector.ts";
 import {
   connectorManifestSchema,
+  generatedContracts,
   pathMatches,
   redirectHostMatches,
 } from "../src/manifest.ts";
@@ -480,5 +481,45 @@ describe("a route's path", () => {
     ]) {
       expect(pathMatches(custom, path)).toBeFalsy();
     }
+  });
+});
+
+describe("generated contracts", () => {
+  const toolNamed = (name: string) =>
+    defineTool({
+      name,
+      description: "A tool",
+      input: z.strictObject({}),
+      output: z.strictObject({}),
+      readOnly: true,
+      routes: [route],
+      run: async () => await Promise.resolve({ output: {} }),
+    });
+
+  it("group a connector's tools by family, each action named after it", () => {
+    const { manifest } = connectorWith({
+      tools: [
+        toolNamed("items.list"),
+        toolNamed("items.get"),
+        toolNamed("people.find"),
+        // No family, or an action name a declaration can't list: in no
+        // contract, so neither served by connect nor in the SDK's catalog.
+        toolNamed("ping"),
+        toolNamed("items.archive.all"),
+      ],
+    });
+    expect(
+      Object.fromEntries(
+        [...generatedContracts(manifest)].map(([contract, actions]) => [
+          contract,
+          Object.fromEntries(
+            [...actions].map(([action, { tool }]) => [action, tool])
+          ),
+        ])
+      )
+    ).toStrictEqual({
+      "example.items@1": { list: "items.list", get: "items.get" },
+      "example.people@1": { find: "people.find" },
+    });
   });
 });

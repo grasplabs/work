@@ -115,6 +115,7 @@ export const schemaFromDescriptor = (
 export { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 export { readAppManifest } from "./app-manifest.ts";
 export {
+  connectorCatalogSource,
   contractFingerprint,
   contractFingerprints,
   contractsFormatVersion,
@@ -123,7 +124,7 @@ export {
   serverModuleSource,
   symbolicModules,
 } from "./generate.ts";
-export type { ReleaseIdentity } from "./generate.ts";
+export type { CatalogAction, ReleaseIdentity } from "./generate.ts";
 export type { ScreenManifest } from "./app.ts";
 
 // A descriptor as JSON Schema, for what reads only JSON Schema (a model
