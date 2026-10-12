@@ -14,7 +14,7 @@ import type { NotificationsApi } from "./notifications.ts";
 import type { OnboardingGateApi } from "./onboarding-gate.ts";
 import type { OnboardingApi, OnboardingStaffApi } from "./onboarding.ts";
 import type { PermissionsApi } from "./permissions.ts";
-import type { ResourceBindingsApi } from "./resource-bindings.ts";
+import type { ResourceBindingsApi, TemplatesApi } from "./resource-bindings.ts";
 import type { Role } from "./roles.ts";
 import type { ScreenTrustApi } from "./screen-trust.ts";
 import type { ScreensApi } from "./screens.ts";
@@ -71,6 +71,12 @@ export interface SessionApi {
    * and revoked by admins only, listed for admins and the App's builders.
    */
   readonly resourceBindings: ResourceBindingsApi;
+  /**
+   * Published templates, each version written once: what template
+   * bindings read. Published by admins only, listed for admins and
+   * builders.
+   */
+  readonly templates: TemplatesApi;
   /**
    * The App registry and each App's code: the Apps the person owns or that
    * are shared with them, and every App for admins.

@@ -1,8 +1,10 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { valueDepth } from "@grasp-os/shared/value-depth";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -22,11 +24,13 @@ import {
   revokePermission,
 } from "../src/permissions.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { invocationSources } from "../src/resource-adapter.ts";
 import {
   approveResourceBinding,
   listResourceBindings,
   revokeResourceBinding,
 } from "../src/resource-bindings.ts";
+import { publishTemplate, templateAdapter } from "../src/resource-templates.ts";
 import { isRestricted } from "../src/restricted.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
@@ -440,6 +444,86 @@ const answerOf = async (
 /** A search text of exactly `length` code units that still finds the leave policy. */
 const searchTextOf = (length: number): string =>
   "leave ".repeat(length).slice(0, length);
+
+/** An App whose action reads a letter template. */
+const letterFiles = (): Record<string, string> => ({
+  "schema.ts": modelFiles()["schema.ts"] ?? "",
+  "operations/letters.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const letter = resource.template("letter", { contract: "grasp.letter@1" });
+
+export const read = action({
+  args: {},
+  returns: v.object({ version: v.number(), greeting: v.string() }),
+  uses: [letter],
+  handler: async (ctx) => {
+    const template = await ctx.resources.letter.read();
+    const { content } = template;
+    const greeting =
+      typeof content === "object" && content !== null && !Array.isArray(content)
+        ? String(content.greeting)
+        : "";
+    return { version: template.version, greeting };
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { letter, read } from "./operations/letters.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Letters",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { letters: { read } },
+  internalOperations: {},
+  screens: [],
+  uses: [letter],
+});
+`,
+});
+
+/** The error code publishing `publication` as `by` fails with. */
+const publishRefusal = async (
+  by: Awaited<ReturnType<typeof person>>,
+  publication: object
+): Promise<string> =>
+  await failure(async () => await publishTemplate(env, by, publication));
+
+/** Letter content whose deepest value is `depth` levels down. */
+const deepLetter = (depth: number): Json => {
+  let rest: Json = "end";
+  for (let level = 2; level < depth; level += 1) {
+    rest = [rest];
+  }
+  return { greeting: "Deep", rest };
+};
+
+/** Overwrites version 1 of `templateId` behind the platform's back. */
+const tamperTemplate = async (
+  templateId: string,
+  content: string,
+  contentHash?: string
+): Promise<void> => {
+  await env.DB.prepare(
+    "UPDATE resource_templates SET content = ?, content_hash = COALESCE(?, content_hash) WHERE id = ? AND version = 1"
+  )
+    .bind(content, contentHash ?? null, templateId)
+    .run();
+};
+
+/** An approval of the Letters App's `letter` to `version` of `templateId`. */
+const letterApproval = (
+  sealed: Sealed,
+  templateId: string,
+  version: number
+) => ({
+  app: sealed.app,
+  alias: "letter",
+  target: { kind: "template", templateId, version },
+  reviewed: { version: 1 },
+});
 
 describe("resource bindings", { timeout: 120_000 }, () => {
   it("refuse a model an action declares until an admin binds it", async () => {
@@ -1140,5 +1224,254 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       extra: "resource.target_invalid",
       anotherApps: "resource.target_invalid",
     });
+  });
+
+  it("read the template version a binding pins, whatever is published later", async () => {
+    const sealed = await sealedApp(letterFiles());
+    const admin = await person("admin");
+    const first = await publishTemplate(env, admin, {
+      contract: "grasp.letter@1",
+      content: { greeting: "Dear" },
+    });
+    await approveResourceBinding(
+      env,
+      admin,
+      letterApproval(sealed, first.templateId, 1)
+    );
+    const second = await publishTemplate(env, admin, {
+      templateId: first.templateId,
+      contract: "grasp.letter@1",
+      content: { greeting: "Hello" },
+    });
+    const pinned = await call(env, sealed, "letters.read", {});
+    await approveResourceBinding(
+      env,
+      admin,
+      letterApproval(sealed, first.templateId, second.version)
+    );
+    const moved = await call(env, sealed, "letters.read", {});
+    expect({
+      pinned: outcomeOf(pinned),
+      moved: outcomeOf(moved),
+    }).toStrictEqual({
+      pinned: { version: 1, greeting: "Dear" },
+      moved: { version: 2, greeting: "Hello" },
+    });
+    // Each read is recorded, by the App, of the version it read.
+    const reads = await auditedFor("resource.template.read", sealed.app);
+    const published = await auditedFor(
+      "resource.template.published",
+      first.templateId
+    );
+    expect({
+      reads: reads.map(({ detail }) => detail?.version),
+      published: published.map(({ detail }) => detail?.version),
+    }).toStrictEqual({ reads: [1, 2], published: [1, 2] });
+  });
+
+  it("number a template's versions one at a time, even published at once", async () => {
+    const admin = await person("admin");
+    const first = await publishTemplate(env, admin, {
+      contract: "grasp.letter@1",
+      content: { greeting: "Dear" },
+    });
+    const publishNext = async (greeting: string): Promise<string> =>
+      await failure(
+        async () =>
+          await publishTemplate(env, admin, {
+            templateId: first.templateId,
+            contract: "grasp.letter@1",
+            content: { greeting },
+          })
+      );
+    const outcomes = await Promise.all([
+      publishNext("Hello"),
+      publishNext("Hi"),
+    ]);
+    const published = await auditedFor(
+      "resource.template.published",
+      first.templateId
+    );
+    expect({
+      outcomes: outcomes.toSorted(),
+      published: published.map(({ detail }) => detail?.version),
+    }).toStrictEqual({
+      outcomes: ["app.conflict", "ok"],
+      published: [1, 2],
+    });
+  });
+
+  it("publish templates by admins only, keeping each one's contract", async () => {
+    const admin = await person("admin");
+    const builder = await person("builder");
+    const first = await publishTemplate(env, admin, {
+      contract: "grasp.letter@1",
+      content: { greeting: "Dear" },
+    });
+    expect({
+      builder: await publishRefusal(builder, {
+        contract: "grasp.letter@1",
+        content: {},
+      }),
+      otherContract: await publishRefusal(admin, {
+        templateId: first.templateId,
+        contract: "grasp.invoice@1",
+        content: {},
+      }),
+      unknown: await publishRefusal(admin, {
+        templateId: "no-such-template",
+        contract: "grasp.letter@1",
+        content: {},
+      }),
+      tooLarge: await publishRefusal(admin, {
+        contract: "grasp.letter@1",
+        content: { text: "x".repeat(70_000) },
+      }),
+      // Served inside its answer, one level down: too deep to be read.
+      tooDeep: await publishRefusal(admin, {
+        contract: "grasp.letter@1",
+        content: deepLetter(valueDepth),
+      }),
+    }).toStrictEqual({
+      builder: "role.forbidden",
+      otherContract: "resource.template_contract_changed",
+      unknown: "resource.template_not_found",
+      tooLarge: "resource.template_invalid",
+      tooDeep: "resource.template_invalid",
+    });
+  });
+
+  it("refuse a publication by an admin demoted since their session was checked", async () => {
+    const admin = await person("admin");
+    await env.DB.prepare("UPDATE members SET role = 'member' WHERE user_id = ?")
+      .bind(admin.userId)
+      .run();
+    const refused = await publishRefusal(admin, {
+      contract: "grasp.letter@1",
+      content: { greeting: "Stale" },
+    });
+    const rows = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM resource_templates WHERE published_by = ?"
+    )
+      .bind(admin.userId)
+      .first<{ count: number }>();
+    expect({ refused, published: rows?.count }).toStrictEqual({
+      refused: "role.forbidden",
+      published: 0,
+    });
+  });
+
+  it("bind only a template of the declared contract, and stop one changed in storage", async () => {
+    const sealed = await sealedApp(letterFiles());
+    const admin = await person("admin");
+    const invoice = await publishTemplate(env, admin, {
+      contract: "grasp.invoice@1",
+      content: { total: 1 },
+    });
+    const letter = await publishTemplate(env, admin, {
+      contract: "grasp.letter@1",
+      content: { greeting: "Dear" },
+    });
+    const otherContract = await failure(
+      async () =>
+        await approveResourceBinding(
+          env,
+          admin,
+          letterApproval(sealed, invoice.templateId, 1)
+        )
+    );
+    await approveResourceBinding(
+      env,
+      admin,
+      letterApproval(sealed, letter.templateId, 1)
+    );
+    // A version is never changed; one changed behind the platform's back
+    // no longer hashes to what was approved, and serves nothing: changed
+    // content, content that isn't JSON, or content changed with its hash.
+    const gotcha = JSON.stringify({ greeting: "Gotcha" });
+    await tamperTemplate(letter.templateId, gotcha);
+    const tampered = await call(env, sealed, "letters.read", {});
+    await tamperTemplate(letter.templateId, "{not json");
+    const notJson = await call(env, sealed, "letters.read", {});
+    await tamperTemplate(letter.templateId, gotcha, await sha256Hex(gotcha));
+    const rehashed = await call(env, sealed, "letters.read", {});
+    expect({
+      otherContract,
+      tampered: outcomeOf(tampered),
+      notJson: outcomeOf(notJson),
+      rehashed: outcomeOf(rehashed),
+    }).toStrictEqual({
+      otherContract: "resource.target_invalid",
+      tampered: { failed: "resource.unavailable" },
+      notJson: { failed: "resource.unavailable" },
+      rehashed: { failed: "resource.unavailable" },
+    });
+  });
+
+  it("serve only the approved content, even when storage changes after the binding resolved", async () => {
+    const sealed = await sealedApp(letterFiles());
+    const admin = await person("admin");
+    const letter = await publishTemplate(env, admin, {
+      contract: "grasp.letter@1",
+      content: { greeting: "Dear" },
+    });
+    const declaration = {
+      "~resource": "template",
+      alias: "letter",
+      contract: "grasp.letter@1",
+    } as const;
+    const served = await templateAdapter.bind(env, sealed.app, declaration, {
+      kind: "template",
+      templateId: letter.templateId,
+      version: 1,
+    });
+    // Between the request resolving its binding and reading it, the row
+    // and its hash are both replaced: the read must not serve the new row.
+    const gotcha = JSON.stringify({ greeting: "Gotcha" });
+    await tamperTemplate(letter.templateId, gotcha, await sha256Hex(gotcha));
+    const read = await failure(
+      async () =>
+        await served?.call(
+          {
+            app: sealed.app,
+            authority: {
+              subject: { type: "app", appId: sealed.app },
+              onBehalfOf: sealed.owner.userId,
+              mode: "interactive",
+              appVersion: 1,
+            },
+            context: { type: "app", appId: sealed.app },
+            sources: invocationSources(),
+          },
+          { method: "read", args: [] },
+          {
+            requestId: crypto.randomUUID(),
+            deadline: Date.now() + 10_000,
+            idempotencyKey: crypto.randomUUID(),
+          },
+          {
+            id: crypto.randomUUID(),
+            declarationHash: "0".repeat(64),
+            fingerprint: letter.contentHash,
+          }
+        )
+    );
+    expect(read).toBe("resource.unavailable");
+  });
+
+  it("serve the deepest content its answer can carry", async () => {
+    const sealed = await sealedApp(letterFiles());
+    const admin = await person("admin");
+    const deepest = await publishTemplate(env, admin, {
+      contract: "grasp.letter@1",
+      content: deepLetter(valueDepth - 1),
+    });
+    await approveResourceBinding(
+      env,
+      admin,
+      letterApproval(sealed, deepest.templateId, 1)
+    );
+    const read = await call(env, sealed, "letters.read", {});
+    expect(outcomeOf(read)).toStrictEqual({ version: 1, greeting: "Deep" });
   });
 });
