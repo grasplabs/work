@@ -1340,6 +1340,10 @@ msgctxt "severity of a finding"
 msgid "Critical"
 msgstr "Critical"
 
+#: src/frame/person-menu.tsx
+msgid "Dark"
+msgstr "Dark"
+
 #: src/dashboard/nav-item.tsx
 #: src/routes/_shell.dashboard.tsx
 msgid "Dashboard"
@@ -2237,6 +2241,10 @@ msgstr "Licence"
 msgctxt "kind of finding"
 msgid "Licence"
 msgstr "Licence"
+
+#: src/frame/person-menu.tsx
+msgid "Light"
+msgstr "Light"
 
 #: src/onboarding/staff-words.ts
 msgid "Links out: {count} of {of}"
@@ -3792,6 +3800,10 @@ msgstr "Stopped following what changes at a connection"
 msgid "Stopped."
 msgstr "Stopped."
 
+#: src/frame/person-menu.tsx
+msgid "System"
+msgstr "System"
+
 #: src/engines/screen-approval.tsx
 msgid "Take back"
 msgstr "Take back"
@@ -4121,6 +4133,10 @@ msgstr "The works council hasn't been heard"
 msgctxt "kickoff field"
 msgid "Their tools"
 msgstr "Their tools"
+
+#: src/frame/person-menu.tsx
+msgid "Theme"
+msgstr "Theme"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "There are no collections you can read yet."
