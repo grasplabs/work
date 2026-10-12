@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { defineErrorFamily } from "./errors.ts";
+import { identifierMaxLength } from "./identifier.ts";
 import { appIdSchema, identifierSchema, permissionIdSchema } from "./ids.ts";
 
 // Approved resource bindings (spec 12, 16.1, 32.3): which provider serves
@@ -127,9 +128,13 @@ export interface ResourceBindingsApi {
   list: (app: string) => Promise<ResourceBinding[]>;
 }
 
-/** A template's contract and major version, as the SDK checks it. */
+/**
+ * A template's contract and major version, as the SDK checks it: no longer
+ * than an identifier, so its publication's audit event can name it.
+ */
 const templateContractSchema = z
   .string()
+  .max(identifierMaxLength)
   .regex(/^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*@[1-9]\d{0,5}$/u);
 
 /** The most bytes of one template version's content, as JSON text. */
