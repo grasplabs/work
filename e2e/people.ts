@@ -190,6 +190,7 @@ const cast = {
   notifications: { builder: "builder" },
   dashboard: { user: "user", admin: "admin" },
   dashboardBoard: { builder: "builder" },
+  dashboardLayout: { user: "user" },
   dependencyApproval: { admin: "admin", builder: "builder", approver: "user" },
   chatPreview: { builder: "builder" },
   languages: { member: "user" },

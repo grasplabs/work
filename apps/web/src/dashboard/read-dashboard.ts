@@ -1,4 +1,5 @@
 import type { AuditRecord } from "@grasp-os/shared/audit-log";
+import type { StandardWidgetId } from "@grasp-os/shared/dashboard";
 import type { KnowledgeSignals } from "@grasp-os/shared/knowledge-signals";
 import type {
   OnboardingProgress,
@@ -20,6 +21,7 @@ import { listWorkflows, openableApps } from "../workflows/reads.ts";
 import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
 import { readNotifications } from "./failed-workflows.tsx";
+import { defaultWidgets } from "./layout.ts";
 import { todayUtc } from "./programme.ts";
 import type { ReportReads } from "./report.ts";
 import { fullDays } from "./runs.ts";
@@ -29,10 +31,11 @@ import type { Waiting } from "./to-do.tsx";
 import type { Board, EnginesRead } from "./widget-board.tsx";
 
 // What the dashboard reads, each part on its own so one that fails or
-// hangs leaves the rest: what waits on the person, what the widget board
-// shows (the workflows, the engines, the runs over time, the signals),
-// the programme with Grasp and what its weekly report is made from, and,
-// for admins, the latest of the audit trail.
+// hangs leaves the rest: what waits on the person, the person's layout of
+// the widget board and what it shows (the workflows, the engines, the
+// runs over time, the signals), the programme with Grasp and what its
+// weekly report is made from, and, for admins, the latest of the audit
+// trail.
 
 /** The catalog and connections, as integrations: those whose access ran out are on the list. */
 const readIntegrations = async (session: Session) => {
@@ -213,7 +216,7 @@ const readEngines = async (
  * reads, and, for admins, how many the interviews heard.
  */
 const readReport = async (
-  board: Board,
+  board: Pick<Board, "workflows" | "runs" | "signals">,
   people: Promise<Loaded<OnboardingProgress | null>> | undefined
 ): Promise<ReportReads> => {
   const [runs, workflows, signals, heard] = await Promise.all([
@@ -223,6 +226,23 @@ const readReport = async (
     people,
   ]);
   return { runs, workflows, signals, people: heard };
+};
+
+/**
+ * The widgets on the person's board, in order: as they last saved it, or
+ * as it begins when they never did. A read that fails gives the board as
+ * it begins too, rather than no board.
+ */
+const readLayout = async (
+  core: CoreConnection
+): Promise<readonly StandardWidgetId[]> => {
+  const loaded = await loadFromCore(
+    core,
+    async (session) => await session.dashboard.layout()
+  );
+  return loaded.state === "ready" && loaded.data !== null
+    ? loaded.data.widgets
+    : defaultWidgets;
 };
 
 /**
@@ -266,22 +286,24 @@ export const readDashboard = async (
     core,
     async (session) => await session.onboarding.programme()
   );
-  const board = { workflows, engines, runs, signals };
   const people = isAdmin(identity.role)
     ? loadFromCore(core, async (session) => {
         const { progress } = await session.onboarding.view();
         return progress;
       })
     : undefined;
-  const report = readReport(board, people);
-  // Read with what waits, so the page's heading comes with it.
-  const [waiting, read] = await Promise.all([
+  const report = readReport({ workflows, runs, signals }, people);
+  // The board's order and the page's heading are known before they show,
+  // so nothing moves once it is there; read alongside what waits, which
+  // the page waits for too.
+  const [waiting, layout, read] = await Promise.all([
     readWaiting(core, identity),
+    readLayout(core),
     programme,
   ]);
   return {
     waiting,
-    board,
+    board: { layout, workflows, engines, runs, signals },
     programme: read,
     today: todayUtc(),
     report,
