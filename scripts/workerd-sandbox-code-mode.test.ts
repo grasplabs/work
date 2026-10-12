@@ -77,6 +77,19 @@ describe("a Code Mode run on the on-prem sandbox", () => {
     expect(outcome.text).toContain("no API named env.mail");
   });
 
+  it("refuses a call of a method every object has, not an API's", async () => {
+    const outcome = await run("objectMethod");
+    expect(outcome.status).toBe("threw");
+    expect(outcome.text).toContain("isn't a call of one of this chat's APIs");
+  });
+
+  it("says no more than that the sandbox is unavailable where the deployment binds none", async () => {
+    const outcome = await run("misconfigured");
+    expect(outcome.status).toBe("crashed");
+    expect(outcome.text).toContain("isn't available");
+    expect(outcome.text).not.toContain("SANDBOX_HOST");
+  });
+
   it("ends a busy loop as cpu_exceeded on its CPU time while core keeps answering", async () => {
     const busy = run("busy");
     const answers: number[] = [];

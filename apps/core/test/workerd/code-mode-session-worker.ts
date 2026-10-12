@@ -1,6 +1,7 @@
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
 import { codeRuntime, describeRun, runCode } from "../../src/code-mode.ts";
+import { sessionHost } from "../../src/sandboxed.ts";
 
 // Code Mode on the on-prem sandbox (scripts/workerd-sandbox-code-mode.test.ts):
 // the same `runCode` core runs, with `SANDBOX_HOST` bound to the sandbox
@@ -28,12 +29,25 @@ interface StandInEnv {
 
 const cases: Record<
   string,
-  { code: string; timeoutMs?: number; cancelAfterMs?: number }
+  {
+    code: string;
+    timeoutMs?: number;
+    cancelAfterMs?: number;
+    /** Whether the deployment binds no sandbox, as one off Cloudflare may. */
+    misconfigured?: boolean;
+  }
 > = {
   complete: {
     code: "export default async (self, env) => { console.log('working'); return (await env.caps.double(2)) + (await env.caps.double(3)); };",
   },
   noSuchApi: { code: "export default async (self, env) => env.mail.send();" },
+  objectMethod: {
+    code: "export default async (self, env) => env.caps.hasOwnProperty('double');",
+  },
+  misconfigured: {
+    code: "export default async () => 1;",
+    misconfigured: true,
+  },
   busy: { code: "export default async () => { for (;;) {} };" },
   throws: { code: "export default async () => { throw new Error('nope'); };" },
   syntax: { code: "export default async () => {" },
@@ -88,7 +102,14 @@ export default {
       chosen.code,
       { caps: api() },
       {
-        sandbox: () => env.SANDBOX_HOST,
+        sandbox: () =>
+          chosen.misconfigured === true
+            ? sessionHost({
+                RUNTIME_PROFILE: env.RUNTIME_PROFILE,
+                SANDBOX_HOST: undefined,
+                SANDBOX_IN_PROCESS: undefined,
+              })
+            : env.SANDBOX_HOST,
         owner: "person:stand-in",
         signal: cancel.signal,
         ...(chosen.timeoutMs === undefined

@@ -1,6 +1,8 @@
 import piAgentCore from "@earendil-works/pi-agent-core/package.json" with { type: "json" };
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { compatibilityDate } from "@grasp-os/shared/runtime";
+import { RpcPromise, RpcStub } from "capnweb";
 import type { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
 
@@ -462,12 +464,22 @@ const sandboxStatuses: Readonly<Record<string, CodeRunStatus>> = {
  * Undefined for any other failure.
  */
 const sandboxEnded = (error: unknown): CodeRun | undefined => {
+  if (error instanceof SandboxUnavailableError) {
+    // How the deployment is wrong is for its operators' logs, never for a
+    // run record people and the model read.
+    log.error("code_mode.sandbox_unavailable", errorFields(error));
+    return {
+      status: "crashed",
+      logs: [],
+      error: "The sandbox that runs code isn't available right now.",
+    };
+  }
   const verdict = sandboxVerdictOf(error);
-  if (verdict === undefined && !(error instanceof SandboxUnavailableError)) {
+  if (verdict === undefined) {
     return undefined;
   }
   return {
-    status: sandboxStatuses[verdict ?? ""] ?? "crashed",
+    status: sandboxStatuses[verdict] ?? "crashed",
     logs: [],
     error: (error instanceof Error ? error.message : "").slice(0, room),
   };
@@ -507,14 +519,18 @@ const loaderCalls = (
 
 /** A method name the code may call on an API: never one every object has. */
 const apiMethod = /^[a-zA-Z][a-zA-Z0-9_]{0,99}$/u;
-const notApiMethods = new Set([
-  "constructor",
-  "then",
-  "dup",
-  "connect",
-  "toString",
-  "valueOf",
-]);
+
+/**
+ * Whether `name` is one a stub or any object answers itself (`then`,
+ * `dup`, `hasOwnProperty`, ...), never an API's: read from the classes, so
+ * a name either gains is refused too.
+ */
+const notApiMethod = (name: string): boolean =>
+  name in Object.prototype ||
+  name in RpcPromise.prototype ||
+  name in RpcStub.prototype ||
+  name === "connect" ||
+  name === "dispose";
 
 /**
  * The one capability a session's run reaches its APIs through: a call of
@@ -528,7 +544,7 @@ const apiBridge = (env: Readonly<Record<string, Fetcher>>) => ({
       !Object.hasOwn(env, api) ||
       typeof method !== "string" ||
       !apiMethod.test(method) ||
-      notApiMethods.has(method) ||
+      notApiMethod(method) ||
       !Array.isArray(args)
     ) {
       throw new TypeError("That isn't a call of one of this chat's APIs.");
