@@ -163,21 +163,26 @@ describe("a session on the on-prem sandbox", () => {
       .toBe(0);
   });
 
-  it("lets one owner hold only its share of the pool", async () => {
-    const holding = run("holds", "app-one");
-    await expect
-      .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
-      .toBe(1);
-    // Half of two processes: app-one holds as many as it may.
-    await expect(run("capabilities", "app-one")).resolves.toMatchObject({
-      status: "refused",
-      verdict: "busy",
-    });
-    await expect(run("capabilities", "app-two")).resolves.toMatchObject({
-      status: "ok",
-    });
-    await expect(holding).resolves.toMatchObject({ status: "ok" });
-  });
+  it(
+    "lets one owner hold only its share of the pool",
+    { timeout: 30_000 },
+    async () => {
+      const holding = run("holds", "app-one");
+      await expect
+        .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
+        .toBe(1);
+      // Half of two processes: app-one holds as many as it may, past the
+      // time a session waits for its owner's room.
+      await expect(run("capabilities", "app-one")).resolves.toMatchObject({
+        status: "refused",
+        verdict: "busy",
+      });
+      await expect(run("capabilities", "app-two")).resolves.toMatchObject({
+        status: "ok",
+      });
+      await expect(holding).resolves.toMatchObject({ status: "ok" });
+    }
+  );
 
   it("refuses to run on a sandbox that doesn't say it bounds the call's CPU time", async () => {
     // A proxy in front of the supervisor that drops what it says.

@@ -94,7 +94,8 @@ const cases: Record<string, Case> = {
     wallMs: 120_000,
     abortAfterMs: 300,
   },
-  holds: { body: "return await probe.slow(3000);", wallMs: 20_000 },
+  // Longer than a session waits for its owner's room (3 s).
+  holds: { body: "return await probe.slow(6000);", wallMs: 20_000 },
 };
 
 const run = async (env: StandInEnv, name: string, owner: string) => {

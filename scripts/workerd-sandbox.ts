@@ -964,13 +964,29 @@ class SandboxPool {
       );
       return;
     }
-    // One owner holds at most its share of the pool, waiting or running.
-    const held = this.#owners.get(owner) ?? 0;
-    if (held >= this.#maxPerOwner) {
+    // One owner holds at most its share of the pool, waiting or running: a
+    // session past it waits, as for a process, then is refused.
+    if (!(await this.#ownerRoom(owner, waitMs, client))) {
       refuse(429, "This owner already holds as many sessions as it may.");
       return;
     }
-    this.#owners.set(owner, held + 1);
+    this.#owners.set(owner, (this.#owners.get(owner) ?? 0) + 1);
+    // Given back as soon as the session ends for core, before its process
+    // is killed: core may start the owner's next call at once.
+    let ownerHeld = true;
+    const giveBack = (): void => {
+      if (!ownerHeld) {
+        return;
+      }
+      ownerHeld = false;
+      const left = (this.#owners.get(owner) ?? 1) - 1;
+      if (left <= 0) {
+        this.#owners.delete(owner);
+      } else {
+        this.#owners.set(owner, left);
+      }
+      this.#released.dispatchEvent(new Event("released"));
+    };
     this.#inFlight += 1;
     try {
       await this.#relay(request, client, head, {
@@ -979,15 +995,11 @@ class SandboxPool {
         waitMs,
         callId,
         refuse,
+        ended: giveBack,
       });
     } finally {
       this.#inFlight -= 1;
-      const left = (this.#owners.get(owner) ?? 1) - 1;
-      if (left <= 0) {
-        this.#owners.delete(owner);
-      } else {
-        this.#owners.set(owner, left);
-      }
+      giveBack();
     }
   }
 
@@ -1001,9 +1013,11 @@ class SandboxPool {
       waitMs: number;
       callId: string;
       refuse: (status: number, message: string) => void;
+      /** Called once the session is over for core. */
+      ended: () => void;
     }
   ): Promise<void> {
-    const { deadlineMs, cpuLimitMs, waitMs, callId, refuse } = session;
+    const { deadlineMs, cpuLimitMs, waitMs, callId, refuse, ended } = session;
     // Gone: core closed its end, done or giving up.
     const caller = new AbortController();
     client.on("close", () => {
@@ -1073,6 +1087,7 @@ class SandboxPool {
       guard.stop();
       upstream.destroy();
       client.destroy();
+      ended();
       try {
         await this.#retire(host);
       } finally {
@@ -1179,6 +1194,31 @@ class SandboxPool {
       this.#verdicts.delete(id);
     }
     this.#verdicts.set(callId, verdict);
+  }
+
+  /**
+   * Whether `owner` has room for one more session, waiting up to `waitMs`
+   * (or until the caller leaves) for one of its sessions to end.
+   */
+  async #ownerRoom(
+    owner: string,
+    waitMs: number,
+    client: Socket
+  ): Promise<boolean> {
+    const gone = new AbortController();
+    client.once("close", () => {
+      gone.abort();
+    });
+    const signal = AbortSignal.any([gone.signal, AbortSignal.timeout(waitMs)]);
+    while ((this.#owners.get(owner) ?? 0) >= this.#maxPerOwner) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- until one of its sessions ends
+        await once(this.#released, "released", { signal });
+      } catch {
+        return false;
+      }
+    }
+    return true;
   }
 
   /** Ends session `callId` as its caller gave up on it; false if none runs. */
