@@ -119,6 +119,15 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   { action: "app", text: msg`Changed an engine` },
   { action: "member.removed", text: msg`Removed a member` },
   { action: "member.role", text: msg`Changed a member's role` },
+  { action: "member.invited", text: msg`Invited someone` },
+  {
+    action: "member.invitation.withdrawn",
+    text: msg`Withdrew an invitation`,
+  },
+  {
+    action: "member.invitation.accepted",
+    text: msg`Joined through an invitation`,
+  },
   { action: "member", text: msg`Changed a member` },
   { action: "team.created", text: msg`Created a team` },
   { action: "team.deleted", text: msg`Deleted a team` },

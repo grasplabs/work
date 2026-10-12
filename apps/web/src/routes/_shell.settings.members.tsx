@@ -1,5 +1,5 @@
 import { memberErrors } from "@grasp-os/shared/members";
-import type { Member } from "@grasp-os/shared/members";
+import type { Invitation, Member } from "@grasp-os/shared/members";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
@@ -50,6 +50,8 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import { initials } from "../frame/person-menu.tsx";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import { InvitationRow, InviteButton } from "../settings/invitations.tsx";
+import { RolesSection } from "../settings/roles-table.tsx";
 import {
   SettingsError,
   SettingsLoading,
@@ -253,13 +255,16 @@ const MemberActions = ({
   );
 };
 
-/** Whether `member` is what the search names: in their name or email. */
-const matches = (member: Member, search: string): boolean => {
+/** Whether `person` is what the search names: in their name or email. */
+const matches = (
+  person: { name?: string; email: string },
+  search: string
+): boolean => {
   const words = search.trim().toLocaleLowerCase();
   return (
     words === "" ||
-    member.name.toLocaleLowerCase().includes(words) ||
-    member.email.toLocaleLowerCase().includes(words)
+    (person.name ?? "").toLocaleLowerCase().includes(words) ||
+    person.email.toLocaleLowerCase().includes(words)
   );
 };
 
@@ -268,35 +273,49 @@ const matches = (member: Member, search: string): boolean => {
  * each with their avatar, name and email, their role and a menu. The
  * admin's own row only shows their role.
  */
-const MembersList = ({ members, me }: { members: Member[]; me: string }) => {
+const MembersList = ({
+  members,
+  invitations,
+  me,
+}: {
+  members: Member[];
+  invitations: Invitation[];
+  me: string;
+}) => {
   const { t } = useLingui();
   const [notice, setNotice] = useState<{ failure?: string; done?: string }>({});
   const [search, setSearch] = useState("");
   const searchField = useRef<HTMLInputElement>(null);
   const people = members.length;
   const shown = members.filter((member) => matches(member, search));
+  const invited = invitations.filter((invitation) =>
+    matches(invitation, search)
+  );
   return (
     <SettingsSection
       action={
-        <InputGroup className="w-56">
-          <InputGroupInput
-            aria-label={t`Search members`}
-            onChange={(event) => {
-              setSearch(event.target.value);
-            }}
-            placeholder={t`Search`}
-            ref={searchField}
-            value={search}
-          />
-          <InputGroupAddon>
-            <SearchIcon />
-          </InputGroupAddon>
-        </InputGroup>
+        <div className="flex items-center gap-2">
+          <InputGroup className="w-56">
+            <InputGroupInput
+              aria-label={t`Search members`}
+              onChange={(event) => {
+                setSearch(event.target.value);
+              }}
+              placeholder={t`Search`}
+              ref={searchField}
+              value={search}
+            />
+            <InputGroupAddon>
+              <SearchIcon />
+            </InputGroupAddon>
+          </InputGroup>
+          <InviteButton />
+        </div>
       }
       description={
         <Plural
-          one="# person has access. Members join by signing in with your organization’s account; there are no invitations to send."
-          other="# people have access. Members join by signing in with your organization’s account; there are no invitations to send."
+          one="# person has access. People join by signing in with your organization’s account; invite them to give them a role from the start."
+          other="# people have access. People join by signing in with your organization’s account; invite them to give them a role from the start."
           value={people}
         />
       }
@@ -310,7 +329,7 @@ const MembersList = ({ members, me }: { members: Member[]; me: string }) => {
           )}
         </div>
       )}
-      {shown.length === 0 ? (
+      {shown.length === 0 && invited.length === 0 ? (
         <p className="text-muted-foreground border-t px-5 py-6 text-center">
           <Trans>Nobody matches.</Trans>
         </p>
@@ -354,6 +373,9 @@ const MembersList = ({ members, me }: { members: Member[]; me: string }) => {
           )}
         </div>
       ))}
+      {invited.map((invitation) => (
+        <InvitationRow invitation={invitation} key={invitation.id} />
+      ))}
     </SettingsSection>
   );
 };
@@ -369,7 +391,16 @@ const Members = () => {
       </SettingsSection>
     );
   }
-  return <MembersList me={identity.userId} members={page.data} />;
+  return (
+    <>
+      <RolesSection />
+      <MembersList
+        invitations={page.data.invitations}
+        me={identity.userId}
+        members={page.data.members}
+      />
+    </>
+  );
 };
 
 export const Route = createFileRoute("/_shell/settings/members")({
@@ -377,5 +408,11 @@ export const Route = createFileRoute("/_shell/settings/members")({
   errorComponent: SettingsError,
   component: Members,
   loader: async ({ context: { core } }) =>
-    await loadFromCore(core, async (session) => await session.members.list()),
+    await loadFromCore(core, async (session) => {
+      const [members, invitations] = await Promise.all([
+        session.members.list(),
+        session.members.invitations(),
+      ]);
+      return { members, invitations };
+    }),
 });

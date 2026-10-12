@@ -303,8 +303,8 @@ msgid "{path}, which would no longer run"
 msgstr "{path}, das nicht mehr laufen würde"
 
 #: src/routes/_shell.settings.members.tsx
-msgid "{people, plural, one {# person has access. Members join by signing in with your organization’s account; there are no invitations to send.} other {# people have access. Members join by signing in with your organization’s account; there are no invitations to send.}}"
-msgstr "{people, plural, one {# Person hat Zugriff. Mitglieder kommen hinzu, indem sie sich mit dem Konto Ihrer Organisation anmelden; Einladungen gibt es nicht.} other {# Personen haben Zugriff. Mitglieder kommen hinzu, indem sie sich mit dem Konto Ihrer Organisation anmelden; Einladungen gibt es nicht.}}"
+msgid "{people, plural, one {# person has access. People join by signing in with your organization’s account; invite them to give them a role from the start.} other {# people have access. People join by signing in with your organization’s account; invite them to give them a role from the start.}}"
+msgstr "{people, plural, one {# Person hat Zugriff. Man tritt bei, indem man sich mit dem Konto Ihrer Organisation anmeldet; laden Sie jemanden ein, um ihm von Anfang an eine Rolle zu geben.} other {# Personen haben Zugriff. Man tritt bei, indem man sich mit dem Konto Ihrer Organisation anmeldet; laden Sie jemanden ein, um ihm von Anfang an eine Rolle zu geben.}}"
 
 #: src/dashboard/todo-pile.tsx
 msgid "{place} of {count}"
@@ -917,6 +917,10 @@ msgstr "Browser"
 msgid "Budgets"
 msgstr "Budgets"
 
+#: src/settings/roles-table.tsx
+msgid "Build apps and workflows, and ask for the access they need"
+msgstr "Apps und Workflows bauen und den Zugriff anfragen, den sie brauchen"
+
 #: src/labels.ts
 msgid "Builder"
 msgstr "Builder"
@@ -955,6 +959,7 @@ msgid "Calls {tools} (any of their methods): may change things"
 msgstr "Ruft {tools} auf (jede ihrer Methoden): kann etwas ändern"
 
 #: src/knowledge/document.tsx
+#: src/settings/invitations.tsx
 msgid "Cancel"
 msgstr "Abbrechen"
 
@@ -1100,6 +1105,10 @@ msgstr "Die Kette des Audit-Trails geprüft"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Choose a file"
 msgstr "Datei auswählen"
+
+#: src/settings/roles-table.tsx
+msgid "Choose models and limit AI spend"
+msgstr "Modelle wählen und KI-Ausgaben begrenzen"
 
 #: src/activity/audit-log.tsx
 msgid "Clear"
@@ -1543,6 +1552,7 @@ msgid "Edit"
 msgstr "Bearbeiten"
 
 #: src/routes/_shell.settings.profile.tsx
+#: src/settings/invitations.tsx
 msgid "Email"
 msgstr "E-Mail"
 
@@ -1806,6 +1816,10 @@ msgctxt "kickoff field"
 msgid "Goals, and why AI now"
 msgstr "Ziele, und warum jetzt KI"
 
+#: src/settings/roles-table.tsx
+msgid "Grant and revoke access, and approve apps"
+msgstr "Zugriff erteilen und entziehen, und Apps freigeben"
+
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
 msgstr "Eine Berechtigung erteilt"
@@ -1997,9 +2011,29 @@ msgctxt "onboarding stage"
 msgid "Interviews"
 msgstr "Interviews"
 
+#: src/settings/invitations.tsx
+msgid "Invite"
+msgstr "Einladen"
+
+#: src/settings/roles-table.tsx
+msgid "Invite people, change roles and remove members"
+msgstr "Personen einladen, Rollen ändern und Mitglieder entfernen"
+
+#: src/settings/invitations.tsx
+msgid "Invite someone"
+msgstr "Jemanden einladen"
+
 #: src/activity/audit-words.ts
 msgid "Invited a guest"
 msgstr "Einen Gast eingeladen"
+
+#: src/settings/invitations.tsx
+msgid "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
+msgstr "Als {role} eingeladen von {inviter} am {date} · noch nicht angemeldet"
+
+#: src/activity/audit-words.ts
+msgid "Invited someone"
+msgstr "Hat jemanden eingeladen"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
@@ -2104,6 +2138,10 @@ msgstr "Die Schritte lassen sich nicht aus dem Code lesen, also kann jeder Schri
 #: src/connections/connection-list.tsx
 msgid "Its tokens are deleted, every engine and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
 msgstr "Ihre Tokens werden gelöscht, jede Engine und jeder Agent verliert sie, und Aktionen, die auf sie warten, werden verworfen. Verbinden Sie sie erneut, um sie wieder zu nutzen."
+
+#: src/activity/audit-words.ts
+msgid "Joined through an invitation"
+msgstr "Ist über eine Einladung beigetreten"
 
 #: src/chat/thread.tsx
 msgid "Jump to the newest message"
@@ -2286,6 +2324,11 @@ msgstr "{app} verwalten, für Sie verbunden"
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
 
+#. Heading of a list of what each role is allowed to do
+#: src/settings/roles-table.tsx
+msgid "May"
+msgstr "Darf"
+
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
 msgstr "Kann etwas außerhalb von Grasp ändern"
@@ -2408,6 +2451,10 @@ msgstr "Neu seit der letzten Genehmigung: {added}"
 #: src/dashboard/failed-workflows.tsx
 msgid "New: failed while acting for you"
 msgstr "Neu: fehlgeschlagen, als in Ihrem Namen gehandelt wurde"
+
+#: src/settings/roles-table.tsx
+msgid "No"
+msgstr "Nein"
 
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.engines.index.tsx
@@ -3317,12 +3364,17 @@ msgstr "Risikobewertung freigegeben"
 
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.settings.profile.tsx
+#: src/settings/invitations.tsx
 msgid "Role"
 msgstr "Rolle"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Role of {who}"
 msgstr "Rolle von {who}"
+
+#: src/settings/roles-table.tsx
+msgid "Roles"
+msgstr "Rollen"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Rules"
@@ -3451,6 +3503,10 @@ msgstr "Im Audit-Trail gesucht"
 msgctxt "kind of finding"
 msgid "Security"
 msgstr "Sicherheit"
+
+#: src/settings/roles-table.tsx
+msgid "See every app and the audit trail"
+msgstr "Jede App und den Audit-Trail sehen"
 
 #: src/chat/composer.tsx
 msgctxt "send the question"
@@ -4037,6 +4093,10 @@ msgstr "Die Plattform ist für alle im Unternehmen offen: Sie wurde für das Onb
 msgid "The risk assessment isn't done"
 msgstr "Die Risikobewertung ist nicht erledigt"
 
+#: src/settings/invitations.tsx
+msgid "The roles above say what each may do."
+msgstr "Die Rollen oben zeigen, was jede darf."
+
 #: src/routes/_shell.settings.models.tsx
 #: src/routes/_shell.settings.spend.tsx
 msgid "The rules in this deployment's configuration can't be read, so every model call is refused. Contact Grasp."
@@ -4100,6 +4160,10 @@ msgstr "Es gibt keine Datenregel: Jedes erlaubte Modell darf sensible Daten erha
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "Die Person wird überall abgemeldet, ihre persönlichen Verbindungen werden getrennt, und sie kann sich nicht mehr anmelden."
+
+#: src/settings/invitations.tsx
+msgid "They get this role when they first sign in with your organization’s account. Grasp sends no email, so let them know."
+msgstr "Diese Rolle erhalten sie, wenn sie sich zum ersten Mal mit dem Konto Ihrer Organisation anmelden. Grasp verschickt keine E-Mail, sagen Sie ihnen also Bescheid."
 
 #: src/chat/thread.tsx
 msgid "Thinking"
@@ -4307,6 +4371,10 @@ msgstr "In das Wissen hochgeladen"
 msgid "Uploading…"
 msgstr "Wird hochgeladen…"
 
+#: src/settings/roles-table.tsx
+msgid "Use the chat, and the apps, workflows and knowledge shared with them"
+msgstr "Den Chat nutzen, und die Apps, Workflows und das Wissen, die mit ihnen geteilt sind"
+
 #: src/routes/sign-in.tsx
 msgid "Use your organization’s account to go on."
 msgstr "Melden Sie sich mit dem Konto Ihrer Organisation an, um fortzufahren."
@@ -4422,6 +4490,10 @@ msgstr "Was sich geändert hat"
 msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Was als Erfolg zählt"
+
+#: src/settings/roles-table.tsx
+msgid "What each role may do. Grasp checks it on every request."
+msgstr "Was jede Rolle darf. Grasp prüft es bei jeder Anfrage."
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "What every agent has in its context, all the time."
@@ -4560,6 +4632,18 @@ msgstr "Wer wo arbeitet"
 msgid "Who works where is in"
 msgstr "Wer wo arbeitet, liegt vor"
 
+#: src/settings/invitations.tsx
+msgid "Withdraw"
+msgstr "Zurückziehen"
+
+#: src/settings/invitations.tsx
+msgid "Withdraw the invitation of {email}"
+msgstr "Einladung von {email} zurückziehen"
+
+#: src/activity/audit-words.ts
+msgid "Withdrew an invitation"
+msgstr "Hat eine Einladung zurückgezogen"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Without all three, nobody is invited: the admin's links wait, and go out once all are in place."
 msgstr "Ohne alle drei wird niemand eingeladen: Die Links des Admins warten und gehen raus, sobald alle stehen."
@@ -4677,6 +4761,10 @@ msgstr "Schreiben Sie Ihre Antwort"
 #: src/chat/thread.tsx
 msgid "Writing"
 msgstr "Schreibt"
+
+#: src/settings/roles-table.tsx
+msgid "Yes"
+msgstr "Ja"
 
 #: src/activity/audit-log.tsx
 msgid "Yes: its hash matches, and it links to the event before it."

@@ -195,6 +195,48 @@ test("an admin signs someone out everywhere, then removes them, and is told what
   ).toBeFocused();
 });
 
+test("invites someone with a role, says what each role may do, and withdraws the invitation", async ({
+  context,
+  page,
+}) => {
+  const { admin } = peopleIn("memberInvites");
+  await signInTo(context, admin);
+  await page.goto("/settings/members");
+  const roles = page.getByRole("region", { name: "Roles" });
+  await expect(
+    roles.getByRole("row", { name: /^Invite people, change roles/u })
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Invite", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Invite someone" });
+  await dialog
+    .getByRole("textbox", { name: "Email" })
+    .fill("someone@elsewhere.test");
+  await dialog.getByRole("button", { name: "Invite", exact: true }).click();
+  await expect(
+    dialog.getByText(
+      "Use an email address in one of the domains your organization signs in with."
+    )
+  ).toBeVisible();
+
+  const email = `invited-${crypto.randomUUID().slice(0, 8)}@acme.test`;
+  await dialog.getByRole("textbox", { name: "Email" }).fill(email);
+  await dialog.getByRole("combobox", { name: "Role" }).click();
+  await page.getByRole("option", { name: "Builder" }).click();
+  await dialog.getByRole("button", { name: "Invite", exact: true }).click();
+  await expect(dialog).toBeHidden();
+
+  const members = page.getByRole("region", { name: "Members and roles" });
+  await expect(members.getByText(email)).toBeVisible();
+  await expect(
+    members.getByText(/^Invited as Builder by .+ · hasn’t signed in yet$/u)
+  ).toBeVisible();
+  await members
+    .getByRole("button", { name: `Withdraw the invitation of ${email}` })
+    .click();
+  await expect(members.getByText(email)).toHaveCount(0);
+});
+
 test("shows the members page only to someone signed in, and never signs them out for core failing", async ({
   context,
   page,
