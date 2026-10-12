@@ -469,23 +469,20 @@ export const invocationFor = async (
     requestId,
     deadline,
     runId: null,
-    // Before every protected step: the call starts, and each mutation
-    // commits. A release revoked meanwhile stops a call already running.
+    // Before every protected step: the call starts, each mutation commits
+    // and each resource request (the operation host's one gate, `admit`).
+    // A release revoked, a role lost or an agent's permission withdrawn
+    // meanwhile stops a call already running.
     authorize: async () => {
       await requireNotRevoked(env, app, release.manifest.resourceVersion);
       await stillAllowed?.();
       return await operationRoles(env, by, app);
     },
     // The App's approved bindings, read again on every request, acting
-    // for the App and the person calling, with the person there; each
-    // request first checks, as each mutation's commit does, that the
-    // release wasn't revoked and that what admitted the caller (an
-    // agent's permission) still holds, so neither reaches anything more.
-    resources: async (declaration) => {
-      await requireNotRevoked(env, app, release.manifest.resourceVersion);
-      await stillAllowed?.();
-      return await bindings(declaration);
-    },
+    // for the App and the person calling, with the person there. The
+    // operation host admits each request through `authorize` first, as it
+    // admits each commit, so nothing else is checked here.
+    resources: bindings,
   };
 };
 

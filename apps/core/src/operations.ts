@@ -127,6 +127,10 @@ import {
 //   read as JSON, measured, validated, and must already be in its
 //   normalized form (`contract.invalid_return`), so the caller gets
 //   exactly what the contract says.
+// - A caller who lost the right keeps reaching outside: every resource
+//   request is admitted by the same `authorize` a mutation's commit is
+//   (`admit`), whatever it checks (the release not revoked, the caller's
+//   roles, what admitted the caller), so the two gates can't drift apart.
 // - A failure leaks what it shouldn't: a caller gets an `AppErrorPayload`
 //   and nothing more. An `AppError` App code threw keeps its code (never
 //   a platform one), message and bounded details; a platform error
@@ -153,8 +157,9 @@ export interface Invocation {
   readonly runId: string | null;
   /**
    * The caller's roles in the App, read again on each call; throws when
-   * they may no longer use it. Called as the call starts and again just
-   * before a mutation commits.
+   * they may no longer use it. The one admission (`admit`): called as the
+   * call starts, just before each mutation commits and before each
+   * resource request, so whatever it checks holds before all three.
    */
   readonly authorize: () => Promise<WriterRoles>;
   /** How core binds the App's resources for this call; none bound without it. */
@@ -308,6 +313,17 @@ const trusted = async <Answer>(
     throw error;
   }
 };
+
+/**
+ * The admission every protected step of a call runs, and the only one:
+ * the call's start, each mutation's commit and each resource request all
+ * call this, so what must hold before one of them (the release not
+ * revoked, the caller's current roles, what admitted the caller) is the
+ * invocation's `authorize` alone and can't differ between them. Its
+ * refusal is the host's.
+ */
+const admit = async (invocation: Invocation): Promise<WriterRoles> =>
+  await trusted(invocation.authorize);
 
 /**
  * Runs `work`, which reads a value App code made: whatever it throws (a
@@ -1149,6 +1165,9 @@ const resourceCall = async (
     });
   }
   allowedRequest(declaration, method, args);
+  // The one gate (`admit`): the same admission a mutation's commit runs,
+  // so a request is made only while the caller may still act.
+  await admit(run.invocation);
   const bound = await run.invocation.resources?.(declaration);
   const contract =
     declaration["~resource"] === "connector" ||
@@ -1686,8 +1705,7 @@ const runQuery = async (
 ): Promise<Json> => {
   const { invocation, compiled } = run;
   const scope = await trusted(
-    async () =>
-      await scopeOf(compiled, invocation, await invocation.authorize())
+    async () => await scopeOf(compiled, invocation, await admit(invocation))
   );
   return await trusted(
     async () =>
@@ -1717,7 +1735,7 @@ const runMutation = async (
 ): Promise<Json> => {
   const { invocation, compiled } = run;
   const { store } = invocation;
-  let roles = await trusted(invocation.authorize);
+  let roles = await admit(invocation);
   const claimed = await trusted(
     async () =>
       await store.claim({
@@ -1794,7 +1812,7 @@ const runMutation = async (
       throw sealed(hostError(refusedWrite));
     }
     // oxlint-disable-next-line no-await-in-loop -- see above
-    const current = await trusted(invocation.authorize);
+    const current = await admit(invocation);
     // Its reads were scoped for roles the caller no longer has: run again
     // under the roles they have, so nothing read under the old ones is
     // committed or kept with the receipt.
@@ -1847,7 +1865,7 @@ const runAction = async (
   key: readonly string[]
 ): Promise<Json> => {
   const { invocation, compiled } = run;
-  await trusted(invocation.authorize);
+  await admit(invocation);
   // What every key this action derives is bound to: who calls it, through
   // which App, which action's contract with which input, under the call's
   // key. Two callers, Apps, actions or inputs with one key never share a

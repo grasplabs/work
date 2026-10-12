@@ -11,7 +11,7 @@ import { z } from "zod";
 import { callAppFunction } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
-import { appResourceBindings } from "../src/db/core/schema.ts";
+import { appMembers, appResourceBindings } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import {
   approveResourceBinding,
@@ -682,6 +682,51 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       outcome: outcomeOf(result),
       sent: gateway.requests.length,
     }).toStrictEqual({ outcome: "first|version.revoked", sent: 1 });
+  });
+
+  it("stop a screen caller whose App role is removed between two requests", async () => {
+    const sealed = await sealedApp(modelFiles());
+    await approveModel(sealed, "writer");
+    const user = await person("user");
+    await drizzle(env.DB).insert(appMembers).values({
+      appId: sealed.app,
+      memberType: "person",
+      memberId: user.userId,
+      role: "user",
+      addedBy: sealed.owner.userId,
+      addedAt: new Date(),
+    });
+    const gate = Promise.withResolvers<unknown>();
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      { ...answer("first"), pause: { at: 2, until: gate.promise } },
+      answer("never sent"),
+    ]);
+    const running = callAppFunction(
+      withGateway,
+      user,
+      sealed.app,
+      requestFor(sealed.release, "assist.twice", {})
+    );
+    while (gateway.requests.length === 0) {
+      // oxlint-disable-next-line no-await-in-loop -- until the first request is out
+      await scheduler.wait(10);
+    }
+    // No longer shared with them: the action already running goes on,
+    // but reaches nothing more.
+    await drizzle(env.DB)
+      .delete(appMembers)
+      .where(
+        and(
+          eq(appMembers.appId, sealed.app),
+          eq(appMembers.memberId, user.userId)
+        )
+      );
+    gate.resolve(null);
+    const answered = await running;
+    expect({
+      outcome: outcomeOf(answered.result),
+      sent: gateway.requests.length,
+    }).toStrictEqual({ outcome: "first|app.not_found", sent: 1 });
   });
 
   it("stop a call once what admitted its caller no longer holds, between two requests", async () => {

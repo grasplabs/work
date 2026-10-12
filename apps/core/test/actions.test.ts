@@ -16,6 +16,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { effectErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import type { WriterRoles } from "@grasp-os/shared/stores";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -520,6 +521,8 @@ interface CallOptions {
   readonly within?: number;
   readonly idempotencyKey?: string;
   readonly resources?: ResourceBindings;
+  /** The admission, in place of the caller's roles read as they are. */
+  readonly authorize?: () => Promise<WriterRoles>;
 }
 
 const call = async (
@@ -532,6 +535,7 @@ const call = async (
     idempotencyKey,
     resources,
     within = 60_000,
+    authorize,
   }: CallOptions = {}
 ): Promise<OperationResult> =>
   await callOperation(
@@ -543,7 +547,8 @@ const call = async (
       requestId: crypto.randomUUID(),
       deadline: Date.now() + within,
       runId: null,
-      authorize: async () => await operationRoles(env, owner, appId),
+      authorize:
+        authorize ?? (async () => await operationRoles(env, owner, appId)),
       ...(resources === undefined ? {} : { resources }),
     },
     { path, kind },
@@ -613,6 +618,68 @@ const bindingsOf =
     await Promise.resolve(
       Object.hasOwn(of, declaration.alias) ? of[declaration.alias] : undefined
     );
+
+describe("the one admission", () => {
+  it("admits each resource request as each commit is admitted, by the same authorize", async () => {
+    const fixture = await notes();
+    const roles = await operationRoles(env, fixture.owner, fixture.appId);
+    // Counts its calls, and refuses from the `refuseFrom`th on.
+    const counted = (refuseFrom = Number.POSITIVE_INFINITY) => {
+      const seen = { calls: 0 };
+      const authorize = async (): Promise<WriterRoles> => {
+        seen.calls += 1;
+        if (seen.calls >= refuseFrom) {
+          throw permissionErrors.create("permission.denied", {
+            action: "call",
+          });
+        }
+        return await Promise.resolve(roles);
+      };
+      return { seen, authorize };
+    };
+    let provided = 0;
+    const resources = bindingsOf({
+      summarizer: bound("model", null, async () => {
+        provided += 1;
+        return await Promise.resolve({ summary: "short" });
+      }),
+    });
+    const commit = counted();
+    await call(fixture, "mutation", "notes.create", { title: "Plan" }, commit);
+    const request = counted();
+    await call(
+      fixture,
+      "action",
+      "actions.summarize",
+      { text: "long" },
+      {
+        ...request,
+        resources,
+      }
+    );
+    // Refused as the request is about to go: the provider never sees it.
+    const refusing = counted(2);
+    const refused = await call(
+      fixture,
+      "action",
+      "actions.summarize",
+      { text: "long" },
+      { authorize: refusing.authorize, resources }
+    );
+    expect({
+      // The start and the commit; the start and the request.
+      commit: commit.seen.calls,
+      request: request.seen.calls,
+      refused: codeOf(refused),
+      provided,
+    }).toStrictEqual({
+      commit: 2,
+      request: 2,
+      refused: "permission.denied",
+      provided: 1,
+    });
+  });
+});
 
 describe("composing the App's functions", () => {
   it("runs the queries and mutations it uses, internal ones included", async () => {
