@@ -1419,6 +1419,9 @@ const linksManifest = manifestText(
         noteOrLink: v.union(v.id("notes"), v.id("links")).optional(),
         noneOr: v.union(v.literal("none"), v.id("notes")).optional(),
         textOr: v.union(v.string(), v.id("notes")).optional(),
+        shape: v
+          .union(v.object({ to: v.string() }), v.object({ to: v.id("notes") }))
+          .optional(),
         parent: v.id("links").optional(),
         secret: v.id("secrets").optional(),
         draft: v.id("drafts").optional(),
@@ -1622,11 +1625,46 @@ describe("a store's references", () => {
       code: "data.referenced",
     });
     await deleteFrom(store, "notes", plain);
+    // A link's ID, the union's second record-ID member: indexed as a link.
+    const holder = await insertLinked(store, "links", { noteOrLink: link });
+    await expect(deleteFrom(store, "links", link)).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+    await deleteFrom(store, "links", holder);
     // A union's record ID that names no record of any of its tables.
     await expect(
       insertLinked(store, "links", { noteOrLink: newRecordId() })
     ).rejects.toMatchObject({ code: "data.reference_invalid" });
     await deleteFrom(store, "links", link);
+    await deleteFrom(store, "notes", note);
+  });
+
+  it("checks each place holding a record ID on its own, whatever ID another holds", async () => {
+    const store = await newLinkedStore();
+    const note = await insertLinked(store, "notes", { title: "Kept" });
+    // The same ID in a field naming notes and one naming secrets: the
+    // note exists, no secret does.
+    await expect(
+      insertLinked(store, "links", { note, secret: note })
+    ).rejects.toMatchObject({ code: "data.reference_invalid" });
+    await deleteFrom(store, "notes", note);
+  });
+
+  it("reads a union as the first member that accepts the value, objects included", async () => {
+    const store = await newLinkedStore();
+    const note = await insertLinked(store, "notes", { title: "Free" });
+    // The first object member takes `to` as text: no reference.
+    await insertLinked(store, "links", { shape: { to: note } });
+    const rows = await runInDurableObject(
+      objectOf(store.id),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ count: number }>(
+            "SELECT count(*) AS count FROM sdk_record_refs"
+          )
+          .one().count
+    );
+    expect(rows).toBe(0);
     await deleteFrom(store, "notes", note);
   });
 

@@ -10,14 +10,20 @@ import { validates } from "./store-queries.ts";
 // as it commits (store-host.ts), so deleting a record another refers to is
 // refused in the same transaction (restrict).
 //
-// A union is resolved by the member its value matches. A value one of its
-// other members accepts (a literal, a string, an object) is that member's,
-// so a union's string is a reference only when no member but its `v.id`
-// ones accepts it. Several `v.id` members may accept the same string: the
-// reference then names each of their tables, and the store host keeps
-// only the table that holds the record (`#indexReferences`).
+// Each place in a record that holds a record ID is one reference, checked
+// on its own: references are never merged across fields or places, even
+// when they hold the same ID. A union is read as the SDK's validator reads
+// it: its members in order, the value belonging to the first that accepts
+// it, and only that member is descended into, objects and arrays
+// included. When that member is a `v.id`, every `v.id` member accepting
+// the value is a table the reference may name (a record ID's shape doesn't
+// say which); the store host keeps the one that holds the record
+// (`#indexReferences`).
 
-/** A record ID, and each table it may name: one, unless a union offers several. */
+/**
+ * One place in a record holding a record ID: the ID, and each table it may
+ * name (one, unless a union of `v.id` members offers several).
+ */
 export interface RecordReference {
   readonly id: string;
   readonly tables: readonly string[];
@@ -62,29 +68,36 @@ const referencesIn = (
       }
     }
   } else if (descriptor.kind === "union") {
-    const accepting = descriptor.members.filter((member) =>
+    const first = descriptor.members.findIndex((member) =>
       validates(member, value)
     );
-    const others = accepting.filter((member) => member.kind !== "id");
-    if (others.length > 0) {
-      for (const member of others) {
-        referencesIn(member, value, found);
-      }
+    const matched = descriptor.members[first];
+    if (matched === undefined) {
       return;
     }
-    const tables = accepting.flatMap((member) =>
-      member.kind === "id" ? [member.tableName] : []
-    );
-    if (typeof value === "string" && tables.length > 0) {
-      found.push({ id: value, tables });
+    if (matched.kind !== "id") {
+      referencesIn(matched, value, found);
+      return;
+    }
+    if (typeof value === "string") {
+      found.push({
+        id: value,
+        tables: descriptor.members
+          .slice(first)
+          .flatMap((member) =>
+            member.kind === "id" && validates(member, value)
+              ? [member.tableName]
+              : []
+          ),
+      });
     }
   }
 };
 
 /**
  * The references a record with `fields` makes, under its table's field
- * descriptors `table`: each record ID once, with every table any field
- * holding it may name.
+ * descriptors `table`: one for each place holding a record ID, in field
+ * order, never merged.
  */
 export const recordReferences = (
   table: Readonly<Record<string, ValueDescriptor>>,
@@ -94,13 +107,5 @@ export const recordReferences = (
   for (const [name, field] of Object.entries(table)) {
     referencesIn(field, fields[name], found);
   }
-  const merged = new Map<string, Set<string>>();
-  for (const { id, tables } of found) {
-    const known = merged.get(id) ?? new Set<string>();
-    for (const name of tables) {
-      known.add(name);
-    }
-    merged.set(id, known);
-  }
-  return [...merged].map(([id, tables]) => ({ id, tables: [...tables] }));
+  return found;
 };

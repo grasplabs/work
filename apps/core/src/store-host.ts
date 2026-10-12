@@ -1776,9 +1776,10 @@ export class StoreHost {
         continue;
       }
       for (const reference of recordReferences(declared, fields)) {
-        // The tables it may name that it refers to: held already, or
-        // holding a record the writer may read. A union offering several
-        // keeps only the one that holds it.
+        // Each place on its own: the tables it may name that it refers
+        // to, held already or holding a record the writer may read. A
+        // union offering several keeps only the one that holds it. Never
+        // satisfied by another place holding the same ID.
         const targets = reference.tables.flatMap((name) => {
           const toTableId = tableIdOf(name);
           return toTableId !== undefined &&
