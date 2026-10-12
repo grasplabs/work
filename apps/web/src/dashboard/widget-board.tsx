@@ -875,7 +875,7 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
       // oxlint-disable-next-line no-use-before-define -- each takes the other off
       window.removeEventListener("pointerup", drop);
       // oxlint-disable-next-line no-use-before-define -- each takes the other off
-      window.removeEventListener("pointercancel", drop);
+      window.removeEventListener("pointercancel", cancel);
       press.current = null;
       stopDrag.current = null;
     };
@@ -890,10 +890,23 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
         void save(held.order, placeSaid(held.id, held.order));
       }
     };
+    // A drag the browser cancels (a touch taken over by a scroll, a pen
+    // lifted out of range) was never dropped: the board goes back, unsaved.
+    const cancel = (ended: globalThis.PointerEvent) => {
+      const held = press.current;
+      if (held === null || ended.pointerId !== held.pointer) {
+        return;
+      }
+      stop();
+      setDragged(null);
+      if (held.moved) {
+        setWidgets(held.before);
+      }
+    };
     stopDrag.current = stop;
     window.addEventListener("pointermove", follow);
     window.addEventListener("pointerup", drop);
-    window.addEventListener("pointercancel", drop);
+    window.addEventListener("pointercancel", cancel);
   };
 
   const missing = missingWidgets(widgets);
