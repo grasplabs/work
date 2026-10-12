@@ -25,7 +25,12 @@ import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
-import { businessStoreMembers, businessStores } from "./db/core/schema.ts";
+import {
+  apps,
+  businessStoreMembers,
+  businessStores,
+  sdkResourceBindings,
+} from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import {
   memberEntry,
@@ -251,9 +256,39 @@ export const requireStoreManager = async (
 };
 
 /**
+ * Whether the current or pending version of some App has a sealed release
+ * bound to store `id` (`sdk_resource_bindings`): one that new calls run.
+ */
+const boundToCurrentRelease = async (
+  env: Env,
+  id: StoreId
+): Promise<boolean> => {
+  const db = drizzle(env.DB);
+  const bound = await db
+    .select({ one: sql`1` })
+    .from(sdkResourceBindings)
+    .innerJoin(apps, eq(apps.id, sdkResourceBindings.resourceId))
+    .where(
+      and(
+        eq(sdkResourceBindings.kind, "store"),
+        eq(sdkResourceBindings.targetId, id),
+        or(
+          eq(apps.currentVersion, sdkResourceBindings.resourceVersion),
+          eq(apps.pendingVersion, sdkResourceBindings.resourceVersion)
+        )
+      )
+    )
+    .get();
+  return bound !== undefined;
+};
+
+/**
  * Deletes store `id` for `by`, who must manage it and isn't Grasp staff:
- * refused with `data.store_in_use`, and audited, while a receipt not yet
- * expired refers to it (the store's object decides, store-host.ts). The
+ * refused, and audited, while an App's current or pending version has a
+ * sealed release bound to it (`data.store_bound`: its calls would fail
+ * with `data.store_unavailable`), or while a receipt not yet expired
+ * refers to it (`data.store_in_use`: the store's object decides,
+ * store-host.ts). The
  * object is marked deleted first, with `by` and the time; then the
  * inventory row and its event, which the object's alarm also ensures
  * before it purges anything, so they happen even if this call stops here.
@@ -266,6 +301,13 @@ export const deleteStore = async (
   requireNotStaff(by);
   const store = await managedBy(env, by, id);
   const actor = by.actor ?? actorOf(by);
+  if (await boundToCurrentRelease(env, store.id)) {
+    const db = drizzle(env.DB);
+    await auditedBatch(env, db, [
+      outboxed(db, storeEntry(by, "store.delete_refused", store.id)),
+    ]);
+    throw dataErrors.create("data.store_bound");
+  }
   let mark: StoreDeletionMark;
   try {
     mark = await inJurisdiction(env, env.DATA_STORES)

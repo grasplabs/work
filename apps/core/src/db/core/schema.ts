@@ -736,7 +736,10 @@ export const sdkReleasePins = sqliteTable(
  * What a sealed release binds, by alias (spec 16.1): for now the store it
  * reads and writes, which only the host chose when it sealed the release.
  * Routing, not a grant: whoever calls is authorized on every call. Also
- * how a store finds the releases that still rely on it.
+ * how a store finds the releases that still rely on it: it can't be
+ * deleted while an App's current or pending version's release is bound
+ * to it (data-stores.ts). An older release kept for retention may still
+ * be bound; its calls fail once the store is gone.
  */
 export const sdkResourceBindings = sqliteTable(
   "sdk_resource_bindings",

@@ -13,8 +13,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles, createApp, findVersion } from "../src/apps.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import {
+  commitFiles,
+  createApp,
+  findVersion,
+  setCurrentVersion,
+} from "../src/apps.ts";
+import { createStore, deleteStore, openStore } from "../src/data-stores.ts";
 import {
   sdkReleaseManifests,
   sdkResourceBindings,
@@ -768,6 +773,47 @@ JSON.stringify = (value, ...rest) => {
     await expect(opened.generations(["beta"])).rejects.toThrow(
       /wasn't handed/u
     );
+  });
+
+  it("keeps its store from being deleted while its version is current, and lets it go once none bound is", async () => {
+    const fixture = await appWith(notesFiles());
+    await seal(fixture);
+    await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+    const refused = await failure(async () => {
+      await deleteStore(env, fixture.owner, fixture.store);
+    });
+    const events = await allEvents();
+    // A version without tables made current: no current release binds it.
+    await commitFiles(env, fixture.owner, fixture.app, tablelessFiles(), "Two");
+    await seal(fixture, 2);
+    await setCurrentVersion(env, fixture.owner, fixture.app, 2);
+    // Version 1 pending again (as an upgrade waiting for approval would
+    // leave it): its calls may run again, so the store stays.
+    await env.DB.prepare("UPDATE apps SET pending_version = 1 WHERE id = ?")
+      .bind(fixture.app)
+      .run();
+    const pending = await failure(async () => {
+      await deleteStore(env, fixture.owner, fixture.store);
+    });
+    await env.DB.prepare("UPDATE apps SET pending_version = NULL WHERE id = ?")
+      .bind(fixture.app)
+      .run();
+    await deleteStore(env, fixture.owner, fixture.store);
+    expect([
+      pending,
+      refused,
+      events.some(
+        (event) =>
+          event.action === "store.delete_refused" &&
+          event.target?.id === fixture.store
+      ),
+      await failure(async () => await openStore(env, fixture.store)),
+    ]).toStrictEqual([
+      "data.store_bound",
+      "data.store_bound",
+      true,
+      "data.store_unavailable",
+    ]);
   });
 
   it("is refused a store that doesn't exist, and to Grasp staff, claiming nothing", async () => {
