@@ -408,7 +408,7 @@ const requireNotRevoked = async (
 };
 
 /** What core resolved of the caller, for an invocation. */
-export interface FunctionCaller {
+interface FunctionCaller {
   readonly by: Pick<Identity, "userId" | "role">;
   readonly requestId: string;
   readonly deadline: number;

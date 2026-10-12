@@ -1476,9 +1476,9 @@ const runHandler = async (
       run.invocation.deadline
     );
     if (outcome === "expired") {
-      // Stopped at its deadline: its channel ends here, so nothing it
-      // still does reaches the store, and what it staged never commits.
-      open.end();
+      // Stopped at its deadline: its channel ends as this returns (the
+      // `finally` below), so nothing it still does reaches the store, and
+      // what it staged never commits.
       throw hostError(operationErrors.create("operation.deadline_exceeded"));
     }
     // What it started and didn't wait for still runs: the run ends once

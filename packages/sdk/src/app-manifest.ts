@@ -1,6 +1,5 @@
 import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
-import { canonicalJson } from "@grasp-os/shared/json";
-import type { Json } from "@grasp-os/shared/json";
+import { canonicalText } from "@grasp-os/shared/json";
 import { appMaxOperations } from "@grasp-os/shared/operation-limits";
 
 import { app, AppDefinitionError, inspectApp } from "./app.ts";
@@ -259,15 +258,6 @@ const screensFrom = (input: unknown): ScreenDefinition[] =>
       input: schemaFrom(screen.input),
     } as ScreenDefinition;
   });
-
-/** The canonical text of `value`, which is JSON data. */
-const canonicalText = (value: unknown): string => {
-  // SAFETY: what JSON.parse answers is JSON; and what is read here
-  // (manifests, verb maps) is JSON data to begin with.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const json = JSON.parse(JSON.stringify(value) ?? "null") as Json;
-  return canonicalJson(json);
-};
 
 /** Whether two verb maps grant the same verbs on every table. */
 const sameVerbs = (
