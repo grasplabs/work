@@ -8,6 +8,15 @@ import { valueDepth } from "./value-depth.ts";
 /** Where the frontend frames screens from: a document core serves. */
 export const screenFramePath = "/screen-frame";
 
+/**
+ * Where a running App's screen calls one of its App's functions (core's
+ * app-function-route.ts): `POST <path>/<app ID>`, the request as the body.
+ */
+export const appFunctionPath = "/api/app-functions";
+
+/** The header that carries the frame's lease on a function call. */
+export const screenLeaseHeader = "x-grasp-screen-lease";
+
 /** Where core serves a screen's modules to its frame, each by its hash. */
 export const screenModulePath = "/screen-modules";
 

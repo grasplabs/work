@@ -1,16 +1,14 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  callAppFunction,
-  functionRequestMaxBytes,
-} from "../src/app-functions.ts";
+import { callAppFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
