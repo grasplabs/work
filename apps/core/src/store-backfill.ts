@@ -396,20 +396,27 @@ export const requireStoreSchemaActive = async (
       "The store doesn't hold the schema its release was sealed on"
     );
   }
-  const now = await keepBackfillGoing(env, storeId);
-  if (now === null) {
-    // Its backfill finished meanwhile: the target holding the schema is
-    // the contract now.
+  await keepBackfillGoing(env, storeId);
+  // Asked again: the store's pending target may have moved on meanwhile
+  // (this schema's finished and a newer one began), and only this
+  // schema's own state refuses its release.
+  const after = await schemaStatus(env, storeId, bound.schemaHash);
+  if (after.state === "active") {
     return;
   }
-  if (now.state === "failed") {
+  if (after.state === "failed") {
     throw migrationErrors.create("migration.backfill_failed", {
-      failure: now.failure === null ? null : { ...now.failure },
+      failure: after.failure === null ? null : { ...after.failure },
     });
+  }
+  if (after.state === "unknown") {
+    throw new Error(
+      "The store doesn't hold the schema its release was sealed on"
+    );
   }
   throw migrationErrors.create("migration.pending", {
     retryable: true,
-    scanned: now.scanned,
-    filled: now.filled,
+    scanned: after.scanned,
+    filled: after.filled,
   });
 };

@@ -418,3 +418,101 @@ describe("a seal of a defaulted reference", () => {
     });
   });
 });
+
+/** Binds a release of a new App to `store` and `schemaHash`, as a seal does. */
+const boundRelease = async (
+  store: PendingStore["store"],
+  schemaHash: string
+) => {
+  const app = appIdSchema.parse(crypto.randomUUID());
+  await drizzle(env.DB)
+    .insert(sdkResourceBindings)
+    .values({
+      resourceId: app,
+      resourceVersion: 1,
+      alias: "default",
+      kind: "store",
+      targetId: store.id,
+      schemaHash,
+      manifestHash: "m".repeat(64),
+    });
+  return app;
+};
+
+describe("keeping a backfill going when the engine fails", () => {
+  it("leaves a retried backfill to the store's alarm", async () => {
+    const pending = await pendingStore(3, [
+      { title: "x".repeat(documentMaxBytes - 22) },
+    ]);
+    const { store, first, second, ids } = pending;
+    await keepBackfillGoing(env, store.id);
+    await finished(await backfillRunId(store.id, second.contract.hash, 1));
+    await commit(store, first.schemaHash, [
+      {
+        op: "patch",
+        table: "notes",
+        id: ids.at(-1) ?? "",
+        expectedRevision: 1,
+        fields: { title: "Shrunk" },
+      },
+    ]);
+    await runInDurableObject(objectOf(store), async (_instance, state) => {
+      await state.storage.deleteAlarm();
+    });
+    // The engine out of reach as the retry asks it for a run.
+    const unreachable: Env = {
+      ...env,
+      WORKFLOW_RUNS: new Proxy(env.WORKFLOW_RUNS, {
+        get: () => {
+          throw new Error("The engine is out of reach");
+        },
+      }),
+    };
+
+    const refused = await codeOf(keepBackfillGoing(unreachable, store.id));
+    const alarm = await runInDurableObject(
+      objectOf(store),
+      async (_instance, state) => await state.storage.getAlarm()
+    );
+    const left = await objectOf(store).backfillStatus(store.id);
+    await leaseRunsOut(store);
+    await runDurableObjectAlarm(objectOf(store));
+    await activated(store);
+
+    expect({
+      refused: refused instanceof Error ? refused.message : refused,
+      alarmSet: alarm !== null,
+      left: left?.state,
+    }).toStrictEqual({
+      refused: "The engine is out of reach",
+      alarmSet: true,
+      left: "running",
+    });
+  });
+});
+
+describe("making a finished schema's release current", () => {
+  it("passes while a newer target is pending", async () => {
+    const { store, second } = await pendingStore(notesHeld);
+    await keepBackfillGoing(env, store.id);
+    await activated(store);
+    const newer = notes({
+      ...noteFields,
+      category: v.string().max(20).default("general"),
+      priority: v.number().default(0),
+    });
+    const third = await store.defineTables(newer, consumer(9));
+    const finishedApp = await boundRelease(store, second.schemaHash);
+    const newerApp = await boundRelease(store, third.schemaHash);
+
+    expect({
+      newer: third.contract.pending,
+      finished: await codeOf(requireStoreSchemaActive(env, finishedApp, 1)),
+      pending: await codeOf(requireStoreSchemaActive(env, newerApp, 1)),
+    }).toStrictEqual({
+      newer: true,
+      finished: "ok",
+      pending: "migration.pending",
+    });
+  });
+});

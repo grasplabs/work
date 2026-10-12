@@ -2953,13 +2953,16 @@ export class StoreHost {
    * found it, for the `backfillStallLimit`th time in a row, fails the
    * backfill as stalled instead, and answers `attempt` itself.
    */
-  restartBackfill(storeId: StoreId, restart: BackfillRestart): number {
+  async restartBackfill(
+    storeId: StoreId,
+    restart: BackfillRestart
+  ): Promise<number> {
     const { target, attempt, ending } = dataErrors.parse(
       "data.invalid",
       backfillRestartSchema,
       restart
     );
-    return this.ctx.storage.transactionSync((): number => {
+    const next = this.ctx.storage.transactionSync((): number => {
       this.#bind(storeId, false);
       const row = this.#db
         .select()
@@ -3013,6 +3016,10 @@ export class StoreHost {
         .run();
       return attempt + 1;
     });
+    // Set before core asks the engine for a run: should that fail, the
+    // alarm still finds the backfill running (#keepBackfillGoing).
+    await this.schedule();
+    return next;
   }
 
   /**
@@ -3036,69 +3043,78 @@ export class StoreHost {
    * loops. Answers the backfill as it is then; null for a target no
    * longer pending.
    */
-  retryBackfill(storeId: StoreId, target: string): BackfillStatus | null {
+  async retryBackfill(
+    storeId: StoreId,
+    target: string
+  ): Promise<BackfillStatus | null> {
     const hash = dataErrors.parse("data.invalid", backfillTargetSchema, target);
-    return this.ctx.storage.transactionSync((): BackfillStatus | null => {
-      this.#bind(storeId, false);
-      const pending = this.#pendingTarget();
-      if (pending?.hash !== hash) {
-        return null;
-      }
-      const { failure } = pending;
-      if (pending.state !== "failed" || failure === null) {
-        return statusOf(pending);
-      }
-      if (failure.reason !== "stalled") {
-        const tableId = this.#tableRows().find(
-          ({ name }) => name === failure.table
-        )?.tableId;
-        const now = this.#db
-          .select({ revision: records.revision })
-          .from(records)
-          .where(
-            and(
-              eq(records.tableId, tableId ?? ""),
-              eq(records.recordId, failure.id)
-            )
-          )
-          .get();
-        if (now !== undefined && now.revision === pending.failureRevision) {
+    const status = this.ctx.storage.transactionSync(
+      (): BackfillStatus | null => {
+        this.#bind(storeId, false);
+        const pending = this.#pendingTarget();
+        if (pending?.hash !== hash) {
+          return null;
+        }
+        const { failure } = pending;
+        if (pending.state !== "failed" || failure === null) {
           return statusOf(pending);
         }
-      }
-      // A stalled backfill has no record to watch: each seal or
-      // activation that asks retries it once, which is bounded by the
-      // stall limit again (a builder's action, never the alarm's).
-      const retried = this.#db
-        .update(backfills)
-        .set({
+        if (failure.reason !== "stalled") {
+          const tableId = this.#tableRows().find(
+            ({ name }) => name === failure.table
+          )?.tableId;
+          const now = this.#db
+            .select({ revision: records.revision })
+            .from(records)
+            .where(
+              and(
+                eq(records.tableId, tableId ?? ""),
+                eq(records.recordId, failure.id)
+              )
+            )
+            .get();
+          if (now !== undefined && now.revision === pending.failureRevision) {
+            return statusOf(pending);
+          }
+        }
+        // A stalled backfill has no record to watch: each seal or
+        // activation that asks retries it once, which is bounded by the
+        // stall limit again (a builder's action, never the alarm's).
+        const retried = this.#db
+          .update(backfills)
+          .set({
+            state: "running",
+            failure: null,
+            failureRevision: null,
+            attempt: pending.attempt + 1,
+            lastBatch: 0,
+            lastOutcome: null,
+            leaseUntil: null,
+            lookedAt: Date.now(),
+            stalls: 0,
+            stallScanned: null,
+          })
+          .where(eq(backfills.targetHash, hash))
+          .returning()
+          .get();
+        if (retried === undefined) {
+          throw new Error("A pending backfill went missing");
+        }
+        return statusOf({
+          ...pending,
           state: "running",
+          attempt: retried.attempt,
+          lastBatch: 0,
+          leaseUntil: null,
           failure: null,
           failureRevision: null,
-          attempt: pending.attempt + 1,
-          lastBatch: 0,
-          lastOutcome: null,
-          leaseUntil: null,
-          lookedAt: Date.now(),
-          stalls: 0,
-          stallScanned: null,
-        })
-        .where(eq(backfills.targetHash, hash))
-        .returning()
-        .get();
-      if (retried === undefined) {
-        throw new Error("A pending backfill went missing");
+        });
       }
-      return statusOf({
-        ...pending,
-        state: "running",
-        attempt: retried.attempt,
-        lastBatch: 0,
-        leaseUntil: null,
-        failure: null,
-        failureRevision: null,
-      });
-    });
+    );
+    // Set before core asks the engine for a run: should that fail, the
+    // alarm still finds the backfill running (#keepBackfillGoing).
+    await this.schedule();
+    return status;
   }
 
   /**
@@ -3545,10 +3561,8 @@ export class StoreHost {
     await keepStoreBackfillGoing(this.env, {
       id: storeId,
       status: async () => await Promise.resolve(this.backfillStatus(storeId)),
-      retry: async (target) =>
-        await Promise.resolve(this.retryBackfill(storeId, target)),
-      restart: async (restart) =>
-        await Promise.resolve(this.restartBackfill(storeId, restart)),
+      retry: async (target) => await this.retryBackfill(storeId, target),
+      restart: async (restart) => await this.restartBackfill(storeId, restart),
     });
   }
 
