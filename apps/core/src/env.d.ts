@@ -37,6 +37,15 @@ interface __BaseEnv_Env {
    * on-prem say `workerd`.
    */
   RUNTIME_PROFILE?: string;
+  /**
+   * On-prem only: the sandbox supervisor (scripts/workerd-sandbox.ts), as an
+   * external service, where untrusted isolates run in workerd processes of
+   * their own with a deadline (src/sandboxed.ts). Plain workerd enforces no
+   * CPU limit; unbound, as on Cloudflare, core loads them itself.
+   */
+  SANDBOX_HOST?: Fetcher;
+  /** Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts). */
+  SANDBOX_DEADLINE_MS?: string;
   /** `none` where Durable Objects have no jurisdiction (src/durable-objects.ts). */
   DURABLE_OBJECT_JURISDICTION?: string;
   /**
