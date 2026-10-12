@@ -103,9 +103,12 @@ import { verifiedTarball } from "./tarballs.ts";
 //   retirement, and counts among what the graph keeps, or never lands. A
 //   revoked graph admits nothing: no build, and no artifact handed out. A
 //   retired one admits only what was pinned before: the pinned artifact
-//   is handed out, and made again only to that pin when its kept bytes
-//   are missing or corrupt; a target config or compiler with no pin
-//   (anything new) is refused with `dependency.retired`.
+//   is handed out, by whichever compiler pinned it (a release that moved
+//   the compiler on still hands out an earlier one's pin), and made again
+//   only to that pin, by this release's compiler, when its kept bytes are
+//   missing or corrupt; a target config with no pin, or an earlier
+//   compiler's pin whose bytes are gone (anything new), is refused with
+//   `dependency.retired`.
 
 /** How the runtime says it stopped an isolate over its limits. */
 const overLimit = /exceeded (?:its )?(?:CPU|memory)/iu;
@@ -535,18 +538,19 @@ const touchPin = async (
   graphHash: string,
   read: { lock: GraspLock; stored: string },
   config: string,
-  pinned: ArtifactPin
+  pinned: ArtifactPin,
+  compiler: string = compilerVersion
 ): Promise<void> => {
   if (Date.now() - Date.parse(pinned.pinnedAt) < touchAfterMs) {
     return;
   }
-  const pins = read.lock.artifacts?.[compilerVersion] ?? {};
+  const pins = read.lock.artifacts?.[compiler] ?? {};
   const stored = canonicalJson(
     graspLockSchema.parse({
       ...read.lock,
       artifacts: {
         ...read.lock.artifacts,
-        [compilerVersion]: {
+        [compiler]: {
           ...pins,
           [config]: { ...pinned, pinnedAt: new Date().toISOString() },
         },
@@ -809,6 +813,31 @@ interface Asked {
 }
 
 /**
+ * The newest pin of target config `configHash` by another compiler than
+ * this release's, with that compiler: what a retired graph keeps once a
+ * release moved the compiler on.
+ */
+const retainedPin = (
+  lock: GraspLock,
+  configHash: string
+): { compiler: string; pin: ArtifactPin } | undefined => {
+  let newest: { compiler: string; pin: ArtifactPin } | undefined;
+  for (const [compiler, pins] of Object.entries(lock.artifacts ?? {})) {
+    const found = Object.hasOwn(pins, configHash)
+      ? pins[configHash]
+      : undefined;
+    if (
+      compiler !== compilerVersion &&
+      found !== undefined &&
+      (newest === undefined || found.pinnedAt > newest.pin.pinnedAt)
+    ) {
+      newest = { compiler, pin: found };
+    }
+  }
+  return newest;
+};
+
+/**
  * The artifact pinned for the target's config, as the lock is now, if
  * its description is kept: handed out by that alone, with nothing
  * recorded and no file read. Each file's bytes are checked as it is
@@ -836,6 +865,35 @@ const pinnedNow = async (
   }
   const configHash = await targetConfigHash(asked.target, config);
   const pinned = read.lock.artifacts?.[compilerVersion]?.[configHash];
+  if (pinned === undefined && admitted.scope === "retained") {
+    // A retired graph builds nothing new, so a release with another
+    // compiler hands out what an earlier one pinned for this config, as
+    // pinned, and never builds it again: those bytes or nothing.
+    const retained = retainedPin(read.lock, configHash);
+    const kept = retained
+      ? await keptDescription(env, retained.pin.hash)
+      : undefined;
+    if (retained && kept) {
+      await touchPin(
+        env,
+        asked.app,
+        asked.graphHash,
+        read,
+        configHash,
+        retained.pin,
+        retained.compiler
+      );
+      return {
+        kept: {
+          hash: retained.pin.hash,
+          artifact: kept,
+          approval: admitted.approval,
+          stats: null,
+          address: await addressOf(env, asked, retained.pin.hash),
+        },
+      };
+    }
+  }
   const kept = pinned ? await keptDescription(env, pinned.hash) : undefined;
   if (pinned && kept) {
     await touchPin(env, asked.app, asked.graphHash, read, configHash, pinned);

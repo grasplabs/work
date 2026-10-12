@@ -304,13 +304,14 @@ describe("serving an App's built packages", () => {
 
   it("serves nothing once the graph is no longer approved, and logs each refusal without filling the audit trail", async () => {
     const { admin, app, request, address, name } = await servedBuild();
-    const { policyGeneration, approvals: inForce } =
-      await admin.api.dependencies.impact(request.id);
+    const { policyGeneration, endings } = await admin.api.dependencies.impact(
+      request.id
+    );
     await admin.api.dependencies.revoke(request.id, {
       reviewed: {
         graphHash: request.graphHash,
         policyGeneration,
-        approvals: inForce.map(({ id }) => id),
+        approvalsDigest: endings.revoke.digest,
       },
       reason: "The package reads more than it says.",
     });

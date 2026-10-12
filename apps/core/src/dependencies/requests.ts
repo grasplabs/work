@@ -3,11 +3,13 @@ import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import {
   canonicalGraph,
+  dependencyApprovalsDigest,
   dependencyDecisionSchema,
   dependencyEndingSchema,
   dependencyErrors,
   dependencyGraphHash,
   dependencyGraphSchema,
+  dependencyImpactListed,
   dependencyMaxBytes,
   dependencyProposalSchema,
   dependencySummaryDirect,
@@ -1221,18 +1223,20 @@ const endable = (app: string, graphHash: string, ending: Ending): SQL =>
     inArray(dependencyRequests.status, [...endings[ending]])
   ) ?? sql`0`;
 
-/** Every approval of `app`'s graph `graphHash` that `ending` would end, by ID. */
-const endableRows = async (
+/**
+ * Every approval of `app`'s graph `graphHash` that `ending` would end:
+ * its ID and status only, however many there are.
+ */
+const endableIds = async (
   db: DrizzleD1Database,
   app: string,
   graphHash: string,
   ending: Ending
-): Promise<Listed[]> =>
+): Promise<{ id: string; status: Row["status"] }[]> =>
   await db
-    .select(listed)
+    .select({ id: dependencyRequests.id, status: dependencyRequests.status })
     .from(dependencyRequests)
-    .where(endable(app, graphHash, ending))
-    .orderBy(dependencyRequests.id);
+    .where(endable(app, graphHash, ending));
 
 /** Only a person on their own session who holds `dependencies.approve` now. */
 const requireDecider = async (env: Env, by: Identity): Promise<void> => {
@@ -1317,17 +1321,37 @@ export const dependencyImpact = async (
   }
   const db = drizzle(env.DB);
   const row = await approvalRow(db, input);
-  const [generation, approvals, artifacts] = await Promise.all([
+  const [generation, inForce, listedRows, artifacts] = await Promise.all([
     policyGeneration(db),
-    endableRows(db, row.appId, row.graphHash, "revoked"),
+    endableIds(db, row.appId, row.graphHash, "revoked"),
+    db
+      .select(listed)
+      .from(dependencyRequests)
+      .where(endable(row.appId, row.graphHash, "revoked"))
+      .orderBy(desc(dependencyRequests.decidedAt), dependencyRequests.id)
+      .limit(dependencyImpactListed),
     pinnedArtifacts(db, row.appId, row.graphHash),
   ]);
-  const requests = await toRequests(env, approvals);
+  const approved = inForce
+    .filter(({ status }) => status === "approved")
+    .map(({ id }) => id);
+  const all = inForce.map(({ id }) => id);
+  const requests = await toRequests(env, listedRows);
   return {
     policyGeneration: generation,
     app: requests[0]?.app ?? { id: appIdSchema.parse(row.appId), name: "" },
     graphHash: row.graphHash,
     approvals: requests,
+    endings: {
+      retire: {
+        approvals: approved.length,
+        digest: await dependencyApprovalsDigest(approved),
+      },
+      revoke: {
+        approvals: all.length,
+        digest: await dependencyApprovalsDigest(all),
+      },
+    },
     artifacts,
   };
 };
@@ -1432,10 +1456,16 @@ export const endDependency = async (
   if (named.graphHash !== reviewed.graphHash) {
     throw dependencyErrors.create("dependency.stale");
   }
-  // What the person reviewed, not what is in force now: a decision ends
-  // exactly the approvals the impact showed them, or nothing.
-  const ids = [...new Set(reviewed.approvals)].toSorted();
-  if (!ids.includes(named.id)) {
+  // What the person reviewed, not merely what this call reads: the
+  // approvals in force now must be the very set the impact showed them
+  // (by digest, however many), and the batch then lands only while they
+  // still are.
+  const inForceNow = await endableIds(db, named.appId, named.graphHash, ending);
+  const ids = inForceNow.map(({ id }) => id);
+  if (
+    !ids.includes(named.id) ||
+    (await dependencyApprovalsDigest(ids)) !== reviewed.approvalsDigest
+  ) {
     throw dependencyErrors.create("dependency.stale");
   }
   const generation = reviewed.policyGeneration + 1;
@@ -1447,7 +1477,10 @@ export const endDependency = async (
       detail: {
         app: named.appId,
         graphHash: named.graphHash,
-        approvals: ids.join(" "),
+        // How many, and which by digest: the rows themselves record that
+        // they ended, with this generation (`ended_generation`).
+        approvals: ids.length,
+        approvalsDigest: reviewed.approvalsDigest,
         reason,
         policyGeneration: generation,
       },
@@ -1457,7 +1490,9 @@ export const endDependency = async (
   // The approvals in force as the batch runs are exactly the ones
   // reviewed: as many, and each of them, whatever order rows come in.
   const inForce = endable(named.appId, named.graphHash, ending);
-  const lands = sql`(SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce}) = ${ids.length} AND (SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce} AND ${inArray(dependencyRequests.id, ids)}) = ${ids.length} AND ${policyGenerationSql} = ${reviewed.policyGeneration} AND ${holdsApproveSql(by.userId)}`;
+  // The IDs as one JSON parameter, however many there are.
+  const reviewedIds = sql`(SELECT value FROM json_each(${JSON.stringify(ids)}))`;
+  const lands = sql`(SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce}) = ${ids.length} AND (SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce} AND ${dependencyRequests.id} IN ${reviewedIds}) = ${ids.length} AND ${policyGenerationSql} = ${reviewed.policyGeneration} AND ${holdsApproveSql(by.userId)}`;
   const status: Row["status"] = ending;
   const [, ended] = await auditedBatch(env, db, [
     outboxedEventWhere(db, event, lands),
@@ -1470,7 +1505,12 @@ export const endDependency = async (
         endedGeneration: generation,
         endedReason: reason,
       })
-      .where(and(inArray(dependencyRequests.id, ids), storedEvent(event.id)))
+      .where(
+        and(
+          sql`${dependencyRequests.id} IN ${reviewedIds}`,
+          storedEvent(event.id)
+        )
+      )
       .returning(listed),
     advancePolicy(db, storedEvent(event.id)),
     // A request waiting for the revoked graph is denied with it: approving

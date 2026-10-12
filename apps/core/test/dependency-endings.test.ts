@@ -1,10 +1,12 @@
+import { compilerVersion } from "@grasp-os/compiler";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { dependencyApprovalsDigest } from "@grasp-os/shared/dependencies";
 import type {
   DependencyRequest,
   DependencyTarget,
 } from "@grasp-os/shared/dependencies";
 import { graspLockSchema } from "@grasp-os/shared/packages";
-import type { PackageBuild } from "@grasp-os/shared/packages";
+import type { GraspLock, PackageBuild } from "@grasp-os/shared/packages";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -106,10 +108,6 @@ const buildOf = async (
   });
 };
 
-/** The IDs of `approvals`, as a decision names what it reviewed. */
-const idsOf = (approvals: readonly { id: string }[]): string[] =>
-  approvals.map(({ id }) => id);
-
 /** Retires or revokes `request`'s graph as `person`, on its impact as read now. */
 const end = async (
   person: Person,
@@ -117,13 +115,14 @@ const end = async (
   request: Pick<DependencyRequest, "id" | "graphHash">,
   reason = "The library is no longer maintained."
 ) => {
-  const { policyGeneration, approvals: inForce } =
-    await person.api.dependencies.impact(request.id);
+  const { policyGeneration, endings } = await person.api.dependencies.impact(
+    request.id
+  );
   return await person.api.dependencies[how](request.id, {
     reviewed: {
       graphHash: request.graphHash,
       policyGeneration,
-      approvals: idsOf(inForce),
+      approvalsDigest: endings[how].digest,
     },
     reason,
   });
@@ -254,7 +253,10 @@ describe("revoking an App's approved packages", () => {
         detail: {
           app: approved.app,
           graphHash: approved.request.graphHash,
-          approvals: approved.request.id,
+          approvals: 1,
+          approvalsDigest: await dependencyApprovalsDigest([
+            approved.request.id,
+          ]),
           reason: "The library is no longer maintained.",
           policyGeneration: before + 1,
         },
@@ -328,6 +330,56 @@ describe("revoking an App's approved packages", () => {
       ].toSorted(([a], [b]) => String(a).localeCompare(String(b)))
     );
     expect(build).toBe("dependency.revoked");
+  });
+});
+
+describe("revoking a graph approved and retired again and again", () => {
+  it("revokes it whatever the number of approvals it ends", async () => {
+    const admin = await approvingAdmin();
+    const builder = await personApi("builder");
+    const { id: app } = await builder.api.apps.create({
+      name: `App ${unique()}`,
+    });
+    const identity = await builder.api.whoami();
+    // More rounds than any one page or bound of IDs would hold.
+    const rounds = 20;
+    let last: DependencyRequest | undefined;
+    for (let round = 0; round < rounds; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one round after another
+      const request = await proposeForTests(env, identity, proposalFor(app));
+      // oxlint-disable-next-line no-await-in-loop
+      const { policyGeneration } = await admin.api.dependencies.waiting();
+      // oxlint-disable-next-line no-await-in-loop
+      last = await admin.api.dependencies.decide(request.id, {
+        approved: true,
+        reviewed: { graphHash: request.graphHash, policyGeneration },
+      });
+      if (round < rounds - 1) {
+        // oxlint-disable-next-line no-await-in-loop
+        await end(admin, "retire", last);
+      }
+    }
+    if (last === undefined) {
+      throw new Error("No approval made");
+    }
+    const impact = await admin.api.dependencies.impact(last.id);
+
+    const revoked = await end(admin, "revoke", last);
+
+    expect({
+      endings: [
+        impact.endings.retire.approvals,
+        impact.endings.revoke.approvals,
+      ],
+      listed: impact.approvals.length,
+      revoked: revoked.length,
+      statuses: [...new Set(revoked.map(({ status }) => status))],
+    }).toStrictEqual({
+      endings: [1, rounds],
+      listed: rounds,
+      revoked: rounds,
+      statuses: ["revoked"],
+    });
   });
 });
 
@@ -442,13 +494,54 @@ describe("retiring an App's approved packages", () => {
     ]).toMatchObject([
       {
         action: "dependency.retired",
-        detail: { approvals: approved.request.id },
+        detail: { approvals: 1 },
       },
       {
         action: "dependency.admission_refused",
         detail: { targets: "server", reason: "retired" },
       },
     ]);
+  });
+
+  it("hands out what an earlier release's compiler pinned, and never builds it again under another", async () => {
+    const admin = await approvingAdmin();
+    const approved = await approvedApp(admin, ["browser"]);
+    const browser = await buildOf(approved, "browser");
+    // A release with another compiler since: the pin is an earlier one's.
+    const lock = await storedLock(approved);
+    const earlier = "0.0.0-earlier";
+    const moved: GraspLock | undefined =
+      lock === undefined
+        ? undefined
+        : {
+            ...lock,
+            artifacts: { [earlier]: lock.artifacts?.[compilerVersion] ?? {} },
+          };
+    await env.DB.prepare(
+      "UPDATE dependency_locks SET lock = ? WHERE app_id = ? AND graph_hash = ?"
+    )
+      .bind(JSON.stringify(moved), approved.app, approved.request.graphHash)
+      .run();
+    await end(admin, "retire", approved.request);
+
+    const kept = await buildOf(approved, "browser");
+    const served = await servedStatus(kept);
+    // Its bytes gone: this release's compiler doesn't make them again.
+    await env.FILES.delete(`package-builds/${browser.hash}.json`);
+    const gone = await outcome(buildOf(approved, "browser"));
+    const after = await storedLock(approved);
+
+    expect({
+      kept: [kept.hash, kept.stats],
+      served,
+      gone,
+      compilers: Object.keys(after?.artifacts ?? {}),
+    }).toStrictEqual({
+      kept: [browser.hash, null],
+      served: 200,
+      gone: "dependency.retired",
+      compilers: [earlier],
+    });
   });
 
   it("makes a missing kept artifact again only to its pin", async () => {
@@ -676,8 +769,9 @@ describe("a build racing the decision", () => {
   it("keeps a pin that landed just before the graph was retired", async () => {
     const admin = await approvingAdmin();
     const approved = await approvedApp(admin);
-    const { policyGeneration, approvals: inForce } =
-      await admin.api.dependencies.impact(approved.request.id);
+    const { policyGeneration, endings } = await admin.api.dependencies.impact(
+      approved.request.id
+    );
     const browser = await buildOf(approved, "browser");
 
     // Decided on the impact read before the pin landed: the pin is part
@@ -686,7 +780,7 @@ describe("a build racing the decision", () => {
       reviewed: {
         graphHash: approved.request.graphHash,
         policyGeneration,
-        approvals: idsOf(inForce),
+        approvalsDigest: endings.retire.digest,
       },
       reason: "Replaced by the platform's own chart.",
     });
@@ -743,13 +837,14 @@ describe("who ends an approval, and on what", () => {
     const staffSession = await signedIn(idp, "grasp-staff", staffPerson());
     const { core: staffCore } = await openRpc(staffSession);
     const staff = staffCore.authenticate();
-    const { policyGeneration, approvals: inForce } =
-      await admin.api.dependencies.impact(approved.request.id);
+    const { policyGeneration, endings } = await admin.api.dependencies.impact(
+      approved.request.id
+    );
     const ending = {
       reviewed: {
         graphHash: approved.request.graphHash,
         policyGeneration,
-        approvals: idsOf(inForce),
+        approvalsDigest: endings.revoke.digest,
       },
       reason: "Unsafe.",
     };
@@ -818,7 +913,7 @@ describe("who ends an approval, and on what", () => {
       });
       const approved = await approvedApp(admin, ["browser"]);
       const identity = await approver.api.whoami();
-      const { policyGeneration, approvals: inForce } =
+      const { policyGeneration, endings } =
         await approver.api.dependencies.impact(approved.request.id);
       let raced = false;
       const db = racingDb(async () => {
@@ -837,7 +932,7 @@ describe("who ends an approval, and on what", () => {
             reviewed: {
               graphHash: approved.request.graphHash,
               policyGeneration,
-              approvals: idsOf(inForce),
+              approvalsDigest: endings.revoke.digest,
             },
             reason: "Unsafe.",
           }
@@ -909,7 +1004,7 @@ describe("who ends an approval, and on what", () => {
         reviewed: {
           graphHash: impact.graphHash,
           policyGeneration: impact.policyGeneration,
-          approvals: idsOf(impact.approvals),
+          approvalsDigest: impact.endings.retire.digest,
         },
         reason: "Unsafe.",
       })
@@ -928,15 +1023,16 @@ describe("who ends an approval, and on what", () => {
   it("refuses a decision on another graph than the approval's", async () => {
     const admin = await approvingAdmin();
     const approved = await approvedApp(admin);
-    const { policyGeneration, approvals: inForce } =
-      await admin.api.dependencies.impact(approved.request.id);
+    const { policyGeneration, endings } = await admin.api.dependencies.impact(
+      approved.request.id
+    );
 
     const result = await outcome(
       admin.api.dependencies.revoke(approved.request.id, {
         reviewed: {
           graphHash: "f".repeat(64),
           policyGeneration,
-          approvals: idsOf(inForce),
+          approvalsDigest: endings.revoke.digest,
         },
         reason: "Unsafe.",
       })

@@ -470,10 +470,17 @@ export const dependencyDecisionSchema = z.strictObject({
 export type DependencyDecision = z.input<typeof dependencyDecisionSchema>;
 
 /**
- * Most approvals one graph of an App can have in force: one per set of
- * targets it was approved for.
+ * What names a set of approvals as a person reviewed it: the SHA-256 of
+ * their IDs, each once, sorted, one per line. A decision names the set by
+ * this however many approvals it holds, so ending one is never refused
+ * for its size.
  */
-export const dependencyEndingMaxApprovals = 16;
+export const dependencyApprovalsDigest = async (
+  ids: readonly string[]
+): Promise<string> => await sha256Hex([...new Set(ids)].toSorted().join("\n"));
+
+/** Most approvals `DependencyImpact.approvals` lists: the newest. */
+export const dependencyImpactListed = 50;
 
 /**
  * What a person decides when they retire or revoke an approved graph, and
@@ -487,13 +494,11 @@ export const dependencyEndingSchema = z.strictObject({
     graphHash: z.string().regex(/^[0-9a-f]{64}$/u),
     policyGeneration: z.int().nonnegative(),
     /**
-     * The approvals the impact listed (`DependencyImpact.approvals`), by
-     * ID: the decision ends exactly these, or nothing.
+     * The digest of the approvals the impact said this decision ends
+     * (`DependencyImpact.endings`, `dependencyApprovalsDigest`): it ends
+     * exactly those, or nothing.
      */
-    approvals: z
-      .array(z.string().min(1).max(identifierMaxLength))
-      .min(1)
-      .max(dependencyEndingMaxApprovals),
+    approvalsDigest: z.string().regex(/^[0-9a-f]{64}$/u),
   }),
   reason: z.string().trim().min(1).max(identifierMaxLength),
 });
@@ -522,8 +527,17 @@ export interface DependencyImpact {
   policyGeneration: number;
   app: { id: AppId; name: string };
   graphHash: string;
-  /** The approvals of the graph that are still in force (approved or retired). */
+  /**
+   * The approvals of the graph still in force (approved or retired), the
+   * newest decision first, at most {@link dependencyImpactListed}.
+   */
   approvals: DependencyRequest[];
+  /**
+   * What each decision would end, all of it however many the list shows:
+   * how many approvals, and their digest, which the decision names.
+   * Retiring ends those approved; revoking, retired ones too.
+   */
+  endings: Record<"retire" | "revoke", { approvals: number; digest: string }>;
   artifacts: DependencyImpactArtifact[];
 }
 
