@@ -376,6 +376,19 @@ const failStart = async (
   if (!failed) {
     return false;
   }
+  // A start that reached the engine between its saying it had no record
+  // of the run and this write may have begun running, its first steps
+  // before the row ended: terminating it, which the engine takes once and
+  // for good (nothing for a run it has no record of), stops the rest.
+  // Should that fail, the run's next activation finds its row ended.
+  try {
+    await runEngine(env).terminate(row.id);
+  } catch (error) {
+    log.error("workflow.unstarted_terminate_failed", {
+      runId: row.id,
+      ...errorFields(error),
+    });
+  }
   await tellScreens(env, row);
   return true;
 };

@@ -9,8 +9,14 @@ import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { planOf, recordedQueries } from "./query-plans.ts";
-import { aroundEngine, endLiveRuns, liveStatus, runObjectId } from "./runs.ts";
-import { signedInApi } from "./sign-in.ts";
+import {
+  aroundEngine,
+  endLiveRuns,
+  liveStatus,
+  runObjectId,
+  stepDone,
+} from "./runs.ts";
+import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, runEvents, workflowFiles } from "./workflow-apps.ts";
 
 // A run's row keeps the start it is to send the engine until the engine
@@ -541,6 +547,68 @@ describe("starts core stopped in the middle of", () => {
       failed: await failedAtAll(orphan),
       ended: endedStatuses.has(await liveStatus(orphan)),
     }).toStrictEqual({ refused: true, failed: false, ended: false });
+  });
+
+  it("stop a run whose start reached the engine just after it said it had none, once marked failed", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, waiting);
+    const run = crypto.randomUUID();
+    // The run's ID, as the start draws it.
+    const uuid = vi.spyOn(crypto, "randomUUID").mockReturnValueOnce(run);
+    let refusedOnce = false;
+    let landed = false;
+    const started = await aroundEngine(
+      async (method, call) => {
+        if (method === "start" && !refusedOnce) {
+          refusedOnce = true;
+          throw new Error("The engine is unavailable");
+        }
+        const answer = await call();
+        if (method === "status" && answer === undefined && !landed) {
+          landed = true;
+          // The start that failed reaches the engine after all, right
+          // after it said it had no record, and runs its first step
+          // before core marks the run failed; its notifications are still
+          // on their way (the row takes none of them yet).
+          await env.DB.prepare(
+            "UPDATE workflow_runs SET engine_sequence = ? WHERE id = ?"
+          )
+            .bind(1_000_000_000, run)
+            .run();
+          await createInstance(app, run);
+          await stepDone(run, "work");
+        }
+        return answer;
+      },
+      async () =>
+        await outcome(
+          startRun(env, {
+            app: appIdSchema.parse(app),
+            workflow: workflowIdSchema.parse("waits"),
+            input: undefined,
+            startedBy: builder.userId,
+            actor: { type: "system" },
+          })
+        )
+    );
+    uuid.mockRestore();
+    await vi.waitFor(
+      async () => {
+        expect(endedStatuses.has(await liveStatus(run))).toBeTruthy();
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+
+    expect({
+      started,
+      row: await rowStatus(run),
+      engine: await liveStatus(run),
+    }).toStrictEqual({
+      started: "Error: The engine is unavailable",
+      row: "failed",
+      // Stopped at once, not left sleeping until its next activation.
+      engine: "terminated",
+    });
   });
 
   it("reach a later start past ones the engine keeps failing to take", async () => {
