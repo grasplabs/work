@@ -16,6 +16,7 @@
     "./client-secrets": "./src/client-secrets.ts",
     "./config": "./src/config.ts",
     "./connect": "./src/connect.ts",
+    "./dashboard": "./src/dashboard.ts",
     "./deadline": "./src/deadline.ts",
     "./decisions": "./src/decisions.ts",
     "./dependencies": "./src/dependencies.ts",

@@ -71,6 +71,13 @@
       "when": 1791729077847,
       "tag": "0009_chat_build_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791786373737,
+      "tag": "0010_dashboard_layouts",
+      "breakpoints": true
     }
   ]
 }

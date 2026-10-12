@@ -2,6 +2,7 @@ import type { AppsApi } from "./apps.ts";
 import type { AuditApi } from "./audit-log.ts";
 import type { ChatsApi } from "./chat.ts";
 import type { ConnectionsApi, PendingActionsApi } from "./connect.ts";
+import type { DashboardApi } from "./dashboard.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
 import type { KnowledgeSignalsApi } from "./knowledge-signals.ts";
@@ -60,6 +61,8 @@ export interface SessionApi {
    * and each chat's messages as they stream in.
    */
   readonly chats: ChatsApi;
+  /** The person's own dashboard: which widgets are on it, in what order. */
+  readonly dashboard: DashboardApi;
   /** Permissions of Apps and agents. */
   readonly permissions: PermissionsApi;
   /**
