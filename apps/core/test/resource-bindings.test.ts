@@ -1,6 +1,7 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
+import { permissionErrors } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -681,6 +682,37 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       outcome: outcomeOf(result),
       sent: gateway.requests.length,
     }).toStrictEqual({ outcome: "first|version.revoked", sent: 1 });
+  });
+
+  it("stop a call once what admitted its caller no longer holds, between two requests", async () => {
+    const sealed = await sealedApp(modelFiles());
+    await approveModel(sealed, "writer");
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      answer("first"),
+      answer("never sent"),
+    ]);
+    // As an agent's permission revoked mid-call: it holds as the call
+    // starts and for its first request, then no more.
+    let checks = 0;
+    const stillAllowed = async () => {
+      checks += 1;
+      if (checks > 2) {
+        throw permissionErrors.create("permission.denied", { action: "call" });
+      }
+      await Promise.resolve();
+    };
+    const answered = await callAppFunction(
+      withGateway,
+      sealed.owner,
+      sealed.app,
+      requestFor(sealed.release, "assist.twice", {}),
+      Date.now() + 60_000,
+      stillAllowed
+    );
+    expect({
+      outcome: outcomeOf(answered.result),
+      sent: gateway.requests.length,
+    }).toStrictEqual({ outcome: "first|permission.denied", sent: 1 });
   });
 
   it("answer two racing revocations with the binding as it is", async () => {

@@ -478,10 +478,12 @@ export const invocationFor = async (
     },
     // The App's approved bindings, read again on every request, acting
     // for the App and the person calling, with the person there; each
-    // request first checks the release wasn't revoked meanwhile, as each
-    // mutation's commit does, so a revoked release reaches nothing more.
+    // request first checks, as each mutation's commit does, that the
+    // release wasn't revoked and that what admitted the caller (an
+    // agent's permission) still holds, so neither reaches anything more.
     resources: async (declaration) => {
       await requireNotRevoked(env, app, release.manifest.resourceVersion);
+      await stillAllowed?.();
       return await bindings(declaration);
     },
   };
