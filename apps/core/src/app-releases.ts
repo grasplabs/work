@@ -48,11 +48,12 @@ import { openStore } from "./data-stores.ts";
 import {
   sdkArtifactDeletions,
   sdkReleaseManifests,
+  sdkReleaseTombstones,
   sdkResourceBindings,
   sdkStoreOwners,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
-import { finishDeletion } from "./release-retention.ts";
+import { finishDeletion, markArtifact } from "./release-retention.ts";
 import { sandbox } from "./sandbox.ts";
 import { buildAppCode } from "./screens.ts";
 
@@ -509,14 +510,18 @@ export const loadRelease = async (
   }
 };
 
-/** How many times a seal tries to reserve past artifacts being deleted. */
-const reserveAttempts = 3;
+/** How often, and how long, a seal waits for a deletion in flight. */
+const reserveWait = { attempts: 50, ms: 200 };
 
 /**
  * Reserves `hashes` for release `key` (release-retention.ts), so no sweep
- * deletes their bytes once this release names them. Where a sweep is
- * deleting one already, its deletion is finished first (the bytes go),
- * and the reservation tried again: the seal stores the bytes after this.
+ * deletes their bytes once this release names them; a reservation made
+ * again is renewed, so a seal retried long after a failed one isn't swept
+ * as an orphan while it runs. Where a deletion of one is in flight, the
+ * seal waits for its owner to finish it (the seal stores the bytes after
+ * this, so they outlive that deletion); a deletion whose owner stopped
+ * (`markTakeoverMs`) is taken over and finished here.
+ * `version.seal_busy` if a deletion is still in flight after the wait.
  */
 const reserveArtifacts = async (
   env: Env,
@@ -524,7 +529,7 @@ const reserveArtifacts = async (
   hashes: readonly string[]
 ): Promise<void> => {
   const unique = [...new Set(hashes)];
-  for (let attempt = 1; attempt <= reserveAttempts; attempt += 1) {
+  for (let attempt = 1; attempt <= reserveWait.attempts; attempt += 1) {
     const now = Date.now();
     // One batch, one transaction: each reserved only where no deletion
     // mark is.
@@ -534,7 +539,7 @@ const reserveArtifacts = async (
         env.DB.prepare(
           `INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at)
            SELECT ?1, ?2, ?3, ?4 WHERE NOT EXISTS (SELECT 1 FROM sdk_artifact_deletions WHERE sha256 = ?1)
-           ON CONFLICT (sha256, app_id, version) DO NOTHING`
+           ON CONFLICT (sha256, app_id, version) DO UPDATE SET reserved_at = excluded.reserved_at`
         ).bind(sha256, key.app, key.version, now)
       )
     );
@@ -547,11 +552,44 @@ const reserveArtifacts = async (
       return;
     }
     for (const { sha256 } of marked) {
+      // Only a mark whose owner stopped is taken over; a live one is
+      // its owner's to finish.
       // oxlint-disable-next-line no-await-in-loop -- see above
-      await finishDeletion(env, sha256);
+      const owner = await markArtifact(env, sha256, new Date(now));
+      if (owner !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await finishDeletion(env, sha256, owner);
+      }
     }
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await scheduler.wait(reserveWait.ms);
   }
-  throw new Error("The release's artifacts kept being deleted as it sealed");
+  throw versionErrors.create("version.seal_busy");
+};
+
+/**
+ * Refuses (`version.seal_conflict`) a seal of a version sealed before and
+ * deleted since unless it makes the same manifest (`hash`): a version's
+ * number never comes to name other code.
+ */
+const requireAsTombstoned = async (
+  env: Env,
+  key: { app: AppId; version: number },
+  hash: string
+): Promise<void> => {
+  const tombstone = await drizzle(env.DB)
+    .select({ hash: sdkReleaseTombstones.manifestHash })
+    .from(sdkReleaseTombstones)
+    .where(
+      and(
+        eq(sdkReleaseTombstones.appId, key.app),
+        eq(sdkReleaseTombstones.version, key.version)
+      )
+    )
+    .get();
+  if (tombstone !== undefined && tombstone.hash !== hash) {
+    throw versionErrors.create("version.seal_conflict");
+  }
 };
 
 /** The empty dependency lock: server code imports no packages. */
@@ -721,6 +759,7 @@ export const sealRelease = async (
   });
   const text = canonicalText(releaseManifest);
   const hash = await sha256Hex(text);
+  await requireAsTombstoned(env, { app, version }, hash);
 
   // Reserved first, so no retention sweep deletes bytes this release will
   // name (release-retention.ts); then the bytes, each under its hash, so a

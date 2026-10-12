@@ -1,5 +1,6 @@
 CREATE TABLE `sdk_artifact_deletions` (
 	`sha256` text PRIMARY KEY NOT NULL,
+	`owner` text NOT NULL,
 	`started_at` integer NOT NULL
 );
 --> statement-breakpoint
@@ -20,6 +21,14 @@ CREATE TABLE `sdk_release_pins` (
 	`expires_at` integer,
 	`pinned_at` integer NOT NULL,
 	PRIMARY KEY(`app_id`, `version`, `holder_kind`, `holder_id`)
+);
+--> statement-breakpoint
+CREATE TABLE `sdk_release_tombstones` (
+	`app_id` text NOT NULL,
+	`version` integer NOT NULL,
+	`manifest_hash` text NOT NULL,
+	`deleted_at` integer NOT NULL,
+	PRIMARY KEY(`app_id`, `version`)
 );
 --> statement-breakpoint
 ALTER TABLE `sdk_release_manifests` ADD `last_current_at` integer;--> statement-breakpoint

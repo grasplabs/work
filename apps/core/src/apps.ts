@@ -29,7 +29,7 @@ import { screenPath } from "@grasp-os/shared/screens";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
-import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -45,7 +45,7 @@ import {
   storedEvent,
 } from "./audit-outbox.ts";
 import type { Acting, Member } from "./auth/identity.ts";
-import { apps, appVersions } from "./db/core/schema.ts";
+import { apps, appVersions, sdkReleaseManifests } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { requireOwnTypes } from "./knowledge/record-types.ts";
@@ -1078,6 +1078,19 @@ export const setCurrentVersion = async (
       keep: previous === null && approved === 1,
     }),
     ...registerTriggers(db, appId, number, triggers, storedEvent(event.id)),
+    // The sealed releases of the version leaving and the one arriving
+    // were current until now: their retention counts from here
+    // (release-retention.ts), not from the sweep's last look.
+    db
+      .update(sdkReleaseManifests)
+      .set({ lastCurrentAt: new Date() })
+      .where(
+        and(
+          eq(sdkReleaseManifests.appId, appId),
+          inArray(sdkReleaseManifests.version, [number, previous ?? number]),
+          storedEvent(event.id)
+        )
+      ),
   ]);
   if (!changed) {
     throw appErrors.create("app.conflict");

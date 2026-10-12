@@ -668,12 +668,31 @@ export const sdkReleaseArtifacts = sqliteTable(
 /**
  * An artifact's bytes being deleted: marked when no release named it, so
  * no seal reserves it again until the bytes are gone and the mark is
- * removed. Whoever finds a mark (the sweep, or a seal) may finish it.
+ * removed. Only its owner finishes a mark, and removes it only once the
+ * bytes are deleted; a mark older than any invocation can run is taken
+ * over by whoever finds it (src/release-retention.ts).
  */
 export const sdkArtifactDeletions = sqliteTable("sdk_artifact_deletions", {
   sha256: text().primaryKey(),
+  owner: text().notNull(),
   startedAt: timestamp("started_at").notNull(),
 });
+
+/**
+ * The manifest hash of each sealed release the retention sweep deleted:
+ * sealing that App version again must make the same manifest, so a
+ * version's number never comes to name other code.
+ */
+export const sdkReleaseTombstones = sqliteTable(
+  "sdk_release_tombstones",
+  {
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    deletedAt: timestamp("deleted_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.version] })]
+);
 
 /**
  * What keeps a sealed release past its retention (spec 16.3): an open

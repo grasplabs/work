@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a0d4d5d5-e596-4bc8-8953-72e4dfe63fa8",
+  "id": "2796338d-b686-455f-a5c7-9c7ef3be450f",
   "prevId": "a49bfd91-4824-40aa-8d34-b064dae941a8",
   "tables": {
     "accounts": {
@@ -2892,6 +2892,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "owner": {
+          "name": "owner",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "started_at": {
           "name": "started_at",
           "type": "integer",
@@ -3107,6 +3114,52 @@
             "holder_id"
           ],
           "name": "sdk_release_pins_app_id_version_holder_kind_holder_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "sdk_release_tombstones": {
+      "name": "sdk_release_tombstones",
+      "columns": {
+        "app_id": {
+          "name": "app_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "manifest_hash": {
+          "name": "manifest_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "sdk_release_tombstones_app_id_version_pk": {
+          "columns": [
+            "app_id",
+            "version"
+          ],
+          "name": "sdk_release_tombstones_app_id_version_pk"
         }
       },
       "uniqueConstraints": {},
