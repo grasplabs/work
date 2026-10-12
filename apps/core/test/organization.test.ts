@@ -83,10 +83,14 @@ describe("the organization", () => {
       outcome(admin.api.organization.update({ name: "   " })),
       outcome(admin.api.organization.update({ name: "x".repeat(81) })),
       outcome(admin.api.organization.update({ name: "Two\nlines" })),
+      outcome(admin.api.organization.update({ name: "Two\u2028lines" })),
+      outcome(admin.api.organization.update({ name: "Two\u2029lines" })),
       outcome(admin.api.organization.update({ timeZone: "Europe/Atlantis" })),
       outcome(admin.api.organization.update({ timeZone: "" })),
     ]);
     expect(outcomes).toStrictEqual([
+      "organization.name_invalid",
+      "organization.name_invalid",
       "organization.name_invalid",
       "organization.name_invalid",
       "organization.name_invalid",
@@ -110,16 +114,46 @@ describe("the organization", () => {
 
     expect(events).toStrictEqual([
       expect.objectContaining({
-        action: "organization.updated",
+        action: "organization.renamed",
         actor: { type: "person", userId: admin.userId },
         target: { type: "organization", id: "organization" },
-        detail: { nameChanged: true },
       }),
       expect.objectContaining({
-        action: "organization.updated",
-        detail: { nameChanged: false, timeZone: "Europe/Paris" },
+        action: "organization.time_zone.updated",
+        detail: { timeZone: "Europe/Paris" },
       }),
     ]);
     expect(JSON.stringify(events)).not.toContain("Secret");
+  });
+
+  it("refuses a change that names nothing to change, and takes one that names nothing", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const api = admin.api.organization;
+    const sent: unknown[] = [null, "Acme", ["Acme"]];
+    const outcomes = await Promise.all(
+      // SAFETY: not changes at all: what a client could send anyway.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      sent.map(async (changes) => await outcome(api.update(changes as never)))
+    );
+    expect(new Set(outcomes)).toStrictEqual(
+      new Set(["organization.changes_invalid"])
+    );
+    await expect(api.update({})).resolves.toMatchObject({
+      name: "Organization",
+    });
+  });
+
+  it("records one change when two admins save the same name at once", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const other = await signedInApi(idp, "admin");
+    const events = await auditedDuring(async () => {
+      await Promise.all([
+        admin.api.organization.update({ name: "Acme Group" }),
+        other.api.organization.update({ name: "Acme Group" }),
+      ]);
+    });
+    expect(
+      events.filter(({ action }) => action === "organization.renamed")
+    ).toHaveLength(1);
   });
 });

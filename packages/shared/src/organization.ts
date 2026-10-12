@@ -17,8 +17,9 @@ export const organizationNameSchema = z
   .trim()
   .min(1)
   .max(80)
-  // No control characters: it is shown as one line.
-  .regex(/^[^\p{Cc}]*$/u);
+  // No control characters or line and paragraph separators: it is shown
+  // as one line.
+  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}]*$/u);
 
 /** An IANA time zone the runtime knows, such as `Europe/Amsterdam`. */
 export const organizationTimeZoneSchema = z.string().max(64).refine(isTimeZone);
@@ -55,4 +56,6 @@ export const organizationErrors = defineErrorFamily({
   "organization.name_invalid":
     "Give the organization a name of up to 80 characters, on one line.",
   "organization.time_zone_invalid": "That isn't a time zone Grasp knows.",
+  "organization.changes_invalid":
+    "Say what to change: the name, the time zone or both.",
 });

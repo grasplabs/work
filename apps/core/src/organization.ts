@@ -13,7 +13,7 @@ import type {
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { defaultTimeZone } from "@grasp-os/shared/workflows";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -53,7 +53,11 @@ const changesSchema = z
 const parseChanges = (
   changes: unknown
 ): { name?: string; timeZone?: string } => {
-  const { name, timeZone } = changesSchema.safeParse(changes).data ?? {};
+  const shape = changesSchema.safeParse(changes);
+  if (!shape.success) {
+    throw organizationErrors.create("organization.changes_invalid");
+  }
+  const { name, timeZone } = shape.data;
   const parsedName =
     name === undefined ? undefined : organizationNameSchema.safeParse(name);
   if (parsedName?.success === false) {
@@ -72,10 +76,20 @@ const parseChanges = (
   };
 };
 
+/** Whether `userId` is an admin of the organization now. */
+const stillAdmin = async (env: Env, userId: string): Promise<boolean> => {
+  const row = await drizzle(env.DB).get<{ admin: number }>(
+    sql`SELECT ${activeMember(userId, ["admin"])} AS admin`
+  );
+  return row.admin === 1;
+};
+
 /**
- * Changes the organization's name or time zone: one statement that changes
- * it only while the admin still is one, with its audit event. The event
- * records the time zone and whether the name changed, never the name.
+ * Changes the organization's name, time zone or both, in one batch: each
+ * one statement that changes it only while it differs and the admin still
+ * is one, followed by its audit event, recorded only when it changed. So
+ * two admins saving the same value at once record one change. The events
+ * record the time zone, never the name.
  */
 const updateOrganization = async (
   env: Env,
@@ -86,43 +100,59 @@ const updateOrganization = async (
     log.warn("organization.refused", { actor: by.userId });
     throw roleErrors.create("role.forbidden");
   }
-  const parsed = parseChanges(changes);
-  const before = await readOrganization(env);
-  const set = {
-    ...(parsed.name === undefined || parsed.name === before.name
-      ? {}
-      : { name: parsed.name }),
-    ...(parsed.timeZone === undefined || parsed.timeZone === before.timeZone
-      ? {}
-      : { timeZone: parsed.timeZone }),
-  };
-  if (set.name === undefined && set.timeZone === undefined) {
-    return before;
-  }
+  const { name, timeZone } = parseChanges(changes);
   const db = drizzle(env.DB);
-  const [updated] = await auditedBatch(env, db, [
-    db
-      .update(organizations)
-      .set(set)
-      .where(
-        and(
-          eq(organizations.id, organizationId),
-          activeMember(by.userId, ["admin"])
-        )
-      )
-      .returning({ id: organizations.id }),
-    outboxedIfChanged(db, {
-      actor: actorOf(by),
-      action: "organization.updated",
-      target: { type: "organization", id: organizationId },
-      detail: {
-        nameChanged: set.name !== undefined,
-        ...(set.timeZone === undefined ? {} : { timeZone: set.timeZone }),
-      },
-    }),
-  ]);
-  if (updated.length === 0) {
-    // The admin stopped being one since their session was checked.
+  const admin = activeMember(by.userId, ["admin"]);
+  const ofOrganization = eq(organizations.id, organizationId);
+  const target = { type: "organization", id: organizationId };
+  const renames =
+    name === undefined
+      ? []
+      : ([
+          db
+            .update(organizations)
+            .set({ name })
+            .where(and(ofOrganization, ne(organizations.name, name), admin))
+            .returning({ id: organizations.id }),
+          outboxedIfChanged(db, {
+            actor: actorOf(by),
+            action: "organization.renamed",
+            target,
+          }),
+        ] as const);
+  const rezones =
+    timeZone === undefined
+      ? []
+      : ([
+          db
+            .update(organizations)
+            .set({ timeZone })
+            .where(
+              and(
+                ofOrganization,
+                sql`coalesce(${organizations.timeZone}, ${defaultTimeZone}) <> ${timeZone}`,
+                admin
+              )
+            )
+            .returning({ id: organizations.id }),
+          outboxedIfChanged(db, {
+            actor: actorOf(by),
+            action: "organization.time_zone.updated",
+            target,
+            detail: { timeZone },
+          }),
+        ] as const);
+  const [first, ...rest] = [...renames, ...rezones];
+  if (first === undefined) {
+    return await readOrganization(env);
+  }
+  const results = await auditedBatch(env, db, [first, ...rest]);
+  const changed = results.some(
+    (result) => Array.isArray(result) && result.length > 0
+  );
+  // Nothing changed: it already was so, or the admin stopped being one
+  // since their session was checked.
+  if (!(changed || (await stillAdmin(env, by.userId)))) {
     throw roleErrors.create("role.forbidden");
   }
   return await readOrganization(env);
