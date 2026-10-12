@@ -5,13 +5,22 @@ import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import { and, eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { appFor } from "../apps.ts";
 import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
 import { activeMember } from "../auth/auth.ts";
-import { apps, appVersions, users, workflowOwners } from "../db/core/schema.ts";
+import {
+  appMembers,
+  apps,
+  appVersions,
+  teamMembers,
+  users,
+  workflowOwners,
+} from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 
 // Who owns a workflow: the person who answers for it. They are shown with
@@ -21,7 +30,9 @@ import { inList } from "../db/d1.ts";
 // the person who started it, or the App's owner (decision on GRA-398).
 //
 // Admins and the App's builders set it, to a current member of the
-// organization, audited as `workflow.owner.updated`. Grasp staff don't:
+// organization who can open the App (`openTo`): the notices they're told
+// are listed only for Apps they can open (notifications.ts). Audited as
+// `workflow.owner.updated`. Grasp staff don't:
 // who answers for a client's workflow is the client's decision. The row
 // is kept by App and workflow ID, so it holds across versions, as
 // parameter values do.
@@ -72,11 +83,39 @@ export const ownerKey = keyOf;
 const ownerInputSchema = z.string().min(1).max(256);
 
 /**
+ * That the person `userId` (an ID, or a column holding one) has a role in
+ * App `app` now, as SQL: an admin, its owner, or someone it is shared with,
+ * as a person or through a team they are in. As `appsFoundBy` decides it
+ * for whoever lists their notifications; what the App read
+ * (app-provenance.ts) can't be decided in SQL, and isn't part of it.
+ */
+const openTo = (userId: string | SQLiteColumn, app: string): SQL => sql`(
+  ${activeMember(userId, ["admin"])}
+  OR EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${app} AND ${apps.ownerId} = ${userId})
+  OR EXISTS (
+    SELECT 1 FROM ${appMembers}
+    WHERE ${appMembers.appId} = ${app}
+      AND ((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${userId})
+        OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (
+          SELECT ${teamMembers.teamId} FROM ${teamMembers}
+          WHERE ${teamMembers.userId} = ${userId})))
+  )
+)`;
+
+/** The owner set for App `app`'s workflow `workflow`, as SQL; NULL for none. */
+const ownerSet = (app: string, workflow: string): SQL =>
+  sql`(SELECT ${workflowOwners.ownerId} FROM ${workflowOwners}
+    WHERE ${workflowOwners.appId} = ${app}
+      AND ${workflowOwners.workflowId} = ${workflow})`;
+
+/**
  * Makes `owner` the owner of workflow `workflow` of App `app`'s current
  * version, for an admin or a builder of the App; not Grasp staff. The
- * owner must be a current member of the organization when the write
- * runs, or `workflow.owner_invalid`. The change and its audit event are
- * one batch.
+ * owner must be a current member of the organization who can open the
+ * App when the write runs, or `workflow.owner_invalid`. The write goes
+ * through only while the owner is still the one read, so the audit event
+ * names the owner it replaced; otherwise `workflow.owner_conflict`. The
+ * change and its audit event are one batch.
  */
 export const setWorkflowOwner = async (
   env: Env,
@@ -133,7 +172,8 @@ export const setWorkflowOwner = async (
       .select(
         sql`SELECT ${found.id}, ${workflowId}, ${ownerId}, ${by.userId}, ${Date.now()}
           WHERE ${activeMember(ownerId)}
-            AND EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${found.id})`
+            AND ${openTo(ownerId, found.id)}
+            AND ${ownerSet(found.id, workflowId)} IS ${previous?.ownerId ?? null}`
       )
       .onConflictDoUpdate({
         target: [workflowOwners.appId, workflowOwners.workflowId],
@@ -156,14 +196,29 @@ export const setWorkflowOwner = async (
     }),
   ]);
   if (set.length === 0) {
-    throw workflowErrors.create("workflow.owner_invalid");
+    const now = await db
+      .select({ ownerId: workflowOwners.ownerId })
+      .from(workflowOwners)
+      .where(
+        and(
+          eq(workflowOwners.appId, found.id),
+          eq(workflowOwners.workflowId, workflowId)
+        )
+      )
+      .get();
+    throw workflowErrors.create(
+      now?.ownerId === previous?.ownerId
+        ? "workflow.owner_invalid"
+        : "workflow.owner_conflict"
+    );
   }
   return { app: found.id, workflow: workflowId };
 };
 
 /**
- * Who owns App `app`'s workflow `workflow` now: the person set, or the
- * App's owner. Whom a run's failure is told to (runs.ts).
+ * Whom a failure of App `app`'s workflow `workflow` is told to (runs.ts):
+ * the owner set, while they can still open the App (`openTo`); otherwise
+ * the App's owner, so a notice never goes to someone who can't see it.
  */
 export const ownerOf = async (
   env: Env,
@@ -171,7 +226,14 @@ export const ownerOf = async (
   workflow: string
 ): Promise<string> => {
   const row = await drizzle(env.DB)
-    .select({ ownerId: workflowOwners.ownerId, appOwner: apps.ownerId })
+    .select({
+      ownerId: sql<string>`CASE
+        WHEN ${workflowOwners.ownerId} IS NOT NULL
+          AND ${openTo(workflowOwners.ownerId, app)}
+        THEN ${workflowOwners.ownerId}
+        ELSE ${apps.ownerId}
+      END`,
+    })
     .from(apps)
     .leftJoin(
       workflowOwners,
@@ -185,5 +247,5 @@ export const ownerOf = async (
   if (row === undefined) {
     throw workflowErrors.create("workflow.not_found");
   }
-  return row.ownerId ?? row.appOwner;
+  return row.ownerId;
 };

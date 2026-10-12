@@ -43,7 +43,9 @@ export const workflowErrors = defineErrorFamily({
   "workflow.start_pending":
     "The run this was delivered for is still starting. Try again shortly.",
   "workflow.owner_invalid":
-    "Only a current member of the organization can own a workflow.",
+    "Only a current member of the organization who can open the App can own its workflow.",
+  "workflow.owner_conflict":
+    "Someone changed the workflow's owner meanwhile. Try again.",
   "workflow.email_taken":
     "Another App's workflow already receives mail at this address.",
   "workflow.attachment_not_found":
@@ -893,9 +895,9 @@ export interface WorkflowsApi {
   /** One workflow of an App's current version. */
   get: (app: string, workflow: string) => Promise<WorkflowDetail>;
   /**
-   * Makes `owner`, a member of the organization, the owner of an App's
-   * workflow; for admins and the App's builders, audited. Returns the
-   * workflow's summary as it is now.
+   * Makes `owner`, a member of the organization who can open the App,
+   * the owner of an App's workflow; for admins and the App's builders,
+   * audited. Returns the workflow's summary as it is now.
    */
   setOwner: (
     app: string,

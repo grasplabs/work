@@ -125,6 +125,10 @@ describe("a workflow's owner", slow, () => {
       staff: await outcome(
         staff.workflows.setOwner(app, "remind", owner.userId)
       ),
+      // A member who can't open the App: they'd never see its notices.
+      noAccess: await outcome(
+        owner.api.workflows.setOwner(app, "remind", outsider.userId)
+      ),
       removed: await outcome(
         owner.api.workflows.setOwner(app, "remind", removed.userId)
       ),
@@ -140,6 +144,11 @@ describe("a workflow's owner", slow, () => {
       "remind",
       builder.userId
     );
+    // Each change names the owner it replaced.
+    const again = await auditedDuring(
+      async () =>
+        await owner.api.workflows.setOwner(app, "chase", builder.userId)
+    );
     // A new version keeps who owns each workflow.
     await release(owner, app, workflowFiles("pay", "  return 1;"));
     const { summary } = await user.api.workflows.get(app, "chase");
@@ -147,12 +156,14 @@ describe("a workflow's owner", slow, () => {
 
     expect({
       before,
-      audited: audited.map(({ action, actor, target, detail }) => ({
-        action,
-        actor,
-        target,
-        detail,
-      })),
+      audited: [...audited, ...again].map(
+        ({ action, actor, target, detail }) => ({
+          action,
+          actor,
+          target,
+          detail,
+        })
+      ),
       refused,
       byAdmin: {
         owner: byAdmin.owner,
@@ -185,10 +196,21 @@ describe("a workflow's owner", slow, () => {
             previous: owner.userId,
           },
         },
+        {
+          action: "workflow.owner.updated",
+          actor: { type: "person", userId: owner.userId },
+          target: { type: "app", id: app },
+          detail: {
+            workflow: "chase",
+            owner: builder.userId,
+            previous: user.userId,
+          },
+        },
       ],
       refused: {
         user: "role.forbidden",
         outsider: "app.not_found",
+        noAccess: "workflow.owner_invalid",
         staff: "role.forbidden",
         removed: "workflow.owner_invalid",
         nobody: "workflow.owner_invalid",
@@ -199,13 +221,13 @@ describe("a workflow's owner", slow, () => {
         changesOwner: true,
       },
       after: [
-        { workflow: "chase", owner: user.userId, changesOwner: true },
+        { workflow: "chase", owner: builder.userId, changesOwner: true },
         { workflow: "pay", owner: owner.userId, changesOwner: true },
         { workflow: "remind", owner: builder.userId, changesOwner: true },
       ],
       asStaff: [false, false, false],
       detail: {
-        owner: { userId: user.userId, name: user.person.name },
+        owner: { userId: builder.userId, name: builder.person.name },
         changesOwner: false,
       },
     });
@@ -230,20 +252,27 @@ describe("a workflow's owner", slow, () => {
 
     const failed = await triggered(app, "careless");
     const booked = await triggered(app, "booking");
+    // Once the owner can't open the App, its owner is told instead.
+    await owner.api.apps.members.remove(app, {
+      type: "person",
+      id: answers.userId,
+    });
+    const unseen = await triggered(app, "careless");
     const instance = await env.WORKFLOWS.get(booked);
     const { output } = await instance.status();
     const events = await allEvents();
     const notified = events
       .filter(
         ({ action, target }) =>
-          action === "workflow.run.notified" && target?.id === failed
+          action === "workflow.run.notified" &&
+          (target?.id === failed || target?.id === unseen)
       )
-      .map(({ detail }) => detail.person);
+      .map(({ target, detail }) => [target?.id, detail.person]);
     const told = async (person: Person) => {
       const { notifications } = await person.api.notifications.list();
       return notifications
-        .filter((notice) => notice.run === failed)
-        .map(({ workflow }) => workflow);
+        .filter((notice) => notice.run === failed || notice.run === unseen)
+        .map(({ run }) => run);
     };
 
     expect({
@@ -252,9 +281,12 @@ describe("a workflow's owner", slow, () => {
       owner: await told(owner),
       output,
     }).toStrictEqual({
-      notified: [answers.userId],
-      answers: ["careless"],
-      owner: [],
+      notified: [
+        [failed, answers.userId],
+        [unseen, owner.userId],
+      ],
+      answers: [],
+      owner: [unseen],
       output: `ledger-INV-1-for-${owner.userId}`,
     });
   });
