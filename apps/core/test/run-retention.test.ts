@@ -1,7 +1,8 @@
 import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { callApp } from "../src/app.ts";
@@ -23,7 +24,16 @@ import {
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { racingDb } from "./racing-db.ts";
-import { endLiveRuns, finished, sleeping, stopped, woken } from "./runs.ts";
+import {
+  aroundEngine,
+  endLiveRuns,
+  finished,
+  runObject,
+  runObjectId,
+  sleeping,
+  stopped,
+  woken,
+} from "./runs.ts";
 import { openRpc, signedInApi } from "./sign-in.ts";
 import { appWith, runEvents, workflowFiles } from "./workflow-apps.ts";
 
@@ -35,10 +45,10 @@ import { appWith, runEvents, workflowFiles } from "./workflow-apps.ts";
 // left half swept; a swept run run again; and a reader handed a swept run
 // as if nothing were missing.
 //
-// Runs are real, on the Workflows engine (Miniflare's), which takes the
-// retention core gives each run but doesn't act on it: that Cloudflare's
-// removes an ended run's record then is checked on a real account. Here
-// the tests check that core asks for it, and everything core does. Time is the
+// Runs are real, on the engine (Workerflow), which takes the retention
+// core gives each run and purges an ended run's record once it is over
+// (its own tests show the purge). Here the tests check that core asks for
+// it, and everything core does. Time is the
 // cron's own: each sweep is run for a time that many days on, as
 // Cloudflare would run it then, so no test waits or sets a clock.
 
@@ -392,37 +402,31 @@ describe("run retention", { timeout: 60_000 }, () => {
       actor: { type: "system" },
     } as const;
 
-    const create = vi.spyOn(env.WORKFLOWS, "create");
-    let asked: unknown[];
-    try {
-      const byDefault = await startRun(env, start);
-      const shorter = await startRun(
-        { ...env, RUN_RETENTION_DAYS: "7" },
-        start
-      );
-      // A config core can't read: the engine keeps it as long as it may.
-      const unset = await startRun(
-        { ...env, RUN_RETENTION_DAYS: "soon" },
-        start
-      );
-      asked = [byDefault, shorter, unset].map(
-        ({ id }) =>
-          create.mock.calls.find(([options]) => options?.id === id)?.[0]
-            ?.retention
-      );
-      await Promise.all(
-        [byDefault, shorter, unset].map(async ({ id }) => {
-          await finished(id);
-        })
-      );
-    } finally {
-      create.mockRestore();
-    }
-
+    const byDefault = await startRun(env, start);
+    const shorter = await startRun({ ...env, RUN_RETENTION_DAYS: "7" }, start);
+    // A config core can't read: the engine keeps it as long as it may.
+    const unset = await startRun({ ...env, RUN_RETENTION_DAYS: "soon" }, start);
+    const asked = await Promise.all(
+      [byDefault, shorter, unset].map(
+        async ({ id }) =>
+          await runInDurableObject(runObject(id), (_object, state) =>
+            state.storage.sql
+              .exec<{ success: number; error: number }>(
+                "SELECT success_retention_ms AS success, error_retention_ms AS error FROM run"
+              )
+              .one()
+          )
+      )
+    );
+    await Promise.all(
+      [byDefault, shorter, unset].map(async ({ id }) => {
+        await finished(id);
+      })
+    );
     expect(asked).toStrictEqual([
-      { successRetention: "30 days", errorRetention: "30 days" },
-      { successRetention: "7 days", errorRetention: "7 days" },
-      undefined,
+      { success: 30 * day, error: 30 * day },
+      { success: 7 * day, error: 7 * day },
+      { success: 30 * day, error: 30 * day },
     ]);
   });
 
@@ -648,18 +652,17 @@ describe("run retention", { timeout: 60_000 }, () => {
     await finished(run.id);
     await runQuarterHourCron({}, daysOn(31));
     // The engine's record went as its retention ended.
-    const record = await env.WORKFLOWS.get(run.id);
-    await record.delete();
+    await runObject(run.id).deleteRun();
 
     // Its trigger delivered again: this run, no new one.
     const again = await startRun(env, delivery);
-    // And an instance under its ID, as nothing in core creates one.
+    // And its start sent to the engine again, as nothing in core sends it:
+    // the engine finds it deleted, and creates nothing.
     await runEngine(env).create({
       id: run.id,
       pinned: { app: run.app, workflow: run.workflow, version: run.version },
       input: { notes: transcript },
     });
-    await finished(run.id);
     const events = await allEvents();
     const { results: rows } = await env.DB.prepare(
       "SELECT id FROM workflow_runs WHERE app_id = ?"
@@ -681,7 +684,7 @@ describe("run retention", { timeout: 60_000 }, () => {
     }).toMatchObject({
       again: { id: run.id, status: "completed" },
       rows: 1,
-      instance: { status: "errored" },
+      instance: undefined,
       // Still the run that completed, its details gone: not failed anew.
       status: { status: "completed", detailsRemoved: true },
       cancelled: { status: "completed" },
@@ -745,25 +748,21 @@ describe("run retention", { timeout: 60_000 }, () => {
       .run();
 
     // The engine fails for that run, and only for it.
-    const get = env.WORKFLOWS.get.bind(env.WORKFLOWS);
-    const failing = vi
-      .spyOn(env.WORKFLOWS, "get")
-      .mockImplementation(async (id) => {
-        if (id === run.id) {
+    const between = await aroundEngine(
+      async (_method, call, object) => {
+        if (object.equals(runObjectId(run.id))) {
           throw new Error("The engine is unavailable");
         }
-        return await get(id);
-      });
-    let between: unknown;
-    try {
-      await runQuarterHourCron({}, daysOn(31));
-      between = {
-        cancelled: await sweptOf([run.id]),
-        other: await sweptOf([done.id]),
-      };
-    } finally {
-      failing.mockRestore();
-    }
+        return await call();
+      },
+      async () => {
+        await runQuarterHourCron({}, daysOn(31));
+        return {
+          cancelled: await sweptOf([run.id]),
+          other: await sweptOf([done.id]),
+        };
+      }
+    );
     const stillThere = await inEngine(run.id);
     await runQuarterHourCron({}, daysOn(31));
 

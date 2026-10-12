@@ -10,6 +10,7 @@
     "./codec": "./src/codec.ts",
     "./contracts": "./src/contracts.ts",
     "./errors": "./src/errors.ts",
+    "./identity": "./src/identity.ts",
     "./instance": "./src/instance.ts",
     "./run": "./src/run.ts"
   },

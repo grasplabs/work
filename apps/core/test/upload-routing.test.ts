@@ -1,7 +1,6 @@
 import type { SessionApi } from "@grasp-os/shared/rpc";
 import { uploadTypes } from "@grasp-os/shared/uploads";
 import type { Upload } from "@grasp-os/shared/uploads";
-import { introspectWorkflow } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -352,19 +351,22 @@ describe("upload routing", { timeout: 60_000 }, () => {
       name: `Files ${unique()}`,
       access: "me",
     });
-    await using introspector = await introspectWorkflow(env.WORKFLOWS);
-    await introspector.modifyAll(async (modifier) => {
-      await modifier.disableRetryDelays();
-    });
     let upload: Upload | undefined;
-    const sent = await withWorkersAi(
-      () => {
-        throw new Error("Workers AI is down");
-      },
-      async () => {
-        upload = await uploadedTo(person.api, collectionId);
-      }
-    );
+    // Every retry due at once.
+    env.WORKFLOW_RETRY_DELAY_MS = "0";
+    let sent: Sent[];
+    try {
+      sent = await withWorkersAi(
+        () => {
+          throw new Error("Workers AI is down");
+        },
+        async () => {
+          upload = await uploadedTo(person.api, collectionId);
+        }
+      );
+    } finally {
+      Reflect.deleteProperty(env, "WORKFLOW_RETRY_DELAY_MS");
+    }
 
     expect({
       // The first try and its three retries.

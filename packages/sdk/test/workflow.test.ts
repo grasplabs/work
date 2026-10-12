@@ -223,6 +223,8 @@ describe("step calls", () => {
       ["go", { description: "Go", retries: { limit: -1 } }],
       ["go", { description: "Go", retries: { limit: 1, delay: 1.5 } }],
       ["go", { description: "Go", timeout: "400 days" }],
+      // Past what an attempt may run on the engine, though a sleep may wait it.
+      ["go", { description: "Go", timeout: "15 minutes" }],
     ];
 
     for (const [name, options] of calls) {
@@ -234,6 +236,23 @@ describe("step calls", () => {
         definition.run(createFakeEngine().engine)
       ).rejects.toMatchObject({ code: "workflow.invalid_step_call" });
     }
+  });
+
+  it("take an attempt timeout of up to 14 minutes, and longer sleeps", async () => {
+    const { engine, steps } = createFakeEngine();
+    await withStep(async (step) => {
+      await step.do(
+        "go",
+        { description: "Go", timeout: "14 minutes" },
+        async () => 1
+      );
+      await step.sleep("pause", {
+        description: "Pause",
+        duration: "15 minutes",
+      });
+    }).run(engine);
+
+    expect(steps.map(({ type }) => type)).toStrictEqual(["step", "sleep"]);
   });
 
   it("reject options of the wrong type before anything runs", async () => {

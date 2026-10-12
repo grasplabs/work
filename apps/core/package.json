@@ -20,12 +20,12 @@
   },
   "dependencies": {
     "@better-auth/sso": "catalog:",
-    "@cloudflare/dynamic-workflows": "catalog:",
     "@earendil-works/pi-agent-core": "catalog:",
     "@earendil-works/pi-ai": "catalog:",
     "@grasp-os/compiler": "workspace:*",
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
+    "@grasp-os/workerflow": "workspace:*",
     "better-auth": "catalog:",
     "capnweb": "catalog:",
     "drizzle-orm": "catalog:",

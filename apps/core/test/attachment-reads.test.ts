@@ -57,7 +57,7 @@ const step: RunStep = {
 
 const hooks: HostHooks = {
   stepFailed: () => {},
-  engineStopped: () => false,
+  busyRefusals: new Map(),
   tampered: () => {},
   waiting: async () => {
     await Promise.resolve();

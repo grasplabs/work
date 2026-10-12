@@ -108,6 +108,15 @@ const isTimeZone = (timeZone: string): boolean => {
 };
 
 /** The time zone of a schedule trigger that names none. */
+/**
+ * The longest a step's attempt may run (its `timeout`): all of a fresh
+ * activation's budget on the owned engine, which gives up on an attempt
+ * by then however long its timeout says. The SDK refuses a longer one
+ * where the step is written, and the host refuses it at run time. Sleeps
+ * and decisions wait durably, so their limits are far longer.
+ */
+export const maxAttemptTimeoutMs = 14 * 60_000;
+
 export const defaultTimeZone = "UTC";
 
 /** A schedule: a five-field cron expression, read in a time zone. */

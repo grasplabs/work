@@ -98,9 +98,9 @@ const core :Workerd.Worker = (
     ${durableObjectBindings.join(",\n    ")},
     ${d1Bindings(d1DatabasesOf(coreWranglerConfig)).join(",\n    ")},
     ${r2Bindings(r2BucketsOf(coreWranglerConfig)).join(",\n    ")},
-    # No LOADER (experimental in workerd) and no WORKFLOWS (no engine):
-    # apps and screens need workerd's --experimental, and workflows don't
-    # run on-prem (apps/core/src/workflows/engine.ts).
+    # No LOADER (experimental in workerd): apps, screens and App workflow
+    # runs need workerd's --experimental. The workflow engine itself is a
+    # Durable Object (WORKFLOW_RUNS), bound with the others.
   ],
   durableObjectNamespaces = [
     ${durableObjectNamespaces.join(",\n    ")},
