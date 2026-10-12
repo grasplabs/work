@@ -364,6 +364,17 @@ export const committedSchema = z.strictObject({
   inserted: z.array(z.string()),
   commit: z.number().int(),
   result: fieldValueSchema,
+  /**
+   * The records a cascade deleted with the commit's own deletions, each
+   * with its table and its owner, kept with the receipt: who deleted them
+   * is the commit's principal. Left out when there were none.
+   */
+  cascaded: z
+    .array(
+      z.strictObject({ table: z.string(), id: z.string(), owner: z.string() })
+    )
+    .max(commitMaxCascade)
+    .optional(),
 });
 export type Committed = z.infer<typeof committedSchema>;
 

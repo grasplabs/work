@@ -2072,14 +2072,122 @@ describe("a store's cascades", () => {
     const [link = ""] = await insertCascading(store, "links", { note: second });
     await insertCascading(store, "subs", { pinned: link });
 
-    await Promise.all(
-      [first, second].map(async (note) => {
-        await expect(deleteNote(store, note)).rejects.toMatchObject({
-          code: "data.referenced",
-        });
-      })
-    );
+    // The note the deletion asked for is named; a link a cascade would
+    // have taken, which may be another's, is not.
+    await expect(
+      Promise.all(
+        [first, second].map(
+          async (note) =>
+            await refusalOf(async () => await deleteNote(store, note))
+        )
+      )
+    ).resolves.toStrictEqual([
+      { code: "data.referenced", details: { table: "notes", id: first } },
+      { code: "data.referenced", details: undefined },
+    ]);
     await expect(recordCount(store)).resolves.toBe(5);
+  });
+
+  it("keeps with the receipt whose records a cascade deleted", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Gone",
+    });
+    const [link = ""] = await insertCascading(store, "links", { note });
+    const sub = newRecordId();
+    await commitIn(store, {
+      ...graceWrites,
+      schemaHash: cascadeHash,
+      writes: [{ op: "insert", id: sub, table: "subs", fields: { link } }],
+    });
+    const committed = await deleteNote(store, note);
+    expect(
+      committed.cascaded?.toSorted((a, b) => a.table.localeCompare(b.table))
+    ).toStrictEqual([
+      { table: "links", id: link, owner: ada.userId },
+      { table: "subs", id: sub, owner: grace.userId },
+    ]);
+  });
+
+  it("leaves a record the commit writes or guards itself to the commit, refusing what still refers", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Kept",
+    });
+    const [link = ""] = await insertCascading(store, "links", { note });
+    const deleting = {
+      op: "delete",
+      table: "notes",
+      id: note,
+      expectedRevision: 1,
+    } as const;
+    await expect(
+      Promise.all([
+        // Rewritten by the commit, still referring to the note.
+        refusalOf(
+          async () =>
+            await commitIn(store, {
+              principal: ada,
+              schemaHash: cascadeHash,
+              writes: [
+                {
+                  op: "patch",
+                  table: "links",
+                  id: link,
+                  fields: { kept: note },
+                  expectedRevision: 1,
+                },
+                deleting,
+              ],
+            })
+        ),
+        // Asserted by the commit to be there at its revision.
+        refusalOf(
+          async () =>
+            await commitIn(store, {
+              principal: ada,
+              schemaHash: cascadeHash,
+              guards: [{ table: "links", id: link, expectedRevision: 1 }],
+              writes: [deleting],
+            })
+        ),
+      ])
+    ).resolves.toStrictEqual([
+      { code: "data.referenced", details: { table: "notes", id: note } },
+      { code: "data.referenced", details: { table: "notes", id: note } },
+    ]);
+    await expect(recordCount(store)).resolves.toBe(2);
+  });
+
+  it("counts toward the bound only what the cascade adds to the commit's own deletions", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Gone",
+    });
+    const extra = 5;
+    const links = [
+      ...(await insertCascading(store, "links", ...linksTo(note, extra))),
+      ...(await insertCascading(
+        store,
+        "links",
+        ...linksTo(note, commitMaxCascade)
+      )),
+    ];
+    // The commit deletes some links itself: the rest are within the bound.
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: cascadeHash,
+      writes: [
+        ...links.slice(0, extra).map((id) => ({
+          op: "delete" as const,
+          table: "links",
+          id,
+          expectedRevision: 1,
+        })),
+        { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+      ],
+    });
+    await expect(recordCount(store)).resolves.toBe(0);
   });
 
   it("refuses a deletion that would take more than one commit may, for a workflow to batch", async () => {

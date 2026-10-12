@@ -237,6 +237,8 @@ interface Staged {
   base: typeof records.$inferSelect | undefined;
   /** Its fields as staged so far; null once the commit deleted it. */
   fields: StoreFields | null;
+  /** Whether a cascade deleted it (`#cascade`), not one of the commit's writes. */
+  cascaded?: true;
 }
 
 /** Where a staged record is kept: its table and ID, which can't collide. */
@@ -1513,10 +1515,19 @@ export class StoreHost {
       if (counted === undefined) {
         throw new Error("A bound store has no row");
       }
+      // Whom a cascade deleted records of, kept with the receipt: the
+      // deletion is attributable to this commit's principal.
+      const cascaded = staged.flatMap(
+        ({ table, recordId, base, cascaded: by }) =>
+          by === true && base !== undefined
+            ? [{ table, id: recordId, owner: base.ownerId }]
+            : []
+      );
       const outcome: Committed = {
         inserted,
         commit: counted.commits,
         result,
+        ...(cascaded.length === 0 ? {} : { cascaded }),
       };
       this.#db
         .update(receipts)
@@ -1738,6 +1749,9 @@ export class StoreHost {
     );
     let cascaded = 0;
     for (let gone = pending.pop(); gone !== undefined; gone = pending.pop()) {
+      // One more than the bound has room for is enough to refuse: no
+      // more is read. (Records already staged are among them, but are
+      // never more than the commit's own writes and what it cascaded.)
       const referring = this.#db
         .select({ tableId: recordRefs.tableId, recordId: recordRefs.recordId })
         .from(recordRefs)
@@ -1748,6 +1762,7 @@ export class StoreHost {
             eq(recordRefs.cascade, true)
           )
         )
+        .limit(commitMaxCascade - cascaded + staged.size + 1)
         .all();
       for (const { tableId, recordId } of referring) {
         if (staged.has(keyOf(tableId, recordId))) {
@@ -1761,6 +1776,7 @@ export class StoreHost {
         }
         const entry = stage(this.#tableName(tableId), tableId, recordId);
         entry.fields = null;
+        entry.cascaded = true;
         pending.push(entry);
       }
     }
@@ -1886,7 +1902,7 @@ export class StoreHost {
         }
       }
     }
-    for (const { table, tableId, recordId, base, fields } of staged) {
+    for (const { table, tableId, recordId, base, fields, cascaded } of staged) {
       if (base === undefined || fields !== null) {
         continue;
       }
@@ -1901,9 +1917,13 @@ export class StoreHost {
         )
         .get();
       if (referred !== undefined) {
-        // The record's own table and ID only: nothing of what refers to
-        // it, which may be another's.
-        throw dataErrors.create("data.referenced", { table, id: recordId });
+        // The record's own table and ID, when the commit's own write
+        // deleted it: nothing of what refers to it, which may be another's.
+        // A record a cascade would have taken may be another's too, and
+        // one the writer can't read: then nothing is named.
+        throw cascaded === true
+          ? dataErrors.create("data.referenced")
+          : dataErrors.create("data.referenced", { table, id: recordId });
       }
     }
   }
