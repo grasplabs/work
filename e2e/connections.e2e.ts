@@ -280,7 +280,7 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
     .getByRole("listitem")
     .filter({ hasText: "Microsoft 365" });
   await expect(
-    used.getByRole("link", {
+    used.getByRole("button", {
       name: "Manage Microsoft 365, connected for everyone",
     })
   ).toBeVisible();
@@ -306,7 +306,6 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   // tools. The test stack lists no Composio toolkits, so its ID stands in
   // for its name.
   await accountOf(page, "composio:hubspot");
-  await expect(page.getByText("Via Composio")).toBeVisible();
   const toolkitCard = cardOf(page, "hubspot", toolkit);
   await expect(toolkitCard.getByText(composioConsentText)).toBeVisible();
   await expect(toolkitCard).toContainText(

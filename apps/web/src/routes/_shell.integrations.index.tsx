@@ -291,6 +291,12 @@ const Search = ({ q }: { q: string | undefined }) => {
   );
 };
 
+const notLetters = /[^a-z]+/gu;
+
+/** A section heading's ID: the group's name has spaces, which an ID reference can't hold. */
+const headingIdOf = (group: CatalogGroup): string =>
+  `integrations-${group.toLowerCase().replaceAll(notLetters, "-")}`;
+
 /**
  * The sections as far as `most` of the catalog's other apps go: each gets
  * what is left of them, and one that would start with none waits.
@@ -360,13 +366,13 @@ const Kinds = ({
     <>
       {upTo(sections, drawn).map((section) => (
         <section
-          aria-labelledby={`integrations-${section.group}`}
+          aria-labelledby={headingIdOf(section.group)}
           className="flex flex-col gap-2"
           key={section.group}
         >
           <h2
             className="text-muted-foreground flex items-baseline gap-2"
-            id={`integrations-${section.group}`}
+            id={headingIdOf(section.group)}
           >
             {i18n._(groupLabel[section.group])}
             {section.count > 6 ? (

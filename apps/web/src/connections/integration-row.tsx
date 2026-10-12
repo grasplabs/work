@@ -207,12 +207,12 @@ export const IntegrationRow = ({
   integration: Integration;
   identity: Identity;
 }) => (
-  <li
-    className="flex h-14 min-w-0 items-center gap-3"
-    title={integration.description ?? undefined}
-  >
+  <li className="flex h-14 min-w-0 items-center gap-3">
     <AppLogo logo={integration.logo} name={integration.name} />
-    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+    <div
+      className="flex min-w-0 flex-1 flex-col gap-0.5"
+      title={integration.description ?? undefined}
+    >
       <Link
         className="w-fit max-w-full truncate font-medium underline-offset-4 outline-none hover:underline focus-visible:underline"
         params={{ integration: integration.key }}
