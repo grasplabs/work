@@ -4,7 +4,9 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
+import { repairControls, settleControls } from "../src/workflows/controls.ts";
 import { runEngine } from "../src/workflows/engine.ts";
+import { projectStatus, repairStarts } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
@@ -13,6 +15,7 @@ import {
   endLiveRuns,
   finished,
   liveStatus,
+  runInstance,
   runObject,
   sleeping,
   woken,
@@ -401,6 +404,125 @@ describe(
         resumed: { kind: "resume", state: "applied" },
         stillPaused: false,
         after: 1,
+      });
+    });
+
+    it("supersede a pause of a run still starting once its start fails, so the repair leaves it", async () => {
+      const builder = await personApi("builder");
+      const app = await appWith(builder, napper);
+      const run = crypto.randomUUID();
+      await env.DB.prepare(
+        "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, pending_start) VALUES (?, ?, 'napper', 1, ?, 'starting', ?, '{}')"
+      )
+        .bind(run, app, builder.userId, Date.now() - 20 * 60_000)
+        .run();
+      await builder.api.screens.control(app, run, "pause");
+
+      // The engine never takes the start: the repair gives it up.
+      await aroundEngine(
+        async (method, call) => {
+          if (method === "start") {
+            throw new Error("The engine is unavailable");
+          }
+          return await call();
+        },
+        async () => {
+          await repairStarts(env, run);
+        }
+      );
+
+      expect({
+        row: await shown(builder, app, run),
+        receipts: await receiptStates(run),
+      }).toStrictEqual({
+        row: "failed",
+        receipts: [["pause", "superseded"]],
+      });
+    });
+
+    it("reach a live run's receipt in one repair, past receipts of runs that have ended", async () => {
+      const builder = await personApi("builder");
+      const app = await appWith(builder, napper);
+      const { id: run } = await builder.api.screens.startRun(app, "napper");
+      await sleeping(run, "go");
+      await until(async () => (await sleepDeadline(run)) !== undefined);
+      await aroundEngine(
+        async (method, call) => {
+          if (method === "pause") {
+            throw new Error("The engine is unavailable");
+          }
+          return await call();
+        },
+        async () =>
+          await outcome(builder.api.screens.control(app, run, "pause"))
+      );
+      // As many ended runs' pauses as a repair takes, older than it.
+      const old = Date.now() - 120_000;
+      await env.DB.batch(
+        Array.from({ length: 50 }, () => crypto.randomUUID()).flatMap(
+          (ended) => [
+            env.DB.prepare(
+              "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'napper', 1, ?, 'failed', ?, ?)"
+            ).bind(ended, app, builder.userId, old, old),
+            env.DB.prepare(
+              "INSERT INTO workflow_run_controls (id, run_id, kind, state, generation, requested_by, created_at) VALUES (?, ?, 'pause', 'admitted', 1, ?, ?)"
+            ).bind(crypto.randomUUID(), ended, builder.userId, old),
+          ]
+        )
+      );
+      await env.DB.prepare(
+        "UPDATE workflow_run_controls SET created_at = ? WHERE run_id = ?"
+      )
+        .bind(Date.now() - 60_000, run)
+        .run();
+
+      await repairControls(env);
+      const { results: left } = await env.DB.prepare(
+        "SELECT count(*) AS left FROM workflow_run_controls c JOIN workflow_runs r ON r.id = c.run_id WHERE r.app_id = ? AND c.state = 'admitted'"
+      )
+        .bind(app)
+        .all<{ left: number }>();
+
+      expect({
+        live: await receiptStates(run),
+        left: left[0]?.left,
+      }).toStrictEqual({ live: [["pause", "applied"]], left: 0 });
+    });
+
+    it("settle a pause only from where the engine has the run as it is read, never from a late notification", async () => {
+      const builder = await personApi("builder");
+      const app = await appWith(builder, napper);
+      const { id: run } = await builder.api.screens.startRun(app, "napper");
+      await sleeping(run, "go");
+      // A pause admitted that the engine hasn't taken.
+      await env.DB.prepare(
+        "INSERT INTO workflow_run_controls (id, run_id, kind, state, generation, requested_by, created_at) VALUES (?, ?, 'pause', 'admitted', 1, ?, ?)"
+      )
+        .bind(crypto.randomUUID(), run, builder.userId, Date.now())
+        .run();
+      await env.DB.prepare(
+        "UPDATE workflow_runs SET control_generation = 1 WHERE id = ?"
+      )
+        .bind(run)
+        .run();
+
+      // A "paused" from before it, delivered late, the row taking it.
+      await projectStatus(env, run, {
+        status: "paused",
+        at: Date.now(),
+        sequence: 1_000_000,
+      });
+      const afterNotification = await receiptStates(run);
+      await settleControls(env, run, await runInstance(run).status());
+
+      expect({
+        afterNotification,
+        afterRead: await receiptStates(run),
+        engine: await liveStatus(run),
+      }).toStrictEqual({
+        afterNotification: [["pause", "admitted"]],
+        afterRead: [["pause", "admitted"]],
+        engine: "waiting",
       });
     });
 

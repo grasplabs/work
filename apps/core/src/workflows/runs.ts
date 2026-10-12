@@ -391,6 +391,30 @@ const failStart = async (
       row.id,
       sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.endedAt} IS NOT NULL)`
     ),
+    // A pause or resume admitted while it was starting has nothing left
+    // to apply to: superseded, so the repair doesn't send it for ever. A
+    // cancel admitted meanwhile is what ended it.
+    db
+      .update(workflowRunControls)
+      .set({ state: "applied", settledAt: failedAt })
+      .where(
+        and(
+          eq(workflowRunControls.runId, row.id),
+          eq(workflowRunControls.state, "admitted"),
+          eq(workflowRunControls.kind, "cancel"),
+          sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.status} = 'cancelled')`
+        )
+      ),
+    db
+      .update(workflowRunControls)
+      .set({ state: "superseded", settledAt: failedAt })
+      .where(
+        and(
+          eq(workflowRunControls.runId, row.id),
+          eq(workflowRunControls.state, "admitted"),
+          sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.status} IN ('failed', 'cancelled'))`
+        )
+      ),
   ]);
   if (!failed) {
     return false;
@@ -932,17 +956,16 @@ const stoppedReport = (row: RunRow, at: Date): RunFailure => ({
 });
 
 /** The pause or resume each status of a run that hasn't ended confirms. */
-const confirmedControl: Partial<
-  Record<InstanceStatus["status"], "pause" | "resume">
-> = { paused: "pause", running: "resume", waiting: "resume" };
-
 /**
- * The statements that settle the run's control receipts (controls.ts) the
- * engine's status confirms, in the projection's batch, after the write of
- * the status: a pause once it is paused, a resume once it runs or waits
- * again, a cancel once it has ended, and a pause or resume still
- * unresolved then, superseded. Only once the row took the notification: a
- * late one settles nothing.
+ * The statements that settle the run's control receipts (controls.ts) its
+ * end settles, in the projection's batch, after the write of the status:
+ * a cancel is applied once the run ended other than completed, and a
+ * pause, a resume, or a cancel a completion overtook, is superseded. Only
+ * once the row took the notification: a late one settles nothing. An end
+ * is final, so its notification can't be overtaken. A pause or resume is
+ * settled only from where the engine has the run as it is read
+ * (controls.ts, `settleControls`), never from a notification, which may
+ * be older than the receipt.
  */
 const controlsSettledBy = (
   db: DrizzleD1Database,
@@ -950,6 +973,9 @@ const controlsSettledBy = (
   { status, sequence }: EngineStatus,
   at: Date
 ) => {
+  if (!endedLive.has(status)) {
+    return [];
+  }
   const took =
     sequence === undefined
       ? undefined
@@ -959,43 +985,27 @@ const controlsSettledBy = (
       eq(workflowRunControls.runId, run),
       eq(workflowRunControls.state, "admitted"),
       inArray(workflowRunControls.kind, kinds),
-      took,
-      // Only a notification newer than the receipt: one delivered again
-      // says nothing of what was admitted after it.
-      sequence === undefined
-        ? undefined
-        : lt(workflowRunControls.admittedSequence, sequence)
+      took
     );
-  if (endedLive.has(status)) {
-    // A cancel is done once the run ended other than completed (its next
-    // activation refused to run on, or the engine terminated it); a run
-    // that completed first overtook it, as it did a pause or a resume.
-    const cancelled =
-      status === "complete"
-        ? []
-        : [
-            db
-              .update(workflowRunControls)
-              .set({ state: "applied", settledAt: at })
-              .where(settled(["cancel"])),
-          ];
-    return [
-      ...cancelled,
-      db
-        .update(workflowRunControls)
-        .set({ state: "superseded", settledAt: at })
-        .where(settled(["pause", "resume", "cancel"])),
-    ];
-  }
-  const confirmed = confirmedControl[status];
-  return confirmed === undefined
-    ? []
-    : [
-        db
-          .update(workflowRunControls)
-          .set({ state: "applied", settledAt: at })
-          .where(settled([confirmed])),
-      ];
+  // A cancel is done once the run ended other than completed (its next
+  // activation refused to run on, or the engine terminated it); a run
+  // that completed first overtook it, as it did a pause or a resume.
+  const cancelled =
+    status === "complete"
+      ? []
+      : [
+          db
+            .update(workflowRunControls)
+            .set({ state: "applied", settledAt: at })
+            .where(settled(["cancel"])),
+        ];
+  return [
+    ...cancelled,
+    db
+      .update(workflowRunControls)
+      .set({ state: "superseded", settledAt: at })
+      .where(settled(["pause", "resume", "cancel"])),
+  ];
 };
 
 /** Where the engine says a run is, as its notification has it. */

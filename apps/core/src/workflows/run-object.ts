@@ -13,6 +13,7 @@ import type { RunNotification } from "@grasp-os/workerflow/run";
 
 import { appHost } from "../durable-objects.ts";
 import type { AttemptFence } from "./attempt-fence.ts";
+import { settleControls } from "./controls.ts";
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
@@ -548,5 +549,8 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       at: latest.timestamp,
       sequence: latest.sequence,
     });
+    // A pause or resume settles from where the engine has the run now,
+    // read here from its journal, not from the notification.
+    await settleControls(this.env, latest.instanceId, this.status());
   }
 }

@@ -193,7 +193,7 @@ const writeReceipt = async (
     db
       .insert(workflowRunControls)
       .select(
-        sql`SELECT ${id}, ${row.id}, ${kind}, ${done ? "applied" : "admitted"}, ${generation}, ${by.userId}, ${now}, ${done ? now : null}, (SELECT ${workflowRuns.engineSequence} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id}) WHERE changes() > 0`
+        sql`SELECT ${id}, ${row.id}, ${kind}, ${done ? "applied" : "admitted"}, ${generation}, ${by.userId}, ${now}, ${done ? now : null} WHERE changes() > 0`
       ),
     outboxedEventWhere(db, event, written),
     ...(kind === "cancel" && !done
@@ -238,6 +238,14 @@ const settle = async (
     );
 };
 
+/** Whether the engine's `live` status is what a control of `kind` asked. */
+const holdsFor = (kind: ControlKind, live: InstanceStatus): boolean =>
+  kind === "pause"
+    ? live.status === "paused"
+    : kind === "resume" &&
+      live.status !== "paused" &&
+      live.status !== "waitingForPause";
+
 /**
  * Sends an admitted receipt to the engine, unless a newer control
  * superseded it (its generation is no longer the run's), and settles it
@@ -253,9 +261,12 @@ const apply = async (env: Env, control: ControlRow): Promise<void> => {
   if (row === undefined) {
     return;
   }
+  // A pause or resume a newer control overtook, or of a run that has
+  // ended (its start failed, say), has nothing left to apply to.
   if (
     control.kind !== "cancel" &&
-    control.generation !== row.controlGeneration
+    (control.generation !== row.controlGeneration ||
+      !unended.includes(row.status))
   ) {
     await settle(env, control.id, "superseded");
     return;
@@ -297,13 +308,34 @@ const apply = async (env: Env, control: ControlRow): Promise<void> => {
     );
     return;
   }
-  const holds =
-    control.kind === "pause"
-      ? live.status === "paused"
-      : control.kind === "resume" && live.status !== "paused";
-  if (holds) {
+  if (holdsFor(control.kind, live)) {
     await settle(env, control.id, "applied");
   }
+};
+
+/**
+ * Settles the run's unresolved pause and resume as `live`, where the
+ * engine has the run as it is read now, says: each only from such a
+ * read, never from a notification, which may be older than the receipt
+ * (a late "paused" says nothing of a pause asked for after it). Asked by
+ * the run's object as it hands on its status changes (run-object.ts).
+ */
+export const settleControls = async (
+  env: Env,
+  run: string,
+  live: InstanceStatus | undefined
+): Promise<void> => {
+  if (live === undefined) {
+    return;
+  }
+  const unresolved = await unresolvedOf(env, run);
+  await Promise.all(
+    unresolved
+      .filter(({ kind }) => kind !== "cancel" && holdsFor(kind, live))
+      .map(async ({ id }) => {
+        await settle(env, id, "applied");
+      })
+  );
 };
 
 /**
@@ -453,7 +485,21 @@ const repairsPerRun = 50;
  * again by the next repair.
  */
 export const repairControls = async (env: Env): Promise<void> => {
-  const due = await drizzle(env.DB)
+  const db = drizzle(env.DB);
+  // First, in one statement: a pause or resume of a run that has ended
+  // has nothing to apply to, so receipts the engine can no longer
+  // confirm never fill the repair's budget.
+  await db
+    .update(workflowRunControls)
+    .set({ state: "superseded", settledAt: new Date() })
+    .where(
+      and(
+        eq(workflowRunControls.state, "admitted"),
+        inArray(workflowRunControls.kind, ["pause", "resume"]),
+        sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${workflowRunControls.runId} AND ${workflowRuns.endedAt} IS NOT NULL)`
+      )
+    );
+  const due = await db
     .select()
     .from(workflowRunControls)
     .where(
