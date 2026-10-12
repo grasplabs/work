@@ -428,6 +428,13 @@
       "when": 1791792699493,
       "tag": "0060_sdk_release_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1791802472714,
+      "tag": "0061_app_default_stores",
+      "breakpoints": true
     }
   ]
 }

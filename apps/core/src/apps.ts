@@ -1,5 +1,6 @@
-import { workflowIdOf } from "@grasp-os/compiler";
+import { isAppLayout, workflowIdOf } from "@grasp-os/compiler";
 import { appLimits } from "@grasp-os/shared/app-limits";
+import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
   appErrors,
   appVersionSchema,
@@ -26,10 +27,11 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { screenPath } from "@grasp-os/shared/screens";
+import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -45,7 +47,13 @@ import {
   storedEvent,
 } from "./audit-outbox.ts";
 import type { Acting, Member } from "./auth/identity.ts";
-import { apps, appVersions, sdkReleaseManifests } from "./db/core/schema.ts";
+import {
+  apps,
+  appVersions,
+  businessStores,
+  sdkReleaseManifests,
+  sdkResourceBindings,
+} from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { requireOwnTypes } from "./knowledge/record-types.ts";
@@ -1014,6 +1022,70 @@ export const proposeVersion = async (
 };
 
 /**
+ * Holds while `version` of `app` has a sealed release that isn't revoked
+ * (app-releases.ts, release-retention.ts), and whose bound store, if any,
+ * isn't deleted (data-stores.ts), as the statement runs.
+ */
+const runnableReleaseSql = (app: AppId, version: number) =>
+  sql`EXISTS (SELECT 1 FROM sdk_release_manifests
+    WHERE app_id = ${app} AND version = ${version} AND revoked_at IS NULL)
+    AND NOT EXISTS (SELECT 1 FROM sdk_resource_bindings AS bound
+      WHERE bound.resource_id = ${app} AND bound.resource_version = ${version}
+        AND bound.kind = 'store'
+        AND NOT EXISTS (SELECT 1 FROM business_stores AS store
+          WHERE store.id = bound.target_id AND store.deleted_at IS NULL))`;
+
+/**
+ * Refuses `version` of `app` unless it has a sealed release that isn't
+ * revoked, on a store that isn't deleted: `version.not_sealed`,
+ * `version.revoked` or `data.store_unavailable`.
+ */
+const requireRunnableRelease = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select({ revokedAt: sdkReleaseManifests.revokedAt })
+    .from(sdkReleaseManifests)
+    .where(
+      and(
+        eq(sdkReleaseManifests.appId, app),
+        eq(sdkReleaseManifests.version, version)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    throw versionErrors.create("version.not_sealed");
+  }
+  if (row.revokedAt !== null) {
+    throw versionErrors.create("version.revoked");
+  }
+  const goneStore = await drizzle(env.DB)
+    .select({ store: sdkResourceBindings.targetId })
+    .from(sdkResourceBindings)
+    .leftJoin(
+      businessStores,
+      and(
+        eq(businessStores.id, sdkResourceBindings.targetId),
+        isNull(businessStores.deletedAt)
+      )
+    )
+    .where(
+      and(
+        eq(sdkResourceBindings.resourceId, app),
+        eq(sdkResourceBindings.resourceVersion, version),
+        eq(sdkResourceBindings.kind, "store"),
+        isNull(businessStores.id)
+      )
+    )
+    .get();
+  if (goneStore !== undefined) {
+    throw dataErrors.create("data.store_unavailable");
+  }
+};
+
+/**
  * Makes a version the one that runs: the pending one after review, or any
  * other, such as an earlier one to roll back. The pending version is
  * cleared once it is current. Made current by someone who couldn't grant
@@ -1036,6 +1108,15 @@ export const setCurrentVersion = async (
     return found;
   }
   const files = await versionFiles(env, appId, number);
+  // A version of spec 8's layout runs only from its release: activation
+  // seals it first (app-activation.ts), and nothing makes one current
+  // unsealed or revoked: checked here for a clear refusal, and again as
+  // the version is made current, so neither a revocation nor the
+  // retention sweep's deletion lands in between.
+  const sealedLayout = isAppLayout(files);
+  if (sealedLayout) {
+    await requireRunnableRelease(env, appId, number);
+  }
   await requireWorkflowTestsPass(env, number, files);
   const triggers = await triggerRegistration(env, appId, number, files);
   const previous = found.currentVersion;
@@ -1063,7 +1144,8 @@ export const setCurrentVersion = async (
         and(
           eq(apps.id, appId),
           sql`${apps.currentVersion} IS ${previous}`,
-          registrationHolds(appId, triggers)
+          registrationHolds(appId, triggers),
+          sealedLayout ? runnableReleaseSql(appId, number) : undefined
         )
       )
       .returning(),
@@ -1093,6 +1175,10 @@ export const setCurrentVersion = async (
       ),
   ]);
   if (!changed) {
+    if (sealedLayout) {
+      // Revoked or deleted since it was checked: refused as such.
+      await requireRunnableRelease(env, appId, number);
+    }
     throw appErrors.create("app.conflict");
   }
   // What its screens build to with this release's kit, which may not be
