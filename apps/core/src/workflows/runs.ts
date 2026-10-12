@@ -382,6 +382,15 @@ const failStart = async (
       { reason, error: "workflow.run_failed" },
       sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.status} = 'failed')`
     )),
+    // A start that reached the engine late may have run steps whose App
+    // calls kept statistics points before this write ended the run, failed
+    // or cancelled: forgotten with its end, as no notification after it
+    // finds the run unended to forget them.
+    stepStatisticsForgotten(
+      db,
+      row.id,
+      sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.endedAt} IS NOT NULL)`
+    ),
   ]);
   if (!failed) {
     return false;

@@ -3,8 +3,10 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { callApp } from "../src/app.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { repairStarts, startRun } from "../src/workflows/runs.ts";
+import { serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
@@ -224,6 +226,102 @@ const whileRefusingStarts = async <T>(
     return await call();
   }, run);
 };
+
+/** A run whose step records a statistics point, then waits a day. */
+const counting = workflowFiles(
+  "waits",
+  `  await step.do("work", { description: "Work" }, async () => await env.APP.call("point", "late"));
+  await step.sleep("go", { description: "Wait", duration: "1 day" });
+  return null;`,
+  { work: null }
+);
+
+/**
+ * A run whose failed start reaches the engine just after it said it had
+ * no record of it, and whose first step records a statistics point before
+ * core marks the start failed, its notifications still on their way;
+ * cancelled after that step when `cancelled`. Its row's status, whether the step
+ * recorded its point, and how many of its steps' points are kept once its
+ * row has ended.
+ */
+const lateStart = async (cancelled: boolean) => {
+  const builder = await personApi("builder");
+  const app = await appWith(builder, counting);
+  await serverBuilt(app, 1);
+  const run = crypto.randomUUID();
+  const uuid = vi.spyOn(crypto, "randomUUID").mockReturnValueOnce(run);
+  let refusedOnce = false;
+  let landed = false;
+  const keptOf = async () =>
+    await env.DB.prepare(
+      "SELECT count(*) AS kept FROM app_statistic_steps WHERE step_key >= ? AND step_key < ?"
+    )
+      .bind(`${run}:`, `${run};`)
+      .first<number>("kept");
+  let recorded = false;
+  await aroundEngine(
+    async (method, call) => {
+      if (method === "start" && !refusedOnce) {
+        refusedOnce = true;
+        throw new Error("The engine is unavailable");
+      }
+      const answer = await call();
+      if (method === "status" && answer === undefined && !landed) {
+        landed = true;
+        await env.DB.prepare(
+          "UPDATE workflow_runs SET engine_sequence = ? WHERE id = ?"
+        )
+          .bind(1_000_000_000, run)
+          .run();
+        await createInstance(app, run);
+        await stepDone(run, "work");
+        recorded = ((await keptOf()) ?? 0) > 0;
+        if (cancelled) {
+          // Its person cancels it then, before core marks it failed.
+          await env.DB.prepare(
+            "UPDATE workflow_runs SET cancel_requested_at = ? WHERE id = ?"
+          )
+            .bind(Date.now(), run)
+            .run();
+        }
+      }
+      return answer;
+    },
+    async () =>
+      await outcome(
+        startRun(env, {
+          app: appIdSchema.parse(app),
+          workflow: workflowIdSchema.parse("waits"),
+          input: undefined,
+          startedBy: builder.userId,
+          actor: { type: "system" },
+        })
+      )
+  );
+  uuid.mockRestore();
+  await vi.waitFor(
+    async () => {
+      expect(endedStatuses.has(await liveStatus(run))).toBeTruthy();
+    },
+    { timeout: 10_000, interval: 100 }
+  );
+  return { row: await rowStatus(run), recorded, kept: await keptOf() };
+};
+
+/** As `counting`, its step held open until the App counts `gate`. */
+const gatedCounting = workflowFiles(
+  "waits",
+  `  await step.do("work", { description: "Work" }, async () => {
+    await env.APP.call("point", "late");
+    while ((await env.APP.call("hits", "gate")) === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return null;
+  });
+  await step.sleep("go", { description: "Wait", duration: "1 day" });
+  return null;`,
+  { work: null }
+);
 
 describe("starts core stopped in the middle of", () => {
   afterEach(endLiveRuns);
@@ -609,6 +707,91 @@ describe("starts core stopped in the middle of", () => {
       // Stopped at once, not left sleeping until its next activation.
       engine: "terminated",
     });
+  });
+
+  it("forget the statistics points of a run whose start landed late, whether it then ended failed or cancelled", async () => {
+    const outcomes: Record<string, unknown> = {};
+    for (const cancelled of [false, true]) {
+      // oxlint-disable-next-line no-await-in-loop -- one ending at a time
+      outcomes[cancelled ? "cancelled" : "failed"] = await lateStart(cancelled);
+    }
+
+    expect(outcomes).toStrictEqual({
+      failed: { row: "failed", recorded: true, kept: 0 },
+      cancelled: { row: "cancelled", recorded: true, kept: 0 },
+    });
+  });
+
+  it("add up nothing of a step that completes after its run's late start was marked failed", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, gatedCounting);
+    await serverBuilt(app, 1);
+    const run = crypto.randomUUID();
+    const uuid = vi.spyOn(crypto, "randomUUID").mockReturnValueOnce(run);
+    const keptOf = async () =>
+      await env.DB.prepare(
+        "SELECT count(*) AS kept FROM app_statistic_steps WHERE step_key >= ? AND step_key < ?"
+      )
+        .bind(`${run}:`, `${run};`)
+        .first<number>("kept");
+    let refusedOnce = false;
+    let landed = false;
+    await aroundEngine(
+      async (method, call) => {
+        if (method === "start" && !refusedOnce) {
+          refusedOnce = true;
+          throw new Error("The engine is unavailable");
+        }
+        const answer = await call();
+        if (method === "status" && answer === undefined && !landed) {
+          landed = true;
+          // The start lands late; its step records a point and is still
+          // out when core marks the start failed.
+          await env.DB.prepare(
+            "UPDATE workflow_runs SET engine_sequence = ? WHERE id = ?"
+          )
+            .bind(1_000_000_000, run)
+            .run();
+          await createInstance(app, run);
+          await vi.waitFor(
+            async () => {
+              if (((await keptOf()) ?? 0) === 0) {
+                throw new Error("No point recorded yet");
+              }
+            },
+            { timeout: 10_000, interval: 50 }
+          );
+        }
+        return answer;
+      },
+      async () =>
+        await outcome(
+          startRun(env, {
+            app: appIdSchema.parse(app),
+            workflow: workflowIdSchema.parse("waits"),
+            input: undefined,
+            startedBy: builder.userId,
+            actor: { type: "system" },
+          })
+        )
+    );
+    uuid.mockRestore();
+    const afterCleanup = await keptOf();
+    // The step finishes now, after the cleanup, and adds up its points.
+    await callApp(
+      env,
+      appIdSchema.parse(app),
+      { userId: builder.userId, mode: "interactive" },
+      "hit",
+      ["gate"]
+    );
+    await stepDone(run, "work");
+
+    expect({
+      row: await rowStatus(run),
+      afterCleanup,
+      kept: await keptOf(),
+    }).toStrictEqual({ row: "failed", afterCleanup: 0, kept: 0 });
   });
 
   it("end a run cancelled just after the engine said it had none as cancelled, keeping its key, with no failure notice", async () => {
