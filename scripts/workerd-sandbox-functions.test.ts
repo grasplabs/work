@@ -111,6 +111,32 @@ describe("an App's function on the on-prem sandbox", () => {
     }
   });
 
+  it("runs a nested function in an isolate of its own, apart from its caller's globals and channel", async () => {
+    const outcome = await call("isolationParent");
+    expect(outcome).toMatchObject({ ok: true, value: { n: 1 } });
+  });
+
+  it("ends the call as cpu_exceeded when a function it nests loops", async () => {
+    const outcome = await call("callsBusy");
+    expect(failure(outcome)).toMatchObject({ code: "operation.cpu_exceeded" });
+    expect(outcome.ms).toBeLessThan(15_000);
+  }, 30_000);
+
+  it("ends the session, not holding it to its wall-clock cap, after a call that didn't wait for a nested one", async () => {
+    // The runtime ends what the isolate still does once its call returned,
+    // a nested call it didn't wait for among it: the session is done then.
+    const outcome = await call("forgets", { within: 1500 });
+    expect(outcome.ms).toBeLessThan(4000);
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 2000, interval: 50 })
+      .toBe(0);
+  });
+
+  it("leaves a caller running when a function it nests fails", async () => {
+    const outcome = await call("catches");
+    expect(outcome).toMatchObject({ ok: true, value: { n: 11 } });
+  });
+
   it("ends a busy-looping function on its CPU-time budget while core keeps answering", async () => {
     const busy = call("busy");
     const answers: number[] = [];

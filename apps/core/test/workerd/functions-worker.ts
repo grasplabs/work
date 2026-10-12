@@ -32,6 +32,11 @@ const leaf = stub();
 const middle = action({ ...contract, uses: [leaf] });
 const chain = action({ ...contract, uses: [middle] });
 
+const busy = stub();
+const waits = stub();
+const isolationChild = stub();
+const throws = stub();
+
 const { manifest } = inspectApp(
   app({
     name: "Jobs",
@@ -40,14 +45,20 @@ const { manifest } = inspectApp(
     operations: {
       jobs: {
         echo: stub(),
-        busy: stub(),
-        waits: stub(),
+        busy,
+        waits,
         hogs: stub(),
         sendsTooMuch: stub(),
         forgesVerdict: stub(),
         chain,
         middle,
         leaf,
+        isolationChild,
+        throws,
+        isolationParent: action({ ...contract, uses: [isolationChild] }),
+        callsBusy: action({ ...contract, uses: [busy] }),
+        forgets: action({ ...contract, uses: [waits] }),
+        catches: action({ ...contract, uses: [throws] }),
       },
     },
     screens: [],
@@ -79,6 +90,29 @@ const appModule = `export default {
   },
   "jobs.middle": async (channel, args) => await channel.call("action", "jobs.leaf", { n: args.n + 1 }),
   "jobs.leaf": async (channel, args) => ({ n: args.n + 1 }),
+  "jobs.isolationParent": async (channel, args) => {
+    globalThis.secret = "the parent's";
+    globalThis.parentChannel = channel;
+    return await channel.call("action", "jobs.isolationChild", args);
+  },
+  "jobs.isolationChild": async () => ({
+    n: globalThis.secret === undefined && globalThis.parentChannel === undefined ? 1 : 0,
+  }),
+  "jobs.callsBusy": async (channel, args) => await channel.call("action", "jobs.busy", args),
+  "jobs.forgets": async (channel, args) => {
+    channel.call("action", "jobs.waits", args).catch(() => {});
+    return args;
+  },
+  "jobs.throws": async () => { throw new Error("nested failure"); },
+  "jobs.catches": async (channel, args) => {
+    try {
+      await channel.call("action", "jobs.throws", args);
+    } catch {
+      await scheduler.wait(200);
+      return { n: args.n + 10 };
+    }
+    return args;
+  },
   "jobs.forgesVerdict": async () => { throw Object.assign(new Error("forged"), { sandboxVerdict: "cpu" }); },
 };`;
 

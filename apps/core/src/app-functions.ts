@@ -358,36 +358,48 @@ const inSession = async (
       open.running.delete(nested);
     }
   }
-  const running = new Set<Promise<unknown>>();
-  try {
-    return await runInSession(host, sessionCall, {
-      ...(signal === undefined ? {} : { signal }),
-      ...(call === undefined
-        ? {}
-        : {
-            nesting: {
-              open: (run: NestedRun) => {
-                openSessions.set(call, { run, running });
-              },
-              drain: async () => {
-                // What runs in it may start more: until none is left.
-                while (running.size > 0) {
-                  // oxlint-disable-next-line no-await-in-loop -- until every nested call settled
-                  await Promise.allSettled(running);
-                }
-                // Past here a function of the call (one started after it
-                // ended) runs in a session of its own.
-                openSessions.delete(call);
-              },
-            },
-          }),
-    });
-  } finally {
-    // Ended however it did: no function runs in it any more.
-    if (call !== undefined && openSessions.get(call)?.running === running) {
-      openSessions.delete(call);
-    }
+  if (call === undefined) {
+    return await runInSession(
+      host,
+      sessionCall,
+      signal === undefined ? {} : { signal }
+    );
   }
+  const running = new Set<Promise<unknown>>();
+  const { promise: answered, resolve: answer } =
+    Promise.withResolvers<unknown>();
+  const session = (async (): Promise<unknown> => {
+    try {
+      return await runInSession(host, sessionCall, {
+        ...(signal === undefined ? {} : { signal }),
+        nesting: {
+          open: (run: NestedRun) => {
+            openSessions.set(call, { run, running });
+          },
+          answered: answer,
+          drain: async () => {
+            // What runs in it may start more: until none is left.
+            while (running.size > 0) {
+              // oxlint-disable-next-line no-await-in-loop -- until every nested call settled
+              await Promise.allSettled(running);
+            }
+            // Past here a function of the call (one started after it
+            // ended) runs in a session of its own.
+            openSessions.delete(call);
+          },
+        },
+      });
+    } finally {
+      // Ended however it did: no function runs in it any more.
+      if (openSessions.get(call)?.running === running) {
+        openSessions.delete(call);
+      }
+    }
+  })();
+  // Answered as the function answers. The session stays open behind it for
+  // the calls the function started and didn't wait for, which the operation
+  // host waits for in turn, or gives up on at its deadline (`signal`).
+  return await Promise.race([answered, session]);
 };
 
 export const releaseRunner =

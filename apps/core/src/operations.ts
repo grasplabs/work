@@ -637,13 +637,13 @@ const isSandboxVerdict = (
  */
 const sandboxFailureOf = (
   thrown: unknown,
-  requestId: string,
-  path: string
+  { requestId, path, depth }: { requestId: string; path: string; depth: number }
 ): Error | undefined => {
   if (thrown instanceof SandboxUnavailableError) {
     log.error("operation.sandbox_unavailable", {
       requestId,
       path,
+      depth,
       ...errorFields(thrown),
     });
     return hostError(operationErrors.create("operation.sandbox_unavailable"));
@@ -652,7 +652,9 @@ const sandboxFailureOf = (
   if (!isSandboxVerdict(verdict)) {
     return undefined;
   }
-  log.warn("operation.sandbox_ended", { requestId, path, verdict });
+  // Every function of the call running in the process logs its own: the
+  // deepest of them was running when it was ended, its callers waiting.
+  log.warn("operation.sandbox_ended", { requestId, path, depth, verdict });
   return hostError(operationErrors.create(sandboxCodes[verdict]));
 };
 
@@ -1629,11 +1631,11 @@ const runHandler = async (
       if (stale !== undefined && (await stale())) {
         throw staleRun;
       }
-      const sandboxed = sandboxFailureOf(
-        outcome.thrown,
-        run.invocation.requestId,
-        operation.path
-      );
+      const sandboxed = sandboxFailureOf(outcome.thrown, {
+        requestId: run.invocation.requestId,
+        path: operation.path,
+        depth: run.depth,
+      });
       if (sandboxed !== undefined) {
         throw sandboxed;
       }

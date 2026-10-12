@@ -111,6 +111,8 @@ export interface SessionOptions {
    */
   readonly nesting?: {
     readonly open: (run: NestedRun) => void;
+    /** Gets the session's own call's answer as it comes, before draining. */
+    readonly answered: (answer: unknown) => void;
     readonly drain: () => Promise<void>;
   };
 }
@@ -504,7 +506,6 @@ export const runInSession = async (
   // Every capability by a name of the session's own: the isolate never
   // sees these, only what the sandbox host makes of them.
   let live = true;
-  const isLive = (): boolean => live;
   // Given up on: its capabilities refuse from now, not once the supervisor
   // has been asked to end the call.
   const giveUp = (): void => {
@@ -577,18 +578,35 @@ export const runInSession = async (
       ]);
     } catch (error) {
       nestedLive = false;
+      if (signal?.aborted === true && nestedSignal?.aborted !== true) {
+        // The call it runs in was given up on, at its deadline or by its
+        // caller: so is this one, never through a fault of its own.
+        throw verdictError({
+          verdict: "deadline",
+          message: "The call this function was called in was stopped.",
+        });
+      }
       throw await failureOf(error, { host, id, closed, signal: nestedSignal });
     } finally {
       nestedLive = false;
     }
   });
+  // The session's own call: its capabilities refuse once it answered, as a
+  // nested call's do, though the session stays open for those it started.
+  let topLive = true;
   try {
-    const answer = await Promise.race([callIn(call, isLive), ...bounds]);
+    const answer = await Promise.race([
+      callIn(call, () => topLive && live),
+      ...bounds,
+    ]);
+    topLive = false;
     if (nesting !== undefined) {
+      nesting.answered(answer);
       await Promise.race([nesting.drain(), ...bounds]);
     }
     return answer;
   } catch (error) {
+    topLive = false;
     giveUp();
     if (signal?.aborted === true || error === overdue) {
       // Given up on: the supervisor ends the call and frees its process at

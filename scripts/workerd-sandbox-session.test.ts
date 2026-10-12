@@ -39,6 +39,8 @@ const outcomeSchema = z.object({
   reachedInternal: z.number(),
   reachedAfterGivingUp: z.number(),
   pinged: z.number(),
+  nestedRan: z.number(),
+  nestedRefused: z.number(),
   verdict: z.string().nullable().optional(),
   logged: z.array(z.unknown()),
 });
@@ -316,6 +318,16 @@ describe("a session on the on-prem sandbox", () => {
         .toBe(0);
       const outcome = await lingering;
       expect(outcome.message).toContain("cancelled");
+    }
+  );
+
+  it(
+    "runs no more calls in a session than core lets one call run",
+    { timeout: 30_000 },
+    async () => {
+      const outcome = await run("manyRuns");
+      expect(outcome.status).toBe("ok");
+      expect(outcome).toMatchObject({ nestedRan: 64, nestedRefused: 1 });
     }
   );
 

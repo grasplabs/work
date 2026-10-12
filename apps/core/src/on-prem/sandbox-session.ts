@@ -60,6 +60,12 @@ interface SessionCall {
   capabilities: Record<string, CapabilitySpec>;
 }
 
+/**
+ * The most calls one session runs: the function a caller named and the
+ * most it may nest, as core counts them (operations.ts `callMaxNested`).
+ */
+export const maxRunsPerSession = 1 + 64;
+
 /** The most capabilities, and methods of one, a call may name. */
 const maxCapabilities = 32;
 const maxMethods = 64;
@@ -174,6 +180,7 @@ const capabilityOf = (
 class Session extends CapnwebTarget {
   readonly #env: SessionEnv;
   readonly #settings: IsolateSettings;
+  #runs = 0;
 
   constructor(env: SessionEnv, settings: IsolateSettings) {
     super();
@@ -187,6 +194,11 @@ class Session extends CapnwebTarget {
    * all in this process, which is killed once the session ends.
    */
   async run(call: unknown, stubs: unknown): Promise<unknown> {
+    // Never more than core lets one call run, as a bound of its own.
+    if (this.#runs >= maxRunsPerSession) {
+      throw new Error("This session has run as many calls as one may.");
+    }
+    this.#runs += 1;
     const parsed = sessionCallOf(call);
     if (parsed === undefined || !isRecord(stubs)) {
       throw new TypeError("The call isn't in the expected shape.");
