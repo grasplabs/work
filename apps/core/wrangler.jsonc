@@ -81,6 +81,13 @@
   // `RUN_RETENTION_DAYS` var (src/workflows/retention.ts), 30 days unless
   // set, from 1 to 30: the engine keeps an ended run's record no longer.
   //
+  // And the runtime profile, `RUNTIME_PROFILE` (src/code-mode.ts): only
+  // `cloudflare` makes Code Mode's run record claim the CPU limit as
+  // enforced. Not a var here, which local dev and tests read too: staging's
+  // deploy script passes it (package.json), and the console sets it on every
+  // client deploy (apps/console/src/deploy/core-config.ts). Plain workerd
+  // and on-prem say `workerd` (scripts/workerd-smoke-config.ts).
+  //
   // Local dev reads none of these from .dev.vars (Wrangler loads only the
   // required secrets and declared vars from it): pass them with
   // `wrangler dev --var NAME:<value>`, as core's dev script does for its own

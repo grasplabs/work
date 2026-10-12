@@ -2,7 +2,7 @@ import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
-import { runDurableObjectAlarm } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -1264,6 +1264,56 @@ describe("model budgets", { timeout: 60_000 }, () => {
       ["model.budget.exhausted", before],
       ["model.budget.alert", after],
     ]);
+  });
+
+  it("give every provider request of a call the call's own cut-off as its deadline, a second ask's too, never a whole timeout from when it is sent", async () => {
+    const timeoutMs = 60_000;
+    const release = Promise.withResolvers<boolean>();
+    const { fake, call } = withRules({}, [
+      // The first answer takes its time, and doesn't fit: asked again.
+      {
+        ...pricedAnswer,
+        text: "No JSON here.",
+        pause: { at: 2, until: release.promise },
+      },
+      { ...pricedAnswer, text: '{ "total": 1 }' },
+    ]);
+    const started = Date.now();
+    const asking = outcome(
+      call({ ...hello(), schema: z.object({ total: z.number() }), timeoutMs })
+    );
+    await scheduler.wait(1500);
+    release.resolve(true);
+    const answered = await asking;
+    const ids = requestIds(fake).map(String);
+    const deadlines = await runInDurableObject(
+      modelLedger(env),
+      (_instance, state) =>
+        ids.map(
+          (id) =>
+            state.storage.sql
+              .exec<{ deadline: number }>(
+                "SELECT deadline FROM requests WHERE id = ?",
+                id
+              )
+              .one().deadline
+        )
+    );
+
+    expect({
+      answered,
+      asked: deadlines.length,
+      // Both the call's cut-off: the second, sent 1.5 seconds on, too.
+      same: new Set(deadlines).size,
+      withinTimeout: deadlines.every(
+        (at) => at >= started + timeoutMs && at <= started + timeoutMs + 1000
+      ),
+    }).toStrictEqual({
+      answered: "ok",
+      asked: 2,
+      same: 1,
+      withinTimeout: true,
+    });
   });
 
   it("count a workflow's calls apart from other workflows', and the deployment's across every caller", async () => {

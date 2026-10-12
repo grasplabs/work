@@ -201,6 +201,14 @@ msgstr "{limit} par mois pour chacun, les administrateurs sont alertés à {aler
 msgid "{limit} a month, admins alerted at {alertAt}. Calls stop once it's used up."
 msgstr "{limit} par mois, les administrateurs sont alertés à {alertAt}. Les appels s’arrêtent une fois le budget épuisé."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{limit} for each run, with the runs it starts, over its whole life, admins alerted at {alertAt}. What each spent so far, this month or before."
+msgstr "{limit} pour chaque exécution, avec les exécutions qu’elle lance, sur toute sa durée, les administrateurs sont alertés à {alertAt}. Ce que chacune a dépensé jusqu’ici, ce mois-ci ou avant."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "{limit} for the run's whole life, admins alerted at {alertAt}. Its calls stop once it's used up or held by calls whose cost isn't settled yet."
+msgstr "{limit} sur toute la durée de l’exécution, les administrateurs sont alertés à {alertAt}. Ses appels s’arrêtent une fois le budget épuisé ou retenu par des appels dont le coût n’est pas encore réglé."
+
 #: src/dashboard/failed-workflows.tsx
 msgid "{link} in {appName} failed"
 msgstr "{link} dans {appName} a échoué"
@@ -950,6 +958,10 @@ msgstr "D’ici la fin du mois"
 msgid "By workflow"
 msgstr "Par workflow"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "By workflow run"
+msgstr "Par exécution de workflow"
+
 #: src/activity/audit-words.ts
 msgid "Called a model"
 msgstr "A appelé un modèle"
@@ -1533,6 +1545,14 @@ msgstr "Chaque personne"
 #: src/routes/_shell.settings.models.tsx
 msgid "Each workflow"
 msgstr "Chaque workflow"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Each workflow run, with the runs it starts"
+msgstr "Chaque exécution de workflow, avec les exécutions qu’elle lance"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Each workflow run, with the runs it starts, may make at most 100 model requests, retries included."
+msgstr "Chaque exécution de workflow, avec les exécutions qu’elle lance, peut faire au plus 100 requêtes au modèle, nouvelles tentatives comprises."
 
 #: src/chat/chat-list.tsx
 msgctxt "older chats"
@@ -3345,6 +3365,14 @@ msgstr "Règles"
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
 msgstr "Exécution"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Run {runId}"
+msgstr "Exécution {runId}"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Run {shortId} of {workflowId} in {engine}, started {started}"
+msgstr "Exécution {shortId} de {workflowId} dans {engine}, lancée le {started}"
 
 #: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx

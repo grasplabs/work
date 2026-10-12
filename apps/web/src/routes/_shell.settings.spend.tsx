@@ -43,7 +43,7 @@ import { useCoreAction } from "../use-core-action.ts";
 
 // AI spend, for admins, as in the prototype (`routes/settings/spend.tsx`):
 // what the models cost this month, as core counts it against the budgets
-// Grasp sets, and where it went, by workflow and by person. Core counts
+// Grasp sets, and where it went, by workflow, person and run. Core counts
 // spend only against a budget, so without one there is nothing to show;
 // the budgets' limits are rules, and stay on the Models page.
 
@@ -92,6 +92,9 @@ const Month = ({ budget, month }: { budget: ModelBudget; month: string }) => {
   );
 };
 
+/** How much of a run's ID names it beside its workflow and start time. */
+const shortRunId = 8;
+
 /** Who spent part of a budget, by the name core has for them. */
 const spenderName = (of: ModelSpender, i18n: I18n): string => {
   if (of.type === "deployment") {
@@ -102,27 +105,54 @@ const spenderName = (of: ModelSpender, i18n: I18n): string => {
     const engine = of.appName ?? of.appId;
     return i18n._(msg`${workflowId} in ${engine}`);
   }
+  if (of.type === "run") {
+    const { runId } = of;
+    if (of.workflowId === null || of.startedAt === null) {
+      return i18n._(msg`Run ${runId}`);
+    }
+    // Runs of one workflow told apart by when each started, and its ID.
+    const { workflowId } = of;
+    const engine = of.appName ?? of.appId ?? "";
+    const started = formatDateTime(of.startedAt);
+    const shortId = runId.slice(0, shortRunId);
+    return i18n._(
+      msg`Run ${shortId} of ${workflowId} in ${engine}, started ${started}`
+    );
+  }
   return of.name ?? of.userId;
 };
 
 const byTitles = {
   workflow: msg`By workflow`,
   user: msg`By person`,
+  run: msg`By workflow run`,
 } as const;
 
-/** Where a budget of each workflow or each person went: one line each, most first. */
+/** What a budget of each workflow, person or run allows each one. */
+const eachLimit = (
+  budget: ModelBudget & { scope: "workflow" | "user" | "run" },
+  i18n: I18n
+): string => {
+  const limit = dollars(budget.limit);
+  const alertAt = percent(budget.alertAt);
+  return budget.scope === "run"
+    ? i18n._(
+        msg`${limit} for each run, with the runs it starts, over its whole life, admins alerted at ${alertAt}. What each spent so far, this month or before.`
+      )
+    : i18n._(msg`${limit} a month for each, admins alerted at ${alertAt}.`);
+};
+
+/** Where a budget of each workflow, person or run went: one line each, most first. */
 const SpentBy = ({
   budget,
 }: {
-  budget: ModelBudget & { scope: "workflow" | "user" };
+  budget: ModelBudget & { scope: "workflow" | "user" | "run" };
 }) => {
   const { t, i18n } = useLingui();
-  const limit = dollars(budget.limit);
-  const alertAt = percent(budget.alertAt);
   const top = budget.spent.length;
   return (
     <SettingsSection
-      description={t`${limit} a month for each, admins alerted at ${alertAt}.`}
+      description={eachLimit(budget, i18n)}
       title={i18n._(byTitles[budget.scope])}
     >
       {budget.spent.length === 0 ? (

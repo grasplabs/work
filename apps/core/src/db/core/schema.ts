@@ -675,6 +675,15 @@ export const workflowRuns = sqliteTable(
      */
     triggerKey: text("trigger_key"),
     detailsRemovedAt: timestamp("details_removed_at"),
+    /**
+     * The run its lineage started from, for a run another run started
+     * (src/workflows/runs.ts, `startRun`'s `parent`): the parent's own
+     * root, so every descendant names the same one. Null for a run that
+     * is its own root. Written once, with the row, and never from what the
+     * run is given: the model gateway counts the lineage's model calls and
+     * spend by it (src/model-budgets.ts).
+     */
+    rootRunId: text("root_run_id"),
   },
   (table) => [
     index("workflow_runs_app_idx").on(table.appId, table.createdAt),
@@ -696,6 +705,12 @@ export const workflowRuns = sqliteTable(
       table.id
     ),
     uniqueIndex("workflow_runs_trigger_key_idx").on(table.triggerKey),
+    // A lineage's runs by its root, for the model ledger to learn whether
+    // every run of it has ended (src/run-lineage-ends.ts). Only runs
+    // another run started have one.
+    index("workflow_runs_root_idx")
+      .on(table.rootRunId)
+      .where(sql`root_run_id IS NOT NULL`),
     // The retention sweep (src/workflows/retention.ts): ended runs that
     // still have their details, longest ended first, then by ID, which
     // the sweep pages by. Only those: a live run has no `ended_at`, and a

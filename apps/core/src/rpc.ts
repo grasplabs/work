@@ -6,18 +6,24 @@ import {
 } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { CoreApi, Identity, SignInOption } from "@grasp-os/shared/rpc";
+import { accountedTransport } from "@grasp-os/shared/rpc-accounting";
 import { screenLimits } from "@grasp-os/shared/screens";
-import { newWebSocketRpcSession } from "capnweb";
+import { RpcSession, WebSocketTransport } from "capnweb";
 
 import { oidcProviders, signInConfig } from "./auth/config.ts";
 import { identify } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
-import { browserMessageSize, CoreRpcTarget } from "./rpc-target.ts";
+import {
+  coreRpcAccounting,
+  CoreRpcTarget,
+  isolateRpcHeld,
+  signedOutRpcAccounting,
+} from "./rpc-target.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import { SessionRpc } from "./session-rpc.ts";
 
 /** What the frontend reaches over `/rpc`, signed in or not. */
-class CoreRpc extends CoreRpcTarget implements CoreApi {
+export class CoreRpc extends CoreRpcTarget implements CoreApi {
   readonly #options: SignInOption[];
   readonly #session: SessionRpc | undefined;
 
@@ -177,6 +183,37 @@ const sessionApi = (
 };
 
 /**
+ * What a browser's connection over `server` reaches: signed in as the
+ * session `headers` carry (only the upgrade request's cookie), if it holds
+ * one. Every target the browser can reach from here extends
+ * `CoreRpcTarget` (test/rpc-targets.test.ts walks them all).
+ */
+/** A connection's API, and whether it is signed in. */
+const browserConnection = async (
+  env: Env,
+  headers: Headers,
+  server: WebSocket
+): Promise<{ api: CoreRpc; signedIn: boolean }> => {
+  const connectedAs = await identify(env, headers);
+  const session = connectedAs
+    ? sessionApi({ env, headers, connectedAs }, server)
+    : undefined;
+  return {
+    api: new CoreRpc(signInOptions(env), session),
+    signedIn: session !== undefined,
+  };
+};
+
+export const browserApi = async (
+  env: Env,
+  headers: Headers,
+  server: WebSocket
+): Promise<CoreRpc> => {
+  const { api } = await browserConnection(env, headers, server);
+  return api;
+};
+
+/**
  * Opens a Cap'n Web session over WebSocket. The session lives in this Worker
  * invocation for as long as the socket is open; hibernation applies once RPC
  * is routed to a Durable Object.
@@ -208,8 +245,6 @@ export const rpcResponse = async (
 
   const cookie = request.headers.get("Cookie");
   const headers = new Headers(cookie === null ? {} : { cookie });
-  const connectedAs = await identify(env, headers);
-
   const { 0: client, 1: server } = new WebSocketPair();
   // Cap'n Web also passes the reason a session ended through onSendError.
   // A closed socket is how sessions normally end, so that isn't logged.
@@ -219,23 +254,31 @@ export const rpcResponse = async (
   });
   server.accept();
 
-  const session = connectedAs
-    ? sessionApi({ env, headers, connectedAs }, server)
-    : undefined;
-  newWebSocketRpcSession(server, new CoreRpc(signInOptions(env), session), {
-    // What a browser sends is untrusted, a screen's calls among it: no
-    // deeper and no longer numbers than a screen's port takes
-    // (`screenLimits.rpc`). A message may be longer than a screen's:
-    // the product's own calls share this connection, and a document or
-    // an App's files are longer than a screen's message. A screen's call
-    // is held to its bytes where it lands (screens-rpc.ts).
-    // These bound each message. A value built from what earlier messages
-    // sent, by referring to them, is held to the same depth and size by
-    // every target it is passed to (rpc-target.ts).
+  // What a browser sends is untrusted, a screen's calls among it, and it is
+  // reachable signed out: bound it before Cap'n Web expands it. The
+  // accountant wraps the transport: it refuses a message longer than
+  // `browserMessageSize` or of too many nodes before parsing it, parses it
+  // once and hands the value to Cap'n Web (which then checks no size of its
+  // own, only depth and digits), and ends the connection once what the
+  // messages copy or hold would outgrow one message's budget or the
+  // connection's (`coreRpcAccounting`). What a value held by a target gets
+  // is bounded again where it lands (rpc-target.ts), and a screen's call to
+  // its bytes (screens-rpc.ts).
+  // A connection that isn't signed in holds little; every connection of the
+  // isolate together holds no more than `isolateRpcHeld`.
+  const { api, signedIn } = await browserConnection(env, headers, server);
+  const transport = accountedTransport(
+    new WebSocketTransport(server),
+    signedIn ? coreRpcAccounting : signedOutRpcAccounting,
+    () => requestErrors.create("request.too_expensive"),
+    isolateRpcHeld
+  );
+  // The session runs itself from its read loop; the socket and the
+  // transport keep it reachable for as long as the connection is open.
+  const connection = new RpcSession(transport, api, {
     limits: {
       maxDepth: screenLimits.rpc.maxDepth,
       maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
-      maxMessageSize: browserMessageSize,
     },
     onSendError: (error) => {
       // Every call of the tab goes over this one connection, so each
@@ -253,5 +296,6 @@ export const rpcResponse = async (
       return sent;
     },
   });
+  void connection;
   return new Response(null, { status: 101, webSocket: client });
 };

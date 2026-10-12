@@ -261,3 +261,33 @@ export const boundValuesIssue = (
     ? `A query's range and filter compare with at most ${queryMaxBoundValues} values (an \`in\` counts once)`
     : undefined;
 };
+
+// A write of a business store, as it crosses from a mutation's App code to
+// core's operation host: one staged change at a time, which the host
+// validates against the pinned schema (defaults on insert, never on
+// patch), authorizes and keeps until the commit. It never holds a record
+// ID for an insert (the host mints it), a managed field, an owner, a role
+// or a receipt.
+
+/** Fields of a record as App code writes them: JSON, keyed by field. */
+export type WriteFields = Record<string, unknown>;
+
+/** One write a mutation stages through `ctx.db`. */
+export type WriteRequest =
+  | { kind: "insert"; table: string; fields: WriteFields }
+  | {
+      kind: "patch";
+      table: string;
+      id: string;
+      fields: WriteFields;
+      unset: string[];
+      expectedRevision: number;
+    }
+  | {
+      kind: "replace";
+      table: string;
+      id: string;
+      fields: WriteFields;
+      expectedRevision: number;
+    }
+  | { kind: "delete"; table: string; id: string; expectedRevision: number };

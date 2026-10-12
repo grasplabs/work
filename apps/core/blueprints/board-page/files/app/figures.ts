@@ -131,6 +131,14 @@ const maxSignals = 50;
 /** Records one page lists. */
 const pageSize = 20;
 
+/**
+ * Drawn versions a snapshot reads at once. One at a time, a Playbook's
+ * 250 designed workflows were 250 round trips to core, one after another,
+ * all within the one call's deadline; a few at once overlap them, and stay
+ * well within what one call may have open.
+ */
+const readsAtOnce = 6;
+
 /** The order the platform ranks improvement signals' kinds in. */
 const kindOrder = [
   "waiting_for_person",
@@ -294,6 +302,42 @@ const drawnVersion = async (
     }
     throw error;
   }
+};
+
+/**
+ * `read` of each of `items`, in their order, at most `limit` at once. The
+ * first refusal stops the reads not yet started and is thrown once those
+ * already started have ended, so none runs on after the call answers.
+ */
+const readEach = async <T, R>(
+  items: readonly T[],
+  limit: number,
+  read: (item: T) => Promise<R>
+): Promise<R[]> => {
+  const results: R[] = [];
+  // Shared by the readers: each takes the next item from it.
+  const queue = items.entries();
+  let refused: { error: unknown } | undefined;
+  const reader = async (): Promise<void> => {
+    for (const [at, item] of queue) {
+      if (refused !== undefined) {
+        return;
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one read per reader at a time
+        results[at] = await read(item);
+      } catch (error) {
+        refused ??= { error };
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, reader)
+  );
+  if (refused !== undefined) {
+    throw refused.error;
+  }
+  return results;
 };
 
 /**
@@ -598,14 +642,16 @@ export const freeze = async (
     apps,
     until
   );
+  // One read for each designed workflow, a few at once.
+  const drawnVersions = await readEach(current, readsAtOnce, async (record) =>
+    record.workflow.state === "designed"
+      ? await drawnVersion(playbook, caller, record)
+      : { version: record.version, workflow: record.workflow }
+  );
   const frozen: Frozen["workflows"] = [];
   const workflows: Record<string, unknown>[] = [];
-  for (const record of current) {
-    const drawn =
-      record.workflow.state === "designed"
-        ? // oxlint-disable-next-line no-await-in-loop -- one read for each designed workflow
-          await drawnVersion(playbook, caller, record)
-        : { version: record.version, workflow: record.workflow };
+  for (const [at, record] of current.entries()) {
+    const drawn = drawnVersions[at];
     if (drawn !== undefined) {
       frozen.push({ path: record.path, version: drawn.version });
     }

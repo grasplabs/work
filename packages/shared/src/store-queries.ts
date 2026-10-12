@@ -24,6 +24,8 @@ import type {
   QueryTerminal,
   RangeBound,
   ReadRequest,
+  WriteFields,
+  WriteRequest,
 } from "./store-reads.ts";
 
 // The host's schema of a read (store-reads.ts has the shapes and what
@@ -41,6 +43,8 @@ export type {
   RangeBound,
   RangeOperator,
   ReadRequest,
+  WriteFields,
+  WriteRequest,
 } from "./store-reads.ts";
 
 /** A finite JSON scalar: what a descriptor may compare a field with. */
@@ -220,3 +224,54 @@ export const readScopeSchema = z.strictObject({
   }),
 });
 export type ReadScope = z.infer<typeof readScopeSchema>;
+
+/** A record's revision, as a write asserts it. */
+const revisionSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
+
+/**
+ * A write's fields: an object, whose names and values the operation host
+ * then checks against the pinned schema's fields.
+ */
+const writeFieldsSchema = z.custom<WriteFields>(
+  (value) =>
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (Reflect.getPrototypeOf(value) === Object.prototype ||
+      Reflect.getPrototypeOf(value) === null),
+  { message: "An object of fields" }
+);
+
+/**
+ * One write a mutation stages, as it crosses from App code to core's
+ * operation host: checked for its shape here, and then against the pinned
+ * schema, the caller's access and the store.
+ */
+export const writeRequestSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("insert"),
+    table: nameSchema,
+    fields: writeFieldsSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("patch"),
+    table: nameSchema,
+    id: identifierSchema,
+    fields: writeFieldsSchema,
+    unset: z.array(nameSchema).max(64),
+    expectedRevision: revisionSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("replace"),
+    table: nameSchema,
+    id: identifierSchema,
+    fields: writeFieldsSchema,
+    expectedRevision: revisionSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("delete"),
+    table: nameSchema,
+    id: identifierSchema,
+    expectedRevision: revisionSchema,
+  }),
+]) satisfies z.ZodType<WriteRequest>;

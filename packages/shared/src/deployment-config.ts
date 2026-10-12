@@ -178,7 +178,10 @@ export const defaultGatewayModels = [
 ] as const;
 
 const budgetSchema = z.strictObject({
-  /** US dollars a month: a cent at least, and well within an integer. */
+  /**
+   * US dollars a month (a run lineage's: for its whole life): a cent at
+   * least, and well within an integer.
+   */
   limit: z.number().min(0.01).max(1_000_000_000),
   /** The percent of the limit at which admins are alerted. */
   alertAt: z.int().min(1).max(99).default(80),
@@ -193,6 +196,12 @@ export const budgetsSchema = z
     workflow: budgetSchema.optional(),
     /** The calls made by or for each person, each on their own. */
     user: budgetSchema.optional(),
+    /**
+     * Each run lineage on its own: a run and every run started under it,
+     * all its steps and retries, for the lineage's whole life, never reset
+     * by a new month. No limit when absent: the lineage is still counted.
+     */
+    run: budgetSchema.optional(),
   })
   .optional();
 

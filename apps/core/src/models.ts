@@ -576,6 +576,8 @@ interface Route extends Admitted {
 interface Request extends Route {
   /** Ends the call when it takes too long, retries included. */
   signal: AbortSignal;
+  /** When `signal` cuts the call off at the latest, in ms since the epoch. */
+  endsAt: number;
   system: string | undefined;
   messages: Message[];
 }
@@ -812,7 +814,8 @@ const settleRequest = async (
  */
 const admitRequest = async (
   route: Route,
-  body: unknown
+  body: unknown,
+  endsAt: number
 ): Promise<Admission | { held: Refusal }> => {
   const { env, call, model, price } = route;
   const { period, scopes } = route.scopesNow();
@@ -838,7 +841,9 @@ const admitRequest = async (
   const promptBound = bytes + promptAllowanceTokens;
   const pinned = price ?? unpriced;
   const id = crypto.randomUUID();
-  const callDeadline = Date.now() + (call.timeoutMs ?? defaultTimeoutMs);
+  // The call's own cut-off, which a retry or a second ask shares: never a
+  // whole timeout from now.
+  const callDeadline = endsAt;
   const reservedMicros = boundMicros(pinned, {
     inputTokens: promptBound,
     outputTokens,
@@ -861,6 +866,11 @@ const admitRequest = async (
     if ("unpriced" in admitted) {
       return { held: { code: "model.unpriced" } };
     }
+    // The run lineage's own limits: no wait helps a lineage out of
+    // requests, nor one whose spend leaves no room.
+    if ("requests" in admitted) {
+      return { held: { code: "model.run_limit", because: "requests" } };
+    }
     if ("reused" in admitted) {
       // Never expected: every ID is a new UUID.
       log.error("model.request_id_reused", { model: call.model });
@@ -880,7 +890,9 @@ const admitRequest = async (
         },
       };
     }
-    return { held: { code: "model.over_budget", because: admitted.scope } };
+    return admitted.scope === "run"
+      ? { held: { code: "model.run_limit", because: "spend" } }
+      : { held: { code: "model.over_budget", because: admitted.scope } };
   } catch (error) {
     log.error("model.ledger_failed", errorFields(error));
     // The admission may have committed with its answer lost: nothing was
@@ -920,7 +932,7 @@ const withRequestId = (
 const open = (
   route: Route,
   context: TranscriptContext,
-  signal: AbortSignal
+  { signal, endsAt }: { signal: AbortSignal; endsAt: number }
 ) => {
   const { model, ref, call, transport, env } = route;
   const response: GatewayResponse = {
@@ -942,7 +954,7 @@ const open = (
   // when it isn't in their provider's shape (Workers AI's has no `error`,
   // so OpenAI's SDK reports "400 status code (no body)").
   const measured: FetchFunction = async (input, init) => {
-    const admitted = await admitRequest(route, init?.body);
+    const admitted = await admitRequest(route, init?.body, endsAt);
     if ("held" in admitted) {
       response.held = admitted.held;
       return heldResponse();
@@ -1009,11 +1021,11 @@ const open = (
 
 /** Sends one request through the gateway and waits for the whole answer. */
 const send = async (request: Request): Promise<Sent> => {
-  const { system, messages, signal } = request;
+  const { system, messages, signal, endsAt } = request;
   const { events, response } = open(
     request,
     normalizeContext({ systemPrompt: system, messages }),
-    signal
+    { signal, endsAt }
   );
   const answer = await events.result();
   return { answer, ...response };
@@ -1674,6 +1686,7 @@ const callModel = async <Output>(
       {
         ...route,
         signal: limit.signal,
+        endsAt: limit.endsAt,
         system:
           schema === undefined
             ? call.system
@@ -1822,13 +1835,7 @@ const relay = async (
   }
   const limit = deadline(session.timeoutMs ?? defaultTimeoutMs, caller);
   try {
-    await relayEvents(
-      env,
-      route,
-      open(route, context, limit.signal),
-      out,
-      limit
-    );
+    await relayEvents(env, route, open(route, context, limit), out, limit);
   } finally {
     limit.clear();
   }

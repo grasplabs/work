@@ -47,6 +47,7 @@ export const screenTests = [
   "test/app-sandbox.test.ts",
   "test/agent-apps.test.ts",
   "test/agent-builds.test.ts",
+  "test/build-jobs.test.ts",
   "test/app-preview.test.ts",
   "test/preview-repairs.test.ts",
   "test/workflows.test.ts",
@@ -64,6 +65,7 @@ export const screenTests = [
   "test/event-sources.test.ts",
   "test/orphaned-runs.test.ts",
   "test/run-retention.test.ts",
+  "test/rpc-targets.test.ts",
 ];
 
 /** Core's Worker test setup, shared by both of core's test projects. */
