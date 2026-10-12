@@ -1020,6 +1020,60 @@ describe("who ends an approval, and on what", () => {
     });
   });
 
+  it("lists an App's approvals in force to its builders and to whoever may end them, and to nobody else", async () => {
+    const admin = await approvingAdmin();
+    const retired = await approvedApp(admin, ["browser"]);
+    await end(admin, "retire", retired.request);
+    const { request: next } = await retired.builder.api.dependencies.resolve(
+      intentFor(retired.app, { [await smallPackage()]: "1.0.0" })
+    );
+    const { policyGeneration } = await admin.api.dependencies.waiting();
+    await admin.api.dependencies.decide(next.id, {
+      approved: true,
+      reviewed: { graphHash: next.graphHash, policyGeneration },
+    });
+    const revoked = await approvedApp(admin, ["browser"]);
+    await end(admin, "revoke", revoked.request);
+    const stranger = await personApi("user");
+    // Someone who may end approvals, but builds no App.
+    const approver = await personApi("user");
+    await admin.api.dependencies.grantApprover({
+      type: "person",
+      userId: approver.userId,
+    });
+
+    const builderReads = await retired.builder.api.dependencies.approvals(
+      retired.app
+    );
+    const approverReads = await approver.api.dependencies.approvals(
+      retired.app
+    );
+    const adminReads = await admin.api.dependencies.approvals(revoked.app);
+    const read = {
+      builder: [
+        builderReads.decides,
+        builderReads.approvals.map(({ id, status }) => [id, status]),
+      ],
+      approver: [approverReads.decides, approverReads.approvals.length],
+      // A revoked graph is in force no more: it isn't listed.
+      revoked: adminReads.approvals,
+      stranger: await outcome(stranger.api.dependencies.approvals(retired.app)),
+    };
+
+    expect(read).toStrictEqual({
+      builder: [
+        false,
+        [
+          [next.id, "approved"],
+          [retired.request.id, "retired"],
+        ],
+      ],
+      approver: [true, 2],
+      revoked: [],
+      stranger: "app.not_found",
+    });
+  });
+
   it("refuses a decision on another graph than the approval's", async () => {
     const admin = await approvingAdmin();
     const approved = await approvedApp(admin);

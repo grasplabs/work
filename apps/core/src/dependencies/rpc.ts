@@ -1,6 +1,7 @@
 import type {
   DependenciesApi,
   DependenciesWaiting,
+  DependencyApprovals,
   DependencyApprover,
   DependencyApproverSubject,
   DependencyDecision,
@@ -25,6 +26,7 @@ import type { SessionCheck } from "../session-check.ts";
 import { grantApprover, listApprovers, revokeApprover } from "./approvers.ts";
 import {
   decideDependency,
+  dependencyApprovals,
   dependencyImpact,
   dependencyReview,
   dependencyStatus,
@@ -98,6 +100,13 @@ export class DependenciesRpc extends CoreRpcTarget implements DependenciesApi {
     return await withPerson(
       this.#check,
       async (by) => await decideDependency(this.#env, by, request, decision)
+    );
+  }
+
+  async approvals(app: string): Promise<DependencyApprovals> {
+    return await withPerson(
+      this.#check,
+      async (by) => await dependencyApprovals(this.#env, by, app)
     );
   }
 

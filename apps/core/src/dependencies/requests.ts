@@ -5,6 +5,7 @@ import {
   canonicalGraph,
   dependencyApprovalsDigest,
   dependencyDecisionSchema,
+  dependencyApprovalsListed,
   dependencyEndingSchema,
   dependencyErrors,
   dependencyGraphHash,
@@ -19,6 +20,7 @@ import {
 } from "@grasp-os/shared/dependencies";
 import type {
   DependenciesWaiting,
+  DependencyApprovals,
   DependencyFinding,
   DependencyGraph,
   DependencyImpact,
@@ -1237,6 +1239,51 @@ const endableIds = async (
     .select({ id: dependencyRequests.id, status: dependencyRequests.status })
     .from(dependencyRequests)
     .where(endable(app, graphHash, ending));
+
+/**
+ * App `input`'s approvals in force (approved or retired), the newest
+ * decision first, at most {@link dependencyApprovalsListed}: for one of
+ * its builders, or someone who holds `dependencies.approve` now, who may
+ * end them. `app.not_found` for anyone else, as for an App that isn't
+ * there. Never their graphs: a list selects what it shows.
+ */
+export const dependencyApprovals = async (
+  env: Env,
+  by: Identity,
+  input: unknown
+): Promise<DependencyApprovals> => {
+  const db = drizzle(env.DB);
+  const decides = await holdsApprove(env, by);
+  const parsed = appIdSchema.safeParse(input);
+  const known =
+    decides && parsed.success
+      ? await db
+          .select({ id: apps.id })
+          .from(apps)
+          .where(eq(apps.id, parsed.data))
+          .get()
+      : undefined;
+  const { id: app } = known ?? (await appFor(env, by, input, "builder"));
+  const [generation, rows] = await Promise.all([
+    policyGeneration(db),
+    db
+      .select(listed)
+      .from(dependencyRequests)
+      .where(
+        and(
+          eq(dependencyRequests.appId, app),
+          inArray(dependencyRequests.status, ["approved", "retired"])
+        )
+      )
+      .orderBy(desc(dependencyRequests.decidedAt), dependencyRequests.id)
+      .limit(dependencyApprovalsListed),
+  ]);
+  return {
+    policyGeneration: generation,
+    decides,
+    approvals: await toRequests(env, rows),
+  };
+};
 
 /** Only a person on their own session who holds `dependencies.approve` now. */
 const requireDecider = async (env: Env, by: Identity): Promise<void> => {

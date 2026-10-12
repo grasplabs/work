@@ -77,9 +77,21 @@ msgstr "{app} a besoin que quelqu’un se reconnecte"
 msgid "{appName} · Version {version}"
 msgstr "{appName} · Version {version}"
 
+#: src/engines/package-approvals.tsx
+msgid "{approvals, plural, one {This ends # approval of these packages.} other {This ends # approvals of these packages.}}"
+msgstr "{approvals, plural, one {Cela met fin à # approbation de ces paquets.} other {Cela met fin à # approbations de ces paquets.}}"
+
 #: src/routes/_shell.engines.index.tsx
 msgid "{apps, plural, one {# app} other {# apps}}"
 msgstr "{apps, plural, one {# application} other {# applications}}"
+
+#: src/engines/package-approvals.tsx
+msgid "{artifacts, plural, one {# build already made ({targets}) keeps working. Nothing new is built with these packages.} other {# builds already made ({targets}) keep working. Nothing new is built with these packages.} =0 {Nothing was built with these packages yet, and nothing new will be.}}"
+msgstr "{artifacts, plural, one {# build déjà fait ({targets}) continue de fonctionner. Rien de nouveau n’est construit avec ces paquets.} other {# builds déjà faits ({targets}) continuent de fonctionner. Rien de nouveau n’est construit avec ces paquets.} =0 {Rien n’a encore été construit avec ces paquets, et rien de nouveau ne le sera.}}"
+
+#: src/engines/package-approvals.tsx
+msgid "{artifacts, plural, one {# build made with them ({targets}) stops at once, and nothing of these packages runs any more.} other {# builds made with them ({targets}) stop at once, and nothing of these packages runs any more.} =0 {Nothing of these packages runs any more.}}"
+msgstr "{artifacts, plural, one {# build fait avec eux ({targets}) s’arrête aussitôt, et plus rien de ces paquets ne s’exécute.} other {# builds faits avec eux ({targets}) s’arrêtent aussitôt, et plus rien de ces paquets ne s’exécute.} =0 {Plus rien de ces paquets ne s’exécute.}}"
 
 #: src/chat/builds.tsx
 msgid "{binding}: {actions} on {object}"
@@ -255,6 +267,7 @@ msgid "{monthly} a month"
 msgstr "{monthly} par mois"
 
 #: src/dashboard/dependency-requests.tsx
+#: src/engines/package-approvals.tsx
 msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
 msgstr "{more, plural, one {{shown} et # autre} other {{shown} et # autres}}"
 
@@ -623,6 +636,7 @@ msgid "Action"
 msgstr "Action"
 
 #: src/engines/resource-bindings.tsx
+#: src/engines/package-approvals.tsx
 msgid "Actions"
 msgstr "Actions"
 
@@ -916,6 +930,7 @@ msgid "Approve the packages for {engine}"
 msgstr "Approuver les paquets pour {engine}"
 
 #: src/dashboard/runs-widget.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
 msgid "Approved"
 msgstr "Approuvé"
@@ -924,11 +939,16 @@ msgstr "Approuvé"
 msgid "Approved an app's code"
 msgstr "A approuvé le code d’une application"
 
+#: src/engines/package-approvals.tsx
+msgid "Approved by {decidedBy}, {decidedAt}"
+msgstr "Approuvé par {decidedBy}, {decidedAt}"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Approved by {name} on {date}."
 msgstr "Approuvé par {name} le {date}."
 
 #: src/activity/audit-words.ts
+#: src/engines/package-approvals.tsx
 msgid "Approved packages"
 msgstr "A approuvé des paquets"
 
@@ -1138,6 +1158,7 @@ msgstr "A appelé un autre moteur"
 msgid "Calls {tools} (any of their methods): may change things"
 msgstr "Appelle {tools} (n'importe laquelle de leurs méthodes) : peut modifier quelque chose"
 
+#: src/engines/package-approvals.tsx
 #: src/knowledge/document.tsx
 msgid "Cancel"
 msgstr "Annuler"
@@ -1324,6 +1345,7 @@ msgstr "Effacer"
 #: src/dashboard/widget-block.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
+#: src/engines/package-approvals.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -2868,6 +2890,10 @@ msgstr "Aucun modèle n’est encore configuré pour ce déploiement."
 msgid "No next run"
 msgstr "Aucune prochaine exécution"
 
+#: src/engines/package-approvals.tsx
+msgid "No packages are approved for this engine."
+msgstr "Aucun paquet n’est approuvé pour ce moteur."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "No packages were approved for this engine before."
 msgstr "Aucun paquet n’avait encore été approuvé pour ce moteur."
@@ -3374,6 +3400,11 @@ msgstr "Vous en êtes responsable"
 msgid "Package"
 msgstr "Paquet"
 
+#: src/engines/package-approvals.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "Packages"
+msgstr "Paquets"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Packages for {engine}"
 msgstr "Paquets pour {engine}"
@@ -3826,6 +3857,26 @@ msgstr "Résultat"
 msgid "Results"
 msgstr "Résultats"
 
+#: src/engines/package-approvals.tsx
+msgid "Retire"
+msgstr "Mettre hors service"
+
+#: src/engines/package-approvals.tsx
+msgid "Retire the packages for {engine}"
+msgstr "Mettre hors service les paquets de {engine}"
+
+#: src/engines/package-approvals.tsx
+msgid "Retire the packages for {engine}?"
+msgstr "Mettre hors service les paquets de {engine} ?"
+
+#: src/engines/package-approvals.tsx
+msgid "Retired"
+msgstr "Hors service"
+
+#: src/engines/package-approvals.tsx
+msgid "Retired by {endedBy}, {endedAt}: {endedReason}"
+msgstr "Mis hors service par {endedBy}, {endedAt} : {endedReason}"
+
 #: src/dashboard/to-do.tsx
 msgid "Review"
 msgstr "Examiner"
@@ -3844,6 +3895,7 @@ msgstr "Examiner les applications de {name}"
 
 #: src/connections/connection-list.tsx
 #: src/engines/resource-bindings.tsx
+#: src/engines/package-approvals.tsx
 msgid "Revoke"
 msgstr "Révoquer"
 
@@ -3858,6 +3910,14 @@ msgstr "Révoquer la liaison de {alias}"
 #: src/engines/resource-bindings.tsx
 msgid "Revoke the binding of {alias}?"
 msgstr "Révoquer la liaison de {alias} ?"
+
+#: src/engines/package-approvals.tsx
+msgid "Revoke the packages for {engine}"
+msgstr "Révoquer les paquets de {engine}"
+
+#: src/engines/package-approvals.tsx
+msgid "Revoke the packages for {engine}?"
+msgstr "Révoquer les paquets de {engine} ?"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
@@ -3962,6 +4022,10 @@ msgstr "S’exécute {how} {count, plural, one {# fois de plus} other {# fois de
 #: src/dashboard/runs-widget.tsx
 msgid "Runs by the day they started"
 msgstr "Exécutions par jour de démarrage"
+
+#: src/engines/package-approvals.tsx
+msgid "Runs in"
+msgstr "S’exécute dans"
 
 #: src/chat/builds-state.ts
 msgid "Runs now"
@@ -4302,6 +4366,7 @@ msgid "Started following what changes at a connection"
 msgstr "A commencé à suivre ce qui change sur une connexion"
 
 #: src/connections/connection-list.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -5019,6 +5084,10 @@ msgstr "À faire"
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
 msgstr "Pour que l’on ne sache pas qui a parlé, une équipe n’apparaît pas tant que cinq de ses membres n’ont pas été sollicités, ni son chiffre tant que trois n’ont pas été entendus. Ni l’un ni l’autre ne veut dire que personne n’a participé."
 
+#: src/engines/package-approvals.tsx
+msgid "To use them again, someone who approves packages reviews them again."
+msgstr "Pour les utiliser à nouveau, une personne qui approuve les paquets les examine de nouveau."
+
 #: src/chat/chat-list.tsx
 msgctxt "chats from today"
 msgid "Today"
@@ -5477,6 +5546,10 @@ msgstr "Qui travaille où"
 #: src/onboarding/staff-words.ts
 msgid "Who works where is in"
 msgstr "Qui travaille où est connu"
+
+#: src/engines/package-approvals.tsx
+msgid "Why"
+msgstr "Pourquoi"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Without all three, nobody is invited: the admin's links wait, and go out once all are in place."

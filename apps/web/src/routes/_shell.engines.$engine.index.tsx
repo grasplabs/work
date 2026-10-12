@@ -1,4 +1,5 @@
 import type { App, AppContents, AppMember } from "@grasp-os/shared/apps";
+import type { DependencyApprovals } from "@grasp-os/shared/dependencies";
 import { canBuild } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreenTrustReview } from "@grasp-os/shared/screen-trust";
@@ -29,6 +30,7 @@ import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/to-do.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
+import { PackageApprovals } from "../engines/package-approvals.tsx";
 import { ResourceBindings } from "../engines/resource-bindings.tsx";
 import type { ResourcesPage } from "../engines/resource-bindings.tsx";
 import { ScreenApproval } from "../engines/screen-approval.tsx";
@@ -384,6 +386,17 @@ const Members = ({
   );
 };
 
+/** The engine's approved npm packages, read when the tab opens. */
+const Packages = ({
+  packages,
+}: {
+  packages: OnFirstUse<DependencyApprovals>;
+}) => (
+  <Later promise={packages().read}>
+    {(listed) => <PackageApprovals listed={listed} />}
+  </Later>
+);
+
 /** How many a tab holds, after its name. */
 const Count = ({ count }: { count: number }) => (
   <span className="text-muted-foreground tabular-nums">{count}</span>
@@ -398,6 +411,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
     approval,
     resources,
     storeChanges,
+    packages,
   } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { app, contents } = page;
@@ -441,6 +455,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
               <Trans>Resources</Trans>
             </TabsTrigger>
           )}
+          {packages === undefined ? null : (
+            <TabsTrigger value="packages">
+              <Trans>Packages</Trans>
+            </TabsTrigger>
+          )}
           <TabsTrigger value="members">
             <Trans>Members</Trans>
           </TabsTrigger>
@@ -478,6 +497,13 @@ const EngineView = ({ page }: { page: EnginePage }) => {
                   />
                 )}
               </Later>
+            </div>
+          </TabsContent>
+        )}
+        {packages === undefined ? null : (
+          <TabsContent value="packages">
+            <div className="pt-4">
+              <Packages packages={packages} />
             </div>
           </TabsContent>
         )}
@@ -555,6 +581,18 @@ export const Route = createFileRoute("/_shell/engines/$engine/")({
               session,
               params.engine,
               decidesRequests(identity)
+            )
+        )
+      : undefined,
+    // For its builders, read when the tab opens; ending an approval is
+    // for whoever core lets approve packages (`decides`).
+    packages: canBuild(identity.role)
+      ? onFirstUse(
+          async () =>
+            await loadFromCore(
+              core,
+              async (session) =>
+                await session.dependencies.approvals(params.engine)
             )
         )
       : undefined,
