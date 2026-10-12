@@ -35,6 +35,19 @@ Object.defineProperty(lockedPrototype, "fixed", {
 });
 Locked.prototype = lockedPrototype;
 
+/** A subclass below {@link Locked}, whose own prototype wraps cleanly. */
+const BelowLocked = function BelowLocked(): void {
+  // Its prototype is all that matters here.
+};
+const belowPrototype = {};
+Object.setPrototypeOf(belowPrototype, lockedPrototype);
+Object.defineProperty(belowPrototype, "more", {
+  value: (value: unknown) => value,
+  writable: true,
+  configurable: true,
+});
+BelowLocked.prototype = belowPrototype;
+
 describe("a bounded RPC target", () => {
   it("refuses an argument deeper than its bound before the method runs", () => {
     const target = new Target();
@@ -47,6 +60,14 @@ describe("a bounded RPC target", () => {
     for (const attempt of [1, 2]) {
       expect(() => {
         Reflect.construct(Target, [], Locked);
+      }, `attempt ${attempt}`).toThrow("can't be bounded");
+    }
+  });
+
+  it("refuses to be made, every time, as a subclass of one with a method it can't wrap", () => {
+    for (const attempt of [1, 2]) {
+      expect(() => {
+        Reflect.construct(Target, [], BelowLocked);
       }, `attempt ${attempt}`).toThrow("can't be bounded");
     }
   });

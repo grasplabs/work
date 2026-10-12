@@ -5,14 +5,23 @@
  * (workerd-sandbox.ts), and passes capabilities of its own into isolates
  * that reach back through them. No Wrangler dev server, no Miniflare.
  */
-import { connect, createServer } from "node:net";
-import type { Socket } from "node:net";
+import { once } from "node:events";
+import { IncomingMessage, request as httpRequest } from "node:http";
+import { Socket, connect, createServer } from "node:net";
 import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { nativeWorkerd, startSandboxSupervisor } from "./workerd-sandbox.ts";
+import {
+  callIdHeader,
+  cpuHeader,
+  deadlineHeader,
+  nativeWorkerd,
+  ownerHeader,
+  startSandboxSupervisor,
+  waitHeader,
+} from "./workerd-sandbox.ts";
 import type { SandboxSupervisor } from "./workerd-sandbox.ts";
 import { serveStandIn } from "./workerd-stand-in.ts";
 import { cleanUp, tempDir } from "./workerd-test-server.ts";
@@ -73,9 +82,86 @@ describe("a session on the on-prem sandbox", () => {
       value: { a: 101, b: 41, c: 102, env: [] },
       logged: ["started"],
     });
+    // At once, not at its 10 s wall-clock cap.
     await expect
-      .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
+      .poll(() => supervisor.stats().inFlight, { timeout: 1000, interval: 50 })
       .toBe(0);
+  });
+
+  /** A session opened as core opens one, its socket left to the test. */
+  const rawSession = async (id: string): Promise<Socket> => {
+    const upgrade = httpRequest({
+      socketPath: supervisor.socket,
+      path: "/session",
+      headers: {
+        connection: "upgrade",
+        upgrade: "websocket",
+        "sec-websocket-version": "13",
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+        [deadlineHeader]: "10000",
+        [cpuHeader]: "5000",
+        [waitHeader]: "3000",
+        [callIdHeader]: id,
+        [ownerHeader]: "app-raw",
+      },
+    });
+    upgrade.end();
+    const upgraded: unknown[] = await once(upgrade, "upgrade");
+    const socket = upgraded.at(1);
+    if (!(socket instanceof Socket)) {
+      throw new TypeError("The upgrade gave no socket");
+    }
+    return socket;
+  };
+
+  it("frees a session's process when core says it's over, its socket still open", async () => {
+    const id = crypto.randomUUID();
+    // Its socket then stays open, unused.
+    const socket = await rawSession(id);
+    try {
+      expect(supervisor.stats().inFlight).toBe(1);
+      const end = httpRequest({
+        socketPath: supervisor.socket,
+        path: `/end/${id}`,
+        method: "POST",
+      });
+      end.end();
+      const answered: unknown[] = await once(end, "response");
+      const response = answered.at(0);
+      if (!(response instanceof IncomingMessage)) {
+        throw new TypeError("The end gave no response");
+      }
+      response.resume();
+      const ended = response.statusCode;
+      expect(ended).toBe(200);
+      await expect
+        .poll(() => supervisor.stats().inFlight, {
+          timeout: 1000,
+          interval: 50,
+        })
+        .toBe(0);
+    } finally {
+      socket.destroy();
+    }
+  });
+
+  it("frees a session's process as core's close frame passes, its word that the call is over lost", async () => {
+    const id = crypto.randomUUID();
+    const socket = await rawSession(id);
+    try {
+      expect(supervisor.stats().inFlight).toBe(1);
+      // A masked close frame (status 1000), its header split as TCP may.
+      socket.write(Buffer.from([0x88]));
+      socket.write(Buffer.from([0x82, 0, 0, 0, 0, 0x03, 0xe8]));
+      await expect
+        .poll(() => supervisor.stats().inFlight, {
+          timeout: 1000,
+          interval: 50,
+        })
+        .toBe(0);
+    } finally {
+      socket.destroy();
+    }
   });
 
   it("ends a busy loop on its CPU-time budget while core keeps answering", async () => {

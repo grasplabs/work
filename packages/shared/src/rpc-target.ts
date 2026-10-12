@@ -82,11 +82,17 @@ const wrapMethods = (
   base: object,
   bounds: ValueBounds
 ): void => {
+  // Every prototype of the chain not wrapped yet: a wrapped one has every
+  // prototype above it wrapped too, as all of them are marked together.
+  const chain: object[] = [];
   for (
     let current: object | null = prototype;
     current !== null && current !== base && !wrapped.has(current);
     current = Reflect.getPrototypeOf(current)
   ) {
+    chain.push(current);
+  }
+  for (const current of chain) {
     for (const name of Reflect.ownKeys(current)) {
       const property = Reflect.getOwnPropertyDescriptor(current, name);
       const method: unknown = property?.value;
@@ -109,8 +115,11 @@ const wrapMethods = (
         );
       }
     }
-    // Only once every method of it is bounded: a prototype that threw is
-    // tried again, and throws again, at its next construction.
+  }
+  // Only once the whole chain is bounded: one that threw, a subclass's
+  // own prototype below it too, is tried again, and throws again, at the
+  // next construction.
+  for (const current of chain) {
     wrapped.add(current);
   }
 };

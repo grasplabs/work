@@ -434,6 +434,70 @@ const answerHead = async (
 };
 
 /** `head` with `name: value` added as its last header, and its blank line. */
+/** A WebSocket frame's opcode for a close. */
+const closeOpcode = 0x8;
+
+/**
+ * Watches the frames core sends on a session, as they pass, and says when
+ * one is a close: core is done with the session, whether or not the sandbox
+ * host ever answers the close (RFC 6455 section 5.2). Only each frame's
+ * header is held; its payload is counted past.
+ */
+const closeFrameWatcher = (onClose: () => void) => {
+  let header = Buffer.alloc(0);
+  let skip = 0;
+  let closed = false;
+  return (chunk: Buffer): void => {
+    let rest = chunk;
+    while (!closed && rest.length > 0) {
+      if (skip > 0) {
+        const skipped = Math.min(skip, rest.length);
+        skip -= skipped;
+        rest = rest.subarray(skipped);
+        continue;
+      }
+      header = Buffer.concat([header, rest]);
+      rest = Buffer.alloc(0);
+      if (header.length < 2) {
+        return;
+      }
+      // oxlint-disable-next-line no-bitwise -- a frame header's bit fields
+      const opcode = (header[0] ?? 0) & 0x0f;
+      const second = header[1] ?? 0;
+      // oxlint-disable-next-line no-bitwise -- a frame header's bit fields
+      const short = second & 0x7f;
+      let lengthBytes = 0;
+      if (short === 126) {
+        lengthBytes = 2;
+      } else if (short === 127) {
+        lengthBytes = 8;
+      }
+      // oxlint-disable-next-line no-bitwise -- a frame header's bit fields
+      const maskBytes = (second & 0x80) === 0 ? 0 : 4;
+      const headerBytes = 2 + lengthBytes + maskBytes;
+      if (header.length < headerBytes) {
+        return;
+      }
+      if (opcode === closeOpcode) {
+        closed = true;
+        onClose();
+        return;
+      }
+      let length = short;
+      if (lengthBytes === 2) {
+        length = header.readUInt16BE(2);
+      } else if (lengthBytes === 8) {
+        length = Number(header.readBigUInt64BE(2));
+      }
+      // What came after this header in the same chunk is its payload, then
+      // the next frame.
+      rest = header.subarray(headerBytes);
+      header = Buffer.alloc(0);
+      skip = length;
+    }
+  };
+};
+
 const withHeader = (head: string, name: string, value: string): string =>
   `${head}\r\n${name}: ${value}\r\n\r\n`;
 
@@ -1098,6 +1162,15 @@ class SandboxPool {
       client.write(answered.rest);
       // Neither end is closed for the other: core's end stays open until
       // the session's verdict is kept, so core finds it when it asks.
+      // Core's close frame, or its end of the connection shut for writing
+      // (as workerd does when it closes a socket the host never answered),
+      // ends the session as core done with it, if its `POST /end/<id>`
+      // never comes; the host needn't answer either.
+      const coreDone = (): void => {
+        finished.abort();
+      };
+      client.on("data", closeFrameWatcher(coreDone));
+      client.once("end", coreDone);
       client.pipe(upstream, { end: false });
       upstream.pipe(client, { end: false });
       await Promise.race([
@@ -1577,6 +1650,9 @@ const answerRequest = async (
   }
 };
 
+/** How long a connection idle between requests is kept: about a second. */
+const KEEP_ALIVE_MS = 1000;
+
 /** The most processes a pool may have: each is a workerd of its own. */
 export const maxProcesses = 64;
 
@@ -1731,11 +1807,20 @@ export const startSandboxSupervisor = async (
       void relaySession(pool, request, client, head);
     }
   );
-  // Calls and sessions together, running or waiting for a process or their
-  // owner's room, hold at most processes + maxWaiting connections (`#full`):
-  // the rest is headroom for `/cancel`, `/verdict` and `/health`, which core
-  // must reach however busy the pool is, and for refusals on their way out.
-  server.maxConnections = 2 * (settings.processes + settings.maxWaiting) + 4;
+  // What may hold a connection at once, with C = processes + maxWaiting:
+  // - calls and sessions, running or waiting for a process or their owner's
+  //   room: at most C (`#full`), one connection each;
+  // - core's word on each of them: one `/end`, `/cancel` or `/verdict` (the
+  //   last after a kill, once the session's own is gone) at a time, as
+  //   core asks one after the other for a call: at most C more;
+  // - refusals on their way out, closed as written, and connections idle
+  //   between requests, closed after `keepAliveTimeout`: a burst of up to C
+  //   more within that second;
+  // - `/health` and slack: 8.
+  // The control endpoints then always find room. A lost `/end` costs
+  // nothing either: core's close frame ends the session as well.
+  server.maxConnections = 3 * (settings.processes + settings.maxWaiting) + 8;
+  server.keepAliveTimeout = KEEP_ALIVE_MS;
   server.headersTimeout = HEADERS_TIMEOUT_MS;
   server.requestTimeout = REQUEST_TIMEOUT_MS;
   watchProcess(pool);

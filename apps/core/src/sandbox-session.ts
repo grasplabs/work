@@ -270,17 +270,25 @@ const endSession = async (
   id: string,
   how: "cancel" | "end"
 ): Promise<void> => {
-  try {
-    const response = await host.fetch(`http://sandbox/${how}/${id}`, {
-      method: "POST",
-      signal: AbortSignal.timeout(backstopMs),
-    });
-    await response.body?.cancel();
-  } catch {
-    // The supervisor is gone: its process goes with it.
+  const tell = async (): Promise<boolean> => {
+    try {
+      const response = await host.fetch(`http://sandbox/${how}/${id}`, {
+        method: "POST",
+        signal: AbortSignal.timeout(backstopMs),
+      });
+      await response.body?.cancel();
+      // Taken, or the session is over already (404): either way, done.
+      return response.status < 500;
+    } catch {
+      return false;
+    }
+  };
+  // Tried twice: one lost costs the session's process until the supervisor
+  // sees core's close frame, or its wall-clock cap.
+  if (!(await tell())) {
+    await tell();
   }
 };
-
 /**
  * Rejects with `error` after `ms`, unless `signal` aborts first: then it
  * resolves, with no rejection left for anyone to handle.
@@ -352,6 +360,8 @@ const openSession = async (
   // App code on a sandbox that doesn't (a code run then claims no limit).
   if (response.headers.get(sandboxCpuHeader) !== String(call.cpuMs)) {
     socket.close(1011, "The sandbox doesn't bound the call's CPU time.");
+    // It holds a process for the session all the same.
+    await endSession(host, id, "end");
     throw new SandboxUnavailableError(
       "The sandbox doesn't bound the call's CPU time."
     );
