@@ -81,13 +81,11 @@ const EndDialog = ({
   const [reason, setReason] = useState("");
   const reasonId = useId();
   const engine = request.app.name;
-  // What it ends: retiring, the approvals in force still approved;
-  // revoking, retired ones too. Named in the decision, so core ends
-  // exactly these or nothing.
-  const ended = impact.approvals.filter(
-    ({ status }) => ending === "revoke" || status === "approved"
-  );
-  const approvals = ended.length;
+  // What it ends, as core counted it: retiring, the approvals in force
+  // still approved; revoking, retired ones too. Named in the decision by
+  // their digest, so core ends exactly these or nothing.
+  const ends = impact.endings[ending];
+  const { approvals } = ends;
   const artifacts = impact.artifacts.length;
   const targets = formatList(
     [...new Set(impact.artifacts.map(({ target }) => target))].map((target) =>
@@ -100,7 +98,7 @@ const EndDialog = ({
         reviewed: {
           graphHash: impact.graphHash,
           policyGeneration: impact.policyGeneration,
-          approvals: ended.map(({ id }) => id),
+          approvalsDigest: ends.digest,
         },
         reason,
       };
