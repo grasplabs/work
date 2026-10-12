@@ -509,21 +509,14 @@ const animate = (element: HTMLCanvasElement): (() => void) => {
   };
 };
 
-/**
- * The buddy, 128px. `aligned` pulls it a little to the left, so its
- * shoulders line up with words under it, as on the chat's start.
- */
-export const GraspBuddy = ({ aligned = false }: { aligned?: boolean }) => {
+/** The buddy, 128px. */
+export const GraspBuddy = () => {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const element = canvas.current;
     return element === null ? undefined : animate(element);
   }, []);
   return (
-    <canvas
-      aria-hidden="true"
-      className={aligned ? "-ml-4 size-32 flex-none" : "size-32 flex-none"}
-      ref={canvas}
-    />
+    <canvas aria-hidden="true" className="size-32 flex-none" ref={canvas} />
   );
 };
