@@ -48,6 +48,7 @@ import type { Acting } from "./auth/identity.ts";
 import { openStore, requireStoreManager } from "./data-stores.ts";
 import {
   appDefaultStores,
+  businessStoreVersions,
   sdkArtifactDeletions,
   sdkReleaseArtifacts,
   sdkReleaseManifests,
@@ -935,6 +936,26 @@ export const sealRelease = async (
             // and not being deleted: otherwise NULL, which the column
             // refuses, and the whole seal with it. So of a seal binding the
             // store and its deletion's closing mark, one wins.
+            // The store's definition in core's inventory, numbered as it
+            // first appears; the binding below names its version.
+            db
+              .insert(businessStoreVersions)
+              .values({
+                storeId: store.storeId,
+                version: sql`COALESCE((SELECT MAX(version) FROM business_store_versions
+                  WHERE store_id = ${store.storeId}), 0) + 1`,
+                schemaHash: store.schemaHash,
+                operationManifestHash: store.operationManifestHash,
+                sourceTreeHash: row.tree,
+                createdAt: new Date(),
+              })
+              .onConflictDoNothing({
+                target: [
+                  businessStoreVersions.storeId,
+                  businessStoreVersions.schemaHash,
+                  businessStoreVersions.operationManifestHash,
+                ],
+              }),
             db.insert(sdkResourceBindings).values({
               resourceId: app,
               resourceVersion: version,
@@ -945,6 +966,9 @@ export const sealRelease = async (
                 AND ${liveStoreSql(sql`${store.storeId}`, Date.now())})`,
               schemaHash: store.schemaHash,
               manifestHash: hash,
+              targetVersion: sql`(SELECT version FROM business_store_versions
+                WHERE store_id = ${store.storeId} AND schema_hash = ${store.schemaHash}
+                  AND operation_manifest_hash = ${store.operationManifestHash})`,
             }),
           ]),
       outboxed(db, {

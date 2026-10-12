@@ -540,3 +540,88 @@ describe("an App's default store", { timeout: 120_000 }, () => {
     ]);
   });
 });
+
+describe("a store's definitions", { timeout: 120_000 }, () => {
+  it("are recorded once each, numbered, and the store's active one follows the current version", async () => {
+    const { owner, app } = await appWith(notesFiles());
+    await activateVersion(env, owner, app, 1);
+    // The same schema and operations under another name: one definition.
+    await commitFiles(env, owner, app, notesFiles("Notes 2"), "Renamed");
+    await activateVersion(env, owner, app, 2);
+    // Another table: a second definition.
+    const widened = notesFiles("Notes 3");
+    widened["schema.ts"] = (widened["schema.ts"] ?? "").replace(
+      "export default defineSchema({",
+      "export default defineSchema({\n  tags: defineTable({ name: v.string() }),"
+    );
+    await commitFiles(env, owner, app, widened, "Tags");
+    await activateVersion(env, owner, app, 3);
+    const [recorded] = await defaultStores(app);
+    const store = recorded?.storeId ?? "";
+    const definitions = await env.DB.prepare(
+      "SELECT version, schema_hash AS schemaHash, operation_manifest_hash AS operations, source_tree_hash AS tree FROM business_store_versions WHERE store_id = ? ORDER BY version"
+    )
+      .bind(store)
+      .all<{
+        version: number;
+        schemaHash: string;
+        operations: string;
+        tree: string;
+      }>();
+    const bound = await env.DB.prepare(
+      "SELECT resource_version AS version, target_version AS definition FROM sdk_resource_bindings WHERE target_id = ? ORDER BY resource_version"
+    )
+      .bind(store)
+      .all<{ version: number; definition: number }>();
+    const active = async () =>
+      await env.DB.prepare(
+        "SELECT active_schema_version AS version, active_schema_hash AS schemaHash, active_operation_manifest_hash AS operations FROM business_stores WHERE id = ?"
+      )
+        .bind(store)
+        .first<{ version: number; schemaHash: string; operations: string }>();
+    const afterThree = await active();
+    // Rolled back: the store's active definition is version 1's again.
+    await activateVersion(env, owner, app, 1);
+    const afterRollback = await active();
+    const [first, third] = await Promise.all([
+      loadRelease(env, app, 1),
+      loadRelease(env, app, 3),
+    ]);
+    expect([
+      definitions.results,
+      bound.results,
+      afterThree,
+      afterRollback,
+    ]).toStrictEqual([
+      [
+        {
+          version: 1,
+          schemaHash: first.store?.schemaHash,
+          operations: first.store?.operationManifestHash,
+          tree: first.manifest.sourceTreeHash,
+        },
+        {
+          version: 2,
+          schemaHash: third.store?.schemaHash,
+          operations: third.store?.operationManifestHash,
+          tree: third.manifest.sourceTreeHash,
+        },
+      ],
+      [
+        { version: 1, definition: 1 },
+        { version: 2, definition: 1 },
+        { version: 3, definition: 2 },
+      ],
+      {
+        version: 2,
+        schemaHash: third.store?.schemaHash,
+        operations: third.store?.operationManifestHash,
+      },
+      {
+        version: 1,
+        schemaHash: first.store?.schemaHash,
+        operations: first.store?.operationManifestHash,
+      },
+    ]);
+  });
+});

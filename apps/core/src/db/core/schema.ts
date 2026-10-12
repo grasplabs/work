@@ -750,12 +750,45 @@ export const sdkResourceBindings = sqliteTable(
     targetId: text("target_id").notNull(),
     schemaHash: text("schema_hash").notNull(),
     manifestHash: text("manifest_hash").notNull(),
+    /**
+     * The target's version: for a store, the definition this release
+     * binds (`business_store_versions.version`).
+     */
+    targetVersion: integer("target_version"),
   },
   (table) => [
     primaryKey({
       columns: [table.resourceId, table.resourceVersion, table.alias],
     }),
     index("sdk_resource_bindings_target").on(table.kind, table.targetId),
+  ]
+);
+
+/**
+ * The definitions a business store serves, in core's inventory (spec 24):
+ * each distinct schema and operation manifest a sealed release bound the
+ * store with, numbered per store as it first appears, with the source
+ * tree of the release that first bound it. Written in the seal's batch
+ * (app-releases.ts), never changed. The store's object holds the schemas
+ * themselves, its receipts and its outbox, and stays their authority.
+ */
+export const businessStoreVersions = sqliteTable(
+  "business_store_versions",
+  {
+    storeId: text("store_id").notNull(),
+    version: integer().notNull(),
+    schemaHash: text("schema_hash").notNull(),
+    operationManifestHash: text("operation_manifest_hash").notNull(),
+    sourceTreeHash: text("source_tree_hash").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storeId, table.version] }),
+    uniqueIndex("business_store_versions_definition").on(
+      table.storeId,
+      table.schemaHash,
+      table.operationManifestHash
+    ),
   ]
 );
 
@@ -1586,6 +1619,12 @@ export const businessStores = sqliteTable("business_stores", {
    * owns each record is the record's own `_ownerId`, never this.
    */
   ownerId: text("owner_id").notNull(),
+  /**
+   * The definition (`business_store_versions`) the release of the current
+   * version of the App the store serves binds, moved in the statement that
+   * makes that version current (apps.ts): a projection, never what the
+   * store's object accepts writes against.
+   */
   activeSchemaVersion: integer("active_schema_version"),
   activeSchemaHash: text("active_schema_hash"),
   activeOperationManifestHash: text("active_operation_manifest_hash"),
