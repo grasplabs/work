@@ -2,7 +2,7 @@ import {
   appModuleName,
   compilerVersion,
   kitModuleName,
-  sdkModules,
+  workflowSdkModules,
   workflowIdOf,
   workflowPaths,
 } from "@grasp-os/compiler";
@@ -463,7 +463,7 @@ const modulesOf = async (
       })),
     });
   }
-  const sdk = await sdkModules(env.ASSETS);
+  const sdk = await workflowSdkModules(env.ASSETS);
   return { ...sdk.modules, ...build.modules };
 };
 
