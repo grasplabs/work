@@ -829,6 +829,34 @@ const restoreDefinition = async (
 };
 
 /**
+ * A release sealed already: its artifacts reserved again before it is
+ * answered, so sealing a version always leaves its release protected,
+ * whatever happened to its reservations; then loaded, every byte checked,
+ * and its store's definition recorded again where it is missing.
+ */
+const resealed = async (
+  env: Env,
+  { app, version }: { app: AppId; version: number },
+  sealedManifest: string
+): Promise<Release> => {
+  const named = manifestOf(sealedManifest, { app, version });
+  await reserveArtifacts(
+    env,
+    { app, version },
+    named.artifacts.map(({ sha256 }) => sha256)
+  );
+  const release = await loadRelease(env, app, version);
+  if (release.store !== null) {
+    await restoreDefinition(
+      env,
+      { app, version, sourceTreeHash: release.manifest.sourceTreeHash },
+      release.store
+    );
+  }
+  return release;
+};
+
+/**
  * What the store recorded of applying a release's schema, its receipt
  * included, for the seal's audit entry: evidence from the store itself,
  * beside the release. Nothing for a release without a store.
@@ -871,24 +899,7 @@ export const sealRelease = async (
     )
     .get();
   if (sealed !== undefined) {
-    // Sealed already: its artifacts reserved again before it is answered,
-    // so sealing a version always leaves its release protected, whatever
-    // happened to its reservations; then loaded, every byte checked.
-    const named = manifestOf(sealed.manifest, { app, version });
-    await reserveArtifacts(
-      env,
-      { app, version },
-      named.artifacts.map(({ sha256 }) => sha256)
-    );
-    const release = await loadRelease(env, app, version);
-    if (release.store !== null) {
-      await restoreDefinition(
-        env,
-        { app, version, sourceTreeHash: release.manifest.sourceTreeHash },
-        release.store
-      );
-    }
-    return release;
+    return await resealed(env, { app, version }, sealed.manifest);
   }
   // Before any App code is inspected: the App's own default store, which
   // the host chose for it (`app_default_stores`), is bound by its builder
