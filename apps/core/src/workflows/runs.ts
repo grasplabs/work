@@ -50,7 +50,7 @@ import { apps, workflowRuns } from "../db/core/schema.ts";
 import { failureNoticed } from "../notifications.ts";
 import { stepStatisticsForgotten } from "../statistic-steps.ts";
 import { hasWorkflow } from "./code.ts";
-import { runEngine } from "./engine.ts";
+import { markRunCancelled, runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellScreens } from "./run-changes.ts";
@@ -1068,6 +1068,10 @@ export const cancelRun = async (
   if (!unended.includes(row.status)) {
     return toRun(env, row);
   }
+  // First, in the run's object: from then on no attempt of it holds, so
+  // nothing more of it is handed back or acts, even should the engine
+  // never terminate it. Should this fail, nothing of the cancel happened.
+  await markRunCancelled(env, row.id);
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db

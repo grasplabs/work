@@ -24,6 +24,7 @@ import type { AppCollectionBinding } from "./knowledge/app-binding.ts";
 import { activePermissions, authorizeExport } from "./permissions.ts";
 import type { AppStatisticsBinding } from "./statistics-binding.ts";
 import { requireAttemptHolds } from "./workflows/attempt-fence.ts";
+import type { AttemptFence } from "./workflows/attempt-fence.ts";
 
 /** What App code passes as the caller: the one its method was called with. */
 const callerSchema = z.object({ token: z.string().min(1).max(100) });
@@ -155,6 +156,47 @@ export const stillAdmitted = async (
 };
 
 /**
+ * `value`, what a stub read or got for `caller`, handed back only once
+ * the caller is admitted again for `use` as it returns (`callerOf`): a
+ * call let go of while the stub awaited (ended, past its deadline, on
+ * code since stopped, or, for a workflow run's step, an attempt that no
+ * longer holds, attempt-fence.ts) gets nothing back. Every stub read of
+ * an App's server code hands back through this; a stub call that may
+ * change something through `afterEffect`. (An App's writes to its own
+ * SQLite never come through a stub, so neither can stop those.)
+ */
+export const handedBack = async <T>(
+  env: Env,
+  app: AppId,
+  caller: unknown,
+  use: InvocationKind,
+  value: Promise<T>
+): Promise<T> => {
+  const answer = await value;
+  await callerOf(env, app, caller, use);
+  return answer;
+};
+
+/**
+ * `value`, the answer to a stub call that may have changed something
+ * (a connection's action, another App's export, a guest chat written),
+ * handed back unless the call came from a workflow run's step whose
+ * attempt no longer holds (`fence`, read once the call was admitted):
+ * nothing goes back to an attempt let go of. Not admitted again in full,
+ * as `handedBack` does for a read: what is done is done, and a refusal
+ * then would only misreport it.
+ */
+export const afterEffect = async <T>(
+  env: Env,
+  fence: () => AttemptFence | undefined,
+  value: Promise<T>
+): Promise<T> => {
+  const answer = await value;
+  await requireAttemptHolds(env, fence());
+  return answer;
+};
+
+/**
  * Who `caller` is, as `callerOf` says, counting one statistics `use` (a
  * point or a read) of their call against its bounds
  * (`App.claimStatistic`): `statistics.rate_limited` past a bound. With
@@ -220,33 +262,38 @@ export class AppConnectionBinding extends WorkerEntrypoint<
     options?: unknown
   ): Promise<ConnectResult> {
     const { app, ...grant } = this.ctx.props;
-    return await runStubCall(
+    // The action may change something, which connect knows and core
+    // doesn't: its answer goes back unless its call's workflow attempt
+    // was let go of meanwhile, not withheld for anything else once done.
+    let fence: AttemptFence | undefined;
+    return await afterEffect(
       this.env,
-      async (key) => {
-        const token = tokenOf(caller);
-        // Admitted as a read: whether the action changes anything is
-        // connect's to know, and a call that may only read has it refuse
-        // every side effect.
-        const { authority, idempotencyKey, kind, path } = await callerOf(
-          this.env,
-          app,
-          { token },
-          "read"
-        );
-        if (authority.mode === "workflow") {
-          requireStepKey(key, idempotencyKey);
-        }
-        return {
-          authority,
-          readOnly: kind === "read",
-          notAfter: path.deadline,
-          stillAllowed: async () => {
-            await stillAdmitted(this.env, app, token, "read");
-          },
-        };
-      },
-      grant,
-      [action, input, options]
+      () => fence,
+      runStubCall(
+        this.env,
+        async (key) => {
+          const token = tokenOf(caller);
+          // Admitted as a read: whether the action changes anything is
+          // connect's to know, and a call that may only read has it refuse
+          // every side effect.
+          const known = await callerOf(this.env, app, { token }, "read");
+          const { authority, idempotencyKey, kind, path } = known;
+          ({ fence } = known);
+          if (authority.mode === "workflow") {
+            requireStepKey(key, idempotencyKey);
+          }
+          return {
+            authority,
+            readOnly: kind === "read",
+            notAfter: path.deadline,
+            stillAllowed: async () => {
+              await stillAdmitted(this.env, app, token, "read");
+            },
+          };
+        },
+        grant,
+        [action, input, options]
+      )
     );
   }
 }

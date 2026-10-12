@@ -90,9 +90,14 @@ export class App extends DurableObject {
   // Waits at the mail server, which holds its search until the test lets
   // it go (MAIL, granted \`mail.search\`), then records a point of
   // \`measure\`, and counts whether the call was taken
-  // (\`measure\`:recorded) or refused.
+  // (\`measure\`:recorded) or refused, the search's answer or the point.
   async pointAfter(caller: Caller, measure: string): Promise<void> {
-    await (this.env as any).MAIL.call(caller, "mail.search", { query: "hold " + measure });
+    try {
+      await (this.env as any).MAIL.call(caller, "mail.search", { query: "hold " + measure });
+    } catch {
+      this.hit(caller, measure + ":refused");
+      return;
+    }
     try {
       await this.point(caller, measure);
       this.hit(caller, measure + ":recorded");

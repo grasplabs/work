@@ -199,6 +199,19 @@ export const runObjectOf = (
 const runStub = (env: Env, id: string): RunStub => runObjectOf(env, id);
 
 /**
+ * Marks run `id` cancelled in its object (run-object.ts,
+ * `markCancelled`), the first step of a cancel: no attempt of it holds
+ * from then on, whatever the engine does after. Throws when the object
+ * can't be told, so a cancel fails before anything else of it.
+ */
+export const markRunCancelled = async (
+  env: Pick<Env, "WORKFLOW_RUNS" | "DURABLE_OBJECT_JURISDICTION">,
+  id: string
+): Promise<void> => {
+  await runObjectOf(env, id).markCancelled();
+};
+
+/**
  * A run's params, as the engine keeps them: its input under `input`, left
  * out when the run has none, so a run started with nothing gets nothing
  * (the engine makes absent params `{}`, as Cloudflare does).

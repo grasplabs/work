@@ -77,6 +77,22 @@ export const busyRefusalsIn = (sql: SqlStorage): BusyRefusals => ({
   },
 });
 
+/**
+ * Where a run's object keeps that the run was cancelled (`markCancelled`):
+ * a table of its SQLite beside the engine's journal, which the engine's
+ * removal of the run drops with it, as `busyTable`.
+ */
+const cancelTable = "grasp_run_cancelled";
+
+/** Whether the run in `sql` was marked cancelled (`markCancelled`). */
+const cancelledIn = (sql: SqlStorage): boolean =>
+  sql
+    .exec(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+      cancelTable
+    )
+    .toArray().length > 0;
+
 // The object every workflow run lives in (`WORKFLOW_RUNS`): Workerflow's
 // run object, one per run, which core reaches only through engine.ts. It
 // is the only authority on a run's execution: its steps, waits, attempts
@@ -117,9 +133,43 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         await runPinned(this.env, pin, event, step, {
           busyRefusals: busyRefusalsIn(this.ctx.storage.sql),
           aiCalls: this.#aiCalls,
-          leaseOf: (key, attempt) => this.attemptLease(key, attempt),
+          leaseOf: (key, attempt) => this.#leaseOf(key, attempt),
         }),
     };
+  }
+
+  /**
+   * Marks the run cancelled in its object, before anything else of a
+   * cancel (runs.ts, `cancelRun`): from then on no attempt of it holds
+   * (`#leaseOf`), so every fenced call of it is refused at once, in this
+   * object, with no read of core's database, whether or not the engine
+   * terminates it after. A run the engine has no journal of yet has no
+   * attempt to fence: its start, should it come, finds its row
+   * cancelled. Synchronous: once this returns, the mark is stored.
+   */
+  markCancelled(): void {
+    const { sql } = this.ctx.storage;
+    const hasRun =
+      sql
+        .exec(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run'"
+        )
+        .toArray().length > 0;
+    if (hasRun) {
+      sql.exec(
+        `CREATE TABLE IF NOT EXISTS ${cancelTable} (at INTEGER NOT NULL)`
+      );
+    }
+  }
+
+  /**
+   * The engine's lease of an attempt (`attemptLease`), unless the run was
+   * marked cancelled (`markCancelled`): then no attempt of it holds.
+   */
+  #leaseOf(key: string, attempt: number) {
+    return cancelledIn(this.ctx.storage.sql)
+      ? undefined
+      : this.attemptLease(key, attempt);
   }
 
   /**
@@ -130,7 +180,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    * (attempt-fence.ts). Read from the journal; tells nothing else.
    */
   attemptHolds(key: string, attempt: number, generation: number): boolean {
-    const lease = this.attemptLease(key, attempt);
+    const lease = this.#leaseOf(key, attempt);
     return (
       lease !== undefined &&
       lease.generation === generation &&

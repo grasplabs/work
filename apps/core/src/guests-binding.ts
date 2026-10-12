@@ -8,7 +8,13 @@ import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-import { callerOf, stillAdmitted, tokenOf } from "./app-bindings.ts";
+import {
+  afterEffect,
+  callerOf,
+  handedBack,
+  stillAdmitted,
+  tokenOf,
+} from "./app-bindings.ts";
 import type { InvocationKind } from "./app.ts";
 import { forSandbox } from "./bindings.ts";
 import { inviteGuest, listGuests, readGuest, revokeGuest } from "./guests.ts";
@@ -88,15 +94,25 @@ export class AppGuestsBinding extends WorkerEntrypoint<
     const { app, permissionId } = this.ctx.props;
     try {
       const token = tokenOf(caller);
-      const { authority, path } = await callerOf(this.env, app, { token }, use);
+      const { authority, path, fence } = await callerOf(
+        this.env,
+        app,
+        { token },
+        use
+      );
       const person =
         authority.mode === "interactive" && path.chain.length === 1;
       if (personOnly && !person) {
         throw guestErrors.create("guest.invalid");
       }
-      return await run(authority, permissionId, async () => {
+      const answer = run(authority, permissionId, async () => {
         await stillAdmitted(this.env, app, token, use);
       });
+      // A read goes back only to a caller admitted again; a chat written
+      // goes back unless the call's workflow attempt was let go of.
+      return use === "read"
+        ? await handedBack(this.env, app, { token }, use, answer)
+        : await afterEffect(this.env, () => fence, answer);
     } catch (error) {
       throw forSandbox(error);
     }

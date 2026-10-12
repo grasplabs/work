@@ -1573,7 +1573,7 @@ export class RunHost extends RpcTarget {
   ): Promise<Settled<unknown>> {
     return await settle(async () => {
       this.#requireUntampered();
-      await this.#requireCurrent(attempt, String(binding));
+      await this.#requireCurrent(attempt, "collection");
       const { collections } = this.#run;
       const name = checked(z.string(), binding);
       const stub = Object.hasOwn(collections, name)
@@ -1629,7 +1629,7 @@ export class RunHost extends RpcTarget {
   ): Promise<Settled<unknown>> {
     return await settle(async () => {
       this.#requireUntampered();
-      await this.#requireCurrent(attempt, String(binding));
+      await this.#requireCurrent(attempt, "connection");
       const stepKey = this.#stepKeyOf(attempt);
       const { connections, authority } = this.#run;
       const name = checked(z.string(), binding);
@@ -1739,7 +1739,7 @@ export class RunHost extends RpcTarget {
   ): Promise<Settled<unknown>> {
     return await settle(async () => {
       this.#requireUntampered();
-      await this.#requireCurrent(attempt, String(binding));
+      await this.#requireCurrent(attempt, "export");
       const idempotencyKey = this.#stepKeyOf(attempt);
       const { apps, authority, app } = this.#run;
       const name = checked(z.string(), binding);

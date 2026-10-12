@@ -12,7 +12,7 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { callerOf, tokenOf } from "./app-bindings.ts";
+import { afterEffect, callerOf, tokenOf } from "./app-bindings.ts";
 import type { AppAnswer, CallPath } from "./app.ts";
 import { auditedBatch, keepAuditEvent, outboxed } from "./audit-outbox.ts";
 import { forSandbox } from "./bindings.ts";
@@ -493,20 +493,24 @@ export class AppExportBinding extends WorkerEntrypoint<
         throw error;
       }
       const { authority, idempotencyKey, attempt, fence, path } = known;
-      return await callExport(
+      return await afterEffect(
         this.env,
-        {
-          authority,
-          idempotencyKey,
-          attempt,
-          fence,
-          path,
-          from: { app, token },
-          actor: delegateActorOf(authority),
-        },
-        grant,
-        method,
-        input
+        () => fence,
+        callExport(
+          this.env,
+          {
+            authority,
+            idempotencyKey,
+            attempt,
+            fence,
+            path,
+            from: { app, token },
+            actor: delegateActorOf(authority),
+          },
+          grant,
+          method,
+          input
+        )
       );
     } catch (error) {
       throw forSandbox(error);

@@ -12,7 +12,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { runBindingsFor } from "../src/bindings.ts";
 import type { CollectionBinding } from "../src/knowledge/binding.ts";
-import type { AttemptHost } from "../src/workflows/attempt-host.ts";
+import {
+  AttemptHost,
+  attemptCallLabels,
+} from "../src/workflows/attempt-host.ts";
 import type { Settled } from "../src/workflows/code.ts";
 import { RunHost } from "../src/workflows/host.ts";
 import { keepMessage } from "../src/workflows/kept-email.ts";
@@ -223,30 +226,40 @@ const cancelledAt = async (
   return { answered, run: run.runId, stages: atReturn };
 };
 
-/** A run's HANDBOOK, its run cancelled as `getDocument` answers. */
-const cancelledAsItAnswers = (
-  bindings: Record<string, Fetcher<CollectionBinding>>,
-  cancel: () => Promise<void>
-): Record<string, Fetcher<CollectionBinding>> => {
-  const handbook = bindings.HANDBOOK;
-  if (handbook === undefined) {
-    throw new Error("The run has no HANDBOOK");
-  }
-  const answering = new Proxy(handbook, {
-    get: (target, key) => {
-      const value: unknown = Reflect.get(target, key);
-      if (key !== "getDocument" || typeof value !== "function") {
-        return value;
-      }
-      return async (...args: unknown[]) => {
-        const answer: unknown = await Reflect.apply(value, target, args);
-        await cancel();
-        return answer;
-      };
-    },
-  });
-  return { HANDBOOK: answering };
-};
+/**
+ * A run's HANDBOOK, its run cancelled as `getDocument` starts, or as it
+ * answers: the collection's own read, in the middle of the call.
+ */
+const cancelledAround =
+  (when: "starts" | "answers") =>
+  (
+    bindings: Record<string, Fetcher<CollectionBinding>>,
+    cancel: () => Promise<void>
+  ): Record<string, Fetcher<CollectionBinding>> => {
+    const handbook = bindings.HANDBOOK;
+    if (handbook === undefined) {
+      throw new Error("The run has no HANDBOOK");
+    }
+    const around = new Proxy(handbook, {
+      get: (target, key) => {
+        const value: unknown = Reflect.get(target, key);
+        if (key !== "getDocument" || typeof value !== "function") {
+          return value;
+        }
+        return async (...args: unknown[]) => {
+          if (when === "starts") {
+            await cancel();
+          }
+          const answer: unknown = await Reflect.apply(value, target, args);
+          if (when === "answers") {
+            await cancel();
+          }
+          return answer;
+        };
+      },
+    });
+    return { HANDBOOK: around };
+  };
 
 describe(
   "an attempt's calls, cancelled while they await",
@@ -312,6 +325,75 @@ describe(
         outcomes: new Set([
           JSON.stringify({ code: "execution.stale_attempt", asked: false }),
         ]),
+      });
+    });
+
+    it("open no decision, and record or tell of none, for a run cancelled as it opens", async () => {
+      const admin = await personApi("admin");
+      const app = await appWith(admin, {});
+      const calls = { steps: { tidy: [] }, all: [] };
+      const open = async (attempt: AttemptHost, arm: () => void) => {
+        arm();
+        return await attempt.openDecision({
+          step: "tidy",
+          from: `person:${admin.userId}`,
+          description: "Approve the invoice",
+          timeout: 60_000,
+        });
+      };
+      const uncancelled = await cancelledAt(
+        app,
+        admin.userId,
+        calls,
+        undefined,
+        open
+      );
+      const outcomes: { code: string; opened: boolean; kept: boolean }[] = [];
+      for (let stage = 1; stage <= uncancelled.stages; stage += 1) {
+        // Only the cancel's tombstone: the decision's own write checks it.
+        // oxlint-disable-next-line no-await-in-loop -- one stage at a time
+        const { answered, run } = await cancelledAt(
+          app,
+          admin.userId,
+          calls,
+          stage,
+          open,
+          undefined,
+          true
+        );
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        const events = await allEvents();
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        const kept = await env.DB.prepare(
+          "SELECT count(*) AS kept FROM workflow_decisions WHERE run_id = ?"
+        )
+          .bind(run)
+          .first<number>("kept");
+        outcomes.push({
+          code: codeOf(answered),
+          opened: events.some(
+            (event) =>
+              event.action === "workflow.decision.opened" &&
+              JSON.stringify(event).includes(run)
+          ),
+          kept: (kept ?? 0) > 0,
+        });
+      }
+
+      // A cancel the decision's write found opened nothing, recorded
+      // nothing and answered stale; one after it found a decision that
+      // stands, recorded as opened.
+      expect({
+        uncancelled: codeOf(uncancelled.answered),
+        consistent: outcomes.every(
+          ({ code, opened, kept }) =>
+            opened === kept && (kept || code === "execution.stale_attempt")
+        ),
+        refusedBeforeOpening: outcomes.some(({ kept }) => !kept),
+      }).toStrictEqual({
+        uncancelled: "ok",
+        consistent: true,
+        refusedBeforeOpening: true,
       });
     });
 
@@ -400,38 +482,50 @@ describe(
         undefined,
         read
       );
-      const codes: string[] = [];
-      for (let stage = 1; stage <= uncancelled.stages; stage += 1) {
-        // oxlint-disable-next-line no-await-in-loop -- one stage at a time
-        const { answered } = await cancelledAt(
-          app,
-          admin.userId,
-          calls,
-          stage,
-          read
-        );
-        codes.push(codeOf(answered));
-      }
-      const { answered: atRead } = await cancelledAt(
+      const { answered: asItStarts } = await cancelledAt(
         app,
         admin.userId,
         calls,
         undefined,
         read,
-        cancelledAsItAnswers
+        cancelledAround("starts")
+      );
+      const { answered: asItAnswers } = await cancelledAt(
+        app,
+        admin.userId,
+        calls,
+        undefined,
+        read,
+        cancelledAround("answers")
       );
 
       expect({
         uncancelled: codeOf(uncancelled.answered),
-        codes: new Set(codes),
-        atRead: codeOf(atRead),
+        asItStarts: codeOf(asItStarts),
+        asItAnswers: codeOf(asItAnswers),
       }).toStrictEqual({
         uncancelled: "ok",
-        codes: new Set(
-          uncancelled.stages > 0 ? ["execution.stale_attempt"] : []
-        ),
-        atRead: "execution.stale_attempt",
+        asItStarts: "execution.stale_attempt",
+        asItAnswers: "execution.stale_attempt",
       });
     });
   }
 );
+
+/** The public methods of a class, by its prototype. */
+const own = (prototype: object) =>
+  Object.getOwnPropertyNames(prototype)
+    .filter((name) => name !== "constructor")
+    .toSorted();
+
+describe("the hosts a run's code reaches", () => {
+  it("are an attempt's host, whose every method is a fenced call, and the run's, which runs steps only", () => {
+    expect({
+      attempt: own(AttemptHost.prototype),
+      run: own(RunHost.prototype),
+    }).toStrictEqual({
+      attempt: Object.keys(attemptCallLabels).toSorted(),
+      run: ["do", "sleep", "waitForDecision"],
+    });
+  });
+});

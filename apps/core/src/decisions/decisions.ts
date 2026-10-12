@@ -186,6 +186,11 @@ export const openDecision = async (
     decidedAt: null,
     payload: null,
   };
+  // Opened only for a run that goes on, as the batch finds it: a decision
+  // of a run cancelled meanwhile is taken out again in the same batch, and
+  // neither audited nor told of.
+  const liveRun = sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run.runId} AND ${workflowRuns.cancelRequestedAt} IS NULL AND ${workflowRuns.endedAt} IS NULL)`;
+  const stands = sql`EXISTS (SELECT 1 FROM ${workflowDecisions} WHERE ${workflowDecisions.id} = ${row.id})`;
   const [[inserted]] = await auditedBatch(env, db, [
     db
       .insert(workflowDecisions)
@@ -194,13 +199,25 @@ export const openDecision = async (
         target: [workflowDecisions.runId, workflowDecisions.step],
       })
       .returning({ id: workflowDecisions.id }),
-    outboxedIfChanged(
+    db
+      .delete(workflowDecisions)
+      .where(and(eq(workflowDecisions.id, row.id), sql`NOT ${liveRun}`)),
+    outboxedWhere(
       db,
       decisionEntry(runActorOf(run), "workflow.decision.opened", run, row, {
         from: request.from,
-      })
+      }),
+      stands
     ),
   ]);
+  const live = await db
+    .select({ id: workflowRuns.id })
+    .from(workflowRuns)
+    .where(and(eq(workflowRuns.id, run.runId), liveRun))
+    .get();
+  if (live === undefined) {
+    throw executionErrors.create("execution.stale_attempt");
+  }
   // The run now waits for it; a step run again after a crash opened
   // nothing, and tells no one.
   if (inserted) {

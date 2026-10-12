@@ -3,7 +3,11 @@ import type { StatisticAnswer } from "@grasp-os/shared/statistics";
 import { statisticErrors } from "@grasp-os/shared/statistics";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-import { limitedReadCallerOf, statisticCallerOf } from "./app-bindings.ts";
+import {
+  handedBack,
+  limitedReadCallerOf,
+  statisticCallerOf,
+} from "./app-bindings.ts";
 import { forSandbox } from "./bindings.ts";
 import {
   auditPlatformRead,
@@ -69,7 +73,13 @@ export class AppStatisticsBinding extends WorkerEntrypoint<
         await this.#auditLimited(caller, query, error);
         throw error;
       });
-      return await readStatistics(this.env, authority, query, permissionId);
+      return await handedBack(
+        this.env,
+        app,
+        caller,
+        "read",
+        readStatistics(this.env, authority, query, permissionId)
+      );
     } catch (error) {
       throw forSandbox(error);
     }

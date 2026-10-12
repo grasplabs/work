@@ -18,7 +18,12 @@ import {
 } from "@grasp-os/shared/submissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-import { callerOf, stillAdmitted, tokenOf } from "../app-bindings.ts";
+import {
+  callerOf,
+  handedBack,
+  stillAdmitted,
+  tokenOf,
+} from "../app-bindings.ts";
 import type { CallPath, InvocationKind } from "../app.ts";
 import { forSandbox } from "../bindings.ts";
 import { collectionReads, readAsDelegate } from "./binding.ts";
@@ -97,9 +102,7 @@ export class AppCollectionBinding extends WorkerEntrypoint<
    * hands nothing on, whatever the read awaited on the way.
    */
   async #leaving<T>(caller: unknown, read: Promise<T>): Promise<T> {
-    const value = await read;
-    await callerOf(this.env, this.ctx.props.app, caller, "read");
-    return value;
+    return await handedBack(this.env, this.ctx.props.app, caller, "read", read);
   }
 
   #reads(caller: unknown) {

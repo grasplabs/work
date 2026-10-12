@@ -51,33 +51,57 @@ export type AttemptFenceCheck = (
  * awaited on the way. Every entry of `calls` is wrapped, so a call added
  * to `AttemptCalls` is fenced without anyone remembering to.
  */
+/**
+ * Each call of `AttemptCalls`, by the label a refusal of it is audited
+ * with. A mapped type over `AttemptCalls`: a call added there and missing
+ * here doesn't compile, and `fenced` wraps every call listed here.
+ */
+export const attemptCallLabels: {
+  readonly [Name in keyof AttemptCalls]: string;
+} = {
+  callModel: "model",
+  callCollection: "collection",
+  callConnection: "connection",
+  callApp: "APP",
+  callExport: "export",
+  openDecision: "decision",
+  decisionRecipients: "decision",
+  readAttachment: "attachment",
+};
+
+/** The names of the calls an attempt's code makes (`AttemptCalls`). */
+const attemptCallNames = Object.keys(attemptCallLabels).filter(
+  (name): name is keyof AttemptCalls => Object.hasOwn(attemptCallLabels, name)
+);
+
 const fenced = (
   calls: AttemptCalls,
   check: AttemptFenceCheck
 ): AttemptCalls => {
-  const wrap =
-    <Args extends unknown[], T>(
-      name: string,
-      call: (...args: Args) => Promise<Settled<T>>
-    ) =>
-    async (...args: Args): Promise<Settled<T>> => {
-      const before = await check(name);
+  const wrapped: Partial<
+    Record<
+      keyof AttemptCalls,
+      (...args: unknown[]) => Promise<Settled<unknown>>
+    >
+  > = {};
+  for (const name of attemptCallNames) {
+    const call: (...args: unknown[]) => Promise<Settled<unknown>> = calls[name];
+    const label = attemptCallLabels[name];
+    wrapped[name] = async (...args: unknown[]): Promise<Settled<unknown>> => {
+      const before = await check(label);
       if (before !== undefined) {
         return before;
       }
       const result = await call(...args);
-      return (await check(name)) ?? result;
+      return (await check(label)) ?? result;
     };
-  return {
-    callModel: wrap("model", calls.callModel),
-    callCollection: wrap("collection", calls.callCollection),
-    callConnection: wrap("connection", calls.callConnection),
-    callApp: wrap("APP", calls.callApp),
-    callExport: wrap("export", calls.callExport),
-    openDecision: wrap("decision", calls.openDecision),
-    decisionRecipients: wrap("decision", calls.decisionRecipients),
-    readAttachment: wrap("attachment", calls.readAttachment),
-  } satisfies { [Name in keyof AttemptCalls]: AttemptCalls[Name] };
+  }
+  // SAFETY: `wrapped` has an entry for every key of `AttemptCalls` (the
+  // keys of `attemptCallLabels`, a mapped type over it), each the call of
+  // that name, taking its arguments as they come and answering what it
+  // answers, or a refusal, which every call may answer.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return wrapped as AttemptCalls;
 };
 
 /**
@@ -90,7 +114,7 @@ const fenced = (
  * attempt's lease, refused as stale once that no longer holds, and has no
  * other attempt to borrow from. Every method answers `Settled`.
  */
-export class AttemptHost extends RpcTarget {
+export class AttemptHost extends RpcTarget implements AttemptCalls {
   readonly #calls: AttemptCalls;
 
   constructor(calls: AttemptCalls, check: AttemptFenceCheck) {
