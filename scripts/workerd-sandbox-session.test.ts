@@ -73,6 +73,9 @@ describe("a session on the on-prem sandbox", () => {
       value: { a: 101, b: 41, c: 102, env: [] },
       logged: ["started"],
     });
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
+      .toBe(0);
   });
 
   it("ends a busy loop on its CPU-time budget while core keeps answering", async () => {

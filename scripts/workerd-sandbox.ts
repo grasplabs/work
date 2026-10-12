@@ -526,7 +526,10 @@ class SandboxPool {
     abandoned: 0,
   };
   /** How to end each session running now, by its call ID. */
-  readonly #running = new Map<string, () => void>();
+  readonly #running = new Map<
+    string,
+    { cancel: () => void; finish: () => void }
+  >();
   /** Sessions each owner holds now, waiting or running. */
   readonly #owners = new Map<string, number>();
   /** Sessions each owner has waiting for its room, and all of them. */
@@ -1056,12 +1059,19 @@ class SandboxPool {
       return;
     }
     this.#topUp();
-    // Core closing its end is how a session ends, not an abandoned call:
-    // the guard watches only the bounds, and the session ends either way.
-    // Core ends one it gave up on (`POST /cancel/<id>`) as abandoned.
+    // Core says when a session is over (`POST /end/<id>`): closing its end
+    // of the socket alone may not reach here, as the close handshake waits
+    // on the sandbox host. Core ends one it gave up on (`POST /cancel/<id>`)
+    // as abandoned. The guard watches only the bounds.
     const cancelled = new AbortController();
-    this.#running.set(callId, () => {
-      cancelled.abort();
+    const finished = new AbortController();
+    this.#running.set(callId, {
+      cancel: () => {
+        cancelled.abort();
+      },
+      finish: () => {
+        finished.abort();
+      },
     });
     const guard = this.#guard(
       host,
@@ -1094,10 +1104,14 @@ class SandboxPool {
         once(upstream, "close"),
         once(guard.signal, "abort"),
         once(caller.signal, "abort"),
+        once(finished.signal, "abort"),
       ]);
       const ending = guard.signal.aborted
         ? await this.#cutShort(host, guard)
-        : await this.#sessionEnded(host, caller.signal);
+        : await this.#sessionEnded(
+            host,
+            AbortSignal.any([caller.signal, finished.signal])
+          );
       this.#judge(host, callId, ending, deadlineMs);
     } finally {
       this.#running.delete(callId);
@@ -1281,9 +1295,16 @@ class SandboxPool {
 
   /** Ends session `callId` as its caller gave up on it; false if none runs. */
   cancel(callId: string): boolean {
-    const end = this.#running.get(callId);
-    end?.();
-    return end !== undefined;
+    const running = this.#running.get(callId);
+    running?.cancel();
+    return running !== undefined;
+  }
+
+  /** Ends session `callId` as core is done with it; false if none runs. */
+  finish(callId: string): boolean {
+    const running = this.#running.get(callId);
+    running?.finish();
+    return running !== undefined;
   }
 
   /** The verdict on session `callId`, if the App was blamed for it lately. */
@@ -1502,6 +1523,9 @@ const relaySession = async (
   }
 };
 
+/** Where core says a session is over: `/cancel/<id>` or `/end/<id>`. */
+const sessionEnding = /^\/(?<how>cancel|end)\/(?<id>[^/]+)$/u;
+
 /** Answers one request to the supervisor. */
 const answerRequest = async (
   pool: SandboxPool,
@@ -1532,9 +1556,12 @@ const answerRequest = async (
     );
     return;
   }
-  const cancelOf = /^\/cancel\/(?<id>[^/]+)$/u.exec(pathname)?.groups?.id;
-  if (cancelOf !== undefined && request.method === "POST") {
-    send(response, pool.cancel(cancelOf) ? 200 : 404, "{}");
+  // Core gave up on a session (`cancel`), or is done with it (`end`).
+  const ending = sessionEnding.exec(pathname)?.groups;
+  if (ending?.id !== undefined && request.method === "POST") {
+    const found =
+      ending.how === "cancel" ? pool.cancel(ending.id) : pool.finish(ending.id);
+    send(response, found ? 200 : 404, "{}");
     request.resume();
     return;
   }

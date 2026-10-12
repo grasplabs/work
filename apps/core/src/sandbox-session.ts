@@ -261,10 +261,17 @@ const verdictOf = async (
   }
 };
 
-/** Asks the supervisor to end session `id` now; never throws. */
-const cancelSession = async (host: Fetcher, id: string): Promise<void> => {
+/**
+ * Tells the supervisor session `id` is over: `cancel` for a call core gave
+ * up on, `end` for one that settled. Never throws.
+ */
+const endSession = async (
+  host: Fetcher,
+  id: string,
+  how: "cancel" | "end"
+): Promise<void> => {
   try {
-    const response = await host.fetch(`http://sandbox/cancel/${id}`, {
+    const response = await host.fetch(`http://sandbox/${how}/${id}`, {
       method: "POST",
       signal: AbortSignal.timeout(backstopMs),
     });
@@ -450,6 +457,8 @@ export const runInSession = async (
   const giveUp = (): void => {
     live = false;
   };
+  // Whether the supervisor was told the session is over already.
+  let told = false;
   signal?.addEventListener("abort", giveUp, { once: true });
   const specs: Record<string, { methods: string[] } | { function: true }> = {};
   const stubs: Record<string, object> = {};
@@ -504,7 +513,8 @@ export const runInSession = async (
     if (signal?.aborted === true || error === overdue) {
       // Given up on: the supervisor ends the call and frees its process at
       // once, whatever the sandbox host does with the closing socket.
-      await cancelSession(host, id);
+      told = true;
+      await endSession(host, id, "cancel");
     }
     throw await failureOf(error, { host, id, closed, signal });
   } finally {
@@ -518,6 +528,11 @@ export const runInSession = async (
       socket.close(1000, "The call is over.");
     } catch {
       // Closed already.
+    }
+    // Its close alone may never reach the supervisor (the handshake waits
+    // on the sandbox host): it frees the process when told.
+    if (!told && !closed) {
+      await endSession(host, id, "end");
     }
   }
 };
