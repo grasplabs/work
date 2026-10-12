@@ -46,6 +46,8 @@ const backstopMs = 2000;
 /** The headers core gives a call's deadline and wait in, in milliseconds. */
 export const sandboxDeadlineHeader = "x-grasp-sandbox-deadline-ms";
 export const sandboxWaitHeader = "x-grasp-sandbox-wait-ms";
+/** The header core gives a session's CPU-time budget in (sandbox-session.ts). */
+export const sandboxCpuHeader = "x-grasp-sandbox-cpu-ms";
 
 /** What a sandboxed call reads from core's env (src/env.d.ts). */
 export type SandboxedEnv = Pick<
@@ -157,6 +159,30 @@ const onHost = async (
     });
   }
   return answerOf(body);
+};
+
+/**
+ * The sandbox supervisor an isolate that reaches back into core runs on
+ * (sandbox-session.ts), or undefined where the caller loads it itself: on
+ * Cloudflare, whose runtime bounds its CPU, or where the deployment
+ * accepts that nothing does (`SANDBOX_IN_PROCESS=unbounded`). Anywhere
+ * else it refuses with {@link SandboxUnavailableError}, as for inspection.
+ */
+export const sessionHost = (
+  env: Pick<Env, "RUNTIME_PROFILE" | "SANDBOX_HOST" | "SANDBOX_IN_PROCESS">
+): Fetcher | undefined => {
+  if (env.SANDBOX_HOST !== undefined) {
+    return env.SANDBOX_HOST;
+  }
+  if (
+    env.RUNTIME_PROFILE !== "cloudflare" &&
+    env.SANDBOX_IN_PROCESS !== "unbounded"
+  ) {
+    throw new SandboxUnavailableError(
+      "No sandbox bounds App code here: bind SANDBOX_HOST to the sandbox supervisor."
+    );
+  }
+  return undefined;
 };
 
 /**
