@@ -483,6 +483,29 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     await expect(stored(release, ".grasp/server.ts")).resolves.toBeTruthy();
   });
 
+  it("a sealed release lost the reservations of are reserved again by sealing it again", async () => {
+    const fixture = await appWith(files("one"));
+    const release = await seal(fixture);
+    await env.DB.prepare(
+      "DELETE FROM sdk_release_artifacts WHERE app_id = ? AND version = 1"
+    )
+      .bind(fixture.app)
+      .run();
+    const again = await seal(fixture);
+    const rows = await env.DB.prepare(
+      "SELECT sha256 FROM sdk_release_artifacts WHERE app_id = ? AND version = 1"
+    )
+      .bind(fixture.app)
+      .all<{ sha256: string }>();
+    const reserved = new Set(rows.results.map(({ sha256 }) => sha256));
+    expect([
+      again.manifestHash,
+      release.manifest.artifacts.filter(
+        (artifact) => !reserved.has(artifact.sha256)
+      ),
+    ]).toStrictEqual([release.manifestHash, []]);
+  });
+
   it("a seal reserves again are reserved anew, so a sweep can't take them mid-seal", async () => {
     const fixture = await appWith(files("one"));
     // A seal of this version failed a long time ago, after reserving.

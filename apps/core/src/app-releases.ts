@@ -688,7 +688,7 @@ export const sealRelease = async (
 ): Promise<Release> => {
   const { app, version } = request;
   const sealed = await drizzle(env.DB)
-    .select({ hash: sdkReleaseManifests.manifestHash })
+    .select({ manifest: sdkReleaseManifests.manifest })
     .from(sdkReleaseManifests)
     .where(
       and(
@@ -698,6 +698,15 @@ export const sealRelease = async (
     )
     .get();
   if (sealed !== undefined) {
+    // Sealed already: its artifacts reserved again before it is answered,
+    // so sealing a version always leaves its release protected, whatever
+    // happened to its reservations; then loaded, every byte checked.
+    const named = manifestOf(sealed.manifest, { app, version });
+    await reserveArtifacts(
+      env,
+      { app, version },
+      named.artifacts.map(({ sha256 }) => sha256)
+    );
     return await loadRelease(env, app, version);
   }
   const row = await findVersion(env, app, version);
