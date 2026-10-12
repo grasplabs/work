@@ -35,7 +35,7 @@ import type {
 import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { graspLockSchema } from "@grasp-os/shared/packages";
 import type { GraspLock, PackageLimits } from "@grasp-os/shared/packages";
 import { roleErrors } from "@grasp-os/shared/roles";
@@ -240,7 +240,8 @@ const requestEntry = (
 /** `rows` as the API returns them, with the App's and the people's names. */
 const toRequests = async (
   env: Env,
-  rows: readonly Listed[]
+  rows: readonly Listed[],
+  names: "read" | "if they can be read" = "read"
 ): Promise<DependencyRequest[]> => {
   if (rows.length === 0) {
     return [];
@@ -253,16 +254,29 @@ const toRequests = async (
       )
     ),
   ];
-  const [appNames, personNames] = await Promise.all([
-    db
-      .select({ id: apps.id, name: apps.name })
-      .from(apps)
-      .where(inArray(apps.id, [...new Set(rows.map(({ appId }) => appId))])),
-    db
-      .select({ id: users.id, name: users.name })
-      .from(users)
-      .where(inArray(users.id, people)),
-  ]);
+  const read = async () =>
+    await Promise.all([
+      db
+        .select({ id: apps.id, name: apps.name })
+        .from(apps)
+        .where(inArray(apps.id, [...new Set(rows.map(({ appId }) => appId))])),
+      db
+        .select({ id: users.id, name: users.name })
+        .from(users)
+        .where(inArray(users.id, people)),
+    ]);
+  let appNames: { id: string; name: string }[] = [];
+  let personNames: { id: string; name: string }[] = [];
+  try {
+    [appNames, personNames] = await read();
+  } catch (error) {
+    // After a change landed, its answer goes without the names rather
+    // than fail as if it hadn't.
+    if (names === "read") {
+      throw error;
+    }
+    log.warn("dependencies.names_unread", errorFields(error));
+  }
   const appName = new Map(appNames.map(({ id, name }) => [id, name]));
   const personName = new Map(personNames.map(({ id, name }) => [id, name]));
   const person = (userId: string) => ({
@@ -1255,15 +1269,17 @@ export const dependencyApprovals = async (
   const db = drizzle(env.DB);
   const decides = await holdsApprove(env, by);
   const parsed = appIdSchema.safeParse(input);
+  // Who may approve packages reads any App's, with its name, and nothing
+  // else of it: not its versions, screens, data or members.
   const known =
     decides && parsed.success
       ? await db
-          .select({ id: apps.id })
+          .select({ id: apps.id, name: apps.name })
           .from(apps)
           .where(eq(apps.id, parsed.data))
           .get()
       : undefined;
-  const { id: app } = known ?? (await appFor(env, by, input, "builder"));
+  const { id: app, name } = known ?? (await appFor(env, by, input, "builder"));
   const [generation, rows] = await Promise.all([
     policyGeneration(db),
     db
@@ -1281,6 +1297,7 @@ export const dependencyApprovals = async (
   return {
     policyGeneration: generation,
     decides,
+    app: { id: appIdSchema.parse(app), name },
     approvals: await toRequests(env, rows),
   };
 };
@@ -1577,8 +1594,11 @@ export const endDependency = async (
         : "dependency.forbidden"
     );
   }
+  // Landed: the answer is what the batch returned, and reading names
+  // can't turn it into a failure.
   return await toRequests(
     env,
-    ended.toSorted((a, b) => a.id.localeCompare(b.id))
+    ended.toSorted((a, b) => a.id.localeCompare(b.id)),
+    "if they can be read"
   );
 };

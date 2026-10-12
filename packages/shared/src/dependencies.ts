@@ -467,6 +467,8 @@ export interface DependencyApprovals {
   policyGeneration: number;
   /** Whether the reader holds `dependencies.approve` now, so may retire or revoke them. */
   decides: boolean;
+  /** The App, by its name: all a reader who doesn't build it is told of it. */
+  app: { id: AppId; name: string };
   /** Approved or retired, the newest decision first; at most {@link dependencyApprovalsListed}. */
   approvals: DependencyRequest[];
 }
