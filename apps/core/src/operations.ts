@@ -1300,7 +1300,9 @@ const spendCall = (budget: CallBudget, what: "nested" | "requests"): void => {
  * the failure of the first that was still running when the handler
  * settled and then failed: one the handler never waited for, so it could
  * neither handle it nor report it. One the handler waited for is its own
- * to have handled, and doesn't fail the run again.
+ * to have handled, and doesn't fail the run again. One stopped at the
+ * deadline (`operation.deadline_exceeded`, nested calls sharing it) is
+ * answered as unfinished, the handler's own failure.
  */
 const trackedCalls = (
   capabilities: Capabilities,
@@ -1312,6 +1314,7 @@ const trackedCalls = (
   let handlerSettled = false;
   const running = new Set<Promise<unknown>>();
   let unfinished: { error: unknown } | undefined;
+  let pastDeadline = false;
   const track = <Args extends unknown[]>(
     use: ((...args: Args) => Promise<unknown>) | undefined
   ) =>
@@ -1326,8 +1329,19 @@ const trackedCalls = (
             try {
               await call;
             } catch (error) {
-              if (handlerSettled && unfinished === undefined) {
-                unfinished = { error };
+              if (!handlerSettled) {
+                return;
+              }
+              // Left running and stopped at the deadline: the handler's
+              // own failure is that it left the call unfinished, as when
+              // the wait for it runs out (the host's error, never one to
+              // read as App code's).
+              if (
+                operationErrors.codeOf(error) === "operation.deadline_exceeded"
+              ) {
+                pastDeadline = true;
+              } else {
+                unfinished ??= { error };
               }
             }
           })();
@@ -1361,6 +1375,9 @@ const trackedCalls = (
           scheduler.wait(left, { signal: timer.signal }).catch(() => null),
         ]);
         timer.abort();
+      }
+      if (pastDeadline) {
+        throw hostError(operationErrors.create("operation.unfinished_call"));
       }
       return unfinished?.error;
     },
