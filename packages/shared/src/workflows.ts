@@ -15,6 +15,16 @@ import { permissionActionSchema } from "./permissions.ts";
 /** A workflow parameter's value: a number, or text. */
 export type ParamValue = string | number;
 
+/**
+ * Why a call of a run's code was refused for the execution it came from,
+ * named as the engine's contract names them (`execution.*`), whatever
+ * workflow the run is of.
+ */
+export const executionErrors = defineErrorFamily({
+  "execution.stale_attempt":
+    "This step's attempt has ended (it ran out of time, or the run was paused or cancelled): what its code still does acts no more.",
+});
+
 /** Why a workflow call was refused. */
 export const workflowErrors = defineErrorFamily({
   "workflow.invalid": "That isn't a valid request for a workflow.",
@@ -27,8 +37,6 @@ export const workflowErrors = defineErrorFamily({
     "A workflow's tests fail, or it has none, so this version can't be made current.",
   "workflow.outside_step":
     "A workflow calls its connections only inside a step: code between steps runs again on every replay.",
-  "workflow.stale_attempt":
-    "This step's attempt has ended (it ran out of time, or the run was paused or cancelled): what its code still does acts no more.",
   "workflow.too_many_steps":
     "This run has taken as many steps as a workflow run may: split the work over more runs.",
   "workflow.idempotency_key_invalid":

@@ -188,7 +188,7 @@ describe("reads of a kept message's attachments", () => {
     });
   });
 
-  it("are refused and recorded for a message that isn't kept, and once their attempt is over", async () => {
+  it("are refused and recorded for a message that isn't kept, and once their attempt is over, audited as stale once", async () => {
     const { host, runId } = await runReading();
     let kept: AttemptHost | undefined;
 
@@ -196,25 +196,48 @@ describe("reads of a kept message's attachments", () => {
       kept = attempt;
       return outcome(await attempt.readAttachment(null, 0));
     });
-    const late =
-      kept === undefined
-        ? "no attempt"
-        : outcome(await kept.readAttachment(null, 0));
+    const late: string[] = [];
+    for (let tries = 0; tries < 3; tries += 1) {
+      late.push(
+        kept === undefined
+          ? "no attempt"
+          : // oxlint-disable-next-line no-await-in-loop -- one read at a time
+            outcome(await kept.readAttachment(null, 0))
+      );
+    }
+    const events = await allEvents();
 
     expect({
       unkept,
       late,
       audited: await auditedReads(runId),
+      refused: events
+        .filter(
+          ({ action, target }) =>
+            action === "workflow.call.refused" && target?.id === runId
+        )
+        .map(({ detail }) => detail),
     }).toMatchObject({
       unkept: "workflow.attachment_not_found",
-      late: "workflow.stale_attempt",
+      late: [
+        "execution.stale_attempt",
+        "execution.stale_attempt",
+        "execution.stale_attempt",
+      ],
       audited: [
         {
           step: "read",
           message: null,
           errorCode: "workflow.attachment_not_found",
         },
-        { step: "read", message: null, errorCode: "workflow.stale_attempt" },
+      ],
+      // A loop of late reads leaves one record, however long it runs.
+      refused: [
+        {
+          step: "read",
+          call: "attachment",
+          errorCode: "execution.stale_attempt",
+        },
       ],
     });
   });

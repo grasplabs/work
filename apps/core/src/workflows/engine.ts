@@ -187,10 +187,16 @@ const runs = (
 ) => inJurisdiction(env, env.WORKFLOW_RUNS);
 
 /** The run `id`'s object, whether or not it has a run. */
-const runStub = (env: Env, id: string): RunStub => {
+/** The object run `id` lives in, as core's own class (run-object.ts). */
+export const runObjectOf = (
+  env: Pick<Env, "WORKFLOW_RUNS" | "DURABLE_OBJECT_JURISDICTION">,
+  id: string
+) => {
   const namespace = runs(env);
   return namespace.get(namespace.idFromName(runObjectName(runDefinition, id)));
 };
+
+const runStub = (env: Env, id: string): RunStub => runObjectOf(env, id);
 
 /**
  * A run's params, as the engine keeps them: its input under `input`, left

@@ -123,6 +123,22 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   }
 
   /**
+   * Whether the attempt `attempt` of the step whose key is `key` still
+   * holds its lease under `generation`, and its deadline hasn't passed:
+   * what a call an attempt started beyond its host (an App method, an
+   * export, and the stub calls they make) checks before it acts
+   * (attempt-fence.ts). Read from the journal; tells nothing else.
+   */
+  attemptHolds(key: string, attempt: number, generation: number): boolean {
+    const lease = this.attemptLease(key, attempt);
+    return (
+      lease !== undefined &&
+      lease.generation === generation &&
+      Date.now() < lease.deadline
+    );
+  }
+
+  /**
    * Takes the run's status changes: the newest of each batch is all core's
    * record needs, as a later status replaces an earlier one. A run of
    * core's own (an upload's extraction, a build) has no row to follow it.

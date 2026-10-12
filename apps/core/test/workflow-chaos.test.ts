@@ -103,7 +103,7 @@ const eventsOf = async (action: string, target: string) => {
 const staleCalls = async (run: string) => {
   const refused = await eventsOf("workflow.call.refused", run);
   return refused
-    .filter(({ detail }) => detail.errorCode === "workflow.stale_attempt")
+    .filter(({ detail }) => detail.errorCode === "execution.stale_attempt")
     .map(({ detail }) => `${String(detail.step)} ${String(detail.call)}`);
 };
 
@@ -493,17 +493,19 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     );
     await builder.api.workflows.cancel(ended.id);
     await finished(ended.id);
-    // The run has ended: the call it left waiting goes on, its caller
-    // still live.
+    // The run has ended: the call it left waiting goes on, but its
+    // attempt holds no more, so the point it records is refused
+    // (attempt-fence.ts).
     await mail.release();
     await vi.waitFor(
       async () => {
         await expect(
-          hitsOf(app, builder.userId, "ended:recorded")
+          hitsOf(app, builder.userId, "ended:refused")
         ).resolves.toBe(1);
       },
       { timeout: 10_000, interval: 100 }
     );
+    const endedRecorded = await hitsOf(app, builder.userId, "ended:recorded");
     const { results: kept } = await env.DB.prepare(
       "SELECT step_key, measure FROM app_statistic_steps WHERE app_id = ?"
     )
@@ -549,7 +551,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       anew,
       silent: await count("anew"),
       outlived: { ...outlivedEnded, counted: await count("outlived"), kept },
-      ended: await count("ended"),
+      ended: { counted: await count("ended"), recorded: endedRecorded },
       bounded: {
         status: await builder.api.workflows.status(bounded.id),
         known: await count("known"),
@@ -580,13 +582,71 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
         counted: 0,
         kept: [],
       },
-      // Recorded once its run had ended: taken, but neither counted nor
-      // kept (`kept` above holds no row of it either).
-      ended: 0,
+      // Asked for once its run had been cancelled: refused, as its
+      // attempt holds no more (`kept` above holds no row of it either).
+      ended: { counted: 0, recorded: 0 },
       // The point in a row the day has, and the first new row, which
       // fits; the next is left out, and the step completes all the same.
       bounded: { status: { status: "completed" }, known: 1, fits: 1, over: 0 },
     });
+  });
+
+  it("refuse what an App method a step's attempt started does once another activation ran the step again", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(
+      builder,
+      // The first attempt's App call waits at the mail server while the
+      // run is restarted from the step, which runs again and completes.
+      workflowFiles(
+        "restarted",
+        `  const attempt = await step.do("count", { description: "Count" }, async () => {
+    const attempt = await env.APP.call("hit", "restarted");
+    if (attempt === 1) {
+      await env.APP.call("pointAfter", "restarted");
+    }
+    return attempt;
+  });
+  await step.sleep("go", { description: "Wait", duration: "1 day" });
+  return attempt;`,
+        { count: 2 }
+      )
+    );
+    const mail = await mailConnection([], mailWithSearch);
+    await requestGranted(idp, builder, {
+      subject: { type: "app", appId: app },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.search"],
+      binding: "MAIL",
+    });
+    await serverBuilt(app, 1);
+    const run = await builder.api.workflows.start(app, "restarted");
+    await vi.waitFor(
+      async () => {
+        await expect(mail.searched()).resolves.toContain("hold restarted");
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    await runInstance(run.id).restart({ from: { name: "count" } });
+    // The step's new attempt waits for the App behind the held call: let
+    // go, the held call records its point, as the first attempt, which
+    // holds no more, then the new attempt runs.
+    await mail.release();
+    await vi.waitFor(
+      async () => {
+        await expect(
+          hitsOf(app, builder.userId, "restarted:refused")
+        ).resolves.toBe(1);
+        await expect(
+          hitsOf(app, builder.userId, "restarted")
+        ).resolves.toBeGreaterThan(1);
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+
+    expect({
+      recorded: await hitsOf(app, builder.userId, "restarted:recorded"),
+      counted: await pointsOf(app, builder.userId, "restarted"),
+    }).toStrictEqual({ recorded: 0, counted: 0 });
   });
 
   it("give up a step's App call that waits behind another past its attempt's time, never running it", async () => {

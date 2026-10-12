@@ -46,6 +46,7 @@ import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { appHost } from "./durable-objects.ts";
 import { sandbox } from "./sandbox.ts";
 import { buildFailed, buildServer } from "./screens.ts";
+import type { AttemptFence } from "./workflows/attempt-fence.ts";
 
 // An App's server code runs as a facet of the App's own Durable Object:
 // loaded through the Worker Loader from the App's current version, with a
@@ -543,6 +544,12 @@ export type Admission =
  */
 export type AppCallerInput = Omit<AppCaller, "token"> & {
   attempt?: string;
+  /**
+   * For a workflow run's step: who its attempt is, which every stub call
+   * of the App's code checks still holds before it acts
+   * (attempt-fence.ts). Never shown to the App's code.
+   */
+  fence?: AttemptFence;
   admission?: Admission;
 };
 
@@ -650,6 +657,8 @@ export interface Admitted {
   authority: Authority;
   idempotencyKey: string | undefined;
   attempt: string | undefined;
+  /** For a workflow run's step: its attempt, to check before acting. */
+  fence: AttemptFence | undefined;
   path: CallPath;
   method: string;
   kind: InvocationKind;
@@ -957,7 +966,12 @@ export class App extends DurableObject<Env> {
     }
   ): Promise<AppAnswer> {
     const token = crypto.randomUUID();
-    const { attempt: _attempt, admission: _admission, ...shown } = caller;
+    const {
+      attempt: _attempt,
+      fence: _fence,
+      admission: _admission,
+      ...shown
+    } = caller;
     const call: Invocation = {
       caller,
       method,
@@ -1406,6 +1420,7 @@ export class App extends DurableObject<Env> {
       },
       idempotencyKey: caller.idempotencyKey,
       attempt: caller.attempt,
+      fence: caller.fence,
       path: {
         chain: [...above, this.#app],
         holding: [...aboveHolding, { app: this.#app, call: turn }],

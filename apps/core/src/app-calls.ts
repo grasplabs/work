@@ -21,6 +21,7 @@ import { apps, appVersions } from "./db/core/schema.ts";
 import { appHost } from "./durable-objects.ts";
 import { authorizeExport } from "./permissions.ts";
 import { isRestricted, restrict } from "./restricted.ts";
+import type { AttemptFence } from "./workflows/attempt-fence.ts";
 
 // Calls between Apps. An App calls another's exports (the server methods
 // its `app/exports.json` declares, app-exports.ts) under a permission an
@@ -95,6 +96,12 @@ export interface ExportCaller {
   idempotencyKey: string | undefined;
   /** For a workflow run's step: its attempt, handed on with the key. */
   attempt?: string | undefined;
+  /**
+   * For a workflow run's step: who its attempt is, handed on with the key,
+   * so the called App's stub calls stop once it holds no more
+   * (attempt-fence.ts).
+   */
+  fence?: AttemptFence | undefined;
   /** Where the call is: the calling App last in its chain. */
   path: CallPath;
   /**
@@ -385,6 +392,7 @@ export const callExport = async (
           ? {}
           : { idempotencyKey: caller.idempotencyKey }),
         ...(caller.attempt === undefined ? {} : { attempt: caller.attempt }),
+        ...(caller.fence === undefined ? {} : { fence: caller.fence }),
         app: { id: calling, version: callingVersion },
         // In on the calling App's permission: each stub call of the
         // called App's code checks it again (app-bindings.ts).
@@ -484,13 +492,14 @@ export class AppExportBinding extends WorkerEntrypoint<
         });
         throw error;
       }
-      const { authority, idempotencyKey, attempt, path } = known;
+      const { authority, idempotencyKey, attempt, fence, path } = known;
       return await callExport(
         this.env,
         {
           authority,
           idempotencyKey,
           attempt,
+          fence,
           path,
           from: { app, token },
           actor: delegateActorOf(authority),

@@ -23,6 +23,7 @@ import type { AppGuestsBinding } from "./guests-binding.ts";
 import type { AppCollectionBinding } from "./knowledge/app-binding.ts";
 import { activePermissions, authorizeExport } from "./permissions.ts";
 import type { AppStatisticsBinding } from "./statistics-binding.ts";
+import { requireAttemptHolds } from "./workflows/attempt-fence.ts";
 
 /** What App code passes as the caller: the one its method was called with. */
 const callerSchema = z.object({ token: z.string().min(1).max(100) });
@@ -100,7 +101,11 @@ const admitted = async (
   const host = appHost(env, app);
   const { admission } = await first(host);
   await requireStillAdmitted(env, app, admission);
-  return await host.admit(token, use);
+  const admittedNow = await host.admit(token, use);
+  // Last before the act: for a workflow run's step, its attempt must
+  // still hold, so nothing it started acts once the engine gave up on it.
+  await requireAttemptHolds(env, admittedNow.fence);
+  return admittedNow;
 };
 
 /**

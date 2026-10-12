@@ -117,7 +117,10 @@ const outcomeOf = async (
  * are counted in `appCalls`, with a permission on another App's exports
  * as `CRM`; what it says fails the run as tampering is in `tampered`.
  */
-const hostHeldTo = async (calls: WorkflowCalls) => {
+const hostHeldTo = async (
+  calls: WorkflowCalls,
+  { db = env.DB }: { db?: D1Database } = {}
+) => {
   const { userId } = await personApi("builder");
   const app = appIdSchema.parse(crypto.randomUUID());
   const runId = runIdSchema.parse(crypto.randomUUID());
@@ -140,7 +143,7 @@ const hostHeldTo = async (calls: WorkflowCalls) => {
     },
   };
   const host = new RunHost(
-    env,
+    { ...env, DB: db },
     step,
     {
       app,
@@ -444,45 +447,141 @@ queueMicrotask(() => {
       appCalls,
       audited: await refusals(runId),
     }).toStrictEqual({
-      leftBehind: "workflow.stale_attempt",
+      leftBehind: "execution.stale_attempt",
       sent: "ok",
       unnamed: "workflow.step_not_reviewed",
       appCalls: [],
       audited: [
-        { step: "arm", call: "APP", errorCode: "workflow.stale_attempt" },
+        { step: "arm", call: "APP", errorCode: "execution.stale_attempt" },
         { step: "evil", call: null, errorCode: "workflow.step_not_reviewed" },
       ],
     });
   });
 
-  it("hold a call to the step whose attempt's host it came through, while another step runs beside it", async () => {
+  it("refuse a call unless the step running now and the step whose host it came through both call it, failing both", async () => {
     const { host, runId, appCalls } = await hostHeldTo({
-      steps: { arm: [], send: ["APP"] },
+      steps: { arm: ["APP"], send: [] },
       all: ["APP"],
     });
     let passed: Settled<unknown> = { ok: true, value: null };
+    let sent: Settled<unknown> = { ok: true, value: null };
     // `arm`'s code hands its host to `send`'s, running inside it, which
-    // calls APP with it: as `arm`, whose review doesn't show it.
+    // calls APP with it: `arm`'s review shows APP, `send`'s doesn't.
     const armed = await host.do("arm", {}, async (arm) => {
-      const sent = await host.do("send", {}, async () => {
+      sent = await host.do("send", {}, async () => {
         passed = await arm.callApp("hit", ["passed"]);
         return { ok: true, value: null };
       });
-      return { ok: true, value: codeOf(sent) };
+      return { ok: true, value: null };
     });
 
     expect({
       passed: codeOf(passed),
+      sent: codeOf(sent),
       armed: codeOf(armed),
       appCalls,
       audited: await refusals(runId),
     }).toStrictEqual({
       passed: "workflow.call_not_reviewed",
+      sent: "workflow.call_not_reviewed",
       armed: "workflow.call_not_reviewed",
       appCalls: [],
       audited: [
-        { step: "arm", call: "APP", errorCode: "workflow.call_not_reviewed" },
+        { step: "send", call: "APP", errorCode: "workflow.call_not_reviewed" },
       ],
+    });
+  });
+
+  it("refuse, as stale, an attempt's calls of every kind once the engine gave up on it, and audit the first", async () => {
+    const { host, runId, appCalls, leases, userId } = await hostHeldTo({
+      steps: { tidy: ["APP", "CRM", "HANDBOOK"] },
+      all: ["APP", "CRM", "HANDBOOK"],
+    });
+    const codes: Record<string, string> = {};
+    await host.do("tidy", {}, async (attempt) => {
+      // The engine gives up on it: it timed out, the run was cancelled or
+      // paused, or another activation took over.
+      leases.delete("key:tidy");
+      codes.model = codeOf(
+        await attempt.callModel({
+          step: "tidy",
+          model: "default",
+          instructions: "Summarise the invoice",
+          input: "Invoice INV-7",
+          outputSchema: { type: "string" },
+        })
+      );
+      codes.collection = codeOf(
+        await attempt.callCollection("HANDBOOK", "search", ["invoices"])
+      );
+      codes.export = codeOf(await attempt.callExport("CRM", "find", {}));
+      codes.app = codeOf(await attempt.callApp("hit", ["late"]));
+      codes.openDecision = codeOf(
+        await attempt.openDecision({
+          step: "tidy",
+          from: `person:${userId}`,
+          description: "Approve the invoice",
+          timeout: 60_000,
+        })
+      );
+      codes.decisionRecipients = codeOf(
+        await attempt.decisionRecipients(crypto.randomUUID(), false)
+      );
+      return { ok: true, value: null };
+    });
+
+    expect({ codes, appCalls, audited: await refusals(runId) }).toStrictEqual({
+      codes: {
+        model: "execution.stale_attempt",
+        collection: "execution.stale_attempt",
+        export: "execution.stale_attempt",
+        app: "execution.stale_attempt",
+        openDecision: "execution.stale_attempt",
+        decisionRecipients: "execution.stale_attempt",
+      },
+      appCalls: [],
+      audited: [
+        { step: "tidy", call: "model", errorCode: "execution.stale_attempt" },
+      ],
+    });
+  });
+
+  it("refuse, as stale, a call whose attempt the engine gave up on while the host read what the call needs", async () => {
+    let giveUp: (() => void) | undefined;
+    // Core's database, giving the attempt up as the host reads it, after
+    // the call's first check that its attempt holds.
+    const db = new Proxy(env.DB, {
+      get: (target, key) => {
+        const value: unknown = Reflect.get(target, key);
+        if (key === "prepare" && typeof value === "function") {
+          return (query: string) => {
+            giveUp?.();
+            return target.prepare(query);
+          };
+        }
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+    const { host, appCalls, leases } = await hostHeldTo(
+      { steps: { tidy: ["APP"] }, all: ["APP"] },
+      { db }
+    );
+    const codes: string[] = [];
+    await host.do("tidy", {}, async (attempt) => {
+      giveUp = () => {
+        leases.delete("key:tidy");
+      };
+      codes.push(codeOf(await attempt.callApp("hit", ["late"])));
+      return { ok: true, value: null };
+    });
+
+    expect({ codes, appCalls }).toStrictEqual({
+      codes: ["execution.stale_attempt"],
+      appCalls: [],
     });
   });
 
@@ -503,10 +602,10 @@ queueMicrotask(() => {
     });
 
     expect({ codes, appCalls, audited: await refusals(runId) }).toStrictEqual({
-      codes: ["workflow.stale_attempt", "workflow.stale_attempt"],
+      codes: ["execution.stale_attempt", "execution.stale_attempt"],
       appCalls: [],
       audited: [
-        { step: "tidy", call: "APP", errorCode: "workflow.stale_attempt" },
+        { step: "tidy", call: "APP", errorCode: "execution.stale_attempt" },
       ],
     });
   });
