@@ -119,10 +119,15 @@ test("an admin binds an engine's declared template and revokes it; its builder o
   await expect(seen.getByRole("button")).toHaveCount(0);
   await expect(seen.getByRole("form")).toHaveCount(0);
 
-  // Revoked: unbound again, for the admin and the builder alike.
+  // Revoked, once confirmed: unbound again, for the admin and the builder
+  // alike.
   await letter
     .getByRole("button", { name: "Revoke the binding of letter" })
     .click();
+  const confirm = deciding.getByRole("dialog", {
+    name: "Revoke the binding of letter?",
+  });
+  await confirm.getByRole("button", { name: "Revoke", exact: true }).click();
   await expect(letter).toContainText(unbound);
   await expect(letter).not.toContainText("Bound to");
   await building.reload();

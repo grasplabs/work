@@ -12,6 +12,15 @@ import type {
 } from "@grasp-os/shared/resource-bindings";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@grasp-os/ui/components/dialog";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import {
   NativeSelect,
@@ -257,12 +266,20 @@ const noChoice = (choices: BindingChoices): boolean => {
 };
 
 /** The first of each choice, as a form starts. */
+/** A template version as a choice names it: its template and version. */
+const templateKey = ({
+  templateId,
+  version,
+}: Pick<PublishedTemplate, "templateId" | "version">): string =>
+  `${templateId}@${version}`;
+
 const firstChoice = (choices: BindingChoices): string => {
   if (choices.kind === "model") {
     return choices.models[0] ?? "";
   }
   if (choices.kind === "template") {
-    return "0";
+    const [newest] = choices.versions;
+    return newest === undefined ? "" : templateKey(newest);
   }
   return choices.permissions[0]?.permissionId ?? "";
 };
@@ -282,7 +299,9 @@ const targetOf = (
   if (choices.kind === "knowledge") {
     return { kind: "knowledge", collections };
   }
-  const version = choices.versions[Number(picked)];
+  const version = choices.versions.find(
+    (published) => templateKey(published) === picked
+  );
   return version === undefined
     ? undefined
     : {
@@ -317,15 +336,18 @@ const BindForm = ({
     Object.fromEntries(
       resource.collections.map((collection) => [
         collection,
-        choices.kind === "knowledge"
-          ? (choices.permissions[0]?.permissionId ?? "")
-          : "",
+        // Nothing chosen yet: each collection is chosen on purpose.
+        "",
       ])
     )
   );
   if (noChoice(choices)) {
     return <NothingToChoose resource={resource} />;
   }
+  // Every declared collection needs its own choice before binding.
+  const chosen = Object.values(collections).every(
+    (permission) => permission !== ""
+  );
   const submit = () => {
     const target = targetOf(choices, picked, collections);
     if (target === undefined) {
@@ -372,12 +394,12 @@ const BindForm = ({
       ) : null}
       {choices.kind === "template" ? (
         <Choice label={t`Template version`} onChange={setPicked} value={picked}>
-          {choices.versions.map((published, index) => {
+          {choices.versions.map((published) => {
             const { templateId } = published;
             return (
               <NativeSelectOption
-                key={`${templateId}@${published.version}`}
-                value={String(index)}
+                key={templateKey(published)}
+                value={templateKey(published)}
               >
                 {t`Template ${templateId}, version ${ph({ version: published.version })}`}
               </NativeSelectOption>
@@ -395,6 +417,7 @@ const BindForm = ({
               }}
               value={collections[collection] ?? ""}
             >
+              <NativeSelectOption value="">{t`Choose a collection`}</NativeSelectOption>
               {choices.permissions.map(({ permissionId, name }) => (
                 <NativeSelectOption key={permissionId} value={permissionId}>
                   {name ?? permissionId}
@@ -403,7 +426,14 @@ const BindForm = ({
             </Choice>
           ))
         : null}
-      <Button disabled={busy} size="sm" type="submit">
+      {choices.truncated ? (
+        <p className="text-muted-foreground max-w-prose">
+          <Trans>
+            Not every choice is listed: there are too many to check.
+          </Trans>
+        </p>
+      ) : null}
+      <Button disabled={busy || !chosen} size="sm" type="submit">
         {binding === null ? (
           <Trans>Bind {alias}</Trans>
         ) : (
@@ -492,7 +522,7 @@ const PublishTemplate = ({
   );
 };
 
-/** A button that revokes `binding` of `alias`. */
+/** Revoking `binding` of `alias`, once confirmed, as disconnecting is. */
 const Revoke = ({
   alias,
   binding,
@@ -505,20 +535,50 @@ const Revoke = ({
   decide: Decide;
 }) => {
   const { t } = useLingui();
+  const [confirming, setConfirming] = useState(false);
   return (
-    <Button
-      aria-label={t`Revoke the binding of ${alias}`}
-      disabled={busy}
-      onClick={() => {
-        void decide(
-          async (session) => await session.resourceBindings.revoke(binding.id)
-        );
-      }}
-      size="sm"
-      variant="outline"
-    >
-      <Trans>Revoke</Trans>
-    </Button>
+    <Dialog onOpenChange={setConfirming} open={confirming}>
+      <DialogTrigger
+        render={
+          <Button
+            aria-label={t`Revoke the binding of ${alias}`}
+            disabled={busy}
+            size="sm"
+            variant="outline"
+          />
+        }
+      >
+        <Trans>Revoke</Trans>
+      </DialogTrigger>
+      <DialogContent closeLabel={t`Close`}>
+        <DialogHeader>
+          <DialogTitle>
+            <Trans>Revoke the binding of {alias}?</Trans>
+          </DialogTitle>
+          <DialogDescription>
+            <Trans>
+              The engine&apos;s next request through it is refused, and actions
+              waiting on it are dropped. Bind it again to use it again.
+            </Trans>
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter closeLabel={t`Close`} showCloseButton>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              setConfirming(false);
+              void decide(
+                async (session) =>
+                  await session.resourceBindings.revoke(binding.id)
+              );
+            }}
+            variant="destructive"
+          >
+            <Trans>Revoke</Trans>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 

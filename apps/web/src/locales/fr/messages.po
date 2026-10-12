@@ -1169,6 +1169,10 @@ msgstr "Discussions"
 msgid "Checked the audit trail's chain"
 msgstr "A vérifié la chaîne du journal d’audit"
 
+#: src/engines/resource-bindings.tsx
+msgid "Choose a collection"
+msgstr "Choisir une collection"
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Choose a file"
 msgstr "Choisir un fichier"
@@ -1181,6 +1185,7 @@ msgstr "Effacer"
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/resource-bindings.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -2761,6 +2766,10 @@ msgstr "Non connectée"
 msgid "Not enough is known yet. It can open once it is past {threshold}%, or once the interviews are over."
 msgstr "On n’en sait pas encore assez. Il peut ouvrir une fois {threshold} % dépassés, ou une fois les entretiens terminés."
 
+#: src/engines/resource-bindings.tsx
+msgid "Not every choice is listed: there are too many to check."
+msgstr "Tous les choix ne sont pas listés : il y en a trop à vérifier."
+
 #: src/frame/page-states.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -3542,6 +3551,10 @@ msgstr "Révoquer l’autorisation de {holder}"
 msgid "Revoke the binding of {alias}"
 msgstr "Révoquer la liaison de {alias}"
 
+#: src/engines/resource-bindings.tsx
+msgid "Revoke the binding of {alias}?"
+msgstr "Révoquer la liaison de {alias} ?"
+
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
 msgstr "A révoqué une autorisation"
@@ -4258,6 +4271,10 @@ msgstr "Les actions du moteur n'atteignent un modèle, une intégration, des con
 #: src/engines/resource-bindings.tsx
 msgid "The engine's current version declares no resource for its actions."
 msgstr "La version actuelle du moteur ne déclare aucune ressource pour ses actions."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
+msgstr "La prochaine requête du moteur qui passe par elle est refusée, et les actions qui l'attendent sont abandonnées. Liez-la à nouveau pour l'utiliser de nouveau."
 
 #: src/chat/builds.tsx
 msgid "The engines this chat builds didn't load."

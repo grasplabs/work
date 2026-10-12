@@ -1169,6 +1169,10 @@ msgstr "Chats"
 msgid "Checked the audit trail's chain"
 msgstr "Comprobó la cadena del registro de auditoría"
 
+#: src/engines/resource-bindings.tsx
+msgid "Choose a collection"
+msgstr "Elige una colección"
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Choose a file"
 msgstr "Elegir un archivo"
@@ -1181,6 +1185,7 @@ msgstr "Borrar"
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/resource-bindings.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -2761,6 +2766,10 @@ msgstr "Sin conectar"
 msgid "Not enough is known yet. It can open once it is past {threshold}%, or once the interviews are over."
 msgstr "Aún no se sabe lo suficiente. Puede abrir cuando pase del {threshold} %, o cuando terminen las entrevistas."
 
+#: src/engines/resource-bindings.tsx
+msgid "Not every choice is listed: there are too many to check."
+msgstr "No se muestran todas las opciones: hay demasiadas para comprobarlas."
+
 #: src/frame/page-states.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -3542,6 +3551,10 @@ msgstr "Revocar el permiso de {holder}"
 msgid "Revoke the binding of {alias}"
 msgstr "Revocar la vinculación de {alias}"
 
+#: src/engines/resource-bindings.tsx
+msgid "Revoke the binding of {alias}?"
+msgstr "¿Revocar la vinculación de {alias}?"
+
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
 msgstr "Revocó un permiso"
@@ -4258,6 +4271,10 @@ msgstr "Las acciones del motor llegan a un modelo, una integración, conocimient
 #: src/engines/resource-bindings.tsx
 msgid "The engine's current version declares no resource for its actions."
 msgstr "La versión actual del motor no declara ningún recurso para sus acciones."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
+msgstr "La siguiente solicitud del motor a través de ella se rechaza, y las acciones que esperan en ella se descartan. Vincúlalo de nuevo para volver a usarlo."
 
 #: src/chat/builds.tsx
 msgid "The engines this chat builds didn't load."

@@ -1169,6 +1169,10 @@ msgstr "Chats"
 msgid "Checked the audit trail's chain"
 msgstr "Checked the audit trail's chain"
 
+#: src/engines/resource-bindings.tsx
+msgid "Choose a collection"
+msgstr "Choose a collection"
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Choose a file"
 msgstr "Choose a file"
@@ -1181,6 +1185,7 @@ msgstr "Clear"
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/resource-bindings.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -2761,6 +2766,10 @@ msgstr "Not connected"
 msgid "Not enough is known yet. It can open once it is past {threshold}%, or once the interviews are over."
 msgstr "Not enough is known yet. It can open once it is past {threshold}%, or once the interviews are over."
 
+#: src/engines/resource-bindings.tsx
+msgid "Not every choice is listed: there are too many to check."
+msgstr "Not every choice is listed: there are too many to check."
+
 #: src/frame/page-states.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -3542,6 +3551,10 @@ msgstr "Revoke {holder}'s permission"
 msgid "Revoke the binding of {alias}"
 msgstr "Revoke the binding of {alias}"
 
+#: src/engines/resource-bindings.tsx
+msgid "Revoke the binding of {alias}?"
+msgstr "Revoke the binding of {alias}?"
+
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
 msgstr "Revoked a permission"
@@ -4258,6 +4271,10 @@ msgstr "The engine's actions reach a model, an integration, knowledge or a templ
 #: src/engines/resource-bindings.tsx
 msgid "The engine's current version declares no resource for its actions."
 msgstr "The engine's current version declares no resource for its actions."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
+msgstr "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
 
 #: src/chat/builds.tsx
 msgid "The engines this chat builds didn't load."

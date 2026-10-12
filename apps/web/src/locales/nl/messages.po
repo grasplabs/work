@@ -1169,6 +1169,10 @@ msgstr "Chats"
 msgid "Checked the audit trail's chain"
 msgstr "De keten van het auditlogboek gecontroleerd"
 
+#: src/engines/resource-bindings.tsx
+msgid "Choose a collection"
+msgstr "Kies een collectie"
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Choose a file"
 msgstr "Kies een bestand"
@@ -1181,6 +1185,7 @@ msgstr "Wissen"
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/resource-bindings.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -2761,6 +2766,10 @@ msgstr "Niet gekoppeld"
 msgid "Not enough is known yet. It can open once it is past {threshold}%, or once the interviews are over."
 msgstr "Er is nog niet genoeg bekend. Het kan open zodra het boven {threshold}% is, of zodra de interviews voorbij zijn."
 
+#: src/engines/resource-bindings.tsx
+msgid "Not every choice is listed: there are too many to check."
+msgstr "Niet elke keuze staat erbij: het zijn er te veel om te controleren."
+
 #: src/frame/page-states.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -3542,6 +3551,10 @@ msgstr "Toestemming van {holder} intrekken"
 msgid "Revoke the binding of {alias}"
 msgstr "Koppeling van {alias} intrekken"
 
+#: src/engines/resource-bindings.tsx
+msgid "Revoke the binding of {alias}?"
+msgstr "Koppeling van {alias} intrekken?"
+
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
 msgstr "Een toestemming ingetrokken"
@@ -4258,6 +4271,10 @@ msgstr "De acties van de engine bereiken een model, een integratie, kennis of ee
 #: src/engines/resource-bindings.tsx
 msgid "The engine's current version declares no resource for its actions."
 msgstr "De huidige versie van de engine declareert geen resource voor zijn acties."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
+msgstr "Het volgende verzoek van de engine erdoor wordt geweigerd, en acties die erop wachten vervallen. Koppel hem opnieuw om hem weer te gebruiken."
 
 #: src/chat/builds.tsx
 msgid "The engines this chat builds didn't load."
