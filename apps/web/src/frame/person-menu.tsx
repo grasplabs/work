@@ -33,7 +33,7 @@ import {
   SunIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 
 import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
@@ -43,6 +43,7 @@ import {
   applyTheme,
   chooseTheme,
   isTheme,
+  onThemeChange,
   readTheme,
   themes,
 } from "./theme.ts";
@@ -100,7 +101,8 @@ const themeIcons: Record<Theme, LucideIcon> = {
  */
 const ThemeMenu = ({ userId }: { userId: string }) => {
   const { t, i18n } = useLingui();
-  const [theme, setTheme] = useState(() => readTheme(userId));
+  // Read where it is kept, so a choice made in another tab shows here too.
+  const theme = useSyncExternalStore(onThemeChange, () => readTheme(userId));
   // What theme.js painted first was whoever was here last; this is theirs.
   useEffect(() => {
     applyTheme(readTheme(userId));
@@ -120,7 +122,6 @@ const ThemeMenu = ({ userId }: { userId: string }) => {
           value={theme}
           onValueChange={(value: unknown) => {
             if (isTheme(value)) {
-              setTheme(value);
               chooseTheme(userId, value);
             }
           }}

@@ -25,6 +25,20 @@ export const readTheme = (userId: string): Theme => {
   }
 };
 
+/**
+ * Calls `onChange` when a choice may have changed: made here (the
+ * `grasp-theme` event chooseTheme sends) or in another tab (`storage`).
+ * Returns how to stop.
+ */
+export const onThemeChange = (onChange: () => void): (() => void) => {
+  document.addEventListener("grasp-theme", onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    document.removeEventListener("grasp-theme", onChange);
+    window.removeEventListener("storage", onChange);
+  };
+};
+
 /** Has theme.js apply `theme` now, and on the next load before first paint. */
 export const applyTheme = (theme: Theme): void => {
   try {
