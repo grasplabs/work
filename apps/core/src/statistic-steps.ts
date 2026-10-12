@@ -1,6 +1,7 @@
 import { statisticRowsPerDay } from "@grasp-os/shared/statistics";
 import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
 import { and, gte, lt } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { appStatisticSteps } from "./db/core/schema.ts";
@@ -80,11 +81,13 @@ export const commitStepStatistics = async (
  * none of them is added up any more, and its end and the cleanup are
  * written together, or neither. None is kept after either: a point is
  * kept only while its run hasn't ended (`recordStatistic`). Deleting what
- * is already gone deletes nothing.
+ * is already gone deletes nothing. `also`: only if it holds as the
+ * statement runs, in its batch.
  */
 export const stepStatisticsForgotten = (
   db: DrizzleD1Database,
-  runId: string
+  runId: string,
+  also?: SQL
 ) => {
   // Every key of the run's steps starts with its ID and a colon
   // (`stepIdempotencyKey`), and no other run's does: a range of the
@@ -95,7 +98,8 @@ export const stepStatisticsForgotten = (
     .where(
       and(
         gte(appStatisticSteps.stepKey, first),
-        lt(appStatisticSteps.stepKey, `${first.slice(0, -1)};`)
+        lt(appStatisticSteps.stepKey, `${first.slice(0, -1)};`),
+        also
       )
     );
 };
