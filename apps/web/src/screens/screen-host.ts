@@ -1,11 +1,13 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewBundle } from "@grasp-os/shared/chat";
-import { authErrors } from "@grasp-os/shared/errors";
+import { authErrors, errorPayloadSchema } from "@grasp-os/shared/errors";
 import { roleErrors } from "@grasp-os/shared/roles";
 import {
+  appFunctionPath,
   screenErrors,
   screenFrameMessage,
   screenFramePath,
+  screenLeaseHeader,
   screenLimits,
 } from "@grasp-os/shared/screens";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
@@ -177,6 +179,55 @@ const refusedForBuild = (error: unknown): boolean => {
 };
 
 /**
+ * A failure that isn't core's refusal (offline, a cut connection, a
+ * proxy's page), as the frame gets it: a coded error, never what was
+ * thrown or what the response held.
+ */
+const callFailed = (): Error =>
+  Object.assign(new Error("The call failed."), {
+    code: "internal.unexpected",
+  });
+
+/**
+ * Calls one of `app`'s functions with `request`, as the frame sent it,
+ * for the build `lease` names (core's app-function-route.ts): a plain
+ * request, so core bounds its bytes as it reads them. Core's answer, or
+ * its refusal as an error with its code.
+ */
+export const callFunction = async (
+  app: string,
+  lease: string,
+  request: string
+): Promise<unknown> => {
+  let response: Response;
+  let answer: unknown;
+  try {
+    response = await fetch(`${appFunctionPath}/${encodeURIComponent(app)}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "content-type": "application/json",
+        [screenLeaseHeader]: lease,
+      },
+      body: request,
+    });
+    answer = await response.json();
+  } catch {
+    throw callFailed();
+  }
+  if (response.ok) {
+    return answer;
+  }
+  const payload = errorPayloadSchema.safeParse(answer);
+  if (!payload.success) {
+    throw callFailed();
+  }
+  throw Object.assign(new Error(payload.data.message), {
+    code: payload.data.code,
+  });
+};
+
+/**
  * A running App's screen: its own App's server, runs and error log. Each
  * connection is told which build the frame runs before its first call,
  * with core's lease on it, so one made again after a break is too.
@@ -210,6 +261,16 @@ const appTarget = (
   return {
     call: async (method, args) =>
       await framed(async (screens) => await screens.call(app, method, args)),
+    callFunction: async (request) => {
+      try {
+        return await callFunction(app, lease, request);
+      } catch (error) {
+        if (refusedForBuild(error)) {
+          void checkDeliveryNow(link, bundle, refused);
+        }
+        throw error;
+      }
+    },
     report: async (problem) => {
       await on(link, async ({ screens }) => {
         await screens.report(app, { version, screen }, problem);
@@ -266,6 +327,8 @@ const previewTarget = (
         async ({ chats }) =>
           await chats.previewCall(chatId, app, revision, method, args)
       ),
+    // A draft's functions aren't sealed, so its preview has none to call.
+    callFunction: refusedInPreview,
     report: async (problem) => {
       await on(link, async ({ chats }) => {
         await chats.previewReport(chatId, app, revision, screen, problem);

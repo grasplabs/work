@@ -1,4 +1,5 @@
 import type { ScreenBridge } from "@grasp-os/sdk/screen-runtime";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { portTransport } from "@grasp-os/shared/screen-port";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { RpcSession, RpcTarget } from "capnweb";
@@ -36,12 +37,17 @@ class Subscription extends RpcTarget {
 /** What reached core, and what it handed out. */
 const coreStandIn = () => {
   const calls: { method: string; args: unknown[] }[] = [];
+  const functionCalls: string[] = [];
   const reports: string[] = [];
   const subscriptions: Subscription[] = [];
   const target: FrameTarget = {
     call: async (method, args) => {
       calls.push({ method, args });
       return await Promise.resolve("answered");
+    },
+    callFunction: async (request) => {
+      functionCalls.push(request);
+      return await Promise.resolve({ result: { ok: true, value: null } });
     },
     report: async (problem) => {
       reports.push(problem.message);
@@ -57,7 +63,7 @@ const coreStandIn = () => {
       return await Promise.resolve(subscription);
     },
   };
-  return { calls, reports, subscriptions, target };
+  return { calls, functionCalls, reports, subscriptions, target };
 };
 
 /** A frame on its port, talking to the page's bridge as the runtime does. */
@@ -211,6 +217,25 @@ describe("the page's bridge to a screen", () => {
       },
       reached: [{ method: "notes", args: ["a"] }],
     });
+  });
+
+  it("passes a function call's request on as the text the frame sent, and nothing else", async () => {
+    const frame = framed();
+    const request = JSON.stringify({ reference: {}, input: { title: "é" } });
+    const results = {
+      text: await outcome(frame.page.callFunction(request)),
+      object: await outcome(frame.page.callFunction(unchecked({ request }))),
+      tooLong: await outcome(
+        frame.page.callFunction("x".repeat(functionRequestMaxBytes + 1))
+      ),
+    };
+    expect(results).toStrictEqual({
+      text: { result: { ok: true, value: null } },
+      object: "screen.invalid",
+      tooLong: "screen.invalid",
+    });
+    expect(frame.functionCalls).toStrictEqual([request]);
+    frame.close();
   });
 
   it("lets a burst of requests through, refuses the rest, and fills again with time", async () => {

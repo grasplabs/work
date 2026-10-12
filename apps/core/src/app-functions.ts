@@ -7,6 +7,7 @@ import type { Json } from "@grasp-os/shared/json";
 import {
   appErrorDetailsMaxBytes,
   appErrorMessageMaxLength,
+  functionRequestMaxBytes,
   operationInputMaxBytes,
   operationResultMaxBytes,
 } from "@grasp-os/shared/operation-limits";
@@ -448,12 +449,6 @@ export const invocationFor = async (
     },
   };
 };
-
-/**
- * The most bytes of a call's request, as UTF-8: the input's own bound
- * (128 KiB) and room for the reference and options around it.
- */
-export const functionRequestMaxBytes = operationInputMaxBytes + 4 * 1024;
 
 const encoder = new TextEncoder();
 

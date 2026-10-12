@@ -121,7 +121,7 @@ const admittedApp = async (
 };
 
 /** `admittedApp`, for its ID. */
-const admitted = async (
+export const admitted = async (
   env: Env,
   by: Identity,
   app: unknown
