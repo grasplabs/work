@@ -5,8 +5,8 @@
  * (workerd-sandbox.ts), and passes capabilities of its own into isolates
  * that reach back through them. No Wrangler dev server, no Miniflare.
  */
-import { execFileSync } from "node:child_process";
-import { readdirSync, writeFileSync } from "node:fs";
+import { connect, createServer } from "node:net";
+import type { Socket } from "node:net";
 import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
@@ -14,10 +14,8 @@ import { z } from "zod";
 
 import { nativeWorkerd, startSandboxSupervisor } from "./workerd-sandbox.ts";
 import type { SandboxSupervisor } from "./workerd-sandbox.ts";
-import { cleanUp, serveOnWorkerd, tempDir } from "./workerd-test-server.ts";
-
-const repo = path.join(import.meta.dirname, "..");
-const core = path.join(repo, "apps/core");
+import { serveStandIn } from "./workerd-stand-in.ts";
+import { cleanUp, tempDir } from "./workerd-test-server.ts";
 
 /** How long core may take to answer another request meanwhile. */
 const ANSWER_MS = 500;
@@ -29,37 +27,9 @@ const outcomeSchema = z.object({
   ms: z.number(),
   reachedAfter: z.number(),
   reachedInternal: z.number(),
+  verdict: z.string().nullable().optional(),
   logged: z.array(z.unknown()),
 });
-
-/**
- * The stand-in core bundled into `out` as core's own deploy bundles, by
- * Wrangler's dry run, as capnp module entries for a config in `out`.
- */
-const bundle = (out: string): string[] => {
-  const config = path.join(out, "wrangler.jsonc");
-  writeFileSync(
-    config,
-    JSON.stringify({
-      name: "session-test",
-      main: path.join(core, "test/workerd/session-worker.ts"),
-      compatibility_date: "2026-09-15",
-      compatibility_flags: ["nodejs_compat"],
-    })
-  );
-  const bundled = path.join(out, "bundle");
-  execFileSync(
-    path.join(repo, "node_modules/.bin/wrangler"),
-    ["deploy", "--dry-run", "--outdir", bundled, "--config", config],
-    { cwd: core, stdio: "ignore" }
-  );
-  return [
-    `(name = "worker.js", esModule = embed "bundle/session-worker.js")`,
-    ...readdirSync(bundled)
-      .filter((file) => file.endsWith(".sql"))
-      .map((file) => `(name = "${file}", text = embed "bundle/${file}")`),
-  ];
-};
 
 describe("a session on the on-prem sandbox", () => {
   let supervisor: SandboxSupervisor;
@@ -71,32 +41,7 @@ describe("a session on the on-prem sandbox", () => {
       processes: 2,
       log: () => {},
     });
-    const out = tempDir();
-    const modules = bundle(out);
-    const served = await serveOnWorkerd(
-      out,
-      (address) => `using Workerd = import "/workerd/workerd.capnp";
-
-const config :Workerd.Config = (
-  services = [
-    (name = "core", worker = .core),
-    (name = "sandbox", external = (address = "unix:${supervisor.socket}", http = ())),
-  ],
-  sockets = [(name = "http", address = "${address}", http = (), service = "core")],
-);
-
-const core :Workerd.Worker = (
-  modules = [${modules.join(", ")}],
-  compatibilityDate = "2026-09-15",
-  compatibilityFlags = ["nodejs_compat"],
-  bindings = [
-    (name = "RUNTIME_PROFILE", text = "workerd"),
-    (name = "SANDBOX_HOST", service = "sandbox"),
-  ],
-);
-`
-    );
-    coreUrl = served.url;
+    coreUrl = await serveStandIn("session-worker.ts", supervisor.socket);
   }, 120_000);
 
   afterAll(async () => {
@@ -104,8 +49,8 @@ const core :Workerd.Worker = (
     cleanUp();
   });
 
-  const run = async (name: string) => {
-    const response = await fetch(`${coreUrl}run?case=${name}`);
+  const run = async (name: string, owner = "app-stand-in", url = coreUrl) => {
+    const response = await fetch(`${url}run?case=${name}&owner=${owner}`);
     return outcomeSchema.parse(await response.json());
   };
 
@@ -184,6 +129,88 @@ const core :Workerd.Worker = (
     const outcome = await run("network");
     expect(outcome.status).toBe("refused");
     expect(outcome.message).toContain("not permitted to access the internet");
+  });
+
+  it("refuses a capability used once the call is over, even with its session still open", async () => {
+    const outcome = await run("lingers");
+    expect(outcome).toMatchObject({ status: "ok", value: "returned" });
+    expect(outcome.reachedAfter).toBe(0);
+  });
+
+  it("makes what the App's code sends that a session doesn't take its own failure, not an outage", async () => {
+    await expect(run("stream")).resolves.toMatchObject({
+      status: "refused",
+      verdict: "refused",
+    });
+    await expect(run("tooLarge")).resolves.toMatchObject({
+      status: "refused",
+      verdict: "refused",
+    });
+  });
+
+  it("refuses a capability named with a method a Cap'n Web stub has of its own", async () => {
+    const outcome = await run("reservedMethod");
+    expect(outcome.status).toBe("refused");
+    expect(outcome.message).toContain("expected shape");
+  });
+
+  it("frees the process of a call its caller cancelled", async () => {
+    const outcome = await run("cancelled");
+    expect(outcome.message).toContain("cancelled");
+    expect(outcome.ms).toBeLessThan(2000);
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
+      .toBe(0);
+  });
+
+  it("lets one owner hold only its share of the pool", async () => {
+    const holding = run("holds", "app-one");
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
+      .toBe(1);
+    // Half of two processes: app-one holds as many as it may.
+    await expect(run("capabilities", "app-one")).resolves.toMatchObject({
+      status: "refused",
+      verdict: "busy",
+    });
+    await expect(run("capabilities", "app-two")).resolves.toMatchObject({
+      status: "ok",
+    });
+    await expect(holding).resolves.toMatchObject({ status: "ok" });
+  });
+
+  it("refuses to run on a sandbox that doesn't say it bounds the call's CPU time", async () => {
+    // A proxy in front of the supervisor that drops what it says.
+    const proxy = path.join(tempDir(), "proxy.sock");
+    const server = createServer((client: Socket) => {
+      const upstream = connect(supervisor.socket);
+      let head = true;
+      upstream.on("data", (chunk: Buffer) => {
+        client.write(
+          head
+            ? chunk
+                .toString("latin1")
+                .replace(/\r\nx-grasp-sandbox-cpu-ms: \d+/iu, "")
+            : chunk
+        );
+        head = false;
+      });
+      client.pipe(upstream);
+      upstream.on("close", () => {
+        client.destroy();
+      });
+      client.on("close", () => {
+        upstream.destroy();
+      });
+    }).listen(proxy);
+    try {
+      const behindProxy = await serveStandIn("session-worker.ts", proxy);
+      const outcome = await run("capabilities", "app-stand-in", behindProxy);
+      expect(outcome.status).toBe("unavailable");
+      expect(outcome.message).toContain("doesn't bound");
+    } finally {
+      server.close();
+    }
   });
 
   it("says the sandbox is unavailable, not the App's fault, when the supervisor is gone", async () => {

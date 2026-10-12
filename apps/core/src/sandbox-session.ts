@@ -1,13 +1,15 @@
+import { whenAborted } from "@grasp-os/shared/deadline";
 import type { RpcAccountingLimits } from "@grasp-os/shared/rpc-accounting";
 import {
   accountedTransport,
+  heldPool,
   rpcCopyNodeBounds,
 } from "@grasp-os/shared/rpc-accounting";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { rpcArgumentDepth, screenLimits } from "@grasp-os/shared/screens";
 import { RpcSession, WebSocketTransport } from "capnweb";
 
-import { isolateRpcHeld } from "./rpc-target.ts";
+import { browserMessageSize } from "./rpc-target.ts";
 import {
   sandboxCpuHeader,
   sandboxDeadlineHeader,
@@ -61,6 +63,22 @@ export interface SessionCall {
   readonly cpuMs: number;
   /** Wall-clock time the call may take, waits included. */
   readonly wallMs: number;
+  /**
+   * Whose call it is (an App, a person's Code Mode): the supervisor lets
+   * one owner hold at most part of its pool at once.
+   */
+  readonly owner: string;
+  /**
+   * Tests only: how long the session stays open once the call settled, to
+   * show its capabilities refuse once the call is over, open or not.
+   */
+  readonly lingerMs?: number;
+}
+
+/** How a call in a session is followed, besides the call itself. */
+export interface SessionOptions {
+  /** Ends the call and frees its process: a cancel, or a deadline core keeps. */
+  readonly signal?: AbortSignal;
 }
 
 /** The methods `target`'s class and those above it declare, by name. */
@@ -103,8 +121,11 @@ export const functionCapability = (
   function: true,
 });
 
-/** The longest message a session takes, either way, in UTF-16 code units. */
-const sessionMessageSize = 16 * 1024 * 1024;
+/**
+ * The longest message a session takes, either way, in UTF-16 code units: a
+ * browser connection's (rpc-target.ts), which a core isolate is sized for.
+ */
+const sessionMessageSize = browserMessageSize;
 
 /** What a session may spend, as a browser's connection may (rpc-target.ts). */
 const sessionAccounting: RpcAccountingLimits = {
@@ -113,18 +134,39 @@ const sessionAccounting: RpcAccountingLimits = {
   maxSessionBytes: 32 * 1024 * 1024,
 };
 
+/**
+ * What every session of this isolate may hold together: a pool of their
+ * own, apart from the browsers' (`isolateRpcHeld`), so App code reaching
+ * back through sessions can't end people's browser connections.
+ */
+const sessionsHeld = heldPool(32 * 1024 * 1024);
+
 /** What a forwarder's methods take: as deep and big as one message makes. */
 const SessionTarget = boundedRpcTarget({
   depth: rpcArgumentDepth,
   size: sessionMessageSize,
 });
 
-/** A forwarder to `capability`: its methods, bounded, nothing else. */
-const forwarderOf = ({ target, methods }: SessionCapability): object => {
+/**
+ * A forwarder to `capability`: its methods, bounded, nothing else, and only
+ * while `live` says the call is open: one used after the call is refused,
+ * whether or not its session is still there.
+ */
+export const sessionForwarder = (
+  { target, methods }: SessionCapability,
+  live: () => boolean
+): object => {
   class Forwarder extends SessionTarget {}
   for (const name of methods) {
+    // Writable and configurable, as a class's own methods are: the
+    // bounded base wraps it on first construction (rpc-target.ts).
     Object.defineProperty(Forwarder.prototype, name, {
+      writable: true,
+      configurable: true,
       async value(...args: unknown[]): Promise<unknown> {
+        if (!live()) {
+          throw new Error("The call this capability was passed for is over.");
+        }
         const method: unknown = Reflect.get(target, name);
         if (typeof method !== "function") {
           throw new TypeError(`That capability has no method ${name}.`);
@@ -142,21 +184,48 @@ const backstopMs = 2000;
 /** The header core gives a session's ID in, which its verdict is asked by. */
 export const sandboxCallIdHeader = "x-grasp-sandbox-call";
 
-const verdictSchema = (body: unknown): string | undefined =>
+/** The header core says whose session it is in, for the per-owner cap. */
+export const sandboxOwnerHeader = "x-grasp-sandbox-owner";
+
+/** A verdict as the supervisor gives it. */
+interface Verdict {
+  verdict: string;
+  message: string;
+}
+
+const verdictSchema = (body: unknown): Verdict | undefined =>
   typeof body === "object" &&
   body !== null &&
   "verdict" in body &&
   typeof body.verdict === "string" &&
   "message" in body &&
   typeof body.message === "string"
-    ? body.message
+    ? { verdict: body.verdict, message: body.message }
     : undefined;
+
+/** An error saying the sandbox ended the call for the App's code, and why. */
+const verdictError = (verdict: Verdict, cause?: unknown): Error =>
+  Object.assign(new Error(verdict.message, { cause }), {
+    sandboxVerdict: verdict.verdict,
+  });
+
+/**
+ * Why the sandbox ended a session's call, for an error `runInSession`
+ * threw: `deadline`, `cpu`, `memory` or `crashed` (the supervisor's),
+ * `refused` (the App's code sent what a session doesn't take), `busy` (its
+ * owner holds as many sessions as it may); undefined otherwise.
+ */
+export const sandboxVerdictOf = (error: unknown): string | undefined => {
+  const verdict: unknown =
+    error instanceof Error ? Reflect.get(error, "sandboxVerdict") : undefined;
+  return typeof verdict === "string" ? verdict : undefined;
+};
 
 /** What the supervisor blamed the App for in session `id`, if anything. */
 const verdictOf = async (
   host: Fetcher,
   id: string
-): Promise<string | undefined> => {
+): Promise<Verdict | undefined> => {
   try {
     const response = await host.fetch(`http://sandbox/verdict/${id}`, {
       signal: AbortSignal.timeout(backstopMs),
@@ -168,6 +237,19 @@ const verdictOf = async (
     return verdictSchema(await response.json());
   } catch {
     return undefined;
+  }
+};
+
+/** Asks the supervisor to end session `id` now; never throws. */
+const cancelSession = async (host: Fetcher, id: string): Promise<void> => {
+  try {
+    const response = await host.fetch(`http://sandbox/cancel/${id}`, {
+      method: "POST",
+      signal: AbortSignal.timeout(backstopMs),
+    });
+    await response.body?.cancel();
+  } catch {
+    // The supervisor is gone: its process goes with it.
   }
 };
 
@@ -194,11 +276,17 @@ const rejectAfter = async (
  * Throws what the isolate's entrypoint threw, an error saying why the
  * sandbox ended it (the App's), or {@link SandboxUnavailableError}.
  */
-export const runInSession = async (
+/**
+ * The session's socket, accepted: once the supervisor took the call and
+ * says it bounds its CPU time as asked. Refused otherwise: `busy` for an
+ * owner at its cap, unavailable for anything else.
+ */
+const openSession = async (
   host: Fetcher,
-  call: SessionCall
-): Promise<unknown> => {
-  const id = crypto.randomUUID();
+  call: SessionCall,
+  id: string,
+  signal: AbortSignal | undefined
+): Promise<WebSocket> => {
   let response: Response;
   try {
     response = await host.fetch("http://sandbox/session", {
@@ -208,9 +296,12 @@ export const runInSession = async (
         [sandboxCpuHeader]: String(call.cpuMs),
         [sandboxWaitHeader]: String(sandboxWaitMs),
         [sandboxCallIdHeader]: id,
+        [sandboxOwnerHeader]: call.owner,
       },
+      ...(signal === undefined ? {} : { signal }),
     });
   } catch (error) {
+    signal?.throwIfAborted();
     throw new SandboxUnavailableError("The sandbox host didn't answer.", {
       cause: error,
     });
@@ -218,20 +309,87 @@ export const runInSession = async (
   const socket = response.webSocket;
   if (socket === null) {
     await response.body?.cancel();
+    if (response.status === 429) {
+      throw verdictError({
+        verdict: "busy",
+        message: "It already runs as many calls in the sandbox as it may.",
+      });
+    }
     throw new SandboxUnavailableError(
       `The sandbox host answered ${response.status}.`
     );
   }
+  socket.accept();
+  // The supervisor says the CPU time it bounds the call to: no session runs
+  // App code on a sandbox that doesn't (a code run then claims no limit).
+  if (response.headers.get(sandboxCpuHeader) !== String(call.cpuMs)) {
+    socket.close(1011, "The sandbox doesn't bound the call's CPU time.");
+    throw new SandboxUnavailableError(
+      "The sandbox doesn't bound the call's CPU time."
+    );
+  }
+  return socket;
+};
+
+/**
+ * What a session's call ended with, as `runInSession` throws it: the
+ * cancel, the App's failure (what it threw or sent, or the supervisor's
+ * verdict), or the sandbox being unavailable.
+ */
+const failureOf = async (
+  error: unknown,
+  {
+    host,
+    id,
+    closed,
+    signal,
+  }: {
+    host: Fetcher;
+    id: string;
+    closed: boolean;
+    signal: AbortSignal | undefined;
+  }
+): Promise<unknown> => {
+  if (signal?.aborted === true) {
+    // Cancelled, or past a deadline core keeps: the socket closes, and with
+    // it the call's process.
+    return signal.reason;
+  }
+  if (sandboxVerdictOf(error) !== undefined || !closed) {
+    // The App's: what its isolate's entrypoint threw, or what it sent.
+    return error;
+  }
+  const verdict = await verdictOf(host, id);
+  return verdict === undefined
+    ? new SandboxUnavailableError("The sandbox session ended.", {
+        cause: error,
+      })
+    : verdictError(verdict, error);
+};
+
+export const runInSession = async (
+  host: Fetcher,
+  call: SessionCall,
+  { signal }: SessionOptions = {}
+): Promise<unknown> => {
+  signal?.throwIfAborted();
+  const id = crypto.randomUUID();
+  const socket = await openSession(host, call, id, signal);
   let closed = false;
   socket.addEventListener("close", () => {
     closed = true;
   });
-  socket.accept();
+  // What the App's code sends that a session doesn't take (too much, too
+  // deep, a value of no kind a call takes) is its own failure.
   const transport = accountedTransport(
     new WebSocketTransport(socket),
     sessionAccounting,
-    () => new SandboxUnavailableError("The session sent more than it may."),
-    isolateRpcHeld
+    () =>
+      verdictError({
+        verdict: "refused",
+        message: "The App's code sent more than a call in the sandbox takes.",
+      }),
+    sessionsHeld
   );
   const session = new RpcSession(transport, undefined, {
     limits: {
@@ -241,6 +399,8 @@ export const runInSession = async (
   });
   // Every capability by a name of the session's own: the isolate never
   // sees these, only what the sandbox host makes of them.
+  let live = true;
+  const isLive = (): boolean => live;
   const specs: Record<string, { methods: string[] } | { function: true }> = {};
   const stubs: Record<string, object> = {};
   const named = (given: SessionCapability): string => {
@@ -248,16 +408,19 @@ export const runInSession = async (
     specs[name] = given.function
       ? { function: true }
       : { methods: [...given.methods] };
-    stubs[name] = forwarderOf(given);
+    stubs[name] = sessionForwarder(given, isLive);
     return name;
   };
   const args = call.args.map((arg) =>
     "capability" in arg ? { capability: named(arg.capability) } : arg
   );
   const settled = new AbortController();
+  const overdue = new SandboxUnavailableError(
+    "The sandbox didn't end the call in time."
+  );
   const backstop = rejectAfter(
     sandboxWaitMs + call.wallMs + backstopMs,
-    new SandboxUnavailableError("The sandbox didn't end the call in time."),
+    overdue,
     settled.signal
   );
   try {
@@ -280,24 +443,24 @@ export const runInSession = async (
       },
       stubs,
     ]);
-    return await Promise.race([answer, backstop]);
+    return await Promise.race([
+      answer,
+      backstop,
+      ...(signal === undefined ? [] : [whenAborted(signal)]),
+    ]);
   } catch (error) {
-    if (error instanceof SandboxUnavailableError && !closed) {
-      throw error;
+    if (signal?.aborted === true || error === overdue) {
+      // Given up on: the supervisor ends the call and frees its process at
+      // once, whatever the sandbox host does with the closing socket.
+      await cancelSession(host, id);
     }
-    if (!closed) {
-      // The session's open: what failed is the isolate's entrypoint.
-      throw error;
-    }
-    const verdict = await verdictOf(host, id);
-    if (verdict !== undefined) {
-      throw new Error(verdict, { cause: error });
-    }
-    throw new SandboxUnavailableError("The sandbox session ended.", {
-      cause: error,
-    });
+    throw await failureOf(error, { host, id, closed, signal });
   } finally {
+    live = false;
     settled.abort();
+    if (call.lingerMs !== undefined && !closed) {
+      await scheduler.wait(call.lingerMs);
+    }
     try {
       socket.close(1000, "The call is over.");
     } catch {

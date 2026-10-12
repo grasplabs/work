@@ -93,16 +93,21 @@ const wrapMethods = (
       const method: unknown = property?.value;
       // Cap'n Web names a method by a string; symbols (`Symbol.dispose`)
       // it calls itself, with nothing a side sent.
+      // A method that can't be wrapped would take any argument unchecked:
+      // never silently.
       if (
         typeof name === "string" &&
         name !== "constructor" &&
         property !== undefined &&
-        isMethod(method)
-      ) {
-        Reflect.defineProperty(current, name, {
+        isMethod(method) &&
+        !Reflect.defineProperty(current, name, {
           ...property,
           value: bounded(name, method, bounds),
-        });
+        })
+      ) {
+        throw new TypeError(
+          `The method ${name} can't be bounded: it isn't writable and configurable.`
+        );
       }
     }
   }

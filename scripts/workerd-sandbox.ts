@@ -111,6 +111,8 @@ export const waitHeader = "x-grasp-sandbox-wait-ms";
 /** A session's CPU-time budget, and the ID core asks its verdict by. */
 export const cpuHeader = "x-grasp-sandbox-cpu-ms";
 export const callIdHeader = "x-grasp-sandbox-call";
+/** Whose session it is, for the per-owner cap. */
+export const ownerHeader = "x-grasp-sandbox-owner";
 
 /** The header that marks an answer as the supervisor's verdict on the App's code. */
 export const verdictHeader = "x-grasp-sandbox-verdict";
@@ -123,6 +125,12 @@ export interface SandboxSupervisorOptions {
   parent?: string;
   /** How many workerd processes serve calls, one call each at a time. */
   processes?: number;
+  /**
+   * How many sessions one owner (an App, a person's Code Mode) may hold at
+   * once: half the pool, rounded up, by default, so no one owner can take
+   * every process while it waits.
+   */
+  maxPerOwner?: number;
   /** The longest deadline a call may ask for. */
   maxDeadlineMs?: number;
   /** The longest a call may wait for a free process, whatever it asks for. */
@@ -179,7 +187,10 @@ const MIB = 1024 * 1024;
 const manifestMaxBytes = 4 * MIB;
 
 const defaults = {
-  processes: 2,
+  // One call per process: a session waiting on core holds its process,
+  // which costs no CPU, so the pool is sized for the sessions that may
+  // wait at once, not for the CPU (GRA-367 sizes it per deployment).
+  processes: 4,
   maxDeadlineMs: 30_000,
   /**
    * The longest a session may last in wall-clock time, whatever it asks
@@ -205,6 +216,7 @@ const defaults = {
 type Settings = typeof defaults & {
   workerd: string;
   parent: string;
+  maxPerOwner?: number;
   log: (event: Record<string, unknown>) => void;
 };
 
@@ -378,6 +390,51 @@ const readBytes = async (
   return Buffer.concat(chunks);
 };
 
+/** The most an HTTP answer's head may take, in bytes. */
+const MAX_HEAD_BYTES = 16 * 1024;
+
+/**
+ * The head of the HTTP answer arriving on `socket` (up to its blank line)
+ * and what came after it; undefined if it closes, `signal` aborts or the
+ * head is too long first.
+ */
+const answerHead = async (
+  socket: Socket,
+  signal: AbortSignal
+): Promise<{ head: string; rest: Buffer } | undefined> => {
+  let received = Buffer.alloc(0);
+  try {
+    for await (const [chunk] of on(socket, "data", {
+      signal,
+      close: ["close", "end"],
+    })) {
+      const piece: unknown = chunk;
+      if (!Buffer.isBuffer(piece)) {
+        return undefined;
+      }
+      received = Buffer.concat([received, piece]);
+      const end = received.indexOf("\r\n\r\n");
+      if (end !== -1) {
+        socket.pause();
+        return {
+          head: received.subarray(0, end).toString("latin1"),
+          rest: received.subarray(end + 4),
+        };
+      }
+      if (received.length > MAX_HEAD_BYTES) {
+        return undefined;
+      }
+    }
+  } catch {
+    // Aborted: the session's bounds ended it first.
+  }
+  return undefined;
+};
+
+/** `head` with `name: value` added as its last header, and its blank line. */
+const withHeader = (head: string, name: string, value: string): string =>
+  `${head}\r\n${name}: ${value}\r\n\r\n`;
+
 /** A header's milliseconds, at most `max`; undefined if it gives none. */
 const millisOf = (
   request: IncomingMessage,
@@ -422,6 +479,9 @@ interface Verdict {
 const VERDICT_TTL_MS = 60_000;
 const MAX_VERDICTS = 1024;
 
+/** An owner as core names one: an App's ID, or `person:` and a person's. */
+const ownerPattern = /^[A-Za-z0-9:_.-]{1,200}$/u;
+
 /** A call ID as core makes them: a random UUID. */
 const callIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
@@ -457,6 +517,11 @@ class SandboxPool {
     crashed: 0,
     abandoned: 0,
   };
+  /** How to end each session running now, by its call ID. */
+  readonly #running = new Map<string, () => void>();
+  /** Sessions each owner holds now, waiting or running. */
+  readonly #owners = new Map<string, number>();
+  readonly #maxPerOwner: number;
   /** Verdicts on sessions, by call ID, oldest first. */
   readonly #verdicts = new Map<string, Verdict>();
 
@@ -464,6 +529,8 @@ class SandboxPool {
     this.#settings = settings;
     this.#dir = dir;
     this.#config = writeSandboxHost(dir);
+    this.#maxPerOwner =
+      settings.maxPerOwner ?? Math.ceil(settings.processes / 2);
     // Every waiting call listens; there may be many.
     setMaxListeners(0, this.#released);
   }
@@ -882,18 +949,28 @@ class SandboxPool {
     const waitMs =
       millisOf(request, waitHeader, settings.maxWaitMs) ?? settings.maxWaitMs;
     const callId = request.headers[callIdHeader];
+    const owner = request.headers[ownerHeader];
     if (
       deadlineMs === undefined ||
       cpuLimitMs === undefined ||
       typeof callId !== "string" ||
-      !callIdPattern.test(callId)
+      !callIdPattern.test(callId) ||
+      typeof owner !== "string" ||
+      !ownerPattern.test(owner)
     ) {
       refuse(
         400,
-        `A session needs ${deadlineHeader}, ${cpuHeader} and ${callIdHeader}.`
+        `A session needs ${deadlineHeader}, ${cpuHeader}, ${callIdHeader} and ${ownerHeader}.`
       );
       return;
     }
+    // One owner holds at most its share of the pool, waiting or running.
+    const held = this.#owners.get(owner) ?? 0;
+    if (held >= this.#maxPerOwner) {
+      refuse(429, "This owner already holds as many sessions as it may.");
+      return;
+    }
+    this.#owners.set(owner, held + 1);
     this.#inFlight += 1;
     try {
       await this.#relay(request, client, head, {
@@ -905,6 +982,12 @@ class SandboxPool {
       });
     } finally {
       this.#inFlight -= 1;
+      const left = (this.#owners.get(owner) ?? 1) - 1;
+      if (left <= 0) {
+        this.#owners.delete(owner);
+      } else {
+        this.#owners.set(owner, left);
+      }
     }
   }
 
@@ -944,10 +1027,15 @@ class SandboxPool {
     this.#topUp();
     // Core closing its end is how a session ends, not an abandoned call:
     // the guard watches only the bounds, and the session ends either way.
+    // Core ends one it gave up on (`POST /cancel/<id>`) as abandoned.
+    const cancelled = new AbortController();
+    this.#running.set(callId, () => {
+      cancelled.abort();
+    });
     const guard = this.#guard(
       host,
       { deadlineMs, cpuLimitMs },
-      new AbortController().signal
+      cancelled.signal
     );
     const upstream = connect(host.socket);
     upstream.on("error", ignore);
@@ -959,6 +1047,14 @@ class SandboxPool {
       }
       upstream.write(`${raw}\r\n`);
       upstream.write(head);
+      // The sandbox host's answer to the upgrade, with the CPU time this
+      // supervisor bounds the session to: core runs nothing without it.
+      const answered = await answerHead(upstream, guard.signal);
+      if (answered === undefined) {
+        throw new Error("The sandbox process didn't answer the session.");
+      }
+      client.write(withHeader(answered.head, cpuHeader, String(cpuLimitMs)));
+      client.write(answered.rest);
       // Neither end is closed for the other: core's end stays open until
       // the session's verdict is kept, so core finds it when it asks.
       client.pipe(upstream, { end: false });
@@ -973,6 +1069,7 @@ class SandboxPool {
         : await this.#sessionEnded(host, caller.signal);
       this.#judge(host, callId, ending, deadlineMs);
     } finally {
+      this.#running.delete(callId);
       guard.stop();
       upstream.destroy();
       client.destroy();
@@ -1082,6 +1179,13 @@ class SandboxPool {
       this.#verdicts.delete(id);
     }
     this.#verdicts.set(callId, verdict);
+  }
+
+  /** Ends session `callId` as its caller gave up on it; false if none runs. */
+  cancel(callId: string): boolean {
+    const end = this.#running.get(callId);
+    end?.();
+    return end !== undefined;
   }
 
   /** The verdict on session `callId`, if the App was blamed for it lately. */
@@ -1330,6 +1434,12 @@ const answerRequest = async (
     );
     return;
   }
+  const cancelOf = /^\/cancel\/(?<id>[^/]+)$/u.exec(pathname)?.groups?.id;
+  if (cancelOf !== undefined && request.method === "POST") {
+    send(response, pool.cancel(cancelOf) ? 200 : 404, "{}");
+    request.resume();
+    return;
+  }
   if (pathname !== "/call" || request.method !== "POST") {
     send(response, 404, refusal("Not found."));
     request.resume();
@@ -1431,6 +1541,17 @@ export const startSandboxSupervisor = async (
   ) {
     throw new Error(
       `The sandbox's processes must be a whole number from 1 to ${maxProcesses}, not ${String(settings.processes)}.`
+    );
+  }
+  // An owner's share is at least one process and at most the whole pool.
+  if (
+    settings.maxPerOwner !== undefined &&
+    (!Number.isInteger(settings.maxPerOwner) ||
+      settings.maxPerOwner < 1 ||
+      settings.maxPerOwner > settings.processes)
+  ) {
+    throw new Error(
+      `The sandbox's maxPerOwner must be a whole number from 1 to its processes, not ${String(settings.maxPerOwner)}.`
     );
   }
   // A bound that isn't a positive number (NaN, say) would bound nothing.

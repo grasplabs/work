@@ -64,7 +64,21 @@ const maxMethods = 64;
 
 /** A method name a capability may have: no getters, nothing internal. */
 const methodName = /^[a-zA-Z][a-zA-Z0-9_]{0,99}$/u;
-const reserved = new Set(["constructor", "then", "dup", "fetch", "connect"]);
+const reserved = new Set([
+  "constructor",
+  "fetch",
+  "connect",
+  // What a Cap'n Web stub's prototype has of its own: never a capability's.
+  "then",
+  "catch",
+  "finally",
+  "map",
+  "onRpcBroken",
+  "dup",
+  "dispose",
+  "toString",
+  "valueOf",
+]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
