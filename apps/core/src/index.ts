@@ -12,6 +12,7 @@ import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
+import { sweepReleases } from "./release-retention.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
 import { sweepStatistics } from "./statistics.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
@@ -89,7 +90,9 @@ export default {
   // src/workflows/retention.ts), and screens' staged builds 30 days
   // after they were last staged (see src/screen-frame.ts), and npm
   // tarballs and package builds no lock names any more (see
-  // src/packages/cleanup.ts). And the
+  // src/packages/cleanup.ts), and sealed App releases nothing keeps any
+  // more, with the artifacts no other release names (see
+  // src/release-retention.ts). And the
   // audit log's retention alarm armed, if it isn't yet: retention itself
   // runs on that alarm (see
   // src/audit-log.ts), and a deployment that appends nothing after a
@@ -107,6 +110,7 @@ export default {
             sweepScreenFrames(env, new Date(controller.scheduledTime)),
             sweepPackageFiles(env, new Date(controller.scheduledTime)),
             sweepReceipts(env, new Date(controller.scheduledTime)),
+            sweepReleases(env, new Date(controller.scheduledTime)),
             auditLog(env).armRetention(),
           ]
         : [

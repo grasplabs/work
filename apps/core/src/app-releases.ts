@@ -38,7 +38,9 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { and, eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { findVersion, versionFiles } from "./apps.ts";
@@ -46,11 +48,15 @@ import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
 import {
+  sdkArtifactDeletions,
+  sdkReleaseArtifacts,
   sdkReleaseManifests,
+  sdkReleaseTombstones,
   sdkResourceBindings,
   sdkStoreOwners,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
+import { finishDeletion, markArtifact } from "./release-retention.ts";
 import { sandbox } from "./sandbox.ts";
 import { buildAppCode } from "./screens.ts";
 
@@ -378,6 +384,61 @@ const verifiedRelease = async (
 };
 
 /**
+ * The manifest in `text`, the release of `key`'s: canonical, of the known
+ * shape, and naming that release; `version.protocol_unsupported` for one
+ * sealed for another protocol, `version.manifest_corrupt` otherwise.
+ */
+const manifestOf = (
+  text: string,
+  key: { app: AppId; version: number }
+): ReleaseManifest => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw versionErrors.create("version.manifest_corrupt");
+  }
+  // Its hash checked already: a protocol this platform doesn't run is a
+  // release of another platform version, not tampering.
+  const protocol: unknown =
+    typeof parsed === "object" && parsed !== null
+      ? Reflect.get(parsed, "sdkProtocolVersion")
+      : undefined;
+  if (typeof protocol === "number" && protocol !== sdkProtocolVersion) {
+    throw versionErrors.create("version.protocol_unsupported");
+  }
+  let manifest: ReleaseManifest;
+  try {
+    manifest = releaseManifestSchema.parse(parsed);
+  } catch {
+    throw versionErrors.create("version.manifest_corrupt");
+  }
+  if (
+    manifest.resourceId !== key.app ||
+    manifest.resourceVersion !== key.version ||
+    canonicalText(manifest) !== text
+  ) {
+    throw versionErrors.create("version.manifest_corrupt");
+  }
+  return manifest;
+};
+
+/** Whether the host's record of the store binding is the manifest's. */
+const bindingAgrees = (
+  manifest: ReleaseManifest,
+  binding: { targetId: string; schemaHash: string } | undefined
+): boolean => {
+  const [store] = manifest.dataStoreBindings;
+  if (store === undefined || binding === undefined) {
+    return store === undefined && binding === undefined;
+  }
+  return (
+    binding.targetId === store.storeId &&
+    binding.schemaHash === store.schemaHash
+  );
+};
+
+/**
  * The sealed release of `app`'s `version`, verified: its manifest's text
  * against its hash, then every artifact's bytes against theirs, the
  * contracts against the manifest's contract hash and the registration
@@ -399,6 +460,7 @@ export const loadRelease = async (
       .select({
         manifest: sdkReleaseManifests.manifest,
         hash: sdkReleaseManifests.manifestHash,
+        revokedAt: sdkReleaseManifests.revokedAt,
       })
       .from(sdkReleaseManifests)
       .where(
@@ -427,6 +489,10 @@ export const loadRelease = async (
   if (row === undefined) {
     throw versionErrors.create("version.not_sealed");
   }
+  // Revoked: it runs no more, whatever else holds (its bytes stay).
+  if (row.revokedAt !== null) {
+    throw versionErrors.create("version.revoked");
+  }
   const hash = await sha256Hex(row.manifest);
   if (
     hash !== row.hash ||
@@ -436,29 +502,11 @@ export const loadRelease = async (
     log.error("release.manifest_corrupt", { app, version });
     throw versionErrors.create("version.manifest_corrupt");
   }
-  let manifest: ReleaseManifest;
-  try {
-    manifest = releaseManifestSchema.parse(JSON.parse(row.manifest));
-  } catch {
-    throw versionErrors.create("version.manifest_corrupt");
-  }
-  if (
-    manifest.resourceId !== app ||
-    manifest.resourceVersion !== version ||
-    canonicalText(manifest) !== row.manifest
-  ) {
-    throw versionErrors.create("version.manifest_corrupt");
-  }
+  const manifest = manifestOf(row.manifest, { app, version });
   // The host's own record of the binding and the manifest's must agree:
   // neither alone routes a call. Checked on every load, as the record is
   // read on every load.
-  const [store] = manifest.dataStoreBindings;
-  if (
-    (store === undefined) !== (binding === undefined) ||
-    (store !== undefined &&
-      (binding?.targetId !== store.storeId ||
-        binding.schemaHash !== store.schemaHash))
-  ) {
+  if (!bindingAgrees(manifest, binding)) {
     log.error("release.binding_mismatch", { app, version });
     throw versionErrors.create("version.manifest_corrupt");
   }
@@ -478,6 +526,115 @@ export const loadRelease = async (
   } catch (error) {
     verified.delete(hash);
     throw error;
+  }
+};
+
+/**
+ * That `column` is one of `values`, bound as one JSON parameter: a
+ * release names more artifacts than D1 binds variables in a statement.
+ */
+const inJson = (column: SQLiteColumn, values: readonly string[]): SQL =>
+  sql`${column} IN (SELECT value FROM json_each(${JSON.stringify(values)}))`;
+
+/** How often, and how long, a seal waits for a deletion in flight. */
+const reserveWait = { attempts: 50, ms: 200 };
+
+/**
+ * Reserves `hashes` for release `key` (release-retention.ts), so no sweep
+ * deletes their bytes once this release names them; a reservation made
+ * again is renewed, so a seal retried long after a failed one isn't swept
+ * as an orphan while it runs. Where a deletion of one is in flight, the
+ * seal waits for its owner to finish it (the seal stores the bytes after
+ * this, so they outlive that deletion); a deletion whose owner stopped
+ * (`markTakeoverMs`) is taken over and finished here.
+ * `version.seal_busy` if a deletion is still in flight after the wait.
+ */
+const reserveArtifacts = async (
+  env: Env,
+  key: { app: AppId; version: number },
+  hashes: readonly string[]
+): Promise<void> => {
+  const unique = [...new Set(hashes)];
+  for (let attempt = 1; attempt <= reserveWait.attempts; attempt += 1) {
+    const now = Date.now();
+    // One batch, one transaction: each reserved only where no deletion
+    // mark is.
+    // oxlint-disable-next-line no-await-in-loop -- tried again in turn
+    await env.DB.batch(
+      unique.map((sha256) =>
+        env.DB.prepare(
+          `INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at)
+           SELECT ?1, ?2, ?3, ?4 WHERE NOT EXISTS (SELECT 1 FROM sdk_artifact_deletions WHERE sha256 = ?1)
+           ON CONFLICT (sha256, app_id, version) DO UPDATE SET reserved_at = excluded.reserved_at`
+        ).bind(sha256, key.app, key.version, now)
+      )
+    );
+    // Done only once every hash is reserved for this release: a hash the
+    // batch skipped for a mark whose owner finished it just after is
+    // simply tried again.
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const reserved = await drizzle(env.DB)
+      .select({ sha256: sdkReleaseArtifacts.sha256 })
+      .from(sdkReleaseArtifacts)
+      .where(
+        and(
+          eq(sdkReleaseArtifacts.appId, key.app),
+          eq(sdkReleaseArtifacts.version, key.version),
+          inJson(sdkReleaseArtifacts.sha256, unique)
+        )
+      );
+    const have = new Set(reserved.map(({ sha256 }) => sha256));
+    const missing = unique.filter((sha256) => !have.has(sha256));
+    if (missing.length === 0) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const marked = await drizzle(env.DB)
+      .select({ sha256: sdkArtifactDeletions.sha256 })
+      .from(sdkArtifactDeletions)
+      .where(inJson(sdkArtifactDeletions.sha256, missing));
+    if (marked.length === 0) {
+      // Unmarked since the batch: reserved on the next try, at once.
+      continue;
+    }
+    for (const { sha256 } of marked) {
+      // Only a mark whose owner stopped is taken over; a live one is
+      // its owner's to finish.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const owner = await markArtifact(env, sha256);
+      if (owner !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await finishDeletion(env, sha256, owner);
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await scheduler.wait(reserveWait.ms);
+  }
+  throw versionErrors.create("version.seal_busy");
+};
+
+/**
+ * Refuses (`version.seal_conflict`) a seal of a version sealed before and
+ * deleted since unless it makes the same manifest (`hash`): a version's
+ * number never comes to name other code.
+ */
+const requireAsTombstoned = async (
+  env: Env,
+  key: { app: AppId; version: number },
+  hash: string
+): Promise<void> => {
+  const tombstone = await drizzle(env.DB)
+    .select({ hash: sdkReleaseTombstones.manifestHash })
+    .from(sdkReleaseTombstones)
+    .where(
+      and(
+        eq(sdkReleaseTombstones.appId, key.app),
+        eq(sdkReleaseTombstones.version, key.version)
+      )
+    )
+    .get();
+  if (tombstone !== undefined && tombstone.hash !== hash) {
+    throw versionErrors.create("version.seal_conflict");
   }
 };
 
@@ -531,7 +688,7 @@ export const sealRelease = async (
 ): Promise<Release> => {
   const { app, version } = request;
   const sealed = await drizzle(env.DB)
-    .select({ hash: sdkReleaseManifests.manifestHash })
+    .select({ manifest: sdkReleaseManifests.manifest })
     .from(sdkReleaseManifests)
     .where(
       and(
@@ -541,6 +698,15 @@ export const sealRelease = async (
     )
     .get();
   if (sealed !== undefined) {
+    // Sealed already: its artifacts reserved again before it is answered,
+    // so sealing a version always leaves its release protected, whatever
+    // happened to its reservations; then loaded, every byte checked.
+    const named = manifestOf(sealed.manifest, { app, version });
+    await reserveArtifacts(
+      env,
+      { app, version },
+      named.artifacts.map(({ sha256 }) => sha256)
+    );
     return await loadRelease(env, app, version);
   }
   const row = await findVersion(env, app, version);
@@ -648,9 +814,17 @@ export const sealRelease = async (
   });
   const text = canonicalText(releaseManifest);
   const hash = await sha256Hex(text);
+  await requireAsTombstoned(env, { app, version }, hash);
 
-  // The bytes first, each under its hash: a manifest never names a missing
-  // artifact. Storing the same bytes again changes nothing.
+  // Reserved first, so no retention sweep deletes bytes this release will
+  // name (release-retention.ts); then the bytes, each under its hash, so a
+  // manifest never names a missing artifact. Storing the same bytes again
+  // changes nothing.
+  await reserveArtifacts(
+    env,
+    { app, version },
+    artifacts.map(({ entry }) => entry.sha256)
+  );
   await Promise.all(
     artifacts.map(async ({ entry, bytes }) => {
       // The very bytes hashed, so what is stored is what the hash names.
@@ -666,7 +840,15 @@ export const sealRelease = async (
       db.insert(sdkReleaseManifests).values({
         appId: app,
         version,
-        manifestHash: hash,
+        // The hash only while every artifact the manifest names is
+        // reserved for this release: otherwise NULL, which the column
+        // refuses, and the whole seal with it. Reservations go only with
+        // the manifest, so no sweep deletes bytes a sealed release names.
+        manifestHash: sql`(SELECT ${hash} WHERE NOT EXISTS (
+          SELECT 1 FROM json_each(${text}, '$.artifacts') AS named
+          WHERE NOT EXISTS (SELECT 1 FROM sdk_release_artifacts AS reserved
+            WHERE reserved.app_id = ${app} AND reserved.version = ${version}
+              AND reserved.sha256 = json_extract(named.value, '$.sha256'))))`,
         manifest: text,
         sealedAt: new Date(),
       }),
@@ -707,6 +889,14 @@ export const sealRelease = async (
       )
     ) {
       throw versionErrors.create("version.store_bound_elsewhere");
+    }
+    if (
+      error instanceof Error &&
+      error.message.includes(
+        "NOT NULL constraint failed: sdk_release_manifests.manifest_hash"
+      )
+    ) {
+      throw versionErrors.create("version.seal_busy");
     }
     if (!isUniqueViolation(error)) {
       throw error;

@@ -1,6 +1,7 @@
 import { sdkModules } from "@grasp-os/compiler";
 import { schemaHash } from "@grasp-os/sdk/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
+import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -440,6 +441,19 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     await expect(
       failure(async () => await loadRelease(env, fixture.app, 1))
     ).resolves.toBe("version.manifest_corrupt");
+  });
+
+  it("is refused as another platform's when sealed for another protocol, not as tampering", async () => {
+    const fixture = await appWith(notesFiles());
+    const release = await seal(fixture);
+    await rewrite(fixture.app, release, {
+      manifest: (manifest) => {
+        manifest.sdkProtocolVersion = sdkProtocolVersion + 1;
+      },
+    });
+    await expect(
+      failure(async () => await loadRelease(env, fixture.app, 1))
+    ).resolves.toBe("version.protocol_unsupported");
   });
 
   it("is refused when its manifest hashes right but isn't canonical", async () => {
