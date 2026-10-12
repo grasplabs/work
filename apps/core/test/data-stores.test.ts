@@ -1,4 +1,5 @@
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+import type { ValueShape } from "@grasp-os/sdk";
 import {
   manifestMaxBytes,
   manifestText,
@@ -1500,6 +1501,23 @@ const deleteFrom = async (
     writes: [{ op: "delete", table, id, expectedRevision: 1 }],
   });
 
+/** A schema of `notes` and `links` with fields `links`, read and written by members. */
+const notesAndLinks = (links: ValueShape): string =>
+  manifestText(
+    schemaManifest(
+      defineSchema({
+        notes: defineTable({ title: v.string() }),
+        links: defineTable(links),
+      }),
+      {
+        tables: {
+          notes: { read: "appMembers", write: "appMembers" },
+          links: { read: "appMembers", write: "appMembers" },
+        },
+      }
+    )
+  );
+
 describe("a store's references", () => {
   it("refuses to delete a record another refers to, at any depth, and writes nothing", async () => {
     const holders = [
@@ -1742,35 +1760,89 @@ describe("a store's references", () => {
     await expect(store.get("links", link)).resolves.toBeNull();
   });
 
-  it("keeps a reference written under one schema after the store moves to the next", async () => {
-    const store = await newLinkedStore();
-    const note = await insertLinked(store, "notes", { title: "Kept" });
-    await insertLinked(store, "links", { note });
-    // The next schema no longer declares `links.note` as a reference: the
-    // record written under the first still holds it.
-    const next = manifestText(
-      schemaManifest(
-        defineSchema({
-          notes: defineTable({ title: v.string() }),
-          links: defineTable({ note: v.string().optional() }),
-        }),
+  it("keeps a reference a newer version wrote through an older version's writes", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    // The older version knows no reference; the newer adds one.
+    const older = notesAndLinks({ label: v.string().optional() });
+    const newer = notesAndLinks({
+      label: v.string().optional(),
+      pin: v.id("notes").optional(),
+    });
+    const [olderHash, newerHash] = await Promise.all([
+      manifestHash(older),
+      manifestHash(newer),
+    ]);
+    await store.defineTables(older);
+    // The older version writes first, so the store reads its contract
+    // before the newer version widens it.
+    const note = newRecordId();
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: olderHash,
+      writes: [
+        { op: "insert", id: note, table: "notes", fields: { title: "Kept" } },
+      ],
+    });
+    await store.defineTables(newer);
+    const link = newRecordId();
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: newerHash,
+      writes: [
+        { op: "insert", id: link, table: "links", fields: { pin: note } },
+      ],
+    });
+    // Rolled back: the older version patches the link, then replaces it.
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: olderHash,
+      writes: [
         {
-          tables: {
-            notes: { read: "appMembers", write: "appMembers" },
-            links: { read: "appMembers", write: "appMembers" },
-          },
-        }
-      )
-    );
-    await store.defineTables(next);
+          op: "patch",
+          table: "links",
+          id: link,
+          fields: { label: "Patched" },
+          expectedRevision: 1,
+        },
+      ],
+    });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: olderHash,
+      writes: [
+        {
+          op: "replace",
+          table: "links",
+          id: link,
+          fields: { label: "Replaced" },
+          expectedRevision: 2,
+        },
+      ],
+    });
     await expect(
-      commitIn(store, {
-        principal: ada,
-        schemaHash: await manifestHash(next),
-        writes: [
-          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
-        ],
-      })
-    ).rejects.toMatchObject({ code: "data.referenced" });
+      Promise.all(
+        [olderHash, newerHash].map(
+          async (pinned) =>
+            await refusalOf(
+              async () =>
+                await commitIn(store, {
+                  principal: ada,
+                  schemaHash: pinned,
+                  writes: [
+                    {
+                      op: "delete",
+                      table: "notes",
+                      id: note,
+                      expectedRevision: 1,
+                    },
+                  ],
+                })
+            )
+        )
+      )
+    ).resolves.toStrictEqual([
+      { code: "data.referenced", details: { table: "notes", id: note } },
+      { code: "data.referenced", details: { table: "notes", id: note } },
+    ]);
   });
 });

@@ -509,6 +509,8 @@ export class StoreHost {
   #keys: CursorKeys | undefined;
   /** Each schema read so far, by hash (`#pinned`). */
   readonly #schemas = new Map<string, PinnedSchema>();
+  /** The store's contract as last read, by its hash (`#contractNow`). */
+  #contract: StoreContract | undefined;
 
   constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
@@ -1729,6 +1731,12 @@ export class StoreHost {
    * nobody can keep a record they may not see from being deleted by
    * referring to it. A reference the record already held is kept as it
    * is, whoever may read its record now.
+   *
+   * A record's references are read from all its fields as the store's
+   * contract declares them (`#contractNow`), not only the pinned table's:
+   * a field a newer version wrote, which an older version's write keeps,
+   * still refers, and the contract fixes each field's descriptor for good
+   * (`defineTables` refuses changing one), so a record ID stays one.
    */
   #indexReferences(
     pinned: PinnedSchema,
@@ -1739,6 +1747,14 @@ export class StoreHost {
     const byKey = new Map(
       staged.map((entry) => [keyOf(entry.tableId, entry.recordId), entry])
     );
+    const contract = this.#contractNow();
+    let storeTables: ReadonlyMap<string, string> | undefined;
+    const tableIdOf = (name: string): string | undefined => {
+      storeTables ??= new Map(
+        this.#tableRows().map((row) => [row.name, row.tableId])
+      );
+      return storeTables.get(name);
+    };
     for (const { table, tableId, recordId, base, fields } of staged) {
       const held = new Set<string>();
       if (base !== undefined) {
@@ -1755,14 +1771,12 @@ export class StoreHost {
         }
         this.#db.delete(recordRefs).where(where).run();
       }
-      const declared = pinned.manifest.tables[table]?.fields;
+      const declared = (contract ?? pinned.manifest).tables[table]?.fields;
       if (fields === null || declared === undefined) {
         continue;
       }
       for (const reference of recordReferences(declared, fields)) {
-        const toTableId = Object.hasOwn(pinned.tableIds, reference.table)
-          ? pinned.tableIds[reference.table]
-          : undefined;
+        const toTableId = tableIdOf(reference.table);
         if (
           toTableId === undefined ||
           (!held.has(keyOf(toTableId, reference.id)) &&
@@ -1804,6 +1818,35 @@ export class StoreHost {
         throw dataErrors.create("data.referenced", { table, id: recordId });
       }
     }
+  }
+
+  /**
+   * The store's contract as its row holds it now (call it inside a
+   * transaction), or undefined while it has none. Read again only when its
+   * hash moved on; its hash was checked when it was set (`defineTables`).
+   */
+  #contractNow(): SchemaManifest | undefined {
+    const row = this.#db
+      .select({
+        hash: store.contractHash,
+        manifest: store.contractManifest,
+      })
+      .from(store)
+      .get();
+    if (
+      row?.hash === null ||
+      row?.hash === undefined ||
+      row.manifest === null
+    ) {
+      return undefined;
+    }
+    if (this.#contract?.hash !== row.hash) {
+      this.#contract = {
+        hash: row.hash,
+        manifest: readSchemaManifest(row.manifest).manifest,
+      };
+    }
+    return this.#contract.manifest;
   }
 
   /**
