@@ -26,6 +26,7 @@ import { ScreensRpc } from "./screens-rpc.ts";
 import { fullAccess, withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
+import { TemplatesRpc } from "./templates-rpc.ts";
 import { WorkflowsRpc } from "./workflows/rpc.ts";
 
 /**
@@ -48,6 +49,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #uploads: UploadsRpc;
   readonly #permissions: PermissionsRpc;
   readonly #resourceBindings: ResourceBindingsRpc;
+  readonly #templates: TemplatesRpc;
   readonly #connections: ConnectionsRpc;
   readonly #workflows: WorkflowsRpc;
   readonly #decisions: DecisionsRpc;
@@ -78,6 +80,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#uploads = new UploadsRpc(env, full);
     this.#permissions = new PermissionsRpc(env, full);
     this.#resourceBindings = new ResourceBindingsRpc(env, full);
+    this.#templates = new TemplatesRpc(env, full);
     this.#connections = new ConnectionsRpc(env, full);
     this.#workflows = new WorkflowsRpc(env, full);
     this.#decisions = new DecisionsRpc(env, full);
@@ -147,6 +150,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get resourceBindings(): ResourceBindingsRpc {
     return this.#resourceBindings;
+  }
+
+  get templates(): TemplatesRpc {
+    return this.#templates;
   }
 
   get connections(): ConnectionsRpc {
