@@ -561,10 +561,17 @@ export const requestPermission = async (
     await requireAppRole(object.appId, "user");
   }
   if (object.type === "app") {
-    // Only an App calls another's exports.
-    if (subject.type !== "app") {
+    // An App calls another's exports; an agent calls an App's sealed
+    // functions (agent-apps.ts), reading with `read` and writing with
+    // `write`, never by an export's name.
+    if (
+      subject.type === "agent" &&
+      !actions.every((action) => action === "read" || action === "write")
+    ) {
       throw permissionErrors.create("permission.invalid", {
-        issues: ["subject: Only an App calls another App's exports."],
+        issues: [
+          "actions: An agent calls an App's functions with read or write.",
+        ],
       });
     }
     await requireAppRole(object.appId, "user");
