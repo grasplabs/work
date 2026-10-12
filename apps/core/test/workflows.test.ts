@@ -905,23 +905,30 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
       )
     );
 
-    // A cancel whose termination failed: the row says cancelled, and the
-    // instance goes on. Its next load does nothing more, and cancelling
-    // again terminates it.
+    // A cancel whose termination failed: the row has its tombstone, and
+    // the engine's run goes on. Its next activation does nothing more, and
+    // the row says cancelled once the engine has ended it.
     const leftOver = await builder.api.workflows.start(app, "cancellable");
     // Stopped once it waits, so its next activation reads the row this
     // test marks cancelled.
     await stepDone(leftOver.id, "$params");
     await stopped(leftOver.id);
     await env.DB.prepare(
-      "UPDATE workflow_runs SET status = 'cancelled' WHERE id = ?"
+      "UPDATE workflow_runs SET cancel_requested_at = ? WHERE id = ?"
     )
-      .bind(leftOver.id)
+      .bind(Date.now(), leftOver.id)
       .run();
     await woken(leftOver.id);
     await finished(leftOver.id);
     const afterLoad = await liveStatus(leftOver.id);
-    await builder.api.workflows.cancel(leftOver.id);
+    const leftOverRow = await vi.waitFor(
+      async () => {
+        const { status } = await builder.api.workflows.status(leftOver.id);
+        expect(status).toBe("cancelled");
+        return status;
+      },
+      { timeout: 10_000, interval: 100 }
+    );
 
     // A cancel that raced a start that failed: the engine has no instance
     // to terminate. A cancel of the row still running marks and audits it,
@@ -960,6 +967,7 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
           (target?.id === waiting.id || target?.id === paused.id)
       ).length,
       afterLoad,
+      leftOverRow,
       after: await hitsOf(app, builder.userId, "after"),
       raced,
       racedAudited: events.filter(
@@ -971,6 +979,7 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
       live: ["terminated", "terminated"],
       audited: 2,
       afterLoad: "errored",
+      leftOverRow: "cancelled",
       after: 0,
       raced: ["cancelled", "cancelled"],
       racedAudited: 1,

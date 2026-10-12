@@ -19,7 +19,7 @@ import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { receiveEmail } from "./workflows/inbound-email.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
 import { sweepRunDetails } from "./workflows/retention.ts";
-import { failOrphans } from "./workflows/runs.ts";
+import { repairStarts } from "./workflows/runs.ts";
 import { startDueSchedules } from "./workflows/triggers.ts";
 
 /** The cron trigger that runs every 15 minutes (wrangler.jsonc). */
@@ -71,8 +71,8 @@ export default {
   // (see src/knowledge/uploads.ts), a new version of core, audited as
   // a platform update (see src/platform-updates.ts), and workflows'
   // schedules due by the minute it runs for (see src/workflows/triggers.ts),
-  // runs whose start stopped before the engine had them, marked failed
-  // (see `failOrphans`, src/workflows/runs.ts), and connector events:
+  // starts core stopped in the middle of, sent to the engine again (see
+  // `repairStarts`, src/workflows/runs.ts), and connector events:
   // where connect listens, and the events it read, delivered (see
   // src/workflows/connector-events.ts).
   //
@@ -124,7 +124,7 @@ export default {
             // version that came and went in between goes unrecorded.
             recordPlatformUpdate(env),
             startDueSchedules(env, new Date(controller.scheduledTime)),
-            failOrphans(env),
+            repairStarts(env),
             pumpConnectorEvents(env),
           ];
     const results = await Promise.allSettled(jobs);

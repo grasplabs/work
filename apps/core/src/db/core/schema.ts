@@ -934,6 +934,30 @@ export const workflowRuns = sqliteTable(
      * spend by it (src/model-budgets.ts).
      */
     rootRunId: text("root_run_id"),
+    /**
+     * The sequence of the engine's latest status notification this row
+     * took (src/workflows/projection.ts): one at or below it is late, and
+     * changes nothing. The engine alone decides a run's status; this row
+     * follows it.
+     */
+    engineSequence: integer("engine_sequence").notNull().default(0),
+    /**
+     * The start the engine is still to confirm, as it is sent (`{ input }`,
+     * src/workflows/engine.ts): kept until the engine's first notification
+     * of the run, so a start core stopped in the middle of is sent again,
+     * the same, by the repair (src/workflows/runs.ts, `repairStarts`).
+     * Null once confirmed, and for a run whose start failed.
+     */
+    pendingStart: text("pending_start", { mode: "json" }).$type<{
+      input?: Json;
+    }>(),
+    /**
+     * When someone cancelled the run: its tombstone. From then on the
+     * dispatcher runs nothing more of it, whatever the engine still does,
+     * and the engine is told to terminate it; its status turns `cancelled`
+     * once the engine has.
+     */
+    cancelRequestedAt: timestamp("cancel_requested_at"),
   },
   (table) => [
     index("workflow_runs_app_idx").on(table.appId, table.createdAt),
@@ -946,6 +970,11 @@ export const workflowRuns = sqliteTable(
       table.workflowId,
       table.createdAt
     ),
+    // The start repair (src/workflows/runs.ts, `repairStarts`): starts the
+    // engine is still to confirm, by ID, which the repair pages by.
+    index("workflow_runs_pending_start_idx")
+      .on(table.id)
+      .where(sql`pending_start IS NOT NULL`),
     // The improvement signals (src/signals.ts): runs that failed in a
     // window, latest first. Runs started in one are counted per App
     // workflow by the index above.

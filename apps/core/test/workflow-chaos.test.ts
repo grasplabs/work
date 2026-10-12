@@ -845,14 +845,15 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       builder,
       workflowFiles(
         "blocking",
-        `  return await step.do("block", { description: "Block" }, async () => {
+        `  const blocked = await step.do("block", { description: "Block" }, async () => {
     await env.APP.call("hit", "entered");
     while ((await env.APP.call("hits", "gate")) === 0) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     return "done";
-  });`,
-        { block: "done" }
+  });
+  return await step.do("after", { description: "After" }, async () => blocked);`,
+        { block: "done", after: "done" }
       )
     );
     const run = await builder.api.workflows.start(app, "blocking");
@@ -896,6 +897,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
         "workflow.run.completed",
         "workflow.run.started",
         "workflow.step.completed $params",
+        "workflow.step.completed after",
         "workflow.step.completed block",
       ],
     });
