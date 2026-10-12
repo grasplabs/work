@@ -184,7 +184,7 @@ const refusedForBuild = (error: unknown): boolean => {
  * request, so core bounds its bytes as it reads them. Core's answer, or
  * its refusal as an error with its code.
  */
-const callFunction = async (
+export const callFunction = async (
   app: string,
   lease: string,
   request: string
@@ -201,7 +201,16 @@ const callFunction = async (
       body: request,
     }
   );
-  const answer: unknown = await response.json();
+  let answer: unknown;
+  try {
+    answer = await response.json();
+  } catch {
+    // Not core's JSON (a proxy's page, a cut connection): a coded error,
+    // never what the response held.
+    throw Object.assign(new Error("The call failed."), {
+      code: "internal.unexpected",
+    });
+  }
   if (response.ok) {
     return answer;
   }

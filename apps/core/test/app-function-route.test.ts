@@ -1,14 +1,21 @@
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
-import { appFunctionPath, screenLeaseHeader } from "@grasp-os/shared/screens";
+import {
+  appFunctionPath,
+  screenLeaseHeader,
+  screenLimits,
+} from "@grasp-os/shared/screens";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { loadRelease } from "../src/app-releases.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import { mockIdp } from "./idp.ts";
+import { person } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 
@@ -104,8 +111,10 @@ const requestFor = ({ release }: Approved, path: string, input: Json): string =>
 interface Sent {
   cookie?: string;
   lease?: string;
-  origin?: string;
+  /** The page's origin; `null` sends no `Origin` at all. */
+  origin?: string | null;
   contentType?: string;
+  headers?: Record<string, string>;
 }
 
 /** Posts `body` to `app`'s function path, as the page does unless told otherwise. */
@@ -117,12 +126,14 @@ const post = async (
     lease,
     origin = clientOrigin,
     contentType = "application/json",
+    headers = {},
   }: Sent
 ): Promise<Response> =>
   await routed(`${appFunctionPath}/${app}`, {
     method: "POST",
     headers: {
-      origin,
+      ...headers,
+      ...(origin === null ? {} : { origin }),
       "content-type": contentType,
       ...(cookie === undefined ? {} : { cookie }),
       ...(lease === undefined ? {} : { [screenLeaseHeader]: lease }),
@@ -233,6 +244,90 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
       ok: true,
       value: [],
     });
+  });
+
+  it("refuses a request with no Origin, an opaque one, or a subdomain's", async () => {
+    const approved = await approvedApp();
+    const create = requestFor(approved, "notes.create", { title: "Forged" });
+    const sent = { cookie: approved.builder.session, lease: approved.lease };
+    const subdomain = new URL(clientOrigin);
+    subdomain.hostname = `evil.${subdomain.hostname}`;
+    await expect(
+      Promise.all(
+        [null, "null", subdomain.origin].map(
+          async (origin) =>
+            await refusalOf(
+              await post(approved.app, create, { ...sent, origin })
+            )
+        )
+      )
+    ).resolves.toStrictEqual(
+      Array.from({ length: 3 }, () => ({
+        status: 403,
+        code: "request.forbidden",
+      }))
+    );
+    await expect(titlesOf(approved)).resolves.toStrictEqual({
+      ok: true,
+      value: [],
+    });
+  });
+
+  it("refuses a person past their requests of the App's screens", async () => {
+    const approved = await approvedApp();
+    const titles = requestFor(approved, "notes.titles", {});
+    const sent = { cookie: approved.builder.session, lease: approved.lease };
+    // Opening the screen counted one already; past the burst, refused.
+    const statuses: number[] = [];
+    for (let count = 0; count <= screenLimits.requests.burst; count += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one request after another, as a page sends them
+      const response = await post(approved.app, titles, sent);
+      statuses.push(response.status);
+      // oxlint-disable-next-line no-await-in-loop -- each body read so its request ends
+      await response.body?.cancel();
+    }
+    expect(statuses[0]).toBe(200);
+    expect(statuses.at(-1)).toBe(429);
+    const refused = await post(approved.app, titles, sent);
+    await expect(refusalOf(refused)).resolves.toStrictEqual({
+      status: 429,
+      code: "screen.rate_limited",
+    });
+  });
+
+  it("refuses a call of a revoked release", async () => {
+    const approved = await approvedApp();
+    const admin = await person("admin");
+    await revokeRelease(
+      env,
+      admin,
+      { app: appIdSchema.parse(approved.app), version: 1 },
+      "Leaks data"
+    );
+    const result = await resultOf(
+      await post(
+        approved.app,
+        requestFor(approved, "notes.create", { title: "After" }),
+        { cookie: approved.builder.session, lease: approved.lease }
+      )
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "version.revoked" },
+    });
+  });
+
+  it("refuses a body whose length says it is past the bound, unread", async () => {
+    const approved = await approvedApp();
+    await expect(
+      refusalOf(
+        await post(approved.app, requestFor(approved, "notes.titles", {}), {
+          cookie: approved.builder.session,
+          lease: approved.lease,
+          headers: { "content-length": String(functionRequestMaxBytes + 1) },
+        })
+      )
+    ).resolves.toStrictEqual({ status: 413, code: "request.too_large" });
   });
 
   it("stops reading a body past its bound, whatever its length says, and runs nothing", async () => {
