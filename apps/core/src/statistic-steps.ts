@@ -24,12 +24,24 @@ import { appStatisticSteps } from "./db/core/schema.ts";
  * a point, so other steps get no row. Points other attempts recorded,
  * one the engine gave up on included, are never added.
  *
+ * Only while run `runId` hasn't ended (`unendedRun`).
+ *
  * The day's bound (`statisticRowsPerDay`) is checked here, exactly: of
  * the new rows the points would make, in the order of their measure and
  * dimensions, those past the bound are left out.
  */
+/**
+ * That run `?4` hasn't ended, as the statement runs: a run's end forgets
+ * its steps' points in the write that ends it (`stepStatisticsForgotten`),
+ * so a step completing after that adds up nothing and leaves no marker,
+ * whichever write comes first.
+ */
+const unendedRun =
+  "SELECT 1 FROM workflow_runs r WHERE r.id = ?4 AND r.ended_at IS NULL";
+
 export const commitStepStatistics = async (
   env: Env,
+  runId: string,
   stepKey: string,
   attempt: string
 ): Promise<void> => {
@@ -59,6 +71,7 @@ export const commitStepStatistics = async (
              SELECT 1 FROM app_statistic_steps c
              WHERE c.step_key = ?1 AND c.committed = 1
            )
+           AND EXISTS (${unendedRun})
        )
        WHERE known OR held + nth <= ?3
        ON CONFLICT (app_id, measure, day, dimensions) DO UPDATE SET
@@ -66,12 +79,12 @@ export const commitStepStatistics = async (
          sum = sum + excluded.sum,
          min = min(min, excluded.min),
          max = max(max, excluded.max)`
-    ).bind(stepKey, attempt, statisticRowsPerDay),
+    ).bind(stepKey, attempt, statisticRowsPerDay, runId),
     env.DB.prepare(
       `INSERT OR IGNORE INTO app_statistic_steps
          (step_key, attempt, app_id, measure, day, dimensions, count, sum, min, max, committed)
-       VALUES (?, ?, '', '', '', '', 0, 0, 0, 0, 1)`
-    ).bind(stepKey, attempt),
+       SELECT ?1, ?2, '', '', '', '', 0, 0, 0, 0, 1 WHERE EXISTS (${unendedRun})`
+    ).bind(stepKey, attempt, statisticRowsPerDay, runId),
   ]);
 };
 

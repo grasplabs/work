@@ -1090,6 +1090,7 @@ export class RunHost extends RpcTarget {
           if (attempt.calledApp) {
             await commitStepStatistics(
               this.#env,
+              this.#run.runId,
               stepIdempotencyKey(this.#run.runId, step),
               attempt.id
             );
