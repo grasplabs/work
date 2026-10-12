@@ -1024,7 +1024,7 @@ export const dependencyRequests = sqliteTable(
     /** The request approved for the App when this one was asked, if any. */
     previous: text(),
     status: text({
-      enum: ["pending", "approved", "denied"],
+      enum: ["pending", "approved", "denied", "retired", "revoked"],
     }).notNull(),
     requestedBy: text("requested_by").notNull(),
     /** The chat's agent that proposed it (JSON); null for a person's own. */
@@ -1039,6 +1039,15 @@ export const dependencyRequests = sqliteTable(
     /** The policy generation the decision was made under. */
     decidedGeneration: integer("decided_generation"),
     reason: text(),
+    /** Who retired or revoked the approval, and when: null until then. */
+    endedBy: text("ended_by"),
+    endedAt: timestamp("ended_at"),
+    /**
+     * The policy generation retiring or revoking it moved on to: what was
+     * pinned under an earlier one is what a retired approval keeps.
+     */
+    endedGeneration: integer("ended_generation"),
+    endedReason: text("ended_reason"),
   },
   (table) => [
     // One request waits per App: a second pending row is refused.
