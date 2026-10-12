@@ -2,7 +2,7 @@ import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
@@ -49,15 +49,27 @@ export const titles = query({
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title).sort(),
 });
 
-/** Keeps its caller's channel where any later call in this isolate finds it, and holds the call open. */
-export const hold = mutation({
+/**
+ * Keeps its caller's channel where any later call in this isolate finds
+ * it, says so with a note ("A holding"), and holds the call open until a
+ * "release" note appears: the test sees A hold, and keeps it holding
+ * until B has finished.
+ */
+export const hold = action({
   args: {},
   returns: v.null(),
+  uses: [create, titles],
   handler: async (ctx) => {
     globalThis.kept = ctx;
-    await ctx.db.insert("notes", { title: "A's own" });
-    await wait(1500);
-    return null;
+    await ctx.runMutation(create, { title: "A holding" });
+    for (let polls = 0; polls < 50; polls += 1) {
+      const seen = await ctx.runQuery(titles, {});
+      if (seen.includes("release")) {
+        return null;
+      }
+      await wait(200);
+    }
+    throw new AppError("hold.not_released", "Nobody released the call.");
   },
 });
 
@@ -70,7 +82,7 @@ export const useKept = mutation({
     if (kept === undefined) {
       return "nothing kept";
     }
-    await kept.db.insert("notes", { title: "written as A" });
+    await kept.runMutation(create, { title: "written as A" });
     return "wrote as A";
   },
 });
@@ -177,16 +189,26 @@ describe("an invocation's authority", { timeout: 120_000 }, () => {
   it("never reaches another caller's call held open alongside it", async () => {
     const isolated = await sealedApp();
     const held = call(isolated, isolated.owner, "notes.hold");
-    // B calls while A's call is held, its channel kept in module state.
-    await scheduler.wait(300);
+    // A has kept its channel and is still running once its note shows.
+    await vi.waitFor(
+      async () => {
+        await expect(
+          call(isolated, isolated.owner, "notes.titles")
+        ).resolves.toStrictEqual({ ok: true, value: ["A holding"] });
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+    // B calls while A holds, its channel kept in module state.
     const used = await call(isolated, isolated.other, "notes.useKept");
     expect(used).toStrictEqual({ ok: true, value: "nothing kept" });
+    // Only now is A let go.
+    await call(isolated, isolated.owner, "notes.create", { title: "release" });
     await expect(held).resolves.toStrictEqual({ ok: true, value: null });
     await expect(
       call(isolated, isolated.owner, "notes.titles")
     ).resolves.toStrictEqual({
       ok: true,
-      value: ["A's own"],
+      value: ["A holding", "release"],
     });
   });
 
