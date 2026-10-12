@@ -22,6 +22,7 @@ import { PassThrough } from "node:stream";
 
 import { routerSecretHeader } from "../packages/shared/src/router.ts";
 import { d1DatabasesOf, writeD1Service } from "./workerd-d1.ts";
+import { writeR2Service } from "./workerd-r2.ts";
 import { coreWranglerConfig, smokeConfig } from "./workerd-smoke-config.ts";
 import { coreStarted, installedOnWorkerd } from "./workerd-smoke-start.ts";
 import type { KnownGap } from "./workerd-smoke-start.ts";
@@ -33,18 +34,11 @@ const INSTALL_TIMEOUT_MS = 120_000;
 
 /**
  * What the on-prem profile can't do yet, so the install can't complete:
- * each excuses exactly its own failure (its event, error and the function
- * that threw it), and the run says so. Remove one
- * once its gap is closed; the install must then be complete.
+ * each would excuse exactly its own failure (its event, error and the
+ * function that threw it), and the run says so. None now: the install must
+ * be complete.
  */
-const knownGaps: KnownGap[] = [
-  {
-    event: "builtins.blueprint_failed",
-    errorMessage: "Cannot read properties of undefined (reading 'put')",
-    thrownIn: "storeBlueprintTree",
-    why: "FILES (R2) has no on-prem service yet, so no built-in blueprint installs (GRA-446)",
-  },
-];
+const knownGaps: KnownGap[] = [];
 const core = path.join(import.meta.dirname, "../apps/core");
 const out = mkdtempSync(path.join(tmpdir(), "grasp-os-workerd-"));
 
@@ -82,6 +76,8 @@ const modules = [
 
 // The on-prem profile's D1 service, and core's D1 migrations for it.
 writeD1Service(out, d1DatabasesOf(coreWranglerConfig));
+// And its R2 service.
+writeR2Service(out);
 
 // Durable Objects keep their SQLite databases on disk, as on-prem. Removed
 // with the rest of `out`.

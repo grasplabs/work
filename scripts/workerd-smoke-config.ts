@@ -10,6 +10,7 @@ import path from "node:path";
 import { z } from "zod";
 
 import { d1Bindings, d1DatabasesOf, d1Service } from "./workerd-d1.ts";
+import { r2Bindings, r2BucketsOf, r2Service } from "./workerd-r2.ts";
 import { parseJsonc } from "./wrangler-config-rules.ts";
 
 export const coreWranglerConfig = path.join(
@@ -79,6 +80,9 @@ const config :Workerd.Config = (
     # Core's D1 databases, on the on-prem profile's D1 service: workerd
     # has D1's client but no D1 (apps/core/src/on-prem/d1.ts).
     ${d1Service("storage")},
+    # Core's R2 buckets, on the on-prem profile's R2 service: workerd has
+    # R2's client but no R2 (apps/core/src/on-prem/r2.ts).
+    ${r2Service("storage")},
   ],
   sockets = [(name = "http", address = "127.0.0.1:${port}", http = (), service = "core")],
 );
@@ -93,6 +97,7 @@ const core :Workerd.Worker = (
     (name = "RUNTIME_PROFILE", text = "workerd"),
     ${durableObjectBindings.join(",\n    ")},
     ${d1Bindings(d1DatabasesOf(coreWranglerConfig)).join(",\n    ")},
+    ${r2Bindings(r2BucketsOf(coreWranglerConfig)).join(",\n    ")},
     # No LOADER (experimental in workerd) and no WORKFLOWS (no engine):
     # apps and screens need workerd's --experimental, and workflows don't
     # run on-prem (apps/core/src/workflows/engine.ts).
