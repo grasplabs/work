@@ -31,15 +31,15 @@ import type {
   IntegrationState,
 } from "../connections/integrations.ts";
 import { OfferSwitch } from "../connections/offer-switch.tsx";
-import { SourceBadge } from "../connections/source-badge.tsx";
 import { ErrorText } from "../error-text.tsx";
-import { formatList } from "../format.ts";
+import { formatDate, formatDayMonth } from "../format.ts";
 import {
   LoadingLines,
   NotFound,
   PageLoading,
   PageNotLoaded,
 } from "../frame/page-states.tsx";
+import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -239,21 +239,27 @@ const Overview = ({
         className="flex flex-col gap-3"
       >
         <h2 className="font-medium" id="integration-status">
-          <Trans>Status</Trans>
+          <Trans>Account</Trans>
         </h2>
-        <div className="bg-card flex items-center gap-2 rounded-xl border p-4">
-          {state === "not_connected" ? null : (
-            <span
-              aria-hidden="true"
-              className={
-                state === "needs_reauth"
-                  ? "bg-status-attention size-1.75 rounded-full"
-                  : "bg-status-agreed size-1.75 rounded-full"
-              }
-            />
-          )}
-          {i18n._(stateText[state])}
-        </div>
+        <dl className="bg-card grid grid-cols-[auto_minmax(0,1fr)] gap-x-8 gap-y-3 rounded-xl border p-4">
+          <dt className="text-muted-foreground">
+            <Trans>Status</Trans>
+          </dt>
+          <dd className="flex items-center gap-2">
+            {state === "not_connected" ? null : (
+              <span
+                aria-hidden="true"
+                className={
+                  state === "needs_reauth"
+                    ? "bg-status-attention size-1.75 rounded-full"
+                    : "bg-status-agreed size-1.75 rounded-full"
+                }
+              />
+            )}
+            {i18n._(stateText[state])}
+          </dd>
+          <ConnectedBy integration={integration} />
+        </dl>
       </section>
       <section
         aria-labelledby="integration-tools"
@@ -321,11 +327,62 @@ const Account = ({
   );
 };
 
-/** What the app is for, under its name: its kinds, as the catalog names them. */
+/** What the app is for, under its name: in a sentence where the catalog says, else its kind. */
 const aboutOf = (integration: Integration): string | undefined =>
-  integration.categories.length === 0
-    ? undefined
-    : formatList(integration.categories);
+  integration.description ?? integration.categories[0];
+
+/** The connection that says who connected the app and when: its newest. */
+const newestOf = (integration: Integration) => integration.connections[0];
+
+/** Who connected the app, and on which day, as the prototype's account card says it. */
+const ConnectedBy = ({ integration }: { integration: Integration }) => {
+  const { t } = useLingui();
+  const newest = newestOf(integration);
+  if (newest === undefined) {
+    return null;
+  }
+  const date = formatDate(newest.createdAt);
+  const person = newest.connectedByName;
+  return (
+    <>
+      <dt className="text-muted-foreground">
+        <Trans>Connected by</Trans>
+      </dt>
+      <dd>
+        {person === null
+          ? date
+          : t({
+              message: `${person}, ${date}`,
+              comment: "Who connected the app, then the day they did.",
+            })}
+      </dd>
+    </>
+  );
+};
+
+/** What the app is for and, once it is connected, since when: "Accounting · connected 3 Oct". */
+const Subtitle = ({ integration }: { integration: Integration }) => {
+  const { t } = useLingui();
+  const about = aboutOf(integration);
+  const newest = newestOf(integration);
+  if (newest === undefined) {
+    return about === undefined ? null : (
+      <p className="text-muted-foreground">{about}</p>
+    );
+  }
+  const date = formatDayMonth(newest.createdAt);
+  return (
+    <p className="text-muted-foreground">
+      {about === undefined
+        ? t`Connected ${date}`
+        : t({
+            message: `${about} · connected ${date}`,
+            comment:
+              "{about} is what the app is for, as the app list writes it, e.g. “Accounting”. {date} is a day and month.",
+          })}
+    </p>
+  );
+};
 
 /** Why this person can't connect it, where they can't: staff, an entry not offered, or a toolkit only admins connect. */
 const WhyNoConnect = ({
@@ -386,7 +443,6 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
   const connected =
     connection !== undefined &&
     integration.connections.some(({ id }) => id === connection);
-  const about = aboutOf(integration);
   const count = integration.connections.length;
   return (
     <>
@@ -396,7 +452,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           { label: integration.name },
         ]}
       />
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-7 text-sm md:px-9">
+      <Page>
         <div className="flex items-center gap-4">
           <AppLogo logo={integration.logo} name={integration.name} />
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -404,16 +460,13 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
               <h1 className="text-2xl font-medium tracking-tight">
                 {integration.name}
               </h1>
-              <SourceBadge source={integration.source} />
               {integration.listed && !integration.offered ? (
                 <Badge variant="outline">
                   <Trans>Not offered</Trans>
                 </Badge>
               ) : null}
             </div>
-            {about === undefined ? null : (
-              <p className="text-muted-foreground">{about}</p>
-            )}
+            <Subtitle integration={integration} />
           </div>
           {connectable && count === 0 ? (
             <Button onClick={open}>
@@ -437,6 +490,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
           </output>
         ) : null}
         <Tabs
+          className="gap-6 text-sm"
           onValueChange={(next: Tab) => {
             void navigate({
               replace: true,
@@ -460,27 +514,23 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
             </TabsTrigger>
           </TabsList>
           <TabsContent value="overview">
-            <div className="pt-4">
-              <Overview
-                catalog={catalog}
-                identity={identity}
-                integration={integration}
-                tools={integration.listed ? tools : undefined}
-              />
-            </div>
+            <Overview
+              catalog={catalog}
+              identity={identity}
+              integration={integration}
+              tools={integration.listed ? tools : undefined}
+            />
           </TabsContent>
           <TabsContent value="account">
-            <div className="pt-4">
-              <Account
-                held={held}
-                identity={identity}
-                integration={integration}
-                onConnect={connectable ? open : undefined}
-              />
-            </div>
+            <Account
+              held={held}
+              identity={identity}
+              integration={integration}
+              onConnect={connectable ? open : undefined}
+            />
           </TabsContent>
         </Tabs>
-      </div>
+      </Page>
       {connectable ? (
         <ConnectDialog
           identity={identity}
