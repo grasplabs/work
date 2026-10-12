@@ -17,35 +17,49 @@ import {
   resourceBindingErrors,
 } from "@grasp-os/shared/resource-bindings";
 import type {
+  BindingChoices,
+  BindingState,
   BindingTarget,
+  DeclaredResource,
   ModelBindingBudget,
   ResourceBinding,
+  ResourceBindingsReview,
 } from "@grasp-os/shared/resource-bindings";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { loadRelease } from "./app-releases.ts";
+import type { Release } from "./app-releases.ts";
 import { appFor, findApp } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
-import { appResourceBindings, apps } from "./db/core/schema.ts";
+import { appResourceBindings, apps, permissions } from "./db/core/schema.ts";
+import { collections } from "./db/knowledge/schema.ts";
+import { gatewaySettings } from "./models.ts";
 import type { BoundResource, ResourceBindings } from "./operations.ts";
 import {
   requireMemberAdmin,
   requireStillAdmin,
   stillAdminSql,
 } from "./permissions.ts";
+import { unchecked } from "./resource-adapter.ts";
 import type {
   BindingCaller,
+  ContractAsks,
   ResourceAdapter,
   ServedBinding,
 } from "./resource-adapter.ts";
-import { connectorAdapter } from "./resource-connector.ts";
+import { connectorAdapter, contractReader } from "./resource-connector.ts";
+import type {
+  ConnectionGrantRow,
+  ContractReader,
+} from "./resource-connector.ts";
 import { knowledgeAdapter } from "./resource-knowledge.ts";
 import { modelAdapter } from "./resource-model.ts";
-import { templateAdapter } from "./resource-templates.ts";
+import { templateAdapter, templateVersionsOf } from "./resource-templates.ts";
 
 // Approved resource bindings (spec 12, 16.1, 32.3): what lets an action of
 // an App of spec 8's layout reach a model, a connection, knowledge or a
@@ -111,13 +125,17 @@ export const declarationHash = async (
   return await sha256Hex(canonicalJson(json));
 };
 
-/** `target` bound for `declaration`, by its kind's adapter. */
-const boundBy = async (
+/**
+ * `target` bound for `declaration`, by its kind's adapter: with a review's
+ * `asks`, sharing and bounding what it asks connect.
+ */
+const bindWith = async (
   env: Env,
   app: AppId,
   declaration: AnyResource,
-  target: BindingTarget
-): Promise<ServedBinding | undefined> => {
+  target: BindingTarget,
+  asks?: ContractAsks
+): Promise<ServedBinding | undefined | typeof unchecked> => {
   if (declaration["~resource"] !== target.kind) {
     return undefined;
   }
@@ -126,7 +144,19 @@ const boundBy = async (
   // `adapters` holds each kind's own adapter.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const loose = adapter as ResourceAdapter<BindingTarget["kind"]> | undefined;
-  return await loose?.bind(env, app, declaration, target);
+  return await loose?.bind(env, app, declaration, target, asks);
+};
+
+/** `target` bound for `declaration` now, asking every provider live. */
+const boundBy = async (
+  env: Env,
+  app: AppId,
+  declaration: AnyResource,
+  target: BindingTarget
+): Promise<ServedBinding | undefined> => {
+  const served = await bindWith(env, app, declaration, target);
+  // Only a review's limit leaves a target unchecked; this one has none.
+  return served === unchecked ? undefined : served;
 };
 
 type Row = typeof appResourceBindings.$inferSelect;
@@ -480,6 +510,330 @@ export const listResourceBindings = async (
   return rows.map(toBinding);
 };
 
+/** Why an active binding doesn't serve its declaration now. */
+type NotServed =
+  /** The current declaration is of another kind. */
+  | "kind"
+  /** The stored target doesn't read. */
+  | "unreadable"
+  /** The current declaration isn't the approved one. */
+  | "declaration"
+  /** The target can't be bound any more. */
+  | "unbindable"
+  /** The target serves another contract, or a changed one. */
+  | "drift"
+  /** A review's limit on asking connect left it unchecked. */
+  | "unchecked"
+  /** Its stored budget doesn't read, so it would run uncapped. */
+  | "budget";
+
+/** How an active binding resolves for a declaration now. */
+type Resolution =
+  | {
+      readonly state: "served";
+      readonly served: ServedBinding;
+      /** Its caps; null when it has none. */
+      readonly budget: ModelBindingBudget | null;
+    }
+  | {
+      readonly state: Exclude<BindingState, "served" | "unbound">;
+      readonly why: NotServed;
+    };
+
+/**
+ * Whether `row`, the active binding of `declaration`'s alias of `app`,
+ * serves it now: approved for exactly this declaration, and its target
+ * still serving exactly the contract it served then. Both a request's
+ * resolution and an admin's review read it here, so the review says
+ * exactly what the next request will find. It logs nothing: a request
+ * does, a review doesn't.
+ */
+const resolved = async (
+  env: Env,
+  app: AppId,
+  declaration: AnyResource,
+  row: Row,
+  asks?: ContractAsks
+): Promise<Resolution> => {
+  if (row.kind !== declaration["~resource"]) {
+    return { state: "declaration_changed", why: "kind" };
+  }
+  const target = bindingTargetSchema.safeParse(JSON.parse(row.target));
+  if (!target.success) {
+    return { state: "grant_lost", why: "unreadable" };
+  }
+  if ((await declarationHash(declaration)) !== row.declarationHash) {
+    return { state: "declaration_changed", why: "declaration" };
+  }
+  // A budget that doesn't read serves nothing, so it never runs uncapped;
+  // checked before connect is asked anything.
+  const budget = storedBudget(row);
+  if (budget === "unreadable") {
+    return { state: "budget_damaged", why: "budget" };
+  }
+  const served = await bindWith(env, app, declaration, target.data, asks);
+  // Never served unless checked: a review that ran out of asks says so.
+  if (served === unchecked) {
+    return { state: "unchecked", why: "unchecked" };
+  }
+  if (served === undefined) {
+    return { state: "grant_lost", why: "unbindable" };
+  }
+  return served.contractId === row.contractId &&
+    served.fingerprint === row.fingerprint
+    ? { state: "served", served, budget }
+    : { state: "contract_changed", why: "drift" };
+};
+
+/** The most choices of one kind a review offers. */
+const choicesMax = 100;
+
+/**
+ * The most times one review asks connect what a connection serves, across
+ * all its connector resources: each (connection, contract) is asked once,
+ * and what is left past this is left out, marked truncated.
+ */
+const reviewContractAsksMax = 50;
+
+const actionListSchema = z.array(z.string());
+
+/**
+ * The App's own active permissions on objects of `objectType`, newest
+ * first: at most `choicesMax`, and whether there were more.
+ */
+const appGrants = async (
+  env: Env,
+  app: AppId,
+  objectType: "connection" | "collection"
+): Promise<{ rows: ConnectionGrantRow[]; truncated: boolean }> => {
+  const rows = await drizzle(env.DB)
+    .select({
+      id: permissions.id,
+      objectId: permissions.objectId,
+      resource: permissions.resource,
+      actions: permissions.actions,
+    })
+    .from(permissions)
+    .where(
+      and(
+        eq(permissions.subjectType, "app"),
+        eq(permissions.subjectId, app),
+        eq(permissions.objectType, objectType),
+        eq(permissions.status, "active"),
+        isNull(permissions.chatId)
+      )
+    )
+    .orderBy(desc(permissions.grantedAt))
+    .limit(choicesMax + 1);
+  return {
+    rows: rows.slice(0, choicesMax),
+    truncated: rows.length > choicesMax,
+  };
+};
+
+/** What one review reads once, for every declared resource's choices. */
+interface ReviewGrants {
+  readonly connections: Awaited<ReturnType<typeof appGrants>>;
+  readonly collections: Awaited<ReturnType<typeof appGrants>>;
+  /** The collections' names, by ID. */
+  readonly names: ReadonlyMap<string, string>;
+  readonly contracts: ContractReader;
+}
+
+/** The App's grants and their collections' names, read once for a review. */
+const reviewGrants = async (
+  env: Env,
+  app: AppId,
+  contracts: ContractReader
+): Promise<ReviewGrants> => {
+  const [connections, collectionGrants] = await Promise.all([
+    appGrants(env, app, "connection"),
+    appGrants(env, app, "collection"),
+  ]);
+  const readable = collectionGrants.rows.filter(
+    ({ actions }) =>
+      actionListSchema.safeParse(JSON.parse(actions)).data?.includes("read") ===
+      true
+  );
+  const ids = [...new Set(readable.map(({ objectId }) => objectId))];
+  const named =
+    ids.length === 0
+      ? []
+      : await drizzle(env.KNOWLEDGE)
+          .select({ id: collections.id, name: collections.name })
+          .from(collections)
+          .where(inArray(collections.id, ids));
+  return {
+    connections,
+    collections: { rows: readable, truncated: collectionGrants.truncated },
+    names: new Map(named.map(({ id, name }) => [id, name])),
+    contracts,
+  };
+};
+
+/**
+ * What `declaration` may be bound to now, from the grants the review read.
+ * A connector's choices are those its adapter binds, so each is one
+ * approving accepts; the other kinds' are checked as they are approved.
+ */
+const choicesFor = async (
+  env: Env,
+  declaration: AnyResource,
+  grants: ReviewGrants
+): Promise<BindingChoices> => {
+  if (declaration["~resource"] === "model") {
+    return {
+      kind: "model",
+      models: gatewaySettings(env).models,
+      truncated: false,
+    };
+  }
+  if (declaration["~resource"] === "template") {
+    const versions = await templateVersionsOf(
+      env,
+      declaration.contract,
+      choicesMax + 1
+    );
+    return {
+      kind: "template",
+      versions: versions.slice(0, choicesMax),
+      truncated: versions.length > choicesMax,
+    };
+  }
+  if (declaration["~resource"] === "connector") {
+    const { rows, truncated } = grants.connections;
+    const serving = await Promise.all(
+      rows.map(
+        async (row) =>
+          [row, await grants.contracts.serves(row, declaration)] as const
+      )
+    );
+    return {
+      kind: "connector",
+      permissions: serving
+        .filter(([, serves]) => serves === true)
+        .map(([row]) => ({
+          permissionId: row.id,
+          connectionId: row.objectId,
+          resource: row.resource,
+        })),
+      truncated:
+        truncated || serving.some(([, serves]) => serves === undefined),
+    };
+  }
+  return {
+    kind: "knowledge",
+    permissions: grants.collections.rows.map((row) => ({
+      permissionId: row.id,
+      collectionId: row.objectId,
+      name: grants.names.get(row.objectId) ?? null,
+    })),
+    truncated: grants.collections.truncated,
+  };
+};
+
+/** The paths of `release`'s actions that use `alias`. */
+const usersOf = (release: Release, alias: string): string[] =>
+  Object.entries(release.app.operations)
+    .filter(
+      ([, operation]) =>
+        operation.kind === "action" &&
+        operation.uses.some(
+          (use) => use.type === "resource" && use.alias === alias
+        )
+    )
+    .map(([path]) => path)
+    .toSorted();
+
+/** What a review says of `declaration`, apart from how it is bound. */
+const declaredOf = (declaration: AnyResource) => {
+  const kind = declaration["~resource"];
+  return {
+    alias: declaration.alias,
+    kind,
+    contract:
+      kind === "connector" || kind === "template" ? declaration.contract : null,
+    actions: kind === "connector" ? [...declaration.actions] : [],
+    operations: kind === "knowledge" ? [...declaration.operations] : [],
+    collections: kind === "knowledge" ? [...declaration.collections] : [],
+    maxOutputTokens: kind === "model" ? declaration.maxOutputTokens : null,
+    structuredOutput: kind === "model" && declaration.structuredOutput !== null,
+  };
+};
+
+/**
+ * What the App's current version declares for its actions, each with its
+ * active binding and whether that serves it now (as the next request
+ * would find it), and for admins of the organization what it may be
+ * bound to: for them and the App's builders. Reads only.
+ */
+export const reviewResourceBindings = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  /** How many times it may ask connect; only a test sets it lower. */
+  contractAsksMax = reviewContractAsksMax
+): Promise<ResourceBindingsReview> => {
+  const decides = isAdmin(by.role) && !by.staff;
+  const found = decides
+    ? await findApp(env, app)
+    : await appFor(env, by, app, "builder");
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(appResourceBindings)
+    .where(
+      and(
+        eq(appResourceBindings.appId, found.id),
+        eq(appResourceBindings.status, "active")
+      )
+    );
+  const byAlias = new Map(rows.map((row) => [row.alias, row]));
+  const version = found.currentVersion;
+  const release =
+    version === null ? undefined : await loadRelease(env, found.id, version);
+  const declared = Object.entries(release?.app.resources ?? {}).toSorted(
+    ([one], [other]) => one.localeCompare(other)
+  );
+  // Read once for every resource's choices, and only for who gets them.
+  // One reader for the whole review: the bindings it checks and the
+  // choices it offers ask connect each (connection, contract) once, and no
+  // more than the limit in all.
+  const contracts = contractReader(env, contractAsksMax);
+  const grants = decides
+    ? await reviewGrants(env, found.id, contracts)
+    : undefined;
+  const resources = await Promise.all(
+    declared.map(async ([alias, declaration]): Promise<DeclaredResource> => {
+      const row = byAlias.get(alias);
+      const resolution =
+        row === undefined
+          ? undefined
+          : await resolved(env, found.id, declaration, row, contracts.asks);
+      return {
+        ...declaredOf(declaration),
+        usedBy: release === undefined ? [] : usersOf(release, alias),
+        state: resolution?.state ?? "unbound",
+        binding: row === undefined ? null : toBinding(row),
+        choices:
+          grants === undefined
+            ? null
+            : await choicesFor(env, declaration, grants),
+      };
+    })
+  );
+  const aliases = new Set(declared.map(([alias]) => alias));
+  return {
+    app: found.id,
+    version,
+    resources,
+    undeclared: rows
+      .filter(({ alias }) => !aliases.has(alias))
+      .toSorted((one, other) => one.alias.localeCompare(other.alias))
+      .map(toBinding),
+    truncated: contracts.truncated(),
+  };
+};
+
 /**
  * How core binds `app`'s declared resources for one invocation, for
  * `caller` (see the header): on every request, the alias's active binding,
@@ -491,33 +845,26 @@ export const resourceBindingsFor =
   (env: Env, caller: BindingCaller): ResourceBindings =>
   async (declaration: AnyResource): Promise<BoundResource | undefined> => {
     const row = await activeRow(env, caller.app, declaration.alias);
-    if (row === undefined || row.kind !== declaration["~resource"]) {
+    if (row === undefined) {
       return undefined;
     }
-    const target = bindingTargetSchema.safeParse(JSON.parse(row.target));
-    if (!target.success) {
-      log.error("resource_binding.unreadable", { binding: row.id });
+    const resolution = await resolved(env, caller.app, declaration, row);
+    if (resolution.state !== "served") {
+      if (resolution.why === "unreadable") {
+        log.error("resource_binding.unreadable", { binding: row.id });
+      } else if (
+        resolution.why === "unbindable" ||
+        resolution.why === "drift"
+      ) {
+        log.warn("resource_binding.not_served", {
+          binding: row.id,
+          contractId: row.contractId,
+          state: resolution.state,
+        });
+      }
       return undefined;
     }
-    if ((await declarationHash(declaration)) !== row.declarationHash) {
-      return undefined;
-    }
-    const served = await boundBy(env, caller.app, declaration, target.data);
-    if (
-      served?.contractId !== row.contractId ||
-      served.fingerprint !== row.fingerprint
-    ) {
-      log.warn("resource_binding.not_served", {
-        binding: row.id,
-        contractId: row.contractId,
-        served: served?.contractId ?? "none",
-      });
-      return undefined;
-    }
-    const budget = storedBudget(row);
-    if (budget === "unreadable") {
-      return undefined;
-    }
+    const { served, budget } = resolution;
     return {
       kind: declaration["~resource"],
       contract:
