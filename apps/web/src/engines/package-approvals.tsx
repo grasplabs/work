@@ -24,9 +24,9 @@ import {
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { i18n } from "@lingui/core";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";
 
+import { changeThenRefresh } from "../change-then-refresh.ts";
 import { targetNames } from "../dashboard/dependency-requests.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime, formatList } from "../format.ts";
@@ -43,6 +43,13 @@ import { useCoreAction } from "../use-core-action.ts";
 
 /** What a person ends: retiring keeps what was built; revoking stops it. */
 type Ending = "retire" | "revoke";
+
+/** An approval a person asked to end, and what ending it touches. */
+interface Asked {
+  request: DependencyRequest;
+  ending: Ending;
+  impact: DependencyImpact;
+}
 
 /** The direct packages a list shows of an approval, and how many more. */
 const PackagesOf = ({ request }: { request: DependencyRequest }) => {
@@ -69,14 +76,16 @@ const EndDialog = ({
   ending,
   impact,
   onClose,
+  refresh,
 }: {
   request: DependencyRequest;
   ending: Ending;
   impact: DependencyImpact;
   onClose: () => void;
+  /** Reads the approvals again, as they stand now. */
+  refresh: () => Promise<void>;
 }) => {
   const { t } = useLingui();
-  const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   const [reason, setReason] = useState("");
   const reasonId = useId();
@@ -93,23 +102,29 @@ const EndDialog = ({
     )
   );
   const end = async (): Promise<void> => {
-    const done = await run(async (session) => {
-      const decision = {
-        reviewed: {
-          graphHash: impact.graphHash,
-          policyGeneration: impact.policyGeneration,
-          approvalsDigest: ends.digest,
-        },
-        reason,
-      };
-      await (ending === "retire"
-        ? session.dependencies.retire(request.id, decision)
-        : session.dependencies.revoke(request.id, decision));
-      return true;
-    });
-    if (done === true) {
+    let done = false;
+    // Read again whatever the outcome, keeping why it failed: a failed
+    // call may still have landed, or someone may have ended it meanwhile,
+    // and the list shows how things stand.
+    await changeThenRefresh(async () => {
+      done =
+        (await run(async (session) => {
+          const decision = {
+            reviewed: {
+              graphHash: impact.graphHash,
+              policyGeneration: impact.policyGeneration,
+              approvalsDigest: ends.digest,
+            },
+            reason,
+          };
+          await (ending === "retire"
+            ? session.dependencies.retire(request.id, decision)
+            : session.dependencies.revoke(request.id, decision));
+          return true;
+        })) === true;
+    }, refresh);
+    if (done) {
       onClose();
-      await router.invalidate({ sync: true });
     }
   };
   return (
@@ -203,16 +218,15 @@ const EndDialog = ({
 const ApprovalRow = ({
   request,
   decides,
+  onAsk,
 }: {
   request: DependencyRequest;
   decides: boolean;
+  /** Opens the dialog that ends it, with what that touches. */
+  onAsk: (asked: Asked) => void;
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  const [asked, setAsked] = useState<{
-    ending: Ending;
-    impact: DependencyImpact;
-  }>();
   const engine = request.app.name;
   const targets = formatList(
     request.targets.map((target) => i18n._(targetNames[target]))
@@ -222,7 +236,7 @@ const ApprovalRow = ({
       async (session) => await session.dependencies.impact(request.id)
     );
     if (impact !== undefined) {
-      setAsked({ ending, impact });
+      onAsk({ request, ending, impact });
     }
   };
   const decidedBy = request.decided?.by.name ?? "";
@@ -295,36 +309,21 @@ const ApprovalRow = ({
             </div>
             <ErrorText>{failure}</ErrorText>
           </div>
-          {asked === undefined ? null : (
-            <EndDialog
-              ending={asked.ending}
-              impact={asked.impact}
-              onClose={() => {
-                setAsked(undefined);
-              }}
-              request={request}
-            />
-          )}
         </TableCell>
       ) : null}
     </TableRow>
   );
 };
 
-/** An engine's approved packages, newest first, with ending each for who may. */
-export const PackageApprovals = ({
+/** The approvals as a table, each with ending it for who may. */
+const ApprovalsTable = ({
   listed,
+  onAsk,
 }: {
   listed: DependencyApprovals;
+  onAsk: (asked: Asked) => void;
 }) => {
   const { t } = useLingui();
-  if (listed.approvals.length === 0) {
-    return (
-      <p className="text-muted-foreground">
-        <Trans>No packages are approved for this engine.</Trans>
-      </p>
-    );
-  }
   return (
     <div className="bg-card overflow-hidden rounded-xl border">
       <Table aria-label={t`Approved packages`}>
@@ -353,11 +352,61 @@ export const PackageApprovals = ({
             <ApprovalRow
               decides={listed.decides}
               key={request.id}
+              onAsk={onAsk}
               request={request}
             />
           ))}
         </TableBody>
       </Table>
     </div>
+  );
+};
+
+/**
+ * An engine's approved packages, newest first, with ending each for who
+ * may. Read again here once someone ends one, whatever the outcome, so an
+ * open dialog keeps why it failed while the list shows how things stand.
+ */
+export const PackageApprovals = ({
+  listed: loaded,
+}: {
+  listed: DependencyApprovals;
+}) => {
+  const { run } = useCoreAction();
+  const [listed, setListed] = useState(loaded);
+  const [asked, setAsked] = useState<Asked>();
+  const refresh = async (): Promise<void> => {
+    const now = await run(
+      async (session) => await session.dependencies.approvals(loaded.app.id)
+    );
+    if (now !== undefined) {
+      setListed(now);
+    }
+  };
+  const dialog =
+    asked === undefined ? null : (
+      <EndDialog
+        ending={asked.ending}
+        impact={asked.impact}
+        onClose={() => {
+          setAsked(undefined);
+        }}
+        refresh={refresh}
+        request={asked.request}
+      />
+    );
+  // The dialog in one place whatever the list shows, so it stays open,
+  // with why it failed, when the list empties.
+  return (
+    <>
+      {listed.approvals.length === 0 ? (
+        <p className="text-muted-foreground">
+          <Trans>No packages are approved for this engine.</Trans>
+        </p>
+      ) : (
+        <ApprovalsTable listed={listed} onAsk={setAsked} />
+      )}
+      {dialog}
+    </>
   );
 };

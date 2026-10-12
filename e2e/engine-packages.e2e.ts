@@ -1,0 +1,143 @@
+import { expect } from "@playwright/test";
+
+import { test } from "./csp.ts";
+import { seedDependencyRequest } from "./dependency-request.ts";
+import { apiOf, pageOf, peopleIn } from "./people.ts";
+
+// An engine's approved npm packages, and taking an approval back: its
+// builders see them in the engine's Packages tab; someone who may approve
+// packages sees them too, and only them when they aren't one of the
+// engine's members, and retires or revokes them after reading what that
+// ends. The approval is written as a person's decision leaves it
+// (dependency-request.ts): a local stack can't resolve from the registry.
+
+/** How long a page may take to show what core said. */
+const pageRead = { timeout: 20_000 };
+
+/** An engine of `builder`'s with one approved package, and `approver` given the permission. */
+const engineWithPackages = async (
+  scene: "enginePackages" | "enginePackagesRefresh",
+  name: string
+) => {
+  const people = peopleIn(scene);
+  const asAdmin = apiOf(people.admin);
+  const asBuilder = apiOf(people.builder);
+  const { id: app } = await asBuilder.api.apps.create({ name });
+  await asAdmin.api.dependencies.grantApprover({
+    type: "person",
+    userId: people.approver.userId,
+  });
+  const request = await seedDependencyRequest({
+    app,
+    requestedBy: people.builder.userId,
+    purpose: "Draw the monthly totals as a chart.",
+    targets: ["browser"],
+    approved: true,
+    graph: {
+      direct: [{ name: "charts", version: "3.1.0" }],
+      packages: [
+        {
+          name: "charts",
+          version: "3.1.0",
+          origin: "https://registry.npmjs.org",
+          integrity: `sha512-${"A".repeat(86)}==`,
+          license: "MIT",
+          dependencies: [],
+          peers: [],
+        },
+      ],
+      platformPeers: {},
+    },
+  });
+  asAdmin.core[Symbol.dispose]();
+  asBuilder.core[Symbol.dispose]();
+  return { ...people, app, request };
+};
+
+test("someone who may approve packages and isn't a member sees only an engine's packages, and retires them", async ({
+  browser,
+}) => {
+  const { builder, approver, app } = await engineWithPackages(
+    "enginePackages",
+    "Charts"
+  );
+
+  const page = await pageOf(browser, approver);
+  await page.goto(`/engines/${app}`);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Charts" })
+  ).toBeVisible(pageRead);
+  // Only the packages: none of the engine's tabs.
+  await expect(page.getByRole("tab")).toHaveCount(0);
+  const table = page.getByRole("table", { name: "Approved packages" });
+  const row = table.getByRole("row").filter({ hasText: "charts@3.1.0" });
+  await expect(row).toContainText("Approved");
+  await row
+    .getByRole("button", { name: "Retire the packages for Charts" })
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Retire the packages for Charts?",
+  });
+  await expect(
+    dialog.getByText("This ends 1 approval of these packages.")
+  ).toBeVisible();
+  const retire = dialog.getByRole("button", { name: "Retire", exact: true });
+  // Why is required.
+  await expect(retire).toBeDisabled();
+  await dialog.getByLabel("Why").fill("Replaced by the platform's chart.");
+  await retire.click();
+
+  await expect(dialog).toHaveCount(0);
+  await expect(row).toContainText("Retired");
+  await expect(row).toContainText("Replaced by the platform's chart.");
+
+  // A builder sees them in the engine's Packages tab, and ends nothing.
+  const builderPage = await pageOf(browser, builder);
+  await builderPage.goto(`/engines/${app}`);
+  await builderPage.getByRole("tab", { name: "Packages" }).click();
+  const builderRow = builderPage
+    .getByRole("table", { name: "Approved packages" })
+    .getByRole("row")
+    .filter({ hasText: "charts@3.1.0" });
+  await expect(builderRow).toContainText("Retired", pageRead);
+  await expect(builderRow.getByRole("button")).toHaveCount(0);
+});
+
+test("reads the packages again when a decision fails, keeping why", async ({
+  browser,
+}) => {
+  const { approver, app, request } = await engineWithPackages(
+    "enginePackagesRefresh",
+    "Ledger"
+  );
+  const page = await pageOf(browser, approver);
+  await page.goto(`/engines/${app}`);
+  await page
+    .getByRole("button", { name: "Revoke the packages for Ledger" })
+    .click(pageRead);
+  const dialog = page.getByRole("dialog", {
+    name: "Revoke the packages for Ledger?",
+  });
+  await expect(dialog).toBeVisible();
+
+  // Revoked elsewhere while the dialog is open.
+  const asApprover = apiOf(approver);
+  const impact = await asApprover.api.dependencies.impact(request.id);
+  await asApprover.api.dependencies.revoke(request.id, {
+    reviewed: {
+      graphHash: impact.graphHash,
+      policyGeneration: impact.policyGeneration,
+      approvalsDigest: impact.endings.revoke.digest,
+    },
+    reason: "Unsafe.",
+  });
+  asApprover.core[Symbol.dispose]();
+  await dialog.getByLabel("Why").fill("Unsafe.");
+  await dialog.getByRole("button", { name: "Revoke", exact: true }).click();
+
+  // Why it failed stays; the list behind it is read again.
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await expect(
+    page.getByText("No packages are approved for this engine.")
+  ).toBeVisible();
+});

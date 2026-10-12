@@ -393,7 +393,7 @@ const Packages = ({
   packages: Deferred<DependencyApprovals>;
 }) => (
   <Later promise={packages}>
-    {(listed) => <PackageApprovals listed={listed} />}
+    {(listed) => <PackageApprovals key={listed.app.id} listed={listed} />}
   </Later>
 );
 
@@ -414,9 +414,13 @@ const PackagesTab = ({
       <Trans>Packages</Trans>
     </TabsTrigger>
   );
+  // A builder's tab is there from the start, never swapped for another.
+  if (builds) {
+    return trigger;
+  }
   return (
-    <Await fallback={builds ? trigger : null} promise={packages}>
-      {(loaded) => (builds || loaded.state === "ready" ? trigger : null)}
+    <Await fallback={null} promise={packages}>
+      {(loaded) => (loaded.state === "ready" ? trigger : null)}
     </Await>
   );
 };
@@ -535,17 +539,73 @@ const EngineView = ({ page }: { page: EnginePage }) => {
   );
 };
 
+/**
+ * The engine for someone core lets read nothing of it but its approved
+ * packages: someone who may approve packages and isn't one of its
+ * members. Only what `dependencies.approvals` answers, its name and its
+ * approvals, and ending them; never its apps, workflows or members.
+ */
+const PackagesOnlyView = ({ listed }: { listed: DependencyApprovals }) => {
+  const { t } = useLingui();
+  return (
+    <>
+      <SiteHeader
+        crumbs={[
+          { label: t`Engines`, to: "/engines" },
+          { label: listed.app.name },
+        ]}
+      />
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
+        <div className="flex flex-col gap-0.5">
+          <h1 className="text-2xl font-medium tracking-tight">
+            {listed.app.name}
+          </h1>
+          <p className="text-muted-foreground">
+            <Trans>
+              The packages approved for this engine. You see them because you
+              may approve packages; the rest of the engine is for its members.
+            </Trans>
+          </p>
+        </div>
+        <section
+          aria-labelledby="engine-packages"
+          className="flex flex-col gap-3"
+        >
+          <h2 className="text-base font-medium" id="engine-packages">
+            <Trans>Packages</Trans>
+          </h2>
+          <PackageApprovals key={listed.app.id} listed={listed} />
+        </section>
+      </div>
+    </>
+  );
+};
+
 const EnginePageView = () => {
-  const { page } = Route.useLoaderData();
+  const { page, packages } = Route.useLoaderData();
   const { t } = useLingui();
   if (page.state !== "ready") {
-    return (
+    const notLoaded = (
       <PageNotLoaded
         crumbs={[{ label: t`Engines`, to: "/engines" }, { label: t`Engine` }]}
         icon={CogIcon}
         notFound={t`Engine not found`}
         page={page}
       />
+    );
+    // Not a member: someone who may approve packages still gets those.
+    return page.state === "missing" ? (
+      <Await fallback={<PageLoading />} promise={packages}>
+        {(listed) =>
+          listed.state === "ready" ? (
+            <PackagesOnlyView listed={listed.data} />
+          ) : (
+            notLoaded
+          )
+        }
+      </Await>
+    ) : (
+      notLoaded
     );
   }
   return (

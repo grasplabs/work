@@ -193,6 +193,12 @@ const cast = {
   dashboardBoard: { builder: "builder" },
   dashboardLayout: { user: "user" },
   dependencyApproval: { admin: "admin", builder: "builder", approver: "user" },
+  enginePackages: { admin: "admin", builder: "builder", approver: "user" },
+  enginePackagesRefresh: {
+    admin: "admin",
+    builder: "builder",
+    approver: "user",
+  },
   chatPreview: { builder: "builder" },
   languages: { member: "user" },
   iconMoves: { member: "user" },
