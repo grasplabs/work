@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
+import { racingDb } from "./racing-db.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   auditedDuring,
@@ -13,6 +14,7 @@ import {
   signedInApi,
   staffPerson,
   whoami,
+  withSignIn,
 } from "./sign-in.ts";
 
 // Invitations: an admin names the role someone gets when they first sign
@@ -101,6 +103,78 @@ describe("inviting someone", () => {
     await other.api.members.setRole(admin.userId, "user");
 
     await expect(joins(person)).resolves.toBe("user");
+  });
+
+  it("gives nothing when withdrawn just before they join", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = newcomer();
+    const { id } = await admin.api.members.invite(
+      String(person.email),
+      "admin"
+    );
+    // Withdrawn after core read the invitation, just before the join lands.
+    const racing = racingDb(
+      async (db) =>
+        await db
+          .prepare("UPDATE invitations SET status = 'canceled' WHERE id = ?")
+          .bind(id)
+          .run()
+    );
+
+    const session = await signedIn(idp, "microsoft", person, {
+      coreEnv: { ...env, DB: racing },
+    });
+
+    const { role } = await whoami(session);
+    expect(role).toBe("user");
+    const row = await env.DB.prepare(
+      "SELECT status FROM invitations WHERE id = ?"
+    )
+      .bind(id)
+      .first<{ status: string }>();
+    expect(row?.status).toBe("canceled");
+  });
+
+  it("is off the list once its admin is no admin, and doesn't keep anyone from inviting them again", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const other = await signedInApi(idp, "admin");
+    const email = String(newcomer().email);
+    const { id } = await admin.api.members.invite(email, "admin");
+    await other.api.members.setRole(admin.userId, "user");
+
+    await expect(other.api.members.invitations()).resolves.not.toContainEqual(
+      expect.objectContaining({ id })
+    );
+    await expect(
+      other.api.members.invite(email, "builder")
+    ).resolves.toMatchObject({ email, role: "builder" });
+  });
+
+  it("is taken up by a configured admin too, who joins as admin", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const person = newcomer();
+    const email = String(person.email);
+    const { id } = await admin.api.members.invite(email, "user");
+    let session = "";
+    const events = await auditedDuring(async () => {
+      session = await signedIn(idp, "microsoft", person, {
+        coreEnv: withSignIn({ admins: [email] }),
+      });
+    });
+
+    const { role, userId } = await whoami(session);
+    expect(role).toBe("admin");
+    await expect(admin.api.members.invitations()).resolves.not.toContainEqual(
+      expect.objectContaining({ id })
+    );
+    expect(
+      events.filter(({ action }) => action === "member.invitation.accepted")
+    ).toStrictEqual([
+      expect.objectContaining({
+        target: { type: "invitation", id },
+        detail: { userId, role: "admin" },
+      }),
+    ]);
   });
 
   it("is taken up once: signing in again keeps the role an admin gave since", async () => {
@@ -232,6 +306,7 @@ describe("inviting someone", () => {
         action: "member.invitation.withdrawn",
         actor: { type: "person", userId: second.userId },
         target: { type: "invitation", id: withdrawnId },
+        detail: { role: "user" },
       }),
     ]);
     const recorded = JSON.stringify([...invited, ...joined, ...withdrawn]);

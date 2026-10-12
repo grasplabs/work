@@ -24,6 +24,7 @@ import {
   currentMembership,
   isRemoved,
   notRemoved,
+  openInvitationAt,
   organizationId,
 } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
@@ -521,13 +522,10 @@ const isRemovedEmail = (email: string): SQL => sql`EXISTS (
     AND lower(${users.email}) = ${email}
 )`;
 
-/** That `email` has an invitation nobody has taken up at `now`, as SQL. */
+/** That `email` has an open invitation at `now` (`openInvitationAt`), as SQL. */
 const isInvitedEmail = (email: string, now: Date): SQL => sql`EXISTS (
   SELECT 1 FROM ${invitations}
-  WHERE ${invitations.organizationId} = ${organizationId}
-    AND ${invitations.email} = ${email}
-    AND ${invitations.status} = 'pending'
-    AND ${invitations.expiresAt} > ${now.getTime()}
+  WHERE ${invitations.email} = ${email} AND ${openInvitationAt(now.getTime())}
 )`;
 
 /** The organization's open invitations, newest first. For admins. */
@@ -547,13 +545,7 @@ const listInvitations = async (
     })
     .from(invitations)
     .innerJoin(users, eq(users.id, invitations.inviterId))
-    .where(
-      and(
-        eq(invitations.organizationId, organizationId),
-        eq(invitations.status, "pending"),
-        gt(invitations.expiresAt, new Date())
-      )
-    )
+    .where(openInvitationAt(Date.now()))
     .orderBy(desc(invitations.createdAt), asc(invitations.id));
   return rows.flatMap(({ role, invitedAt, expiresAt, ...invitation }) => {
     const parsed = roleSchema.safeParse(role);
@@ -676,6 +668,19 @@ const withdrawInvitation = async (
     throw refusal(by, memberErrors.create("member.invitation_not_found"));
   }
   const db = drizzle(env.DB);
+  const [invitation] = await db
+    .select({ role: invitations.role })
+    .from(invitations)
+    .where(
+      and(
+        eq(invitations.id, parsed.data),
+        eq(invitations.organizationId, organizationId),
+        eq(invitations.status, "pending")
+      )
+    );
+  if (!invitation) {
+    throw refusal(by, memberErrors.create("member.invitation_not_found"));
+  }
   const [withdrawn] = await auditedBatch(env, db, [
     db
       .update(invitations)
@@ -688,11 +693,12 @@ const withdrawInvitation = async (
           isActiveAdmin(by.userId)
         )
       )
-      .returning({ role: invitations.role }),
+      .returning({ id: invitations.id }),
     outboxedIfChanged(db, {
       actor: actorOf(by),
       action: "member.invitation.withdrawn",
       target: { type: "invitation", id: parsed.data },
+      detail: { role: invitation.role },
     }),
   ]);
   if (withdrawn.length > 0) {

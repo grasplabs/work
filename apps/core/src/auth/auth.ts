@@ -19,7 +19,6 @@ import { organization } from "better-auth/plugins/organization";
 import { defaultAc } from "better-auth/plugins/organization/access";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
@@ -210,26 +209,37 @@ const restoreAdmin = async (env: Env, userId: string): Promise<void> => {
 };
 
 /**
- * The invitation `email` takes up as they first join, if any: nobody has
- * taken it up, it hasn't lapsed, and whoever made it is still an admin,
- * so an admin's demotion or removal also ends what they invited.
+ * That an invitation (a row of `invitations`) is open at `now`, as SQL: in
+ * the organization, nobody has taken it up or withdrawn it, it hasn't
+ * lapsed, and whoever made it is still an admin, so an admin's demotion or
+ * removal also ends what they invited. Listing, inviting and joining all
+ * read it (`members.ts`), and joining checks it again in the statements
+ * that act on it.
  */
+export const openInvitationAt = (now: number): SQL =>
+  and(
+    eq(invitations.organizationId, organizationId),
+    eq(invitations.status, "pending"),
+    sql`${invitations.expiresAt} > ${now}`,
+    activeMember(invitations.inviterId, ["admin"])
+  ) ?? sql`0`;
+
+/** That invitation `id` is open at `now`, as SQL on its own. */
+const isOpenInvitation = (id: string, now: number): SQL => sql`EXISTS (
+  SELECT 1 FROM ${invitations}
+  WHERE ${invitations.id} = ${id} AND ${openInvitationAt(now)}
+)`;
+
+/** The open invitation of `email`, if any: the newest. */
 const openInvitation = async (
   env: Env,
-  email: string
+  email: string,
+  now: number
 ): Promise<{ id: string; role: string } | undefined> => {
   const [invitation] = await drizzle(env.DB)
     .select({ id: invitations.id, role: invitations.role })
     .from(invitations)
-    .where(
-      and(
-        eq(invitations.organizationId, organizationId),
-        eq(invitations.email, email),
-        eq(invitations.status, "pending"),
-        sql`${invitations.expiresAt} > ${Date.now()}`,
-        activeMember(invitations.inviterId, ["admin"])
-      )
-    )
+    .where(and(eq(invitations.email, email), openInvitationAt(now)))
     .orderBy(desc(invitations.createdAt))
     .limit(1);
   const role = roleSchema.safeParse(invitation?.role);
@@ -239,46 +249,18 @@ const openInvitation = async (
 };
 
 /**
- * Runs `join`, the insert of membership `memberId`, with taking up
- * `invitation`, audited, in one batch: taken up only by the insert that
- * made them a member, this one.
- */
-const takeUpInvitation = async (
-  env: Env,
-  join: BatchItem<"sqlite">,
-  memberId: string,
-  invitation: { id: string; role: string; userId: string }
-): Promise<void> => {
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    join,
-    db
-      .update(invitations)
-      .set({ status: "accepted" })
-      .where(
-        and(
-          eq(invitations.id, invitation.id),
-          eq(invitations.status, "pending"),
-          sql`EXISTS (SELECT 1 FROM ${members} WHERE ${members.id} = ${memberId})`
-        )
-      ),
-    outboxedIfChanged(db, {
-      actor: actorOf({ userId: invitation.userId, staff: false }),
-      action: "member.invitation.accepted",
-      target: { type: "invitation", id: invitation.id },
-      detail: { userId: invitation.userId, role: invitation.role },
-    }),
-  ]);
-};
-
-/**
  * Makes someone signing in from the client's IdP a member of the deployment's
  * organization, creating it on the first sign-in, unless an admin removed
  * them. Runs on every sign-in, so a membership whose creation failed is
  * created next time; an existing one, and its role, is kept, except that a
- * configured admin is made admin again when nobody else is one. Someone
- * joining takes up their invitation (`members.ts`), with its role, in the
- * same batch, audited. Returns whether they are a member.
+ * configured admin is made admin again when nobody else is one.
+ *
+ * Someone joining takes up their open invitation (`members.ts`), in one
+ * batch with the membership: the membership gets the invited role only if
+ * the invitation is still open as the insert runs, so one withdrawn, lapsed
+ * or orphaned since it was read gives nothing; and it is taken up, audited,
+ * only by the insert that made them a member, this one. A configured admin
+ * joins as admin, and takes up an invitation too.
  *
  * The removal check is part of the insert itself, one statement: a removal
  * records its marker before it deletes the membership (`members.ts`), so
@@ -298,12 +280,18 @@ const ensureMember = async (
   // Config emails are lowercased when parsed; Better Auth lowercases the IdP's.
   const email = user?.email.toLowerCase();
   const configuredAdmin = email !== undefined && config.admins.includes(email);
-  const invitation =
-    configuredAdmin || email === undefined
-      ? undefined
-      : await openInvitation(env, email);
-  const role = configuredAdmin ? "admin" : (invitation?.role ?? "user");
   const now = new Date();
+  const invitation =
+    email === undefined
+      ? undefined
+      : await openInvitation(env, email, now.getTime());
+  const invited =
+    invitation === undefined
+      ? sql`0`
+      : isOpenInvitation(invitation.id, now.getTime());
+  const role = configuredAdmin
+    ? sql`'admin'`
+    : sql`CASE WHEN ${invited} THEN ${invitation?.role ?? "user"} ELSE 'user' END`;
   await db
     .insert(organizations)
     .values({
@@ -323,7 +311,25 @@ const ensureMember = async (
     .onConflictDoNothing();
   await (invitation === undefined
     ? join
-    : takeUpInvitation(env, join, memberId, { ...invitation, userId }));
+    : auditedBatch(env, db, [
+        join,
+        db
+          .update(invitations)
+          .set({ status: "accepted" })
+          .where(
+            and(
+              eq(invitations.id, invitation.id),
+              openInvitationAt(now.getTime()),
+              sql`EXISTS (SELECT 1 FROM ${members} WHERE ${members.id} = ${memberId})`
+            )
+          ),
+        outboxedIfChanged(db, {
+          actor: actorOf({ userId, staff: false }),
+          action: "member.invitation.accepted",
+          target: { type: "invitation", id: invitation.id },
+          detail: { userId, role: configuredAdmin ? "admin" : invitation.role },
+        }),
+      ]));
   if (configuredAdmin) {
     await restoreAdmin(env, userId);
   }
