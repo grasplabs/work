@@ -187,6 +187,51 @@ export const checkRevision = query({
   },
 });
 
+let reads = 0;
+
+/**
+ * A reference that names one function to the registration (its two
+ * reads in an isolate: the constructor's and the App's) and another to
+ * everything after: the runner asks for a mutation the action never
+ * listed.
+ */
+const shifty = {
+  get contractId() {
+    reads += 1;
+    return reads <= 2 ? "notes.count" : "notes.create";
+  },
+  visibility: "internal",
+};
+
+/** Runs what its reference names now, and says how that ended. */
+export const sneak = action({
+  args: {},
+  returns: v.string(),
+  uses: [shifty as never],
+  handler: async (ctx) => {
+    try {
+      await ctx.runMutation(shifty as never, { title: "Sneaked" });
+      return "ran";
+    } catch (error) {
+      return \`caught \${String(Reflect.get(Object(error), "code"))}\`;
+    }
+  },
+});
+
+/** What the Workers runtime's env holds, reached around the import rules. */
+export const peekEnv = query({
+  args: {},
+  returns: v.string(),
+  handler: async () => {
+    try {
+      const workers = await new Function("return import('cloudflare:workers')")();
+      return JSON.stringify(Object.keys(workers.env ?? {}));
+    } catch (error) {
+      return \`refused \${error instanceof Error ? error.name : "?"}\`;
+    }
+  },
+});
+
 /** Runs a query that fails as a domain failure, and recovers from it. */
 export const recover = action({
   args: {},
@@ -207,7 +252,7 @@ export const recover = action({
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
 import {
-  bump, checkRevision, closed, count, create, flood, get, list, reach, recover, remember, remove, tally, update,
+  bump, checkRevision, closed, count, create, flood, get, list, peekEnv, reach, recover, remember, remove, sneak, tally, update,
 } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
@@ -216,7 +261,7 @@ export default app({
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
   operations: {
-    notes: { list, get, create, update, remove, tally, bump, remember, reach, flood, closed, checkRevision, recover },
+    notes: { list, get, create, update, remove, tally, bump, remember, reach, flood, closed, checkRevision, recover, sneak, peekEnv },
   },
   internalOperations: { notes: { count } },
   screens: [],
@@ -431,6 +476,31 @@ describe("an App's functions", { timeout: 120_000 }, () => {
     expect(
       valueOf(await call(notes, other, "notes.remember", { secret: "other's" }))
     ).toBe("");
+  });
+
+  it("are held to what was sealed, whatever their registration says at run time", async () => {
+    const notes = await sealedNotes();
+    // Sealed, the action uses an internal query; run, its reference names
+    // a mutation it never listed, which the host refuses.
+    expect(notes.release.app.operations["notes.sneak"]?.uses).toStrictEqual([
+      { type: "function", path: "notes.count", kind: "query" },
+    ]);
+    expect(valueOf(await call(notes, notes.owner, "notes.sneak", {}))).toBe(
+      "caught operation.not_found"
+    );
+    const page = valueOf(
+      await call(notes, notes.owner, "notes.list", { pagination: {} })
+    );
+    expect(titlesOn(page)).toStrictEqual([]);
+  });
+
+  it("find nothing in the Workers runtime's env, however they import it", async () => {
+    const notes = await sealedNotes();
+    const peeked = valueOf(await call(notes, notes.owner, "notes.peekEnv", {}));
+    expect(
+      peeked === "[]" ||
+        (typeof peeked === "string" && peeked.startsWith("refused"))
+    ).toBeTruthy();
   });
 
   it("can't reach the network or the runtime's cache", async () => {
