@@ -1,5 +1,6 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { Json } from "@grasp-os/shared/json";
+import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { env } from "cloudflare:workers";
@@ -435,6 +436,10 @@ const answerOf = async (
   input: unknown
 ): Promise<FunctionAnswer> =>
   await callAppFunction(env, owner, app, requestFor(release, path, input));
+
+/** A search text of exactly `length` code units that still finds the leave policy. */
+const searchTextOf = (length: number): string =>
+  "leave ".repeat(length).slice(0, length);
 
 describe("resource bindings", { timeout: 120_000 }, () => {
   it("refuse a model an action declares until an admin binds it", async () => {
@@ -1024,6 +1029,25 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       },
       // As a document that doesn't exist.
       opened: { failed: "resource.item_not_found" },
+    });
+  });
+
+  it("search with text up to Knowledge's own limit, and refuse longer up front", async () => {
+    const { sealed } = await knowledgeApp();
+    const atLimit = await answerOf(sealed, "help.find", {
+      text: searchTextOf(knowledgeSearchMaxLength),
+    });
+    const pastLimit = await answerOf(sealed, "help.find", {
+      text: searchTextOf(knowledgeSearchMaxLength + 1),
+    });
+    expect({
+      atLimit: hitsSchema
+        .parse(outcomeOf(atLimit.result))
+        .map(({ title }) => title),
+      pastLimit: outcomeOf(pastLimit.result),
+    }).toStrictEqual({
+      atLimit: ["Leave", "Pay"],
+      pastLimit: { failed: "contract.invalid_args" },
     });
   });
 

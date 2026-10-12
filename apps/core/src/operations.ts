@@ -24,6 +24,7 @@ import {
   appErrorMessageMaxLength,
   invocationMaxReads,
   isAppErrorCode,
+  knowledgeSearchMaxLength,
   mutationResultMaxBytes,
   operationInputMaxBytes,
   operationResultMaxBytes,
@@ -960,7 +961,7 @@ export type ResourceBindings = (
 
 /** A knowledge search's request, as the declaration's client sends it. */
 const knowledgeSearchSchema = z.strictObject({
-  text: z.string().min(1).max(1000),
+  text: z.string().min(1).max(knowledgeSearchMaxLength),
   limit: z.number().int().min(1).max(20).optional(),
 });
 
@@ -1026,8 +1027,12 @@ const allowedRequest = (
     allowed =
       schema !== undefined &&
       declaration.operations.some((operation) => operation === method) &&
-      args.length === 1 &&
-      schema.safeParse(first).success;
+      args.length === 1;
+    // A declared operation asked with a request outside its contract (a
+    // search text past Knowledge's limit, say): arguments that don't fit.
+    if (allowed && schema?.safeParse(first).success !== true) {
+      throw operationErrors.create("contract.invalid_args");
+    }
   } else if (kind === "model") {
     allowed =
       method === "generate" &&

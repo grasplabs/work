@@ -4,6 +4,7 @@ import type { AppId, CollectionId, PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
 import type { SearchHit, SearchResults } from "@grasp-os/shared/knowledge";
+import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -38,7 +39,10 @@ import type {
 const knowledgeContract = {
   contractId: "grasp.knowledge@1",
   search: {
-    request: { text: "string, 1 to 1000", limit: "1 to 20, optional" },
+    request: {
+      text: `string, 1 to ${knowledgeSearchMaxLength}`,
+      limit: "1 to 20, optional",
+    },
     answer: "up to 20 hits of a title and an excerpt, best first",
   },
   read: {
