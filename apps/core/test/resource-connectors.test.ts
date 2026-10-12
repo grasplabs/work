@@ -25,6 +25,8 @@ import {
 } from "../src/resource-bindings.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
+import type { ToolkitServer } from "./mail-server.ts";
 import { planOf, recordedQueries } from "./query-plans.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
@@ -320,7 +322,7 @@ type Mailer = Awaited<ReturnType<typeof mailerApp>>;
 
 /** Calls `path` of the Mailer as its builder, under the call key `key`. */
 const call = async (
-  { by, release }: Mailer,
+  { by, release }: Pick<Mailer, "by" | "release">,
   path: string,
   input: unknown,
   key?: string,
@@ -373,7 +375,9 @@ const failure = async (work: () => Promise<unknown>): Promise<string> => {
 };
 
 /** Confirms every held action waiting for the Mailer's builder. */
-const confirmAll = async ({ builder }: Mailer): Promise<void> => {
+const confirmAll = async ({
+  builder,
+}: Pick<Mailer, "builder">): Promise<void> => {
   const pending = builder.api.pendingActions;
   for (const held of await pending.list()) {
     // oxlint-disable-next-line no-await-in-loop -- one at a time
@@ -1090,6 +1094,345 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       served: ["served"],
       reshaped: ["contract_changed"],
       disconnected: ["grant_lost"],
+    });
+  });
+});
+
+// A Composio toolkit's contract, `composio.<toolkit>@1` (threat model on
+// GRA-504): generated from what the connection's own server lists now, so
+// Composio changing a tool after an admin approved the binding stops it
+// until an admin approves again. The real connect runs behind core; only
+// Composio's server is faked (test/mail-server.ts), with tools of a CRM
+// toolkit.
+
+/** What listing contacts takes, as the CRM's server first lists it. */
+const listArguments = { limit: { type: "integer", minimum: 1 } };
+
+const noContacts = { contacts: [] };
+
+/** What listing contacts answers, as the CRM's server first lists it. */
+const listAnswer = {
+  type: "object",
+  properties: { contacts: { type: "array", items: { type: "string" } } },
+  required: ["contacts"],
+};
+
+/**
+ * A CRM toolkit's tools, as its Composio server lists them: listing takes
+ * `listProperties` and answers `listOutput`.
+ */
+const crmTools = ({
+  listProperties = listArguments,
+  listOutput = listAnswer,
+}: { listProperties?: object; listOutput?: object } = {}) => [
+  {
+    name: "CRM_LIST_CONTACTS",
+    inputSchema: { type: "object", properties: listProperties, required: [] },
+    outputSchema: listOutput,
+  },
+  {
+    // Composio says it only reads; the admin didn't.
+    name: "CRM_CREATE_CONTACT",
+    inputSchema: {
+      type: "object",
+      properties: { email: { type: "string" } },
+      required: ["email"],
+    },
+    annotations: { readOnlyHint: true },
+  },
+];
+
+/**
+ * What the CRM's tools answer: listing answers `contacts` (no contacts by
+ * default), creating answers the created one's text.
+ */
+const crmAnswers = (contacts: object = noContacts) => ({
+  CRM_LIST_CONTACTS: {
+    content: [{ type: "text", text: JSON.stringify(contacts) }],
+    structuredContent: contacts,
+  },
+  CRM_CREATE_CONTACT: {
+    content: [{ type: "text", text: "Created contact-1" }],
+  },
+});
+
+/** The admin's allowlist: listing is a read, creating isn't. */
+const crmRules = (listIsRead = true) => [
+  { name: "CRM_LIST_CONTACTS", read: listIsRead },
+  "CRM_CREATE_CONTACT",
+];
+
+/** An App whose actions list and create contacts in the CRM. */
+const crmFiles = (): Record<string, string> => ({
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({ notes: defineTable({ title: v.string() }) });
+`,
+  "operations/crm.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const crm = resource.connector("crm", {
+  contract: "composio.crm@1",
+  actions: ["CRM_LIST_CONTACTS", "CRM_CREATE_CONTACT"],
+});
+
+export const contacts = action({
+  args: {},
+  returns: v.number(),
+  uses: [crm],
+  handler: async (ctx) => {
+    const listed = await ctx.resources.crm.call("CRM_LIST_CONTACTS", { limit: 5 });
+    return typeof listed === "object" && listed !== null && !Array.isArray(listed) && Array.isArray(listed.contacts)
+      ? listed.contacts.length
+      : -1;
+  },
+});
+
+/** Lists with an argument the tool doesn't name. */
+export const sloppy = action({
+  args: {},
+  returns: v.number(),
+  uses: [crm],
+  handler: async (ctx) => {
+    await ctx.resources.crm.call("CRM_LIST_CONTACTS", { limit: 5, archived: true });
+    return 0;
+  },
+});
+
+export const create = action({
+  args: { email: v.string() },
+  returns: v.string(),
+  uses: [crm],
+  handler: async (ctx, args) => {
+    const created = await ctx.resources.crm.call("CRM_CREATE_CONTACT", { email: args.email });
+    return typeof created === "string" ? created : "";
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { contacts, create, crm, sloppy } from "./operations/crm.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Contacts",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { crm: { contacts, create, sloppy } },
+  internalOperations: {},
+  screens: [],
+  uses: [crm],
+});
+`,
+});
+
+const crmServerStateSchema = z.object({
+  ran: z.array(z.object({ tool: z.string(), arguments: z.unknown() })),
+});
+
+/**
+ * A shared CRM connection in connect's registry, as the Composio flow
+ * leaves it, to a server of its own listing `crmTools()`.
+ */
+const crmConnection = async () => {
+  const name = `crm-${crypto.randomUUID()}`;
+  const id = `connection-${name}`;
+  const now = Date.now();
+  await connectDb()
+    .prepare(
+      "INSERT INTO connections (id, provider, scope, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'crm', 'shared', 'active', 'composio', ?, ?, ?, ?)"
+    )
+    .bind(id, mailServerUrl(name), JSON.stringify(crmRules()), now, now)
+    .run();
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+  }
+  /** Changes what the server lists, or answers. */
+  const serve = async (server: ToolkitServer): Promise<void> => {
+    await providers.fetch(mailControlUrl(name), {
+      method: "POST",
+      body: JSON.stringify(server),
+    });
+  };
+  await serve({ list: crmTools(), answers: crmAnswers() });
+  return {
+    id,
+    serve,
+    /** Makes its server's next look at its tools fail, as a 503. */
+    unavailable: async () => {
+      await providers.fetch(mailControlUrl(name), {
+        method: "POST",
+        body: JSON.stringify({ plan: ["unavailable"] }),
+      });
+    },
+    /** Every call that reached one of its tools. */
+    ran: async () => {
+      const response = await providers.fetch(mailControlUrl(name));
+      return crmServerStateSchema.parse(await response.json()).ran;
+    },
+    /** Sets the admin's allowlist, as editing it in connect would. */
+    allow: async (tools: unknown[]): Promise<void> => {
+      await connectDb()
+        .prepare("UPDATE connections SET tools = ? WHERE id = ?")
+        .bind(JSON.stringify(tools), id)
+        .run();
+    },
+  };
+};
+
+/**
+ * The Contacts App, current, with a permission on a CRM connection to its
+ * two tools an admin granted, and its CRM resource bound to it unless
+ * `bind` is false.
+ */
+const contactsApp = async (
+  options: {
+    bind?: boolean;
+    before?: (crm: CrmConnection) => Promise<void>;
+  } = {}
+) => {
+  const admin = await signedInApi(idp, "admin");
+  const builder = await signedInApi(idp, "builder");
+  const created = await builder.api.apps.create({ name: "Contacts" });
+  await builder.api.apps.files.commit(created.id, crmFiles(), "First");
+  await builder.api.apps.versions.setCurrent(created.id, 1);
+  const crm = await crmConnection();
+  await options.before?.(crm);
+  const requested = await builder.api.permissions.request({
+    subject: { type: "app", appId: created.id },
+    object: { type: "connection", connectionId: crm.id },
+    actions: ["CRM_LIST_CONTACTS", "CRM_CREATE_CONTACT"],
+    binding: "CRM",
+  });
+  await admin.api.permissions.grant(requested.id, { version: 1 });
+  const approval = {
+    app: created.id,
+    alias: "crm",
+    target: { kind: "connector" as const, permissionId: requested.id },
+    reviewed: { version: 1 },
+  };
+  const approve = async () =>
+    await admin.api.resourceBindings.approve(approval);
+  if (options.bind !== false) {
+    await approve();
+  }
+  return {
+    admin,
+    builder,
+    by: await builder.api.whoami(),
+    release: await loadRelease(env, created.id, 1),
+    crm,
+    approve,
+  };
+};
+
+type CrmConnection = Awaited<ReturnType<typeof crmConnection>>;
+
+describe("Composio connector resource bindings", { timeout: 120_000 }, () => {
+  it("read through connect, under a contract generated from the connection's own server", async () => {
+    const app = await contactsApp();
+    const listed = await call(app, "crm.contacts", {});
+    expect({
+      listed: outcomeOf(listed),
+      ran: await app.crm.ran(),
+    }).toStrictEqual({
+      listed: 0,
+      ran: [{ tool: "CRM_LIST_CONTACTS", arguments: { limit: 5 } }],
+    });
+  });
+
+  it("refuse an argument the tool doesn't name before Composio sees it", async () => {
+    const app = await contactsApp();
+    const result = await call(app, "crm.sloppy", {});
+    expect({
+      outcome: outcomeOf(result),
+      ran: await app.crm.ran(),
+    }).toStrictEqual({ outcome: { failed: "resource.invalid_args" }, ran: [] });
+  });
+
+  it("stop once Composio changes a tool, until an admin approves the binding again", async () => {
+    const app = await contactsApp();
+    await app.crm.serve({
+      list: crmTools({
+        listProperties: { ...listArguments, archived: { type: "boolean" } },
+      }),
+    });
+    const drifted = await call(app, "crm.contacts", {});
+    const ranWhileDrifted = await app.crm.ran();
+    await app.approve();
+    const approvedAgain = await call(app, "crm.contacts", {});
+    expect({
+      drifted: outcomeOf(drifted),
+      ranWhileDrifted,
+      approvedAgain: outcomeOf(approvedAgain),
+    }).toStrictEqual({
+      drifted: { failed: "resource.unavailable" },
+      ranWhileDrifted: [],
+      approvedAgain: 0,
+    });
+  });
+
+  it("stop once the admin's rules for a tool change, or the tool leaves the allowlist", async () => {
+    const app = await contactsApp();
+    await app.crm.allow(crmRules(false));
+    const notARead = await call(app, "crm.contacts", {});
+    await app.crm.allow(["CRM_CREATE_CONTACT"]);
+    const notAllowed = await call(app, "crm.contacts", {});
+    expect({
+      notARead: outcomeOf(notARead),
+      notAllowed: outcomeOf(notAllowed),
+      ran: await app.crm.ran(),
+    }).toStrictEqual({
+      notARead: { failed: "resource.unavailable" },
+      notAllowed: { failed: "resource.unavailable" },
+      ran: [],
+    });
+  });
+
+  it("refuse an answer with more than the tool promises", async () => {
+    const app = await contactsApp();
+    await app.crm.serve({ answers: crmAnswers({ contacts: [], total: 0 }) });
+    expect(outcomeOf(await call(app, "crm.contacts", {}))).toStrictEqual({
+      failed: "contract.invalid_resource_result",
+    });
+  });
+
+  it("hold a tool the admin didn't mark as a read, whatever Composio says of it, and answer its text", async () => {
+    const app = await contactsApp();
+    const input = { email: "ada@acme.test" };
+    const held = await call(app, "crm.create", input, "create-1");
+    const ranWhileHeld = await app.crm.ran();
+    await confirmAll(app);
+    const answered = await call(app, "crm.create", input, "create-1");
+    expect({
+      held: outcomeOf(held),
+      ranWhileHeld,
+      answered: outcomeOf(answered),
+    }).toStrictEqual({
+      held: { failed: "resource.awaiting_confirmation" },
+      ranWhileHeld: [],
+      answered: "Created contact-1",
+    });
+  });
+
+  it("bind no tool whose answer is open, and no contract while Composio can't be reached", async () => {
+    const open = await contactsApp({
+      bind: false,
+      before: async (crm) => {
+        await crm.serve({ list: crmTools({ listOutput: { type: "object" } }) });
+      },
+    });
+    const app = await contactsApp();
+    await app.crm.unavailable();
+    const unreachable = await call(app, "crm.contacts", {});
+    expect({
+      open: await failure(open.approve),
+      unreachable: outcomeOf(unreachable),
+      ran: await app.crm.ran(),
+    }).toStrictEqual({
+      open: "resource.target_invalid",
+      unreachable: { failed: "resource.unavailable" },
+      ran: [],
     });
   });
 });

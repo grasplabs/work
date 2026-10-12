@@ -55,6 +55,17 @@ export interface McpTool {
  */
 export type McpServerTool = Pick<McpTool, "name" | "inputProperties">;
 
+/**
+ * A tool as a server lists it, with its schemas as it declares them, for a
+ * contract to be made of (contracts.ts): untrusted JSON, read as data.
+ */
+export interface McpListedTool {
+  name: string;
+  inputSchema: Json;
+  /** Its output's schema, if it declares one. */
+  outputSchema: Json | undefined;
+}
+
 /** What a tool call returned. */
 export interface McpToolResult {
   /**
@@ -125,6 +136,19 @@ const toolsPageSchema = z.object({
     })
   ),
   nextCursor: z.string().optional(),
+});
+
+/** A page of tools, each read on its own (`listedToolSchema`). */
+const listedPageSchema = z.object({
+  tools: z.array(z.unknown()),
+  nextCursor: z.string().optional(),
+});
+
+/** A tool with its schemas; one that isn't is left out of the list. */
+const listedToolSchema = z.object({
+  name: z.string(),
+  inputSchema: z.json(),
+  outputSchema: z.json().optional(),
 });
 
 const callResultSchema = z.object({
@@ -290,6 +314,13 @@ const resultOf = (result: unknown): McpToolResult => {
 export interface McpServer {
   /** The tool named exactly `name`, or undefined if the server has none. */
   tool: (name: string) => Promise<McpServerTool | undefined>;
+  /**
+   * Every tool the server lists with its schemas, as far as `maxToolPages`
+   * goes; a tool listed without them is left out. Throws {@link McpError}
+   * if it didn't answer, or lists more than that: half a list would look
+   * like all of it.
+   */
+  tools: () => Promise<McpListedTool[]>;
   /** Calls the tool once. Throws {@link McpError} if it didn't answer. */
   call: (name: string, input: Record<string, Json>) => Promise<McpToolResult>;
 }
@@ -422,6 +453,32 @@ export const mcpServer = (
         pages < maxToolPages
       );
       return found;
+    },
+    tools: async () => {
+      await started();
+      const listed: McpListedTool[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < maxToolPages; page += 1) {
+        const tools = listedPageSchema.safeParse(
+          // oxlint-disable-next-line no-await-in-loop -- pages come one after another
+          await request("tools/list", cursor === undefined ? {} : { cursor })
+        );
+        if (!tools.success) {
+          throw new McpError("The server's tool list isn't readable");
+        }
+        for (const item of tools.data.tools) {
+          const tool = listedToolSchema.safeParse(item);
+          if (tool.success) {
+            const { name, inputSchema, outputSchema } = tool.data;
+            listed.push({ name, inputSchema, outputSchema });
+          }
+        }
+        cursor = tools.data.nextCursor;
+        if (cursor === undefined) {
+          return listed;
+        }
+      }
+      throw new McpError("The server lists more tools than connect reads");
     },
     call: async (name, input) => {
       await started();

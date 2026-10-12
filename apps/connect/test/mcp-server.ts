@@ -22,6 +22,14 @@ export interface FakeTool {
   resourceField?: string;
   /** The properties its input schema declares. */
   inputs?: string[];
+  /**
+   * The input schema it lists, as JSON, in place of the one `inputs`
+   * makes; it then takes any input. Changed between requests, it is a
+   * server whose tool changed.
+   */
+  inputSchema?: unknown;
+  /** The output schema it lists, as JSON; by default it lists none. */
+  outputSchema?: unknown;
   /** What running it with `input` returns. */
   run: (input: Record<string, unknown>) => FakeResult | Promise<FakeResult>;
 }
@@ -95,6 +103,47 @@ const padded = (response: Response, padding: number): Response => {
   return new Response(stream, { headers: response.headers });
 };
 
+const isToolList = (body: unknown): boolean =>
+  typeof body === "object" &&
+  body !== null &&
+  "method" in body &&
+  body.method === "tools/list";
+
+const listMessageSchema = z.looseObject({
+  result: z.looseObject({
+    tools: z.array(z.looseObject({ name: z.string() })),
+  }),
+});
+
+/**
+ * A `tools/list` answer (a JSON body) with each tool's schemas as `tools`
+ * list them, where they set their own.
+ */
+const listedAs = async (
+  response: Response,
+  tools: readonly FakeTool[]
+): Promise<Response> => {
+  const message = listMessageSchema.parse(await response.json());
+  const listed = message.result.tools.map((each) => {
+    const tool = tools.find(({ name }) => name === each.name);
+    return {
+      ...each,
+      ...(tool?.inputSchema === undefined
+        ? {}
+        : { inputSchema: tool.inputSchema }),
+      ...(tool?.outputSchema === undefined
+        ? {}
+        : { outputSchema: tool.outputSchema }),
+    };
+  });
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  return Response.json(
+    { ...message, result: { ...message.result, tools: listed } },
+    { headers }
+  );
+};
+
 interface Ran {
   tool: string;
   input: Record<string, unknown>;
@@ -113,9 +162,14 @@ const serverWith = (tools: readonly FakeTool[], ran: Ran[]): McpServer => {
       tool.name,
       {
         inputSchema: z.looseObject(
-          Object.fromEntries(
-            (tool.inputs ?? []).map((input) => [input, z.string().optional()])
-          )
+          tool.inputSchema === undefined
+            ? Object.fromEntries(
+                (tool.inputs ?? []).map((input) => [
+                  input,
+                  z.string().optional(),
+                ])
+              )
+            : {}
         ),
         annotations: { readOnlyHint: tool.readOnly ?? false },
         _meta:
@@ -205,6 +259,9 @@ export const mcpServerWith = (
     if (network === "invalid-params") {
       await response.text();
       return rpcError(body, -32_602);
+    }
+    if (isToolList(body) && !stream) {
+      return await listedAs(response, tools);
     }
     return padded(response, stream ? padding : 0);
   };

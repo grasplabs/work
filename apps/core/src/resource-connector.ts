@@ -127,8 +127,14 @@ const contractOf = async (
     return served;
   } catch (error) {
     const code = connectErrors.codeOf(error);
-    // A contract ID connect can't read names no connector of its own.
-    if (code !== "connect.contract_not_found" && code !== "connect.invalid") {
+    // A contract ID connect can't read names no connector of its own; one
+    // whose Composio server can't be reached to list it isn't served now,
+    // so nothing is checked against a contract no one could read.
+    if (
+      code !== "connect.contract_not_found" &&
+      code !== "connect.invalid" &&
+      code !== "connect.server_unavailable"
+    ) {
       throw error;
     }
   }
