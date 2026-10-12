@@ -1622,8 +1622,9 @@ export const businessStores = sqliteTable("business_stores", {
   /**
    * The definition (`business_store_versions`) the release of the current
    * version of the App the store serves binds, moved in the statement that
-   * makes that version current (apps.ts): a projection, never what the
-   * store's object accepts writes against.
+   * makes that version current (apps.ts), and null while that version
+   * binds the store none: a projection, never what the store's object
+   * accepts writes against.
    */
   activeSchemaVersion: integer("active_schema_version"),
   activeSchemaHash: text("active_schema_hash"),

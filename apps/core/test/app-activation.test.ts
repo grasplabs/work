@@ -578,11 +578,20 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
         "SELECT active_schema_version AS version, active_schema_hash AS schemaHash, active_operation_manifest_hash AS operations FROM business_stores WHERE id = ?"
       )
         .bind(store)
-        .first<{ version: number; schemaHash: string; operations: string }>();
+        .first<{
+          version: number | null;
+          schemaHash: string | null;
+          operations: string | null;
+        }>();
     const afterThree = await active();
     // Rolled back: the store's active definition is version 1's again.
     await activateVersion(env, owner, app, 1);
     const afterRollback = await active();
+    // A version without a schema binds no store: the store serves no
+    // definition while it is current.
+    await commitFiles(env, owner, app, emptyFiles, "No tables");
+    await activateVersion(env, owner, app, 4);
+    const unbound = await active();
     const [first, third] = await Promise.all([
       loadRelease(env, app, 1),
       loadRelease(env, app, 3),
@@ -592,6 +601,7 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
       bound.results,
       afterThree,
       afterRollback,
+      unbound,
     ]).toStrictEqual([
       [
         {
@@ -622,6 +632,7 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
         schemaHash: first.store?.schemaHash,
         operations: first.store?.operationManifestHash,
       },
+      { version: null, schemaHash: null, operations: null },
     ]);
   });
 });

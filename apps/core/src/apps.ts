@@ -1157,7 +1157,9 @@ export const setCurrentVersion = async (
     }),
     ...registerTriggers(db, appId, number, triggers, storedEvent(event.id)),
     // The store the arriving version's release binds now serves its
-    // definition: core's inventory follows (data-stores.ts).
+    // definition, and one the leaving version's bound and the arriving
+    // one's doesn't serves none (each subquery finds no binding): core's
+    // inventory follows (data-stores.ts).
     db
       .update(businessStores)
       .set({
@@ -1177,7 +1179,8 @@ export const setCurrentVersion = async (
       .where(
         and(
           sql`${businessStores.id} IN (SELECT target_id FROM sdk_resource_bindings
-            WHERE resource_id = ${appId} AND resource_version = ${number} AND kind = 'store')`,
+            WHERE resource_id = ${appId} AND resource_version IN (${number}, ${previous ?? number})
+              AND kind = 'store')`,
           storedEvent(event.id)
         )
       ),
