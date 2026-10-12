@@ -480,6 +480,9 @@ const animate = (
       const slot = firstFree(fibres);
       const place = SLOTS[slot];
       if (place === undefined) {
+        // No place free while a fibre is still drawing back: try again on
+        // a later frame, once it has gone.
+        known = undefined;
         continue;
       }
       // The ones there from the start grow in one after another.
