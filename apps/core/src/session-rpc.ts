@@ -19,6 +19,7 @@ import { OnboardingRpc } from "./onboarding/rpc.ts";
 import { OnboardingStaffRpc } from "./onboarding/staff-rpc.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
+import { ResourceBindingsRpc } from "./resource-bindings-rpc.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { ScreenTrustRpc } from "./screen-trust-rpc.ts";
 import { ScreensRpc } from "./screens-rpc.ts";
@@ -46,6 +47,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #memory: MemoryRpc;
   readonly #uploads: UploadsRpc;
   readonly #permissions: PermissionsRpc;
+  readonly #resourceBindings: ResourceBindingsRpc;
   readonly #connections: ConnectionsRpc;
   readonly #workflows: WorkflowsRpc;
   readonly #decisions: DecisionsRpc;
@@ -75,6 +77,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#memory = new MemoryRpc(env, full);
     this.#uploads = new UploadsRpc(env, full);
     this.#permissions = new PermissionsRpc(env, full);
+    this.#resourceBindings = new ResourceBindingsRpc(env, full);
     this.#connections = new ConnectionsRpc(env, full);
     this.#workflows = new WorkflowsRpc(env, full);
     this.#decisions = new DecisionsRpc(env, full);
@@ -140,6 +143,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get permissions(): PermissionsRpc {
     return this.#permissions;
+  }
+
+  get resourceBindings(): ResourceBindingsRpc {
+    return this.#resourceBindings;
   }
 
   get connections(): ConnectionsRpc {

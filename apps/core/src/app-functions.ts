@@ -39,6 +39,9 @@ import { sdkReleaseManifests } from "./db/core/schema.ts";
 import { hostJsonModule, hostJsonSource } from "./host-json.ts";
 import { callOperation } from "./operations.ts";
 import type { HostedApp, Invocation, Runner } from "./operations.ts";
+import { invocationSources } from "./resource-adapter.ts";
+import type { InvocationSources } from "./resource-adapter.ts";
+import { resourceBindingsFor } from "./resource-bindings.ts";
 import { sandbox } from "./sandbox.ts";
 
 // Running an App's server functions from its sealed release (spec 6, 8,
@@ -419,6 +422,8 @@ interface FunctionCaller {
    * permission, agent-apps.ts): throws once it doesn't.
    */
   readonly stillAllowed?: () => Promise<void>;
+  /** What the invocation reads through its resources is noted here. */
+  readonly sources?: InvocationSources;
 }
 
 /**
@@ -429,11 +434,28 @@ interface FunctionCaller {
 export const invocationFor = async (
   env: Env,
   release: Release,
-  { by, requestId, deadline, stillAllowed }: FunctionCaller
+  {
+    by,
+    requestId,
+    deadline,
+    stillAllowed,
+    sources = invocationSources(),
+  }: FunctionCaller
 ): Promise<Invocation> => {
   // SAFETY: a release's resource ID is the App it was sealed for.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const app = release.manifest.resourceId as AppId;
+  const bindings = resourceBindingsFor(env, {
+    app,
+    authority: {
+      subject: { type: "app", appId: app },
+      onBehalfOf: by.userId,
+      mode: "interactive",
+      appVersion: release.manifest.resourceVersion,
+    },
+    context: { type: "app", appId: app },
+    sources,
+  });
   return {
     principal: by.userId,
     consumer: {
@@ -447,13 +469,20 @@ export const invocationFor = async (
     requestId,
     deadline,
     runId: null,
-    // Before every protected step: the call starts, and each mutation
-    // commits. A release revoked meanwhile stops a call already running.
+    // Before every protected step: the call starts, each mutation commits
+    // and each resource request (the operation host's one gate, `admit`).
+    // A release revoked, a role lost or an agent's permission withdrawn
+    // meanwhile stops a call already running.
     authorize: async () => {
       await requireNotRevoked(env, app, release.manifest.resourceVersion);
       await stillAllowed?.();
       return await operationRoles(env, by, app);
     },
+    // The App's approved bindings, read again on every request, acting
+    // for the App and the person calling, with the person there. The
+    // operation host admits each request through `authorize` first, as it
+    // admits each commit, so nothing else is checked here.
+    resources: bindings,
   };
 };
 
