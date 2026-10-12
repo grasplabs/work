@@ -27,6 +27,7 @@ import {
   listResourceBindings,
   revokeResourceBinding,
 } from "../src/resource-bindings.ts";
+import { publishTemplate } from "../src/resource-templates.ts";
 import { isRestricted } from "../src/restricted.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
@@ -440,6 +441,64 @@ const answerOf = async (
 /** A search text of exactly `length` code units that still finds the leave policy. */
 const searchTextOf = (length: number): string =>
   "leave ".repeat(length).slice(0, length);
+
+/** An App whose action reads a letter template. */
+const letterFiles = (): Record<string, string> => ({
+  "schema.ts": modelFiles()["schema.ts"] ?? "",
+  "operations/letters.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const letter = resource.template("letter", { contract: "grasp.letter@1" });
+
+export const read = action({
+  args: {},
+  returns: v.object({ version: v.number(), greeting: v.string() }),
+  uses: [letter],
+  handler: async (ctx) => {
+    const template = await ctx.resources.letter.read();
+    const { content } = template;
+    const greeting =
+      typeof content === "object" && content !== null && !Array.isArray(content)
+        ? String(content.greeting)
+        : "";
+    return { version: template.version, greeting };
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { letter, read } from "./operations/letters.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Letters",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { letters: { read } },
+  internalOperations: {},
+  screens: [],
+  uses: [letter],
+});
+`,
+});
+
+/** The error code publishing `publication` as `by` fails with. */
+const publishRefusal = async (
+  by: Awaited<ReturnType<typeof person>>,
+  publication: object
+): Promise<string> =>
+  await failure(async () => await publishTemplate(env, by, publication));
+
+/** An approval of the Letters App's `letter` to `version` of `templateId`. */
+const letterApproval = (
+  sealed: Sealed,
+  templateId: string,
+  version: number
+) => ({
+  app: sealed.app,
+  alias: "letter",
+  target: { kind: "template", templateId, version },
+  reviewed: { version: 1 },
+});
 
 describe("resource bindings", { timeout: 120_000 }, () => {
   it("refuse a model an action declares until an admin binds it", async () => {
@@ -1139,6 +1198,114 @@ describe("resource bindings", { timeout: 120_000 }, () => {
       missing: "resource.target_invalid",
       extra: "resource.target_invalid",
       anotherApps: "resource.target_invalid",
+    });
+  });
+
+  it("read the template version a binding pins, whatever is published later", async () => {
+    const sealed = await sealedApp(letterFiles());
+    const admin = await person("admin");
+    const first = await publishTemplate(env, admin, {
+      contract: "grasp.letter@1",
+      content: { greeting: "Dear" },
+    });
+    await approveResourceBinding(
+      env,
+      admin,
+      letterApproval(sealed, first.templateId, 1)
+    );
+    const second = await publishTemplate(env, admin, {
+      templateId: first.templateId,
+      contract: "grasp.letter@1",
+      content: { greeting: "Hello" },
+    });
+    const pinned = await call(env, sealed, "letters.read", {});
+    await approveResourceBinding(
+      env,
+      admin,
+      letterApproval(sealed, first.templateId, second.version)
+    );
+    const moved = await call(env, sealed, "letters.read", {});
+    expect({
+      pinned: outcomeOf(pinned),
+      moved: outcomeOf(moved),
+    }).toStrictEqual({
+      pinned: { version: 1, greeting: "Dear" },
+      moved: { version: 2, greeting: "Hello" },
+    });
+  });
+
+  it("publish templates by admins only, keeping each one's contract", async () => {
+    const admin = await person("admin");
+    const builder = await person("builder");
+    const first = await publishTemplate(env, admin, {
+      contract: "grasp.letter@1",
+      content: { greeting: "Dear" },
+    });
+    expect({
+      builder: await publishRefusal(builder, {
+        contract: "grasp.letter@1",
+        content: {},
+      }),
+      otherContract: await publishRefusal(admin, {
+        templateId: first.templateId,
+        contract: "grasp.invoice@1",
+        content: {},
+      }),
+      unknown: await publishRefusal(admin, {
+        templateId: "no-such-template",
+        contract: "grasp.letter@1",
+        content: {},
+      }),
+      tooLarge: await publishRefusal(admin, {
+        contract: "grasp.letter@1",
+        content: { text: "x".repeat(70_000) },
+      }),
+    }).toStrictEqual({
+      builder: "role.forbidden",
+      otherContract: "resource.template_contract_changed",
+      unknown: "resource.template_not_found",
+      tooLarge: "resource.template_invalid",
+    });
+  });
+
+  it("bind only a template of the declared contract, and stop one changed in storage", async () => {
+    const sealed = await sealedApp(letterFiles());
+    const admin = await person("admin");
+    const invoice = await publishTemplate(env, admin, {
+      contract: "grasp.invoice@1",
+      content: { total: 1 },
+    });
+    const letter = await publishTemplate(env, admin, {
+      contract: "grasp.letter@1",
+      content: { greeting: "Dear" },
+    });
+    const otherContract = await failure(
+      async () =>
+        await approveResourceBinding(
+          env,
+          admin,
+          letterApproval(sealed, invoice.templateId, 1)
+        )
+    );
+    await approveResourceBinding(
+      env,
+      admin,
+      letterApproval(sealed, letter.templateId, 1)
+    );
+    // A version is never changed; one changed behind the platform's back
+    // no longer hashes to what was approved, and serves nothing.
+    await env.DB.prepare(
+      "UPDATE resource_templates SET content = ? WHERE id = ?"
+    )
+      .bind(JSON.stringify({ greeting: "Gotcha" }), letter.templateId)
+      .run();
+    const tampered = await call(env, sealed, "letters.read", {});
+    expect({
+      otherContract,
+      tampered: outcomeOf(tampered),
+    }).toStrictEqual({
+      otherContract: "resource.target_invalid",
+      tampered: { failed: "resource.unavailable" },
     });
   });
 });

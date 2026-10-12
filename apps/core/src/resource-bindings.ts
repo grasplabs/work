@@ -43,6 +43,7 @@ import type {
 import { connectorAdapter } from "./resource-connector.ts";
 import { knowledgeAdapter } from "./resource-knowledge.ts";
 import { modelAdapter } from "./resource-model.ts";
+import { templateAdapter } from "./resource-templates.ts";
 
 // Approved resource bindings (spec 12, 16.1, 32.3): what lets an action of
 // an App of spec 8's layout reach a model, a connection, knowledge or a
@@ -84,11 +85,12 @@ import { modelAdapter } from "./resource-model.ts";
 
 /** Each kind's adapter. */
 const adapters: {
-  readonly [Kind in BindingTarget["kind"]]?: ResourceAdapter<Kind>;
+  readonly [Kind in BindingTarget["kind"]]: ResourceAdapter<Kind>;
 } = {
   model: modelAdapter,
   knowledge: knowledgeAdapter,
   connector: connectorAdapter,
+  template: templateAdapter,
 };
 
 /** The SHA-256 of `declaration`, canonical, as a release sealed it. */

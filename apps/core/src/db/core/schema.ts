@@ -817,6 +817,28 @@ export const appDefaultStores = sqliteTable("app_default_stores", {
 });
 
 /**
+ * Published templates (resource-bindings.ts): each version's content,
+ * written once by an admin and never changed, so a binding to a version
+ * always reads exactly what was approved (spec 32.3). A template keeps the
+ * contract of its first version; a new version is a new row.
+ */
+export const resourceTemplates = sqliteTable(
+  "resource_templates",
+  {
+    id: text().notNull(),
+    version: integer().notNull(),
+    contract: text().notNull(),
+    /** The content, as canonical JSON. */
+    content: text().notNull(),
+    /** The SHA-256 of `content`. */
+    contentHash: text("content_hash").notNull(),
+    publishedBy: text("published_by").notNull(),
+    publishedAt: timestamp("published_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.id, table.version] })]
+);
+
+/**
  * Which provider serves each resource an App of spec 8's layout declares
  * for its actions (resource-bindings.ts): approved by an admin, for the
  * exact declaration they reviewed (`declaration_hash`) and the contract it
