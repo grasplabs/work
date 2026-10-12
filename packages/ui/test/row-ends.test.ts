@@ -59,4 +59,8 @@ describe(moveToShow, () => {
   it("shows the start of an item the row has no room for", () => {
     expect(moveToShow(row, { left: 10, right: 600 }, 24)).toBe(-38);
   });
+
+  it("shows the start of an item the row has no room for, though its start is in view", () => {
+    expect(moveToShow(row, { left: 100, right: 700 }, 24)).toBe(52);
+  });
 });

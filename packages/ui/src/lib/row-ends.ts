@@ -28,7 +28,11 @@ export const endsOf = (row: RowScroll): { start: boolean; end: boolean } => ({
  * the row may fade); 0 when it already is. An item with no room for all of it shows its start.
  */
 export const moveToShow = (row: Span, item: Span, clear: number): number => {
-  if (item.left < row.left + clear) {
+  // Wider than the room between the ends, or starting before it: its start.
+  if (
+    item.left < row.left + clear ||
+    item.right - item.left > row.right - row.left - 2 * clear
+  ) {
     return item.left - (row.left + clear);
   }
   if (item.right > row.right - clear) {
@@ -59,7 +63,9 @@ export const watchEnds = (
   // The box's own size, and that of what is in it: a font that arrives or a count that goes
   // changes how wide the items are without changing the box.
   const sizes = new ResizeObserver(mark);
+  // Watched anew on every change, so an item that left isn't held on to.
   const watchSizes = () => {
+    sizes.disconnect();
     sizes.observe(box);
     for (const item of box.children) {
       sizes.observe(item);
