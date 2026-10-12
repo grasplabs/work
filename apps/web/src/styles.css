@@ -612,17 +612,6 @@
   padding-bottom: calc(var(--spacing) * 24);
 }
 
-/* The Integrations banner: a band of soft light in the palette's own greys, behind the brain and its nerves. */
-@utility banner-light {
-  background-image:
-    radial-gradient(
-      38% 120% at 50% 50%,
-      color-mix(in oklch, var(--card) 90%, transparent),
-      transparent 75%
-    ),
-    linear-gradient(110deg, var(--muted), var(--accent) 50%, var(--muted));
-}
-
 /* The lines of the experiment's chain. A drawing says how its lines are printed (`data-lines`)
    and whether its workflow is live (`data-live`), and every line in it follows (`WireLine` in
    `inside-flow.tsx`: `wire-base` is the line, `wire-grain` every third dot again a little larger,

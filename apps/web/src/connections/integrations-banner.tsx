@@ -59,7 +59,7 @@ const SignInAgain = ({
       ref={link}
       to="/integrations/$integration"
     >
-      <AppLogo name={integration.name} size="sm" />
+      <AppLogo logo={integration.logo} name={integration.name} size="inline" />
       <span className="font-medium">{integration.name}</span>
       <span className="text-muted-foreground">
         <Trans>Sign in again</Trans>

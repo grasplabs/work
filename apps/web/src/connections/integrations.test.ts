@@ -162,10 +162,10 @@ describe("filters, search and sections", () => {
   it("finds by name before what an app is for, whatever the case", () => {
     expect(find(all, "GOO").map(({ id }) => id)).toStrictEqual(["google"]);
     expect(find(all, "files").map(({ id }) => id)).toStrictEqual(["google"]);
+    // Google by its name, Microsoft only by its kind (Email).
     expect(find(all, "e").map(({ id }) => id)).toStrictEqual([
-      "microsoft",
       "google",
-      "hubspot",
+      "microsoft",
     ]);
   });
 
