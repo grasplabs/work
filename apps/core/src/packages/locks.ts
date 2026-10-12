@@ -137,6 +137,13 @@ export const failUnless = (
     );
 
 /**
+ * That `app`'s graph `graphHash` is retired and approved by nothing else,
+ * as SQL: its lock is frozen (`lockStatements`).
+ */
+const frozenSql = (app: string, graphHash: string): SQL =>
+  sql`(EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.appId} = ${app} AND ${dependencyRequests.graphHash} = ${graphHash} AND ${dependencyRequests.status} = 'retired') AND NOT EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.appId} = ${app} AND ${dependencyRequests.graphHash} = ${graphHash} AND ${dependencyRequests.status} = 'approved'))`;
+
+/**
  * That no pending, approved or retired request of its App names the lock
  * `lock`. A retired graph's lock stays: the artifacts it pins are what
  * the graph keeps working with. A revoked one's goes.
@@ -249,9 +256,30 @@ export const lockStatements = async (
     .where(where)
     .get();
   const before = row ? graspLockSchema.parse(JSON.parse(row.lock)) : undefined;
-  const merged = before
-    ? mergedLock(before, fresh)
-    : { lock: fresh, changed: [] };
+  // A retired graph's lock is frozen: its pins are what the graph keeps,
+  // each built for the target config the lock names. A resolve may add a
+  // target it has no config for, never change one it has (a new config
+  // waits for the graph to be approved again).
+  const retiredOnly = frozenSql(app, graphHash);
+  const read = await db.get<{ frozen: number }>(
+    sql`SELECT ${retiredOnly} AS frozen`
+  );
+  const frozen = before !== undefined && read.frozen !== 0;
+  let merged: { lock: GraspLock; changed: DependencyTarget[] } = {
+    lock: fresh,
+    changed: [],
+  };
+  if (before !== undefined) {
+    merged = frozen
+      ? {
+          lock: {
+            ...before,
+            targets: { ...fresh.targets, ...before.targets },
+          },
+          changed: [],
+        }
+      : mergedLock(before, fresh);
+  }
   const stored = canonicalJson(graspLockSchema.parse(merged.lock));
   if (new TextEncoder().encode(stored).byteLength > limits.lockBytes) {
     throw packageErrors.create("package.quota", {
@@ -310,8 +338,13 @@ export const lockStatements = async (
     .update(dependencyLocks)
     .set({ lock: stored })
     .where(and(where, eq(dependencyLocks.lock, row.lock)));
+  // Merged as a lock in use: the batch fails whole if the graph was
+  // retired since, and the next attempt reads it frozen.
+  const stillThawed = frozen
+    ? []
+    : [failUnless(db, app, graphHash, sql`NOT ${retiredOnly}`)];
   if (merged.changed.length === 0) {
-    return { lock: merged.lock, statements: [update, guard] };
+    return { lock: merged.lock, statements: [update, guard, ...stillThawed] };
   }
   const [from, to] = await Promise.all([
     configsOf(before, merged.changed, "from"),
@@ -322,6 +355,7 @@ export const lockStatements = async (
     statements: [
       update,
       guard,
+      ...stillThawed,
       // Only if the guard passed: the batch lands whole or not at all.
       outboxed(db, {
         actor: by.actor ?? actorOf(by),

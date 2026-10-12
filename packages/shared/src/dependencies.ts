@@ -470,15 +470,30 @@ export const dependencyDecisionSchema = z.strictObject({
 export type DependencyDecision = z.input<typeof dependencyDecisionSchema>;
 
 /**
+ * Most approvals one graph of an App can have in force: one per set of
+ * targets it was approved for.
+ */
+export const dependencyEndingMaxApprovals = 16;
+
+/**
  * What a person decides when they retire or revoke an approved graph, and
- * what they reviewed as they did: the graph, and the policy generation
- * they read its impact under (`DependencyImpact`). Why is required: it is
+ * what they reviewed as they did: the graph, the approvals it would end
+ * and the policy generation they read its impact under
+ * (`DependencyImpact`). Why is required: it is
  * what the audit trail and the App's builders are told.
  */
 export const dependencyEndingSchema = z.strictObject({
   reviewed: z.strictObject({
     graphHash: z.string().regex(/^[0-9a-f]{64}$/u),
     policyGeneration: z.int().nonnegative(),
+    /**
+     * The approvals the impact listed (`DependencyImpact.approvals`), by
+     * ID: the decision ends exactly these, or nothing.
+     */
+    approvals: z
+      .array(z.string().min(1).max(identifierMaxLength))
+      .min(1)
+      .max(dependencyEndingMaxApprovals),
   }),
   reason: z.string().trim().min(1).max(identifierMaxLength),
 });

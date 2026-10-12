@@ -1333,16 +1333,81 @@ export const dependencyImpact = async (
 };
 
 /**
+ * The statements, for a batch that revokes `named`'s graph and stores
+ * event `revocation`, that deny the request waiting for that same App and
+ * graph, if one does, as `by`'s decision under `generation`: its audit
+ * event first (`dependency.denied`, naming the revocation), written from
+ * the very row the update then changes, and both only if the revocation
+ * landed.
+ */
+const denyWaiting = (
+  db: DrizzleD1Database,
+  by: Identity,
+  named: Listed,
+  revocation: string,
+  generation: number,
+  reason: string
+) => {
+  const waits = and(
+    eq(dependencyRequests.appId, named.appId),
+    eq(dependencyRequests.graphHash, named.graphHash),
+    eq(dependencyRequests.status, "pending"),
+    storedEvent(revocation)
+  );
+  const eventId = crypto.randomUUID();
+  const now = new Date();
+  const event = sql`json_object(
+    'id', ${eventId},
+    'at', ${now.toISOString()},
+    'source', 'core',
+    'actor', json(${JSON.stringify(actorOf(by))}),
+    'action', 'dependency.denied',
+    'target', json_object('type', 'dependency_request', 'id', ${dependencyRequests.id}),
+    'provenance', json('[]'),
+    'detail', json_object(
+      'app', ${dependencyRequests.appId},
+      'sourceRevision', ${dependencyRequests.sourceRevision},
+      'graphHash', ${dependencyRequests.graphHash},
+      'targets', (SELECT group_concat(value, ' ') FROM json_each(${dependencyRequests.targets})),
+      'direct', ${dependencyRequests.direct},
+      'packages', ${dependencyRequests.packages},
+      'requestedBy', ${dependencyRequests.requestedBy},
+      'policyGeneration', ${generation},
+      'reason', ${reason},
+      'revocation', ${revocation}
+    )
+  )`;
+  return [
+    db
+      .insert(auditOutbox)
+      .select(
+        sql`SELECT ${eventId}, ${event}, ${now.getTime()} FROM ${dependencyRequests} WHERE ${waits}`
+      ),
+    db
+      .update(dependencyRequests)
+      .set({
+        status: "denied",
+        decidedBy: by.userId,
+        decidedAt: now,
+        decidedGeneration: generation,
+        reason,
+      })
+      .where(waits),
+  ] as const;
+};
+
+/**
  * Retires or revokes the graph of approval `input` for its App, for `by`:
- * every approval of the graph `ending` ends (`endings`), in one batch
- * that lands only while those are exactly the ones in force now, the
+ * the approvals of the graph the person reviewed, in one batch that
+ * lands only while those are exactly the ones `ending` would end now
+ * (`endings`), the
  * policy generation is the one reviewed, and `by` holds
  * `dependencies.approve`, all read as it runs. The batch records it once
  * (`dependency.retired` or `dependency.revoked`, naming every approval it
  * ended) and moves the policy generation on, so every admission read
- * before is refused from then on; a revoked graph's lock goes with it,
- * unless a request waiting for the App names it, and its files are
- * queued for cleanup (packages/locks.ts). A retired graph keeps its lock,
+ * before is refused from then on. Revoking also denies the request
+ * waiting for the same graph, if one does, and the graph's lock goes, its
+ * files queued for cleanup (packages/locks.ts). A retired graph keeps its lock,
  * and the artifacts it pins keep working.
  *
  * As for a decision: only a person, from their own session, never an
@@ -1367,12 +1432,12 @@ export const endDependency = async (
   if (named.graphHash !== reviewed.graphHash) {
     throw dependencyErrors.create("dependency.stale");
   }
-  const rows = await endableRows(db, named.appId, named.graphHash, ending);
-  if (!rows.some(({ id }) => id === named.id)) {
-    // Retiring one already retired: nothing in force to retire.
+  // What the person reviewed, not what is in force now: a decision ends
+  // exactly the approvals the impact showed them, or nothing.
+  const ids = [...new Set(reviewed.approvals)].toSorted();
+  if (!ids.includes(named.id)) {
     throw dependencyErrors.create("dependency.stale");
   }
-  const ids = rows.map(({ id }) => id);
   const generation = reviewed.policyGeneration + 1;
   const event = createAuditEvent(
     {
@@ -1389,10 +1454,10 @@ export const endDependency = async (
     },
     "core"
   );
-  // The approvals in force as the batch runs, by ID in order: exactly the
-  // ones read, or the batch changes nothing.
-  const inForce = sql`(SELECT group_concat(id, ' ') FROM (SELECT ${dependencyRequests.id} AS id FROM ${dependencyRequests} WHERE ${endable(named.appId, named.graphHash, ending)} ORDER BY ${dependencyRequests.id}))`;
-  const lands = sql`${inForce} = ${ids.join(" ")} AND ${policyGenerationSql} = ${reviewed.policyGeneration} AND ${holdsApproveSql(by.userId)}`;
+  // The approvals in force as the batch runs are exactly the ones
+  // reviewed: as many, and each of them, whatever order rows come in.
+  const inForce = endable(named.appId, named.graphHash, ending);
+  const lands = sql`(SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce}) = ${ids.length} AND (SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce} AND ${inArray(dependencyRequests.id, ids)}) = ${ids.length} AND ${policyGenerationSql} = ${reviewed.policyGeneration} AND ${holdsApproveSql(by.userId)}`;
   const status: Row["status"] = ending;
   const [, ended] = await auditedBatch(env, db, [
     outboxedEventWhere(db, event, lands),
@@ -1408,7 +1473,12 @@ export const endDependency = async (
       .where(and(inArray(dependencyRequests.id, ids), storedEvent(event.id)))
       .returning(listed),
     advancePolicy(db, storedEvent(event.id)),
-    // A revoked graph's lock goes, unless a request waiting names it; a
+    // A request waiting for the revoked graph is denied with it: approving
+    // it later would bring back the lock, and what it pinned, unbuilt.
+    ...(ending === "revoked"
+      ? denyWaiting(db, by, named, event.id, generation, reason)
+      : []),
+    // A revoked graph's lock goes, now that nothing waiting names it; a
     // retired one is in use (packages/locks.ts).
     ...unusedLockStatements(db, named.appId),
   ]);
