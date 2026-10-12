@@ -636,6 +636,50 @@ describe("pinned schemas", () => {
   });
 });
 
+describe("stored documents", () => {
+  it("show what is stored: a default is filled in as a record is written, never as it is read", async () => {
+    const fixture = await storeWith("appMembers");
+    const [written, damaged] = await insert(
+      fixture,
+      "ada",
+      { title: "left out" },
+      { title: "damaged", done: true }
+    );
+    // A record that lost the field in storage, as no write leaves one.
+    await runInDurableObject(
+      env.DATA_STORES.getByName(fixture.store.id),
+      (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE sdk_records SET value_json = json_remove(value_json, '$.done') WHERE record_id = ?",
+          damaged ?? ""
+        );
+      }
+    );
+    const read = async (id: string | undefined) => {
+      const answer = await valueOf(fixture.store, scopeOf(fixture.schemaHash), {
+        kind: "get",
+        table: "notes",
+        id: id ?? "",
+        expectedRevision: null,
+      });
+      return {
+        title: fieldOf(answer, "title"),
+        done: fieldOf(answer, "done"),
+        holdsDone:
+          typeof answer === "object" && answer !== null && "done" in answer,
+      };
+    };
+
+    expect({
+      written: await read(written),
+      damaged: await read(damaged),
+    }).toStrictEqual({
+      written: { title: "left out", done: false, holdsDone: true },
+      damaged: { title: "damaged", done: undefined, holdsDone: false },
+    });
+  });
+});
+
 describe("more owners, more tables", () => {
   it("never count another owner's records against the caller's bounds", async () => {
     const fixture = await storeWith("owner");

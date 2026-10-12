@@ -74,8 +74,12 @@ import type { PhysicalIndex } from "./store-indexes.ts";
 //   two-valued (store-expressions.ts), so `NOT` keeps records whose field
 //   is null or left out, and comparisons never reach them.
 // - A pinned consumer reads fields its schema doesn't know, or misses one
-//   it relies on: documents are projected to the pinned table's fields,
-//   with their defaults where a stored record lacks one (spec 32.7).
+//   it relies on: documents are projected to the pinned table's fields
+//   (spec 32.7), and every record holds each field its store's contract
+//   gives a default (the store fills it in on every write, and fills in
+//   records written before the field existed before the contract takes
+//   it, store-host.ts `fillMissing`), so a read shows what is stored and
+//   never makes a default up.
 // - A caller reads a schema the store doesn't hold, or claims a role: the
 //   schema hash and roles are core's (`ReadScope`), and an unknown hash is
 //   refused (`data.unknown_schema`).
@@ -302,7 +306,10 @@ type Projection = (value: unknown, descriptor: ValueDescriptor) => unknown;
 /**
  * An object's value as `fields` declare it: their keys only, each
  * projected (a key declared without a descriptor, as a semantic kind's
- * are, kept as stored), with defaults where a defaulted key is missing.
+ * are, kept as stored). A key the value lacks stays missing, defaulted or
+ * not: a default is filled in when a value is written (input validation,
+ * and the store's fill-missing rule for fields added later,
+ * store-fills.ts), never made up while reading (spec 17.1).
  */
 const projectedObject = (
   value: unknown,
@@ -320,11 +327,6 @@ const projectedObject = (
     if (Object.hasOwn(value, field)) {
       shown[field] =
         declared === undefined ? value[field] : project(value[field], declared);
-    } else if (
-      declared?.presence === "default" &&
-      declared.defaultValue !== undefined
-    ) {
-      shown[field] = declared.defaultValue;
     }
   }
   return shown;
@@ -364,8 +366,8 @@ const projectedUnion = (
 
 /**
  * `value` as `descriptor` (a pinned schema's) has it, at every depth:
- * objects keep only the keys they declare, with their defaults where a
- * defaulted key is missing, and so do the object-valued semantic kinds;
+ * objects keep only the keys they declare and hold, and so do the
+ * object-valued semantic kinds;
  * records, arrays and unions project what they hold. Keys a later schema
  * stored are left out, however deep (spec 32.7). A value that holds an
  * object or a list where its type holds neither, or that no member of a
