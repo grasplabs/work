@@ -1,5 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 import type { AppManifest, OperationManifest } from "./app.ts";
@@ -41,14 +41,6 @@ export const generatedPaths = {
 
 /** The format of `contracts.json`. */
 export const contractsFormatVersion = 1;
-
-/** The canonical text of `value`, which is JSON data. */
-const canonicalText = (value: unknown): string => {
-  // SAFETY: what JSON.parse answers is JSON; a manifest is JSON data.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const json = JSON.parse(JSON.stringify(value) ?? "null") as Json;
-  return canonicalJson(json);
-};
 
 /**
  * The fingerprint of `operation`'s exact contract: the SHA-256, in hex, of
