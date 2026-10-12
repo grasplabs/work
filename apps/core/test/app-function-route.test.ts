@@ -10,7 +10,7 @@ import {
   screenLimits,
 } from "@grasp-os/shared/screens";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
@@ -274,25 +274,35 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
   });
 
   it("refuses a person past their requests of the App's screens", async () => {
-    const approved = await approvedApp();
-    const titles = requestFor(approved, "notes.titles", {});
-    const sent = { cookie: approved.builder.session, lease: approved.lease };
-    // Opening the screen counted one already; past the burst, refused.
-    const statuses: number[] = [];
-    for (let count = 0; count <= screenLimits.requests.burst; count += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one request after another, as a page sends them
-      const response = await post(approved.app, titles, sent);
-      statuses.push(response.status);
-      // oxlint-disable-next-line no-await-in-loop -- each body read so its request ends
-      await response.body?.cancel();
+    // The bucket fills again with time (`screenLimits.requests`), so the
+    // clock is stopped: what is admitted is then exact, however long the
+    // requests take. A fresh person and App, so no other test's count.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    try {
+      const approved = await approvedApp();
+      const titles = requestFor(approved, "notes.titles", {});
+      const sent = { cookie: approved.builder.session, lease: approved.lease };
+      // Opening the screen counted one already.
+      const statuses: number[] = [];
+      for (let count = 0; count < screenLimits.requests.burst; count += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one request after another, as a page sends them
+        const response = await post(approved.app, titles, sent);
+        statuses.push(response.status);
+        // oxlint-disable-next-line no-await-in-loop -- each body read so its request ends
+        await response.body?.cancel();
+      }
+      expect(statuses).toStrictEqual([
+        ...Array.from({ length: screenLimits.requests.burst - 1 }, () => 200),
+        429,
+      ]);
+      const refused = await post(approved.app, titles, sent);
+      await expect(refusalOf(refused)).resolves.toStrictEqual({
+        status: 429,
+        code: "screen.rate_limited",
+      });
+    } finally {
+      vi.useRealTimers();
     }
-    expect(statuses[0]).toBe(200);
-    expect(statuses.at(-1)).toBe(429);
-    const refused = await post(approved.app, titles, sent);
-    await expect(refusalOf(refused)).resolves.toStrictEqual({
-      status: 429,
-      code: "screen.rate_limited",
-    });
   });
 
   it("refuses a call of a revoked release", async () => {
