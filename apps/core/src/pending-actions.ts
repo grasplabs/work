@@ -22,6 +22,7 @@ import { signedCall } from "./bindings.ts";
 import { personOf } from "./connections.ts";
 import { workflowRuns } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
+import { requireHeldBinding } from "./resource-bindings.ts";
 import { isRestricted } from "./restricted.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -140,6 +141,16 @@ export const confirmPendingAction = async (
       throw permissionErrors.create("permission.denied", {
         action: held.action,
       });
+    }
+    // A call an App's action made through a resource binding runs only if
+    // that binding would still serve it now, as a live request would.
+    if (held.subject.type === "app" && held.binding !== null) {
+      await requireHeldBinding(
+        env,
+        held.subject.appId,
+        held.binding,
+        held.action
+      );
     }
     const authority = authoritySchema.parse({
       subject: held.subject,

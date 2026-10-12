@@ -1,3 +1,4 @@
+import type { Json } from "@grasp-os/shared/json";
 import { describe, expect, it } from "vite-plus/test";
 
 import googleWorkspace from "../../../packages/connectors/google-workspace/src/index.ts";
@@ -84,6 +85,46 @@ describe("generated connector contracts", () => {
       union: passes(schema, { name: "a", size: "large", labels: { a: "b" } }),
       wrongMap: passes(schema, { name: "a", size: 1, labels: { a: 1 } }),
     }).toStrictEqual({ nulls: true, union: true, wrongMap: false });
+  });
+
+  it("enforce the patterns and formats a descriptor can't say", () => {
+    const list = read(
+      microsoft365.manifest.actions["mail.list"]?.contract.input
+    );
+    const accepted = readContractSchema(
+      JSON.stringify(microsoft365.manifest.actions["mail.list"]?.contract.input)
+    );
+    const fits = (value: Record<string, Json>) =>
+      passes(list, value) && accepted?.accepts(value) === true;
+    expect({
+      valid: fits({
+        mailbox: "team@acme.test",
+        receivedAfter: "2026-10-12T09:00:00Z",
+      }),
+      // A mailbox with a path in it, which the connector's pattern refuses.
+      badPattern: fits({ mailbox: "team/../other" }),
+      notADate: fits({ mailbox: "team@acme.test", receivedAfter: "yesterday" }),
+    }).toStrictEqual({ valid: true, badPattern: false, notADate: false });
+  });
+
+  it("refuse any keyword it doesn't enforce, rather than drop it", () => {
+    const string = { type: "string" };
+    const unreadable = [
+      { type: "number", exclusiveMinimum: 0 },
+      { type: "number", multipleOf: 2 },
+      { type: "array", items: string, uniqueItems: true },
+      { type: "array", items: string, contains: string },
+      { type: "object", additionalProperties: string, maxProperties: 3 },
+      { type: "string", format: "uri" },
+      {
+        type: "object",
+        properties: { a: string },
+        required: ["a", "b"],
+        additionalProperties: false,
+      },
+      { type: "string", pattern: "(" },
+    ].map((schema) => readContractSchema(JSON.stringify(schema)));
+    expect(unreadable.every((each) => each === undefined)).toBeTruthy();
   });
 
   it("fail closed on what a descriptor can't say", () => {

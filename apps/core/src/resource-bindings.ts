@@ -2,13 +2,14 @@ import type { AnyResource } from "@grasp-os/sdk";
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
+import type { HeldBinding } from "@grasp-os/shared/capability";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { identifierMaxLength } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { jsonOf } from "@grasp-os/shared/operations";
+import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import {
   bindingApprovalSchema,
   bindingTargetSchema,
@@ -120,6 +121,27 @@ const boundBy = async (
 };
 
 type Row = typeof appResourceBindings.$inferSelect;
+
+/**
+ * Drops the held actions App `app` made through binding `bindingId`, now
+ * revoked or replaced: none of them could be confirmed anyway
+ * (`requireHeldBinding`), so the person isn't asked about them. Best
+ * effort: the check on confirming is what holds.
+ */
+const dropHeldFor = async (
+  env: Env,
+  app: string,
+  bindingId: string
+): Promise<void> => {
+  try {
+    await env.CONNECT.dropForBinding({ appId: app, bindingId });
+  } catch (error) {
+    log.warn("resource_binding.drop_failed", {
+      binding: bindingId,
+      ...errorFields(error),
+    });
+  }
+};
 
 /** A row as the API returns it. */
 const toBinding = (row: Row): ResourceBinding => ({
@@ -305,6 +327,9 @@ export const approveResourceBinding = async (
     await requireStillAdmin(env, by);
     throw appErrors.create("app.conflict");
   }
+  if (previous !== undefined) {
+    await dropHeldFor(env, found.id, previous.id);
+  }
   return toBinding(written);
 };
 
@@ -361,6 +386,7 @@ export const revokeResourceBinding = async (
       .get();
     return toBinding(now ?? found);
   }
+  await dropHeldFor(env, row.appId, row.id);
   return toBinding(row);
 };
 
@@ -431,6 +457,72 @@ export const resourceBindingsFor =
           ? declaration.contract
           : null,
       call: async (method, args, context) =>
-        await served.call(caller, { method, args }, context),
+        await served.call(caller, { method, args }, context, {
+          id: row.id,
+          declarationHash: row.declarationHash,
+          fingerprint: row.fingerprint,
+        }),
     };
   };
+
+/** A held call its binding no longer serves. */
+const notServed = () => operationErrors.create("resource.unavailable");
+
+/**
+ * Refuses a held call of App `app` through binding `pin` unless the
+ * binding would still serve it now, exactly as a live request of the App's
+ * current version would resolve it (`resourceBindingsFor`): the binding is
+ * the same one and still active, the current release declares exactly
+ * what was approved, its target still serves exactly the contract pinned,
+ * and that contract still names the call's tool. A binding revoked or
+ * replaced since, a version that widened the declaration, a drifted
+ * contract or a lost grant: `resource.unavailable`, and nothing runs.
+ */
+export const requireHeldBinding = async (
+  env: Env,
+  app: AppId,
+  pin: HeldBinding,
+  tool: string
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select()
+    .from(appResourceBindings)
+    .where(
+      and(
+        eq(appResourceBindings.id, pin.id),
+        eq(appResourceBindings.appId, app),
+        eq(appResourceBindings.status, "active")
+      )
+    )
+    .get();
+  const found = row === undefined ? undefined : await findApp(env, app);
+  if (
+    row === undefined ||
+    found?.currentVersion === null ||
+    found === undefined ||
+    row.declarationHash !== pin.declarationHash ||
+    row.fingerprint !== pin.fingerprint
+  ) {
+    throw notServed();
+  }
+  const release = await loadRelease(env, found.id, found.currentVersion);
+  const declaration = Object.hasOwn(release.app.resources, row.alias)
+    ? release.app.resources[row.alias]
+    : undefined;
+  const target = bindingTargetSchema.safeParse(JSON.parse(row.target));
+  if (
+    declaration === undefined ||
+    !target.success ||
+    (await declarationHash(declaration)) !== row.declarationHash
+  ) {
+    throw notServed();
+  }
+  const served = await boundBy(env, found.id, declaration, target.data);
+  if (
+    served?.contractId !== row.contractId ||
+    served.fingerprint !== row.fingerprint ||
+    served.tools?.includes(tool) !== true
+  ) {
+    throw notServed();
+  }
+};

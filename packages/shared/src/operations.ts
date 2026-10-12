@@ -69,6 +69,10 @@ export const operationErrors = defineErrorFamily({
     "The model budget this request counts against is used up, so it wasn't sent.",
   "resource.awaiting_confirmation":
     "This request waits for the person it acts for to confirm it. Make the same call again once they have.",
+  "resource.declined":
+    "The person this request waited for declined it: it didn't run, and won't under this call's key.",
+  "resource.idempotency_conflict":
+    "This call's key was already used for a request with other arguments: it wasn't run again.",
   "resource.invalid_args":
     "The arguments don't fit the contract of the resource's action.",
   "resource.item_not_found":
@@ -122,6 +126,8 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "resource.awaiting_confirmation": "operational",
   "resource.item_not_found": "domain",
   "resource.invalid_args": "contract",
+  "resource.declined": "domain",
+  "resource.idempotency_conflict": "contract",
   "data.write_denied": "authorization",
   "data.conflict": "domain",
   "data.not_unique": "domain",

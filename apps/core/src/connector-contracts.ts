@@ -3,41 +3,22 @@ import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import type { Json } from "@grasp-os/shared/json";
 import { jsonOf } from "@grasp-os/shared/operations";
 
+import { accepts, admissible } from "./connector-schema-check.ts";
+
 // A generated connector contract's JSON Schemas (connect's contracts.ts),
 // read as the SDK's value descriptors, so core checks a connector call's
 // arguments and its answer with the one validator every boundary uses
 // (spec 32.1), never a second rulebook.
 //
-// Only the forms a connector's own schemas make are read: types (one, or
-// one and `null`), `anyOf`, `const`, `enum`, string and array bounds,
-// number bounds, strict objects (`additionalProperties: false`) and maps.
-// Anything else (`$ref`, `oneOf`, `allOf`, `not`, tuples, an object open to
-// any key) can't be read, and the action is left out of the binding: it
-// fails closed. A `pattern`, and a `format` other than `email`, have no
-// descriptor and are left to the connector, which checks its input against
-// its own schema again: here the check may be looser, never stricter.
+// What is read is decided by an allow-list (connector-schema-check.ts):
+// every keyword is one a descriptor holds or the schema check enforces, or
+// an annotation; anything else leaves the action out of the binding, so no
+// constraint is ever dropped. The descriptor checks shape and normal form;
+// the schema check enforces the rest exactly (patterns, formats), and both
+// must pass.
 
 /** A descriptor as plain JSON, before the SDK reads and seals it. */
 type Draft = Record<string, Json>;
-
-/** The keywords that can't be read: their meaning would be lost. */
-const unreadable = [
-  "$ref",
-  "$defs",
-  "oneOf",
-  "allOf",
-  "not",
-  "if",
-  "then",
-  "else",
-  "prefixItems",
-  "patternProperties",
-  "dependentSchemas",
-  "dependentRequired",
-  "propertyNames",
-  "unevaluatedProperties",
-  "unevaluatedItems",
-];
 
 /** The most a schema nests here, as the SDK's descriptors do. */
 const maxDepth = 32;
@@ -169,11 +150,7 @@ const draftOf = (
   schema: Json | undefined,
   depth: number
 ): Draft | undefined => {
-  if (
-    !isRecord(schema) ||
-    depth > maxDepth ||
-    unreadable.some((keyword) => Object.hasOwn(schema, keyword))
-  ) {
+  if (!isRecord(schema) || depth > maxDepth) {
     return undefined;
   }
   const { anyOf, type } = schema;
@@ -201,15 +178,18 @@ const draftOf = (
   return typed.every((each) => each !== undefined) ? unionOf(typed) : undefined;
 };
 
-/** A contract's schema, read: its descriptor and the schema it makes. */
+/** A contract's schema, read: its descriptor, its schema and its full check. */
 export interface ReadSchema {
   readonly descriptor: Draft;
   readonly schema: ValueSchema<unknown, unknown>;
+  /** Whether a value fits every constraint of the JSON Schema itself. */
+  readonly accepts: (value: Json) => boolean;
 }
 
 /**
- * `text` (a JSON Schema of a generated contract, as JSON text) as a sealed value
- * schema, or undefined when it holds what a descriptor can't say.
+ * `text` (a JSON Schema of a generated contract, as JSON text) as a sealed
+ * value schema and its full check, or undefined when it uses anything not
+ * enforced, or holds what a descriptor can't say.
  */
 export const readContractSchema = (text: string): ReadSchema | undefined => {
   let parsed: unknown;
@@ -218,7 +198,11 @@ export const readContractSchema = (text: string): ReadSchema | undefined => {
   } catch {
     return undefined;
   }
-  const draft = draftOf(jsonOf(parsed), 1);
+  const json = jsonOf(parsed);
+  if (json === undefined || !admissible(json)) {
+    return undefined;
+  }
+  const draft = draftOf(json, 1);
   if (draft === undefined) {
     return undefined;
   }
@@ -226,6 +210,7 @@ export const readContractSchema = (text: string): ReadSchema | undefined => {
     return {
       descriptor: draft,
       schema: schemaFromDescriptor(JSON.stringify(draft)),
+      accepts: (value) => accepts(json, value),
     };
   } catch {
     return undefined;

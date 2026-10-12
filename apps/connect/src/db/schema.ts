@@ -180,6 +180,12 @@ export const pendingActions = sqliteTable(
     /** Asked for by a chat, App or run that had read restricted data. */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * The App's approved resource binding the call came through, as JSON
+     * (`HeldBinding`): core checks it again before confirming. Null for
+     * any other call.
+     */
+    binding: text(),
   },
   (table) => [
     uniqueIndex("pending_actions_call_idx").on(

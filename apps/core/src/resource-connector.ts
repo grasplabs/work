@@ -1,4 +1,4 @@
-import type { ValueSchema } from "@grasp-os/sdk";
+import type { HeldBinding } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type {
   ConnectorContract,
@@ -17,6 +17,7 @@ import { z } from "zod";
 
 import { signedCall } from "./bindings.ts";
 import { readContractSchema } from "./connector-contracts.ts";
+import type { ReadSchema } from "./connector-contracts.ts";
 import { permissions } from "./db/core/schema.ts";
 import type { ResourceContext } from "./operations.ts";
 import type {
@@ -106,8 +107,8 @@ const connectionGrant = async (
 /** One declared action, as its contract describes it now. */
 interface BoundAction {
   readonly raw: ConnectorContractAction;
-  readonly args: ValueSchema<unknown, unknown>;
-  readonly returns: ValueSchema<unknown, unknown>;
+  readonly args: ReadSchema;
+  readonly returns: ReadSchema;
 }
 
 /** What connect says a connection serves of `contract`, if it serves it. */
@@ -156,21 +157,22 @@ const boundActions = (
     ) {
       return undefined;
     }
-    bound.set(name, { raw, args: args.schema, returns: returns.schema });
+    bound.set(name, { raw, args, returns });
   }
   return bound;
 };
 
 /**
- * `value` as `schema` normalizes it, if it is valid and, when `exact`,
- * already in that form; undefined otherwise.
+ * `value` as `read` normalizes it, if it fits the descriptor and every
+ * constraint of the contract's JSON Schema, and, when `exact`, is already
+ * in that form; undefined otherwise.
  */
 const checked = (
-  schema: ValueSchema<unknown, unknown>,
+  read: ReadSchema,
   value: unknown,
   exact: boolean
 ): Json | undefined => {
-  const result = schema["~standard"].validate(value);
+  const result = read.schema["~standard"].validate(value);
   if ("then" in result || result.issues !== undefined) {
     return undefined;
   }
@@ -178,6 +180,7 @@ const checked = (
   const given = jsonOf(value);
   if (
     normalized === undefined ||
+    !read.accepts(normalized) ||
     (exact &&
       (given === undefined ||
         canonicalJson(normalized) !== canonicalJson(given)))
@@ -198,6 +201,12 @@ const refusalOf = (error: unknown): unknown => {
   ) {
     return operationErrors.create("resource.unavailable");
   }
+  if (code === "connect.declined") {
+    return operationErrors.create("resource.declined");
+  }
+  if (code === "connect.idempotency_conflict") {
+    return operationErrors.create("resource.idempotency_conflict");
+  }
   return error;
 };
 
@@ -208,7 +217,8 @@ const callAction = async (
   grant: ConnectionGrant,
   actions: ReadonlyMap<string, BoundAction>,
   args: readonly Json[],
-  context: ResourceContext
+  context: ResourceContext,
+  pin: HeldBinding
 ): Promise<Json> => {
   const [name, input] = args;
   const action = typeof name === "string" ? actions.get(name) : undefined;
@@ -229,6 +239,7 @@ const callAction = async (
         connection: grant.connection,
         permissionId: grant.permissionId,
         notAfter: context.deadline,
+        binding: pin,
       },
       { action: action.raw.tool, idempotencyKey: context.idempotencyKey }
     );
@@ -239,7 +250,10 @@ const callAction = async (
   if (answered.pending !== undefined) {
     throw operationErrors.create("resource.awaiting_confirmation");
   }
-  caller.sources.noteConnection(grant.connection.connectionId);
+  caller.sources.noteConnection(
+    grant.connection.connectionId,
+    answered.provenance
+  );
   let output: unknown;
   try {
     output = JSON.parse(answered.output);
@@ -291,8 +305,9 @@ export const connectorAdapter: ResourceAdapter<"connector"> = {
       : {
           contractId: declaration.contract,
           fingerprint,
-          call: async (caller, { args }, context) =>
-            await callAction(env, caller, grant, actions, args, context),
+          tools: [...actions.values()].map(({ raw }) => raw.tool),
+          call: async (caller, { args }, context, pin) =>
+            await callAction(env, caller, grant, actions, args, context, pin),
         };
   },
 };

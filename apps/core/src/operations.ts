@@ -1121,6 +1121,8 @@ const providerFailure = (error: unknown, requestId: string): Error => {
     code === "resource.awaiting_confirmation" ||
     code === "resource.item_not_found" ||
     code === "resource.invalid_args" ||
+    code === "resource.declined" ||
+    code === "resource.idempotency_conflict" ||
     code === "contract.invalid_resource_result"
   ) {
     return hostError(operationErrors.create(code));

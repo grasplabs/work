@@ -4,7 +4,6 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import type { Provenance } from "@grasp-os/shared/knowledge";
 import {
   appErrorDetailsMaxBytes,
   appErrorMessageMaxLength,
@@ -41,7 +40,10 @@ import { hostJsonModule, hostJsonSource } from "./host-json.ts";
 import { callOperation } from "./operations.ts";
 import type { HostedApp, Invocation, Runner } from "./operations.ts";
 import { invocationSources } from "./resource-adapter.ts";
-import type { InvocationSources } from "./resource-adapter.ts";
+import type {
+  InvocationProvenance,
+  InvocationSources,
+} from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
 import { sandbox } from "./sandbox.ts";
 
@@ -513,9 +515,10 @@ export interface FunctionAnswer {
   /**
    * Where what the call read through its resources comes from, with its
    * classification (spec 32.3): the Knowledge collections, and whether
-   * any was sensitive or restricted. Null when no function ran.
+   * any was sensitive or restricted, and each connection read from with
+   * the resources its connector named. Null when no function ran.
    */
-  readonly provenance: Provenance | null;
+  readonly provenance: InvocationProvenance | null;
   /** The fingerprint of the contract that ran, when one did. */
   readonly fingerprint: string | null;
   /** The release that ran, when one did. */

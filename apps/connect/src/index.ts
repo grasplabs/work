@@ -71,6 +71,7 @@ import {
   auditRefusedDecision,
   callOf,
   dropForEndedRun,
+  dropForBinding,
   dropForEndedRuns,
   heldFor,
   declineChatActions,
@@ -390,6 +391,10 @@ export default class Connect
 
   async dropForEndedRuns(request: unknown): Promise<void> {
     await dropForEndedRuns(this.env, request);
+  }
+
+  async dropForBinding(request: unknown): Promise<void> {
+    await dropForBinding(this.env, request);
   }
 
   async anyPending(request: unknown): Promise<boolean> {

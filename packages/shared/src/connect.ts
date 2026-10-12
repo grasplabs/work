@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
+import type { HeldBinding } from "./capability.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
 import type { CodedError } from "./errors.ts";
 import {
@@ -504,6 +505,11 @@ export interface PendingAction {
   inputHash: string;
   /** ISO 8601. */
   requestedAt: string;
+  /**
+   * The App's approved resource binding it came through, as it served then
+   * (`HeldBinding`); null for any other call.
+   */
+  binding: HeldBinding | null;
 }
 
 const inputHashSchema = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -819,6 +825,12 @@ export interface ConnectApi extends PackageRegistryApi {
    */
   dropForEndedRuns: (request: EndedRuns) => Promise<void>;
   /**
+   * Drops every held action an App's calls made through resource binding
+   * `bindingId`, once core revoked or replaced it: none of them could run.
+   * Recorded as `connection.action.dropped`, reason `binding.revoked`.
+   */
+  dropForBinding: (request: BindingDropRequest) => Promise<void>;
+  /**
    * Runs a held action its person confirmed: only with the capability core
    * signed for confirming it, and only for that person.
    */
@@ -901,6 +913,13 @@ export const connectionErrors = defineErrorFamily({
   "connection.not_offered":
     "Your organization doesn't offer this connection. An admin can offer it.",
 });
+
+/** Which App's held actions of which binding to drop. */
+export const bindingDropRequestSchema = z.strictObject({
+  appId: identifierSchema,
+  bindingId: identifierSchema,
+});
+export type BindingDropRequest = z.input<typeof bindingDropRequestSchema>;
 
 // Generated connector contracts (spec 12): what an App's connector
 // resource is bound to. A native connector's actions of one family (its
