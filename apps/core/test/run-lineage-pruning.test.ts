@@ -146,11 +146,13 @@ const keptOf = async (root: string) =>
 
 /** The ledger's alarm, with its sweep, now. */
 const swept = async (): Promise<void> => {
-  // The sweep runs on the alarm; set it for now, then run it.
+  // The sweep runs on the alarm; set it, then run it. Set an hour ahead,
+  // never for now: workerd would run one due now on its own, and this one
+  // would then find none to run and return while that one still sweeps.
   await runInDurableObject(modelLedger(env), async (_instance, state) => {
-    await state.storage.setAlarm(Date.now());
+    await state.storage.setAlarm(Date.now() + 60 * 60 * 1000);
   });
-  await runDurableObjectAlarm(modelLedger(env));
+  await expect(runDurableObjectAlarm(modelLedger(env))).resolves.toBeTruthy();
 };
 
 describe("run lineage pruning", { timeout: 90_000 }, () => {

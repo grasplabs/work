@@ -148,6 +148,8 @@ import { useState } from "react";
 
 import { DotBrain } from "../brain/dot-brain.tsx";
 import type { ShapeKey } from "../brain/dot-shapes.ts";
+import { IntegrationsBanner } from "../connections/integrations-banner.tsx";
+import type { Integration } from "../connections/integrations.ts";
 import {
   PageSidebar,
   PageSidebarBody,
@@ -367,6 +369,87 @@ const DotBrains = () => {
               </Button>
             </div>
           )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+/** An app for the banner, connected for everyone, needing someone to sign in again, or not connected. */
+const demoIntegration = (
+  id: string,
+  name: string,
+  status: "active" | "needs_reauth" | "none"
+): Integration => ({
+  key: `composio:${id}`,
+  source: "composio",
+  id,
+  name,
+  categories: [],
+  toolCount: undefined,
+  offered: true,
+  listed: true,
+  connections:
+    status === "none"
+      ? []
+      : [
+          {
+            id: `connection-${id}`,
+            source: "composio",
+            provider: id,
+            scope: "shared",
+            status,
+            ownerUserId: null,
+            connectedBy: null,
+            connectedByName: null,
+            accountName: null,
+            createdAt: "2026-10-01T09:00:00.000Z",
+          },
+        ],
+});
+
+const demoIntegrations = [
+  demoIntegration("gmail", "Gmail", "active"),
+  demoIntegration("slack", "Slack", "active"),
+  demoIntegration("hubspot", "HubSpot", "needs_reauth"),
+  demoIntegration("notion", "Notion", "active"),
+  demoIntegration("jira", "Jira", "active"),
+  demoIntegration("asana", "Asana", "none"),
+];
+
+/** The Integrations banner (connections/integrations-banner.tsx): a nerve into the brain for each connected app. */
+const Banner = () => {
+  const [more, setMore] = useState(false);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Integrations banner</CardTitle>
+        <CardDescription>
+          A nerve for every connected app; HubSpot needs signing in again.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col items-start gap-3">
+          <div className="w-full">
+            <IntegrationsBanner
+              integrations={
+                more
+                  ? [
+                      ...demoIntegrations,
+                      demoIntegration("linear", "Linear", "active"),
+                    ]
+                  : demoIntegrations
+              }
+            />
+          </div>
+          <Button
+            onClick={() => {
+              setMore(!more);
+            }}
+            variant="outline"
+          >
+            {more ? "Disconnect Linear" : "Connect Linear"}
+          </Button>
         </div>
       </CardContent>
     </Card>
@@ -665,6 +748,8 @@ const Kit = () => (
         <States />
 
         <DotBrains />
+
+        <Banner />
 
         <Card>
           <CardHeader>

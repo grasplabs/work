@@ -51,6 +51,13 @@ export const addWorkingDays = (day: string, count: number): string => {
   return at;
 };
 
+/** The Monday (UTC) of the week `day` falls in, as an ISO day. */
+export const mondayOf = (day: string): string => {
+  const weekday = new Date(`${dayOf(day)}T12:00:00Z`).getUTCDay();
+  // Sunday is the last day of its week, not the first.
+  return addDays(day, -((weekday + 6) % 7));
+};
+
 /** The last day of the interviews. */
 export const closesOn = (plan: Plan): string =>
   addDays(plan.start, plan.days - 1);

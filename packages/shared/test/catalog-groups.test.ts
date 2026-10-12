@@ -88,6 +88,12 @@ describe("a catalog entry's description", () => {
   });
 
   it("is none for an empty description", () => {
+    expect(
+      firstSentence("Acme Inc. provides accounting tools. It also invoices.")
+    ).toBe("Acme Inc. provides accounting tools.");
+    expect(firstSentence('"Manage your tasks." Keep teams aligned.')).toBe(
+      '"Manage your tasks."'
+    );
     expect(firstSentence(" \n ")).toBeNull();
   });
 });

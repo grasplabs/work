@@ -108,6 +108,7 @@ export {
   contractsFormatVersion,
   generatedPaths,
   generateModules,
+  serverModuleSource,
   symbolicModules,
 } from "./generate.ts";
 export type { ReleaseIdentity } from "./generate.ts";

@@ -11,7 +11,10 @@ import { pileOf, toCard } from "./pile.ts";
 // this week and what could be better, each block opening in full; and,
 // for admins, the latest of the audit trail. Each person lays out their
 // own board: widgets taken off, added back and moved stay so over a
-// reload, until they put it back as it began. What waits is a pile of
+// reload, until they put it back as it began. Without a plan for the
+// interviews there is no programme week and no weekly report: those, with
+// a plan, are in e2e/onboarding.e2e.ts, which runs after this file, as a
+// plan can't be taken back. What waits is a pile of
 // cards gone through one at a time, and what is settled on its own page
 // under it; what fills them is the failed-run, held-write and approval
 // journeys' (notifications, chat, activity, screen approval).
@@ -55,6 +58,16 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
   await expect(
     page.getByRole("heading", { level: 1, name: "Dashboard" })
   ).toBeVisible();
+  // No plan for the interviews yet: no programme week, and no report.
+  await expect(
+    page.getByText(
+      "What waits on you, each with its next step, and what could be better."
+    )
+  ).toBeVisible();
+  await expect(page.getByText(/^Week \d/u)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Export report" })).toHaveCount(
+    0
+  );
   // A pile nothing is on isn't there at all.
   await expect(page.getByRole("region", { name: "To do" })).toHaveCount(0);
   await expect(

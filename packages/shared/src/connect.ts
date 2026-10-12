@@ -419,7 +419,13 @@ export const catalogGroupOf = (categories: readonly string[]): CatalogGroup => {
 const descriptionMaxLength = 140;
 
 const whitespace = /\s+/gu;
-const firstSentenceOf = /^.*?[.!?](?= |$)/u;
+/**
+ * Up to the first sentence's end: a stop, possibly inside closing quotes,
+ * followed by a space or the end, but not the stop of a common
+ * abbreviation ("Acme Inc. makes…").
+ */
+const firstSentenceOf =
+  /^.*?(?<!\b(?:Inc|Ltd|Co|Corp|LLC|etc|vs|e\.g|i\.e|approx|St|Dr|Mr|Mrs|Ms|No))[.!?]["'”’)]?(?= |$)/u;
 const lastWord = /\s+\S*$/u;
 const trailingPause = /[,;:]$/u;
 

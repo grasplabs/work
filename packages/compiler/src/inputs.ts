@@ -115,3 +115,65 @@ export const limitErrors = (files: Record<string, string>): Diagnostic[] => {
   }
   return errors;
 };
+
+/**
+ * What a build takes of the modules the host generates for an App
+ * (`.grasp/`), apart from the App's own files, so an App at its limits
+ * still builds: the few generated modules, each derived from a manifest
+ * that at most the App's own limits of source can make.
+ */
+const generatedLimits = {
+  files: 8,
+  fileLength: 2 * appLimits.totalLength,
+  totalLength: 4 * appLimits.totalLength,
+} as const;
+
+/** Whether `path` is where the host puts a module it generates. */
+const isGenerated = (path: string): boolean => path.startsWith(".grasp/");
+
+/**
+ * Why a build of an App's server code (`appCodeFiles`) is more than it
+ * takes: the App's own files held to the App's limits (`limitErrors`),
+ * the host's generated modules to their own.
+ */
+export const appCodeLimitErrors = (
+  files: Record<string, string>
+): Diagnostic[] => {
+  const own: Record<string, string> = {};
+  const generated: [string, string][] = [];
+  for (const [path, source] of Object.entries(files)) {
+    if (isGenerated(path)) {
+      generated.push([path, source]);
+    } else {
+      own[path] = source;
+    }
+  }
+  const errors = limitErrors(own);
+  if (generated.length > generatedLimits.files) {
+    errors.push(
+      tooMuch(
+        `The host generated ${generated.length} modules; a build takes at most ${generatedLimits.files}.`
+      )
+    );
+  }
+  const oversized = generated.filter(
+    ([, source]) => source.length > generatedLimits.fileLength
+  );
+  for (const [path, source] of oversized) {
+    errors.push(
+      tooMuch(
+        `This generated module has ${source.length} characters; a build takes at most ${generatedLimits.fileLength}.`,
+        path
+      )
+    );
+  }
+  const total = generated.reduce((sum, [, source]) => sum + source.length, 0);
+  if (total > generatedLimits.totalLength) {
+    errors.push(
+      tooMuch(
+        `The generated modules have ${total} characters together; a build takes at most ${generatedLimits.totalLength}.`
+      )
+    );
+  }
+  return errors;
+};
