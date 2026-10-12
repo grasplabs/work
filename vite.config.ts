@@ -224,6 +224,7 @@ export default defineConfig({
           include: [
             "scripts/**/*.test.ts",
             "apps/core/build-blueprints.test.ts",
+            "apps/core/host-json.bundle.test.ts",
           ],
           environment: "node",
         },

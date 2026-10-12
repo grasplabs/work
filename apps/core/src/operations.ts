@@ -1388,7 +1388,9 @@ const trackedCalls = (
  * `work`, or "expired" once `deadline` (ms since the epoch) passes first:
  * the sandbox limits CPU, not time, so a handler awaiting a long timer
  * would otherwise hold its call and channel open. Nested calls share their
- * caller's invocation, so they run to the same deadline.
+ * caller's invocation, so they run to the same deadline. It stops waiting,
+ * not the isolate: a busy loop runs on until the runtime's CPU limit ends
+ * it, which plain workerd (on-prem) doesn't enforce (sandbox.ts, GRA-449).
  */
 const untilDeadline = async <Answer>(
   work: Promise<Answer>,

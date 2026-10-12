@@ -221,7 +221,12 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
   });
 
 export default coreProject({
-  // The build step's own test runs in Node, in the root config's "scripts"
-  // project.
-  exclude: [...defaultExclude, ...screenTests, "build-blueprints.test.ts"],
+  // The build step's own test, and the test that bundles core's host module
+  // with Wrangler, run in Node, in the root config's "scripts" project.
+  exclude: [
+    ...defaultExclude,
+    ...screenTests,
+    "build-blueprints.test.ts",
+    "host-json.bundle.test.ts",
+  ],
 });
