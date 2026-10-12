@@ -2075,6 +2075,18 @@ describe("a store's cascades", () => {
     await expect(recordCount(store)).resolves.toBe(0);
   });
 
+  it("restricts where any place holding the same record ID restricts, whatever their order", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Held",
+    });
+    // `either` cascades and comes before `kept`, which restricts.
+    await insertCascading(store, "links", { either: note, kept: note });
+    await expect(deleteNote(store, note)).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+  });
+
   it("cascades through a union's record ID as the table holding the record says", async () => {
     const store = await newCascadeStore();
     const [note = ""] = await insertCascading(store, "notes", {
