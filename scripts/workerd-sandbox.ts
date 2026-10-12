@@ -473,6 +473,13 @@ class SandboxPool {
   readonly #released = new EventTarget();
   #next = 0;
   #waiting = 0;
+  /**
+   * Calls running now: at most `processes`. With the successor each starts,
+   * the pool never holds more than twice `processes` workerd at once.
+   */
+  #busy = 0;
+  /** Replacements being started, toward `processes` idle at all times. */
+  #pending = 0;
   #inFlight = 0;
   #stopping = false;
   /** Every workerd started and not yet gone, serving or still starting. */
@@ -510,10 +517,10 @@ class SandboxPool {
     const live = this.#live.size;
     const { processes } = this.#settings;
     let status: "ok" | "degraded" | "down" = "degraded";
-    if (live >= processes) {
-      status = "ok";
-    } else if (live === 0) {
+    if (live === 0) {
       status = "down";
+    } else if (live >= processes) {
+      status = "ok";
     }
     return { status, live, processes };
   }
@@ -624,17 +631,23 @@ class SandboxPool {
     // Gone while a process came free: its call never starts.
     if (caller.signal.aborted) {
       this.#counts.abandoned += 1;
+      this.#busy -= 1;
       this.#release(host);
       return;
     }
-    const ending = await this.#run(host, body, deadlineMs, caller.signal);
-    this.#answer(response, host, ending, deadlineMs);
-    if (ending.kind === "answered" || ending.kind === "too_large") {
-      this.#release(host);
-    } else {
-      // Busy, broken or abandoned, the process may still be spinning:
-      // never reused.
+    // A process serves one call, then goes: whatever the App's code left
+    // running (a timer, `waitUntil`, a loop it scheduled for later) dies
+    // with it, and the next App starts in a process no App has touched.
+    // Its successor starts now, while this call runs, so the pool stays
+    // warm.
+    this.#topUp();
+    try {
+      const ending = await this.#run(host, body, deadlineMs, caller.signal);
+      this.#answer(response, host, ending, deadlineMs);
       await this.#retire(host);
+    } finally {
+      this.#busy -= 1;
+      this.#released.dispatchEvent(new Event("released"));
     }
   }
 
@@ -929,7 +942,7 @@ class SandboxPool {
       pid: host.pid,
       code: host.child.exitCode,
     });
-    await this.#replace();
+    this.#topUp();
   }
 
   /** Makes `host` idle, for the next call waiting or to come. */
@@ -947,9 +960,12 @@ class SandboxPool {
     if (signal.aborted) {
       return undefined;
     }
+    // An idle process, while fewer calls run than the pool's size.
+    const take = (): HostProcess | undefined =>
+      this.#busy < this.#settings.processes ? this.#idle.shift() : undefined;
     this.#waiting += 1;
     try {
-      let host = this.#idle.shift();
+      let host = take();
       while (host === undefined && !this.#stopping && !signal.aborted) {
         try {
           // oxlint-disable-next-line no-await-in-loop -- until a process is free
@@ -957,7 +973,10 @@ class SandboxPool {
         } catch {
           return undefined;
         }
-        host = this.#idle.shift();
+        host = take();
+      }
+      if (host !== undefined) {
+        this.#busy += 1;
       }
       return host;
     } finally {
@@ -965,35 +984,49 @@ class SandboxPool {
     }
   }
 
-  /** Kills `host`, which ran a call past its bounds or broke, and replaces it. */
+  /** Kills `host` once its one call is over, however it ended. */
   async #retire(host: HostProcess): Promise<void> {
     this.#live.delete(host);
     killGroup(host.pid);
     await host.exited;
-    await this.#replace();
   }
 
-  /** Starts a process in place of one that's gone, waiting longer after each failure. */
+  /** Starts replacements until idle and starting processes fill the pool. */
+  #topUp(): void {
+    while (
+      !this.#stopping &&
+      this.#idle.length + this.#pending < this.#settings.processes
+    ) {
+      this.#pending += 1;
+      void this.#replace();
+    }
+  }
+
+  /** Starts one process, waiting longer after each failure, until it's in the pool. */
   async #replace(): Promise<void> {
     let delay = RESTART_DELAY_MS;
-    while (!this.#stopping) {
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- tried until one starts
-        this.#release(await this.#startProcess());
-        return;
-      } catch (error) {
-        if (this.#stopping) {
+    try {
+      while (!this.#stopping) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- tried until one starts
+          this.#release(await this.#startProcess());
           return;
+        } catch (error) {
+          if (this.#stopping) {
+            return;
+          }
+          this.#settings.log({
+            event: "sandbox.process_failed",
+            error: String(error),
+            retryInMs: delay,
+          });
+          // oxlint-disable-next-line no-await-in-loop -- waits between tries
+          await sleep(delay);
+          delay = Math.min(delay * 2, MAX_RESTART_DELAY_MS);
         }
-        this.#settings.log({
-          event: "sandbox.process_failed",
-          error: String(error),
-          retryInMs: delay,
-        });
-        // oxlint-disable-next-line no-await-in-loop -- waits between tries
-        await sleep(delay);
-        delay = Math.min(delay * 2, MAX_RESTART_DELAY_MS);
       }
+    } finally {
+      this.#pending -= 1;
     }
   }
 }
@@ -1026,6 +1059,9 @@ const answerRequest = async (
   }
 };
 
+/** The most processes a pool may have: each is a workerd of its own. */
+export const maxProcesses = 64;
+
 /** The supervisor's directory's prefix, and its socket's name in it. */
 const dirPrefix = "grasp-sandbox-";
 const supervisorSocket = "supervisor.sock";
@@ -1036,6 +1072,8 @@ const supervisorSocket = "supervisor.sock";
  * (`pN.sock`) is shorter than the supervisor's.
  */
 const maxSocketPathBytes = process.platform === "linux" ? 107 : 103;
+
+const wholeNumber = /^\d+$/u;
 
 /** The pools running in this process, whose workerd dies with it. */
 const runningPools = new Set<SandboxPool>();
@@ -1102,6 +1140,16 @@ export const startSandboxSupervisor = async (
         process.stderr.write(`${JSON.stringify(event)}\n`);
       }),
   };
+  // A pool of none would serve nothing and still look started.
+  if (
+    !Number.isInteger(settings.processes) ||
+    settings.processes < 1 ||
+    settings.processes > maxProcesses
+  ) {
+    throw new Error(
+      `The sandbox's processes must be a whole number from 1 to ${maxProcesses}, not ${String(settings.processes)}.`
+    );
+  }
   // Checked before anything starts: past the limit, workerd would only say
   // it didn't listen.
   const longest = path.join(
@@ -1167,13 +1215,25 @@ if (import.meta.main) {
       processes: { type: "string" },
     },
   });
-  const supervisor = await startSandboxSupervisor({
-    workerd: values.workerd,
-    ...(values.parent === undefined ? {} : { parent: values.parent }),
-    ...(values.processes === undefined
-      ? {}
-      : { processes: Number(values.processes) }),
-  });
+  // Digits only: "1e1", "0x2" or " 2" are refused, not read as numbers.
+  const given = values.processes;
+  let processes: number | undefined;
+  if (given !== undefined) {
+    processes = wholeNumber.test(given) ? Number(given) : Number.NaN;
+  }
+  let supervisor: SandboxSupervisor;
+  try {
+    supervisor = await startSandboxSupervisor({
+      workerd: values.workerd,
+      ...(values.parent === undefined ? {} : { parent: values.parent }),
+      ...(processes === undefined ? {} : { processes }),
+    });
+  } catch (error) {
+    process.stderr.write(
+      `${JSON.stringify({ event: "sandbox.failed_to_start", error: String(error) })}\n`
+    );
+    process.exit(1);
+  }
   process.stderr.write(
     `${JSON.stringify({ event: "sandbox.listening", socket: supervisor.socket })}\n`
   );

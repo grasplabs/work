@@ -752,6 +752,60 @@ setInterval(() => undefined, 1000);
     }
   );
 
+  it("runs each call in a process of its own, so work an App leaves behind never reaches the next", async () => {
+    await withSupervisor({}, async (supervisor) => {
+      const [first] = supervisor.pids();
+      // Answers at once, and leaves a busy loop to start after its answer.
+      const leaving = await callSupervisor(supervisor.socket, {
+        body: "this.ctx.waitUntil(scheduler.wait(300).then(() => { for (;;) {} })); setTimeout(() => { for (;;) {} }, 300); return 'answered';",
+        deadlineMs: 5000,
+      });
+      expect(leaving.answer).toStrictEqual({ ok: true, value: "answered" });
+      await expect.poll(() => isRunning(first ?? 0)).toBe(false);
+      await sleep(600);
+      const next = await callSupervisor(supervisor.socket, {
+        body: "return 'innocent';",
+        deadlineMs: 2000,
+      });
+      expect(next.answer).toStrictEqual({ ok: true, value: "innocent" });
+      expect(next.ms).toBeLessThan(2000);
+    });
+  });
+
+  it.each([0, -1, Number.NaN, 65, 1.5])(
+    "refuses a pool of %s processes",
+    async (processes) => {
+      await expect(
+        startSandboxSupervisor({
+          workerd: nativeWorkerd,
+          processes,
+          log: quiet,
+        })
+      ).rejects.toThrow("whole number from 1 to 64");
+    }
+  );
+
+  it.each(["0", "two", "-1"])(
+    "refuses --processes=%s when run on its own",
+    async (processes) => {
+      const supervisor = spawn(
+        process.execPath,
+        [
+          path.join(import.meta.dirname, "workerd-sandbox.ts"),
+          `--processes=${processes}`,
+        ],
+        { stdio: ["ignore", "ignore", "pipe"] }
+      );
+      let stderr = "";
+      supervisor.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+      const exit: unknown[] = await once(supervisor, "exit");
+      expect(exit[0]).toBe(1);
+      expect(stderr).toContain("whole number from 1 to 64");
+    }
+  );
+
   it("stops its processes on SIGTERM when run on its own", async () => {
     const supervisor = spawn(
       process.execPath,
