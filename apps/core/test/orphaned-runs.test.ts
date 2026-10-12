@@ -722,7 +722,7 @@ describe("starts core stopped in the middle of", () => {
     });
   });
 
-  it("add up nothing of a step that completes after its run's late start was marked failed", async () => {
+  it("add up nothing of a step still out when its run's late start is marked failed, refusing its calls from then on", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, gatedCounting);
     await serverBuilt(app, 1);
@@ -777,7 +777,10 @@ describe("starts core stopped in the middle of", () => {
     );
     uuid.mockRestore();
     const afterCleanup = await keptOf();
-    // The step finishes now, after the cleanup, and adds up its points.
+    // Marking the start failed terminated the run, so its attempt holds no
+    // more: the step's next call, its look at the gate, is refused, and the
+    // step never completes to add up anything (were it to complete
+    // first, its commit finds the run ended and writes nothing either).
     await callApp(
       env,
       appIdSchema.parse(app),
@@ -785,13 +788,33 @@ describe("starts core stopped in the middle of", () => {
       "hit",
       ["gate"]
     );
-    await stepDone(run, "work");
+    await vi.waitFor(
+      async () => {
+        const actions = await actionsOf(run);
+        if (!actions.includes("workflow.call.refused")) {
+          throw new Error("The step's call isn't refused yet");
+        }
+      },
+      { timeout: 10_000, interval: 100 }
+    );
 
+    const events = await allEvents();
     expect({
       row: await rowStatus(run),
       afterCleanup,
+      completed: events.some(
+        ({ action, target, detail }) =>
+          action === "workflow.step.completed" &&
+          target?.id === run &&
+          detail.step === "work"
+      ),
       kept: await keptOf(),
-    }).toStrictEqual({ row: "failed", afterCleanup: 0, kept: 0 });
+    }).toStrictEqual({
+      row: "failed",
+      afterCleanup: 0,
+      completed: false,
+      kept: 0,
+    });
   });
 
   it("end a run cancelled just after the engine said it had none as cancelled, keeping its key, with no failure notice", async () => {
