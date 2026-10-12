@@ -176,8 +176,16 @@ const level0 = action({
 });
 
 const mail = resource.connector("mail", {
-  contract: "grasp.mail@1",
+  contract: "microsoft-365.mail@1",
   actions: ["send"],
+});
+
+/** A mail to `to`, as the contract's `send` takes it. */
+const mailTo = (to: string) => ({
+  mailbox: "team@acme.test",
+  subject: "Hello",
+  body: "Hi.",
+  to: [to],
 });
 const summarizer = resource.model("summarizer", {
   structuredOutput: v.object({ summary: v.string() }),
@@ -191,16 +199,11 @@ const letter = resource.template("letter", { contract: "grasp.letter@1" });
 
 const sendMail = action({
   args: { to: v.string().email() },
-  returns: v.object({ messageId: v.string() }),
+  returns: v.object({ mailbox: v.string() }),
   uses: [mail],
   handler: async (ctx, args) => {
-    const sent = await ctx.resources.mail.call("send", { to: args.to });
-    if (typeof sent !== "object" || sent === null || Array.isArray(sent)) {
-      throw new AppError("mail.unexpected", "The mail answer was unexpected.");
-    }
-    return {
-      messageId: typeof sent.messageId === "string" ? sent.messageId : "",
-    };
+    const sent = await ctx.resources.mail.call("send", mailTo(args.to));
+    return { mailbox: sent.mailbox };
   },
 });
 
@@ -281,7 +284,7 @@ const sendMany = action({
   handler: async (ctx, args) => {
     for (let index = 0; index < args.count; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one request after the other
-      await ctx.resources.mail.call("send", { to: "ada@acme.test" });
+      await ctx.resources.mail.call("send", mailTo("ada@acme.test"));
     }
     return args.count;
   },
@@ -293,7 +296,7 @@ const sendMailToo = action({
   returns: v.null(),
   uses: [mail],
   handler: async (ctx, args) => {
-    await ctx.resources.mail.call("send", { to: args.to });
+    await ctx.resources.mail.call("send", mailTo(args.to));
     return null;
   },
 });
@@ -597,8 +600,9 @@ const misusing = (
   return run;
 };
 
-/** A provider that answers every request with one message ID. */
-const messageSent = async () => await Promise.resolve({ messageId: "m" });
+/** A provider that answers every request as one mail sent. */
+const messageSent = async () =>
+  await Promise.resolve({ mailbox: "m", sent: true });
 
 /** A binding of `kind` serving `contract`, answering with `answer`. */
 const bound = (
@@ -850,7 +854,7 @@ describe("resources", () => {
     bindingsOf({
       mail: bound(
         "connector",
-        "grasp.mail@1",
+        "microsoft-365.mail@1",
         async (_method, args, context) => await answer(args, context)
       ),
     });
@@ -860,7 +864,10 @@ describe("resources", () => {
     const seen: ResourceContext[] = [];
     const resources = mailBinding(async (args, context) => {
       seen.push(context);
-      return await Promise.resolve({ messageId: `m-${JSON.stringify(args)}` });
+      return await Promise.resolve({
+        mailbox: `m-${JSON.stringify(args)}`,
+        sent: true,
+      });
     });
     const send = async (key: string) =>
       await call(
@@ -880,7 +887,7 @@ describe("resources", () => {
       otherKey: seen[0]?.idempotencyKey === seen[2]?.idempotencyKey,
     }).toStrictEqual({
       results: Array.from({ length: 3 }, () => ({
-        messageId: 'm-["send",{"to":"ada@acme.test"}]',
+        mailbox: `m-${JSON.stringify(["send", mailTo("ada@acme.test")])}`,
       })),
       sameKey: true,
       otherKey: false,
@@ -902,7 +909,9 @@ describe("resources", () => {
     expect({
       none: await send(),
       otherContract: await send(
-        bindingsOf({ mail: bound("connector", "grasp.mail@2", messageSent) })
+        bindingsOf({
+          mail: bound("connector", "microsoft-365.mail@2", messageSent),
+        })
       ),
       otherKind: await send(
         bindingsOf({ mail: bound("model", null, messageSent) })
@@ -919,7 +928,7 @@ describe("resources", () => {
     let reached = false;
     const resources = mailBinding(async () => {
       reached = true;
-      return await Promise.resolve({ messageId: "m" });
+      return await Promise.resolve({ mailbox: "m", sent: true });
     });
     const attempt = async (
       misuse: (channel: OperationChannel) => Promise<unknown>
@@ -1084,7 +1093,7 @@ describe("one call's budget", () => {
   it("bounds the resource requests one call makes", async () => {
     const fixture = await notes();
     const resources = bindingsOf({
-      mail: bound("connector", "grasp.mail@1", messageSent),
+      mail: bound("connector", "microsoft-365.mail@1", messageSent),
     });
     const send = async (requests: number) =>
       codeOf(
@@ -1117,10 +1126,10 @@ describe("derived keys", () => {
         resources: bindingsOf({
           mail: bound(
             "connector",
-            "grasp.mail@1",
+            "microsoft-365.mail@1",
             async (_method, _args, context) => {
               seen.push(context.idempotencyKey);
-              return await Promise.resolve({ messageId: "m" });
+              return await Promise.resolve({ mailbox: "m", sent: true });
             }
           ),
         }),
@@ -1297,7 +1306,7 @@ describe("failures across the host's boundary", () => {
             resources: bindingsOf({
               mail: bound(
                 "connector",
-                "grasp.mail@1",
+                "microsoft-365.mail@1",
                 async () => await Promise.reject(failure)
               ),
             }),

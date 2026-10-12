@@ -18,6 +18,8 @@ export { resource } from "./resources.ts";
 export type {
   AnyResource,
   BrowserResource,
+  ConnectorAction,
+  ConnectorContract,
   ConnectorResource,
   FilesResource,
   LinksResource,

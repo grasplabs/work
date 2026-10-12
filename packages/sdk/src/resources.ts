@@ -1,6 +1,7 @@
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
 
+import type { ConnectorCatalog } from "./connector-catalog.gen.ts";
 import type { FilesOperation } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type {
@@ -35,10 +36,38 @@ export interface ModelConfig<Output extends AnySchema | undefined> {
   readonly maxOutputTokens: number;
 }
 
+/**
+ * A generated connector contract of this release (spec 12), e.g.
+ * `microsoft-365.mail@1`: a native connector's tools of one family.
+ */
+export type ConnectorContract = Extract<keyof ConnectorCatalog, string>;
+
+/** The actions of connector contract `Contract`, by name. */
+export type ConnectorAction<Contract extends ConnectorContract> = Extract<
+  keyof ConnectorCatalog[Contract],
+  string
+>;
+
+/**
+ * Action `Action` of contract `Contract`: its `input`, the arguments a
+ * call passes, and its `output`, the answer it gets back.
+ */
+type ContractAction<Contract, Action> = Contract extends ConnectorContract
+  ? Action extends keyof ConnectorCatalog[Contract]
+    ? ConnectorCatalog[Contract][Action]
+    : never
+  : never;
+
 /** What a declaration's config may say about a connector. */
-export interface ConnectorConfig<Actions extends readonly string[]> {
-  /** The adapter contract and its major version, e.g. `grasp.mail@1`. */
-  readonly contract: string;
+export interface ConnectorConfig<
+  Contract extends ConnectorContract,
+  Actions extends readonly ConnectorAction<Contract>[],
+> {
+  /**
+   * The generated contract and its major version, e.g.
+   * `microsoft-365.mail@1`: one the release's connectors serve.
+   */
+  readonly contract: Contract;
   /** The contract's actions the App needs, each once. */
   readonly actions: Actions;
 }
@@ -84,9 +113,10 @@ export interface ModelResource<
 /** A connector requirement. */
 export interface ConnectorResource<
   Alias extends string = string,
+  Contract extends string = string,
   Actions extends readonly string[] = readonly string[],
 > extends DeclarationBase<"connector", Alias> {
-  readonly contract: string;
+  readonly contract: Contract;
   readonly actions: Actions;
 }
 
@@ -171,13 +201,36 @@ export interface ModelClient<Output> {
   }) => Promise<Output>;
 }
 
-/** What `ctx.resources.<alias>` is for a connector. */
-export interface ConnectorClient<Actions extends readonly string[]> {
-  /** One of the declared actions, with its arguments, through connect. */
-  readonly call: (
-    action: Actions[number],
-    args: Readonly<Record<string, JsonValue>>
-  ) => Promise<JsonValue>;
+/** A catalog action's arguments. */
+type InputOf<Entry> = Entry extends { readonly input: infer Input }
+  ? Input
+  : never;
+
+/**
+ * A call's arguments: each action of `Action` paired with its own
+ * arguments, so an action that may be either of two needs arguments that
+ * fit whichever it is, never just one of them.
+ */
+type CallArgs<Contract, Action> = Action extends string
+  ? [action: Action, args: InputOf<ContractAction<Contract, Action>>]
+  : never;
+
+/**
+ * What `ctx.resources.<alias>` is for a connector: its calls typed by the
+ * contract's catalog entry (`ConnectorCatalog`).
+ */
+export interface ConnectorClient<
+  Contract extends string,
+  Actions extends readonly string[],
+> {
+  /**
+   * One of the declared actions, with its arguments, through connect: its
+   * answer, or any of theirs when the action may be several. Both are
+   * checked against the contract the binding serves.
+   */
+  readonly call: <Action extends Actions[number]>(
+    ...call: CallArgs<Contract, Action>
+  ) => Promise<ContractAction<Contract, Action>["output"]>;
 }
 
 /** What `ctx.resources.<alias>` is for knowledge, by its operations. */
@@ -214,8 +267,8 @@ export interface TemplateClient {
 export type ResourceClient<Resource> =
   Resource extends ModelResource<string, infer Output>
     ? ModelClient<Output>
-    : Resource extends ConnectorResource<string, infer Actions>
-      ? ConnectorClient<Actions>
+    : Resource extends ConnectorResource<string, infer Contract, infer Actions>
+      ? ConnectorClient<Contract, Actions>
       : Resource extends KnowledgeResource<string, infer Operations>
         ? KnowledgeClient<Operations>
         : Resource extends TemplateResource
@@ -470,11 +523,15 @@ export const resource = Object.freeze({
   /** Some of a connector contract's actions. */
   connector: <
     const Alias extends string,
-    const Actions extends readonly [string, ...string[]],
+    const Contract extends ConnectorContract,
+    const Actions extends readonly [
+      ConnectorAction<Contract>,
+      ...ConnectorAction<Contract>[],
+    ],
   >(
     alias: Alias,
-    config: ConnectorConfig<Actions>
-  ): ConnectorResource<Alias, Actions> => {
+    config: ConnectorConfig<Contract, Actions>
+  ): ConnectorResource<Alias, Contract, Actions> => {
     const checked = checkedConfig(config, ["contract", "actions"]);
     // SAFETY: built from what was checked of the arguments the type is
     // inferred from: the alias given, and lists holding exactly the names
@@ -485,7 +542,7 @@ export const resource = Object.freeze({
       alias: checkedAlias(alias),
       contract: checkedContract(checked.contract),
       actions: checkedList(checked.actions, "actions"),
-    }) as ConnectorResource<Alias, Actions>;
+    }) as ConnectorResource<Alias, Contract, Actions>;
   },
   /** Search and reading of some knowledge collections. */
   knowledge: <
