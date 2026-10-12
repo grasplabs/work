@@ -1077,7 +1077,9 @@ const checkedResourceResult = (
  * provider couldn't confirm (`effect.outcome_unknown`, connect's
  * `connect.outcome_unknown` included) as that, kept so nobody repeats the
  * effect under a fresh key; a binding whose grant was revoked
- * (`permission.denied`) as `resource.unavailable`; anything else
+ * (`permission.denied`) as `resource.unavailable`; a refusal a binding's
+ * adapter made in the host's words (an unavailable resource, a budget used
+ * up, an effect held for its person, a broken contract) as that; anything else
  * `internal.unexpected`, its cause logged. Never the provider's own code,
  * message or details (a connection's ID, the provider's status).
  */
@@ -1088,6 +1090,16 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   }
   if (code === "permission.denied") {
     return hostError(operationErrors.create("resource.unavailable"));
+  }
+  // What a binding's adapter, core's own code, says of a request it
+  // refused or couldn't complete, each in the operation host's own words.
+  if (
+    code === "resource.unavailable" ||
+    code === "resource.budget_exhausted" ||
+    code === "resource.awaiting_confirmation" ||
+    code === "contract.invalid_resource_result"
+  ) {
+    return hostError(operationErrors.create(code));
   }
   log.error("operation.resource_failed", {
     requestId,

@@ -52,6 +52,7 @@
     "./platform-change": "./src/platform-change.ts",
     "./record-ids": "./src/record-ids.ts",
     "./release": "./src/release.ts",
+    "./resource-bindings": "./src/resource-bindings.ts",
     "./roles": "./src/roles.ts",
     "./router": "./src/router.ts",
     "./rpc": "./src/rpc.ts",

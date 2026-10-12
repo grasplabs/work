@@ -39,6 +39,9 @@ import { sdkReleaseManifests } from "./db/core/schema.ts";
 import { hostJsonModule, hostJsonSource } from "./host-json.ts";
 import { callOperation } from "./operations.ts";
 import type { HostedApp, Invocation, Runner } from "./operations.ts";
+import { invocationSources } from "./resource-adapter.ts";
+import type { InvocationSources } from "./resource-adapter.ts";
+import { resourceBindingsFor } from "./resource-bindings.ts";
 import { sandbox } from "./sandbox.ts";
 
 // Running an App's server functions from its sealed release (spec 6, 8,
@@ -419,6 +422,8 @@ interface FunctionCaller {
    * permission, agent-apps.ts): throws once it doesn't.
    */
   readonly stillAllowed?: () => Promise<void>;
+  /** What the invocation reads through its resources is noted here. */
+  readonly sources?: InvocationSources;
 }
 
 /**
@@ -429,7 +434,13 @@ interface FunctionCaller {
 export const invocationFor = async (
   env: Env,
   release: Release,
-  { by, requestId, deadline, stillAllowed }: FunctionCaller
+  {
+    by,
+    requestId,
+    deadline,
+    stillAllowed,
+    sources = invocationSources(),
+  }: FunctionCaller
 ): Promise<Invocation> => {
   // SAFETY: a release's resource ID is the App it was sealed for.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -454,6 +465,19 @@ export const invocationFor = async (
       await stillAllowed?.();
       return await operationRoles(env, by, app);
     },
+    // The App's approved bindings, read again on every request, acting
+    // for the App and the person calling, with the person there.
+    resources: resourceBindingsFor(env, {
+      app,
+      authority: {
+        subject: { type: "app", appId: app },
+        onBehalfOf: by.userId,
+        mode: "interactive",
+        appVersion: release.manifest.resourceVersion,
+      },
+      context: { type: "app", appId: app },
+      sources,
+    }),
   };
 };
 
