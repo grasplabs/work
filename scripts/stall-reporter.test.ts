@@ -490,6 +490,68 @@ describe("a test whose events Vitest delivers unreliably", () => {
       "passed core test/lifecycle.test.ts > result twice",
     ]);
   });
+
+  it("writes a test's result once its state has it, though its result event came before", async () => {
+    const progressFile = path.join(
+      await mkdtemp(path.join(tmpdir(), "stall-reporter-")),
+      "progress.log"
+    );
+    const { reporter } = reporting(progressFile);
+    const workflows = file("batches");
+    const early = test(workflows, "result event early");
+    const settled = test(workflows, "result event early, state later");
+    reporter.onTestRunStart();
+    reporter.onTestModuleStart(workflows);
+    reporter.onTestCaseReady(early);
+    reporter.onTestCaseResult(early);
+    reporter.onTestCaseResult(finish(sameTest(early)));
+    reporter.onTestCaseResult(settled);
+    finish(settled);
+    reporter.onTestModuleEnd(finishFile(workflows));
+    await reporter.onTestRunEnd();
+
+    const progress = await readFile(progressFile, "utf-8");
+    expect(
+      progress
+        .trimEnd()
+        .split("\n")
+        .map((line) => line.replace(progressPrefix, "$<state> "))
+        .toSorted()
+    ).toStrictEqual([
+      "passed core test/batches.test.ts > result event early",
+      "passed core test/batches.test.ts > result event early, state later",
+    ]);
+  });
+
+  it("writes the result of a test none of whose events arrived, once, by its file's end or the run's", async () => {
+    const progressFile = path.join(
+      await mkdtemp(path.join(tmpdir(), "stall-reporter-")),
+      "progress.log"
+    );
+    const { reporter } = reporting(progressFile);
+    const ended = file("results");
+    const unended = file("retries");
+    const silent = finish(test(ended, "no events"));
+    finish(test(unended, "no events, nor its file's end"));
+    reporter.onTestRunStart();
+    reporter.onTestModuleStart(ended);
+    reporter.onTestModuleStart(unended);
+    reporter.onTestModuleEnd(finishFile(ended));
+    reporter.onTestCaseResult(silent);
+    await reporter.onTestRunEnd([ended, finishFile(unended)]);
+
+    const progress = await readFile(progressFile, "utf-8");
+    expect(
+      progress
+        .trimEnd()
+        .split("\n")
+        .map((line) => line.replace(progressPrefix, "$<state> "))
+        .toSorted()
+    ).toStrictEqual([
+      "passed core test/results.test.ts > no events",
+      "passed core test/retries.test.ts > no events, nor its file's end",
+    ]);
+  });
 });
 
 /** A reporter that explains a run's end in a summary file, annotated. */

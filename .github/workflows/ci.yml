@@ -92,7 +92,11 @@ jobs:
         run: |
           free -m
           ps -eo pid,ppid,rss,etime,args --sort=-rss | head -n 15 | cut -c 1-200
-          sudo dmesg --ctime | grep -iE 'out of memory|oom-kill|killed process' || echo "The kernel killed no process for memory."
+          if kernel_log=$(sudo dmesg --ctime 2>&1); then
+            grep -iE 'out of memory|oom-kill|killed process' <<< "$kernel_log" || echo "The kernel killed no process for memory."
+          else
+            echo "The kernel log is unavailable, so an OOM kill can't be ruled out: $kernel_log"
+          fi
       - run: vp run -r build
       # The console isn't deployed from here (see deploy-staging): check that
       # its build is a Worker wrangler would deploy. No credentials needed.

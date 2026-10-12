@@ -361,6 +361,10 @@ export default class StallReporter implements Reporter {
   ): Promise<void> {
     clearTimeout(this.#timer);
     clearInterval(this.#overdueTimer);
+    // Files whose end, or whose tests' events, never arrived.
+    for (const testModule of testModules) {
+      this.#recover(testModule);
+    }
     if (reason !== "passed") {
       await this.#explain(runEnd(testModules, unhandledErrors, reason));
     }
@@ -401,11 +405,21 @@ export default class StallReporter implements Reporter {
 
   /** Writes `testCase`'s result, once, and stops tracking it. */
   #caseDone(testCase: ReportedCase): void {
-    const running = this.#cases.get(testCase.id);
-    this.#cases.delete(testCase.id);
     if (this.#finished.has(testCase.id)) {
+      this.#cases.delete(testCase.id);
       return;
     }
+    const running = this.#cases.get(testCase.id);
+    // A result event can come before Vitest's state has the result: the
+    // test is kept as running, for `#settle` to write once it has.
+    if (!ended(testCase)) {
+      this.#cases.set(testCase.id, {
+        testCase,
+        started: running?.started ?? Date.now(),
+      });
+      return;
+    }
+    this.#cases.delete(testCase.id);
     this.#finished.add(testCase.id);
     const took =
       running === undefined ? "" : ` ${Date.now() - running.started}ms`;
@@ -414,11 +428,25 @@ export default class StallReporter implements Reporter {
     );
   }
 
-  /** Stops tracking `testModule`, and its tests: none runs past its file. */
+  /**
+   * Stops tracking `testModule`, and its tests: none runs past its file.
+   * Writes the result of each test of it that Vitest's state has, whether
+   * or not any of its events arrived.
+   */
   #moduleDone(testModule: ReportedModule): void {
     this.#modules.delete(testModule.id);
-    for (const { testCase } of this.#cases.values()) {
+    this.#recover(testModule);
+    for (const [id, { testCase }] of this.#cases) {
       if (testCase.module.id === testModule.id) {
+        this.#cases.delete(id);
+      }
+    }
+  }
+
+  /** Writes each ended test of `testModule` not written yet. */
+  #recover(testModule: ReportedModule): void {
+    for (const testCase of testModule.children.allTests()) {
+      if (!this.#finished.has(testCase.id) && ended(testCase)) {
         this.#caseDone(testCase);
       }
     }
