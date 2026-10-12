@@ -336,7 +336,8 @@ const unstarted = {
  * start was lost), the dispatcher runs none of it, as the row has ended.
  * Its report, which its owner sees as they see any failed run's, says
  * only that it didn't start. It gives up its trigger key, so its trigger
- * delivered again starts a new run. Whether this marked it.
+ * delivered again starts a new run. A run cancelled meanwhile ends
+ * cancelled instead, keeping its key. Whether this ended it.
  */
 const failStart = async (
   env: Env,
@@ -358,21 +359,29 @@ const failStart = async (
   const [[failed]] = await auditedBatch(env, db, [
     db
       .update(workflowRuns)
+      // A run cancelled meanwhile (as the row is now, in this write) ends
+      // cancelled: its cancel was audited when asked for, nobody is told
+      // of a failure, and it keeps its trigger key, so a delivery of its
+      // trigger again finds the run that was cancelled rather than
+      // starting the work anew.
       .set({
-        status: "failed",
+        status: sql`CASE WHEN ${workflowRuns.cancelRequestedAt} IS NULL THEN 'failed' ELSE 'cancelled' END`,
         endedAt: failedAt,
-        failure,
-        triggerKey: null,
+        failure: sql`CASE WHEN ${workflowRuns.cancelRequestedAt} IS NULL THEN ${JSON.stringify(failure)} ELSE NULL END`,
+        triggerKey: sql`CASE WHEN ${workflowRuns.cancelRequestedAt} IS NULL THEN NULL ELSE ${workflowRuns.triggerKey} END`,
         pendingStart: null,
       })
       .where(
         and(eq(workflowRuns.id, row.id), eq(workflowRuns.status, "starting"))
       )
       .returning({ id: workflowRuns.id }),
-    ...(await failureRecorded(env, db, row, {
-      reason,
-      error: "workflow.run_failed",
-    })),
+    ...(await failureRecorded(
+      env,
+      db,
+      row,
+      { reason, error: "workflow.run_failed" },
+      sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.status} = 'failed')`
+    )),
   ]);
   if (!failed) {
     return false;

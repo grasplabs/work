@@ -611,6 +611,68 @@ describe("starts core stopped in the middle of", () => {
     });
   });
 
+  it("end a run cancelled just after the engine said it had none as cancelled, keeping its key, with no failure notice", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, waiting);
+    const key = `event:${crypto.randomUUID()}`;
+    const run = crypto.randomUUID();
+    const start = async () =>
+      await startRun(env, {
+        app: appIdSchema.parse(app),
+        workflow: workflowIdSchema.parse("waits"),
+        input: undefined,
+        startedBy: null,
+        actor: { type: "system" },
+        trigger: { type: "schedule", key, version: 1 },
+      });
+    const uuid = vi.spyOn(crypto, "randomUUID").mockReturnValueOnce(run);
+    let cancelled = false;
+    const first = await aroundEngine(
+      async (method, call) => {
+        if (method === "start") {
+          throw new Error("The engine is unavailable");
+        }
+        const answer = await call();
+        if (method === "status" && answer === undefined && !cancelled) {
+          cancelled = true;
+          // The person cancels it right after the engine said it had no
+          // record of it, before core marks it failed.
+          await env.DB.prepare(
+            "UPDATE workflow_runs SET cancel_requested_at = ? WHERE id = ?"
+          )
+            .bind(Date.now(), run)
+            .run();
+        }
+        return answer;
+      },
+      async () => await outcome(start())
+    );
+    uuid.mockRestore();
+    // Its trigger delivered again.
+    const again = await start();
+    const row = await env.DB.prepare(
+      "SELECT status, failure, trigger_key AS key FROM workflow_runs WHERE id = ?"
+    )
+      .bind(run)
+      .first();
+    const actions = await actionsOf(run);
+
+    expect({
+      first,
+      row,
+      again: again.id,
+      failed: await failedAtAll(run),
+      notified: actions.includes("workflow.run.notified"),
+    }).toStrictEqual({
+      first: "Error: The engine is unavailable",
+      row: { status: "cancelled", failure: null, key },
+      // The cancelled run, not a new one doing the work it was to do.
+      again: run,
+      failed: false,
+      notified: false,
+    });
+  });
+
   it("reach a later start past ones the engine keeps failing to take", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, waiting);
