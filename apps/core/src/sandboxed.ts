@@ -162,6 +162,28 @@ const onHost = async (
 };
 
 /**
+ * Refuses, with {@link SandboxUnavailableError}, to run `what` (App code
+ * core loads itself and no sandbox bounds yet: a workflow's run, an App's
+ * server object) except where the runtime bounds its CPU
+ * (`RUNTIME_PROFILE` `cloudflare`) or the deployment accepts that nothing
+ * does (`SANDBOX_IN_PROCESS=unbounded`). A bound `SANDBOX_HOST` doesn't
+ * allow it: nothing runs this code on the sandbox host.
+ */
+export const requireBoundedHere = (
+  env: Pick<Env, "RUNTIME_PROFILE" | "SANDBOX_IN_PROCESS">,
+  what: string
+): void => {
+  if (
+    env.RUNTIME_PROFILE !== "cloudflare" &&
+    env.SANDBOX_IN_PROCESS !== "unbounded"
+  ) {
+    throw new SandboxUnavailableError(
+      `${what} runs App code that no sandbox bounds here yet, not even with SANDBOX_HOST bound: run on Cloudflare, or set SANDBOX_IN_PROCESS=unbounded to accept that nothing bounds it.`
+    );
+  }
+};
+
+/**
  * The sandbox supervisor an isolate that reaches back into core runs on
  * (sandbox-session.ts), or undefined where the caller loads it itself: on
  * Cloudflare, whose runtime bounds its CPU, or where the deployment

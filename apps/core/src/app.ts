@@ -46,6 +46,7 @@ import { findApp, versionFiles } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { appHost } from "./durable-objects.ts";
 import { sandbox } from "./sandbox.ts";
+import { requireBoundedHere } from "./sandboxed.ts";
 import { buildFailed, buildServer } from "./screens.ts";
 import { requireAttemptHolds } from "./workflows/attempt-fence.ts";
 import type { AttemptFence } from "./workflows/attempt-fence.ts";
@@ -699,12 +700,16 @@ const currentVersion = async (env: Env, app: AppId): Promise<number> => {
  * The App's server code at `version`, with an env for the permissions of
  * `generation` (see `#load`), as the class its facet runs.
  */
-const loadServer = async (
+export const loadServer = async (
   env: Env,
   app: AppId,
   version: number,
   generation: number
 ): Promise<DurableObjectClass> => {
+  // On-prem, nothing bounds an App's server object (a facet of core's own
+  // Loader, which the sandbox can't host): refused unless the deployment
+  // says that's fine, until GRA-500 moves Apps onto sealed functions.
+  requireBoundedHere(env, "An App's server object");
   const files = await versionFiles(env, app, version);
   const build = await buildServer(env, files);
   if (!build.ok) {

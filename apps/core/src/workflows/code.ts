@@ -26,6 +26,7 @@ import type { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
 import { sandbox } from "../sandbox.ts";
+import { requireBoundedHere } from "../sandboxed.ts";
 import { buildWorkflows } from "../screens.ts";
 import { collectionMethods, fromIsolate } from "./host.ts";
 
@@ -498,8 +499,11 @@ export interface RunCode {
  * goes through the host, and no two runs, or loads of one run, share
  * memory. Loads are few: a run's start, and each resume after a wait.
  */
-export const loadRun = (env: Env, { version, workflow, files }: RunCode) =>
-  env.LOADER.get(null, async () => ({
+export const loadRun = (env: Env, { version, workflow, files }: RunCode) => {
+  // On-prem, nothing bounds a run's isolate yet: refused unless the
+  // deployment says that's fine (GRA-501).
+  requireBoundedHere(env, "A workflow's run");
+  return env.LOADER.get(null, async () => ({
     ...workflowSandbox,
     mainModule: runModule,
     modules: {
@@ -509,6 +513,7 @@ export const loadRun = (env: Env, { version, workflow, files }: RunCode) =>
     },
     env: {},
   })).getEntrypoint<RunEntrypoint>("Run");
+};
 
 /** The most of why an isolate didn't start that a failure keeps. */
 const maxLoadFailure = 500;
@@ -546,6 +551,7 @@ const declaredMetadata = async (
   id: WorkflowId,
   files: AppFiles
 ): Promise<{ params?: unknown; triggers?: unknown }> => {
+  requireBoundedHere(env, "A workflow's metadata");
   const code = env.LOADER.get(
     `workflow-metadata:${app}:${version}:${id}:${compilerVersion}`,
     async () => ({
@@ -627,6 +633,7 @@ const testFailures = async (
   modules: Record<string, string>,
   calls: string
 ): Promise<string[]> => {
+  requireBoundedHere(env, "A workflow's tests");
   const tests = env.LOADER.get(null, () => ({
     ...workflowSandbox,
     mainModule: testsModule,
@@ -685,6 +692,7 @@ export const dryRunTests = async (
    */
   { draft = false }: { draft?: boolean } = {}
 ): Promise<DryRuns> => {
+  requireBoundedHere(env, "A workflow's dry runs");
   const calls = callsOf(files, id);
   const code = env.LOADER.get(
     draft
