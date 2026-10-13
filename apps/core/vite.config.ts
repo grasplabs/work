@@ -192,8 +192,12 @@ export const coreProject = (
             SANDBOX_IN_PROCESS: "unbounded",
             // So the test of a call that never ends doesn't wait a minute.
             APP_CALL_TIMEOUT_MS: "10000",
-            // Core's step limit, lowered so a test reaches it.
-            WORKFLOW_STEP_LIMIT: String(testStepLimit),
+            // The quota policy, its step limit lowered so a test reaches it
+            // (src/workflows/quotas.ts); tests of the others set their own.
+            QUOTA_LIMITS: {
+              generation: 1,
+              limits: { workflowSteps: testStepLimit },
+            },
             // So a run waiting on a held side effect checks again at once.
             WORKFLOW_OFF_WAIT_MS: "250",
             CORE_MIGRATIONS: coreMigrations,

@@ -1,9 +1,11 @@
+import { platformLimits } from "./platform-limits.ts";
 import { valueDepth } from "./value-depth.ts";
 
 // The limits and the frame's start, as the page, core and the frame's own
 // runtime all name them. Apart from the rest of what screens share
-// (screens.ts), importing only the depth a value may nest (a constant):
-// the runtime is loaded into every frame, and carries only what it uses.
+// (screens.ts), importing only constants (the depth a value may nest, the
+// platform's limits): the runtime is loaded into every frame, and carries
+// only what it uses.
 
 /** Where the frontend frames screens from: a document core serves. */
 export const screenFramePath = "/screen-frame";
@@ -59,7 +61,7 @@ export const rpcArgumentDepth = valueDepth + rpcWrapperLevels - 1;
  */
 export const screenLimits = {
   /** How long each stage of a screen's start may take: ready, then mounted. */
-  stageMs: 10_000,
+  stageMs: platformLimits.screenStageMs,
   /**
    * How long the page waits for core to hand over a screen's build before
    * the frame starts: past core's own wait for a build (15 s), so core
@@ -92,11 +94,14 @@ export const screenLimits = {
     maxBigIntDigits: 32,
   },
   /** A server call's arguments, as UTF-8 JSON, in bytes. */
-  inputBytes: 128 * 1024,
+  inputBytes: platformLimits.operationInputBytes,
   /** A server call's answer, as UTF-8 JSON, in bytes: more is paged. */
-  answerBytes: 256 * 1024,
+  answerBytes: platformLimits.operationOutputBytes,
   /** A person's requests of one App's screens (subscriptions apart). */
-  requests: { burst: 20, perMinute: 120 },
+  requests: {
+    burst: platformLimits.browserRequestBurst,
+    perMinute: platformLimits.browserRequestsPerMinute,
+  },
   /** The problems kept of what one person's screens of an App report. */
   callerReports: { burst: 20, perMinute: 20 },
   /** The problems kept of what all of an App's screens report. */

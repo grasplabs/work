@@ -9,6 +9,7 @@ import {
 import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type {
@@ -52,6 +53,8 @@ import { stepStatisticsForgotten } from "../statistic-steps.ts";
 import { hasWorkflow } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
+import { admitChild, lineageCreated } from "./quotas.ts";
+import type { ChildPlace } from "./quotas.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellScreens } from "./run-changes.ts";
 import type { TriggerType } from "./trigger-registry.ts";
@@ -95,8 +98,15 @@ export const shownStatus = (
 /** Most runs one `list` call returns. */
 export const runsPerPage = 100;
 
-/** The most input a run starts with, as JSON text. */
-export const maxInputLength = 128 * 1024;
+/**
+ * The most input a run starts with, in bytes of its UTF-8 JSON: the public
+ * operation input limit (spec 18.1), whoever starts the run.
+ */
+export const maxInputBytes = platformLimits.operationInputBytes;
+
+/** The bytes of `value` as UTF-8 JSON. */
+export const jsonBytes = (value: unknown): number =>
+  new TextEncoder().encode(JSON.stringify(value)).byteLength;
 
 const invalid = () => workflowErrors.create("workflow.invalid");
 
@@ -513,17 +523,29 @@ const engineHas = async (env: Env, run: string): Promise<boolean | null> => {
   }
 };
 
+/** Where a root sits: its own lineage's root, at its top. */
+const rootPlace = { rootRunId: null, depth: 0 } as const;
+
 /**
- * The root of the lineage a run started by `parent` joins: the parent's
- * own root, or the parent itself when it is a root. Read from the parent's
- * row, so a lineage holds however deep its runs nest.
+ * Where a run started by `parent` sits: in the lineage of the parent's own
+ * root (or the parent itself, when it is a root), one deeper than it. Read
+ * from the parent's row, so a lineage holds however deep its runs nest,
+ * and admitted against the lineage's quotas (quotas.ts, `admitChild`),
+ * which takes one of its descendant runs. A run started by no other is a
+ * root (`rootPlace`).
  */
-const rootOf = async (env: Env, parent: RunId): Promise<string> => {
+const placeUnder = async (
+  env: Env,
+  parent: RunId | undefined
+): Promise<ChildPlace | typeof rootPlace> => {
+  if (parent === undefined) {
+    return rootPlace;
+  }
   const row = await findRun(env, parent);
   if (row === undefined) {
     throw new Error(`No run ${parent} to start a run under`);
   }
-  return row.rootRunId ?? row.id;
+  return await admitChild(env, row);
 };
 
 /**
@@ -602,17 +624,19 @@ const startFailed = async (
  * it. The run is pinned to the version checked, so at worst a trigger
  * starts its own version's run as that version is being replaced, as a
  * person starting it by hand then would. Input over
- * {@link maxInputLength} is refused (`workflow.invalid`), whoever starts it.
+ * {@link maxInputBytes} is refused (`workflow.invalid`), whoever starts it.
+ * A run started under another (`parent`) is admitted against its
+ * lineage's quotas first (quotas.ts, `admitChild`), and refused past them
+ * (`workflow.lineage_limit`).
  */
 export const startRun = async (
   env: Env,
   { app, workflow, input, startedBy, actor, via, trigger, parent }: RunRequest
 ): Promise<WorkflowRun> => {
-  if (input !== undefined && JSON.stringify(input).length > maxInputLength) {
+  if (input !== undefined && jsonBytes(input) > maxInputBytes) {
     throw invalid();
   }
   const db = drizzle(env.DB);
-  const rootRunId = parent === undefined ? null : await rootOf(env, parent);
   const { currentVersion: version } = await appRecord(env, app);
   if (version === null) {
     throw appErrors.create("app.not_running");
@@ -623,6 +647,9 @@ export const startRun = async (
   if (!hasWorkflow(await versionFiles(env, app, version), workflow)) {
     throw workflowErrors.create("workflow.not_found", { workflow, version });
   }
+  // Admitted last, once nothing else refuses the start: the slot it takes
+  // in its lineage is never given back.
+  const { rootRunId, depth } = await placeUnder(env, parent);
   const row = {
     id: crypto.randomUUID(),
     appId: app,
@@ -636,6 +663,7 @@ export const startRun = async (
     triggerKey: trigger?.key ?? null,
     detailsRemovedAt: null,
     rootRunId,
+    depth,
     pendingStart: input === undefined ? {} : { input },
   } satisfies RunFields & typeof workflowRuns.$inferInsert;
   // Nothing is written, audit event included, for a key a run has.
@@ -659,6 +687,9 @@ export const startRun = async (
           : { parent, root: rootRunId }),
       })
     ),
+    // A root's lineage, its age counting from now: nothing for a trigger's
+    // key a run has. A run started under another joins its parent's.
+    ...(rootRunId === null ? [lineageCreated(db, row.id)] : []),
   ]);
   if (inserted.length === 0) {
     return await deliveredBefore(env, row.triggerKey ?? "", row.id);

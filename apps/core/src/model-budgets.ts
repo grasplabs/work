@@ -7,6 +7,7 @@ import type {
   ModelSpender,
 } from "@grasp-os/shared/models";
 import type { Authority } from "@grasp-os/shared/permissions";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { ModelBindingBudget } from "@grasp-os/shared/resource-bindings";
 import { inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -115,7 +116,7 @@ export const budgetMonth = (
  * The most provider requests one run lineage may make, retries included
  * (platform default: 100 model requests per run lineage).
  */
-export const lineageModelRequests = 100;
+export const { lineageModelRequests } = platformLimits;
 
 /** A scope a call counts against, and the budget the deployment sets for it. */
 interface Scoped {
