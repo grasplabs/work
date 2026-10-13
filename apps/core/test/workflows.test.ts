@@ -1191,7 +1191,13 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
     const admin = await personApi("admin");
     const owner = await personApi("builder");
     const starter = await personApi("builder");
-    const mail = await mailConnection(["invalid", "invalid"]);
+    // Marked a read by its admin, so the tool's error is the action's
+    // failure: a Composio side effect's error leaves its outcome unknown,
+    // and its run waits for its person instead (unknown-outcome-runs).
+    const mail = await mailConnection(
+      ["invalid", "invalid"],
+      [{ name: "mail.send", read: true }]
+    );
     const app = await appWith(
       owner,
       mailer(`retries: { limit: 3, delay: 10, backoff: "constant" }`)
@@ -1254,7 +1260,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
       audited: events.map(({ detail }) => detail.error),
       unknownApp: appErrors.codeOf(unknownApp),
     }).toMatchObject({
-      // One call each, never retried: the tool may have acted.
+      // One call each, never retried: the tool refused it.
       server: { calls: 2, sent: [] },
       report: {
         status: "failed",
@@ -1266,9 +1272,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
           step: "send",
           // What the step works on, without the values.
           input: { to: "string", subject: "string" },
-          // On Composio a tool's error can't be told from one after it
-          // acted: unknown, never sent again.
-          error: { code: "connect.outcome_unknown" },
+          error: { code: "connect.action_failed" },
         },
       },
       seen: {
@@ -1280,7 +1284,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
         starter: [started.id, byTrigger.id],
         owner: [null, null],
       },
-      audited: ["connect.outcome_unknown"],
+      audited: ["connect.action_failed"],
       unknownApp: "app.not_found",
     });
   });

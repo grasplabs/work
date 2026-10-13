@@ -973,8 +973,8 @@ export interface ConnectApi extends PackageRegistryApi {
   anyPending: (request: PendingKey) => Promise<boolean>;
   /**
    * The calls of unknown outcome that acted for `person`, newest first (at
-   * most 200), that connect can't recover on its own: none for Grasp
-   * staff.
+   * most 200), those connect may still recover on its own included: none
+   * for Grasp staff.
    */
   listUnknownOutcomes: (person: ConnectionPerson) => Promise<UnknownOutcome[]>;
   /** One call of unknown outcome of the person's, or `null`. */
