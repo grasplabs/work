@@ -86,6 +86,17 @@ const deadlineOf = (env: SandboxedEnv): number => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
+/** Disposes `value` if it is disposable, as an RPC call's promise is. */
+const disposeOf = (value: unknown): void => {
+  const dispose: unknown =
+    isRecord(value) || typeof value === "function"
+      ? Reflect.get(value, Symbol.dispose)
+      : undefined;
+  if (typeof dispose === "function") {
+    Reflect.apply(dispose, value, []);
+  }
+};
+
 /** Calls `method` on a stub, as an RPC stub answers any method name. */
 const callStub = async (stub: unknown, method: string): Promise<unknown> => {
   const fn: unknown =
@@ -95,7 +106,19 @@ const callStub = async (stub: unknown, method: string): Promise<unknown> => {
   if (typeof fn !== "function") {
     throw new TypeError(`The entrypoint has no method ${method}.`);
   }
-  return await Reflect.apply(fn, stub, []);
+  const call: unknown = Reflect.apply(fn, stub, []);
+  try {
+    return await call;
+  } catch (error) {
+    // A call that rejected (the App's code threw, which is routine here)
+    // keeps holding the isolate's session until its promise is disposed or
+    // collected: the isolate's request never completes, and workerd aborts
+    // it as hung while this request goes on (a migration run's next batch).
+    // Fixed in workerd 1.20261010.1 (cloudflare/workerd#7637); until the
+    // runtime here is on it, release the call as soon as it rejected.
+    disposeOf(call);
+    throw error;
+  }
 };
 
 /**
