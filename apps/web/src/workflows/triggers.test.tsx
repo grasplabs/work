@@ -27,6 +27,7 @@ describe("a workflow's triggers", () => {
     const running = textOf([
       {
         type: "schedule",
+        position: 0,
         param: "every",
         timeZone: "Europe/Amsterdam",
         nextRunAt,
@@ -36,6 +37,7 @@ describe("a workflow's triggers", () => {
     const stopped = textOf([
       {
         type: "schedule",
+        position: 0,
         param: "every",
         timeZone: "Europe/Amsterdam",
         nextRunAt: null,
@@ -51,12 +53,27 @@ describe("a workflow's triggers", () => {
   it("shows an email trigger's address and an event trigger's event", () => {
     expect(
       textOf([
-        { type: "email", address: "invoices-acme@mail.example" },
-        { type: "event", event: "invoice.paid" },
+        { type: "email", position: 0, address: "invoices-acme@mail.example" },
+        { type: "event", position: 1, event: "invoice.paid" },
       ])
     ).toBe(
       "When an email arrives at invoices-acme@mail.example When the event invoice.paid happens"
     );
+  });
+
+  it("shows two triggers alike in all it shows as two rows", () => {
+    // One event under two filters: the filters aren't shown, their places are what differs.
+    const markup = renderToStaticMarkup(
+      <I18nProvider i18n={i18n}>
+        <WorkflowTriggers
+          triggers={[
+            { type: "event", position: 0, event: "invoice.paid" },
+            { type: "event", position: 1, event: "invoice.paid" },
+          ]}
+        />
+      </I18nProvider>
+    );
+    expect(markup.match(/<li\b/gu)?.length).toBe(2);
   });
 
   it("says when nothing starts it on its own", () => {

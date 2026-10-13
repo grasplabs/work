@@ -8,7 +8,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import { HistoryView } from "./history-view.tsx";
-import { formatDuration, historyItems, withPage } from "./run-history.ts";
+import {
+  firstHistory,
+  formatDuration,
+  historyItems,
+  withPage,
+} from "./run-history.ts";
 
 // A run's history as its page shows it, read from what it renders: each
 // step once with its attempts under it, waits by kind, a compensation,
@@ -139,10 +144,10 @@ describe("a run's history", () => {
       nextCursor: null,
       hasMore: false,
     };
-    const once = withPage({ entries: [], cursor: null }, first);
-    const both = withPage(once, later);
+    const once = firstHistory("run-a", first);
+    const both = withPage(once, { run: "run-a", cursor: "2" }, later);
     // The same page read twice adds nothing twice.
-    const again = withPage(both, later);
+    const again = withPage(both, { run: "run-a", cursor: "2" }, later);
     expect({
       cursors: [once.cursor, both.cursor],
       items: historyItems(again.entries).map((item) =>
@@ -154,6 +159,42 @@ describe("a run's history", () => {
       cursors: ["2", null],
       items: [["1 retrying", "2 completed"]],
     });
+  });
+
+  it("keeps each run's history its own when a page comes for another run", () => {
+    const ofA: RunHistoryPage = {
+      items: [step("step-1", "started", 1, 0, "fetch")],
+      nextCursor: "1",
+      hasMore: true,
+    };
+    const ofB: RunHistoryPage = {
+      items: [step("step-1", "started", 1, 0, "charge")],
+      nextCursor: "1",
+      hasMore: true,
+    };
+    const laterOfA: RunHistoryPage = {
+      items: [step("step-1", "completed", 1, 2, "fetch")],
+      nextCursor: null,
+      hasMore: false,
+    };
+    const b = firstHistory("run-b", ofB);
+    // Run A's next page, asked for before the page moved on to run B, at
+    // the same cursor run B is at now.
+    const late = withPage(b, { run: "run-a", cursor: "1" }, laterOfA);
+    // Run B's own next page goes on from where run B is.
+    const own = withPage(b, { run: "run-b", cursor: "1" }, laterOfA);
+    // A page from a cursor run A has moved past changes nothing either.
+    const a = withPage(
+      firstHistory("run-a", ofA),
+      { run: "run-a", cursor: "1" },
+      laterOfA
+    );
+    const stale = withPage(a, { run: "run-a", cursor: "1" }, ofA);
+    expect({
+      late: late === b,
+      own: [own.run, own.cursor, own.entries.length],
+      stale: stale === a,
+    }).toStrictEqual({ late: true, own: ["run-b", null, 2], stale: true });
   });
 
   it("offers more while core has more, and not once it has none", () => {

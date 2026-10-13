@@ -27,6 +27,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import {
   formatDuration,
   historyItems,
+  firstHistory,
   stepOrdinal,
   withPage,
 } from "./run-history.ts";
@@ -355,23 +356,26 @@ export const RunHistory = ({
   first: RunHistoryPage;
 }) => {
   const { busy, failure, run: read } = useCoreAction();
+  // Read once: the page keys this by `run`, so another run starts afresh.
   const [loaded, setLoaded] = useState<LoadedHistory>(() =>
-    withPage({ entries: [], cursor: null }, first)
+    firstHistory(run, first)
   );
   const more = async (): Promise<void> => {
-    const { cursor } = loaded;
+    // The run and cursor of the history as it is now: the page read is
+    // added only to that same history, at that same place.
+    const { run: of, cursor } = loaded;
     if (cursor === null) {
       return;
     }
     const page = await read(
       async (session) =>
-        await session.workflows.history(run, {
+        await session.workflows.history(of, {
           pageSize: historyPageSize,
           cursor,
         })
     );
     if (page !== undefined) {
-      setLoaded((previous) => withPage(previous, page));
+      setLoaded((previous) => withPage(previous, { run: of, cursor }, page));
     }
   };
   return (

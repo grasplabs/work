@@ -159,19 +159,48 @@ export const historyItems = (
 
 /** A run's history as read so far, and where to read on from. */
 export interface LoadedHistory {
+  /** The run it is the history of. */
+  run: string;
   entries: RunHistoryEntry[];
   /** The cursor of the next page; null once the last page is read. */
   cursor: string | null;
 }
 
-/** The history read so far once `page`, the next one, is read too. */
+/** Where a page was read from: which run, after which cursor. */
+export interface PageRead {
+  run: string;
+  cursor: string | null;
+}
+
+/** A run's history from its first page. */
+export const firstHistory = (
+  run: string,
+  first: RunHistoryPage
+): LoadedHistory => ({
+  run,
+  entries: [...first.items],
+  cursor: first.nextCursor,
+});
+
+/**
+ * The history read so far once `page`, read from `from`, is read too. A
+ * page of another run, or from a cursor this history has moved past (an
+ * answer that came after the page went on to another run, or after the
+ * same page was read again), changes nothing: each run's history holds
+ * only its own entries, in its own order.
+ */
 export const withPage = (
   loaded: LoadedHistory,
+  from: PageRead,
   page: RunHistoryPage
 ): LoadedHistory => {
-  // A page read twice (a click while one was on its way) adds nothing twice.
+  if (from.run !== loaded.run || from.cursor !== loaded.cursor) {
+    return loaded;
+  }
+  // Each entry once, should a page repeat what the one before held.
   const known = new Set(loaded.entries.map(({ id }) => id));
   return {
+    run: loaded.run,
     entries: [
       ...loaded.entries,
       ...page.items.filter(({ id }) => !known.has(id)),

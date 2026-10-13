@@ -9,16 +9,6 @@ import { formatDateTime } from "../format.ts";
 // registered it (core's `WorkflowDetail.triggers`): a schedule with its
 // next run and whether it stopped, an email address, or an event.
 
-/** The key of a trigger among a workflow's. */
-const keyOf = (trigger: WorkflowTrigger): string => {
-  if (trigger.type === "schedule") {
-    return `schedule:${trigger.param}`;
-  }
-  return trigger.type === "email"
-    ? `email:${trigger.address}`
-    : `event:${trigger.event}`;
-};
-
 const ScheduleTrigger = ({
   trigger,
 }: {
@@ -96,7 +86,9 @@ export const WorkflowTriggers = ({
       {triggers.map((trigger) => (
         <li
           className="bg-card flex items-start gap-2 rounded-xl border px-4 py-3 shadow-xs"
-          key={keyOf(trigger)}
+          // Its place among the workflow's triggers, its own alone: two
+          // alike in all shown (one event, two filters) are two rows.
+          key={trigger.position}
         >
           <Trigger trigger={trigger} />
         </li>

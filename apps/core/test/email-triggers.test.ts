@@ -300,7 +300,9 @@ describe("email triggers", () => {
 
     const { triggers } = await builder.api.workflows.get(app, "intake");
 
-    expect(triggers).toStrictEqual([{ type: "email", address: "shown" }]);
+    expect(triggers).toStrictEqual([
+      { type: "email", position: 0, address: "shown" },
+    ]);
   });
 
   it("keep nothing of a message without attachments, or with inline ones only", async () => {

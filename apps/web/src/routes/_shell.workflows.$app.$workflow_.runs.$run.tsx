@@ -65,7 +65,12 @@ const RunPage = () => {
           </p>
         ) : null}
         {!summary.detailsRemoved && history.state === "ready" ? (
-          <RunHistory first={history.data} run={run} />
+          <RunHistory
+            // Another run starts with its own history, not this one's.
+            key={run}
+            first={history.data}
+            run={run}
+          />
         ) : null}
         {!summary.detailsRemoved && history.state !== "ready" ? (
           <NotLoadedState heading="h2" page={history} />
