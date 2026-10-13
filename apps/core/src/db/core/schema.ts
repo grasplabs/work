@@ -1083,7 +1083,8 @@ export const workflowRuns = sqliteTable(
  * that changes them only if the work fits, so admissions racing each
  * other never pass a limit, and nothing a retry, a restart, a child or a
  * branch does starts them afresh: they only grow (but for `active_held_ms`,
- * which moves into `active_used_ms` as attempts settle).
+ * which moves into `active_used_ms` as attempts settle, and `host_calls`,
+ * of which an attempt gives back what it reserved and didn't make).
  *
  * - `created_at`: the root's start, which the lineage's age counts from.
  *   A wait doesn't move it, nor does a child.
@@ -1094,6 +1095,8 @@ export const workflowRuns = sqliteTable(
  *   allowance until it settles (`run_lineage_attempts`).
  * - `policy_generation`: the quota policy's generation at the latest
  *   admission.
+ * - `host_calls`: host calls its attempts reserved, in blocks; once an
+ *   attempt settles, only those it made.
  */
 export const runLineages = sqliteTable("run_lineages", {
   rootRunId: text("root_run_id")
@@ -1104,6 +1107,7 @@ export const runLineages = sqliteTable("run_lineages", {
   activeUsedMs: integer("active_used_ms").notNull().default(0),
   activeHeldMs: integer("active_held_ms").notNull().default(0),
   policyGeneration: integer("policy_generation").notNull().default(0),
+  hostCalls: integer("host_calls").notNull().default(0),
 });
 
 /**
@@ -1137,6 +1141,11 @@ export const runLineageAttempts = sqliteTable(
     admittedAt: timestamp("admitted_at").notNull(),
     settledAt: timestamp("settled_at"),
     policyGeneration: integer("policy_generation").notNull(),
+    /**
+     * Host calls the attempt reserved of its lineage while it runs, then,
+     * once it settled, those it made; all it reserved if it never did.
+     */
+    hostCalls: integer("host_calls").notNull().default(0),
   },
   (table) => [
     primaryKey({

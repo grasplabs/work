@@ -20,8 +20,9 @@ import { platformLimits } from "./platform-limits.ts";
  * The limits a deployment's operator may lower. Each is a ceiling core
  * checks as it admits work: a run's steps, a step's attempts (its first
  * included), the levels and descendant runs of a run lineage, the
- * lineage's active execution and age, and the provider requests it sends
- * to models (core's model ledger, model-budgets.ts).
+ * lineage's active execution and age, the provider requests it sends to
+ * models (core's model ledger, model-budgets.ts), and the host calls its
+ * attempts make.
  */
 export const lowerableLimits = [
   "workflowSteps",
@@ -31,6 +32,7 @@ export const lowerableLimits = [
   "workflowActiveMs",
   "workflowAgeMs",
   "lineageModelRequests",
+  "lineageHostCalls",
 ] as const;
 
 export type LowerableLimit = (typeof lowerableLimits)[number];
@@ -60,6 +62,7 @@ export const quotaLimitsSchema = z.strictObject({
     workflowActiveMs: lowered("workflowActiveMs"),
     workflowAgeMs: lowered("workflowAgeMs"),
     lineageModelRequests: lowered("lineageModelRequests"),
+    lineageHostCalls: lowered("lineageHostCalls"),
   } satisfies Record<LowerableLimit, z.ZodType>),
 });
 
@@ -87,6 +90,7 @@ export const quotaPolicyOf = (
     workflowActiveMs: platformLimits.workflowActiveMs,
     workflowAgeMs: platformLimits.workflowAgeMs,
     lineageModelRequests: platformLimits.lineageModelRequests,
+    lineageHostCalls: platformLimits.lineageHostCalls,
   };
   if (configured === undefined) {
     return { generation: 0, limits };

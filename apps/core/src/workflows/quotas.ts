@@ -89,6 +89,34 @@ import {
 // - A database that can't answer: nothing is admitted. The attempt fails
 //   as the platform's unexpected error, which its step may retry.
 //
+// A lineage's host calls (every call an attempt's code makes through its
+// host, `AttemptHost`) are counted on its row too, each attempt reserving
+// them in blocks as it calls (`hostCallsOf`), so most calls take no write.
+// How a lineage could make more than it may, and what closes it:
+//
+// - A retry, a restart or a new activation starting afresh: the count is
+//   the lineage's, in its row; what an attempt keeps in memory is only how
+//   much of its own reservation it has used.
+// - A child, or a child of a child: its attempts count on its root's row,
+//   as its runs and active time do.
+// - Calls racing each other: an attempt's calls take from its reservation
+//   one at a time, and only one block of it is reserved at once; each
+//   block is one conditional statement that grants no more than the
+//   lineage has left. Attempts racing each other each reserve that way.
+// - Giving back more than was left over: an attempt gives back what it
+//   reserved and didn't use once, as it settles, in the statement that
+//   settles it; an attempt that never settles (its activation died) gives
+//   back nothing, and an attempt settled already reserves nothing more.
+//   What a block left unused while an attempt died is lost to the
+//   lineage: blocks start at one call and double, so at most about as
+//   many as the attempt made.
+// - A replay: a step the engine journaled answers without its function,
+//   and makes no call. An attempt run again makes its calls, and counts
+//   them, again.
+// - Parallel branches: the SDK runs a run's steps one after another
+//   (`exclusive`), and code that gets past it runs steps that still call
+//   through their attempts' hosts, counted on the same row.
+//
 // Refusals say which they are: a limit reached for good
 // (`workflow.lineage_limit`, naming the limit), or a lineage whose active
 // time is held by attempts still under way, which a retry after the
@@ -229,6 +257,7 @@ const lineageLimits = {
   descendants: "workflowDescendantRuns",
   activeTime: "workflowActiveMs",
   age: "workflowAgeMs",
+  hostCalls: "lineageHostCalls",
 } as const satisfies Record<string, LowerableLimit>;
 
 type LineageLimit = keyof typeof lineageLimits;
@@ -250,7 +279,7 @@ export const lineageCreated = (db: DrizzleD1Database, root: string) =>
   db
     .insert(runLineages)
     .select(
-      sql`SELECT ${workflowRuns.id}, ${workflowRuns.createdAt}, 0, 0, 0, 0 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${root}`
+      sql`SELECT ${workflowRuns.id}, ${workflowRuns.createdAt}, 0, 0, 0, 0, 0 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${root}`
     )
     .onConflictDoNothing();
 
@@ -425,11 +454,19 @@ export interface QuotaAttempt {
   deadline: number;
 }
 
-/** An admitted attempt: what settles it, once its code has returned. */
+/**
+ * An admitted attempt: what admits each of its host calls, and what
+ * settles it, once its code has returned.
+ */
 export interface AttemptAdmission {
   /** The attempts the quota policy admits at the step: none after this many. */
   attemptsAllowed: number;
-  /** Settles it with the time it used; never throws. */
+  /**
+   * Admits one host call of the attempt against its lineage's
+   * (`hostCallsOf`), throwing the refusal.
+   */
+  hostCall: () => Promise<void>;
+  /** Settles it with the time it used and the calls it made; never throws. */
   settle: () => Promise<void>;
 }
 
@@ -464,7 +501,8 @@ const busyFor = async (
 /**
  * Settles the attempt `identity` of the lineage of `root`, admitted at
  * `admittedAt`: its hold is given back, and the lineage counts what it
- * used, the wall time it ran up to its deadline. Once only, however often
+ * used, the wall time it ran up to its deadline, and gives back the
+ * `unusedHostCalls` it reserved and didn't make. Once only, however often
  * it is called, and not at all once its deadline has passed and an
  * admission settled it as used up. Logged, never thrown, when the
  * database can't: the hold stays, and is settled as used up once its
@@ -474,7 +512,8 @@ const settleAttempt = async (
   env: Pick<Env, "DB">,
   root: string,
   identity: ReturnType<typeof and>,
-  admittedAt: Date
+  admittedAt: Date,
+  unusedHostCalls: number
 ): Promise<void> => {
   const held = runLineageAttempts;
   const ran = Math.max(0, Date.now() - admittedAt.getTime());
@@ -491,6 +530,7 @@ const settleAttempt = async (
         .set({
           activeHeldMs: sql`${runLineages.activeHeldMs} - ${reservedOf}`,
           activeUsedMs: sql`${runLineages.activeUsedMs} + ${usedOf}`,
+          hostCalls: sql`max(0, ${runLineages.hostCalls} - ${unusedHostCalls})`,
         })
         .where(
           and(
@@ -503,6 +543,7 @@ const settleAttempt = async (
         .set({
           usedMs: used,
           settledAt: new Date(),
+          hostCalls: sql`max(0, ${held.hostCalls} - ${unusedHostCalls})`,
         })
         .where(open),
     ]);
@@ -512,6 +553,140 @@ const settleAttempt = async (
       ...errorFields(error),
     });
   }
+};
+
+/** The most host calls an attempt reserves of its lineage at once. */
+const hostCallBlockMax = 32;
+
+/**
+ * Reserves up to `block` host calls of the lineage of `root` for its
+ * attempt `identity`, under `policy`: no more than the lineage has left,
+ * and none once the attempt has settled. Answers how many it reserved, at
+ * least one; throws `workflow.lineage_limit` when the lineage has none
+ * left, or `execution.stale_attempt` for a settled attempt.
+ */
+const reserveHostCallsOnce = async (
+  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  lineage: { root: string; identity: ReturnType<typeof and> },
+  block: number,
+  policy: QuotaPolicy,
+  retried: boolean
+): Promise<number> => {
+  const { root, identity } = lineage;
+  const db = drizzle(env.DB);
+  const held = runLineageAttempts;
+  const limit = policy.limits.lineageHostCalls;
+  const ofLineage = eq(runLineages.rootRunId, root);
+  const grant = sql`min(${block}, ${limit} - ${runLineages.hostCalls})`;
+  // One batch, so one transaction: what the lineage had before is what
+  // both updates grant from, and no other reservation comes between.
+  const [before, granted] = await db.batch([
+    db
+      .select({ hostCalls: runLineages.hostCalls })
+      .from(runLineages)
+      .where(ofLineage),
+    // The attempt's receipt first, while it is open and the lineage has
+    // calls left under a policy still current...
+    db
+      .update(held)
+      .set({
+        hostCalls: sql`${held.hostCalls} + (SELECT ${grant} FROM ${runLineages} WHERE ${ofLineage})`,
+      })
+      .where(
+        and(
+          identity,
+          isNull(held.settledAt),
+          sql`EXISTS (SELECT 1 FROM ${runLineages} WHERE ${ofLineage} AND ${runLineages.hostCalls} < ${limit} AND ${stillCurrent(policy)})`
+        )
+      )
+      .returning({ hostCalls: held.hostCalls }),
+    // ...then the lineage, by as much, only if that took.
+    db
+      .update(runLineages)
+      .set({
+        hostCalls: sql`${runLineages.hostCalls} + ${grant}`,
+        policyGeneration: policy.generation,
+      })
+      .where(
+        and(ofLineage, lt(runLineages.hostCalls, limit), sql`changes() > 0`)
+      ),
+  ]);
+  const had = before[0]?.hostCalls;
+  if (had === undefined) {
+    throw new Error(`No run ${root} to count host calls of`);
+  }
+  if (granted.length > 0) {
+    return Math.min(block, limit - had);
+  }
+  if (had >= limit) {
+    throw limitReached("hostCalls", policy);
+  }
+  if (!retried && !(await policyStill(db, policy))) {
+    return await reserveHostCallsOnce(
+      env,
+      lineage,
+      block,
+      await quotaPolicy(env),
+      true
+    );
+  }
+  throw executionErrors.create("execution.stale_attempt");
+};
+
+/**
+ * The host calls of the attempt `identity`, of the lineage of `root`, as
+ * its host admits them: `take` admits one, from what the attempt reserved
+ * of the lineage, reserving another block when that is used up (one at a
+ * time: calls made at once wait for the same block). Blocks start at one
+ * call and double, up to {@link hostCallBlockMax}, so an attempt that
+ * makes few calls reserves few, and one that makes many writes once every
+ * few dozen. `close` ends it as the attempt settles, answering what it
+ * reserved and didn't use, for its settle to give back; no call is
+ * admitted after it.
+ */
+const hostCallsOf = (
+  env: Pick<Env, "DB" | "QUOTA_LIMITS">,
+  root: string,
+  identity: ReturnType<typeof and>
+): { take: () => Promise<void>; close: () => number } => {
+  let reserved = 0;
+  let used = 0;
+  let closed = false;
+  let reserving: Promise<void> | undefined;
+  const reserve = async (): Promise<void> => {
+    try {
+      const block = Math.min(hostCallBlockMax, Math.max(1, reserved));
+      reserved += await reserveHostCallsOnce(
+        env,
+        { root, identity },
+        block,
+        await quotaPolicy(env),
+        false
+      );
+    } finally {
+      reserving = undefined;
+    }
+  };
+  return {
+    take: async () => {
+      for (;;) {
+        if (closed) {
+          throw executionErrors.create("execution.stale_attempt");
+        }
+        if (used < reserved) {
+          used += 1;
+          return;
+        }
+        reserving ??= reserve();
+        // oxlint-disable-next-line no-await-in-loop -- one block at a time
+        await reserving;
+      }
+    },
+    close: () => {
+      closed = true;
+      return reserved - used;
+    },
+  };
 };
 
 /** `admitAttempt` under `policy`; `retried` once read again (`policyStill`). */
@@ -584,7 +759,7 @@ const admitAttemptOnce = async (
     db
       .insert(held)
       .select(
-        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, ${policy.generation} FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${policy.limits.workflowActiveMs} AND ${runLineages.createdAt} > ${bornAfter} AND ${stillCurrent(policy)}`
+        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, ${policy.generation}, 0 FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${policy.limits.workflowActiveMs} AND ${runLineages.createdAt} > ${bornAfter} AND ${stillCurrent(policy)}`
       )
       .onConflictDoNothing(),
     // Held on the lineage only if that statement took the receipt.
@@ -618,10 +793,18 @@ const admitAttemptOnce = async (
     if (admitted.settledAt !== null) {
       throw executionErrors.create("execution.stale_attempt");
     }
+    const hostCalls = hostCallsOf(env, root, identity);
     return {
       attemptsAllowed: policy.limits.workflowAttemptsPerStep,
+      hostCall: hostCalls.take,
       settle: async () => {
-        await settleAttempt(env, root, identity, admitted.admittedAt);
+        await settleAttempt(
+          env,
+          root,
+          identity,
+          admitted.admittedAt,
+          hostCalls.close()
+        );
       },
     };
   }

@@ -58,7 +58,7 @@ export const operationErrors = defineErrorFamily({
   "operation.unsupported":
     "This operation needs a capability this release doesn't run yet.",
   "operation.call_limit":
-    "This call ran more nested functions, or made more resource requests, than one call may.",
+    "This call made more host calls, ran more nested functions, or made more resource requests than one call may.",
   "operation.depth_exceeded":
     "Functions called each other deeper than one call may go.",
   "operation.cpu_exceeded":
