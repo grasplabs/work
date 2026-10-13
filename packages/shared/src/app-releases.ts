@@ -123,4 +123,6 @@ export const versionErrors = defineErrorFamily({
   "version.revoked": "This version was revoked and no longer runs.",
   "version.mismatch":
     "That reference belongs to another version or contract than the one that runs.",
+  "version.tests_failed":
+    "This version's App tests fail, so it can't be made current.",
 });

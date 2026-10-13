@@ -30,8 +30,10 @@ export type {
 export {
   appCodeFiles,
   appCodeKind,
+  appTestFiles,
   generatedModules,
   isAppLayout,
+  isAppTestSuite,
 } from "./app-code.ts";
 export {
   appCodeLimitErrors,

@@ -517,7 +517,7 @@ const unbound = async (): Promise<never> =>
   await Promise.reject(versionErrors.create("version.store_unbound"));
 
 /** A store for a release without tables: there is nothing to reach. */
-const noStore = (): OpenStore => ({
+export const noStore = (): OpenStore => ({
   // SAFETY: an ID no store has, for logs only: every call is refused.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   id: "none" as OpenStore["id"],
@@ -648,6 +648,61 @@ const functionRequestSchema = z.strictObject({
   idempotencyKey: z.string().optional(),
 });
 
+/** A call's request, read. */
+export type FunctionRequest = z.infer<typeof functionRequestSchema>;
+
+/**
+ * The call `request` (its JSON text, as its caller sent it), bounded
+ * before it is read: `contract.input_too_large` past the bound, and
+ * `contract.invalid_request` for anything that isn't a call.
+ */
+export const readFunctionRequest = (request: unknown): FunctionRequest => {
+  if (typeof request !== "string") {
+    throw operationErrors.create("contract.invalid_request");
+  }
+  if (isOverBytes(request, functionRequestMaxBytes)) {
+    throw operationErrors.create("contract.input_too_large", {
+      maxBytes: operationInputMaxBytes,
+    });
+  }
+  try {
+    return functionRequestSchema.parse(JSON.parse(request));
+  } catch {
+    throw operationErrors.create("contract.invalid_request");
+  }
+};
+
+/**
+ * The path of the public function `reference` names exactly in
+ * `release`: refused as one that doesn't exist (`operation.not_found`)
+ * when there is none or it is internal, `operation.kind_mismatch` for
+ * another kind, and `version.mismatch` for another App, version or
+ * contract than the release's.
+ */
+export const publicOperationOf = (
+  release: Release,
+  reference: FunctionRequest["reference"]
+): string => {
+  const operation = Object.hasOwn(release.app.operations, reference.contractId)
+    ? release.app.operations[reference.contractId]
+    : undefined;
+  // An internal function is refused as one that doesn't exist.
+  if (operation === undefined || operation.visibility !== "public") {
+    throw operationErrors.create("operation.not_found");
+  }
+  if (operation.kind !== reference.kind) {
+    throw operationErrors.create("operation.kind_mismatch");
+  }
+  if (
+    reference.resourceId !== release.manifest.resourceId ||
+    reference.resourceVersion !== release.manifest.resourceVersion ||
+    release.fingerprints[operation.path] !== reference.fingerprint
+  ) {
+    throw versionErrors.create("version.mismatch");
+  }
+  return operation.path;
+};
+
 /** What a call answers (spec 32.6). */
 export interface FunctionAnswer {
   readonly result: OperationResult;
@@ -665,7 +720,10 @@ export interface FunctionAnswer {
 }
 
 /** `error` as the caller may see it, before any function ran. */
-const refusalOf = (error: unknown, requestId: string): AppErrorPayload => {
+export const refusalOf = (
+  error: unknown,
+  requestId: string
+): AppErrorPayload => {
   const expected = isExpectedError(error)
     ? error
     : internalErrors.create("internal.unexpected", { requestId });
@@ -703,21 +761,11 @@ export const callAppFunction = async (
     fingerprint: null,
     manifestHash: null,
   });
-  if (typeof request !== "string") {
-    return refused(operationErrors.create("contract.invalid_request"));
-  }
-  if (isOverBytes(request, functionRequestMaxBytes)) {
-    return refused(
-      operationErrors.create("contract.input_too_large", {
-        maxBytes: operationInputMaxBytes,
-      })
-    );
-  }
-  let call: z.infer<typeof functionRequestSchema>;
+  let call: FunctionRequest;
   try {
-    call = functionRequestSchema.parse(JSON.parse(request));
-  } catch {
-    return refused(operationErrors.create("contract.invalid_request"));
+    call = readFunctionRequest(request);
+  } catch (error) {
+    return refused(error);
   }
   let release: Release;
   let path: string;
@@ -727,29 +775,10 @@ export const callAppFunction = async (
     if (found.currentVersion === null) {
       throw versionErrors.create("version.not_sealed");
     }
+    // The release of the App's current version: its manifest names the
+    // App and the version the reference must name.
     release = await loadRelease(env, found.id, found.currentVersion);
-    const { reference } = call;
-    const operation = Object.hasOwn(
-      release.app.operations,
-      reference.contractId
-    )
-      ? release.app.operations[reference.contractId]
-      : undefined;
-    // An internal function is refused as one that doesn't exist.
-    if (operation === undefined || operation.visibility !== "public") {
-      throw operationErrors.create("operation.not_found");
-    }
-    if (operation.kind !== reference.kind) {
-      throw operationErrors.create("operation.kind_mismatch");
-    }
-    if (
-      reference.resourceId !== found.id ||
-      reference.resourceVersion !== found.currentVersion ||
-      release.fingerprints[operation.path] !== reference.fingerprint
-    ) {
-      throw versionErrors.create("version.mismatch");
-    }
-    ({ path } = operation);
+    path = publicOperationOf(release, call.reference);
   } catch (error) {
     return refused(error);
   }

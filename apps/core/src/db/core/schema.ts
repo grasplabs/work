@@ -817,6 +817,24 @@ export const appDefaultStores = sqliteTable("app_default_stores", {
 });
 
 /**
+ * The fixture stores an App's tests run on (app-tests.ts), each recorded
+ * before its object is first touched and deleted once the object is
+ * discarded: a row left behind is a test run that died between the two,
+ * whose store the sweep discards. A fixture store is never in the store
+ * inventory (`business_stores`), so nothing opens or binds it as a store.
+ */
+export const appTestFixtures = sqliteTable(
+  "app_test_fixtures",
+  {
+    storeId: text("store_id").primaryKey(),
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("app_test_fixtures_created_at").on(table.createdAt)]
+);
+
+/**
  * Published templates (resource-bindings.ts): each version's content,
  * written once by an admin and never changed, so a binding to a version
  * always reads exactly what was approved (spec 32.3). A template keeps the

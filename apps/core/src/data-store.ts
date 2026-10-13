@@ -161,6 +161,30 @@ export class DataStore extends DurableObject<Env> {
     return JSON.stringify(await this.#host.commit(input, outboxConsumers));
   }
 
+  /**
+   * Discards a fixture store an App's tests ran on (app-tests.ts):
+   * everything the object holds, and its alarm. Refused for any store
+   * core's inventory lists, whatever asks: a business store is only ever
+   * deleted through its deletion (store-deletion.ts), audited and kept
+   * until nothing refers to it. A fixture store never is listed, so this
+   * can only ever empty one.
+   */
+  async discardFixture(storeId: StoreId): Promise<void> {
+    if (this.ctx.id.name !== undefined && this.ctx.id.name !== storeId) {
+      throw new Error("That isn't this object's store.");
+    }
+    const listed = await this.env.DB.prepare(
+      "SELECT 1 FROM business_stores WHERE id = ?"
+    )
+      .bind(storeId)
+      .first();
+    if (listed !== null) {
+      throw new Error("A listed store is deleted, never discarded.");
+    }
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+  }
+
   /** `StoreHost.runAlarm`, with the deployment's outbox consumers. */
   override async alarm(): Promise<void> {
     await this.#host.runAlarm(outboxConsumers);

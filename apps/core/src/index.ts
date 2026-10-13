@@ -1,5 +1,6 @@
 import { errorFields, log } from "@grasp-os/shared/log";
 
+import { sweepTestFixtures } from "./app-tests.ts";
 import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
@@ -94,7 +95,8 @@ export default {
   // tarballs and package builds no lock names any more (see
   // src/packages/cleanup.ts), and sealed App releases nothing keeps any
   // more, with the artifacts no other release names (see
-  // src/release-retention.ts). And the
+  // src/release-retention.ts), and the fixture stores App test runs
+  // left behind (see src/app-tests.ts). And the
   // audit log's retention alarm armed, if it isn't yet: retention itself
   // runs on that alarm (see
   // src/audit-log.ts), and a deployment that appends nothing after a
@@ -113,6 +115,7 @@ export default {
             sweepPackageFiles(env, new Date(controller.scheduledTime)),
             sweepReceipts(env, new Date(controller.scheduledTime)),
             sweepReleases(env, new Date(controller.scheduledTime)),
+            sweepTestFixtures(env, new Date(controller.scheduledTime)),
             auditLog(env).armRetention(),
           ]
         : [

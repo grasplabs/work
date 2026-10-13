@@ -699,6 +699,28 @@ export const storeManagers = async (
   }));
 };
 
+/** Store `storeId`'s object, as core calls it, its ID bound to every call. */
+const storeClient = (
+  env: Pick<Env, "DATA_STORES" | "DURABLE_OBJECT_JURISDICTION">,
+  storeId: StoreId
+): OpenStore => {
+  const stub = inJurisdiction(env, env.DATA_STORES).getByName(storeId);
+  return {
+    id: storeId,
+    defineTables: async (manifest, consumer) =>
+      await stub.defineTables(storeId, manifest, consumer),
+    get: async (table, recordId) => await stub.get(storeId, table, recordId),
+    claim: async (claim) => claimedOf(await stub.claim({ ...claim, storeId })),
+    commit: async (commit) =>
+      committedSchema.parse(
+        JSON.parse(await stub.commit({ ...commit, storeId }))
+      ),
+    read: async (scope, request, staged) =>
+      readResultOf(await stub.read(storeId, scope, request, staged)),
+    generations: async (names) => await stub.generations(storeId, names),
+  };
+};
+
 /**
  * The store `id`, if the inventory lists it and it isn't deleted;
  * otherwise `data.store_unavailable`, the same for a store that never
@@ -724,20 +746,27 @@ export const openStore = async (
   if (!parsed.success || row === undefined) {
     throw dataErrors.create("data.store_unavailable");
   }
-  const storeId = parsed.data;
-  const stub = inJurisdiction(env, env.DATA_STORES).getByName(storeId);
-  return {
-    id: storeId,
-    defineTables: async (manifest, consumer) =>
-      await stub.defineTables(storeId, manifest, consumer),
-    get: async (table, recordId) => await stub.get(storeId, table, recordId),
-    claim: async (claim) => claimedOf(await stub.claim({ ...claim, storeId })),
-    commit: async (commit) =>
-      committedSchema.parse(
-        JSON.parse(await stub.commit({ ...commit, storeId }))
-      ),
-    read: async (scope, request, staged) =>
-      readResultOf(await stub.read(storeId, scope, request, staged)),
-    generations: async (names) => await stub.generations(storeId, names),
-  };
+  return storeClient(env, parsed.data);
+};
+
+/**
+ * A fixture store an App's tests run on (app-tests.ts): an object of the
+ * stores' namespace that core's inventory never lists, so it is opened
+ * only here, never by `openStore`, and no release binds it. Core mints
+ * its ID and records it (`app_test_fixtures`) before it is first opened.
+ */
+export const openFixtureStore = (
+  env: Pick<Env, "DATA_STORES" | "DURABLE_OBJECT_JURISDICTION">,
+  id: StoreId
+): OpenStore => storeClient(env, id);
+
+/**
+ * Discards fixture store `id`: its object refuses for any store the
+ * inventory lists (`DataStore.discardFixture`).
+ */
+export const discardFixtureStore = async (
+  env: Pick<Env, "DATA_STORES" | "DURABLE_OBJECT_JURISDICTION">,
+  id: StoreId
+): Promise<void> => {
+  await inJurisdiction(env, env.DATA_STORES).getByName(id).discardFixture(id);
 };
