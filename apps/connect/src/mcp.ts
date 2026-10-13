@@ -1,6 +1,7 @@
 import {
   mcpProtocolVersion,
   notPerformedMetaKey,
+  outcomeUnknownMetaKey,
   provenanceMetaKey,
   provenanceSchema,
 } from "@grasp-os/connector-kit/manifest";
@@ -85,6 +86,12 @@ export interface McpToolResult {
    * word on this (policy.ts).
    */
   notPerformed: boolean;
+  /**
+   * The tool says it can't tell whether its write took effect
+   * (`outcomeUnknownMetaKey`). Taken from any server: it can only stop a
+   * repeat.
+   */
+  outcomeUnknown: boolean;
 }
 
 /**
@@ -315,7 +322,11 @@ const resultOf = (result: unknown): McpToolResult => {
     output: JSON.stringify(structuredContent ?? text ?? content),
     provenance: provenance.data,
     isError,
-    notPerformed: isError && meta?.[notPerformedMetaKey] === true,
+    notPerformed:
+      isError &&
+      meta?.[notPerformedMetaKey] === true &&
+      meta[outcomeUnknownMetaKey] !== true,
+    outcomeUnknown: isError && meta?.[outcomeUnknownMetaKey] === true,
   };
 };
 

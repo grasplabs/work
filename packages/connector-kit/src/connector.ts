@@ -5,6 +5,7 @@ import {
   connectorManifestSchema,
   mcpProtocolVersion,
   notPerformedMetaKey,
+  outcomeUnknownMetaKey,
   provenanceMetaKey,
   provenanceSchema,
   resourceMetaKey,
@@ -126,22 +127,41 @@ export const invalidCode: ToolErrorCode = "invalid";
  * most one write, as its last request; a tool that writes twice can't rely
  * on it. A read-only tool changes nothing, so it may set it for any
  * failure trying again may fix, such as a provider's 5xx.
+ *
+ * `outcomeUnknown: true` says the opposite: the tool's write may have
+ * reached the provider, and the tool can't tell whether it took effect
+ * (`outcomeUnknownMetaKey`): a dropped connection, a 5xx or a timeout
+ * after it was sent, an answer to it the tool can't read. `providerFetch`
+ * sets it for each of those answers to a write. Connect then never sends
+ * the call again under its key, and never passes the error off as the
+ * action's failure. An error can't say both.
  */
 export class ToolError extends Error {
   readonly details: ToolErrorDetails | undefined;
   readonly notPerformed: boolean;
+  readonly outcomeUnknown: boolean;
 
   constructor(
     message: string,
     {
       notPerformed = false,
+      outcomeUnknown = false,
       code,
       retryAfterSeconds,
-    }: Partial<ToolErrorDetails> & { notPerformed?: boolean } = {}
+    }: Partial<ToolErrorDetails> & {
+      notPerformed?: boolean;
+      outcomeUnknown?: boolean;
+    } = {}
   ) {
     super(message);
+    if (notPerformed && outcomeUnknown) {
+      throw new Error(
+        "A tool error can't say both that nothing was done and that its outcome is unknown"
+      );
+    }
     this.name = "ToolError";
     this.notPerformed = notPerformed;
+    this.outcomeUnknown = outcomeUnknown;
     this.details =
       code === undefined
         ? undefined
@@ -235,19 +255,42 @@ const isClosed = (schema: unknown): boolean => {
   return branches.every(isClosed) && objectClosed && arrayClosed;
 };
 
-/** An error result: its message, its code when it has one, and whether it did nothing. */
+/** What an error result says of the call besides its message. */
+type FailureKind = "failed" | "notPerformed" | "outcomeUnknown";
+
+const failureMeta: Record<FailureKind, JsonObject | undefined> = {
+  failed: undefined,
+  notPerformed: { [notPerformedMetaKey]: true },
+  outcomeUnknown: { [outcomeUnknownMetaKey]: true },
+};
+
+/**
+ * An error result: its message, its code when it has one, and whether it
+ * did nothing, or may have done something nobody can confirm.
+ */
 const failure = (
   text: string,
   details?: ToolErrorDetails,
-  notPerformed = false
-): CallResult => ({
-  content: [{ type: "text", text }],
-  ...(details === undefined
-    ? {}
-    : { structuredContent: { error: { message: text, ...details } } }),
-  isError: true,
-  ...(notPerformed ? { _meta: { [notPerformedMetaKey]: true } } : {}),
-});
+  kind: FailureKind = "failed"
+): CallResult => {
+  const meta = failureMeta[kind];
+  return {
+    content: [{ type: "text", text }],
+    ...(details === undefined
+      ? {}
+      : { structuredContent: { error: { message: text, ...details } } }),
+    isError: true,
+    ...(meta === undefined ? {} : { _meta: meta }),
+  };
+};
+
+/** What a ToolError says of the call besides its message. */
+const kindOf = ({ notPerformed, outcomeUnknown }: ToolError): FailureKind => {
+  if (notPerformed) {
+    return "notPerformed";
+  }
+  return outcomeUnknown ? "outcomeUnknown" : "failed";
+};
 
 /** Where input didn't parse, without the values that were sent. */
 const issuesOf = (error: z.ZodError): string =>
@@ -328,14 +371,30 @@ export const defineTool = <
       try {
         result = await definition.run(parsed.data);
       } catch (error) {
-        return error instanceof ToolError
-          ? failure(error.message, error.details, error.notPerformed)
-          : failure("The action failed");
+        if (error instanceof ToolError) {
+          return failure(error.message, error.details, kindOf(error));
+        }
+        // An error the tool didn't foresee may have come after its write,
+        // the last request it sends: nobody can say whether that went
+        // through. A read changed nothing either way.
+        return readOnly
+          ? failure("The action failed")
+          : failure(
+              "The action's outcome is unknown",
+              undefined,
+              "outcomeUnknown"
+            );
       }
       const checked = output.safeParse(result.output);
       const provenance = provenanceSchema.safeParse(result.provenance ?? []);
       if (!checked.success || !provenance.success) {
-        return failure("The connector's result isn't what it declares");
+        // A writing tool that got this far sent its write: it went through,
+        // but what it made can't be told.
+        return failure(
+          "The connector's result isn't what it declares",
+          undefined,
+          readOnly ? "failed" : "outcomeUnknown"
+        );
       }
       const structured: JsonObject = checked.data;
       // Connect reads structured content only, so the output isn't sent a

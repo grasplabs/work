@@ -141,6 +141,11 @@ export interface CallRecord {
   outcome: CallOutcome;
   /** The error code, when it didn't end well. */
   reason?: string;
+  /**
+   * Answered, or refused, from an earlier call's stored outcome under the
+   * same key: a repeat, not a send of its own.
+   */
+  replayed?: boolean;
   /** The IDs of the resources it read. */
   provenance?: readonly string[];
   /** The held action it made, or the one its person confirmed. */
@@ -226,6 +231,8 @@ export const auditCall = async (
     claims?.context?.type === "chat" ? claims.context.chatId : undefined
   );
   add("reason", reason);
+  // Only when it is: a repeat answered from the earlier call's outcome.
+  add("replayed", record.replayed === true ? true : undefined);
   add("pendingActionId", record.pendingActionId);
   add("provenanceCount", provenance.length);
 

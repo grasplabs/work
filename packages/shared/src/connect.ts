@@ -587,13 +587,16 @@ export type HeldOutcomeRequest = z.input<typeof heldOutcomeRequestSchema>;
 /**
  * What became of a held action: it still waits for its person (or is being
  * carried out now); they declined it, or it was dropped; it ran and
- * answered (`done`); or it didn't end well (`failed`: `reason` is the
+ * answered (`done`); it was sent and nobody can tell whether it took
+ * effect (`unknown`: it may have been carried out, and is never sent
+ * again under its key); or it didn't end well (`failed`: `reason` is the
  * error's code, and `output` what the tool said, for a tool's own error).
  */
 export type HeldOutcome =
   | { state: "waiting" }
   | { state: "declined" }
   | { state: "done"; result: ConnectResult }
+  | { state: "unknown"; reason: "connect.outcome_unknown" }
   | { state: "failed"; reason: string; output: string | null };
 
 /** Workflow runs that have ended, each with its App: at most 50. */

@@ -1112,6 +1112,32 @@ describe("the Google Workspace connector's answers", () => {
     expect(google.sent).toHaveLength(1);
   });
 
+  it("say an email Gmail sent is of unknown outcome when its answer was lost, and never send it again", async () => {
+    const connection = await connected();
+    const send = async () =>
+      await outcome(
+        call(
+          connection,
+          "mail.send",
+          {
+            mailbox: invoices,
+            subject: "Payment of invoice 2026-0041",
+            body: "Paid today.",
+            to: ["billing@northwind.example.org"],
+          },
+          { resource: invoices, idempotencyKey: "run-9:send-receipt" }
+        )
+      );
+    google.loseWriteAnswer();
+    const outcomes = [await send(), await send()];
+    expect(outcomes).toStrictEqual([
+      "connect.outcome_unknown",
+      "connect.outcome_unknown",
+    ]);
+    expect(google.writesDone()).toBe(1);
+    expect(google.sent).toHaveLength(1);
+  });
+
   it("never take a provider's answer for connect's egress's own", async () => {
     const connection = await connected();
     // Google's 404 carries `grasp-egress: refused`: the egress drops it,
