@@ -30,7 +30,8 @@ jobs:
     name: static
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # About 2 minutes with a warm cache (October 2026).
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,8 +69,8 @@ jobs:
     name: test (${{ matrix.shard }}/${{ strategy.job-total }})
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    # The test step's 14 minutes, and room for the steps around it.
-    timeout-minutes: 20
+    # The test step's 16 minutes, and room for the steps around it.
+    timeout-minutes: 22
     strategy:
       # A failing shard doesn't cancel the other: each says what failed in
       # it.
@@ -86,8 +87,12 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
-      # Unsharded, 8 to 10.5 minutes when it passed with fewer tests, and up
-      # to 16 at about 5,300 tests; each of two shards runs about half.
+      # Unsharded, the step took about 9.5 minutes at about 5,350 tests
+      # (October 2026), and up to 16 on a slow runner. Split in two, it
+      # took 6.5 and 9 minutes: the split is by file, not by time, and
+      # core's heaviest files can land together, while each shard still
+      # starts its own workerd for every project. 16 minutes leaves room
+      # for a slow runner on the heavier shard.
       # Vitest's default runs a worker per CPU but one, which left a third
       # of the runner's CPU idle; a worker per CPU measured about 6% faster.
       # Vitest times a test out from inside its worker, so a worker that is
@@ -106,11 +111,11 @@ jobs:
       # Reporters given here replace Vitest's defaults, so github-actions is
       # listed for the inline failure annotations.
       - run: vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=100% --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts
-        timeout-minutes: 14
+        timeout-minutes: 16
         env:
           # Below the step's timeout, so the reporter says what still runs
           # before the step is killed.
-          GRASP_STALL_REPORT_AFTER_MINUTES: 12
+          GRASP_STALL_REPORT_AFTER_MINUTES: 14
           # Seconds past a test's own timeout (counted for each attempt):
           # room for the hooks around it, which have timeouts of their own.
           # The longest is 120 s, set by workerflow's process tests
