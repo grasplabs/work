@@ -13,6 +13,7 @@ import { rpcArgumentDepth, screenLimits } from "@grasp-os/shared/screens";
 import { RpcSession, WebSocketTransport } from "capnweb";
 
 import { sessionMaxRuns } from "./call-limits.ts";
+import { capabilityMarker } from "./on-prem/sandbox-capability.ts";
 import { browserMessageSize } from "./rpc-target.ts";
 import {
   sandboxCallIdHeader,
@@ -112,8 +113,12 @@ export interface SessionOptions {
    * unless a test gives a pool of its own.
    */
   readonly held?: HeldPool;
-  /** Gets the session's call ID once it's open, for its children's calls. */
-  readonly opened?: (callId: string) => void;
+  /**
+   * Gets the session's call ID once it's open, for its children's calls,
+   * and whether its own call is open now: not once it answered or was given
+   * up on, for a capability passed during it to check (`passedCapability`).
+   */
+  readonly opened?: (callId: string, live: () => boolean) => void;
   /**
    * Lets more calls run in the session while it's open (`open` gets how),
    * and keeps it open, once its own call settled, until they have
@@ -236,6 +241,23 @@ export const sessionForwarder = (
   }
   return new Forwarder();
 };
+
+/**
+ * `target` as a capability passed during a call, not as one of its
+ * arguments: as an argument of a callback into the isolate (a workflow
+ * step's attempt host, given to the step's function). Only its `methods`,
+ * bounded, while `live` says (the attempt its function runs for), and
+ * while the session is open; the sandbox host gives the isolate a
+ * capability of exactly those methods for it (on-prem/sandbox-capability.ts).
+ */
+export const passedCapability = (
+  target: object,
+  methods: readonly string[],
+  live: () => boolean
+): Record<string, unknown> => ({
+  [capabilityMarker]: [...methods],
+  target: sessionForwarder({ target, methods, function: false }, live),
+});
 
 /** How much longer than the supervisor may take core waits for a session. */
 const backstopMs = 2000;
@@ -579,7 +601,13 @@ export const runInSession = async (
   signal?.throwIfAborted();
   const id = crypto.randomUUID();
   const socket = await openSession(host, call, id, signal);
-  opened?.(id);
+  // Every capability by a name of the session's own: the isolate never
+  // sees these, only what the sandbox host makes of them.
+  let live = true;
+  // The session's own call: its capabilities refuse once it answered, as a
+  // nested call's do, though the session stays open for those it started.
+  let topLive = true;
+  opened?.(id, () => live && topLive);
   let closed = false;
   socket.addEventListener("close", () => {
     closed = true;
@@ -598,20 +626,26 @@ export const runInSession = async (
   const transport = accountedTransport(
     new WebSocketTransport(socket),
     sessionAccounting,
-    (refusal) => {
+    (refusal, direction) => {
       // Every session's holdings together past the isolate's pool: the
       // session crossing it is ended, but the App may hold little; core
-      // can't take it now, to try again, never the App's fault.
-      const error =
-        refusal === "isolate"
-          ? new SandboxUnavailableError(
-              "Core holds as much for calls in the sandbox as it may. Try again shortly."
-            )
-          : verdictError({
-              verdict: "refused",
-              message:
-                "The App's code sent more than a call in the sandbox takes.",
-            });
+      // can't take it now, to try again, never the App's fault. Nor is one
+      // of core's own messages past a bound: core sent it, not the App.
+      let error: Error;
+      if (refusal === "isolate") {
+        error = new SandboxUnavailableError(
+          "Core holds as much for calls in the sandbox as it may. Try again shortly."
+        );
+      } else if (direction === "sent") {
+        error = new SandboxUnavailableError(
+          "Core's own message was more than a call in the sandbox takes."
+        );
+      } else {
+        error = verdictError({
+          verdict: "refused",
+          message: "The App's code sent more than a call in the sandbox takes.",
+        });
+      }
       refused(error);
       return error;
     },
@@ -623,9 +657,6 @@ export const runInSession = async (
       maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
     },
   });
-  // Every capability by a name of the session's own: the isolate never
-  // sees these, only what the sandbox host makes of them.
-  let live = true;
   // Given up on: its capabilities refuse from now, not once the supervisor
   // has been asked to end the call.
   const giveUp = (): void => {
@@ -722,9 +753,6 @@ export const runInSession = async (
       nestedLive = false;
     }
   });
-  // The session's own call: its capabilities refuse once it answered, as a
-  // nested call's do, though the session stays open for those it started.
-  let topLive = true;
   let answered: { answer: unknown } | undefined;
   try {
     const answer = await Promise.race([
