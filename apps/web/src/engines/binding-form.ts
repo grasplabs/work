@@ -1,7 +1,10 @@
+import { modelBindingBudgetSchema } from "@grasp-os/shared/resource-bindings";
 import type {
   BindingChoices,
   BindingTargetInput,
   DeclaredResource,
+  ModelBindingBudget,
+  ModelBindingBudgetInput,
   PublishedTemplate,
 } from "@grasp-os/shared/resource-bindings";
 
@@ -143,3 +146,100 @@ export const formKey = (
     resource.binding?.id ?? null,
     choiceIds(resource.choices),
   ]);
+
+/** A model binding's caps as the form holds them: text, as typed. */
+export interface BudgetFields {
+  perRequest: string;
+  perDay: string;
+  perMonth: string;
+  alertAt: string;
+}
+
+/** The caps a form holds, as opposed to when admins are alerted. */
+export const capFields = ["perRequest", "perDay", "perMonth"] as const;
+
+/** The alert a budget has unless the admin says otherwise. */
+const defaultAlertAt = String(
+  modelBindingBudgetSchema.parse({ perDay: 1 }).alertAt
+);
+
+/**
+ * The fields a form starts on: the caps of the binding it replaces, so
+ * replacing a binding keeps its caps unless the admin changes them; none
+ * for a new binding, or one whose budget can't be read.
+ */
+export const budgetFieldsOf = (
+  budget: ModelBindingBudget | null
+): BudgetFields => ({
+  perRequest: budget?.perRequest === undefined ? "" : String(budget.perRequest),
+  perDay: budget?.perDay === undefined ? "" : String(budget.perDay),
+  perMonth: budget?.perMonth === undefined ? "" : String(budget.perMonth),
+  alertAt: budget === null ? defaultAlertAt : String(budget.alertAt),
+});
+
+/**
+ * Whether `fields` set a cap admins are alerted on (a day's or a month's):
+ * the alert means nothing without one.
+ */
+export const alerts = (fields: BudgetFields): boolean =>
+  fields.perDay.trim() !== "" || fields.perMonth.trim() !== "";
+
+/** Why a field doesn't hold what a budget may: an amount, or a percent. */
+export type BudgetProblem = "amount" | "alert";
+
+/** What a form's budget fields come to: a budget (none for no cap), or what is wrong. */
+export type BudgetRead =
+  | { ok: true; budget: ModelBindingBudgetInput | undefined }
+  | { ok: false; problems: Partial<Record<keyof BudgetFields, BudgetProblem>> };
+
+// Dollars as typed, with a decimal point or comma (`2.50`, `2,50`); whole
+// percents.
+const amountPattern = /^\d+(?:[.,]\d+)?$/u;
+const percentPattern = /^\d+$/u;
+
+/**
+ * The budget `fields` set, each part checked by the schema core checks an
+ * approval with (`modelBindingBudgetSchema`): each cap at least a cent, the alert a
+ * whole percent from 1 to 99. Empty caps set no cap; with none, the
+ * binding has no budget of its own, so a budget is never sent without a
+ * cap. The alert is sent only with a cap it applies to.
+ */
+export const budgetOf = (fields: BudgetFields): BudgetRead => {
+  const { shape } = modelBindingBudgetSchema;
+  const problems: Partial<Record<keyof BudgetFields, BudgetProblem>> = {};
+  const caps: Partial<Record<(typeof capFields)[number], number>> = {};
+  for (const field of capFields) {
+    const typed = fields[field].trim();
+    if (typed === "") {
+      continue;
+    }
+    const amount = amountPattern.test(typed)
+      ? Number(typed.replace(",", "."))
+      : Number.NaN;
+    if (shape[field].safeParse(amount).success) {
+      caps[field] = amount;
+    } else {
+      problems[field] = "amount";
+    }
+  }
+  let alertAt: number | undefined;
+  if (alerts(fields)) {
+    const typed = fields.alertAt.trim();
+    const percent = percentPattern.test(typed) ? Number(typed) : Number.NaN;
+    if (shape.alertAt.safeParse(percent).success) {
+      alertAt = percent;
+    } else {
+      problems.alertAt = "alert";
+    }
+  }
+  if (Object.keys(problems).length > 0) {
+    return { ok: false, problems };
+  }
+  if (Object.keys(caps).length === 0) {
+    return { ok: true, budget: undefined };
+  }
+  return {
+    ok: true,
+    budget: { ...caps, ...(alertAt === undefined ? {} : { alertAt }) },
+  };
+};
