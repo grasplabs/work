@@ -9,6 +9,7 @@ import {
   budgetFieldsOf,
   budgetOf,
   formKey,
+  problemsAfter,
   targetOf,
 } from "./binding-form.ts";
 import type { BudgetFields } from "./binding-form.ts";
@@ -144,6 +145,26 @@ describe("a model binding's budget fields", () => {
       negative: { ok: false, problems: { perRequest: "amount" } },
       alert: { ok: false, problems: { alertAt: "alert" } },
       fraction: { ok: false, problems: { alertAt: "alert" } },
+    });
+  });
+
+  it("drop a refusal once its field changes, or once the alert is off", () => {
+    const refused = typed({ perDay: "10", perRequest: "x", alertAt: "100" });
+    const read = budgetOf(refused);
+    const problems = read.ok ? {} : read.problems;
+    expect({
+      problems,
+      // The day's cap cleared: no cap left to alert on, the request's
+      // refusal still stands.
+      dayCleared: problemsAfter(problems, refused, { ...refused, perDay: "" }),
+      requestFixed: problemsAfter(problems, refused, {
+        ...refused,
+        perRequest: "1",
+      }),
+    }).toStrictEqual({
+      problems: { perRequest: "amount", alertAt: "alert" },
+      dayCleared: { perRequest: "amount" },
+      requestFixed: { alertAt: "alert" },
     });
   });
 

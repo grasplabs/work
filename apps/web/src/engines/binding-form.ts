@@ -192,6 +192,30 @@ export type BudgetRead =
   | { ok: true; budget: ModelBindingBudgetInput | undefined }
   | { ok: false; problems: Partial<Record<keyof BudgetFields, BudgetProblem>> };
 
+/** Why each field a form shows refused can't be sent. */
+export type BudgetProblems = Partial<Record<keyof BudgetFields, BudgetProblem>>;
+
+/**
+ * The problems still standing once `before` became `after`: none for a
+ * field that changed since it was refused, and none for the alert once no
+ * cap it applies to is left (its field is off then, and isn't sent).
+ */
+export const problemsAfter = (
+  problems: BudgetProblems,
+  before: BudgetFields,
+  after: BudgetFields
+): BudgetProblems => {
+  const standing: BudgetProblems = {};
+  for (const field of [...capFields, "alertAt"] as const) {
+    const problem = problems[field];
+    const off = field === "alertAt" && !alerts(after);
+    if (problem !== undefined && !off && before[field] === after[field]) {
+      standing[field] = problem;
+    }
+  }
+  return standing;
+};
+
 // Dollars as typed, with a decimal point or comma (`2.50`, `2,50`); whole
 // percents.
 const amountPattern = /^\d+(?:[.,]\d+)?$/u;

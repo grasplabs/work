@@ -61,6 +61,7 @@ import {
   allChosen,
   budgetFieldsOf,
   budgetOf,
+  problemsAfter,
   firstChoice,
   formKey,
   noChoice,
@@ -500,7 +501,12 @@ const BindForm = ({
       {choices.kind === "model" ? (
         <BudgetFieldSet
           fields={budget}
-          onChange={setBudget}
+          onChange={(next) => {
+            // A refusal no longer stands once its field changes, or once
+            // the alert is off.
+            setProblems(problemsAfter(problems, budget, next));
+            setBudget(next);
+          }}
           problems={problems}
         />
       ) : null}
