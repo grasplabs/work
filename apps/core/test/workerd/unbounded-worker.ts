@@ -75,10 +75,15 @@ export default {
       return new Response(
         await refusal(
           async () =>
-            await workflowTestFailures({ ...env, SANDBOX_HOST: undefined }, 1, {
-              "workflows/intake.ts": "export default {};",
-              "workflows/intake.workflow-tests.ts": "export default {};",
-            })
+            await workflowTestFailures(
+              { ...env, SANDBOX_HOST: undefined },
+              appIdSchema.parse(crypto.randomUUID()),
+              1,
+              {
+                "workflows/intake.ts": "export default {};",
+                "workflows/intake.workflow-tests.ts": "export default {};",
+              }
+            )
         )
       );
     }

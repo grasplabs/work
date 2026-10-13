@@ -414,7 +414,7 @@ const testsOf = async (
   }
   let tests: VersionReview["tests"];
   try {
-    const failures = await workflowTestFailures(env, version, files);
+    const failures = await workflowTestFailures(env, app, version, files);
     tests = {
       status: failures.length === 0 ? "passed" : "failed",
       failures: failures.slice(0, maxFailures),

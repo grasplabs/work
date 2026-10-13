@@ -325,6 +325,7 @@ const withBindingsRead = (
 /** The tests of a draft's workflows, once they build. */
 const testsOf = async (
   env: Env,
+  app: AppId,
   base: number | null,
   files: Record<string, string>,
   workflows: SavedBuild
@@ -335,7 +336,7 @@ const testsOf = async (
   if (!buildPassed(workflows)) {
     return { status: "not_run", failures: [] };
   }
-  const failures = await workflowTestFailures(env, base ?? 0, files);
+  const failures = await workflowTestFailures(env, app, base ?? 0, files);
   return {
     status: failures.length === 0 ? "passed" : "failed",
     failures: failures.slice(0, maxReported),
@@ -412,7 +413,7 @@ export const checkFiles = async (
     ...saved,
     workflows: withBindingsRead(saved.workflows, files),
   };
-  const tests = await testsOf(env, base, files, builds.workflows);
+  const tests = await testsOf(env, app, base, files, builds.workflows);
   const built =
     [builds.screens, builds.server, builds.workflows].every(buildPassed) &&
     tests.status !== "failed";

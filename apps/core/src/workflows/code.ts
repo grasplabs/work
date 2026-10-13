@@ -27,7 +27,11 @@ import { z } from "zod";
 
 import { runInSession, sandboxVerdictOf } from "../sandbox-session.ts";
 import { sandbox } from "../sandbox.ts";
-import { requireBoundedHere, sessionHost } from "../sandboxed.ts";
+import {
+  requireBoundedHere,
+  SandboxUnavailableError,
+  sessionHost,
+} from "../sandboxed.ts";
 import { buildWorkflows } from "../screens.ts";
 import { collectionMethods, fromIsolate } from "./host.ts";
 
@@ -156,6 +160,19 @@ const workflowSandbox = {
 const codeCallMs = 5 * 60_000;
 
 /**
+ * The sandbox's verdicts that are the code's own doing: anything else it
+ * says (its owner at its share, its call over) is the platform's, to try
+ * again (`isolateCall`).
+ */
+const codesVerdicts: ReadonlySet<string> = new Set([
+  "deadline",
+  "cpu",
+  "memory",
+  "crashed",
+  "refused",
+]);
+
+/**
  * Calls `method` of `entrypoint` with JSON `args`, in a workflow isolate of
  * `mainModule` and `modules`: on-prem in a sandbox session of its own, as
  * `owner`, its CPU time and memory bounded by the supervisor, which plain
@@ -176,6 +193,7 @@ export const isolateCall = async (
     entrypoint,
     method,
     args,
+    signal,
   }: {
     key: string | null;
     owner: string;
@@ -184,20 +202,39 @@ export const isolateCall = async (
     entrypoint: string;
     method: string;
     args: unknown[];
+    /** Gives up on it, freeing its process at once. */
+    signal?: AbortSignal;
   }
 ): Promise<unknown> => {
   const host = sessionHost(env);
   if (host !== undefined) {
-    return await runInSession(host, {
-      mainModule,
-      modules: await modules(),
-      entrypoint,
-      method,
-      args: args.map((value) => ({ value })),
-      owner,
-      cpuMs: workflowSandbox.limits.cpuMs,
-      wallMs: codeCallMs,
-    });
+    try {
+      return await runInSession(
+        host,
+        {
+          mainModule,
+          modules: await modules(),
+          entrypoint,
+          method,
+          args: args.map((value) => ({ value })),
+          owner,
+          cpuMs: workflowSandbox.limits.cpuMs,
+          wallMs: codeCallMs,
+        },
+        signal === undefined ? {} : { signal }
+      );
+    } catch (error) {
+      // Its owner at its share of the sandbox, or anything else that isn't
+      // the code's doing: the platform's, to try again, never the code's.
+      const verdict = sandboxVerdictOf(error);
+      if (verdict !== undefined && !codesVerdicts.has(verdict)) {
+        throw new SandboxUnavailableError(
+          error instanceof Error ? error.message : "The sandbox is busy.",
+          { cause: error }
+        );
+      }
+      throw error;
+    }
   }
   const stub: unknown = env.LOADER.get(key, async () => ({
     ...workflowSandbox,
@@ -603,7 +640,8 @@ export const startFailure = (error: unknown): string | undefined => {
  * its CPU time, memory or time. Anything else is the platform's.
  */
 export const codesFailure = (error: unknown): string | undefined => {
-  if (sandboxVerdictOf(error) !== undefined) {
+  const verdict = sandboxVerdictOf(error);
+  if (verdict !== undefined && codesVerdicts.has(verdict)) {
     return error instanceof Error ? error.message : "it was stopped";
   }
   return startFailure(error);
@@ -623,6 +661,19 @@ const declaredMetadata = async (
   id: WorkflowId,
   files: AppFiles
 ): Promise<{ params?: unknown; triggers?: unknown }> => {
+  // Refused before anything is read where no sandbox may run it.
+  sessionHost(env);
+  // Read once a version: its code never changes, and every run load,
+  // parameter read and trigger registration asks again. Kept where its
+  // builds are (screens.ts), as what it read, never what it refused.
+  const cacheKey = `workflow-metadata/${app}/${version}/${id}/${compilerVersion}.json`;
+  const cached = await env.FILES.get(cacheKey);
+  if (cached !== null) {
+    const kept = declaredMetadataSchema.safeParse(await cached.json());
+    if (kept.success) {
+      return kept.data;
+    }
+  }
   let outcome: Settled<unknown>;
   try {
     outcome = fromIsolate(
@@ -654,6 +705,7 @@ const declaredMetadata = async (
   if (metadata?.success !== true) {
     throw workflowErrors.create("workflow.invalid");
   }
+  await env.FILES.put(cacheKey, JSON.stringify(metadata.data));
   return metadata.data;
 };
 
@@ -701,6 +753,7 @@ export const declaredTriggers = async (
  */
 const testFailures = async (
   env: Env,
+  app: AppId,
   id: WorkflowId,
   modules: Record<string, string>,
   calls: string
@@ -710,8 +763,7 @@ const testFailures = async (
     outcome = fromIsolate(
       await isolateCall(env, {
         key: null,
-        // The version isn't anyone's App yet: its tests share one place.
-        owner: "workflow-tests",
+        owner: app,
         mainModule: testsModule,
         modules: async () =>
           await Promise.resolve({
@@ -771,7 +823,14 @@ export const dryRunTests = async (
    * For a chat's draft over `version` (agent-builds.ts): its isolate is
    * loaded unnamed, never kept, as a draft's code changes with each write.
    */
-  { draft = false }: { draft?: boolean } = {}
+  {
+    draft = false,
+    signal,
+  }: {
+    draft?: boolean;
+    /** Gives up on the dry runs, freeing their process at once on-prem. */
+    signal?: AbortSignal;
+  } = {}
 ): Promise<DryRuns> => {
   const calls = callsOf(files, id);
   let outcome: Settled<unknown>;
@@ -790,6 +849,7 @@ export const dryRunTests = async (
         entrypoint: "DryRuns",
         method: "run",
         args: [params],
+        ...(signal === undefined ? {} : { signal }),
       })
     );
   } catch (error) {
@@ -815,6 +875,8 @@ export const dryRunTests = async (
  */
 export const workflowTestFailures = async (
   env: Env,
+  /** Whose tests they are: the App, which the sandbox caps per owner. */
+  app: AppId,
   version: number,
   files: AppFiles
 ): Promise<string[]> => {
@@ -830,7 +892,7 @@ export const workflowTestFailures = async (
     if (Object.hasOwn(files, workflowPaths(id).tests)) {
       const calls = callsOf(files, id);
       // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
-      failures.push(...(await testFailures(env, id, modules, calls)));
+      failures.push(...(await testFailures(env, app, id, modules, calls)));
     } else {
       // Often a helper, not a workflow: say where shared code goes.
       failures.push(
@@ -848,10 +910,11 @@ export const workflowTestFailures = async (
  */
 export const requireWorkflowTestsPass = async (
   env: Env,
+  app: AppId,
   version: number,
   files: AppFiles
 ): Promise<void> => {
-  const failures = await workflowTestFailures(env, version, files);
+  const failures = await workflowTestFailures(env, app, version, files);
   if (failures.length > 0) {
     throw workflowErrors.create("workflow.tests_failed", {
       version,
