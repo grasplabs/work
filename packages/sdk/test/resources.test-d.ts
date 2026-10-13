@@ -11,6 +11,7 @@ import { resource } from "../src/index.ts";
 import type { ConnectorAction, ConnectorContract } from "../src/index.ts";
 import { serverModule } from "../src/server.ts";
 import type { ActionCtx } from "../src/server.ts";
+import type { JsonValue } from "../src/value-descriptor.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
 
 const { action } = serverModule(
@@ -172,3 +173,26 @@ expectTypeOf(
 expectTypeOf(
   ctx.resources.mail.call("list", { mailbox: "team@acme.test" })
 ).resolves.not.toHaveProperty("sent");
+
+// A Composio toolkit's contract (`composio.<toolkit>@1`): its tools change
+// without a release, so it isn't in the catalog and its calls are untyped
+// JSON, checked by the host against the contract its binding pinned.
+const crm = resource.connector("crm", {
+  contract: "composio.hubspot@1",
+  actions: ["HUBSPOT_LIST_CONTACTS"],
+});
+expectTypeOf<"composio.hubspot@1">().toExtend<ConnectorContract>();
+expectTypeOf<ConnectorAction<"composio.hubspot@1">>().toEqualTypeOf<string>();
+declare const crmCtx: ActionCtx<readonly [typeof crm]>;
+const contacts = await crmCtx.resources.crm.call("HUBSPOT_LIST_CONTACTS", {
+  limit: 5,
+});
+expectTypeOf(contacts).toEqualTypeOf<JsonValue>();
+// @ts-expect-error -- arguments are a JSON object
+await crmCtx.resources.crm.call("HUBSPOT_LIST_CONTACTS", "all");
+// @ts-expect-error -- only the actions it declares
+await crmCtx.resources.crm.call("HUBSPOT_CREATE_CONTACT", {});
+// @ts-expect-error -- Composio contracts are generated at version 1 only
+resource.connector("old", { contract: "composio.hubspot@2", actions: ["X"] });
+// @ts-expect-error -- not a Composio contract: a family of no native connector
+resource.connector("lookalike", { contract: "hubspot.crm@1", actions: ["X"] });

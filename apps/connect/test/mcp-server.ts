@@ -22,6 +22,23 @@ export interface FakeTool {
   resourceField?: string;
   /** The properties its input schema declares. */
   inputs?: string[];
+  /**
+   * The input schema it lists, as JSON, in place of the one `inputs`
+   * makes; it then takes any input. Changed between requests, it is a
+   * server whose tool changed.
+   */
+  inputSchema?: unknown;
+  /**
+   * The input schema it lists, as JSON text, for one too deep to be made
+   * with `JSON.stringify`; in place of `inputSchema`.
+   */
+  inputSchemaText?: string;
+  /** The output schema it lists, as JSON; by default it lists none. */
+  outputSchema?: unknown;
+  /** Other names it is listed under too, its own included for a duplicate. */
+  alsoListedAs?: string[];
+  /** It is listed a second time by its name alone, with no schema. */
+  alsoListedBare?: boolean;
   /** What running it with `input` returns. */
   run: (input: Record<string, unknown>) => FakeResult | Promise<FakeResult>;
 }
@@ -95,6 +112,62 @@ const padded = (response: Response, padding: number): Response => {
   return new Response(stream, { headers: response.headers });
 };
 
+const isToolList = (body: unknown): boolean =>
+  typeof body === "object" &&
+  body !== null &&
+  "method" in body &&
+  body.method === "tools/list";
+
+const listMessageSchema = z.looseObject({
+  result: z.looseObject({
+    tools: z.array(z.looseObject({ name: z.string() })),
+  }),
+});
+
+/**
+ * A `tools/list` answer (a JSON body) with each tool's schemas as `tools`
+ * list them, where they set their own.
+ */
+const listedAs = async (
+  response: Response,
+  tools: readonly FakeTool[]
+): Promise<Response> => {
+  const message = listMessageSchema.parse(await response.json());
+  // Schemas given as text go in by a placeholder, once the rest is text.
+  const raw = new Map<string, string>();
+  const listed = message.result.tools.flatMap((each) => {
+    const tool = tools.find(({ name }) => name === each.name);
+    let inputSchema: unknown = tool?.inputSchema;
+    if (tool?.inputSchemaText !== undefined) {
+      inputSchema = `raw-schema-${crypto.randomUUID()}`;
+      raw.set(JSON.stringify(inputSchema), tool.inputSchemaText);
+    }
+    const entry = {
+      ...each,
+      ...(inputSchema === undefined ? {} : { inputSchema }),
+      ...(tool?.outputSchema === undefined
+        ? {}
+        : { outputSchema: tool.outputSchema }),
+    };
+    return [
+      entry,
+      ...(tool?.alsoListedAs ?? []).map((name) => ({ ...entry, name })),
+      ...(tool?.alsoListedBare === true ? [{ name: entry.name }] : []),
+    ];
+  });
+  let text = JSON.stringify({
+    ...message,
+    result: { ...message.result, tools: listed },
+  });
+  for (const [placeholder, schema] of raw) {
+    text = text.replace(placeholder, () => schema);
+  }
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.set("content-type", "application/json");
+  return new Response(text, { headers });
+};
+
 interface Ran {
   tool: string;
   input: Record<string, unknown>;
@@ -113,9 +186,14 @@ const serverWith = (tools: readonly FakeTool[], ran: Ran[]): McpServer => {
       tool.name,
       {
         inputSchema: z.looseObject(
-          Object.fromEntries(
-            (tool.inputs ?? []).map((input) => [input, z.string().optional()])
-          )
+          tool.inputSchema === undefined && tool.inputSchemaText === undefined
+            ? Object.fromEntries(
+                (tool.inputs ?? []).map((input) => [
+                  input,
+                  z.string().optional(),
+                ])
+              )
+            : {}
         ),
         annotations: { readOnlyHint: tool.readOnly ?? false },
         _meta:
@@ -205,6 +283,9 @@ export const mcpServerWith = (
     if (network === "invalid-params") {
       await response.text();
       return rpcError(body, -32_602);
+    }
+    if (isToolList(body) && !stream) {
+      return await listedAs(response, tools);
     }
     return padded(response, stream ? padding : 0);
   };

@@ -4,6 +4,7 @@ import type { ConnectorContract } from "@grasp-os/shared/connect";
 import type { AppId, ConnectionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { Provenance } from "@grasp-os/shared/knowledge";
+import { operationErrors } from "@grasp-os/shared/operations";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import type {
   BindingTarget,
@@ -103,6 +104,27 @@ export const invocationSources = (): InvocationSources => {
     connections: () => [...connections.keys()].toSorted(),
   };
 };
+
+/**
+ * A target's provider couldn't be reached to say what it serves now (a
+ * Composio server that didn't answer): `resource.unavailable` for this
+ * request, but nothing is known to have changed, so a held call of the
+ * binding keeps waiting instead of being dropped as stale
+ * (`isProviderUnreachable`).
+ */
+export const providerUnreachable = () =>
+  operationErrors.create("resource.unavailable", { transient: true });
+
+/** Whether `error` is {@link providerUnreachable}'s. */
+export const isProviderUnreachable = (error: unknown): boolean =>
+  operationErrors.codeOf(error) === "resource.unavailable" &&
+  typeof error === "object" &&
+  error !== null &&
+  "details" in error &&
+  typeof error.details === "object" &&
+  error.details !== null &&
+  "transient" in error.details &&
+  error.details.transient === true;
 
 /** Who an invocation acts for, as core resolved it, and where it works. */
 export interface BindingCaller {

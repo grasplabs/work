@@ -4,7 +4,8 @@ import { buildConnectors, connectorEntries } from "../build.ts";
 
 /**
  * Connect's connectors as its tests load them: the release's, as build.ts
- * builds them, and the sample connector the tests call through.
+ * builds them, the sample connector the tests call through, and one named
+ * `composio`, whose contracts must never be served.
  */
 export const testConnectorsFile = path.join(
   import.meta.dirname,
@@ -16,6 +17,7 @@ const setup = async (): Promise<void> => {
     [
       ...connectorEntries(),
       path.join(import.meta.dirname, "fixtures/sample-connector.ts"),
+      path.join(import.meta.dirname, "fixtures/composio-named-connector.ts"),
     ],
     testConnectorsFile
   );

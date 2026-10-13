@@ -784,12 +784,16 @@ export interface ConnectApi extends PackageRegistryApi {
    */
   catalogTools: (request: CatalogToolsRequest) => Promise<CatalogTool[]>;
   /**
-   * The generated contract `contract` names (`<connector>.<family>@1`) as
-   * the connection `connectionId` serves it now: the connector's actions
-   * of that family, each with the JSON Schemas of its input and output.
-   * `connect.contract_not_found` unless the connection is a native one of
-   * that very connector and the family has actions. Data only, read from
-   * the release's manifests: nothing is loaded and no token is read.
+   * The generated contract `contract` names as the connection
+   * `connectionId` serves it now, each action with the JSON Schemas of its
+   * input and output. A native connection serves `<connector>.<family>@1`,
+   * its connector's actions of that family, read from the release's
+   * manifests: nothing is loaded and no token is read. A Composio
+   * connection serves `composio.<toolkit>@1`, its own toolkit's allowed
+   * tools, as its server lists them now. `connect.contract_not_found` for
+   * any other contract, or one with no actions it can serve;
+   * `connect.server_unavailable` when a Composio server can't be reached
+   * to read it.
    */
   connectorContract: (
     request: ConnectorContractRequest
@@ -932,10 +936,16 @@ export type BindingDropRequest = z.input<typeof bindingDropRequestSchema>;
 // resource is bound to. A native connector's actions of one family (its
 // tools named `<family>.<action>`, such as `mail.send`) make the contract
 // `<connector>.<family>@1`, whose shape is the tools' own input and output
-// schemas. Core fingerprints what it gets, so a connector release that
-// changes any of it is a drifted contract an admin approves again.
+// schemas. A Composio connection's allowed tools make `composio.<toolkit>@1`
+// (a toolkit slug that starts with a letter), whose shape is what its
+// server lists now. Core fingerprints what it gets, so a connector release,
+// or Composio, changing any of it is a drifted contract an admin approves
+// again.
 
-/** A generated contract's ID: `<connector>.<family>@<major>`. */
+/**
+ * A generated contract's ID: `<connector>.<family>@<major>`, or
+ * `composio.<toolkit>@1`.
+ */
 export const connectorContractIdSchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]{0,62}\.[a-z][a-z0-9_-]{0,62}@[1-9]\d{0,5}$/u);
@@ -951,23 +961,30 @@ export type ConnectorContractRequest = z.input<
 
 /** One action of a generated contract. */
 export interface ConnectorContractAction {
-  /** The connector's tool a call of it names, e.g. `mail.send`. */
+  /** The tool a call of it names, e.g. `mail.send`. */
   tool: string;
-  /** Whether the connector declares that it only reads. */
+  /**
+   * Whether it only reads: as a native connector declares, or as the
+   * admin's rule for a Composio tool says (never Composio's hint).
+   */
   readOnly: boolean;
   /**
-   * The JSON Schemas of its input and output, as the connector makes them,
-   * each as JSON text: a type for any JSON value is too deep for the RPC
-   * types to follow.
+   * The JSON Schemas of its input and output, as the connector makes them
+   * or a Composio server lists them (closed, composio-contracts.ts), each
+   * as JSON text: a type for any JSON value is too deep for the RPC types
+   * to follow.
    */
   input: string;
   output: string;
 }
 
-/** A generated contract, as connect reads it from the release's manifests. */
+/** A generated contract, as connect serves it now. */
 export interface ConnectorContract {
   contract: string;
-  /** Each action, by its name in the contract (`send`, not `mail.send`). */
+  /**
+   * Each action, by its name in the contract: `send`, not `mail.send`, for
+   * a native one; its tool, such as `HUBSPOT_LIST_CONTACTS`, for Composio.
+   */
   actions: Record<string, ConnectorContractAction>;
 }
 
@@ -982,7 +999,7 @@ export const connectErrors = defineErrorFamily({
     "This is someone's personal connection: only calls for its owner can use it.",
   "connect.action_not_found": "This connection has no such action.",
   "connect.contract_not_found":
-    "This connection doesn't serve that contract: it isn't a native connection of that connector, or the connector has no such family of actions.",
+    "This connection doesn't serve that contract: it isn't a connection of that connector or toolkit, or it has no such actions to serve.",
   "connect.input_too_large": "This call's input is too large.",
   "connect.resource_out_of_scope":
     "This call reaches beyond the one resource it may use.",
