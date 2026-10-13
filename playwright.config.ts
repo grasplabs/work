@@ -18,6 +18,13 @@ const browserPolicyTests = /(?:screen-attacks|product-page-scripts)\.e2e\.ts$/u;
  * a project of its own after all the others, one test at a time.
  */
 const onboardingTests = /onboarding\.e2e\.ts$/u;
+/**
+ * What grants, retires or revokes package approvals: each bumps the
+ * deployment's shared policy generation in the one database every worker
+ * uses, so a decision another worker's browser already shows is refused as
+ * stale. They run in a project of their own, one test at a time.
+ */
+const packageApprovalTests = /(?:dashboard|engine-packages)\.e2e\.ts$/u;
 const ci = process.env.CI === "true";
 
 /**
@@ -53,7 +60,13 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: [playbookTests, onboardingTests],
+      testIgnore: [playbookTests, onboardingTests, packageApprovalTests],
+    },
+    {
+      name: "package-approvals",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: packageApprovalTests,
+      workers: 1,
     },
     // The Playbook's built-ins: one copy of each has the Playbook's record
     // types (core's knowledge/record-types.ts), so their tests hand it from
@@ -82,7 +95,13 @@ export default defineConfig({
       // Never tried again (below), so a trace is kept of the run that failed.
       use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
       testMatch: onboardingTests,
-      dependencies: ["chromium", "playbook", "firefox", "webkit"],
+      dependencies: [
+        "chromium",
+        "playbook",
+        "package-approvals",
+        "firefox",
+        "webkit",
+      ],
       workers: 1,
       // Not tried again: once a link is out the team is told, and nothing
       // undoes that (the agreements stay as they were), so a second try
