@@ -198,7 +198,7 @@ describe("sealing a release", { timeout: 120_000 }, () => {
       resourceVersion: 1,
       sourceTreeHash: tree,
       schemaHash: schema,
-      sdkProtocolVersion: 1,
+      sdkProtocolVersion,
       target: "app",
       bindings: [],
       artifactTrust: "unreviewed",

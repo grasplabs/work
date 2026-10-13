@@ -112,6 +112,19 @@ const serverChangeWarnings = {
   removed: msg`Removed: it acts for whoever uses the engine, with everything the engine holds`,
 } as const;
 
+/** How a migration changed, with its table, as a whole sentence for its warning. */
+const migrationWarning = (
+  change: "added" | "modified",
+  table: string
+): string =>
+  change === "added"
+    ? i18n._(
+        msg`Added: it reads and rewrites every record of ${table}, whoever owns it`
+      )
+    : i18n._(
+        msg`Changed: it reads and rewrites every record of ${table}, whoever owns it`
+      );
+
 /** How a workflow changed, before its ID. */
 const workflowChangeWords = {
   added: msg`Added workflow`,
@@ -291,6 +304,29 @@ const ReviewDetails = ({
             {i18n._(serverChangeWarnings[review.server])}
           </Badge>
           <ServerCode code={serverCode} onRetry={onRetryServerCode} />
+        </section>
+      )}
+      {review.migrations?.length === 0 ? null : (
+        <section aria-label={t`Migrations`} className="flex flex-col gap-1">
+          <h4 className="font-medium">
+            <Trans>Migrations</Trans>
+          </h4>
+          {review.migrations === null ? (
+            <Badge variant="destructive">
+              {t`Its migrations can't be read: it may rewrite the records of any table`}
+            </Badge>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {review.migrations.map(({ name, table, change }) => (
+                <li className="flex flex-col gap-1" key={name}>
+                  <code className="font-mono">{name}</code>
+                  <Badge variant="destructive">
+                    {migrationWarning(change, table)}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
       {review.workflows.length === 0 ? null : (

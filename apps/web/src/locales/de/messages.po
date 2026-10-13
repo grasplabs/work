@@ -681,6 +681,10 @@ msgstr "Workflow hinzugefügt:"
 msgid "Added: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Hinzugefügt: Er handelt für jeden, der die Engine nutzt, mit allem, was die Engine hat"
 
+#: src/chat/builds.tsx
+msgid "Added: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Hinzugefügt: liest und überschreibt jeden Datensatz von {table}, egal wem er gehört"
+
 #: src/labels.ts
 msgid "Admin"
 msgstr "Admin"
@@ -1230,6 +1234,10 @@ msgstr "Workflow geändert:"
 #: src/chat/builds.tsx
 msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Geändert: Er handelt für jeden, der die Engine nutzt, mit allem, was die Engine hat"
+
+#: src/chat/builds.tsx
+msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Geändert: liest und überschreibt jeden Datensatz von {table}, egal wem er gehört"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
@@ -2397,6 +2405,10 @@ msgstr "Der Inhalt konnte nicht gelesen werden."
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Seine Nachrichten werden endgültig gelöscht, und jede Änderung, die sein Agent für Sie zurückhält, wird abgelehnt. Was der Agent getan hat, bleibt im Prüfprotokoll."
 
+#: src/chat/builds.tsx
+msgid "Its migrations can't be read: it may rewrite the records of any table"
+msgstr "Seine Migrationen lassen sich nicht lesen: Es kann die Datensätze jeder Tabelle überschreiben"
+
 #: src/engines/store-changes.tsx
 msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
 msgstr "Die Standardwerte der neuen Felder werden ausgefüllt. Releases, die sie brauchen, können aktuell gemacht werden, sobald das abgeschlossen ist."
@@ -2642,6 +2654,10 @@ msgstr "Gedächtnis"
 #: src/routes/guest.tsx
 msgid "Messages"
 msgstr "Nachrichten"
+
+#: src/chat/builds.tsx
+msgid "Migrations"
+msgstr "Migrationen"
 
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.models.tsx
