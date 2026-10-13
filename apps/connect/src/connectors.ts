@@ -156,14 +156,15 @@ export const nativeServer = async (
   env: Env,
   connection: Connection,
   { connector, declared }: NativeAction,
-  claims: Pick<CapabilityClaims, "jti" | "resource">
+  claims: Pick<CapabilityClaims, "jti" | "resource">,
+  routes: ActionManifest["routes"] = declared.routes
 ): Promise<McpServer> => {
   const { manifest, code } = connector;
   const props: EgressProps = {
     connector: `${manifest.name}@${manifest.version}`,
     callId: claims.jti,
     hosts: manifest.hosts,
-    routes: declared.routes,
+    routes,
     values:
       declared.resource === null || claims.resource === null
         ? {}

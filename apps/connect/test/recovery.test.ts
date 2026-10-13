@@ -1,7 +1,7 @@
 import { effectKeyPattern } from "@grasp-os/connector-kit/manifest";
 import { effectPropertyId } from "@grasp-os/connector-microsoft-365/graph";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
@@ -114,6 +114,46 @@ const columnOf = async (
     .bind(id)
     .all<{ value: unknown }>();
   return results.map(({ value }) => value);
+};
+
+/**
+ * Has `meanwhile` run right before the `nth` read of a stored call from
+ * now on reaches the database: as another call writing between two reads.
+ */
+const beforeRead = (nth: number, meanwhile: () => Promise<unknown>): void => {
+  const prepare = env.DB.prepare.bind(env.DB);
+  let reads = 0;
+  let done: Promise<unknown> | undefined;
+  const first = async (): Promise<void> => {
+    done ??= meanwhile();
+    await done;
+  };
+  /** The statement, its every method waiting for `meanwhile` first. */
+  const delayed = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        if (property === "bind") {
+          return (...values: unknown[]) => delayed(target.bind(...values));
+        }
+        return async (...values: unknown[]): Promise<unknown> => {
+          await first();
+          const result: unknown = await Reflect.apply(value, target, values);
+          return result;
+        };
+      },
+    });
+  vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
+    const statement = prepare(query);
+    if (!/^select .* from "idempotent_calls"/u.test(query)) {
+      return statement;
+    }
+    reads += 1;
+    return reads === nth ? delayed(statement) : statement;
+  });
 };
 
 /** Sets the connection's stored calls' columns, as SQL `assignments` say. */
@@ -485,6 +525,34 @@ describe("a Microsoft 365 write of unknown outcome", () => {
       writes: 2,
       lookups: 1,
     });
+  });
+
+  it("gets the answer another recovery stored between its two reads of the key", async () => {
+    const connection = await connected();
+    graph.failWrite(500);
+    await outcome(draft(connection, "run-18:draft"));
+    await claimedAgo(connection);
+    const stored = {
+      mailbox: invoices,
+      id: "draft-recovered",
+      conversationId: null,
+      webLink: null,
+    };
+    // The call reads the key as unknown; before it reads it again, another
+    // recovery stores its answer.
+    beforeRead(2, async () => {
+      await storedCalls(
+        connection,
+        `state = 'done', output = '${JSON.stringify(stored)}', provenance = '[]'`
+      );
+    });
+    const answered = await outputOf(draft(connection, "run-18:draft"));
+    vi.restoreAllMocks();
+    expect({
+      answered,
+      writes: writes().length,
+      lookups: lookups().length,
+    }).toStrictEqual({ answered: stored, writes: 1, lookups: 0 });
   });
 
   it("whose lookup fails stays unknown, and waits a window anew", async () => {

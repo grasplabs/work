@@ -331,6 +331,15 @@ export const idempotencyStore = (
     },
 
     /**
+     * The answer the row `row` of this key records, read already, as
+     * `replay` gives it.
+     */
+    replayRow: (row: Row, seen: Repeat = {}): StoredAnswer => {
+      seen.replayed = true;
+      return replay(row, inputHash, Date.now());
+    },
+
+    /**
      * Claims the key for a call about to go out: undefined once claimed. If
      * another call claimed it first, answers as a repeat of that call
      * (`seen.replayed`).

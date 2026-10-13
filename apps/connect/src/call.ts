@@ -226,6 +226,7 @@ const actionFor = async (
   /** The native connector build that serves it (`nativeRelease`). */
   release: string | null;
   open: () => Promise<McpServer>;
+  openLookup: () => Promise<McpServer>;
 }> => {
   if (connection.serverKind === "native") {
     const native = nativeAction(connection, action);
@@ -234,6 +235,14 @@ const actionFor = async (
       recovery: native.declared.recovery,
       release: await nativeRelease(native.connector),
       open: async () => await nativeServer(env, connection, native, claims),
+      openLookup: async () =>
+        await nativeServer(
+          env,
+          connection,
+          native,
+          claims,
+          native.declared.routes.filter(({ method }) => method === "GET")
+        ),
     };
   }
   // Only a tool the admin allowed, asked for before anything goes out,
@@ -251,6 +260,7 @@ const actionFor = async (
     recovery: "none",
     release: null,
     open: async () => await Promise.resolve(server),
+    openLookup: async () => await Promise.resolve(server),
   };
 };
 
@@ -387,20 +397,35 @@ const scopeOf = (
 type Store = ReturnType<typeof idempotencyStore>;
 
 /**
- * The stored row of a call `replay` found of unknown outcome, if `error`
- * says so: the call recovery may take up once the action is known.
+ * When `replay` found the call of unknown outcome (`refusal` says so), the
+ * row read again: its answer, if another call stored one in between (a
+ * recovery that finished), as any repeat gets it; the row itself, for
+ * recovery, only while it is still of unknown outcome. Undefined when
+ * `refusal` says otherwise, or the row went.
  */
 const unknownRow = async (
   store: Store | undefined,
-  error: unknown
-): Promise<Row | undefined> => {
+  refusal: unknown,
+  progress: CallProgress
+): Promise<{ stored?: StoredAnswer; recovering?: Row } | undefined> => {
   if (
     store === undefined ||
-    connectErrors.codeOf(error) !== "connect.outcome_unknown"
+    connectErrors.codeOf(refusal) !== "connect.outcome_unknown"
   ) {
     return undefined;
   }
-  return await store.find();
+  const row = await store.find();
+  if (row === undefined) {
+    return undefined;
+  }
+  try {
+    return { stored: store.replayRow(row, progress) };
+  } catch (error) {
+    if (connectErrors.codeOf(error) === "connect.outcome_unknown") {
+      return { recovering: row };
+    }
+    throw error;
+  }
 };
 
 /**
@@ -419,14 +444,14 @@ const earlierCall = async (
   try {
     return { stored: await store?.replay(progress) };
   } catch (error) {
-    const recovering =
+    const read =
       connection.serverKind === "native"
-        ? await unknownRow(store, error)
+        ? await unknownRow(store, error, progress)
         : undefined;
-    if (recovering === undefined) {
+    if (read === undefined) {
       throw error;
     }
-    return { recovering };
+    return read;
   }
 };
 
@@ -517,6 +542,8 @@ interface Sent {
   meta: Record<string, Json> | undefined;
   store: Store;
   open: () => Promise<McpServer>;
+  /** Its server for a lookup (`find`): the action's GET routes only. */
+  openLookup: () => Promise<McpServer>;
 }
 
 /**
@@ -632,8 +659,10 @@ const recover = async (
   recovery: RecoveryMode,
   progress: CallProgress
 ): Promise<Omit<CallDone, "sideEffect">> => {
-  // Every refusal is behind: only now may a token be read.
-  const server = await sent.open();
+  // Every refusal is behind: only now may a token be read. A lookup's
+  // server lets only the action's GET routes out: a `find` that tried to
+  // write would be refused at the egress, before anything left.
+  const server = await (recovery === "find" ? sent.openLookup() : sent.open());
   await sent.store.retake(row);
   // A recovery may go out again: no repeat answered from the stored row.
   progress.replayed = undefined;
@@ -713,7 +742,7 @@ export const carryOut = async (
     return { ...stored, sideEffect: true, replayed: true };
   }
 
-  const { tool, recovery, release, open } = await actionFor(
+  const { tool, recovery, release, open, openLookup } = await actionFor(
     env,
     connection,
     claims,
@@ -772,6 +801,7 @@ export const carryOut = async (
     meta,
     store,
     open,
+    openLookup,
   };
   if (recovering !== undefined) {
     return {
