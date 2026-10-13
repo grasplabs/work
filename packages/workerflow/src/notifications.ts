@@ -116,12 +116,15 @@ export const readPending = (
   sql: SqlStorage,
   run: RunRow
 ): RunNotification[] => {
-  const firstActivatedAt =
-    sql
-      .exec<{ at: number | null }>(
-        "SELECT MIN(started_at) AS at FROM activations"
-      )
-      .one().at ?? null;
+  // The first activation is the one of the lowest generation, the table's
+  // key: one row read however many activations the run has had (each
+  // wake from a sleep, a wait or a retry adds one).
+  const [first] = sql
+    .exec<{ at: number }>(
+      "SELECT started_at AS at FROM activations ORDER BY generation LIMIT 1"
+    )
+    .toArray();
+  const firstActivatedAt = first?.at ?? null;
   return sql
     .exec<NotificationRow>(
       "SELECT sequence, at, status, generation FROM notifications ORDER BY sequence LIMIT ?",
