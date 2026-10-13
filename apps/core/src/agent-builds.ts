@@ -1319,7 +1319,7 @@ build: {
       server: "added" | "modified" | "removed" | null;
       serverFiles: { path: string; change: "added" | "modified" | "removed" }[];
       /** Its migrations new or changed: each reads and rewrites every record of its table, whoever owns it; null when they can't be read. */
-      migrations: { name: string; table: string; change: "added" | "modified" }[] | null;
+      migrations: { name: string; table: string; change: "added" | "modified"; fixtures: number; fixturesPassed: boolean | null }[] | null;
       workflows: {
         id: string;
         change: "added" | "modified" | "removed";

@@ -32,6 +32,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import {
   exportChangeText,
+  migrationFixturesText,
   pendingToShow,
   readyToMakeCurrent,
   triggerChangeText,
@@ -317,14 +318,23 @@ const ReviewDetails = ({
             </Badge>
           ) : (
             <ul className="flex flex-col gap-1">
-              {review.migrations.map(({ name, table, change }) => (
-                <li className="flex flex-col gap-1" key={name}>
-                  <code className="font-mono">{name}</code>
-                  <Badge variant="destructive">
-                    {migrationWarning(change, table)}
-                  </Badge>
-                </li>
-              ))}
+              {review.migrations.map((migration) => {
+                const { name, table, change } = migration;
+                const fixtures = migrationFixturesText(migration);
+                return (
+                  <li className="flex flex-col gap-1" key={name}>
+                    <code className="font-mono">{name}</code>
+                    <Badge variant="destructive">
+                      {migrationWarning(change, table)}
+                    </Badge>
+                    {fixtures.failed ? (
+                      <Badge variant="destructive">{fixtures.text}</Badge>
+                    ) : (
+                      <p className="text-muted-foreground">{fixtures.text}</p>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
@@ -605,10 +615,8 @@ const PendingVersion = ({
     };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `codeReads` says when to read again
   }, [core, app.id, version, loaded, codeReads]);
-  const [refused, setRefused] = useState<{
-    text: string;
-    link: string | undefined;
-  }>();
+  const [refused, setRefused] =
+    useState<Exclude<MadeCurrent, { made: true }>>();
   const makeCurrent = async (): Promise<void> => {
     setRefused(undefined);
     const made = await run(
@@ -666,6 +674,15 @@ const PendingVersion = ({
           />
         )}
         <ErrorText>{failure ?? refused?.text}</ErrorText>
+        {failure !== undefined || refused?.issues === undefined ? null : (
+          <ul className="flex flex-col gap-1">
+            {refused.issues.map((issue) => (
+              <li key={issue}>
+                <code className="font-mono text-sm break-all">{issue}</code>
+              </li>
+            ))}
+          </ul>
+        )}
         {refused?.link === undefined ? null : (
           <p className="text-muted-foreground">
             <Link

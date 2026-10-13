@@ -205,6 +205,14 @@ msgstr "{failed, plural, one {# fehlgeschlagener Lauf} other {# fehlgeschlagene 
 msgid "{fileName}, brought in on {when}. Bring it in again to read it again."
 msgstr "{fileName}, eingebracht am {when}. Bringen Sie es erneut ein, um es neu lesen zu lassen."
 
+#: src/chat/builds-state.ts
+msgid "{fixtures, plural, one {It passed its # fixture when the version was sealed} other {It passed all # of its fixtures when the version was sealed}}"
+msgstr "{fixtures, plural, one {Sie hat ihren # Testdatensatz bestanden, als die Version versiegelt wurde} other {Sie hat alle # Testdatensätze bestanden, als die Version versiegelt wurde}}"
+
+#: src/chat/builds-state.ts
+msgid "{fixtures, plural, one {It runs on its # fixture when the version is sealed, before any record} other {It runs on its # fixtures when the version is sealed, before any record}}"
+msgstr "{fixtures, plural, one {Sie läuft auf ihrem # Testdatensatz, wenn die Version versiegelt wird, vor jedem Datensatz} other {Sie läuft auf ihren # Testdatensätzen, wenn die Version versiegelt wird, vor jedem Datensatz}}"
+
 #: src/knowledge/timeline.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
 msgstr "{folded, plural, one {# frühere} other {# frühere}}"
@@ -2351,9 +2359,21 @@ msgstr "Interviews"
 msgid "Invited a guest"
 msgstr "Einen Gast eingeladen"
 
+#: src/engines/store-change-errors.ts
+msgid "it answered something that isn't its records"
+msgstr "sie hat etwas geantwortet, das nicht ihre Datensätze sind"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
 msgstr "Es zählt als ausgegeben gegen die Budgets: das Meiste, was es hätte kosten können. Das lässt sich nicht rückgängig machen."
+
+#: src/engines/store-change-errors.ts
+msgid "it didn't pass"
+msgstr "sie hat nicht bestanden"
+
+#: src/chat/builds-state.ts
+msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
+msgstr "Sie ist an ihren Testdatensätzen gescheitert, als die Version versiegelt wurde: Sie läuft auf keinem Datensatz, und die Version kann nicht aktuell gemacht werden"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
@@ -2454,6 +2474,18 @@ msgstr "Seine Migrationen lassen sich nicht lesen: Es kann die Datensätze jeder
 #: src/engines/store-changes.tsx
 msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
 msgstr "Die Standardwerte der neuen Felder werden ausgefüllt. Releases, die sie brauchen, können aktuell gemacht werden, sobald das abgeschlossen ist."
+
+#: src/engines/store-change-errors.ts
+msgid "its output doesn't fit the table"
+msgstr "ihre Ausgabe passt nicht zur Tabelle"
+
+#: src/engines/store-change-errors.ts
+msgid "its output is larger than a record may be"
+msgstr "ihre Ausgabe ist größer, als ein Datensatz sein darf"
+
+#: src/engines/store-change-errors.ts
+msgid "its output isn't what the fixture expects"
+msgstr "ihre Ausgabe ist nicht, was der Testdatensatz erwartet"
 
 #: src/chat/builds.tsx
 msgid "Its parameters can't be read from its code."
@@ -4713,6 +4745,10 @@ msgstr "Der Export hat nicht funktioniert. Versuchen Sie es erneut."
 msgid "The first {shown} by engine; more engines have models bound."
 msgstr "Die ersten {shown} nach Engine; an weitere Engines sind Modelle gebunden."
 
+#: src/engines/store-change-errors.ts
+msgid "the fixture's row doesn't fit what the migration takes"
+msgstr "die Zeile des Testdatensatzes passt nicht zu dem, was die Migration annimmt"
+
 #: src/dashboard/activity.tsx
 msgid "The full audit trail"
 msgstr "Der vollständige Audit-Trail"
@@ -4772,6 +4808,14 @@ msgstr "Der Link funktioniert bis {until}."
 msgid "The list is full: remove a line to add another."
 msgstr "Die Liste ist voll: Entfernen Sie eine Zeile, um eine weitere hinzuzufügen."
 
+#: src/engines/store-change-errors.ts
+msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again."
+msgstr "Die Migration {migration} ist an ihrem Testdatensatz {fixture} gescheitert, als diese Version versiegelt wurde: {reason}. Sie läuft auf keinem Datensatz, daher kann die Version nicht aktuell gemacht werden: Korrigieren Sie die Migration oder ihren Testdatensatz und lassen Sie die Engine neu bauen."
+
+#: src/engines/store-change-errors.ts
+msgid "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again."
+msgstr "Die Migration {migration} ist an ihren Testdatensätzen gescheitert, als diese Version versiegelt wurde: {reason}. Sie läuft auf keinem Datensatz, daher kann die Version nicht aktuell gemacht werden: Korrigieren Sie die Migration oder ihre Testdatensätze und lassen Sie die Engine neu bauen."
+
 #: src/engines/store-changes.tsx
 msgid "The migration {migration} of the table {table} failed as a whole: its code failed, not a record."
 msgstr "Die Migration {migration} der Tabelle {table} ist als Ganzes fehlgeschlagen: Ihr Code ist fehlgeschlagen, nicht ein Datensatz."
@@ -4779,6 +4823,10 @@ msgstr "Die Migration {migration} der Tabelle {table} ist als Ganzes fehlgeschla
 #: src/engines/store-changes.tsx
 msgid "The migration {migration} of the table {table} failed on the record {record}."
 msgstr "Die Migration {migration} der Tabelle {table} ist beim Datensatz {record} fehlgeschlagen."
+
+#: src/engines/store-change-errors.ts
+msgid "the migration threw an error"
+msgstr "die Migration hat einen Fehler ausgelöst"
 
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx

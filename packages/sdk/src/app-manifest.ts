@@ -262,6 +262,22 @@ const screensFrom = (input: unknown): ScreenDefinition[] =>
     } as ScreenDefinition;
   });
 
+/**
+ * A manifest's fixtures as a declaration lists them: `expect` left out
+ * where the manifest records null. Anything else is passed on as it is,
+ * for `migration` to refuse.
+ */
+const fixturesFrom = (fixtures: unknown): unknown =>
+  Array.isArray(fixtures)
+    ? fixtures.map((fixture: unknown) =>
+        isPlainObject(fixture) &&
+        hasExactly(fixture, ["row", "expect"]) &&
+        fixture.expect === null
+          ? { row: fixture.row }
+          : fixture
+      )
+    : fixtures;
+
 /** The migrations of the manifest, declared again, in the order filed. */
 const migrationsFrom = (input: unknown): Migration[] =>
   entriesOf(input, "migrations").map(([name, declared]) => {
@@ -273,6 +289,7 @@ const migrationsFrom = (input: unknown): Migration[] =>
         "toSchema",
         "input",
         "output",
+        "fixtures",
       ])
     ) {
       return refuse(
@@ -292,6 +309,7 @@ const migrationsFrom = (input: unknown): Migration[] =>
       toSchema: declared.toSchema,
       ...(declared.input === null ? {} : { input: schemaFrom(declared.input) }),
       output: schemaFrom(declared.output),
+      fixtures: fixturesFrom(declared.fixtures),
       handler: inert,
     } as Parameters<typeof migration>[0]);
   });

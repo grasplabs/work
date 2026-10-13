@@ -2,7 +2,9 @@ import { appModuleName, kitModuleName } from "@grasp-os/compiler";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import type { MigrationManifest } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
-import { canonicalJson } from "@grasp-os/shared/json";
+import type { MigrationEvidence } from "@grasp-os/shared/app-releases";
+import { sha256Hex } from "@grasp-os/shared/encoding";
+import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { jsonOf } from "@grasp-os/shared/operations";
 import { documentMaxBytes } from "@grasp-os/shared/stores";
@@ -59,6 +61,15 @@ import type { SandboxedEnv } from "./sandboxed.ts";
 //   as its modules loaded can still differ between calls, so a retried
 //   batch is answered from the store's receipt, never compared with an
 //   earlier answer.
+// - A transform that answers wrong (valid for the table, but not what was
+//   meant) rewrites real records before anyone notices: it runs on its
+//   fixtures first, as its release is sealed (`migrationEvidence`), and
+//   only one whose fixtures all passed runs on records
+//   (migration-evidence.ts). Fixtures are the App's own data, reviewed
+//   with it; what the run found is sealed into the release's manifest by
+//   the host, never reported by App code. Not a boundary against a
+//   transform written to tell fixtures from records (it sees their IDs and
+//   fields): every output on records is still validated as above.
 
 /** Rows one batch transforms, at most (spec 17.2's bounded batches). */
 export const transformBatchMaxRows = 100;
@@ -486,6 +497,143 @@ export const transformBatch = async (
     transformed.push({ id: row.id, owner: row.owner, fields });
   }
   return { ok: true, rows: transformed };
+};
+
+/** The ID a fixture's record has as its migration runs on it. */
+const fixtureId = (index: number): string => `fixture-${index + 1}`;
+
+/** The owner of every fixture's record: one owner, as a batch requires. */
+const fixtureOwner = "fixture";
+
+/** `fields`, only the keys `declared` holds. */
+const declaredFields = (
+  fields: StoreFields,
+  declared: Readonly<Record<string, unknown>>
+): StoreFields => picked(fields, (key) => Object.hasOwn(declared, key));
+
+/**
+ * What running migration `declared` of `release` on its fixtures found
+ * (see `MigrationEvidence`): each fixture as a record of its own, through
+ * `transformBatch` as records are, its output compared with what the
+ * fixture expects, when it says. Throws `SandboxUnavailableError` when the
+ * sandbox didn't answer, which is never the App's failure.
+ */
+const fixtureEvidence = async (
+  env: SandboxedEnv,
+  release: TransformRelease,
+  declared: MigrationManifest
+): Promise<MigrationEvidence> => {
+  const { name, table, fromSchema, toSchema, fixtures } = declared;
+  const base = {
+    migration: name,
+    table,
+    fromSchema,
+    toSchema,
+    fixturesHash: await sha256Hex(canonicalText(fixtures)),
+    fixtures: fixtures.length,
+  };
+  const failed = (
+    fixture: number | null,
+    reason: NonNullable<MigrationEvidence["failure"]>["reason"],
+    issues: readonly string[]
+  ): MigrationEvidence => ({
+    ...base,
+    passed: false,
+    failure: {
+      fixture,
+      reason,
+      issues: issues.slice(0, 20).map((issue) => issue.slice(0, 500)),
+    },
+  });
+  const managed = release.app.schema.managedFields;
+  const holding = fixtures.findIndex(({ row }) =>
+    managed.some((key) => Object.hasOwn(row, key))
+  );
+  if (holding !== -1) {
+    return failed(holding, "invalid_input", [
+      "A fixture's row holds a managed field, which the store keeps itself",
+    ]);
+  }
+  const rows = fixtures.map(({ row }, index) => ({
+    id: fixtureId(index),
+    owner: fixtureOwner,
+    fields: row,
+  }));
+  const outcome = await transformBatch(env, release, name, rows);
+  if (!outcome.ok) {
+    const { id, reason, issues } = outcome.failure;
+    const index = rows.findIndex((row) => row.id === id);
+    return failed(index === -1 ? null : index, reason, issues);
+  }
+  const target = release.app.schema.tables[table]?.fields ?? {};
+  for (const [index, { expect: expected }] of fixtures.entries()) {
+    const answered = outcome.rows[index];
+    if (expected !== null && answered !== undefined) {
+      const actual = canonicalJson(declaredFields(answered.fields, target));
+      const wanted = canonicalJson(expected);
+      if (actual !== wanted) {
+        return failed(index, "unexpected_output", [
+          `It answered ${actual}`,
+          `The fixture expects ${wanted}`,
+        ]);
+      }
+    }
+  }
+  return { ...base, passed: true, failure: null };
+};
+
+/**
+ * What running each of `release`'s explicit migrations on its fixtures
+ * found, in the order the App declares them: what the seal records in
+ * the release's manifest (app-releases.ts). One migration after the
+ * other, each in a fresh isolate.
+ */
+export const migrationEvidence = async (
+  env: SandboxedEnv,
+  release: TransformRelease
+): Promise<MigrationEvidence[]> => {
+  const found: MigrationEvidence[] = [];
+  for (const declared of Object.values(release.app.migrations)) {
+    // One sandbox call at a time: an App declares at most 16.
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    found.push(await fixtureEvidence(env, release, declared));
+  }
+  return found;
+};
+
+/**
+ * Whether `evidence` is what running `migrations`' fixtures records: one
+ * entry per migration, by its name (a manifest read back from canonical
+ * text lists its migrations in another order than declared), naming its
+ * table, its schemas and its fixtures as declared. A sealed manifest
+ * whose evidence isn't is corrupt.
+ */
+export const evidenceFits = async (
+  migrations: Readonly<Record<string, MigrationManifest>>,
+  evidence: readonly MigrationEvidence[]
+): Promise<boolean> => {
+  const declared = Object.values(migrations);
+  if (declared.length !== evidence.length) {
+    return false;
+  }
+  const hashes = await Promise.all(
+    declared.map(
+      async ({ fixtures }) => await sha256Hex(canonicalText(fixtures))
+    )
+  );
+  const byName = new Map(evidence.map((found) => [found.migration, found]));
+  return declared.every((migration, index) => {
+    const found = byName.get(migration.name);
+    return (
+      found !== undefined &&
+      found.migration === migration.name &&
+      found.table === migration.table &&
+      found.fromSchema === migration.fromSchema &&
+      found.toSchema === migration.toSchema &&
+      found.fixtures === migration.fixtures.length &&
+      found.fixturesHash === hashes[index]
+    );
+  });
 };
 
 /**

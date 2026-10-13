@@ -59,7 +59,11 @@ import {
   sdkStoreOwners,
 } from "./db/core/schema.ts";
 import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
-import { requireMigrationsTarget } from "./migration-transform.ts";
+import {
+  evidenceFits,
+  migrationEvidence,
+  requireMigrationsTarget,
+} from "./migration-transform.ts";
 import { finishDeletion, markArtifact } from "./release-retention.ts";
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv } from "./sandboxed.ts";
@@ -383,7 +387,8 @@ const verifiedRelease = async (
       contracts.resourceVersion !== manifest.resourceVersion ||
       canonicalText(await contractFingerprints(app)) !==
         canonicalText(fingerprints) ||
-      (await schemaHash(app.schema)) !== manifest.schemaHash
+      (await schemaHash(app.schema)) !== manifest.schemaHash ||
+      !(await evidenceFits(app.migrations, manifest.migrationEvidence))
     ) {
       throw new Error("The contracts don't match their release");
     }
@@ -467,21 +472,17 @@ const bindingAgrees = (
 };
 
 /**
- * The sealed release of `app`'s `version`, verified: its manifest's text
- * against its hash, then every artifact's bytes against theirs, the
- * contracts against the manifest's contract hash and the registration
- * read again as the host reads it. `version.not_sealed` for a version
- * never sealed; `version.manifest_corrupt` or `version.artifact_corrupt`
- * for one that no longer matches what was sealed. With `pinned`, the
- * manifest hash an invocation was admitted under, a release whose hash
- * is another is refused too.
+ * The sealed manifest of `app`'s `version` and its hash, its text checked
+ * against the hash and the host's record of its store binding, its
+ * artifacts not read: `version.not_sealed`, `version.revoked` or
+ * `version.manifest_corrupt` as `loadRelease` says.
  */
-export const loadRelease = async (
+const checkedManifest = async (
   env: Env,
   app: AppId,
   version: number,
   pinned?: string
-): Promise<Release> => {
+): Promise<{ manifest: ReleaseManifest; hash: string }> => {
   const db = drizzle(env.DB);
   const [row, binding] = await Promise.all([
     db
@@ -538,6 +539,26 @@ export const loadRelease = async (
     log.error("release.binding_mismatch", { app, version });
     throw versionErrors.create("version.manifest_corrupt");
   }
+  return { manifest, hash };
+};
+
+/**
+ * The sealed release of `app`'s `version`, verified: its manifest's text
+ * against its hash, then every artifact's bytes against theirs, the
+ * contracts against the manifest's contract hash and the registration
+ * read again as the host reads it. `version.not_sealed` for a version
+ * never sealed; `version.manifest_corrupt` or `version.artifact_corrupt`
+ * for one that no longer matches what was sealed. With `pinned`, the
+ * manifest hash an invocation was admitted under, a release whose hash
+ * is another is refused too.
+ */
+export const loadRelease = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  pinned?: string
+): Promise<Release> => {
+  const { manifest, hash } = await checkedManifest(env, app, version, pinned);
   let loading = verified.get(hash);
   if (loading === undefined) {
     loading = verifiedRelease(env, manifest);
@@ -769,6 +790,35 @@ export const versionManifest = async (
 };
 
 /**
+ * What running `version`'s migrations on their fixtures found as it was
+ * sealed (`ReleaseManifest.migrationEvidence`); undefined while it isn't
+ * sealed. Read from its manifest alone, checked against its hash: its
+ * artifacts aren't loaded, so asking leaves no verified release cached
+ * for its first run to take (`loadRelease` checks every byte then).
+ */
+export const sealedEvidence = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<ReleaseManifest["migrationEvidence"] | undefined> => {
+  const sealed = await drizzle(env.DB)
+    .select({ version: sdkReleaseManifests.version })
+    .from(sdkReleaseManifests)
+    .where(
+      and(
+        eq(sdkReleaseManifests.appId, app),
+        eq(sdkReleaseManifests.version, version)
+      )
+    )
+    .get();
+  if (sealed === undefined) {
+    return undefined;
+  }
+  const { manifest } = await checkedManifest(env, app, version);
+  return manifest.migrationEvidence;
+};
+
+/**
  * The store release `request` binds, with the App's schema (`schema`, its
  * hash) applied to it for this version, and what that did to the store's
  * contract; or null for an App without tables; `version.store_unbound`
@@ -954,6 +1004,15 @@ export const sealRelease = async (
 
   const schema = await schemaHash(manifest.schema);
   requireMigrationsTarget(manifest.migrations, schema);
+  // Each explicit migration run on its fixtures, the release's own code in
+  // the sandbox, before the store is handed it: what the host found is
+  // sealed into the manifest below, passed or failed, and only a passed
+  // migration runs on records or is made current (migration-evidence.ts).
+  const evidence = await migrationEvidence(env, {
+    app: manifest,
+    modules: final,
+    sdk: sdk.modules,
+  });
   const bound = await boundStore(env, request, manifest, schema);
   const store = bound?.binding ?? null;
 
@@ -1003,6 +1062,7 @@ export const sealRelease = async (
     artifacts: artifacts.map(({ entry }) => entry),
     bindings: [],
     verificationReportHash: reportEntry?.entry.sha256,
+    migrationEvidence: evidence,
     artifactTrust: "unreviewed",
   });
   const text = canonicalText(releaseManifest);

@@ -28,6 +28,12 @@ import { newRecordId } from "./store-schemas.ts";
 // - A transform's failure lets the release run, or its message reaches
 //   no one who can act on it: "refuses the release while its transform
 //   fails, telling the App why".
+// - A transform that answers wrong rewrites real records, or its release
+//   runs, on App code's word that it works: "keeps a migration that fails
+//   on its fixtures off every record, and refuses its release" and
+//   "refuses a release whose migration failed on its fixtures, though
+//   there was nothing to transform"; the evidence of one that passed is
+//   the host's, sealed with the release: "transforms every record once …".
 // - A rollback to a version the migration left behind runs it over
 //   records it no longer fits, or refuses without saying what would fit:
 //   "refuses a rollback past the migration, naming the versions that
@@ -72,11 +78,18 @@ export default app({
 });
 `;
 
+/** A fixture `deriving` passes: a launch note gets the launch category. */
+const passingFixtures = `[
+    { row: { title: "launch day" }, expect: { title: "launch day", category: "launch" } },
+    { row: { title: "Note" } },
+  ]`;
+
 /** The migration from `fromSchema` to `toSchema`, transforming with `handler`. */
 const migrationFile = (
   fromSchema: string,
   toSchema: string,
-  handler: string
+  handler: string,
+  fixtures = passingFixtures
 ): string => `import { migration, v } from "@grasp-os/sdk";
 import { noteFields } from "../schema.ts";
 
@@ -87,6 +100,7 @@ export default migration({
   toSchema: ${JSON.stringify(toSchema)},
   input: v.object({ title: noteFields.title }),
   output: v.object(noteFields),
+  fixtures: ${fixtures},
   handler: ${handler},
 });
 `;
@@ -100,10 +114,16 @@ const deriving = `(ctx, row) => ({
 const migratedFiles = (
   fromSchema: string,
   toSchema: string,
-  handler: string
+  handler: string,
+  fixtures = passingFixtures
 ): Record<string, string> => ({
   "schema.ts": v2Schema,
-  "migrations/derive-category.ts": migrationFile(fromSchema, toSchema, handler),
+  "migrations/derive-category.ts": migrationFile(
+    fromSchema,
+    toSchema,
+    handler,
+    fixtures
+  ),
   "app.ts": appFile(true),
 });
 
@@ -163,7 +183,12 @@ const migrated = async (
   {
     extra = {},
     firstCurrent = false,
-  }: { extra?: Record<string, string>; firstCurrent?: boolean } = {}
+    fixtures = passingFixtures,
+  }: {
+    extra?: Record<string, string>;
+    firstCurrent?: boolean;
+    fixtures?: string;
+  } = {}
 ) => {
   const fixture: Fixture = await appWith({
     "schema.ts": v1Schema,
@@ -198,7 +223,7 @@ const migrated = async (
     env,
     fixture.owner,
     fixture.app,
-    { ...migratedFiles(fromSchema, placeholder, handler), ...extra },
+    { ...migratedFiles(fromSchema, placeholder, handler, fixtures), ...extra },
     "Migrate"
   );
   const refused = await refusalOf(async () => await seal(fixture, 2));
@@ -207,7 +232,7 @@ const migrated = async (
     env,
     fixture.owner,
     fixture.app,
-    { ...migratedFiles(fromSchema, toSchema, handler), ...extra },
+    { ...migratedFiles(fromSchema, toSchema, handler, fixtures), ...extra },
     "Migrate to the sealed schema"
   );
   const release = await seal(fixture, 3);
@@ -246,6 +271,18 @@ describe("an explicit migration's run", { timeout: 180_000 }, () => {
       current: 3,
       after: { state: "active" },
     });
+    // What running it on its fixtures found, sealed with the release.
+    expect(release.manifest.migrationEvidence).toMatchObject([
+      {
+        migration: "derive-category",
+        table: "notes",
+        fromSchema: fixture.firstSchema,
+        toSchema: release.manifest.schemaHash,
+        fixtures: 2,
+        passed: true,
+        failure: null,
+      },
+    ]);
 
     const records = await notesOf(store);
     const derivedRight = records.every(({ fields }) => {
@@ -414,13 +451,115 @@ export default appTest({
     });
   });
 
+  it("keeps a migration that fails on its fixtures off every record, and refuses its release", async () => {
+    const { fixture, store, release } = await migrated(5, deriving, {
+      firstCurrent: true,
+      fixtures:
+        '[{ row: { title: "launch day" }, expect: { title: "launch day", category: "general" } }]',
+    });
+
+    await vi.waitFor(
+      async () => {
+        await expect(
+          refusalOf(async () => {
+            await requireStoreSchemaActive(env, fixture.app, 3);
+          })
+        ).resolves.toMatchObject({
+          code: "migration.backfill_failed",
+          details: {
+            failure: {
+              table: "notes",
+              migration: "derive-category",
+              id: null,
+              reason: "fixtures_failed",
+            },
+          },
+        });
+      },
+      { timeout: 120_000, interval: 500 }
+    );
+    const refused = await refusalOf(
+      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+    );
+    const records = await notesOf(store);
+
+    expect({
+      evidence: release.manifest.migrationEvidence,
+      refused,
+      revisions: new Set(records.map(({ revision }) => revision)),
+    }).toStrictEqual({
+      evidence: [
+        expect.objectContaining({
+          migration: "derive-category",
+          fixtures: 1,
+          passed: false,
+          failure: {
+            fixture: 0,
+            reason: "unexpected_output",
+            issues: [
+              'It answered {"category":"launch","title":"launch day"}',
+              'The fixture expects {"category":"general","title":"launch day"}',
+            ],
+          },
+        }),
+      ],
+      refused: {
+        code: "version.migration_fixtures_failed",
+        details: {
+          migration: "derive-category",
+          fixture: 1,
+          reason: "unexpected_output",
+          issues: [
+            'It answered {"category":"launch","title":"launch day"}',
+            'The fixture expects {"category":"general","title":"launch day"}',
+          ],
+        },
+      },
+      // Not one record was transformed.
+      revisions: new Set([1]),
+    });
+  });
+
+  it("refuses a release whose migration failed on its fixtures, though there was nothing to transform", async () => {
+    const { fixture, store, release } = await migrated(
+      0,
+      `(ctx, row) => {
+        throw new Error("Not written yet");
+      }`,
+      { fixtures: '[{ row: { title: "Note" } }]' }
+    );
+    const object = env.DATA_STORES.getByName(store.id);
+
+    const refused = await refusalOf(
+      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+    );
+
+    expect({
+      // The store took its schema at once: no record to transform.
+      status: await object.schemaStatus(store.id, release.manifest.schemaHash),
+      refused,
+    }).toStrictEqual({
+      status: { state: "active" },
+      refused: {
+        code: "version.migration_fixtures_failed",
+        details: {
+          migration: "derive-category",
+          fixture: 1,
+          reason: "threw",
+          issues: ["Not written yet"],
+        },
+      },
+    });
+  });
+
   it("refuses the release while its transform fails, telling the App why", async () => {
     const { fixture, store } = await migrated(
       5,
       `(ctx, row) => {
         if (row.title === "Note 4") throw new Error("No category for Note 4");
         return { ...row, category: "general" };
-      }`
+      }`,
+      { fixtures: '[{ row: { title: "Note" } }]' }
     );
 
     await vi.waitFor(

@@ -24,7 +24,7 @@ import type {
 } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
-import { versionManifest } from "./app-releases.ts";
+import { sealedEvidence, versionManifest } from "./app-releases.ts";
 import {
   appFor,
   keptCallsOf,
@@ -80,8 +80,10 @@ const migrationsOf = async (
 ): Promise<VersionReview["migrations"]> => {
   let next: AppManifest | undefined;
   let previous: AppManifest | undefined;
+  let evidence: Awaited<ReturnType<typeof sealedEvidence>>;
   try {
     next = await versionManifest(env, app, proposed.version, proposed.files);
+    evidence = await sealedEvidence(env, app, proposed.version);
     previous =
       before === undefined
         ? undefined
@@ -97,13 +99,18 @@ const migrationsOf = async (
       ? had[declared.name]
       : undefined;
     const { name, table } = declared;
+    const found = evidence?.find(({ migration }) => migration === name);
+    const checked = {
+      fixtures: declared.fixtures.length,
+      fixturesPassed: found === undefined ? null : found.passed,
+    };
     if (old === undefined) {
-      listed.push({ name, table, change: "added" });
+      listed.push({ name, table, change: "added", ...checked });
     } else if (
       canonicalText(old) !== canonicalText(declared) ||
       serverChanged
     ) {
-      listed.push({ name, table, change: "modified" });
+      listed.push({ name, table, change: "modified", ...checked });
     }
   }
   return listed;
